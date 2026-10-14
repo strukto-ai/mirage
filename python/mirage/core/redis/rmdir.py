@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.errors.fs import enotempty
@@ -42,4 +41,3 @@ async def rmdir(
     if children:
         raise enotempty(path_spec)
     await store.remove_dir(p)
-    await invalidate_after_unlink(path_spec)

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 import pytest
 
 import mirage.core.gdrive.write as write_mod
@@ -115,15 +114,7 @@ def _replying(fn, overrides):
 
 
 async def _write_recorded(accessor, virtual: str, data: bytes, monkeypatch):
-    order: list[tuple[str, int]] = []
     scope = RecordingScope()
-
-    async def _spy(path):
-        order.append(("invalidate", len(scope.records)))
-
-    monkeypatch.setattr(
-        "mirage.core.gdrive.write.invalidate_after_write", _spy
-    )
     try:
         await write(accessor, spec(virtual), data)
     finally:
@@ -132,7 +123,7 @@ async def _write_recorded(accessor, virtual: str, data: bytes, monkeypatch):
         (r.op, r.path, r.bytes, r.fingerprint, r.revision)
         for r in scope.records
     ]
-    return rows, order
+    return rows
 
 
 def _patch_replies(fake_drive, monkeypatch, overrides) -> None:
@@ -157,13 +148,10 @@ async def test_write_records_the_reply_token(
     if existing:
         fake_drive.add("f.txt", content=b"old")
     _patch_replies(fake_drive, monkeypatch, overrides)
-    rows, order = await _write_recorded(
+    rows = await _write_recorded(
         gdrive_accessor, "/f.txt", b"hello", monkeypatch
     )
     assert rows == [("write", "/f.txt", 5, token, None)]
-    # Recorded before the eviction, so the record exists when the cache
-    # reacts to the write.
-    assert order == [("invalidate", 1)]
 
 
 @pytest.mark.asyncio
@@ -176,33 +164,7 @@ async def test_a_write_whose_reply_is_empty_still_records_it(
         await fake_drive.upload_file(*args, **kwargs)
 
     monkeypatch.setattr(write_mod, "upload_file", _empty)
-    rows, _ = await _write_recorded(
+    rows = await _write_recorded(
         gdrive_accessor, "/f.txt", b"hello", monkeypatch
     )
     assert rows == [("write", "/f.txt", 5, None, None)]
-
-
-@pytest.mark.asyncio
-async def test_a_write_whose_reply_fails_still_evicts_the_path(
-    fake_drive, gdrive_accessor, monkeypatch
-):
-    # Drive may have stored the bytes before the reply broke off, so the
-    # cached copy is stale either way.
-    evicted: list[str] = []
-
-    async def _cut_off(*args, **kwargs):
-        raise aiohttp.ClientPayloadError("reply cut off")
-
-    async def _spy(path):
-        evicted.append(path.virtual)
-
-    monkeypatch.setattr(write_mod, "upload_file", _cut_off)
-    monkeypatch.setattr(write_mod, "invalidate_after_write", _spy)
-    scope = RecordingScope()
-    try:
-        with pytest.raises(aiohttp.ClientPayloadError):
-            await write(gdrive_accessor, spec("/f.txt"), b"hello")
-    finally:
-        scope.close()
-    assert evicted == ["/f.txt"]
-    assert scope.records == []

@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import {
-  evictAfter,
-  invalidateAfterWrite,
-  nativeCondition,
-  writeCondition,
-} from '../../cache/context.ts'
+import { nativeCondition, writeCondition } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
@@ -29,9 +24,8 @@ import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
 import { statFromItem } from './stat.ts'
 
 /**
- * Upload a new file, or a new version of an existing one. A failed upload
- * still evicts the path: Box may have stored the bytes before its reply
- * broke off. A held version goes out as the file's etag.
+ * Upload a new file, or a new version of an existing one. A held version goes
+ * out as the file's etag.
  */
 export async function write(
   accessor: BoxAccessor,
@@ -56,19 +50,14 @@ export async function write(
     upload = () => uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
   }
   try {
-    await evictAfter(
-      async () => {
-        const reply = await upload()
-        const entries: unknown =
-          typeof reply === 'object' && reply !== null && !Array.isArray(reply)
-            ? (reply as { entries?: unknown }).entries
-            : undefined
-        const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
-        const token = uploadToken(first, statFromItem, path.virtual)
-        record('write', path.virtual, 'box', data.length, timer, { fingerprint: token })
-      },
-      () => invalidateAfterWrite(path),
-    )
+    const reply = await upload()
+    const entries: unknown =
+      typeof reply === 'object' && reply !== null && !Array.isArray(reply)
+        ? (reply as { entries?: unknown }).entries
+        : undefined
+    const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
+    const token = uploadToken(first, statFromItem, path.virtual)
+    record('write', path.virtual, 'box', data.length, timer, { fingerprint: token })
   } catch (err) {
     throw (await refused(path, err, cond, etag)) ?? err
   }

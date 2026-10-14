@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -29,5 +28,4 @@ export async function create(accessor: RedisAccessor, path: PathSpec): Promise<v
   await store.setFile(p, new Uint8Array(0))
   await store.setModified(p, nowIso())
   record('create', path.virtual, VFSName.REDIS, 0, timer)
-  await invalidateAfterWrite(path)
 }

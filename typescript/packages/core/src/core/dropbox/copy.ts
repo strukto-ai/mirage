@@ -13,14 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import {
-  invalidateAfterWrite,
-  invalidateAncestors,
-  invalidateSubtree,
-  nativeCondition,
-  stale,
-  writeCondition,
-} from '../../cache/context.ts'
+import { nativeCondition, stale, writeCondition } from '../../cache/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
@@ -128,8 +121,6 @@ export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSp
   await replaceOnto(tm, src, dst, to, () => copyPath(tm, from, to), false)
   record('copy', dst.virtual, 'dropbox', 0, timer)
   liftLost(dst, upto)
-  await invalidateAfterWrite(dst)
-  await invalidateAncestors(dst)
 }
 
 /**
@@ -155,6 +146,4 @@ export async function dirCopy(
   }
   record('copy_prefix', dst.virtual, 'dropbox', 0, timer)
   liftLost(dst, upto, true)
-  await invalidateSubtree(dst)
-  await invalidateAncestors(dst)
 }

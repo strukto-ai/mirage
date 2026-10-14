@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { invalidateAfterMove } from '../../cache/context.ts'
+
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -79,8 +79,6 @@ export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec
   const op = folder ? 'rename_prefix' : 'rename'
   record(op, src.virtual, 'box', 0, timer)
   record(op, dst.virtual, 'box', 0, timer)
-  await invalidateAfterMove(dst, folder)
-  await invalidateAfterMove(src, folder)
   liftLost(src, upto, folder)
   liftLost(dst, upto, folder)
 }

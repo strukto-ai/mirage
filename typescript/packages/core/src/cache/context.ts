@@ -31,14 +31,10 @@ import {
 /**
  * What this module needs from a cache manager. `CacheManager` in
  * `cache/manager.ts` satisfies this structurally; this module never
- * imports it, keeping the dependency one-way: core mutators ->
+ * imports it, keeping the dependency one-way: backends ->
  * cache/context <- mount (which installs a manager).
  */
 export interface CacheInvalidator {
-  invalidateAfterWrite(path: string | PathSpec): Promise<void>
-  invalidateAfterUnlink(path: string | PathSpec): Promise<void>
-  invalidateSubtree(path: string | PathSpec): Promise<void>
-  invalidateAncestors(path: PathSpec): Promise<void>
   cachedSize(path: PathSpec): Promise<number | null>
   isCached(path: PathSpec): Promise<boolean>
   listingTrusted(folder: string): boolean
@@ -52,8 +48,7 @@ export interface CacheContextState {
 /**
  * Run `fn` with `manager` active for the current async context.
  * Mirrors `runWithRevisions`: the mount entry point wraps command
- * dispatch, core backend mutators report through
- * {@link invalidateAfterWrite} / {@link invalidateAfterUnlink}.
+ * dispatch.
  */
 export function runWithCacheManager<T>(
   manager: CacheInvalidator | null,
@@ -84,120 +79,33 @@ export function activeCacheManager(): CacheInvalidator | null {
 }
 
 /**
- * Every distinct manager bound by a live frame. Invalidation is the
- * opposite trade from the read side: dropping a live frame's
- * invalidation serves stale bytes later, while evicting from a mount
- * the write never touched only costs a refetch, so writes broadcast
- * where reads abstain.
- */
-function liveManagers(): CacheInvalidator[] {
-  const managers: CacheInvalidator[] = []
-  for (const state of liveCallers().flatMap((caller) =>
-    caller.cache === null ? [] : [caller.cache],
-  )) {
-    const manager = state.manager
-    if (manager !== null && !managers.includes(manager)) managers.push(manager)
-  }
-  return managers
-}
-
-/**
- * Report a backend write so caches are invalidated at the mutation
- * site. No-op if no cache manager is active.
- */
-export async function invalidateAfterWrite(path: string | PathSpec): Promise<void> {
-  for (const manager of liveManagers()) {
-    await manager.invalidateAfterWrite(path)
-  }
-}
-
-/**
- * Report a backend deletion so caches are invalidated at the mutation
- * site. No-op if no cache manager is active.
- */
-export async function invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
-  for (const manager of liveManagers()) {
-    await manager.invalidateAfterUnlink(path)
-  }
-}
-
-/**
- * Report a backend deletion that took a whole subtree with it.
- *
- * `invalidateAfterUnlink` evicts the path's own listing and its
- * parent's, which is the whole story for a file. A recursive delete or a
- * directory rename also strands every listing and every cached body
- * *below* the path, and those were cached under their own keys, so
- * nothing above them evicts one: `ls` kept printing a deleted
- * directory's contents and `cat` kept serving a deleted file's bytes
- * until the index TTL expired.
- *
- * Unlike {@link invalidateAncestors}, this cannot be assembled from
- * `invalidateAfterWrite` calls, because the set of keys beneath the path
- * is only known to the caches themselves.
- */
-export async function invalidateSubtree(path: string | PathSpec): Promise<void> {
-  for (const manager of liveManagers()) {
-    await manager.invalidateSubtree(path)
-  }
-}
-
-/**
- * Report one end of a backend rename.
- *
- * A renamed folder strands everything cached beneath both of its names, so
- * it takes {@link invalidateSubtree}. A renamed file has nothing beneath it
- * and takes {@link invalidateAfterUnlink}, which spares the walk of every
- * store. The caller passes `folder: true` whenever it cannot tell, and for
- * a destination the backend may have replaced a non-empty folder at.
- */
-export async function invalidateAfterMove(path: string | PathSpec, folder: boolean): Promise<void> {
-  await (folder ? invalidateSubtree(path) : invalidateAfterUnlink(path))
-}
-
-/**
- * Run `op`, then `evict`, also when `op` fails.
+ * Run `op`, then `settle`, also when `op` fails.
  *
  * An op that fails partway (a paginated delete, a folder copy that merged
- * some children) has already changed the backend, so what it touched is
- * stale either way. `evict` gets the op's result, or undefined when the op
- * failed. After a failed op an eviction error is reported, not thrown, so
- * the caller still learns why the op failed.
+ * some children) has already changed the backend, so its record is owed
+ * either way. `settle` gets the op's result, or undefined when the op
+ * failed. After a failed op a settle error is reported, not thrown, so the
+ * caller still learns why the op failed. Mirrors Python's `settle_after`.
  *
  * Args:
  *   op: the backend change.
- *   evict: records and evicts what the op changed, given its result.
+ *   settle: records what the op changed, given its result.
  */
-export async function evictAfter<T>(
+export async function settleAfter<T>(
   op: () => Promise<T>,
-  evict: (result: T | undefined) => Promise<void>,
+  settle: (result: T | undefined) => Promise<void>,
 ): Promise<T> {
   let result: T
   try {
     result = await op()
   } catch (error) {
-    await evict(undefined).catch((evictError: unknown) => {
-      console.warn(`evicting after a failed op: ${String(evictError)}`)
+    await settle(undefined).catch((settleError: unknown) => {
+      console.warn(`settling after a failed op: ${String(settleError)}`)
     })
     throw error
   }
-  await evict(result)
+  await settle(result)
   return result
-}
-
-/**
- * Evict every ancestor directory listing of `path`.
- *
- * A single invalidateAfterWrite only refreshes the immediate parent
- * listing. When an op materializes several missing levels at once
- * (`mkdir -p a/b/c`, a bucket write that creates parents), the higher
- * ancestors' cached listings stay stale and hide the new entries until
- * the index TTL expires. Walking the chain refreshes each one.
- */
-export async function invalidateAncestors(path: PathSpec): Promise<void> {
-  for (const manager of liveManagers()) {
-    await manager.invalidateAncestors(path)
-  }
 }
 
 /**
@@ -513,22 +421,6 @@ export function conditioned(path: PathSpec, kind: 'copy' | 'delete'): boolean {
   if (context === null) return false
   require(context, path, kind)
   return true
-}
-
-/**
- * Evict `path`'s cached bytes and listing, keeping the version held, for a
- * request that raised and may have landed. Mirrors Python's
- * `evict_keeping_version`.
- */
-export async function evictKeepingVersion(path: PathSpec): Promise<void> {
-  const context = activeWriteContext(path)
-  if (context === null) {
-    await invalidateAfterWrite(path)
-    return
-  }
-  const version = await context.readVersion(path)
-  await context.drop(path)
-  if (version !== null && version !== '') await context.keep(path, version)
 }
 
 /** Drop the write context's cached copy of `path`, if there is one. */

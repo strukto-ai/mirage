@@ -17,7 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
 import { eisdir, fsError } from '../../errors/fs.ts'
 import { norm } from '../../utils/path.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
+
 import { activePipe } from '../dev/device.ts'
 
 /**
@@ -33,6 +33,5 @@ export async function unlink(accessor: RAMAccessor, path: PathSpec): Promise<voi
   accessor.store.files.delete(p)
   accessor.store.modified.delete(p)
   accessor.store.attrs.delete(p)
-  await invalidateAfterUnlink(path)
   return Promise.resolve()
 }

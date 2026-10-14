@@ -274,7 +274,7 @@ class ObjectStoreDriver(Generic[A, C]):
 
     Everything above this line — readdir with its index write-back,
     stat's probe ladder, find's implicit-directory synthesis, du, and
-    the mutation family with its cache invalidation — derives from
+    the mutation family — derives from
     these primitives in ``mirage.core.object_store``; a backend supplies
     only the raw store calls.
 

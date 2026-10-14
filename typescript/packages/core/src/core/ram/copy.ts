@@ -18,7 +18,7 @@ import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { activePipe } from '../dev/device.ts'
 import { checkDestParents, checkWriteTarget, lookupError } from './dest.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+
 import { makeAbortError } from '../../utils/abort.ts'
 
 /**
@@ -60,5 +60,4 @@ export async function copy(
   checkWriteTarget(accessor, dst, d)
   accessor.store.files.set(d, data)
   accessor.store.modified.set(d, nowIso())
-  await invalidateAfterWrite(dst)
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
+
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { deleteFile } from '../google/drive.ts'
@@ -26,7 +26,6 @@ async function unlinkImpl(accessor: GDriveAccessor, path: PathSpec): Promise<voi
   if (node === null) throw enoent(path)
   if (isFolder(node)) throw eisdir(path)
   await deleteFile(accessor.tokenManager, node.id)
-  await invalidateAfterUnlink(path)
 }
 
 export const unlink = eaccesOnDenied(unlinkImpl)

@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import {
-  deleteCondition,
-  invalidateAfterUnlink,
-  invalidateAncestors,
-  nativeCondition,
-} from '../../cache/context.ts'
+import { deleteCondition, nativeCondition } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
@@ -60,7 +55,5 @@ export async function unlink(accessor: DropboxAccessor, path: PathSpec): Promise
   const upto = lostCount()
   await deleteResolved(accessor, path, entry)
   record('unlink', path.virtual, 'dropbox', 0, timer)
-  await invalidateAfterUnlink(path)
-  await invalidateAncestors(path)
   liftLost(path, upto)
 }

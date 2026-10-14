@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.client import graph_delete
 from mirage.core.msgraph.drive import drive_root_empty
@@ -49,4 +48,3 @@ async def rmdir(
     if not await drive_root_empty(accessor.config, loc, session=accessor.pool):
         raise enotempty(path)
     await graph_delete(accessor.config, loc.item(), session=accessor.pool)
-    await invalidate_after_unlink(path)

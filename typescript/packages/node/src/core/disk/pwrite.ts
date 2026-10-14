@@ -14,7 +14,7 @@
 
 import { open } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
+
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -50,5 +50,4 @@ export async function pwrite(
     throw diskError(err, p)
   }
   record('pwrite', p.virtual, VFSName.DISK, data.byteLength, timer)
-  await invalidateAfterWrite(p)
 }

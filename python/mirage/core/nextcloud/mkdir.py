@@ -3,7 +3,6 @@ from opendal.exceptions import NotFound, Unexpected
 from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.errors.fs import eexist, enoent, enotdir
 from mirage.types import PathSpec
@@ -73,9 +72,6 @@ async def mkdir(
         raise enotdir(
             mounted_path(path, "/" + level) if parents else path
         ) from exc
-    await invalidate_after_write(path)
-    if parents:
-        await invalidate_ancestors(path)
     try:
         md = await op.stat(key)
     except NotFound:

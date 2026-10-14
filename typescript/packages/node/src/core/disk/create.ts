@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { writeFile } from 'node:fs/promises'
-import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
+
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -30,5 +30,4 @@ export async function create(accessor: DiskAccessor, path: PathSpec): Promise<vo
     throw diskError(err, path)
   }
   record('create', path.virtual, VFSName.DISK, 0, timer)
-  await invalidateAfterWrite(path)
 }

@@ -18,25 +18,10 @@ from typing import Any
 import pytest
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.cache.context import push_cache_manager
 from mirage.core.gridfs import driver as gridfs_driver
 from mirage.core.gridfs.rename import rename
 from mirage.types import PathSpec
 from mirage.vfs.gridfs.config import GridFSConfig
-
-
-class _FakeManager:
-    async def invalidate_ancestors(self, path: PathSpec) -> None:
-        pass
-
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        return None
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        return None
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        return None
 
 
 class _FakeFiles:
@@ -127,11 +112,7 @@ async def test_rename_moves_a_whole_directory_prefix(monkeypatch):
         }
     )
     _install(monkeypatch, files)
-    prev = push_cache_manager(_FakeManager())
-    try:
-        await rename(_accessor(), _spec("d"), _spec("e"))
-    finally:
-        push_cache_manager(prev)
+    await rename(_accessor(), _spec("d"), _spec("e"))
     assert files.docs == {
         "1": "e/",
         "2": "e/f.txt",
@@ -144,11 +125,7 @@ async def test_rename_moves_a_whole_directory_prefix(monkeypatch):
 async def test_rename_directory_replaces_an_empty_destination(monkeypatch):
     files = _FakeFiles({"1": "src/", "2": "src/f.txt", "3": "dst/"})
     _install(monkeypatch, files)
-    prev = push_cache_manager(_FakeManager())
-    try:
-        await rename(_accessor(), _spec("src"), _spec("dst"))
-    finally:
-        push_cache_manager(prev)
+    await rename(_accessor(), _spec("src"), _spec("dst"))
     assert sorted(files.docs.values()) == ["dst/", "dst/f.txt"]
 
 
@@ -156,11 +133,7 @@ async def test_rename_directory_replaces_an_empty_destination(monkeypatch):
 async def test_rename_keeps_moving_a_plain_file(monkeypatch):
     files = _FakeFiles({"1": "a.txt"})
     _install(monkeypatch, files)
-    prev = push_cache_manager(_FakeManager())
-    try:
-        await rename(_accessor(), _spec("a.txt"), _spec("b.txt"))
-    finally:
-        push_cache_manager(prev)
+    await rename(_accessor(), _spec("a.txt"), _spec("b.txt"))
     assert files.docs == {"1": "b.txt"}
 
 
@@ -168,10 +141,6 @@ async def test_rename_keeps_moving_a_plain_file(monkeypatch):
 async def test_rename_missing_source_raises_enoent(monkeypatch):
     files = _FakeFiles({"1": "other.txt"})
     _install(monkeypatch, files)
-    prev = push_cache_manager(_FakeManager())
-    try:
-        with pytest.raises(FileNotFoundError):
-            await rename(_accessor(), _spec("ghost"), _spec("e"))
-    finally:
-        push_cache_manager(prev)
+    with pytest.raises(FileNotFoundError):
+        await rename(_accessor(), _spec("ghost"), _spec("e"))
     assert files.docs == {"1": "other.txt"}

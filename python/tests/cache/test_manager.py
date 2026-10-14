@@ -1076,3 +1076,28 @@ async def test_a_line_is_indexed_a_bounded_number_of_times(monkeypatch):
     finally:
         scope.close()
     assert len(built) < 3, built
+
+
+async def _repeated_mount_case(prefix: str) -> None:
+    index = RAMIndexCacheStore(ttl=600)
+    manager = CacheManager(None, index, prefix, True)
+    directory = prefix + prefix + "/a"
+    ancestors = [prefix, prefix + prefix, directory]
+    for ancestor in ancestors:
+        await index.set_dir(ancestor, [])
+    await index.set_dir(prefix + "/unrelated", [])
+    path = PathSpec(
+        vfs_path=directory[len(prefix) :].strip("/") + "/b.txt",
+        virtual=directory + "/b.txt",
+        directory=directory,
+    )
+    await manager.invalidate_after_write(path)
+    await manager.invalidate_ancestors(path)
+    for ancestor in ancestors:
+        assert (await index.list_dir(ancestor)).entries is None
+    assert (await index.list_dir(prefix + "/unrelated")).entries is not None
+
+
+@pytest.mark.parametrize("prefix", ["/data", "/nested/data"])
+def test_ancestor_eviction_with_repeated_mount_name(prefix: str):
+    _run(_repeated_mount_case(prefix))

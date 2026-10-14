@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
+
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
 import { deletePath, getMetadata, listFolder } from './api.ts'
-import { invalidateAncestors } from '../../cache/context.ts'
+
 import { dropboxPathOf } from './paths.ts'
 
 // delete_v2 removes a folder RECURSIVELY; kernel/GNU rmdir must fail
@@ -40,6 +40,4 @@ export async function rmdir(accessor: DropboxAccessor, path: PathSpec): Promise<
   const timer = startOp()
   await deletePath(accessor.tokenManager, apiPath)
   record('rmdir', path.virtual, 'dropbox', 0, timer)
-  await invalidateAfterUnlink(path)
-  await invalidateAncestors(path)
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileEntryWithStats, SFTPWrapper, Stats } from 'ssh2'
-import { invalidateSubtree } from '@struktoai/mirage-core/cache/context'
+
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -80,5 +80,4 @@ export async function rmR(accessor: SSHAccessor, p: PathSpec): Promise<void> {
     if (isNoSuchFile(err)) throw enoent(p)
     throw err
   }
-  await invalidateSubtree(p)
 }

@@ -18,7 +18,7 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+
 import { activePipe } from '../dev/device.ts'
 import { checkDestParents, checkWriteTarget } from './dest.ts'
 
@@ -49,5 +49,4 @@ export async function pwrite(
   accessor.store.files.set(p, spliceWindow(existing, offset, data))
   accessor.store.modified.set(p, nowIso())
   record('pwrite', path.virtual, VFSName.RAM, data.byteLength, timer)
-  await invalidateAfterWrite(path)
 }

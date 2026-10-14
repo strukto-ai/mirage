@@ -14,11 +14,9 @@
 
 from mirage.cache.context import (
     drop_cached,
-    evict_after,
-    invalidate_after_move,
-    invalidate_ancestors,
     known_versions,
     move_condition,
+    settle_after,
     stale,
 )
 from mirage.cache.types import Measured
@@ -126,17 +124,6 @@ def make_rename(
             # carries a token.
             record(op, src_spec.virtual, driver.vfs, 0, timer)
             record(op, dst_spec.virtual, driver.vfs, 0, timer)
-            # The eviction rides with the records, as in unlink. Only a
-            # clean move_file names a file, which has nothing beneath it;
-            # move_prefix relocates every key under src, and a raise
-            # leaves the kind unknown, so those evict both subtrees.
-            folder = op != "rename" or moved is None
-            await invalidate_after_move(dst_spec, folder)
-            await invalidate_after_move(src_spec, folder)
-            # The move can create the destination's missing ancestors and
-            # erase the source's prefix-only ones in the same call.
-            await invalidate_ancestors(dst_spec)
-            await invalidate_ancestors(src_spec)
 
         def named(
             key: str, exc: ConditionLostError
@@ -151,7 +138,7 @@ def make_rename(
         upto = lost_count()
         async with driver.connect(accessor) as conn:
             try:
-                moved = await evict_after(move(conn), settle)
+                moved = await settle_after(move(conn), settle)
             except ConditionLostError as exc:
                 lost, sent = named(await keep_walk(src_spec, kpfx, exc), exc)
                 # The untouched end of a refused move keeps its version.

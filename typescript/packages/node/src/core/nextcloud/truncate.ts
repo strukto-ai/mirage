@@ -1,5 +1,5 @@
 import { enotsup } from '@struktoai/mirage-core/errors/fs'
-import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
+
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -27,5 +27,4 @@ export async function truncate(
   current.copy(next, 0, 0, Math.min(current.byteLength, length))
   await op.write(key, next)
   record('truncate', path.virtual, VFSName.NEXTCLOUD, 0, timer)
-  await invalidateAfterWrite(path)
 }

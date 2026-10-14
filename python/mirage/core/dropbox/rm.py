@@ -18,11 +18,9 @@ from typing import Any
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import (
     conditioned,
-    evict_after,
     held_versions,
-    invalidate_ancestors,
-    invalidate_subtree,
     keep_refused,
+    settle_after,
 )
 from mirage.core.dropbox.api import delete_path, list_folder, lookup
 from mirage.core.dropbox.client import DropboxApiError
@@ -137,8 +135,6 @@ async def rm_r(accessor: DropboxAccessor, path: PathSpec) -> None:
                 raise enoent(path.virtual) from exc
             raise
         record("rm_r", path.virtual, "dropbox", 0, timer)
-        await invalidate_subtree(path)
-        await invalidate_ancestors(path)
         return
     entry = await lookup(accessor.token_manager, api_path)
     if entry is None:
@@ -148,11 +144,9 @@ async def rm_r(accessor: DropboxAccessor, path: PathSpec) -> None:
 
     async def settle(done: bool | None) -> None:
         record("rm_r", path.virtual, "dropbox", 0, timer)
-        await invalidate_subtree(path)
-        await invalidate_ancestors(path)
         refusal = await keep_refused(lost)
         if done and refusal is not None:
             raise refusal
 
-    await evict_after(_remove(accessor, path, entry, lost), settle)
+    await settle_after(_remove(accessor, path, entry, lost), settle)
     lift_lost(path, upto, subtree=True)

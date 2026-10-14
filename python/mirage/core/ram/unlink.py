@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import lookup_error
 from mirage.errors.fs import eisdir, fs_error
@@ -45,4 +44,3 @@ async def unlink(accessor: RAMAccessor, path_spec: PathSpec) -> None:
     del store.files[p]
     store.modified.pop(p, None)
     store.attrs.pop(p, None)
-    await invalidate_after_unlink(path_spec)

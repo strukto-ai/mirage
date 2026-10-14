@@ -1,11 +1,8 @@
-import contextlib
-
 import pytest
 from aioresponses import CallbackResult, aioresponses
 from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.cache.context import push_cache_manager
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandOpts
@@ -47,57 +44,6 @@ async def test_copy_posts_copy_action_with_name():
         )
     assert body["name"] == "b.txt"
     assert "/root:/sub" in body["parentReference"]["path"]
-
-
-class _Invalidations:
-    def __init__(self) -> None:
-        self.seen: list[str] = []
-
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        self.seen.append(f"write {path.virtual}")
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.seen.append(f"subtree {path.virtual}")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["completed", "failed"])
-async def test_copy_invalidates_the_destination_subtree_under_its_own_path(
-    status,
-):
-    # A key named like its mount: the mount-relative `/m/k.txt` names
-    # another file under a `/m` mount. A failed copy invalidates too: a
-    # merge may have landed some children first.
-    monitor = "https://monitor.example/op/inv"
-    manager = _Invalidations()
-    previous = push_cache_manager(manager)
-    try:
-        with aioresponses() as m:
-            m.post(
-                _BASE + "/root:/a.txt:/copy",
-                status=202,
-                headers={"Location": monitor},
-            )
-            m.get(monitor, payload={"status": status, "error": {}})
-            with (
-                pytest.raises(GraphError)
-                if status == "failed"
-                else contextlib.nullcontext()
-            ):
-                await copy(
-                    _accessor(),
-                    PathSpec(
-                        virtual="/m/a.txt", directory="/m/", vfs_path="a.txt"
-                    ),
-                    PathSpec(
-                        virtual="/m/m/k.txt",
-                        directory="/m/m/",
-                        vfs_path="m/k.txt",
-                    ),
-                )
-    finally:
-        push_cache_manager(previous)
-    assert manager.seen == ["subtree /m/m/k.txt"]
 
 
 @pytest.mark.asyncio

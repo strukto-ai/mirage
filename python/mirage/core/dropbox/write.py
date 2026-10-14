@@ -13,13 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import (
-    evict_after,
-    invalidate_after_write,
-    invalidate_ancestors,
-    native_condition,
-    write_condition,
-)
+from mirage.cache.context import native_condition, write_condition
 from mirage.core.dropbox.api import lookup, refused
 from mirage.core.dropbox.client import DropboxApiError, dropbox_upload
 from mirage.core.dropbox.fingerprint import live_of
@@ -36,9 +30,8 @@ async def write(
     """Upload in a single call; Dropbox caps it at ~150 MB (larger files
     need upload sessions, not supported here).
 
-    A failed upload still evicts the path: Dropbox may have stored the
-    bytes before its reply broke off. A held version costs one get_metadata
-    and goes out as the file's rev in ``update`` mode.
+    A held version costs one get_metadata and goes out as the file's rev
+    in ``update`` mode.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -66,11 +59,7 @@ async def write(
             fingerprint=token,
         )
 
-    async def evict(_: None) -> None:
-        await invalidate_after_write(path)
-        await invalidate_ancestors(path)
-
     try:
-        await evict_after(send(), evict)
+        await send()
     except DropboxApiError as exc:
         raise (await refused(path, exc, cond, rev)) or exc

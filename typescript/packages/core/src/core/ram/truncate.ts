@@ -17,7 +17,7 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+
 import { einval } from '../../errors/fs.ts'
 import { activePipe } from '../dev/device.ts'
 import { checkDestParents, checkWriteTarget } from './dest.ts'
@@ -45,6 +45,5 @@ export async function truncate(
   accessor.store.files.set(p, out)
   accessor.store.modified.set(p, nowIso())
   record('truncate', path.virtual, VFSName.RAM, 0, timer)
-  await invalidateAfterWrite(path)
   return Promise.resolve()
 }

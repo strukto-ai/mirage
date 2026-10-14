@@ -13,12 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import (
-    evict_after,
-    invalidate_after_write,
-    native_condition,
-    write_condition,
-)
+from mirage.cache.context import native_condition, write_condition
 from mirage.core.box.api import refused, upload_file_version, upload_new_file
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.fingerprint import live_of
@@ -33,8 +28,7 @@ from mirage.utils.upload import upload_token
 async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
     """Upload a new file, or a new version of an existing one.
 
-    A failed upload still evicts the path: Box may have stored the bytes
-    before its reply broke off. A held version goes out as the file's etag.
+    A held version goes out as the file's etag.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -71,6 +65,6 @@ async def write(accessor: BoxAccessor, path: PathSpec, data: bytes) -> None:
         )
 
     try:
-        await evict_after(send(), lambda _: invalidate_after_write(path))
+        await send()
     except BoxApiError as exc:
         raise (await refused(path, exc, cond, etag)) or exc

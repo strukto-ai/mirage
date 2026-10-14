@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
 from mirage.core.google.drive import delete_file, list_files
@@ -62,4 +61,3 @@ async def rmdir(
     if children:
         raise enotempty(path)
     await delete_file(accessor.token_manager, node.id)
-    await invalidate_after_unlink(path)

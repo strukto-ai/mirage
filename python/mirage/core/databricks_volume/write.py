@@ -16,7 +16,6 @@ import asyncio
 from io import BytesIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import (
     is_directory_metadata,
@@ -90,4 +89,3 @@ async def write(
             raise enoent(path) from exc
         raise
     record("write", path.virtual, "databricks_volume", len(data), timer)
-    await invalidate_after_write(path)

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { deleteCondition, invalidateAfterUnlink, nativeCondition } from '../../cache/context.ts'
+import { deleteCondition, nativeCondition } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
@@ -48,6 +48,5 @@ export async function unlink(accessor: BoxAccessor, path: PathSpec): Promise<voi
   const timer = startOp()
   await deleteResolved(accessor, path, item)
   record('unlink', path.virtual, 'box', 0, timer)
-  await invalidateAfterUnlink(path)
   liftLost(path, upto)
 }

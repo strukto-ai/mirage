@@ -1,4 +1,3 @@
-import { invalidateAfterWrite, invalidateSubtree } from '@struktoai/mirage-core/cache/context'
 import { liftLost, lostCount, record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName, type PathSpec } from '@struktoai/mirage-core/types'
 import { eacces, eexist, enoent, fsError } from '@struktoai/mirage-core/errors/fs'
@@ -20,7 +19,6 @@ export async function copy(
     if (isNotFound(error)) throw enoent(source)
     throw error
   }
-  await invalidateAfterWrite(destination)
 }
 
 /**
@@ -59,7 +57,6 @@ export async function dirCopy(
   })
   let status = response.status
   if (status === 207) {
-    await invalidateSubtree(dst)
     status = failedStatus(await response.text())
   }
   if (status === 404) throw enoent(src)
@@ -70,5 +67,4 @@ export async function dirCopy(
   if (!response.ok) throw new Error(`Nextcloud COPY returned HTTP ${String(response.status)}`)
   record('copy_prefix', dst.virtual, VFSName.NEXTCLOUD, 0, timer)
   liftLost(dst, upto, true)
-  await invalidateSubtree(dst)
 }

@@ -15,7 +15,6 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.context import invalidate_subtree
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
@@ -43,8 +42,3 @@ async def rename(
             raise enoent(src)
     except asyncssh.SFTPNoSuchFile:
         raise enoent(src)
-    # Both sides are subtree evictions: a rename destroys the destination's
-    # previous identity and relocates everything under the source, so a
-    # listing or body cached below either name is now stale.
-    await invalidate_subtree(dst_spec)
-    await invalidate_subtree(src_spec)

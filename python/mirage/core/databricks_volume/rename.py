@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.context import invalidate_after_move
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.copy import copy
 from mirage.core.databricks_volume.path import backend_path
@@ -53,8 +52,3 @@ async def rename(
     else:
         await copy(accessor, src, dst, index)
         await unlink(accessor, src, index)
-    # Only a positive file rules out a subtree at the source. The
-    # destination keeps the subtree drop: the upload overwrites whatever
-    # stands there, and nothing checks it is not a non-empty directory.
-    await invalidate_after_move(dst, True)
-    await invalidate_after_move(src, src_stat.type != FileType.FILE)

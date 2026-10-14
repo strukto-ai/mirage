@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import invalidate_after_move
 from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import (
     check_dest_parents,
@@ -86,15 +85,12 @@ async def rename(
     now = now_iso()
     check_dest_parents(store, dst_spec, d)
     check_rename(store, src_spec, s, dst_spec, d)
-    # Only a folder carries a subtree; a file takes the unlink flavor.
-    folder = False
     if s in store.files:
         store.files[d] = store.files.pop(s)
         store.modified[d] = store.modified.pop(s, now)
         if s in store.attrs:
             store.attrs[d] = store.attrs.pop(s)
     elif s in store.dirs:
-        folder = True
         store.dirs.discard(s)
         store.dirs.add(d)
         store.modified[d] = store.modified.pop(s, now)
@@ -103,5 +99,3 @@ async def rename(
         _move_subtree(store, s, d)
     else:
         raise lookup_error(store, src_spec, s)
-    await invalidate_after_move(dst_spec, folder)
-    await invalidate_after_move(src_spec, folder)

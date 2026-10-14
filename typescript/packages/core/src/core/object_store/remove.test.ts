@@ -13,41 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithCacheManager } from '../../cache/context.ts'
 import { runWithRecording } from '../../observe/context.ts'
-import { codeOf, FakeAccessor, FakeManager, FakeStore, makeDriver, spec } from './fakes.ts'
+import { codeOf, FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
 import { makeRemovePrefix, makeRmdir, makeUnlink } from './remove.ts'
 
 const accessor = new FakeAccessor()
 
-async function managed(fn: () => Promise<void>): Promise<FakeManager> {
-  const manager = new FakeManager()
-  await runWithCacheManager(manager, fn)
-  return manager
-}
-
 describe('object_store remove', () => {
-  it('unlink deletes and invalidates every ancestor listing', async () => {
+  it('unlink deletes the object', async () => {
     // Deleting the last key under a/b makes /a/b and /a disappear as
     // implied prefixes; the stale-ancestor eviction is the pinned fix.
     const store = new FakeStore({ 'a/b/c.txt': 'hi' })
-    const manager = await managed(() => makeUnlink(makeDriver(store))(accessor, spec('/a/b/c.txt')))
+    await makeUnlink(makeDriver(store))(accessor, spec('/a/b/c.txt'))
     expect(store.contents()).toEqual({})
-    expect(manager.unlinks).toEqual(['/a/b/c.txt'])
-    expect(manager.writes).toEqual([])
-    expect(manager.ancestors).toEqual(['/mnt/a/b/c.txt'])
   })
 
-  it('removePrefix deletes the subtree and ancestors evict', async () => {
+  it('removePrefix deletes the subtree', async () => {
     const store = new FakeStore({ 'a/b/c.txt': 'hi', 'a/b/d/e.txt': 'x' })
-    const manager = await managed(() => makeRemovePrefix(makeDriver(store))(accessor, spec('/a/b')))
+    await makeRemovePrefix(makeDriver(store))(accessor, spec('/a/b'))
     expect(store.contents()).toEqual({})
     // A subtree evict, not an unlink: every key below /a/b went with it,
     // and each one was cached under its own key.
-    expect(manager.subtrees).toEqual(['/a/b'])
-    expect(manager.unlinks).toEqual([])
-    expect(manager.writes).toEqual([])
-    expect(manager.ancestors).toEqual(['/mnt/a/b'])
   })
 
   // rmdir is not removePrefix. On a keyed store an empty directory is its
@@ -71,11 +57,8 @@ describe('object_store remove', () => {
 
   it('rmdir removes the marker of an empty prefix', async () => {
     const store = new FakeStore({ 'a/b/': '', 'keep.txt': 'k' })
-    const manager = await managed(() => makeRmdir(makeDriver(store))(accessor, spec('/a/b')))
+    await makeRmdir(makeDriver(store))(accessor, spec('/a/b'))
     expect(store.contents()).toEqual({ 'keep.txt': 'k' })
-    expect(manager.unlinks).toEqual(['/a/b'])
-    expect(manager.writes).toEqual([])
-    expect(manager.ancestors).toEqual(['/mnt/a/b'])
   })
 
   it('rmdir reports ENOENT for a prefix holding no key', async () => {
@@ -100,7 +83,7 @@ describe('object_store remove', () => {
 
   it('rmdir on an empty mount root is a no-op', async () => {
     const store = new FakeStore({})
-    await managed(() => makeRmdir(makeDriver(store))(accessor, spec('/')))
+    await makeRmdir(makeDriver(store))(accessor, spec('/'))
     expect(store.contents()).toEqual({})
   })
 
@@ -118,7 +101,7 @@ describe('object_store remove', () => {
       conn.objects.set('a/b/late.txt', new TextEncoder().encode('new'))
     }
     const rmdir = makeRmdir({ ...driver, listChildren: racingChildren })
-    await managed(() => rmdir(accessor, spec('/a/b')))
+    await rmdir(accessor, spec('/a/b'))
     expect(store.contents()).toEqual({ 'a/b/late.txt': 'new' })
     expect(store.deletes).toEqual(['a/b/'])
   })
@@ -126,7 +109,7 @@ describe('object_store remove', () => {
 
 async function recorded(fn: () => Promise<void>): Promise<[string, string][]> {
   const [, records] = await runWithRecording(async () => {
-    await managed(fn)
+    await fn()
   })
   return records.map((r) => [r.op, r.path])
 }
@@ -182,43 +165,8 @@ describe('a retraction records even when the driver call throws', () => {
       deleteFile: () => Promise.reject(new Error('store on fire')),
     }
     const [, records] = await runWithRecording(async () => {
-      await expect(managed(() => makeUnlink(driver)(accessor, spec('/a/b.txt')))).rejects.toThrow(
-        'store on fire',
-      )
-    })
-    expect(records.map((r) => [r.op, r.path])).toEqual([['unlink', '/mnt/a/b.txt']])
-  })
-})
-
-describe('a retraction evicts the cache even when the driver call throws', () => {
-  it('unlink evicts the body and the ancestor listings', async () => {
-    // The eviction rides with the record: with the pin gone, a cached
-    // body left behind would be served by a restored snapshot with
-    // nothing left to check it.
-    const driver = {
-      ...makeDriver(new FakeStore({ 'a/b.txt': 'b' })),
-      deleteFile: () => Promise.reject(new Error('store on fire')),
-    }
-    const manager = await managed(async () => {
       await expect(makeUnlink(driver)(accessor, spec('/a/b.txt'))).rejects.toThrow('store on fire')
     })
-    expect(manager.unlinks).toEqual(['/a/b.txt'])
-    expect(manager.writes).toEqual([])
-    expect(manager.ancestors).toEqual(['/mnt/a/b.txt'])
-  })
-
-  it('removePrefix evicts the subtree', async () => {
-    const driver = {
-      ...makeDriver(new FakeStore()),
-      deletePrefix: () => Promise.reject(new Error('store on fire')),
-    }
-    const manager = await managed(async () => {
-      await expect(makeRemovePrefix(driver)(accessor, spec('/a/b'))).rejects.toThrow(
-        'store on fire',
-      )
-    })
-    expect(manager.subtrees).toEqual(['/a/b'])
-    expect(manager.writes).toEqual([])
-    expect(manager.ancestors).toEqual(['/mnt/a/b'])
+    expect(records.map((r) => [r.op, r.path])).toEqual([['unlink', '/mnt/a/b.txt']])
   })
 })

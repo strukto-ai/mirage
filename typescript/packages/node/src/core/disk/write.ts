@@ -14,7 +14,7 @@
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { writeFile } from 'node:fs/promises'
-import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
+
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -33,5 +33,4 @@ export async function write(accessor: DiskAccessor, p: PathSpec, data: Uint8Arra
     throw diskError(err, p)
   }
   record('write', p.virtual, VFSName.DISK, data.byteLength, timer)
-  await invalidateAfterWrite(p)
 }

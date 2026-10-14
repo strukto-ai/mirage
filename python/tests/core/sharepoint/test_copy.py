@@ -5,7 +5,6 @@ from aioresponses import CallbackResult, aioresponses
 from yarl import URL
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
-from mirage.cache.context import push_cache_manager
 from mirage.core.msgraph.client import GraphError
 from mirage.core.sharepoint.copy import copy
 from mirage.types import PathSpec
@@ -55,40 +54,24 @@ async def test_copy_posts_copy_action_with_name():
     assert "driveId" not in body["parentReference"]
 
 
-class _Subtrees:
-    def __init__(self) -> None:
-        self.seen: list[str] = []
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.seen.append(path.virtual)
-
-
 @pytest.mark.asyncio
 async def test_copy_raises_when_monitor_reports_failed():
-    # The destination is still invalidated: a merge may have landed some
-    # children before one failed.
     monitor = "https://monitor.example/sp/0"
-    manager = _Subtrees()
-    previous = push_cache_manager(manager)
-    try:
-        with aioresponses() as m:
-            m.post(
-                _DRIVE + "/root:/a.txt:/copy",
-                status=202,
-                headers={"Location": monitor},
-            )
-            m.get(
-                monitor,
-                payload={
-                    "status": "failed",
-                    "error": {"code": "generalException", "message": "x"},
-                },
-            )
-            with pytest.raises(GraphError):
-                await copy(_accessor(), _spec("a.txt"), _spec("b.txt"))
-    finally:
-        push_cache_manager(previous)
-    assert manager.seen == ["/sp/Engineering/Documents/b.txt"]
+    with aioresponses() as m:
+        m.post(
+            _DRIVE + "/root:/a.txt:/copy",
+            status=202,
+            headers={"Location": monitor},
+        )
+        m.get(
+            monitor,
+            payload={
+                "status": "failed",
+                "error": {"code": "generalException", "message": "x"},
+            },
+        )
+        with pytest.raises(GraphError):
+            await copy(_accessor(), _spec("a.txt"), _spec("b.txt"))
 
 
 @pytest.mark.asyncio

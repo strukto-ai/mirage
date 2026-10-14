@@ -1,5 +1,4 @@
 import type { Operator } from 'opendal'
-import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
@@ -62,8 +61,6 @@ export async function mkdir(
     // names it.
     throw enotdir(parents ? mountedPath(path, `/${level}`) : path)
   }
-  await invalidateAfterWrite(path)
-  if (parents) await invalidateAncestors(path)
   let taken = false
   try {
     taken = !(await op.stat(key)).isDirectory()

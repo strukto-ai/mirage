@@ -4,7 +4,6 @@ from xml.etree import ElementTree
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_subtree
 from mirage.core.nextcloud.dav import dav_request, dav_url
 from mirage.core.nextcloud.search.xml import dav
 from mirage.core.nextcloud.util import nextcloud_key
@@ -24,7 +23,6 @@ async def copy(
         await op.copy(src_key, dst_key)
     except NotFound as exc:
         raise enoent(src) from exc
-    await invalidate_after_write(dst)
 
 
 def failed_status(content: bytes) -> int:
@@ -71,7 +69,6 @@ async def dir_copy(
     )
     status = response.status_code
     if status == HTTPStatus.MULTI_STATUS:
-        await invalidate_subtree(dst)
         status = failed_status(response.content)
     if status == HTTPStatus.NOT_FOUND:
         raise enoent(src)
@@ -86,4 +83,3 @@ async def dir_copy(
     response.raise_for_status()
     record("copy_prefix", dst.virtual, "nextcloud", 0, timer)
     lift_lost(dst, upto, subtree=True)
-    await invalidate_subtree(dst)

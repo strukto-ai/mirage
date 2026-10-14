@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import {
-  runWithOwnVersion,
-  invalidateAfterWrite,
-  invalidateAncestors,
-  writeCondition,
-} from '../../cache/context.ts'
+import { runWithOwnVersion, writeCondition } from '../../cache/context.ts'
 import { OwnRead, type WriteCondition } from '../../cache/types.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
@@ -84,10 +79,8 @@ export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
     record('write', path.virtual, driver.vfs, data.byteLength, timer, {
       fingerprint: meta?.fingerprint ?? null,
     })
-    await invalidateAfterWrite(path)
     // A put materializes every missing level of the key at once, so the
     // listings above the immediate parent gained entries too.
-    await invalidateAncestors(path)
   }
 }
 
@@ -107,9 +100,7 @@ export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C
     record('create', path.virtual, driver.vfs, 0, timer, {
       fingerprint: meta?.fingerprint ?? null,
     })
-    await invalidateAfterWrite(path)
     // An empty put materializes missing parents exactly like write.
-    await invalidateAncestors(path)
   }
 }
 
@@ -157,9 +148,7 @@ export function makeTruncate<A extends Accessor, C>(
     record('truncate', path.virtual, driver.vfs, 0, timer, {
       fingerprint: meta?.fingerprint ?? null,
     })
-    await invalidateAfterWrite(path)
     // Truncating a missing key creates it, parents included.
-    await invalidateAncestors(path)
   }
 }
 
@@ -252,7 +241,5 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
     } finally {
       await close()
     }
-    await invalidateAfterWrite(path)
-    if (parents) await invalidateAncestors(path)
   }
 }

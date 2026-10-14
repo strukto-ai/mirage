@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.ssh.utils import join_root, open_for_write
 from mirage.errors.fs import enotsup
 from mirage.observe.context import record, start_op
@@ -35,4 +34,3 @@ async def truncate(
     async with await open_for_write(sftp, remote, path) as f:
         await f.truncate(length)
     record("truncate", path.virtual, "ssh", 0, timer)
-    await invalidate_after_write(path)

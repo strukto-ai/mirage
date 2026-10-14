@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
@@ -43,5 +42,4 @@ export async function unlink(
     throw exc
   }
   record('unlink', p.virtual, VFSName.DATABRICKS_VOLUME, 0, timer)
-  await invalidateAfterUnlink(p)
 }

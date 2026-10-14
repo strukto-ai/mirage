@@ -16,30 +16,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.cache.context import push_cache_manager
 from mirage.core.databricks_volume.copy import copy
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
-
-
-class _FakeManager:
-    def __init__(self) -> None:
-        self.writes: list[str] = []
-        self.ancestors: list[str] = []
-        self.unlinks: list[str] = []
-        self.subtrees: list[str] = []
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None:
-        self.ancestors.append(path.virtual)
-
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        self.writes.append(path.mount_path)
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        self.unlinks.append(path.mount_path)
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.subtrees.append(path.mount_path)
 
 
 def _path(path: str) -> PathSpec:
@@ -179,32 +158,3 @@ async def test_copy_recursive_into_own_subtree_fails(
     assert files.create_directory_calls == []
     assert files.upload_calls == []
     assert files.downloads[f"{remote_root}/d/a.txt"] == b"aaa"
-
-
-@pytest.mark.asyncio
-async def test_copy_recursive_invalidates_destination_tree(
-    accessor, files, remote_root, index
-):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/d")
-    _seed_file(files, f"{remote_root}/d/a.txt", b"aaa")
-    _seed_directory(files, f"{remote_root}/deep")
-
-    manager = _FakeManager()
-    prev = push_cache_manager(manager)
-    try:
-        await copy(
-            accessor,
-            _path("/dbx/d"),
-            _path("/dbx/deep/dst"),
-            index,
-            recursive=True,
-        )
-    finally:
-        push_cache_manager(prev)
-
-    # The destination's own listing must go (a merge target can pre-exist)
-    # along with every ancestor listing create_directory materialized.
-    assert manager.unlinks == ["/deep/dst"]
-    assert manager.writes == []
-    assert manager.ancestors == ["/dbx/deep/dst"]

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import invalidate_after_unlink, invalidate_ancestors
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dropbox.api import delete_path, get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
@@ -55,5 +54,3 @@ async def rmdir(
     timer = start_op()
     await delete_path(accessor.token_manager, api_path)
     record("rmdir", path.virtual, "dropbox", 0, timer)
-    await invalidate_after_unlink(path)
-    await invalidate_ancestors(path)

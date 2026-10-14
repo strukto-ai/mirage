@@ -55,7 +55,7 @@ import type { Decisions } from '../../policy/decisions.ts'
 import { Boundary } from '../../policy/boundary.ts'
 import { METADATA_OPS } from '../../policy/constants.ts'
 import { PolicyError } from '../../policy/errors.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
+import { mountKey, underPath } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { CycleError, norm, parent, posixNormpath } from '../../utils/path.ts'
 import type { Visibility } from '../../types.ts'
@@ -64,14 +64,16 @@ import {
   activeRecords,
   commandRecords,
   type LostPaths,
+  lostPaths,
   record,
+  recordIndex,
   runWithMountContext,
   runWithRecording,
   startOp,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
 import type { OpRecord } from '../../observe/record.ts'
-import { WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
+import { RETRACT_FINGERPRINT_OPS, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -352,6 +354,20 @@ async function mkdirOnReadOnly(
 function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
   const specs = paths.filter((p): p is PathSpec => p instanceof PathSpec)
   for (const virtual of new Set(specs.map((p) => p.virtual))) gate.check(virtual)
+}
+
+/**
+ * Whether the running line's newest word on `virtual` is that a change it
+ * made took the path's version (a copy, a move, a removal). Bytes cached
+ * before that change are not served: a later step of the same op can still
+ * be running, and the path is evicted only once the op ends. A read or write
+ * since stamps a newer record. Mirrors Python's `_retracted`.
+ */
+function retracted(virtual: string): boolean {
+  const records = activeRecords()
+  if (records === undefined) return false
+  const rec = recordIndex(records).newestVersion(virtual)
+  return rec !== null && RETRACT_FINGERPRINT_OPS.has(rec.op)
 }
 
 /**
@@ -851,12 +867,27 @@ export class Dispatcher {
     if (cached !== null) {
       return [cached, new IOResult()]
     }
-    const [answer, dst, fullArgs] = await this.callBackend(call, mount, vfs, scope, mode)
-    const result = this.filter(call, answer)
-    if (
+    const settles =
       (DISPATCH_WRITE_OPS.has(name) || (call.write && !POLICY_WRITE_OPS.has(name))) &&
       !SERIAL_WRITE_OPS.has(name)
-    ) {
+    let ran: Awaited<ReturnType<typeof this.callBackend>>
+    try {
+      ran = await this.callBackend(call, mount, vfs, scope, mode)
+    } catch (err) {
+      if (settles) {
+        await this.evictFailedWrite(
+          name,
+          call.path,
+          call.dst,
+          operands(name, call.args, call.kwargs),
+          lostPaths(activeRecords()),
+        )
+      }
+      throw err
+    }
+    const [answer, dst, fullArgs] = ran
+    const result = this.filter(call, answer)
+    if (settles) {
       await this.settleWrite(name, call.path, dst, fullArgs, operands(name, call.args, call.kwargs))
     }
     // The transfer already happened, so a limit changes what the caller
@@ -1270,16 +1301,21 @@ export class Dispatcher {
     await other.ensureReady()
     if (!(await other.canCopyFrom(owner, call.path.virtual))) throw exdev(call.path)
     const key = `${String(this.storeId(other.vfs))}:${mountKey(dst.virtual, rstripSlash(other.prefix))}`
-    await this.holdWrite(
-      [key],
-      other.opTimeout('copy'),
-      'copy',
-      `copy ${call.path.virtual}`,
-      (onCall) => other.copyFrom(owner, call.path.virtual, dst.virtual, onCall),
-      async () => {
-        await this.settleWrite('copy', call.path, dst, [dst], [])
-      },
-    )
+    try {
+      await this.holdWrite(
+        [key],
+        other.opTimeout('copy'),
+        'copy',
+        `copy ${call.path.virtual}`,
+        (onCall) => other.copyFrom(owner, call.path.virtual, dst.virtual, onCall),
+        async () => {
+          await this.settleWrite('copy', call.path, dst, [dst], [])
+        },
+      )
+    } catch (err) {
+      await this.evictFailedWrite('copy', call.path, dst, [], lostPaths(activeRecords()))
+      throw err
+    }
   }
 
   /**
@@ -1518,6 +1554,7 @@ export class Dispatcher {
     const cached = await this.cache.get(call.path.virtual)
     if (
       cached === null ||
+      retracted(call.path.virtual) ||
       !(await this.reconciler.mayServeCached(mount, call.path.virtual)) ||
       this.rendersRead(call, mount) ||
       mount.retiring ||
@@ -1687,29 +1724,42 @@ export class Dispatcher {
               .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
               .sort(compareCodePoints)
         let mine: OpRecord[] = []
+        let line: readonly OpRecord[] | undefined
         let before: [Uint8Array, string | null] | null = null
         const own = async (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> => {
+          line = activeRecords()
           before = await this.cachedBefore(call, mount)
           return commandRecords((records) => {
             mine = records
             return run(fullKwargs, onCall)
           })
         }
-        result = await this.holdWrite(
-          keys,
-          opTimeout,
-          name,
-          `${name} ${p.virtual}`,
-          (onCall) =>
-            activeRecords() === undefined
-              ? runWithRecording(() => own(onCall)).then(([value]) => value)
-              : own(onCall),
-          async (value) => {
-            served(report, value)
-            await this.settleWrite(name, p, dst, fullArgs, operands(name, call.args, kwargs))
-            await this.keepWritten(call, mount, fullArgs, mine, before)
-          },
-        )
+        try {
+          result = await this.holdWrite(
+            keys,
+            opTimeout,
+            name,
+            `${name} ${p.virtual}`,
+            (onCall) =>
+              activeRecords() === undefined
+                ? runWithRecording(() => own(onCall)).then(([value]) => value)
+                : own(onCall),
+            async (value) => {
+              served(report, value)
+              await this.settleWrite(name, p, dst, fullArgs, operands(name, call.args, kwargs))
+              await this.keepWritten(call, mount, fullArgs, mine, before)
+            },
+          )
+        } catch (err) {
+          await this.evictFailedWrite(
+            name,
+            p,
+            dst,
+            operands(name, call.args, kwargs),
+            lostPaths(line),
+          )
+          throw err
+        }
       } else {
         result = await run(fullKwargs)
         if (name === 'stat') result = await sized(mount, p, result)
@@ -2031,6 +2081,65 @@ export class Dispatcher {
       // reaching the dispatcher directly, as git mv does, had nothing to.
       await this.namespace.rename(p.virtual, dst.virtual)
       await this.namespace.renameUnder(p.virtual, dst.virtual)
+    }
+  }
+
+  /**
+   * Drop what a write that threw may have made stale.
+   *
+   * A write that fails partway may already have changed the store (a
+   * paginated delete, a copy that merged some children), so the caches at
+   * and below every name it reaches go either way; the node table moves only
+   * with a write that landed. The version the line held for each name is
+   * kept, so the next write there stays conditioned on what the agent read,
+   * and so is each version `lost` marks under them, which a refused
+   * conditional write kept: a retry without a read is refused again.
+   * Over-dropping costs a refetch. An eviction error is logged, not thrown,
+   * so the caller still learns why the write failed. Mirrors Python's
+   * Dispatcher._evict_failed_write.
+   */
+  private async evictFailedWrite(
+    name: string,
+    p: PathSpec,
+    dst: PathSpec | null,
+    others: readonly [number | string, PathSpec][],
+    lost: LostPaths | null,
+  ): Promise<void> {
+    const names = [
+      ...(COPY_OPS.has(name) ? [] : [p]),
+      ...(dst !== null && DESTINATION_OPS.has(name) ? [dst] : []),
+      ...others.map(([, other]) => other),
+    ]
+    for (const target of names) {
+      try {
+        const path = rstripSlash(target.virtual) || '/'
+        const mount = this.namespace.tryMountFor(path)
+        if (mount === null) continue
+        for (const [owner, alias] of this.aliases(mount, path)) {
+          const manager = this.managerFor(owner)
+          const spec = PathSpec.fromStrPath(alias)
+          const version = await manager.readVersion(spec)
+          await manager.invalidateSubtree(alias)
+          await manager.invalidateAncestors(alias)
+          if (version !== null && version !== '') await manager.keepVersion(spec, version)
+        }
+      } catch (err) {
+        console.debug(`evicting after a failed ${name}: ${String(err)}`)
+      }
+    }
+    if (lost === null) return
+    for (const key of [...lost.marks.keys()]) {
+      const version = lost.version(key)
+      if (version === null || !names.some((target) => underPath(key, target.virtual))) continue
+      try {
+        const mount = this.namespace.tryMountFor(key)
+        if (mount === null) continue
+        for (const [owner, alias] of this.aliases(mount, key)) {
+          await this.managerFor(owner).keepVersion(PathSpec.fromStrPath(alias), version)
+        }
+      } catch (err) {
+        console.debug(`keeping ${key} after a refusal: ${String(err)}`)
+      }
     }
   }
 

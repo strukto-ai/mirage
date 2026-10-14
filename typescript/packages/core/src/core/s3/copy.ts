@@ -79,5 +79,5 @@ export async function copyFrom(
   } finally {
     ;(client as unknown as { destroy?: () => void }).destroy?.()
   }
-  await settleCopy(dst, DRIVER.vfs, timer)
+  settleCopy(dst, DRIVER.vfs, timer)
 }

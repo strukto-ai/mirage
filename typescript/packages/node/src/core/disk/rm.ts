@@ -14,12 +14,11 @@
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { rm } from 'node:fs/promises'
-import { invalidateSubtree } from '@struktoai/mirage-core/cache/context'
+
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { resolveInside } from './utils.ts'
 
 export async function rmR(accessor: DiskAccessor, path: PathSpec): Promise<void> {
   const full = await resolveInside(accessor.root, path)
   await rm(full, { recursive: true, force: true })
-  await invalidateSubtree(path)
 }

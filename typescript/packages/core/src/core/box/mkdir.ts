@@ -12,34 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf, mountedPath } from '../../utils/key_prefix.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
-import { PathSpec } from '../../types.ts'
+
+import type { PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir } from '../../errors/fs.ts'
 import { createFolder, listFolderItems } from './api.ts'
 import { BoxApiError } from './client.ts'
 import { pathParts, resolveChain } from './resolve.ts'
-
-async function invalidateLevels(path: PathSpec, count: number): Promise<void> {
-  // `mkdir -p a/b/c` creates several levels; invalidate each one's parent
-  // listing (not just the final target's) so a cached ancestor listing from
-  // an earlier command re-fetches and sees the new folders. Box resolves ids
-  // through those listings, so a stale ancestor hides new children.
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const segments = rstripVirtual(path.virtual).split('/')
-  for (let i = 0; i < count; i++) {
-    const depth = segments.length - count + i + 1
-    const levelVirtual = segments.slice(0, depth).join('/') || '/'
-    await invalidateAfterWrite(PathSpec.fromStrPath(levelVirtual, mountKey(levelVirtual, prefix)))
-  }
-}
-
-export function rstripVirtual(virtual: string): string {
-  let end = virtual.length
-  while (end > 1 && virtual.charCodeAt(end - 1) === 47) end--
-  return virtual.slice(0, end)
-}
 
 export async function mkdir(accessor: BoxAccessor, path: PathSpec, parents = false): Promise<void> {
   const parts = pathParts(path)
@@ -63,7 +43,6 @@ export async function mkdir(accessor: BoxAccessor, path: PathSpec, parents = fal
         curId = created.id
       }
     }
-    await invalidateLevels(path, parts.length)
   } else {
     const chain = await resolveChain(accessor, parts.slice(0, -1))
     // A level that resolved but is a file is ENOTDIR, the parent itself
@@ -81,6 +60,5 @@ export async function mkdir(accessor: BoxAccessor, path: PathSpec, parents = fal
       if (error instanceof BoxApiError && error.status === 409) throw eexist(path)
       throw error
     }
-    await invalidateAfterWrite(path)
   }
 }

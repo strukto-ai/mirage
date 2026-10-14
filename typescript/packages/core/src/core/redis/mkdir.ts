@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
@@ -40,12 +39,9 @@ export async function mkdir(
         await store.setModified(current, now)
       }
     }
-    await invalidateAfterWrite(p)
-    await invalidateAncestors(path)
     return
   }
   await checkDestParents(store, path, p)
   await store.addDir(p)
   await store.setModified(p, nowIso())
-  await invalidateAfterWrite(p)
 }

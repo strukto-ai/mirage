@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -45,5 +44,4 @@ export async function appendBytes(
   }
   await store.setModified(p, nowIso())
   record('append', path.virtual, VFSName.REDIS, data.byteLength, timer)
-  await invalidateAfterWrite(p)
 }

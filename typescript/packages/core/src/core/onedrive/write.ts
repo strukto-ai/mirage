@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { writeItem } from '../msgraph/drive.ts'
@@ -27,5 +27,4 @@ export async function write(
   const timer = startOp()
   await writeItem(accessor.config, driveLoc(accessor.config, path.vfsPath), data)
   record('write', path.virtual, 'onedrive', data.length, timer)
-  await invalidateAfterWrite(path)
 }

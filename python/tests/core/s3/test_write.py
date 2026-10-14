@@ -16,31 +16,10 @@ import asyncio
 import hashlib
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.context import push_cache_manager
 from mirage.core.s3 import driver as s3_driver
 from mirage.core.s3.write import write
 from mirage.types import PathSpec
 from mirage.vfs.s3.config import S3Config
-
-
-class _FakeManager:
-    def __init__(self) -> None:
-        self.writes: list[str] = []
-        self.ancestors: list[str] = []
-        self.unlinks: list[str] = []
-        self.subtrees: list[str] = []
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None:
-        self.ancestors.append(path.virtual)
-
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        self.writes.append(path.mount_path)
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        self.unlinks.append(path.mount_path)
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.subtrees.append(path.mount_path)
 
 
 class _FakeClient:
@@ -74,43 +53,23 @@ class _FakeSession:
 
 async def _write(
     monkeypatch, mount_path: str, content_type: str | None = None
-) -> tuple[_FakeManager, list]:
+) -> list[tuple[str, bytes, str | None]]:
     puts: list[tuple[str, bytes, str | None]] = []
     monkeypatch.setattr(
         s3_driver, "async_session", lambda config: _FakeSession(puts)
     )
-    manager = _FakeManager()
-    prev = push_cache_manager(manager)
-    try:
-        await write(
-            S3Accessor(
-                S3Config(bucket="b", default_content_type=content_type)
-            ),
-            PathSpec(
-                virtual="/mnt" + mount_path,
-                directory="/mnt/",
-                vfs_path=mount_path.lstrip("/"),
-            ),
-            b"hi",
-        )
-    finally:
-        push_cache_manager(prev)
-    return manager, puts
-
-
-def test_write_invalidates_every_ancestor_listing(monkeypatch):
-    manager, puts = asyncio.run(_write(monkeypatch, "/a/b/c.txt"))
-    assert puts == [("a/b/c.txt", b"hi", None)]
-    # The put materializes `a` and `a/b` too, so their listings are stale.
-    assert manager.writes == ["/a/b/c.txt"]
-    assert manager.ancestors == ["/mnt/a/b/c.txt"]
-
-
-def test_write_at_mount_root_invalidates_only_itself(monkeypatch):
-    manager, _ = asyncio.run(_write(monkeypatch, "/c.txt"))
-    assert manager.writes == ["/c.txt"]
+    await write(
+        S3Accessor(S3Config(bucket="b", default_content_type=content_type)),
+        PathSpec(
+            virtual="/mnt" + mount_path,
+            directory="/mnt/",
+            vfs_path=mount_path.lstrip("/"),
+        ),
+        b"hi",
+    )
+    return puts
 
 
 def test_write_stamps_the_mounts_default_content_type(monkeypatch):
-    _, puts = asyncio.run(_write(monkeypatch, "/c.txt", "text/plain"))
+    puts = asyncio.run(_write(monkeypatch, "/c.txt", "text/plain"))
     assert puts == [("c.txt", b"hi", "text/plain")]

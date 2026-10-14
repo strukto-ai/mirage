@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import { invalidateAfterUnlink, invalidateAncestors } from '../../cache/context.ts'
+
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -78,12 +78,6 @@ export async function copy(
       throw new Error(`cannot copy a directory, '${s.virtual}', into itself, '${d.virtual}'`)
     }
     await copyTree(accessor, remoteSrc, remoteDst)
-    // create_directory materializes missing ancestors and the walk can
-    // merge into a pre-existing destination directory (mv onto an empty
-    // dir), so evict the destination's own listing and every ancestor
-    // listing, not just the parent (mirrors mkdir with parents=true).
-    await invalidateAfterUnlink(d)
-    await invalidateAncestors(d)
     return
   }
   if (samePath) {

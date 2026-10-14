@@ -1,4 +1,3 @@
-import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -22,5 +21,4 @@ export async function write(
     throw error
   }
   record('write', path.virtual, VFSName.NEXTCLOUD, data.byteLength, timer)
-  await invalidateAfterWrite(path)
 }

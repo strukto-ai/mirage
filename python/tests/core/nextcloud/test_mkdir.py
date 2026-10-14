@@ -1,46 +1,8 @@
 import pytest
 from opendal.exceptions import Unexpected
 
-from mirage.cache.context import push_cache_manager
 from mirage.core.nextcloud.mkdir import mkdir
 from mirage.types import PathSpec
-
-
-class _RecordingInvalidator:
-    """Collects the paths each invalidation hook was told about."""
-
-    def __init__(self) -> None:
-        self.writes: list[str] = []
-        self.ancestors: list[str] = []
-        self.unlinks: list[str] = []
-        self.subtrees: list[str] = []
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None:
-        self.ancestors.append(path.virtual)
-
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        self.writes.append(path.mount_path)
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        self.unlinks.append(path.mount_path)
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.subtrees.append(path.mount_path)
-
-    async def cached_size(self, path: PathSpec) -> int | None:
-        return None
-
-
-async def _record(
-    accessor, path: PathSpec, **kwargs: bool
-) -> _RecordingInvalidator:
-    recorder = _RecordingInvalidator()
-    previous = push_cache_manager(recorder)
-    try:
-        await mkdir(accessor, path, **kwargs)
-    finally:
-        push_cache_manager(previous)
-    return recorder
 
 
 @pytest.mark.asyncio
@@ -58,26 +20,22 @@ async def test_mkdir_refuses_a_missing_parent_without_parents(make_acc):
     """
     acc = make_acc({})
     with pytest.raises(FileNotFoundError, match="'/a/b/c'$"):
-        await _record(acc, PathSpec.from_str_path("/a/b/c"))
+        await mkdir(acc, PathSpec.from_str_path("/a/b/c"))
     assert acc._fake.dirs == set()
 
 
 @pytest.mark.asyncio
 async def test_mkdir_without_parents_creates_one_level(make_acc):
-    recorder = await _record(
-        make_acc({"a/b/x": b""}), PathSpec.from_str_path("/a/b/c")
-    )
-    assert recorder.writes == ["/a/b/c"]
-    assert recorder.ancestors == []
+    acc = make_acc({"a/b/x": b""})
+    await mkdir(acc, PathSpec.from_str_path("/a/b/c"))
+    assert "a/b/c/" in acc._fake.dirs
 
 
 @pytest.mark.asyncio
-async def test_mkdir_parents_invalidates_the_same_chain(make_acc):
-    recorder = await _record(
-        make_acc({}), PathSpec.from_str_path("/a/b/c"), parents=True
-    )
-    assert recorder.writes == ["/a/b/c"]
-    assert recorder.ancestors == ["/a/b/c"]
+async def test_mkdir_parents_creates_the_whole_chain(make_acc):
+    acc = make_acc({})
+    await mkdir(acc, PathSpec.from_str_path("/a/b/c"), parents=True)
+    assert "a/b/c/" in acc._fake.dirs
 
 
 def _refuse_create(acc) -> None:
@@ -127,21 +85,14 @@ async def test_mkdir_keeps_a_refusal_no_file_explains(make_acc):
 
 
 @pytest.mark.asyncio
-async def test_mkdir_invalidates_before_the_probe_after_create(make_acc):
-    """A probe that fails after MKCOL landed still leaves no stale listing."""
+async def test_mkdir_raises_a_probe_that_fails_after_create(make_acc):
+    """A probe that fails after MKCOL landed raises, the collection made."""
     acc = make_acc({})
 
     async def stat(key: str) -> None:
         raise Unexpected("Unexpected (temporary) at stat, status 503")
 
     acc._fake.stat = stat
-    recorder = _RecordingInvalidator()
-    previous = push_cache_manager(recorder)
-    try:
-        with pytest.raises(Unexpected):
-            await mkdir(acc, PathSpec.from_str_path("/newdir"))
-    finally:
-        push_cache_manager(previous)
+    with pytest.raises(Unexpected):
+        await mkdir(acc, PathSpec.from_str_path("/newdir"))
     assert "newdir/" in acc._fake.dirs
-    assert recorder.writes == ["/newdir"]
-    assert recorder.ancestors == []

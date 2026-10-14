@@ -15,7 +15,6 @@
 import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.disk.dest import mkdir_component_error
 from mirage.core.disk.errors import disk_error, disk_errors
 from mirage.core.disk.utils import resolve_inside
@@ -43,10 +42,7 @@ async def mkdir(
             raise (named or disk_error(exc, path_spec.virtual)) from exc
         except OSError as exc:
             raise disk_error(exc, path_spec.virtual) from exc
-        await invalidate_after_write(path_spec)
-        await invalidate_ancestors(path_spec)
         return
     # An existing target is EEXIST, not success: only -p is idempotent.
     with disk_errors(path_spec.virtual):
         await aiofiles.os.mkdir(p)
-    await invalidate_after_write(path_spec)

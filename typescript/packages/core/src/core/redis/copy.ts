@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { nowIso } from '../../utils/dates.ts'
@@ -28,5 +27,4 @@ export async function copy(accessor: RedisAccessor, src: PathSpec, dst: PathSpec
   if (data === null) throw await lookupError(store, src, s)
   await store.setFile(d, data)
   await store.setModified(d, nowIso())
-  await invalidateAfterWrite(dst)
 }

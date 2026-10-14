@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.core.redis.dest import lookup_error
 from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
@@ -31,4 +30,3 @@ async def unlink(accessor: RedisAccessor, path_spec: PathSpec) -> None:
     await store.del_file(p)
     await store.del_modified(p)
     await store.del_attrs(p)
-    await invalidate_after_unlink(path_spec)

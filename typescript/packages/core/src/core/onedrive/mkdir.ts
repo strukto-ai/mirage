@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enotdir, isEexist, isEnoent } from '../../errors/fs.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
@@ -109,6 +108,4 @@ export async function mkdir(
   } else {
     await createDir(accessor, key, path.virtual, path.virtual, false)
   }
-  await invalidateAfterWrite(path)
-  if (parents) await invalidateAncestors(path)
 }

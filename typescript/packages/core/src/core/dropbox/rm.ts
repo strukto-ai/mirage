@@ -13,14 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import {
-  conditioned,
-  evictAfter,
-  heldVersions,
-  invalidateAncestors,
-  invalidateSubtree,
-  keepRefused,
-} from '../../cache/context.ts'
+import { conditioned, settleAfter, heldVersions, keepRefused } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../errors/fs.ts'
@@ -106,20 +99,16 @@ export async function rmR(accessor: DropboxAccessor, path: PathSpec): Promise<vo
       throw err
     }
     record('rm_r', path.virtual, 'dropbox', 0, timer)
-    await invalidateSubtree(path)
-    await invalidateAncestors(path)
     return
   }
   const entry = await lookup(accessor.tokenManager, apiPath)
   if (entry === null) throw enoent(path.virtual)
   const upto = lostCount()
   const lost: [PathSpec, string | null][] = []
-  await evictAfter(
+  await settleAfter(
     () => remove(accessor, path, entry, lost),
     async (done) => {
       record('rm_r', path.virtual, 'dropbox', 0, timer)
-      await invalidateSubtree(path)
-      await invalidateAncestors(path)
       const refusal = await keepRefused(lost)
       if (done === true && refusal !== null) throw refusal
     },

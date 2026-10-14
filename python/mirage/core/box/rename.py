@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import invalidate_after_move
 from mirage.cache.types import WriteCondition
 from mirage.core.box.api import (
     update_file,
@@ -92,7 +91,5 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     op = "rename_prefix" if folder else "rename"
     record(op, src.virtual, "box", 0, timer)
     record(op, dst.virtual, "box", 0, timer)
-    await invalidate_after_move(dst, folder)
-    await invalidate_after_move(src, folder)
     lift_lost(src, upto, subtree=folder)
     lift_lost(dst, upto, subtree=folder)

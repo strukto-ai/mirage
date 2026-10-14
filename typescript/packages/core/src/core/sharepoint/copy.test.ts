@@ -15,7 +15,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { runWithCacheManager, type CacheInvalidator } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import { copy } from './copy.ts'
 
@@ -46,8 +45,7 @@ describe('SharePoint copy', () => {
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('/drives/'))).toBe(true)
   })
 
-  it('invalidates the destination even when the copy fails', async () => {
-    // A merge may have landed some children before one failed.
+  it('rejects when the monitor reports the copy failed', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: unknown, init?: RequestInit) => {
@@ -66,21 +64,11 @@ describe('SharePoint copy', () => {
         return Promise.resolve(new Response(JSON.stringify({ value })))
       }),
     )
-    const seen: string[] = []
-    const manager = {
-      invalidateSubtree: (path: string | PathSpec) => {
-        seen.push(typeof path === 'string' ? path : path.virtual)
-        return Promise.resolve()
-      },
-    } as unknown as CacheInvalidator
-    const outcome = runWithCacheManager(manager, () =>
-      copy(
-        new SharePointAccessor({ accessToken: 'token' }),
-        PathSpec.fromStrPath('/sp/Team/Documents/a.txt', 'Team/Documents/a.txt'),
-        PathSpec.fromStrPath('/sp/Team/Documents/b.txt', 'Team/Documents/b.txt'),
-      ),
+    const outcome = copy(
+      new SharePointAccessor({ accessToken: 'token' }),
+      PathSpec.fromStrPath('/sp/Team/Documents/a.txt', 'Team/Documents/a.txt'),
+      PathSpec.fromStrPath('/sp/Team/Documents/b.txt', 'Team/Documents/b.txt'),
     )
     await expect(outcome).rejects.toThrow()
-    expect(seen).toEqual(['/sp/Team/Documents/b.txt'])
   })
 })

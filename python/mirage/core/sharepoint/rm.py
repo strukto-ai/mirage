@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.context import invalidate_subtree
 from mirage.core.msgraph.client import graph_delete
 from mirage.core.sharepoint.resolve import drive_loc, resolve
 from mirage.types import PathSpec
@@ -30,4 +29,3 @@ async def rm_r(accessor: SharePointAccessor, path: PathSpec) -> None:
         drive_loc(accessor.config, resolved, path.vfs_path).item(),
         session=accessor.pool,
     )
-    await invalidate_subtree(path)

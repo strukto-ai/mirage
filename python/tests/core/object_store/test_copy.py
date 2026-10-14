@@ -17,13 +17,11 @@ from dataclasses import replace
 
 import pytest
 
-from mirage.cache.context import push_cache_manager
 from mirage.core.object_store.copy import make_copy
 from mirage.core.object_store.exists import make_exists
 from mirage.core.object_store.stat import make_stat
 from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (
-    FakeManager,
     FakeStore,
     make_driver,
     spec,
@@ -35,45 +33,30 @@ def _copy_for(store: FakeStore):
     return make_copy(driver, make_exists(make_stat(driver)))
 
 
-def _managed(coro):
-    manager = FakeManager()
-    prev = push_cache_manager(manager)
-    try:
-        asyncio.run(coro)
-    finally:
-        push_cache_manager(prev)
-    return manager
-
-
-def test_copy_duplicates_and_invalidates_destination_ancestors(accessor):
+def test_copy_duplicates_the_object(accessor):
     store = FakeStore({"src.txt": b"hi"})
-    manager = _managed(
+    asyncio.run(
         _copy_for(store)(accessor, spec("/src.txt"), spec("/a/b/dst.txt"))
     )
     assert store.objects == {"src.txt": b"hi", "a/b/dst.txt": b"hi"}
-    assert manager.writes == ["/a/b/dst.txt"]
-    assert manager.ancestors == ["/mnt/a/b/dst.txt"]
 
 
 def test_copy_missing_source_is_enoent(accessor):
     with pytest.raises(FileNotFoundError):
-        _managed(
+        asyncio.run(
             _copy_for(FakeStore())(accessor, spec("/never"), spec("/dst.txt"))
         )
 
 
 def test_copy_onto_the_same_key_is_a_guarded_no_op(accessor):
     store = FakeStore({"a.txt": b"hi"})
-    manager = _managed(
-        _copy_for(store)(accessor, spec("/a.txt"), spec("/a.txt"))
-    )
+    asyncio.run(_copy_for(store)(accessor, spec("/a.txt"), spec("/a.txt")))
     assert store.objects == {"a.txt": b"hi"}
-    assert manager.writes == []
 
 
 def test_copy_onto_the_same_key_still_fails_when_absent(accessor):
     with pytest.raises(FileNotFoundError):
-        _managed(
+        asyncio.run(
             _copy_for(FakeStore())(accessor, spec("/a.txt"), spec("/a.txt"))
         )
 
@@ -90,7 +73,7 @@ def test_copy_without_native_copy_refuses_to_build():
 def _recorded(coro):
     scope = RecordingScope()
     try:
-        _managed(coro)
+        asyncio.run(coro)
     finally:
         scope.close()
     return [(r.op, r.path) for r in scope.records]
@@ -131,7 +114,7 @@ def _recorded_failure(coro, exc_type, match: str | None = None):
     scope = RecordingScope()
     try:
         with pytest.raises(exc_type, match=match):
-            _managed(coro)
+            asyncio.run(coro)
     finally:
         scope.close()
     return [(r.op, r.path) for r in scope.records]
@@ -147,22 +130,6 @@ def test_copy_records_the_retraction_when_the_store_throws(accessor):
         RuntimeError,
         "boom",
     ) == [("copy", "/mnt/b.txt")]
-
-
-def test_copy_evicts_the_destination_when_the_store_throws(accessor):
-    """The eviction rides with the record, on the same condition."""
-
-    async def run():
-        driver = replace(
-            make_driver(FakeStore({"a.txt": b"x"})), copy_file=_boom
-        )
-        with pytest.raises(RuntimeError):
-            await make_copy(driver, _exists)(
-                accessor, spec("/a.txt"), spec("/b.txt")
-            )
-
-    manager = _managed(run())
-    assert manager.writes == ["/b.txt"]
 
 
 def test_copy_of_a_missing_source_records_nothing(accessor):

@@ -13,19 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { evictAfter, invalidateSubtree } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { copyTree } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'
 
 /**
  * Copy a file or folder server-side.
- *
- * The whole destination subtree is invalidated here, under its own path:
- * a folder copy that merges into an existing folder changes listings below
- * `dst`, and only the op knows the mount-absolute spelling of `dst`. A
- * failed copy invalidates too, since a merge may have landed some children
- * before one failed.
  *
  * Args:
  *   accessor: OneDrive accessor.
@@ -38,8 +31,5 @@ export async function copy(
   dst: PathSpec,
 ): Promise<void> {
   const config = accessor.config
-  await evictAfter(
-    () => copyTree(config, driveLoc(config, src.vfsPath), driveLoc(config, dst.vfsPath)),
-    () => invalidateSubtree(dst),
-  )
+  await copyTree(config, driveLoc(config, src.vfsPath), driveLoc(config, dst.vfsPath))
 }

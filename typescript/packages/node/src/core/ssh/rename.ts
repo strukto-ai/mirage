@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateSubtree } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -41,9 +40,4 @@ export async function rename(accessor: SSHAccessor, src: PathSpec, dst: PathSpec
       sftp.rename(remoteSrc, remoteDst, done)
     }
   })
-  // Both sides are subtree evictions: a rename destroys the destination's
-  // previous identity and relocates everything under the source, so a
-  // listing or body cached below either name is now stale.
-  await invalidateSubtree(dst)
-  await invalidateSubtree(src)
 }

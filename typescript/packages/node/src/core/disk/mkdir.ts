@@ -14,7 +14,7 @@
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { mkdir as fsMkdir } from 'node:fs/promises'
-import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
+
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { norm } from '@struktoai/mirage-core/utils/path'
 import { mkdirComponentError } from './dest.ts'
@@ -40,8 +40,6 @@ export async function mkdir(
           : null
       throw named ?? diskError(err, path)
     }
-    await invalidateAfterWrite(path)
-    await invalidateAncestors(path)
     return
   }
   // An existing target is EEXIST, not success: only -p is idempotent (GNU).
@@ -53,5 +51,4 @@ export async function mkdir(
   } catch (err) {
     throw diskError(err, path)
   }
-  await invalidateAfterWrite(path)
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
+
 import type { PathSpec } from '../../types.ts'
 import { enotempty } from '../../errors/fs.ts'
 import { graphDelete } from '../msgraph/client.ts'
@@ -41,5 +41,4 @@ export async function rmdir(accessor: SharePointAccessor, path: PathSpec): Promi
   const loc = driveLoc(accessor.config, resolved, path.vfsPath)
   if (!(await driveRootEmpty(accessor.config, loc))) throw enotempty(path)
   await graphDelete(accessor.config, loc.item())
-  await invalidateAfterUnlink(path)
 }

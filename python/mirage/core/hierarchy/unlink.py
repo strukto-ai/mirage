@@ -14,7 +14,6 @@
 
 from collections.abc import Awaitable, Callable, Mapping
 
-from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hierarchy.probe import A, ReaddirFn, resolve_entry
@@ -72,6 +71,5 @@ def make_unlink(
         virtual_key = prefix + "/" + key if key else prefix or "/"
         parent_dir = virtual_key.rsplit("/", 1)[0] or "/"
         await index.invalidate_dir(parent_dir)
-        await invalidate_after_unlink(path)
 
     return unlink

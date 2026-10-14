@@ -13,14 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import {
-  conditioned,
-  evictAfter,
-  heldVersions,
-  invalidateAfterUnlink,
-  invalidateSubtree,
-  keepRefused,
-} from '../../cache/context.ts'
+import { conditioned, settleAfter, heldVersions, keepRefused } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { childSpec } from '../../utils/key_prefix.ts'
@@ -37,7 +30,6 @@ export async function rmdir(accessor: BoxAccessor, path: PathSpec): Promise<void
   if (item === null) throw enoent(path.virtual)
   if (item.type !== 'folder') throw enotdir(path.virtual)
   await deleteEmptyFolder(accessor.tokenManager, item.id, path)
-  await invalidateAfterUnlink(path)
 }
 
 /**
@@ -142,11 +134,10 @@ export async function rmR(accessor: BoxAccessor, path: PathSpec): Promise<void> 
   const upto = lostCount()
   const timer = startOp()
   const lost: [PathSpec, string | null][] = []
-  await evictAfter(
+  await settleAfter(
     () => remove(accessor, path, item, lost),
     async (done) => {
       record('rm_r', path.virtual, 'box', 0, timer)
-      await invalidateSubtree(path)
       const refusal = await keepRefused(lost)
       if (done === true && refusal !== null) throw refusal
     },

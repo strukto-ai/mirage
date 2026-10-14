@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.dropbox.api import create_folder, get_metadata
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
@@ -72,5 +71,3 @@ async def mkdir(
             raise eexist(path.virtual) from exc
         raise
     record("mkdir", path.virtual, "dropbox", 0, timer)
-    await invalidate_after_write(path)
-    await invalidate_ancestors(path)

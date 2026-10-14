@@ -16,11 +16,8 @@ import type { Accessor } from '../../accessor/base.ts'
 import {
   conditioned,
   deleteCondition,
-  evictAfter,
-  invalidateAfterUnlink,
-  invalidateAncestors,
-  invalidateSubtree,
   knownVersions,
+  settleAfter,
   stale,
 } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
@@ -45,27 +42,19 @@ export function makeUnlink<A extends Accessor, C>(driver: ObjectStoreDriver<A, C
     // A delete needs no prior read, only that nobody wrote since.
     const cond = await deleteCondition(path, found.fingerprint ?? null)
     const timer = startOp()
-    const settle = async (): Promise<void> => {
+    const settle = (): Promise<void> => {
       // Also when the delete threw: one that throws part-way has already
       // removed keys, and a pin that outlives the object it names fails
       // the next snapshot load.
       record('unlink', path.virtual, driver.vfs, 0, timer)
-      // The eviction rides with the record: a retracted pin and a cached
-      // body for the same path must not both survive, or a restored
-      // snapshot serves the body with nothing left to check it.
-      // Over-dropping costs one refetch.
-      await invalidateAfterUnlink(path)
-      // Deleting the last key under a prefix makes every ancestor that
-      // existed only as that prefix disappear, so their cached listings
-      // are stale symmetrically to the write case.
-      await invalidateAncestors(path)
+      return Promise.resolve()
     }
     // The connect is outside, because a connection that never opened
     // removed nothing.
     const { conn, close } = await driver.connect(accessor)
     const upto = lostCount()
     try {
-      await evictAfter(async () => {
+      await settleAfter(async () => {
         try {
           if (cond !== null) await requireHook(driver.deleteIf)(conn, key, cond)
           else await driver.deleteFile(conn, key)
@@ -97,23 +86,16 @@ export function makeRemovePrefix<A extends Accessor, C>(
     // Keeps and reports a key changed since the agent (or walk) saw it.
     const conditional = conditioned(path, 'delete')
     const timer = startOp()
-    const settle = async (): Promise<void> => {
+    const settle = (): Promise<void> => {
       // A prefix delete is a paginated walk, so a failure mid-walk has
-      // already removed keys. The eviction rides with the record, as in
-      // unlink.
+      // already removed keys, as in unlink.
       record('rm_r', path.virtual, driver.vfs, 0, timer)
-      // Not invalidateAfterUnlink: a prefix delete takes every key below
-      // with it, and each of those listings and bodies was cached under
-      // its own key, so nothing above them evicts one.
-      await invalidateSubtree(path)
-      // Same rationale as unlink: ancestors that existed only as this
-      // prefix are gone now.
-      await invalidateAncestors(path)
+      return Promise.resolve()
     }
     const { conn, close } = await driver.connect(accessor)
     const upto = lostCount()
     try {
-      await evictAfter(async () => {
+      await settleAfter(async () => {
         try {
           if (conditional) {
             await requireHook(driver.deletePrefixIf)(conn, pfx, knownVersions(path, kpfx))
@@ -194,7 +176,5 @@ export function makeRmdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
     }
     if (hasChild) throw enotempty(path)
     if (!sawKey && !isRoot) throw enoent(path)
-    await invalidateAfterUnlink(path)
-    await invalidateAncestors(path)
   }
 }

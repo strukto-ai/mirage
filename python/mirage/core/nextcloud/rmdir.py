@@ -1,7 +1,6 @@
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.errors.fs import enoent, enotempty
@@ -48,4 +47,3 @@ async def rmdir(
         raise enoent(path) from exc
     if has_child:
         raise enotempty(path)
-    await invalidate_after_unlink(path)

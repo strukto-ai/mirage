@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { enotempty } from '../../errors/fs.ts'
@@ -29,6 +28,7 @@ import { norm } from '../../utils/path.ts'
  * left every child addressable but unreachable -- `readdir` then raised,
  * because the directory they hang off had been erased.
  */
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function rmdir(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.mountPath)
   const store = accessor.store
@@ -38,5 +38,4 @@ export async function rmdir(accessor: RAMAccessor, path: PathSpec): Promise<void
   if (keys.some((k) => k !== p && k.startsWith(prefix))) throw enotempty(path)
   store.dirs.delete(p)
   store.modified.delete(p)
-  await invalidateAfterUnlink(path)
 }

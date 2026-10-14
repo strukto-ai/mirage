@@ -13,16 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import {
-  evictAfter,
-  evictKeepingVersion,
-  writesConditioned,
-  invalidateAfterWrite,
-  invalidateSubtree,
-  nativeCondition,
-  stale,
-  writeCondition,
-} from '../../cache/context.ts'
+import { nativeCondition, stale, writeCondition } from '../../cache/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { childSpec } from '../../utils/key_prefix.ts'
@@ -80,39 +71,20 @@ export async function retaken(
 /**
  * Record a path the copy changed, as soon as it changed. A later step of the
  * same copy can take a while, and another stage of the line may read the path
- * meanwhile: recorded now, the retract stays older than that read. On a `write:
- * conditional` mount the path's cached bytes go with the retract, so that read
- * cannot take the old bytes without the version that would refuse a write of
- * them. Mirrors Python's `_landed`.
+ * meanwhile: recorded now, the retract stays older than that read, and the
+ * dispatcher serves no cached bytes for a path the line retracted. Mirrors
+ * Python's `_landed`.
  */
-async function landed(
-  changed: [PathSpec, boolean][],
-  dst: PathSpec,
-  whole: boolean,
-  timer: OpTimer,
-  upto: number,
-): Promise<void> {
-  changed.push([dst, whole])
+function landed(dst: PathSpec, whole: boolean, timer: OpTimer, upto: number): void {
   record(whole ? 'copy_prefix' : 'copy', dst.virtual, 'box', 0, timer)
   liftLost(dst, upto, whole)
-  if (!writesConditioned(dst)) return
-  await (whole ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
 }
 
 /**
- * Copy `item` to `dst`, merging a folder into a folder. `changed` receives each
- * file or whole folder that landed, recorded as it landed, and whether it is a
- * folder; `sent` receives
- * each path a request may have gone out for, landed or not, and whether it is
- * a folder. Mirrors Python's `_copy_into`.
+ * Copy `item` to `dst`, merging a folder into a folder. Mirrors Python's
+ * `_copy_into`.
  */
-async function copyInto(
-  accessor: BoxAccessor,
-  item: BoxItem,
-  dst: PathSpec,
-  changed: [PathSpec, boolean][],
-  sent: [PathSpec, boolean][],
-): Promise<void> {
+async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager
   const timer = startOp()
   const upto = lostCount()
@@ -122,7 +94,7 @@ async function copyInto(
     // Merge into an existing folder, as cp -r does: copy each child
     // rather than replacing the folder, so pre-existing entries survive.
     for (const child of await listFolderItems(tm, item.id)) {
-      await copyInto(accessor, child, childSpec(dst, child.name), changed, sent)
+      await copyInto(accessor, child, childSpec(dst, child.name))
     }
     return
   }
@@ -137,20 +109,17 @@ async function copyInto(
     // only a file gives way to a file.
     if (existing.type === 'folder') throw eisdir(dst.virtual)
     if (item.type === 'folder') throw enotdir(dst.virtual)
-    sent.push([dst, false])
     cond = await replaceFile(accessor, dst, existing)
   } else if (existing === null && item.type === 'file') {
     cond = await replaceFile(accessor, dst, null)
   }
   try {
     if (item.type === 'folder') {
-      sent.push([dst, true])
       await copyFolder(tm, item.id, dstParent, newName)
-      await landed(changed, dst, true, timer, upto)
+      landed(dst, true, timer, upto)
     } else {
-      sent.push([dst, false])
       await copyFile(tm, item.id, dstParent, newName)
-      await landed(changed, dst, false, timer, upto)
+      landed(dst, false, timer, upto)
     }
   } catch (err) {
     throw (await retaken(err, cond, dst)) ?? err
@@ -159,38 +128,13 @@ async function copyInto(
 
 /**
  * Copy a file or folder server-side, recording each path it changed. Each path
- * is recorded as it lands, and on a conditional mount evicted with its record; a
- * replaced file only once its copy lands, so through the clear the line keeps
- * its version and the cached bytes keep meeting it, and no cache step sits
- * between the delete and the copy. Everything changed is evicted again once the
- * copy ends, since a listing read while the copy ran may land after the early
- * eviction. The eviction runs also when the copy fails: a request that raised
- * keeps its held version, and a folder whose request raised evicts its subtree
- * and records nothing. A landed path also lifts the line's lost marks on it, and
- * beneath it for a folder copied whole.
+ * is recorded as it lands; a replaced file only once its copy lands, so through
+ * the clear the line keeps its version. A landed path also lifts the line's lost
+ * marks on it, and beneath it for a folder copied whole. The dispatcher evicts
+ * what the copy changed, also when it fails.
  */
 export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const item = await resolveItem(accessor, pathParts(src))
   if (item === null) throw enoent(src.virtual)
-  const folder = item.type === 'folder'
-  const changed: [PathSpec, boolean][] = []
-  const sent: [PathSpec, boolean][] = []
-  await evictAfter(
-    () => copyInto(accessor, item, dst, changed, sent),
-    async () => {
-      if (!writesConditioned(dst)) {
-        await (folder ? invalidateSubtree(dst) : invalidateAfterWrite(dst))
-        return
-      }
-      for (const [spec, whole] of changed) {
-        await (whole ? invalidateSubtree(spec) : invalidateAfterWrite(spec))
-      }
-      const done = new Set(changed.map(([spec]) => spec.virtual))
-      for (const [spec, whole] of sent) {
-        if (done.has(spec.virtual)) continue
-        if (whole) await invalidateSubtree(spec)
-        else await evictKeepingVersion(spec)
-      }
-    },
-  )
+  await copyInto(accessor, item, dst)
 }

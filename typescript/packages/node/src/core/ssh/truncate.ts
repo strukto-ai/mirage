@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { enotsup } from '@struktoai/mirage-core/errors/fs'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -47,5 +46,4 @@ export async function truncate(
     })
   }
   record('truncate', p.virtual, VFSName.SSH, 0, timer)
-  await invalidateAfterWrite(p)
 }

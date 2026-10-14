@@ -14,7 +14,6 @@
 
 import { mountKey } from '../../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runWithCacheManager } from '../../cache/context.ts'
 import { copy } from './copy.ts'
 import { rename } from './rename.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
@@ -32,53 +31,6 @@ import {
 } from './_test_util.ts'
 
 const resolveGlob = makeResolveGlob(dbxReaddir, undefined, undefined, dbxStat)
-
-class FakeManager {
-  listingTrusted(_folder: string): boolean {
-    return false
-  }
-
-  probedStat(): null {
-    return null
-  }
-
-  readThrough(_path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array> {
-    return fetch()
-  }
-
-  writes: string[] = []
-  ancestors: string[] = []
-  unlinks: string[] = []
-  subtrees: string[] = []
-
-  invalidateAfterWrite(path: string | PathSpec): Promise<void> {
-    this.writes.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
-    this.unlinks.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  invalidateAncestors(path: PathSpec): Promise<void> {
-    this.ancestors.push(path.virtual)
-    return Promise.resolve()
-  }
-
-  invalidateSubtree(path: string | PathSpec): Promise<void> {
-    this.subtrees.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  cachedSize(_path: PathSpec): Promise<number | null> {
-    return Promise.resolve(null)
-  }
-
-  isCached(_path: PathSpec): Promise<boolean> {
-    return Promise.resolve(false)
-  }
-}
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -152,28 +104,6 @@ describe('copy', () => {
     expect(puts.some((c) => c.url.includes('dir2/a.txt'))).toBe(true)
   })
 
-  it('invalidates the destination tree after a recursive copy', async () => {
-    const { fetch } = routedFetch((call) => {
-      if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()
-      if (call.method === 'HEAD') return new Response(null, { status: 200 })
-      if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
-        return jsonResponse({ contents: [{ path: `${TEST_ROOT}/dir/a.txt` }] })
-      }
-      if (call.method === 'GET') return new Response('data', { status: 200 })
-      return new Response(null, { status: 200 })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const manager = new FakeManager()
-    await runWithCacheManager(manager, async () => {
-      await copy(makeAccessor(), spec('/volume/dir'), spec('/volume/deep/dst'), undefined, true)
-    })
-    // The destination's own listing must go (a merge target can pre-exist)
-    // along with every ancestor listing create_directory materialized.
-    expect(manager.unlinks).toEqual(['/deep/dst'])
-    expect(manager.writes).toEqual([])
-    expect(manager.ancestors).toEqual(['/volume/deep/dst'])
-  })
-
   it('refuses copying a directory into its own subtree before any write', async () => {
     const { fetch, calls } = routedFetch((call) => {
       if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()
@@ -222,19 +152,6 @@ describe('rename', () => {
       spec('/volume/gone.txt'),
     ).catch((e: unknown) => e)) as Error & { code?: string }
     expect(err.code).toBe('ENOENT')
-  })
-
-  it('renaming a file narrows only the source', async () => {
-    // The source end is a file, so it drops no subtree. The destination
-    // keeps one: the upload overwrites whatever stands at dst and nothing
-    // here checks that it is not a non-empty directory.
-    const { fetch } = routedFetch(fileRoutes)
-    vi.stubGlobal('fetch', fetch)
-    const manager = new FakeManager()
-    await runWithCacheManager(manager, () =>
-      rename(makeAccessor(), spec('/volume/a.txt'), spec('/volume/b.txt')),
-    )
-    expect(manager.subtrees).toEqual(['/b.txt'])
   })
 
   it('refuses moving a directory into its own subtree and never deletes', async () => {

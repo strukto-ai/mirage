@@ -13,23 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithCacheManager } from '../../cache/context.ts'
 import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { enoent, errorVirtualPath } from '../../errors/fs.ts'
 import type { ObjectStoreDriver } from './driver.ts'
 import type { FakeStore as Store } from './fakes.ts'
-import { FakeAccessor, FakeManager, FakeStore, makeDriver, spec } from './fakes.ts'
+import { FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
 import { makeCreate, makeMkdir, makeTruncate, makeWrite } from './write.ts'
 
 const accessor = new FakeAccessor()
 const ENC = new TextEncoder()
-
-async function managed(fn: () => Promise<void>): Promise<FakeManager> {
-  const manager = new FakeManager()
-  await runWithCacheManager(manager, fn)
-  return manager
-}
 
 class MissingContainer extends Error {}
 
@@ -44,7 +37,7 @@ function missingContainer(): ObjectStoreDriver<FakeAccessor, Store> {
 
 async function caught(fn: () => Promise<void>): Promise<unknown> {
   try {
-    await managed(fn)
+    await fn()
   } catch (err) {
     return err
   }
@@ -52,56 +45,35 @@ async function caught(fn: () => Promise<void>): Promise<unknown> {
 }
 
 describe('object_store write', () => {
-  it('write puts and invalidates every ancestor listing', async () => {
+  it('write puts the object', async () => {
     const store = new FakeStore()
-    const manager = await managed(() =>
-      makeWrite(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
-    )
+    await makeWrite(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi'))
     expect(store.contents()).toEqual({ 'a/b/c.txt': 'hi' })
-    expect(manager.writes).toEqual(['/a/b/c.txt'])
-    expect(manager.ancestors).toEqual(['/mnt/a/b/c.txt'])
   })
 
-  it('write at the mount root invalidates only itself', async () => {
+  it('create puts an empty object', async () => {
     const store = new FakeStore()
-    const manager = await managed(() =>
-      makeWrite(makeDriver(store))(accessor, spec('/c.txt'), ENC.encode('x')),
-    )
-    expect(manager.writes).toEqual(['/c.txt'])
-  })
-
-  it('create puts empty and invalidates ancestors', async () => {
-    const store = new FakeStore()
-    const manager = await managed(() => makeCreate(makeDriver(store))(accessor, spec('/a/b/c.txt')))
+    await makeCreate(makeDriver(store))(accessor, spec('/a/b/c.txt'))
     expect(store.contents()).toEqual({ 'a/b/c.txt': '' })
-    expect(manager.writes).toEqual(['/a/b/c.txt'])
-    expect(manager.ancestors).toEqual(['/mnt/a/b/c.txt'])
   })
 
-  it('truncate pads with NUL and invalidates ancestors', async () => {
+  it('truncate pads with NUL', async () => {
     const store = new FakeStore({ 'a/f.bin': '0123456789' })
-    const manager = await managed(() =>
-      makeTruncate(makeDriver(store))(accessor, spec('/a/f.bin'), 4),
-    )
+    await makeTruncate(makeDriver(store))(accessor, spec('/a/f.bin'), 4)
     expect(store.text('a/f.bin')).toBe('0123')
-    expect(manager.writes).toEqual(['/a/f.bin'])
-    expect(manager.ancestors).toEqual(['/mnt/a/f.bin'])
   })
 
   it('truncate extends a missing key', async () => {
     const store = new FakeStore()
-    await managed(() => makeTruncate(makeDriver(store))(accessor, spec('/f.bin'), 3))
+    await makeTruncate(makeDriver(store))(accessor, spec('/f.bin'), 3)
     expect(store.text('f.bin')).toBe('\0\0\0')
   })
 
-  it('mkdir writes a marker and parents gate ancestors', async () => {
+  it('mkdir writes a marker', async () => {
     const store = new FakeStore({ 'a/': '' })
-    const manager = await managed(() => makeMkdir(makeDriver(store))(accessor, spec('/a/b')))
+    await makeMkdir(makeDriver(store))(accessor, spec('/a/b'))
     expect(store.contents()).toEqual({ 'a/': '', 'a/b/': '' })
-    expect(manager.writes).toEqual(['/a/b'])
-    const deep = await managed(() => makeMkdir(makeDriver(store))(accessor, spec('/x/y'), true))
-    expect(deep.writes).toEqual(['/x/y'])
-    expect(deep.ancestors).toEqual(['/mnt/x/y'])
+    await makeMkdir(makeDriver(store))(accessor, spec('/x/y'), true)
   })
 
   it('write names the path, not the key, when the container is gone', async () => {
@@ -156,7 +128,7 @@ describe('object_store write', () => {
       ['/f.txt', false],
       ['/f.txt', true],
     ] as const) {
-      await expect(managed(() => mkdir(accessor, spec(path), parents))).rejects.toMatchObject({
+      await expect(mkdir(accessor, spec(path), parents)).rejects.toMatchObject({
         code: 'EEXIST',
       })
     }
@@ -168,9 +140,9 @@ describe('object_store write', () => {
   it('mkdir -p keeps an existing marker', async () => {
     const store = new FakeStore({ 'a/': '', 'imp/x.txt': 'x' })
     const mkdir = makeMkdir(makeDriver(store))
-    await managed(() => mkdir(accessor, spec('/a'), true))
+    await mkdir(accessor, spec('/a'), true)
     expect(store.puts).toEqual([])
-    await managed(() => mkdir(accessor, spec('/imp'), true))
+    await mkdir(accessor, spec('/imp'), true)
     expect(store.puts.map(([key]) => key)).toEqual(['imp/'])
   })
 
@@ -193,7 +165,7 @@ describe('object_store write', () => {
       ['/f.txt/sub', false, '/mnt/f.txt/sub'],
       ['/f.txt/x/y', true, '/mnt/f.txt'],
     ] as const) {
-      await expect(managed(() => mkdir(accessor, spec(path), parents))).rejects.toMatchObject({
+      await expect(mkdir(accessor, spec(path), parents)).rejects.toMatchObject({
         code: 'ENOTDIR',
         message: named,
       })
@@ -208,9 +180,8 @@ describe('object_store write', () => {
     async (parents) => {
       const store = new FakeStore()
       const driver = { ...makeDriver(store), markersSupported: false }
-      const manager = await managed(() => makeMkdir(driver)(accessor, spec('/a/b'), parents))
+      await makeMkdir(driver)(accessor, spec('/a/b'), parents)
       expect(store.contents()).toEqual({})
-      expect(manager.writes).toEqual([])
     },
   )
 })
@@ -219,7 +190,7 @@ describe('object_store write', () => {
 
 async function recorded(fn: () => Promise<void>): Promise<OpRecord[]> {
   const [, records] = await runWithRecording(async () => {
-    await managed(fn)
+    await fn()
   })
   return records
 }
@@ -264,10 +235,8 @@ describe('object store write records the put token', () => {
         return Promise.resolve(data === undefined ? null : [data, 'v1'])
       },
     }
-    await managed(() =>
-      runWithRevisions(new Map([['/mnt/a/cut.txt', 'rev-1']]), () =>
-        makeTruncate(driver)(accessor, spec('/a/cut.txt'), 2),
-      ),
+    await runWithRevisions(new Map([['/mnt/a/cut.txt', 'rev-1']]), () =>
+      makeTruncate(driver)(accessor, spec('/a/cut.txt'), 2),
     )
     expect(asked).toEqual(['rev-1'])
   })

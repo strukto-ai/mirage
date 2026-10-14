@@ -15,7 +15,6 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import eisdir, enoent
 from mirage.types import PathSpec
@@ -35,4 +34,3 @@ async def unlink(accessor: SSHAccessor, path: PathSpec) -> None:
         if await sftp.isdir(remote):
             raise eisdir(path) from exc
         raise
-    await invalidate_after_unlink(path)

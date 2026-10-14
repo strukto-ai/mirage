@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import push_cache_manager
@@ -64,15 +63,3 @@ async def _rm_r_case() -> tuple[bool, bool, bool]:
         await cache.exists("/data/a/b/f.txt"),
         (await index.list_dir("/data/a")).entries is not None,
     )
-
-
-@pytest.mark.asyncio
-async def test_rm_r_evicts_listings_and_bodies_inside_the_subtree():
-    # A recursive remove takes directories the caller never named, and
-    # their listings were cached independently: evicting only the target
-    # and its parent leaves `/data/a/b` answering for a directory the
-    # backend no longer has.
-    nested, body, own = await _rm_r_case()
-    assert nested is False
-    assert body is False
-    assert own is False

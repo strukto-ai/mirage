@@ -17,7 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
+
 import { checkDestParents, checkMkdirTarget } from './dest.ts'
 
 export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = false): Promise<void> {
@@ -34,13 +34,10 @@ export async function mkdir(accessor: RAMAccessor, path: PathSpec, parents = fal
         accessor.store.modified.set(current, now)
       }
     }
-    await invalidateAfterWrite(path)
-    await invalidateAncestors(path)
     return Promise.resolve()
   }
   checkDestParents(accessor, path, p)
   accessor.store.dirs.add(p)
   accessor.store.modified.set(p, nowIso())
-  await invalidateAfterWrite(path)
   return Promise.resolve()
 }

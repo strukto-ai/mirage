@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
-import { PathSpec } from '../../types.ts'
+
+import type { PathSpec } from '../../types.ts'
 import { eexist, enotdir } from '../../errors/fs.ts'
 import { createFolder } from '../google/drive.ts'
 import {
@@ -37,23 +37,14 @@ async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = fal
     const [parentId] = await resolveParent(accessor, path)
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
     await createFolder(tm, basename, parentId)
-    await invalidateAfterWrite(path)
     return
   }
   let [parentId, driveId] = await rootContext(accessor)
   const segments = key.split('/').filter((s) => s !== '')
-  const mountPrefix = path.virtual.endsWith(key)
-    ? path.virtual.slice(0, path.virtual.length - key.length).replace(/\/$/, '')
-    : ''
   for (const [i, segment] of segments.entries()) {
     let node = await resolveSegment(tm, parentId, segment, driveId, i === 0 && parentId === 'root')
     if (node === null) {
       node = nodeFromItem(await createFolder(tm, segment, parentId), driveId)
-      // Every created level makes its parent's cached listing stale, not
-      // just the leaf's; a later warm-through resolution of the chain
-      // would otherwise ENOENT on the stale ancestor.
-      const segVirtual = `${mountPrefix}/${segments.slice(0, i + 1).join('/')}`
-      await invalidateAfterWrite(PathSpec.fromStrPath(segVirtual))
     } else if (!isFolder(node)) {
       // -p only silences EEXIST for directories: a file at the leaf is
       // File exists, a file in the middle is Not a directory.
@@ -63,7 +54,6 @@ async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = fal
     parentId = node.id
     driveId = node.driveId
   }
-  await invalidateAfterWrite(path)
 }
 
 export const mkdir = eaccesOnDenied(mkdirImpl)

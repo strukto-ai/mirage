@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateSubtree } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
@@ -38,5 +37,4 @@ export async function rmR(accessor: RedisAccessor, path: PathSpec): Promise<void
       await store.delAttrs(key)
     }
   }
-  await invalidateSubtree(path)
 }

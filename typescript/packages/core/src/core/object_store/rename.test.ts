@@ -13,10 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { runWithCacheManager } from '../../cache/context.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { makeExists } from './exists.ts'
-import { codeOf, FakeAccessor, FakeManager, FakeStore, makeDriver, spec } from './fakes.ts'
+import { codeOf, FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
 import { makeRename } from './rename.ts'
 import { makeStat } from './stat.ts'
 
@@ -27,51 +26,37 @@ function renameFor(store: FakeStore) {
   return makeRename(driver, makeExists(makeStat(driver)))
 }
 
-async function managed(fn: () => Promise<void>): Promise<FakeManager> {
-  const manager = new FakeManager()
-  await runWithCacheManager(manager, fn)
-  return manager
-}
-
 describe('object_store rename', () => {
   it('moves a file', async () => {
     const store = new FakeStore({ 'a/src.txt': 'hi' })
-    const manager = await managed(() =>
-      renameFor(store)(accessor, spec('/a/src.txt'), spec('/b/dst.txt')),
-    )
+    await renameFor(store)(accessor, spec('/a/src.txt'), spec('/b/dst.txt'))
     expect(store.contents()).toEqual({ 'b/dst.txt': 'hi' })
     // A file has nothing beneath it, so neither end walks the caches for a
     // subtree: both take the unlink flavor.
-    expect(manager.subtrees).toEqual([])
-    expect(manager.unlinks).toEqual(['/b/dst.txt', '/a/src.txt'])
-    expect(manager.writes).toEqual([])
-    expect(manager.ancestors).toEqual(['/mnt/b/dst.txt', '/mnt/a/src.txt'])
   })
 
   it('falls back to the prefix walk', async () => {
     const store = new FakeStore({ 'dir/f.txt': 'x', 'dir/sub/g.txt': 'y' })
-    await managed(() => renameFor(store)(accessor, spec('/dir'), spec('/moved')))
+    await renameFor(store)(accessor, spec('/dir'), spec('/moved'))
     expect(store.contents()).toEqual({ 'moved/f.txt': 'x', 'moved/sub/g.txt': 'y' })
   })
 
   it('a missing source is ENOENT', async () => {
     const store = new FakeStore()
-    await expect(
-      codeOf(managed(() => renameFor(store)(accessor, spec('/never'), spec('/dst')))),
-    ).resolves.toBe('ENOENT')
+    await expect(codeOf(renameFor(store)(accessor, spec('/never'), spec('/dst')))).resolves.toBe(
+      'ENOENT',
+    )
   })
 
   it('renaming onto the same key is a guarded no-op', async () => {
     const store = new FakeStore({ 'a.txt': 'hi' })
-    const manager = await managed(() => renameFor(store)(accessor, spec('/a.txt'), spec('/a.txt')))
+    await renameFor(store)(accessor, spec('/a.txt'), spec('/a.txt'))
     expect(store.contents()).toEqual({ 'a.txt': 'hi' })
-    expect(manager.unlinks).toEqual([])
-    expect(manager.subtrees).toEqual([])
   })
 
   it('renaming onto the same key still fails when absent', async () => {
     await expect(
-      codeOf(managed(() => renameFor(new FakeStore())(accessor, spec('/a.txt'), spec('/a.txt')))),
+      codeOf(renameFor(new FakeStore())(accessor, spec('/a.txt'), spec('/a.txt'))),
     ).resolves.toBe('ENOENT')
   })
 
@@ -85,7 +70,7 @@ describe('object_store rename', () => {
 
 async function recorded(fn: () => Promise<void>): Promise<[string, string][]> {
   const [, records] = await runWithRecording(async () => {
-    await managed(fn)
+    await fn()
   })
   return records.map((r) => [r.op, r.path])
 }
@@ -137,20 +122,6 @@ describe('object_store rename retraction records', () => {
     ])
   })
 
-  it('evicts both subtrees when the prefix walk rejects', async () => {
-    // The eviction rides with the records, on the same condition.
-    const store = new FakeStore()
-    store.objects.set('d/f.txt', new Uint8Array(1))
-    const driver = makeDriver(store)
-    driver.movePrefix = () => Promise.reject(Object.assign(new Error('boom'), { code: 'EIO' }))
-    const manager = await managed(async () => {
-      expect(await codeOf(makeRename(driver, alwaysExists)(accessor, spec('/d'), spec('/e')))).toBe(
-        'EIO',
-      )
-    })
-    expect(manager.subtrees).toEqual(['/e', '/d'])
-  })
-
   it('records nothing when the source is missing', async () => {
     // Both calls answering a clean false is the store saying nothing
     // moved at all, which is the one outcome safe to skip.
@@ -171,7 +142,7 @@ async function recordedFailure(
 ): Promise<{ code: string; records: [string, string][] }> {
   let code = 'no-throw'
   const [, records] = await runWithRecording(async () => {
-    code = await codeOf(managed(fn))
+    code = await codeOf(fn())
   })
   return { code, records: records.map((r) => [r.op, r.path]) }
 }

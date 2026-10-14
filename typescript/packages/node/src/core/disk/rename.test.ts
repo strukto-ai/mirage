@@ -12,60 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runWithCacheManager } from '@struktoai/mirage-core/cache/context'
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { rename } from './rename.ts'
-
-class FakeManager {
-  listingTrusted(_folder: string): boolean {
-    return false
-  }
-
-  probedStat(): null {
-    return null
-  }
-
-  writes: string[] = []
-  unlinks: string[] = []
-  subtrees: string[] = []
-
-  invalidateAfterWrite(path: string | PathSpec): Promise<void> {
-    this.writes.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
-    this.unlinks.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  invalidateAncestors(_path: PathSpec): Promise<void> {
-    return Promise.resolve()
-  }
-
-  invalidateSubtree(path: string | PathSpec): Promise<void> {
-    this.subtrees.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  readThrough(_path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array> {
-    return fetch()
-  }
-
-  cachedSize(_path: PathSpec): Promise<number | null> {
-    return Promise.resolve(null)
-  }
-
-  isCached(_path: PathSpec): Promise<boolean> {
-    return Promise.resolve(false)
-  }
-}
 
 let root: string
 let accessor: DiskAccessor
@@ -89,38 +41,5 @@ describe('core/disk/rename', () => {
     await expect(rename(accessor, spec('/missing'), spec('/x'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
-  })
-  it('evicts both identities so a replaced empty dir loses its listing', async () => {
-    await mkdir(join(root, 'src'))
-    await writeFile(join(root, 'src', 'f.txt'), 'x')
-    await mkdir(join(root, 'dst'))
-    const manager = new FakeManager()
-    await runWithCacheManager(manager, async () => {
-      await rename(accessor, spec('/src'), spec('/dst'))
-    })
-    expect(manager.subtrees).toEqual(['/src', '/dst'])
-    expect(manager.writes).toEqual([])
-    expect(await readFile(join(root, 'dst', 'f.txt'), 'utf-8')).toBe('x')
-  })
-
-  it('a file evicts no subtree once the rename has landed', async () => {
-    // A regular file has nothing beneath it: both ends take the unlink
-    // flavor, which still drops the destination's own listing. Evicting
-    // first left a window in which a concurrent listing of the parent
-    // re-cached the pre-rename view, with nothing evicting it after.
-    await writeFile(join(root, 'a.txt'), 'A')
-    const landed: boolean[] = []
-    const manager = new FakeManager()
-    const record = manager.invalidateAfterUnlink.bind(manager)
-    manager.invalidateAfterUnlink = (path) => {
-      landed.push(existsSync(join(root, 'b.txt')))
-      return record(path)
-    }
-    await runWithCacheManager(manager, async () => {
-      await rename(accessor, spec('/a.txt'), spec('/b.txt'))
-    })
-    expect(manager.subtrees).toEqual([])
-    expect(manager.unlinks).toEqual(['/a.txt', '/b.txt'])
-    expect(landed).toEqual([true, true])
   })
 })

@@ -18,7 +18,6 @@ from functools import partial
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.disk.utils import open_flags, resolve_inside
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -43,4 +42,3 @@ async def truncate(
             return
         raise
     record("truncate", path_spec.virtual, "disk", 0, timer)
-    await invalidate_after_write(path_spec)

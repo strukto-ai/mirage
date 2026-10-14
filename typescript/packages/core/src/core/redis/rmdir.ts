@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enotempty } from '../../errors/fs.ts'
 import { lookupError } from './dest.ts'
@@ -41,5 +40,4 @@ export async function rmdir(accessor: RedisAccessor, path: PathSpec): Promise<vo
   const candidates = [...files, ...dirs]
   if (candidates.some((k) => k !== p && k.startsWith(prefix))) throw enotempty(path)
   await store.removeDir(p)
-  await invalidateAfterUnlink(path)
 }

@@ -13,30 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.box.api import create_folder, list_folder_items
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.resolve import path_parts, resolve_chain, root_id
 from mirage.errors.fs import eexist, enoent, enotdir
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of, mounted_path
-
-
-async def _invalidate_levels(path: PathSpec, count: int) -> None:
-    # `mkdir -p a/b/c` creates several levels; invalidate each one's parent
-    # listing (not just the final target's) so a cached ancestor listing from
-    # an earlier command re-fetches and sees the new folders. Box resolves
-    # ids through those listings, so a stale ancestor hides new children.
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    segments = path.virtual.rstrip("/").split("/")
-    for i in range(count):
-        depth = len(segments) - count + i + 1
-        level_virtual = "/".join(segments[:depth]) or "/"
-        await invalidate_after_write(
-            PathSpec.from_str_path(
-                level_virtual, mount_key(level_virtual, prefix)
-            )
-        )
+from mirage.utils.key_prefix import mounted_path
 
 
 async def mkdir(
@@ -63,7 +45,6 @@ async def mkdir(
             else:
                 created = await create_folder(tm, cur_id, name)
                 cur_id = created["id"]
-        await _invalidate_levels(path, len(parts))
     else:
         chain = await resolve_chain(accessor, parts[:-1])
         # A level that resolved but is a file is ENOTDIR, the parent itself
@@ -82,4 +63,3 @@ async def mkdir(
             if exc.status == 409:
                 raise eexist(path) from exc
             raise
-        await invalidate_after_write(path)

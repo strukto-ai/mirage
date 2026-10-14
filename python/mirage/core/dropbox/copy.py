@@ -16,14 +16,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import (
-    invalidate_after_write,
-    invalidate_ancestors,
-    invalidate_subtree,
-    native_condition,
-    stale,
-    write_condition,
-)
+from mirage.cache.context import native_condition, stale, write_condition
 from mirage.cache.types import WriteCondition
 from mirage.core.dropbox.api import (
     copy_path,
@@ -153,8 +146,6 @@ async def copy(
     )
     record("copy", dst.virtual, "dropbox", 0, timer)
     lift_lost(dst, upto)
-    await invalidate_after_write(dst)
-    await invalidate_ancestors(dst)
 
 
 async def dir_copy(
@@ -183,5 +174,3 @@ async def dir_copy(
         raise
     record("copy_prefix", dst.virtual, "dropbox", 0, timer)
     lift_lost(dst, upto, subtree=True)
-    await invalidate_subtree(dst)
-    await invalidate_ancestors(dst)

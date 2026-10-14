@@ -15,7 +15,6 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.context import invalidate_subtree
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
@@ -29,7 +28,6 @@ async def rm_r(accessor: SSHAccessor, path_spec: PathSpec) -> None:
         await _rm_r_inner(sftp, config, path)
     except asyncssh.SFTPNoSuchFile:
         raise enoent(path)
-    await invalidate_subtree(path_spec)
 
 
 async def _rm_r_inner(sftp, config, path: str) -> None:

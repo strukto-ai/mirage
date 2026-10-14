@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { writeItem } from '../msgraph/drive.ts'
@@ -38,5 +38,4 @@ export async function create(accessor: SharePointAccessor, path: PathSpec): Prom
     new Uint8Array(),
   )
   record('create', path.virtual, 'sharepoint', 0, timer)
-  await invalidateAfterWrite(path)
 }

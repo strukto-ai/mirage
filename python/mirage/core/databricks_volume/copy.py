@@ -16,7 +16,6 @@ import asyncio
 from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.context import invalidate_after_unlink, invalidate_ancestors
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
@@ -99,12 +98,6 @@ async def copy(
         await asyncio.to_thread(
             _copy_tree_sync, accessor, remote_src, remote_dst
         )
-        # create_directory materializes missing ancestors and the walk can
-        # merge into a pre-existing destination directory (mv onto an empty
-        # dir), so evict the destination's own listing and every ancestor
-        # listing, not just the parent (mirrors mkdir with parents=True).
-        await invalidate_after_unlink(dst)
-        await invalidate_ancestors(dst)
         return
     if same_path:
         # Copying a file onto itself would re-upload it; skip.

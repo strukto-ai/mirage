@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -61,7 +60,6 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = fals
       if (isFailure(err) && (await statRemote(sftp, remote)) !== null) throw eexist(p)
       throw err
     }
-    await invalidateAfterWrite(p)
     return
   }
   const cleaned = stripSlash(virtual)
@@ -75,6 +73,4 @@ export async function mkdir(accessor: SSHAccessor, p: PathSpec, recursive = fals
     if (existing?.isDirectory()) continue
     await mkdirOne(sftp, stepRemote, true)
   }
-  await invalidateAfterWrite(p)
-  await invalidateAncestors(p)
 }

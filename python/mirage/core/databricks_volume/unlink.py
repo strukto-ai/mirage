@@ -15,7 +15,6 @@
 import asyncio
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
@@ -49,4 +48,3 @@ async def unlink(
             raise enoent(path) from exc
         raise
     record("unlink", path.virtual, "databricks_volume", 0, timer)
-    await invalidate_after_unlink(path)

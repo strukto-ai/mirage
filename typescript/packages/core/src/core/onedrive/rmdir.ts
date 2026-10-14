@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
+
 import type { PathSpec } from '../../types.ts'
 import { enotempty } from '../../errors/fs.ts'
 import { graphDelete } from '../msgraph/client.ts'
@@ -39,5 +39,4 @@ export async function rmdir(accessor: OneDriveAccessor, path: PathSpec): Promise
   const loc = driveLoc(accessor.config, path.vfsPath)
   if (!(await driveRootEmpty(accessor.config, loc))) throw enotempty(path)
   await graphDelete(accessor.config, loc.item())
-  await invalidateAfterUnlink(path)
 }

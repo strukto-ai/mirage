@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { invalidateSubtree } from '../../cache/context.ts'
+
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { deleteFile } from '../google/drive.ts'
@@ -26,7 +26,6 @@ async function rmRImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> 
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(path)
   await deleteFile(accessor.tokenManager, node.id)
-  await invalidateSubtree(path)
 }
 
 export const rmR = eaccesOnDenied(rmRImpl)

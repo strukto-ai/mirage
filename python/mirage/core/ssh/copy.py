@@ -17,7 +17,6 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_subtree
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import enoent, enotsup, fs_error
 from mirage.errors.posix import POSIX
@@ -46,7 +45,6 @@ async def copy(
             await f.write(content)
     except asyncssh.SFTPNoSuchFile:
         raise enoent(src)
-    await invalidate_after_write(dst_spec)
 
 
 def _refusal(dst: PathSpec, err: bytes) -> OSError:
@@ -94,11 +92,9 @@ async def dir_copy(
     if status == 0 and out == COPIED:
         record("copy_prefix", dst.virtual, "ssh", 0, timer)
         lift_lost(dst, upto, subtree=True)
-        await invalidate_subtree(dst)
         return
     sftp = await accessor.sftp()
     if not await sftp.exists(join_root(root, dst.mount_path)):
         logger.debug("ssh tree copy left to the walk: %r", err)
         raise enotsup(VFSName.SSH, "dir_copy", dst)
-    await invalidate_subtree(dst)
     raise _refusal(dst, err)

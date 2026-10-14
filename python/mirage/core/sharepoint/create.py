@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.msgraph.drive import write_item
 from mirage.core.sharepoint.resolve import drive_loc, resolve_item
 from mirage.observe.context import record, start_op
@@ -40,4 +39,3 @@ async def create(accessor: SharePointAccessor, path: PathSpec) -> None:
         session=accessor.pool,
     )
     record("create", path.virtual, "sharepoint", 0, timer)
-    await invalidate_after_write(path)

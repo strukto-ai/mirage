@@ -187,35 +187,6 @@ def make_driver(
     )
 
 
-class FakeManager:
-    def listing_trusted(self, _folder: str) -> bool:
-        return False
-
-    def probed_stat(self, _path):
-        return None
-
-    def __init__(self) -> None:
-        self.writes: list[str] = []
-        self.ancestors: list[str] = []
-        self.unlinks: list[str] = []
-        self.subtrees: list[str] = []
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None:
-        self.ancestors.append(path.virtual)
-
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        self.writes.append(path.mount_path)
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        self.unlinks.append(path.mount_path)
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.subtrees.append(path.mount_path)
-
-    async def cached_size(self, path: PathSpec) -> int | None:
-        return None
-
-
 @pytest.fixture
 def accessor() -> FakeAccessor:
     return FakeAccessor()

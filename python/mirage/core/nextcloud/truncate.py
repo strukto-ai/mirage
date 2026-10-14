@@ -1,7 +1,6 @@
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.errors.fs import enotsup
 from mirage.observe.context import record, start_op
@@ -26,4 +25,3 @@ async def truncate(
     result = data[:length].ljust(length, b"\0")
     await op.write(key, result)
     record("truncate", path.virtual, "nextcloud", 0, timer)
-    await invalidate_after_write(path)

@@ -12,12 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.context import (
-    invalidate_after_write,
-    invalidate_ancestors,
-    own_write_version,
-    write_condition,
-)
+from mirage.cache.context import own_write_version, write_condition
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.types import OwnRead, WriteCondition
 from mirage.core.object_store.driver import (
@@ -115,10 +110,6 @@ def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
             timer,
             fingerprint=meta.fingerprint if meta else None,
         )
-        await invalidate_after_write(path_spec)
-        # A put materializes every missing level of the key at once, so
-        # the listings above the immediate parent gained entries too.
-        await invalidate_ancestors(path_spec)
 
     return write
 
@@ -145,9 +136,6 @@ def make_create(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
             timer,
             fingerprint=meta.fingerprint if meta else None,
         )
-        await invalidate_after_write(path_spec)
-        # An empty put materializes missing parents exactly like write.
-        await invalidate_ancestors(path_spec)
 
     return create
 
@@ -200,9 +188,6 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
             timer,
             fingerprint=meta.fingerprint if meta else None,
         )
-        await invalidate_after_write(path_spec)
-        # Truncating a missing key creates it, parents included.
-        await invalidate_ancestors(path_spec)
 
     return truncate
 
@@ -306,8 +291,5 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
                     # only a key below implies still gets one.
                     return
                 await driver.put(conn, pfx, b"")
-            await invalidate_after_write(path_spec)
-            if parents:
-                await invalidate_ancestors(path_spec)
 
     return mkdir

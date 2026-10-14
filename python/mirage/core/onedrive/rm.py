@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.context import invalidate_subtree
 from mirage.core.msgraph.client import graph_delete
 from mirage.core.onedrive.client import item_url
 from mirage.types import PathSpec
@@ -27,4 +26,3 @@ async def rm_r(accessor: OneDriveAccessor, path: PathSpec) -> None:
         item_url(accessor.config, path.vfs_path),
         session=accessor.pool,
     )
-    await invalidate_subtree(path)

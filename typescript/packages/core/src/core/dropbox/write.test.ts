@@ -14,7 +14,6 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type * as ObserveModule from '../../observe/context.ts'
-import type * as CacheContextModule from '../../cache/context.ts'
 import type * as ClientModule from './client.ts'
 import type * as ApiModule from './api.ts'
 
@@ -29,17 +28,6 @@ vi.mock('../../observe/context.ts', async (importOriginal) => {
     record: (...args: Parameters<typeof actual.record>) => {
       H.order.push('record')
       actual.record(...args)
-    },
-  }
-})
-
-vi.mock('../../cache/context.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof CacheContextModule>()
-  return {
-    ...actual,
-    invalidateAfterWrite: async (...args: Parameters<typeof actual.invalidateAfterWrite>) => {
-      H.order.push('invalidate')
-      await actual.invalidateAfterWrite(...args)
     },
   }
 })
@@ -293,16 +281,6 @@ describe('dropbox write records the upload reply', () => {
     expect(await writeRecorded(reply)).toEqual([['write', '/note.txt', 5, token, null]])
     // Recorded before the eviction, so the record exists when the cache
     // reacts to the write.
-    expect(H.order).toEqual(['record', 'invalidate'])
-  })
-
-  it('a write whose reply fails still evicts the path', async () => {
-    // Dropbox may have stored the bytes before the reply broke off, so the
-    // cached copy is stale either way.
-    vi.mocked(client.dropboxUpload).mockRejectedValue(new Error('reply cut off'))
-    await expect(
-      write(makeAccessor(), spec('/note.txt'), new TextEncoder().encode('hello')),
-    ).rejects.toThrow('reply cut off')
-    expect(H.order).toEqual(['invalidate'])
+    expect(H.order).toEqual(['record'])
   })
 })

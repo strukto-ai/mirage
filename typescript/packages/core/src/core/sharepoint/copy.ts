@@ -13,19 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { evictAfter, invalidateSubtree } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { copyTree } from '../msgraph/drive.ts'
 import { driveLoc, resolveItem } from './resolve.ts'
 
 /**
  * Copy a file or folder server-side, across drives when they differ.
- *
- * The whole destination subtree is invalidated here, under its own path:
- * a folder copy that merges into an existing folder changes listings below
- * `dst`, and only the op knows the mount-absolute spelling of `dst`. A
- * failed copy invalidates too, since a merge may have landed some children
- * before one failed.
  *
  * Args:
  *   accessor: SharePoint accessor.
@@ -40,13 +33,9 @@ export async function copy(
   const config = accessor.config
   const srcResolved = await resolveItem(accessor, src)
   const dstResolved = await resolveItem(accessor, dst)
-  await evictAfter(
-    () =>
-      copyTree(
-        config,
-        driveLoc(config, srcResolved, src.vfsPath),
-        driveLoc(config, dstResolved, dst.vfsPath),
-      ),
-    () => invalidateSubtree(dst),
+  await copyTree(
+    config,
+    driveLoc(config, srcResolved, src.vfsPath),
+    driveLoc(config, dstResolved, dst.vfsPath),
   )
 }

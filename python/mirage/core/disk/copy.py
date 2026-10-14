@@ -18,7 +18,6 @@ import shutil
 import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.disk.errors import disk_error
 from mirage.core.disk.utils import resolve_inside
 from mirage.types import PathSpec
@@ -43,4 +42,3 @@ async def copy(
         ) and not await aiofiles.os.path.exists(s)
         spec = src_spec if blame_src else dst_spec
         raise disk_error(exc, spec.virtual) from exc
-    await invalidate_after_write(dst_spec)

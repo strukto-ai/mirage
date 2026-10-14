@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
+
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { deleteFile, listFiles } from '../google/drive.ts'
@@ -43,7 +43,6 @@ async function rmdirImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void
   })
   if (children.length > 0) throw enotempty(path)
   await deleteFile(accessor.tokenManager, node.id)
-  await invalidateAfterUnlink(path)
 }
 
 export const rmdir = eaccesOnDenied(rmdirImpl)

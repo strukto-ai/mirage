@@ -14,7 +14,6 @@
 
 from unittest.mock import AsyncMock, patch
 
-import aiohttp
 import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
@@ -74,11 +73,7 @@ async def test_create_uploads_empty_bytes():
 
 
 async def _write_recorded(reply):
-    order: list[tuple[str, int]] = []
     scope = RecordingScope()
-
-    async def _spy(path):
-        order.append(("invalidate", len(scope.records)))
 
     try:
         with (
@@ -86,13 +81,6 @@ async def _write_recorded(reply):
                 "mirage.core.dropbox.write.dropbox_upload",
                 new_callable=AsyncMock,
                 return_value=reply,
-            ),
-            patch(
-                "mirage.core.dropbox.write.invalidate_after_write", new=_spy
-            ),
-            patch(
-                "mirage.core.dropbox.write.invalidate_ancestors",
-                new_callable=AsyncMock,
             ),
         ):
             await write(
@@ -104,42 +92,7 @@ async def _write_recorded(reply):
         (r.op, r.path, r.bytes, r.fingerprint, r.revision)
         for r in scope.records
     ]
-    return rows, order
-
-
-@pytest.mark.asyncio
-async def test_a_write_whose_reply_fails_still_evicts_the_path():
-    # Dropbox may have stored the bytes before the reply broke off, so the
-    # cached copy is stale either way.
-    scope = RecordingScope()
-    evicted: list[str] = []
-
-    async def _spy(path):
-        evicted.append(path.virtual)
-
-    try:
-        with (
-            patch(
-                "mirage.core.dropbox.write.dropbox_upload",
-                new_callable=AsyncMock,
-                side_effect=aiohttp.ClientPayloadError("reply cut off"),
-            ),
-            patch(
-                "mirage.core.dropbox.write.invalidate_after_write", new=_spy
-            ),
-            patch(
-                "mirage.core.dropbox.write.invalidate_ancestors",
-                new_callable=AsyncMock,
-            ),
-            pytest.raises(aiohttp.ClientPayloadError),
-        ):
-            await write(
-                make_accessor(), PathSpec.from_str_path("/note.txt"), b"hello"
-            )
-    finally:
-        scope.close()
-    assert evicted == ["/note.txt"]
-    assert scope.records == []
+    return rows
 
 
 @pytest.mark.asyncio
@@ -150,8 +103,5 @@ async def test_a_write_whose_reply_fails_still_evicts_the_path():
 )
 async def test_write_records_the_reply_token(reply, token):
     # "h5" is a token no local hash produces.
-    rows, order = await _write_recorded(reply)
+    rows = await _write_recorded(reply)
     assert rows == [("write", "/note.txt", 5, token, None)]
-    # Recorded before the eviction, so the record exists when the cache
-    # reacts to the write.
-    assert order == [("invalidate", 1)]

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { writeItem } from '../msgraph/drive.ts'
@@ -28,5 +28,4 @@ export async function write(
   const timer = startOp()
   await writeItem(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath), data)
   record('write', path.virtual, 'sharepoint', data.length, timer)
-  await invalidateAfterWrite(path)
 }

@@ -15,7 +15,6 @@
 import errno
 from unittest.mock import AsyncMock, patch
 
-import aiohttp
 import pytest
 
 from mirage.core.box.client import BoxApiError
@@ -65,10 +64,6 @@ async def test_write_new_file_uploads_under_parent(root_accessor):
         patch(
             "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
         ) as up,
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         await write(root_accessor, _spec("/data/new.txt"), b"hello")
     up.assert_awaited_once_with(
@@ -83,10 +78,6 @@ async def test_write_existing_file_uploads_version(root_accessor):
         patch(
             "mirage.core.box.write.upload_file_version", new_callable=AsyncMock
         ) as ver,
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         await write(root_accessor, _spec("/data/a.txt"), b"OVER")
     ver.assert_awaited_once_with(
@@ -98,10 +89,6 @@ async def test_write_existing_file_uploads_version(root_accessor):
 async def test_write_missing_parent_raises(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(FileNotFoundError):
             await write(root_accessor, _spec("/data/ghost/x.txt"), b"x")
@@ -116,10 +103,6 @@ async def test_mkdir_creates_under_parent(root_accessor):
             new_callable=AsyncMock,
             return_value={"id": "400"},
         ) as cf,
-        patch(
-            "mirage.core.box.mkdir.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         await mkdir(root_accessor, _spec("/data/newdir"))
     cf.assert_awaited_once_with(root_accessor.token_manager, "100", "newdir")
@@ -201,16 +184,10 @@ async def test_mkdir_parents_creates_each_missing_level(root_accessor):
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
         patch("mirage.core.box.mkdir.list_folder_items", new=_fake_list),
         patch("mirage.core.box.mkdir.create_folder", new=fake_create),
-        patch(
-            "mirage.core.box.mkdir.invalidate_after_write",
-            new_callable=AsyncMock,
-        ) as inv,
     ):
         await mkdir(root_accessor, _spec("/data/p/q"), parents=True)
     assert ("100", "p") in created
-    # invalidate fires once per path level (data/p/q) so a cached ancestor
-    # listing refreshes and sees the new folders.
-    assert inv.await_count == 3
+    assert ("new-p", "q") in created
     _TREE.pop("new-p", None)
     _TREE.pop("new-q", None)
     _TREE["100"] = [e for e in _TREE["100"] if e["name"] != "p"]
@@ -223,10 +200,6 @@ async def test_unlink_deletes_file(root_accessor):
         patch(
             "mirage.core.box.unlink.delete_file", new_callable=AsyncMock
         ) as df,
-        patch(
-            "mirage.core.box.unlink.invalidate_after_unlink",
-            new_callable=AsyncMock,
-        ),
     ):
         await unlink(root_accessor, _spec("/data/a.txt"))
     df.assert_awaited_once_with(root_accessor.token_manager, "200", None)
@@ -246,10 +219,6 @@ async def test_rmdir_deletes_folder_non_recursive(root_accessor):
         patch(
             "mirage.core.box.rmdir.delete_folder", new_callable=AsyncMock
         ) as df,
-        patch(
-            "mirage.core.box.rmdir.invalidate_after_unlink",
-            new_callable=AsyncMock,
-        ),
     ):
         await rmdir(root_accessor, _spec("/data/sub"))
     df.assert_awaited_once_with(
@@ -264,9 +233,6 @@ async def test_rm_r_recursive_on_folder(root_accessor):
         patch(
             "mirage.core.box.rmdir.delete_folder", new_callable=AsyncMock
         ) as df,
-        patch(
-            "mirage.core.box.rmdir.invalidate_subtree", new_callable=AsyncMock
-        ),
     ):
         await rm_r(root_accessor, _spec("/data/sub"))
     df.assert_awaited_once_with(
@@ -281,43 +247,11 @@ async def test_rename_moves_file(root_accessor):
         patch(
             "mirage.core.box.rename.update_file", new_callable=AsyncMock
         ) as uf,
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ),
     ):
         await rename(root_accessor, _spec("/data/a.txt"), _spec("/data/b.txt"))
     uf.assert_awaited_once_with(
         root_accessor.token_manager, "200", name="b.txt", parent_id="100"
     )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("src", "dst", "update", "folder"),
-    [
-        ("/data/a.txt", "/data/b.txt", "update_file", False),
-        ("/data/sub", "/data/moved", "update_folder", True),
-    ],
-    ids=["file", "folder"],
-)
-async def test_only_a_renamed_file_drops_no_subtree(
-    root_accessor, src, dst, update, folder
-):
-    src, dst = _spec(src), _spec(dst)
-    with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-        patch(f"mirage.core.box.rename.{update}", new_callable=AsyncMock),
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ) as moved,
-    ):
-        await rename(root_accessor, src, dst)
-    assert [c.args for c in moved.await_args_list] == [
-        (dst, folder),
-        (src, folder),
-    ]
 
 
 @pytest.mark.asyncio
@@ -330,10 +264,6 @@ async def test_rename_replaces_empty_folder_destination(root_accessor):
         patch(
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
         ) as uo,
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ),
     ):
         await rename(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
     df.assert_awaited_once_with(
@@ -358,10 +288,6 @@ async def test_rename_refuses_nonempty_folder_destination(root_accessor):
         patch(
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
         ) as uo,
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(OSError) as caught:
             await rename(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
@@ -379,10 +305,6 @@ async def test_rename_unmapped_folder_error_propagates(root_accessor):
             side_effect=BoxApiError("boom", 500),
         ),
         patch("mirage.core.box.rename.update_folder", new_callable=AsyncMock),
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(BoxApiError):
             await rename(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
@@ -401,10 +323,6 @@ async def test_rename_file_onto_folder_raises_isdir(root_accessor):
         patch(
             "mirage.core.box.rename.update_file", new_callable=AsyncMock
         ) as uf,
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(IsADirectoryError):
             await rename(
@@ -424,10 +342,6 @@ async def test_rename_folder_onto_file_raises_notdir(root_accessor):
         patch(
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
         ) as uo,
-        patch(
-            "mirage.core.box.rename.invalidate_after_move",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(NotADirectoryError):
             await rename(
@@ -447,10 +361,6 @@ async def test_copy_file_onto_folder_raises_isdir(root_accessor):
         patch(
             "mirage.core.box.copy.delete_file", new_callable=AsyncMock
         ) as df,
-        patch(
-            "mirage.core.box.copy.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(IsADirectoryError):
             await copy(root_accessor, _spec("/data/a.txt"), _spec("/data/sub"))
@@ -469,10 +379,6 @@ async def test_copy_folder_onto_file_raises_notdir(root_accessor):
         patch(
             "mirage.core.box.copy.delete_file", new_callable=AsyncMock
         ) as df,
-        patch(
-            "mirage.core.box.copy.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(NotADirectoryError):
             await copy(root_accessor, _spec("/data/sub"), _spec("/data/a.txt"))
@@ -489,10 +395,6 @@ async def test_copy_file(root_accessor):
             patch(
                 "mirage.core.box.copy.copy_file", new_callable=AsyncMock
             ) as cf,
-            patch(
-                "mirage.core.box.copy.invalidate_after_write",
-                new_callable=AsyncMock,
-            ),
         ):
             await copy(
                 root_accessor, _spec("/data/a.txt"), _spec("/data/c.txt")
@@ -514,10 +416,6 @@ async def test_copy_of_a_whole_folder_is_recorded_as_a_prefix(root_accessor):
             patch(
                 "mirage.core.box.copy.copy_folder", new_callable=AsyncMock
             ) as cd,
-            patch(
-                "mirage.core.box.copy.invalidate_subtree",
-                new_callable=AsyncMock,
-            ),
         ):
             await copy(root_accessor, _spec("/data/sub"), _spec("/data/new"))
     finally:
@@ -531,7 +429,7 @@ async def test_copy_of_a_whole_folder_is_recorded_as_a_prefix(root_accessor):
 
 
 @pytest.mark.asyncio
-async def test_a_merge_records_and_evicts_each_folder_before_the_next(
+async def test_a_merge_records_each_folder_before_the_next(
     root_accessor,
 ):
     tree = {
@@ -547,30 +445,20 @@ async def test_a_merge_records_and_evicts_each_folder_before_the_next(
 
     scope = RecordingScope()
     seen: list[list[tuple[str, str]]] = []
-    evicted: list[str] = []
 
     async def copied(*_args, **_kwargs):
         seen.append([(r.op, r.path) for r in scope.records])
-        seen[-1].extend(("evicted", path) for path in evicted)
-
-    async def subtree(path):
-        evicted.append(path.virtual)
 
     try:
         with (
             patch("mirage.core.box.resolve.list_folder_items", new=listing),
             patch("mirage.core.box.copy.list_folder_items", new=listing),
             patch("mirage.core.box.copy.copy_folder", new=copied),
-            patch("mirage.core.box.copy.invalidate_subtree", new=subtree),
-            patch(
-                "mirage.core.box.copy.writes_conditioned", return_value=True
-            ),
         ):
             await copy(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
     finally:
         scope.close()
-    first = [("copy_prefix", "/data/dst/x"), ("evicted", "/data/dst/x")]
-    assert seen == [[], first]
+    assert seen == [[], [("copy_prefix", "/data/dst/x")]]
 
 
 @pytest.mark.asyncio
@@ -589,10 +477,6 @@ async def test_a_replaced_file_is_recorded_only_once_its_copy_lands(
             patch("mirage.core.box.resolve.list_folder_items", new=_copy_list),
             patch("mirage.core.box.copy.copy_file", new=copied),
             patch("mirage.core.box.copy.delete_file", new_callable=AsyncMock),
-            patch(
-                "mirage.core.box.copy.invalidate_after_write",
-                new_callable=AsyncMock,
-            ),
         ):
             await copy(
                 root_accessor, _spec("/data/a.txt"), _spec("/data/b.txt")
@@ -646,10 +530,6 @@ async def test_write_records_the_virtual_path(root_accessor):
             patch(
                 "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
             ),
-            patch(
-                "mirage.core.box.write.invalidate_after_write",
-                new_callable=AsyncMock,
-            ),
         ):
             await write(root_accessor, spec, b"hello")
     finally:
@@ -672,151 +552,6 @@ _COPY_TREE = {
 
 async def _copy_list(_tm, folder_id, limit=1000):
     return _COPY_TREE.get(folder_id, [])
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("src", "dst", "fails", "raised", "conditioned", "expected"),
-    [
-        (
-            "/data/a.txt",
-            "/data/c.txt",
-            False,
-            None,
-            False,
-            [
-                ("copy_file", "c.txt"),
-                ("write", "/data/c.txt"),
-            ],
-        ),
-        (
-            "/data/a.txt",
-            "/data/b.txt",
-            True,
-            RuntimeError,
-            False,
-            [
-                ("delete_file", "210"),
-                ("copy_file", "b.txt"),
-                ("write", "/data/b.txt"),
-            ],
-        ),
-        (
-            "/data/sub",
-            "/data/new",
-            False,
-            None,
-            False,
-            [
-                ("copy_folder", "new"),
-                ("subtree", "/data/new"),
-            ],
-        ),
-        (
-            "/data/sub",
-            "/data/dst",
-            True,
-            RuntimeError,
-            False,
-            [
-                ("delete_file", "410"),
-                ("copy_file", "x.txt"),
-                ("subtree", "/data/dst"),
-            ],
-        ),
-        (
-            "/data/sub",
-            "/data/a.txt",
-            False,
-            NotADirectoryError,
-            False,
-            [("subtree", "/data/a.txt")],
-        ),
-        (
-            "/data/a.txt",
-            "/data/b.txt",
-            False,
-            None,
-            True,
-            [
-                ("delete_file", "210"),
-                ("copy_file", "b.txt"),
-                ("write", "/data/b.txt"),
-                ("write", "/data/b.txt"),
-            ],
-        ),
-        (
-            "/data/sub",
-            "/data/new",
-            False,
-            None,
-            True,
-            [
-                ("copy_folder", "new"),
-                ("subtree", "/data/new"),
-                ("subtree", "/data/new"),
-            ],
-        ),
-    ],
-    ids=[
-        "file-ok",
-        "file-fails",
-        "folder-ok",
-        "folder-fails",
-        "refused",
-        "conditional-replace",
-        "conditional-folder",
-    ],
-)
-async def test_a_copy_evicts_after_it_ends(
-    root_accessor, src, dst, fails, raised, conditioned, expected
-):
-    events: list[tuple[str, str]] = []
-
-    async def fake_copy_file(_tm, _file_id, _parent_id, name=None):
-        events.append(("copy_file", name))
-        if fails:
-            raise RuntimeError("copy failed")
-        return {}
-
-    async def fake_copy_folder(_tm, _folder_id, _parent_id, name=None):
-        events.append(("copy_folder", name))
-        return {}
-
-    async def fake_delete_file(_tm, file_id, _etag=None):
-        events.append(("delete_file", file_id))
-
-    async def wrote(path):
-        events.append(("write", path.virtual))
-
-    async def dropped(path):
-        events.append(("subtree", path.virtual))
-
-    with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_copy_list),
-        patch("mirage.core.box.copy.list_folder_items", new=_copy_list),
-        patch("mirage.core.box.copy.copy_file", new=fake_copy_file),
-        patch("mirage.core.box.copy.copy_folder", new=fake_copy_folder),
-        patch("mirage.core.box.copy.delete_file", new=fake_delete_file),
-        patch(
-            "mirage.core.box.copy.invalidate_after_write",
-            new=AsyncMock(side_effect=wrote),
-        ),
-        patch(
-            "mirage.core.box.copy.invalidate_subtree",
-            new=AsyncMock(side_effect=dropped),
-        ),
-        patch(
-            "mirage.core.box.copy.writes_conditioned",
-            return_value=conditioned,
-        ),
-    ):
-        if raised is None:
-            await copy(root_accessor, _spec(src), _spec(dst))
-        else:
-            with pytest.raises(raised):
-                await copy(root_accessor, _spec(src), _spec(dst))
-    assert events == expected
 
 
 def _file_entry() -> dict:
@@ -843,11 +578,7 @@ _BOX_REPLY_IDS = ["agrees", "no-entries", "non-dict", "empty-reply"]
 
 
 async def _box_write_recorded(accessor, virtual: str, reply):
-    order: list[tuple[str, int]] = []
     scope = RecordingScope()
-
-    async def _spy(path):
-        order.append(("invalidate", len(scope.records)))
 
     try:
         with (
@@ -862,7 +593,6 @@ async def _box_write_recorded(accessor, virtual: str, reply):
                 new_callable=AsyncMock,
                 return_value=reply,
             ),
-            patch("mirage.core.box.write.invalidate_after_write", new=_spy),
         ):
             await write(accessor, _spec(virtual), b"hello")
     finally:
@@ -871,7 +601,7 @@ async def _box_write_recorded(accessor, virtual: str, reply):
         (r.op, r.path, r.bytes, r.fingerprint, r.revision)
         for r in scope.records
     ]
-    return rows, order
+    return rows
 
 
 @pytest.mark.asyncio
@@ -884,36 +614,5 @@ async def _box_write_recorded(accessor, virtual: str, reply):
 async def test_write_records_the_reply_token(
     root_accessor, virtual, reply, token
 ):
-    rows, order = await _box_write_recorded(root_accessor, virtual, reply)
+    rows = await _box_write_recorded(root_accessor, virtual, reply)
     assert rows == [("write", virtual, 5, token, None)]
-    # Recorded before the eviction, so the record exists when the cache
-    # reacts to the write.
-    assert order == [("invalidate", 1)]
-
-
-@pytest.mark.asyncio
-async def test_a_write_whose_reply_fails_still_evicts_the_path(root_accessor):
-    # Box may have stored the bytes before the reply broke off, so the
-    # cached copy is stale either way.
-    scope = RecordingScope()
-    evicted: list[str] = []
-
-    async def _spy(path):
-        evicted.append(path.virtual)
-
-    try:
-        with (
-            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-            patch(
-                "mirage.core.box.write.upload_file_version",
-                new_callable=AsyncMock,
-                side_effect=aiohttp.ClientPayloadError("reply cut off"),
-            ),
-            patch("mirage.core.box.write.invalidate_after_write", new=_spy),
-            pytest.raises(aiohttp.ClientPayloadError),
-        ):
-            await write(root_accessor, _spec("/data/a.txt"), b"hello")
-    finally:
-        scope.close()
-    assert evicted == ["/data/a.txt"]
-    assert scope.records == []

@@ -18,11 +18,9 @@ from typing import Any
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import (
     conditioned,
-    evict_after,
     held_versions,
-    invalidate_after_unlink,
-    invalidate_subtree,
     keep_refused,
+    settle_after,
 )
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.box.api import (
@@ -54,7 +52,6 @@ async def rmdir(
     if item.get("type") != "folder":
         raise enotdir(path.virtual)
     await delete_empty_folder(accessor.token_manager, item["id"], path)
-    await invalidate_after_unlink(path)
 
 
 async def delete_empty_folder(
@@ -196,10 +193,9 @@ async def rm_r(accessor: BoxAccessor, path: PathSpec) -> None:
 
     async def settle(done: bool | None) -> None:
         record("rm_r", path.virtual, "box", 0, timer)
-        await invalidate_subtree(path)
         refusal = await keep_refused(lost)
         if done and refusal is not None:
             raise refusal
 
-    await evict_after(_remove(accessor, path, item, lost), settle)
+    await settle_after(_remove(accessor, path, item, lost), settle)
     lift_lost(path, upto, subtree=True)

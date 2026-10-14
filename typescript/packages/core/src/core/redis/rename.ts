@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterMove } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -77,8 +76,6 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
     await store.setModified(d, mod ?? now)
     if (Object.keys(attrs).length > 0) await store.setAttrs(d, attrs)
     // A file has nothing beneath it: both ends take the unlink flavor.
-    await invalidateAfterMove(src, false)
-    await invalidateAfterMove(dst, false)
     return
   }
   if (await store.hasDir(s)) {
@@ -91,8 +88,6 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
     await store.setModified(d, mod ?? now)
     if (Object.keys(attrs).length > 0) await store.setAttrs(d, attrs)
     await moveSubtree(store, s, d)
-    await invalidateAfterMove(src, true)
-    await invalidateAfterMove(dst, true)
     return
   }
   throw await lookupError(store, src, s)

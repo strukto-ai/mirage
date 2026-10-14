@@ -15,11 +15,8 @@
 from mirage.cache.context import (
     conditioned,
     delete_condition,
-    evict_after,
-    invalidate_after_unlink,
-    invalidate_ancestors,
-    invalidate_subtree,
     known_versions,
+    settle_after,
     stale,
 )
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -68,15 +65,6 @@ def make_unlink(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
             # already removed keys, and a pin that outlives the object it
             # names fails the next snapshot load.
             record("unlink", path_spec.virtual, driver.vfs, 0, timer)
-            # The eviction rides with the record: a retracted pin and a
-            # cached body for the same path must not both survive, or a
-            # restored snapshot serves the body with nothing left to
-            # check it. Over-dropping costs one refetch.
-            await invalidate_after_unlink(path_spec)
-            # Deleting the last key under a prefix makes every ancestor
-            # that existed only as that prefix disappear, so their cached
-            # listings are stale symmetrically to the write case.
-            await invalidate_ancestors(path_spec)
 
         # The connect is outside, because a connection that never opened
         # removed nothing.
@@ -88,7 +76,7 @@ def make_unlink(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                 op = driver.delete_if(conn, key, cond)
             upto = lost_count()
             try:
-                await evict_after(op, settle)
+                await settle_after(op, settle)
             except ConditionLostError as exc:
                 raise await refused(path_spec, exc, cond) from exc
         lift_lost(path_spec, upto)
@@ -116,16 +104,8 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
 
         async def settle(_: None) -> None:
             # A prefix delete is a paginated walk, so a failure mid-walk
-            # has already removed keys. The eviction rides with the
-            # record, as in unlink.
+            # has already removed keys, as in unlink.
             record("rm_r", path_spec.virtual, driver.vfs, 0, timer)
-            # Not invalidate_after_unlink: a prefix delete takes every key
-            # below with it, and each of those listings and bodies was
-            # cached under its own key, so nothing above them evicts one.
-            await invalidate_subtree(path_spec)
-            # Same rationale as unlink: ancestors that existed only as
-            # this prefix are gone now.
-            await invalidate_ancestors(path_spec)
 
         async with driver.connect(accessor) as conn:
             if conditional:
@@ -137,7 +117,7 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                 op = driver.delete_prefix(conn, pfx)
             upto = lost_count()
             try:
-                await evict_after(op, settle)
+                await settle_after(op, settle)
             except ConditionLostError as exc:
                 key = await keep_walk(path_spec, kpfx, exc)
                 raise await stale(
@@ -223,7 +203,5 @@ def make_rmdir(driver: ObjectStoreDriver[A, C]) -> RmdirFn[A]:
             raise enotempty(path_spec)
         if not saw_key and not is_root:
             raise enoent(path_spec)
-        await invalidate_after_unlink(path_spec)
-        await invalidate_ancestors(path_spec)
 
     return rmdir

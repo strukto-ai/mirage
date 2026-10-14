@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -34,5 +33,4 @@ export async function truncate(
   await checkWriteTarget(store, path, p)
   if (!(await store.truncateFile(p, length, nowIso(), noCreate))) return
   record('truncate', path.virtual, VFSName.REDIS, 0, timer)
-  await invalidateAfterWrite(p)
 }

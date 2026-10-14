@@ -20,10 +20,6 @@ import {
   activeCacheManager,
   captureRead,
   publishRead,
-  invalidateAfterUnlink,
-  invalidateAfterWrite,
-  invalidateAncestors,
-  invalidateSubtree,
   runWithCacheManager,
   runWithOwnVersion,
   runWithWriteContext,
@@ -67,26 +63,10 @@ function gate(): [Promise<void>, () => void] {
   return [held, release]
 }
 
-function fakeManager(log: string[], name: string): CacheInvalidator {
+function fakeManager(): CacheInvalidator {
   return {
     listingTrusted: () => false,
     probedStat: () => null,
-    invalidateAfterWrite(path) {
-      log.push(`${name}:write:${typeof path === 'string' ? path : path.virtual}`)
-      return Promise.resolve()
-    },
-    invalidateAfterUnlink(path) {
-      log.push(`${name}:unlink:${typeof path === 'string' ? path : path.virtual}`)
-      return Promise.resolve()
-    },
-    invalidateAncestors(path) {
-      log.push(`${name}:ancestors:${path.virtual}`)
-      return Promise.resolve()
-    },
-    invalidateSubtree(path) {
-      log.push(`${name}:subtree:${typeof path === 'string' ? path : path.virtual}`)
-      return Promise.resolve()
-    },
     cachedSize(): Promise<number | null> {
       return Promise.resolve(null)
     },
@@ -96,62 +76,14 @@ function fakeManager(log: string[], name: string): CacheInvalidator {
   }
 }
 
-describe('cache invalidation on the fallback storage', () => {
-  it('a write invalidates every live manager, and only live ones', async () => {
-    // Dropping a live frame's invalidation serves stale bytes later;
-    // evicting a mount the write never touched only costs a refetch.
-    // So writes broadcast.
-    const log: string[] = []
-    const managerA = fakeManager(log, 'a')
-    const managerB = fakeManager(log, 'b')
-    const [hold, release] = gate()
-    const long = runWithCacheManager(managerA, async () => {
-      await hold
-    })
-    const short = runWithCacheManager(managerB, async () => {
-      await invalidateAfterWrite('/m/x')
-      release()
-    })
-    await Promise.all([long, short])
-    expect(log.sort()).toEqual(['a:write:/m/x', 'b:write:/m/x'])
-    log.length = 0
-    await invalidateAfterWrite('/m/x')
-    expect(log).toEqual([])
-  })
-
-  it('an unlink and a subtree drop broadcast the same way', async () => {
-    const log: string[] = []
-    const managerA = fakeManager(log, 'a')
-    const managerB = fakeManager(log, 'b')
-    const [hold, release] = gate()
-    const long = runWithCacheManager(managerA, async () => {
-      await hold
-    })
-    const short = runWithCacheManager(managerB, async () => {
-      await invalidateAfterUnlink('/m/x')
-      await invalidateSubtree('/m/d')
-      await invalidateAncestors(PathSpec.fromStrPath('/m/d/file'))
-      release()
-    })
-    await Promise.all([long, short])
-    expect(log.sort()).toEqual([
-      'a:ancestors:/m/d/file',
-      'a:subtree:/m/d',
-      'a:unlink:/m/x',
-      'b:ancestors:/m/d/file',
-      'b:subtree:/m/d',
-      'b:unlink:/m/x',
-    ])
-  })
-
+describe('the active cache manager on the fallback storage', () => {
   it('the read side abstains while two managers disagree', async () => {
     // A warm hit from another mount's cache is another mount's bytes;
     // a miss just reads the backend. So reads fail toward the cold
     // read while the frames disagree, and answer again once one
     // manager is live — or while every frame agrees (a nested rebind).
-    const log: string[] = []
-    const managerA = fakeManager(log, 'a')
-    const managerB = fakeManager(log, 'b')
+    const managerA = fakeManager()
+    const managerB = fakeManager()
     const [hold, release] = gate()
     let besideOther: CacheInvalidator | null = managerB
     let afterOtherSettled: CacheInvalidator | null = null

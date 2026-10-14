@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
+
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { GraphError, graphDelete } from '../msgraph/client.ts'
@@ -26,5 +26,4 @@ export async function unlink(accessor: OneDriveAccessor, path: PathSpec): Promis
     if (error instanceof GraphError && error.status === 404) throw enoent(path)
     throw error
   }
-  await invalidateAfterUnlink(path)
 }

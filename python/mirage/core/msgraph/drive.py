@@ -81,7 +81,7 @@ class DriveLoc:
         drive (str): Opaque drive identity for cross-drive comparison
             (empty for single-drive backends).
         path (str): Backend-addressing item path.
-        virt (str): Mount-relative path for cache invalidation.
+        virt (str): Mount-relative path, which a walk names children by.
         url (Callable[[str, str], str]): Maps ``(path, action)`` to a
             full Graph URL.
         ref (Callable[[str], str]): Maps a folder path to a

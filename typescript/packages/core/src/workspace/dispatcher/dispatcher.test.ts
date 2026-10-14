@@ -18,7 +18,7 @@ import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import { revisionFor } from '../../observe/context.ts'
+import { record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
@@ -2038,6 +2038,48 @@ describe('a streamed read', () => {
       expect((await pullAll(stream)).join('')).toBe(WHOLE)
       await ws.dispatch('read', TAPE)
       expect(tape.reads).toBe(1)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+class LostReply extends Tape {
+  // A store whose write lands and whose reply then breaks off.
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    this.files.set(path.vfsPath.replace(/^\/+/, ''), data)
+    return Promise.reject(new Error('reply lost'))
+  }
+}
+
+describe('a write and the cached bytes', () => {
+  it('a write that throws still drops the cached bytes', async () => {
+    // The store may hold the new bytes though the write threw, so the copy
+    // cached before it is not served again.
+    const tape = new LostReply()
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    try {
+      await ws.dispatch('read', TAPE)
+      await expect(ws.dispatch('write', TAPE, [ENC.encode('new')])).rejects.toThrow('reply lost')
+      const got = (await ws.dispatch('read', TAPE)) as Uint8Array
+      expect([DEC.decode(got), tape.reads]).toEqual(['new', 2])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a path the line retracted is not served from the cache', async () => {
+    // A copy still running has recorded that it replaced the path, but the
+    // dispatcher evicts only once the copy ends.
+    const tape = new Tape()
+    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    try {
+      await ws.dispatch('read', TAPE)
+      await runWithRecording(async () => {
+        record('copy', TAPE, 'tape', 0, startOp())
+        await ws.dispatch('read', TAPE)
+      })
+      expect(tape.reads).toBe(2)
     } finally {
       await ws.close()
     }

@@ -20,7 +20,6 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { fsError } from '../../errors/fs.ts'
 import { activePipe } from '../dev/device.ts'
 import { checkDestParents, checkRename, lookupError } from './dest.ts'
-import { invalidateAfterMove } from '../../cache/context.ts'
 
 function moveAttrs(accessor: RAMAccessor, src: string, dst: string): void {
   const attrs = accessor.store.attrs.get(src)
@@ -94,8 +93,6 @@ export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec
     accessor.store.modified.delete(s)
     moveAttrs(accessor, s, d)
     // A file has nothing beneath it: both ends take the unlink flavor.
-    await invalidateAfterMove(src, false)
-    await invalidateAfterMove(dst, false)
     return Promise.resolve()
   }
   if (accessor.store.dirs.has(s)) {
@@ -105,8 +102,6 @@ export async function rename(accessor: RAMAccessor, src: PathSpec, dst: PathSpec
     accessor.store.modified.delete(s)
     moveAttrs(accessor, s, d)
     moveSubtree(accessor, s, d)
-    await invalidateAfterMove(src, true)
-    await invalidateAfterMove(dst, true)
     return Promise.resolve()
   }
   throw lookupError(accessor, src, s)

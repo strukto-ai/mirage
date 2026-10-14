@@ -1,4 +1,3 @@
-import { invalidateSubtree } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -14,5 +13,4 @@ export async function rmR(accessor: NextcloudAccessor, path: PathSpec): Promise<
     if (isNotFound(error)) throw enoent(path)
     throw error
   }
-  await invalidateSubtree(path)
 }

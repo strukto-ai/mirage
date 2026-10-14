@@ -17,7 +17,6 @@ from dataclasses import replace
 
 import pytest
 
-from mirage.cache.context import push_cache_manager
 from mirage.core.object_store.write import (
     make_create,
     make_mkdir,
@@ -27,77 +26,47 @@ from mirage.core.object_store.write import (
 from mirage.errors.fs import enoent
 from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (
-    FakeManager,
     FakeStore,
     make_driver,
     spec,
 )
 
 
-def _managed(coro):
-    manager = FakeManager()
-    prev = push_cache_manager(manager)
-    try:
-        asyncio.run(coro)
-    finally:
-        push_cache_manager(prev)
-    return manager
-
-
-def test_write_puts_and_invalidates_every_ancestor_listing(accessor):
+def test_write_puts_the_object(accessor):
     store = FakeStore()
-    manager = _managed(
+    asyncio.run(
         make_write(make_driver(store))(accessor, spec("/a/b/c.txt"), b"hi")
     )
     assert store.objects == {"a/b/c.txt": b"hi"}
-    assert manager.writes == ["/a/b/c.txt"]
-    assert manager.ancestors == ["/mnt/a/b/c.txt"]
 
 
-def test_write_at_mount_root_invalidates_only_itself(accessor):
+def test_create_puts_an_empty_object(accessor):
     store = FakeStore()
-    manager = _managed(
-        make_write(make_driver(store))(accessor, spec("/c.txt"), b"x")
-    )
-    assert manager.writes == ["/c.txt"]
-
-
-def test_create_puts_empty_and_invalidates_ancestors(accessor):
-    store = FakeStore()
-    manager = _managed(
-        make_create(make_driver(store))(accessor, spec("/a/b/c.txt"))
-    )
+    asyncio.run(make_create(make_driver(store))(accessor, spec("/a/b/c.txt")))
     assert store.objects == {"a/b/c.txt": b""}
-    assert manager.writes == ["/a/b/c.txt"]
-    assert manager.ancestors == ["/mnt/a/b/c.txt"]
 
 
-def test_truncate_pads_with_nul_and_invalidates_ancestors(accessor):
+def test_truncate_pads_with_nul(accessor):
     store = FakeStore({"a/f.bin": b"0123456789"})
-    manager = _managed(
+    asyncio.run(
         make_truncate(make_driver(store))(accessor, spec("/a/f.bin"), 4)
     )
     assert store.objects["a/f.bin"] == b"0123"
-    assert manager.writes == ["/a/f.bin"]
-    assert manager.ancestors == ["/mnt/a/f.bin"]
 
 
 def test_truncate_extends_a_missing_key(accessor):
     store = FakeStore()
-    _managed(make_truncate(make_driver(store))(accessor, spec("/f.bin"), 3))
+    asyncio.run(make_truncate(make_driver(store))(accessor, spec("/f.bin"), 3))
     assert store.objects["f.bin"] == b"\0\0\0"
 
 
-def test_mkdir_writes_a_marker_and_parents_gate_ancestors(accessor):
+def test_mkdir_writes_a_marker(accessor):
     store = FakeStore({"a/": b""})
-    manager = _managed(make_mkdir(make_driver(store))(accessor, spec("/a/b")))
+    asyncio.run(make_mkdir(make_driver(store))(accessor, spec("/a/b")))
     assert store.objects == {"a/": b"", "a/b/": b""}
-    assert manager.writes == ["/a/b"]
-    deep = _managed(
+    asyncio.run(
         make_mkdir(make_driver(store))(accessor, spec("/x/y"), parents=True)
     )
-    assert deep.writes == ["/x/y"]
-    assert deep.ancestors == ["/mnt/x/y"]
 
 
 def test_mkdir_refuses_a_name_that_exists(accessor):
@@ -113,7 +82,7 @@ def test_mkdir_refuses_a_name_that_exists(accessor):
         ("/f.txt", True),
     ):
         with pytest.raises(FileExistsError):
-            _managed(mkdir(accessor, spec(path), parents=parents))
+            asyncio.run(mkdir(accessor, spec(path), parents=parents))
     assert store.puts == []
 
 
@@ -122,9 +91,9 @@ def test_mkdir_parents_keeps_an_existing_marker(accessor):
     # adds a version; a directory only a key implies still gets a marker.
     store = FakeStore({"a/": b"", "imp/x.txt": b"x"})
     mkdir = make_mkdir(make_driver(store))
-    _managed(mkdir(accessor, spec("/a"), parents=True))
+    asyncio.run(mkdir(accessor, spec("/a"), parents=True))
     assert store.puts == []
-    _managed(mkdir(accessor, spec("/imp"), parents=True))
+    asyncio.run(mkdir(accessor, spec("/imp"), parents=True))
     assert store.puts == [("imp/", b"")]
 
 
@@ -134,7 +103,7 @@ def test_mkdir_refuses_a_missing_parent_without_parents(accessor):
     # ENOENT and puts nothing.
     store = FakeStore()
     with pytest.raises(FileNotFoundError):
-        _managed(make_mkdir(make_driver(store))(accessor, spec("/a/b")))
+        asyncio.run(make_mkdir(make_driver(store))(accessor, spec("/a/b")))
     assert store.puts == []
 
 
@@ -148,7 +117,7 @@ def test_mkdir_refuses_a_directory_under_a_file(accessor):
         ("/f.txt/x/y", True, "/mnt/f.txt"),
     ):
         with pytest.raises(NotADirectoryError) as caught:
-            _managed(mkdir(accessor, spec(path), parents=parents))
+            asyncio.run(mkdir(accessor, spec(path), parents=parents))
         assert caught.value.filename == named
     assert store.puts == []
 
@@ -159,11 +128,8 @@ def test_mkdir_without_marker_support_is_a_no_op(accessor, parents):
     # plain mkdir under it cannot be checked and stays a no-op.
     store = FakeStore()
     driver = replace(make_driver(store), markers_supported=False)
-    manager = _managed(
-        make_mkdir(driver)(accessor, spec("/a/b"), parents=parents)
-    )
+    asyncio.run(make_mkdir(driver)(accessor, spec("/a/b"), parents=parents))
     assert store.objects == {}
-    assert manager.writes == []
 
 
 async def _put_missing_container(
@@ -177,7 +143,7 @@ def _enoent_from(fn, path: str) -> FileNotFoundError:
     store = FakeStore()
     driver = replace(make_driver(store), put=_put_missing_container)
     try:
-        _managed(fn(driver, spec(path)))
+        asyncio.run(fn(driver, spec(path)))
     except FileNotFoundError as exc:
         return exc
     raise AssertionError("expected FileNotFoundError")
@@ -216,7 +182,7 @@ def test_truncate_names_the_path_when_its_pinned_revision_is_gone(accessor):
         make_driver(FakeStore()), get_versioned=_pinned_revision_gone
     )
     try:
-        _managed(make_truncate(driver)(accessor, spec("/a/cut.txt"), 1))
+        asyncio.run(make_truncate(driver)(accessor, spec("/a/cut.txt"), 1))
     except FileNotFoundError as exc:
         assert exc.filename == "/mnt/a/cut.txt"
         return
@@ -232,7 +198,7 @@ def test_a_store_error_that_is_not_a_missing_container_propagates(accessor):
 
     driver = replace(make_driver(store), put=boom)
     try:
-        _managed(make_write(driver)(accessor, spec("/a.txt"), b"hi"))
+        asyncio.run(make_write(driver)(accessor, spec("/a.txt"), b"hi"))
     except RuntimeError as exc:
         assert str(exc) == "bucket on fire"
     else:
@@ -250,7 +216,7 @@ async def _put_silently(conn: FakeStore, key: str, data: bytes) -> None:
 def _recorded(coro):
     scope = RecordingScope()
     try:
-        _managed(coro)
+        asyncio.run(coro)
     finally:
         scope.close()
     return scope.records

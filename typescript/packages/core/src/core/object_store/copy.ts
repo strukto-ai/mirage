@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import {
-  evictAfter,
-  invalidateAfterWrite,
-  invalidateAncestors,
-  writeCondition,
-} from '../../cache/context.ts'
+import { settleAfter, writeCondition } from '../../cache/context.ts'
 import { type OpTimer, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
@@ -34,17 +29,12 @@ import { ConditionLostError } from './errors.ts'
 
 /**
  * Account for a copy onto `dst`: the change is recorded, so a snapshot drops
- * the destination's earlier pin, and its cached bytes and its ancestors'
- * listings are dropped. Mirrors Python's settle_copy.
+ * the destination's earlier pin. Mirrors Python's settle_copy.
  */
-export async function settleCopy(dst: PathSpec, vfs: string, timer: OpTimer): Promise<void> {
+export function settleCopy(dst: PathSpec, vfs: string, timer: OpTimer): void {
   // The destination, not the source: a copy replaces dst's bytes and leaves
   // src untouched, so only dst's token stops describing its object.
   record('copy', dst.virtual, vfs, 0, timer)
-  // The eviction rides with the record, as in unlink.
-  await invalidateAfterWrite(dst)
-  // The copy can materialize the destination's missing ancestors.
-  await invalidateAncestors(dst)
 }
 
 /**
@@ -75,17 +65,18 @@ export function makeCopy<A extends Accessor, C>(
       return
     }
     const timer = startOp()
-    const settle = async (copied: boolean | undefined): Promise<void> => {
+    const settle = (copied: boolean | undefined): Promise<void> => {
       // undefined when the store threw: only a clean false, "nothing was
       // copied", is safe to skip -- a throw may have left a partial object
       // behind.
-      if (copied !== false) await settleCopy(dst, driver.vfs, timer)
+      if (copied !== false) settleCopy(dst, driver.vfs, timer)
+      return Promise.resolve()
     }
     const cond = await writeCondition(dst, 'copy')
     const { conn, close } = await driver.connect(accessor)
     let copied: boolean
     try {
-      copied = await evictAfter(async () => {
+      copied = await settleAfter(async () => {
         try {
           return cond !== null
             ? await requireHook(driver.copyIf)(conn, srcKey, dstKey, cond)

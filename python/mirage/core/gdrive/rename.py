@@ -15,7 +15,6 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.context import invalidate_after_move
 from mirage.core.gdrive.resolve import (
     drive_target_name,
     eacces_on_denied,
@@ -74,10 +73,3 @@ async def rename(
         add_parents=add_parents,
         remove_parents=remove_parents,
     )
-    # A folder carries a subtree under both names. dst also loses one when
-    # the move replaced an empty folder there, whose name may still have
-    # cached children; a non-empty one refused above.
-    folder = src_node.is_folder
-    replaced_folder = dst_node is not None and dst_node.is_folder
-    await invalidate_after_move(dst, folder or replaced_folder)
-    await invalidate_after_move(src, folder)

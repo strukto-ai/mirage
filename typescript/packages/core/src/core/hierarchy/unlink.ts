@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { invalidateAfterUnlink } from '../../cache/context.ts'
+
 import type { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -71,6 +71,5 @@ export function makeUnlink<A extends Accessor>(
     const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
     const parentDir = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
     await store.invalidateDir(parentDir)
-    await invalidateAfterUnlink(virtualKey)
   }
 }

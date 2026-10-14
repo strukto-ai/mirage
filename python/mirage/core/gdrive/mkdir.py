@@ -15,7 +15,6 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.gdrive.resolve import (
     eacces_on_denied,
     node_from_item,
@@ -42,13 +41,9 @@ async def mkdir(
     if not parents:
         parent_id, _ = await resolve_parent(accessor, path)
         await create_folder(token_manager, posixpath.basename(key), parent_id)
-        await invalidate_after_write(path)
         return
     parent_id, drive_id = await root_context(accessor)
     segments = [s for s in key.split("/") if s]
-    mount_prefix = (
-        virtual[: -len(key)].rstrip("/") if virtual.endswith(key) else ""
-    )
     for i, segment in enumerate(segments):
         node = await resolve_segment(
             token_manager,
@@ -60,11 +55,6 @@ async def mkdir(
         if node is None:
             item = await create_folder(token_manager, segment, parent_id)
             node = node_from_item(item, drive_id)
-            # Every created level makes its parent's cached listing stale,
-            # not just the leaf's; a later warm-through resolution of the
-            # chain would otherwise ENOENT on the stale ancestor.
-            seg_virtual = mount_prefix + "/" + "/".join(segments[: i + 1])
-            await invalidate_after_write(PathSpec.from_str_path(seg_virtual))
         elif not node.is_folder:
             # -p only silences EEXIST for directories: a file at the leaf is
             # File exists, a file in the middle is Not a directory.
@@ -73,4 +63,3 @@ async def mkdir(
             raise enotdir(virtual)
         parent_id = node.id
         drive_id = node.drive_id
-    await invalidate_after_write(path)

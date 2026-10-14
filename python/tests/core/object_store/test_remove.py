@@ -18,7 +18,6 @@ from dataclasses import replace
 
 import pytest
 
-from mirage.cache.context import push_cache_manager
 from mirage.core.object_store.remove import (
     make_remove_prefix,
     make_rmdir,
@@ -26,48 +25,26 @@ from mirage.core.object_store.remove import (
 )
 from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (
-    FakeManager,
     FakeStore,
     make_driver,
     spec,
 )
 
 
-def _managed(coro):
-    manager = FakeManager()
-    prev = push_cache_manager(manager)
-    try:
-        asyncio.run(coro)
-    finally:
-        push_cache_manager(prev)
-    return manager
-
-
-def test_unlink_deletes_and_invalidates_every_ancestor_listing(accessor):
+def test_unlink_deletes_the_object(accessor):
     # Deleting the last key under a/b makes /a/b and /a disappear as
     # implied prefixes; the stale-ancestor eviction is the pinned fix.
     store = FakeStore({"a/b/c.txt": b"hi"})
-    manager = _managed(
-        make_unlink(make_driver(store))(accessor, spec("/a/b/c.txt"))
-    )
+    asyncio.run(make_unlink(make_driver(store))(accessor, spec("/a/b/c.txt")))
     assert store.objects == {}
-    assert manager.unlinks == ["/a/b/c.txt"]
-    assert manager.writes == []
-    assert manager.ancestors == ["/mnt/a/b/c.txt"]
 
 
-def test_remove_prefix_deletes_the_subtree_and_ancestors_evict(accessor):
+def test_remove_prefix_deletes_the_subtree(accessor):
     store = FakeStore({"a/b/c.txt": b"hi", "a/b/d/e.txt": b"x"})
-    manager = _managed(
-        make_remove_prefix(make_driver(store))(accessor, spec("/a/b"))
-    )
+    asyncio.run(make_remove_prefix(make_driver(store))(accessor, spec("/a/b")))
     assert store.objects == {}
     # A subtree evict, not an unlink: every key below /a/b went with it,
     # and each one was cached under its own key.
-    assert manager.subtrees == ["/a/b"]
-    assert manager.unlinks == []
-    assert manager.writes == []
-    assert manager.ancestors == ["/mnt/a/b"]
 
 
 def test_rmdir_refuses_a_nonempty_prefix_and_keeps_every_key(accessor):
@@ -81,7 +58,7 @@ def test_rmdir_refuses_a_nonempty_prefix_and_keeps_every_key(accessor):
     """
     store = FakeStore({"a/b/": b"", "a/b/c.txt": b"hi", "a/b/d/e.txt": b"x"})
     with pytest.raises(OSError) as excinfo:
-        _managed(make_rmdir(make_driver(store))(accessor, spec("/a/b")))
+        asyncio.run(make_rmdir(make_driver(store))(accessor, spec("/a/b")))
     assert excinfo.value.errno == errno.ENOTEMPTY
     assert store.objects == {
         "a/b/": b"",
@@ -93,24 +70,21 @@ def test_rmdir_refuses_a_nonempty_prefix_and_keeps_every_key(accessor):
 def test_rmdir_refuses_a_prefix_whose_only_child_is_a_subdirectory(accessor):
     store = FakeStore({"a/b/": b"", "a/b/d/": b""})
     with pytest.raises(OSError) as excinfo:
-        _managed(make_rmdir(make_driver(store))(accessor, spec("/a/b")))
+        asyncio.run(make_rmdir(make_driver(store))(accessor, spec("/a/b")))
     assert excinfo.value.errno == errno.ENOTEMPTY
     assert store.objects == {"a/b/": b"", "a/b/d/": b""}
 
 
 def test_rmdir_removes_the_marker_of_an_empty_prefix(accessor):
     store = FakeStore({"a/b/": b"", "keep.txt": b"k"})
-    manager = _managed(make_rmdir(make_driver(store))(accessor, spec("/a/b")))
+    asyncio.run(make_rmdir(make_driver(store))(accessor, spec("/a/b")))
     assert store.objects == {"keep.txt": b"k"}
-    assert manager.unlinks == ["/a/b"]
-    assert manager.writes == []
-    assert manager.ancestors == ["/mnt/a/b"]
 
 
 def test_rmdir_reports_enoent_for_a_prefix_holding_no_key(accessor):
     store = FakeStore({"keep.txt": b"k"})
     with pytest.raises(FileNotFoundError):
-        _managed(make_rmdir(make_driver(store))(accessor, spec("/a/b")))
+        asyncio.run(make_rmdir(make_driver(store))(accessor, spec("/a/b")))
     assert store.objects == {"keep.txt": b"k"}
 
 
@@ -126,14 +100,14 @@ def test_rmdir_on_a_populated_mount_root_destroys_nothing(accessor):
     """
     store = FakeStore({"a.txt": b"x", "d/f.txt": b"y"})
     with pytest.raises(OSError) as excinfo:
-        _managed(make_rmdir(make_driver(store))(accessor, spec("/")))
+        asyncio.run(make_rmdir(make_driver(store))(accessor, spec("/")))
     assert excinfo.value.errno == errno.ENOTEMPTY
     assert store.objects == {"a.txt": b"x", "d/f.txt": b"y"}
 
 
 def test_rmdir_on_an_empty_mount_root_is_a_no_op(accessor):
     store = FakeStore({})
-    _managed(make_rmdir(make_driver(store))(accessor, spec("/")))
+    asyncio.run(make_rmdir(make_driver(store))(accessor, spec("/")))
     assert store.objects == {}
 
 
@@ -155,7 +129,7 @@ def test_rmdir_leaves_a_child_that_arrived_after_the_probe(accessor):
         conn.objects["a/b/late.txt"] = b"new"
 
     rmdir = make_rmdir(replace(driver, list_children=racing_children))
-    _managed(rmdir(accessor, spec("/a/b")))
+    asyncio.run(rmdir(accessor, spec("/a/b")))
     assert store.objects == {"a/b/late.txt": b"new"}
     assert store.deletes == ["a/b/"]
 
@@ -166,7 +140,7 @@ def test_rmdir_leaves_a_child_that_arrived_after_the_probe(accessor):
 def _recorded(coro):
     scope = RecordingScope()
     try:
-        _managed(coro)
+        asyncio.run(coro)
     finally:
         scope.close()
     return [(r.op, r.path) for r in scope.records]
@@ -177,11 +151,11 @@ def test_unlink_refuses_a_missing_name_and_a_directory(accessor):
     # both, so the op stats first and deletes nothing it refuses.
     store = FakeStore({"a/b/c.txt": b"hi"})
     with pytest.raises(FileNotFoundError):
-        _managed(
+        asyncio.run(
             make_unlink(make_driver(store))(accessor, spec("/a/nope.txt"))
         )
     with pytest.raises(IsADirectoryError):
-        _managed(make_unlink(make_driver(store))(accessor, spec("/a/b")))
+        asyncio.run(make_unlink(make_driver(store))(accessor, spec("/a/b")))
     assert store.deletes == []
 
 
@@ -232,33 +206,3 @@ def test_unlink_records_even_when_the_delete_raises(accessor):
 
 async def _boom(conn: FakeStore, key: str) -> None:
     raise RuntimeError("store on fire")
-
-
-def test_unlink_evicts_the_cache_even_when_the_delete_raises(accessor):
-    """The eviction rides with the record: with the pin gone, a cached
-    body left behind would be served by a restored snapshot with nothing
-    left to check it."""
-
-    async def run():
-        driver = replace(
-            make_driver(FakeStore({"a/b.txt": b"b"})), delete_file=_boom
-        )
-        with pytest.raises(RuntimeError):
-            await make_unlink(driver)(accessor, spec("/a/b.txt"))
-
-    manager = _managed(run())
-    assert manager.unlinks == ["/a/b.txt"]
-    assert manager.writes == []
-    assert manager.ancestors == ["/mnt/a/b.txt"]
-
-
-def test_remove_prefix_evicts_the_subtree_even_when_the_walk_raises(accessor):
-    async def run():
-        driver = replace(make_driver(FakeStore()), delete_prefix=_boom)
-        with pytest.raises(RuntimeError):
-            await make_remove_prefix(driver)(accessor, spec("/a/b"))
-
-    manager = _managed(run())
-    assert manager.subtrees == ["/a/b"]
-    assert manager.writes == []
-    assert manager.ancestors == ["/mnt/a/b"]

@@ -15,12 +15,7 @@
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import (
-    delete_condition,
-    invalidate_after_unlink,
-    invalidate_ancestors,
-    native_condition,
-)
+from mirage.cache.context import delete_condition, native_condition
 from mirage.core.dropbox.api import delete_path, get_metadata, refused
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.fingerprint import live_of
@@ -65,6 +60,4 @@ async def unlink(accessor: DropboxAccessor, path: PathSpec) -> None:
     upto = lost_count()
     await delete_resolved(accessor, path, entry)
     record("unlink", path.virtual, "dropbox", 0, timer)
-    await invalidate_after_unlink(path)
-    await invalidate_ancestors(path)
     lift_lost(path, upto)

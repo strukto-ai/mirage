@@ -15,7 +15,6 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import eexist, enoent
 from mirage.types import PathSpec
@@ -42,6 +41,3 @@ async def mkdir(
             if await sftp.exists(remote):
                 raise eexist(path) from exc
             raise
-    await invalidate_after_write(path)
-    if parents:
-        await invalidate_ancestors(path)

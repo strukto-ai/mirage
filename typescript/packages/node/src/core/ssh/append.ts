@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -45,5 +44,4 @@ export async function appendBytes(
     })
   }
   record('append', p.virtual, VFSName.SSH, data.byteLength, timer)
-  await invalidateAfterWrite(p)
 }

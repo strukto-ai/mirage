@@ -20,18 +20,13 @@ import pytest
 from mirage.cache.context import (
     active_cache_manager,
     capture_read,
-    evict_after,
-    invalidate_after_move,
-    invalidate_after_unlink,
-    invalidate_after_write,
-    invalidate_ancestors,
-    invalidate_subtree,
     listing_refreshed,
     native_condition,
     own_write_version,
     publish_read,
     push_cache_manager,
     push_write_context,
+    settle_after,
     write_condition,
 )
 from mirage.cache.file.ram import RAMFileCacheStore
@@ -54,24 +49,6 @@ class FakeManager:
     def probed_stat(self, _path):
         return None
 
-    def __init__(self) -> None:
-        self.writes: list[PathSpec] = []
-        self.unlinks: list[PathSpec] = []
-        self.subtrees: list[PathSpec] = []
-        self.ancestors: list[PathSpec] = []
-
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        self.writes.append(path)
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        self.unlinks.append(path)
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None:
-        self.ancestors.append(path)
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.subtrees.append(path)
-
 
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(
@@ -81,37 +58,6 @@ def _spec(virtual: str) -> PathSpec:
         pattern=None,
         resolved=True,
     )
-
-
-async def _delegates() -> FakeManager:
-    manager = FakeManager()
-    prev = push_cache_manager(manager)
-    await invalidate_after_write(_spec("/a.txt"))
-    await invalidate_after_unlink(_spec("/b.txt"))
-    await invalidate_subtree(_spec("/c"))
-    await invalidate_after_move(_spec("/d"), True)
-    await invalidate_after_move(_spec("/e"), False)
-    push_cache_manager(prev)
-    return manager
-
-
-def test_delegates_to_active_manager():
-    manager = _run(_delegates())
-    assert [p.mount_path for p in manager.writes] == ["/a.txt"]
-    assert [p.mount_path for p in manager.unlinks] == ["/b.txt", "/e"]
-    assert [p.mount_path for p in manager.subtrees] == ["/c", "/d"]
-
-
-async def _noop_without_manager() -> None:
-    push_cache_manager(None)
-    await invalidate_after_write(_spec("/a.txt"))
-    await invalidate_after_unlink(_spec("/b.txt"))
-    await invalidate_subtree(_spec("/c"))
-    await invalidate_ancestors(_spec("/c/d"))
-
-
-def test_noop_without_active_manager():
-    _run(_noop_without_manager())
 
 
 async def _push_restores() -> tuple[object, object, object]:
@@ -131,55 +77,6 @@ def test_push_returns_previous_manager():
     assert prev1 is not None
     assert active is not restored
     assert restored is prev1
-
-
-async def _ancestors() -> FakeManager:
-    manager = FakeManager()
-    prev = push_cache_manager(manager)
-    await invalidate_ancestors(
-        PathSpec(
-            vfs_path="data/a/b.txt",
-            virtual="/data/data/a/b.txt",
-            directory="/data/data/a",
-        )
-    )
-    push_cache_manager(prev)
-    return manager
-
-
-def test_invalidate_ancestors_preserves_virtual_path():
-    manager = _run(_ancestors())
-    assert [p.virtual for p in manager.ancestors] == ["/data/data/a/b.txt"]
-    assert manager.writes == []
-
-
-async def _repeated_mount_case(prefix: str) -> None:
-    index = RAMIndexCacheStore(ttl=600)
-    manager = CacheManager(None, index, prefix, True)
-    directory = prefix + prefix + "/a"
-    ancestors = [prefix, prefix + prefix, directory]
-    for ancestor in ancestors:
-        await index.set_dir(ancestor, [])
-    await index.set_dir(prefix + "/unrelated", [])
-    path = PathSpec(
-        vfs_path=directory[len(prefix) :].strip("/") + "/b.txt",
-        virtual=directory + "/b.txt",
-        directory=directory,
-    )
-    previous = push_cache_manager(manager)
-    try:
-        await invalidate_after_write(path)
-        await invalidate_ancestors(path)
-    finally:
-        push_cache_manager(previous)
-    for ancestor in ancestors:
-        assert (await index.list_dir(ancestor)).entries is None
-    assert (await index.list_dir(prefix + "/unrelated")).entries is not None
-
-
-@pytest.mark.parametrize("prefix", ["/data", "/nested/data"])
-def test_ancestor_eviction_with_repeated_mount_name(prefix: str):
-    _run(_repeated_mount_case(prefix))
 
 
 @pytest.mark.asyncio
@@ -206,7 +103,7 @@ class _OpFailed(Exception):
     pass
 
 
-class _EvictFailed(Exception):
+class _SettleFailed(Exception):
     pass
 
 
@@ -218,27 +115,27 @@ async def _op(error: type[Exception] | None) -> str:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "op_error, evict_breaks, raised, seen",
+    "op_error, settle_breaks, raised, seen",
     [
         (None, False, None, "done"),
         (_OpFailed, False, _OpFailed, None),
         (_OpFailed, True, _OpFailed, None),
-        (None, True, _EvictFailed, "done"),
+        (None, True, _SettleFailed, "done"),
     ],
 )
-async def test_evict_after_evicts_and_keeps_the_ops_error(
-    op_error, evict_breaks, raised, seen
+async def test_settle_after_settles_and_keeps_the_ops_error(
+    op_error, settle_breaks, raised, seen
 ):
-    # The op's own error wins over an eviction that fails after it.
+    # The op's own error wins over a settle that fails after it.
     results = []
 
-    async def evict(result: str | None) -> None:
+    async def settle(result: str | None) -> None:
         results.append(result)
-        if evict_breaks:
-            raise _EvictFailed
+        if settle_breaks:
+            raise _SettleFailed
 
     with pytest.raises(raised) if raised else contextlib.nullcontext():
-        assert await evict_after(_op(op_error), evict) == "done"
+        assert await settle_after(_op(op_error), settle) == "done"
     assert results == [seen]
 
 

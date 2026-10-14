@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { evictAfter, invalidateAfterWrite } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eacces, eisdir } from '../../errors/fs.ts'
@@ -22,11 +21,7 @@ import { type DriveFile, updateFileContent, uploadFile } from '../google/drive.t
 import { statFromItem } from './stat.ts'
 import { eaccesOnDenied, isFolder, isNative, resolveKey, resolveParent } from './resolve.ts'
 
-/**
- * Upload a new file, or new content for an existing one. A failed upload
- * still evicts the path: Drive may have stored the bytes before its reply
- * broke off.
- */
+/** Upload a new file, or new content for an existing one. */
 async function writeImpl(
   accessor: GDriveAccessor,
   path: PathSpec,
@@ -48,13 +43,8 @@ async function writeImpl(
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
     upload = () => uploadFile(tm, basename, parentId, data)
   }
-  await evictAfter(
-    async () => {
-      const token = uploadToken(await upload(), statFromItem, path.virtual)
-      record('write', path.virtual, 'gdrive', data.length, timer, { fingerprint: token })
-    },
-    () => invalidateAfterWrite(path),
-  )
+  const token = uploadToken(await upload(), statFromItem, path.virtual)
+  record('write', path.virtual, 'gdrive', data.length, timer, { fingerprint: token })
 }
 
 export const write = eaccesOnDenied(writeImpl)

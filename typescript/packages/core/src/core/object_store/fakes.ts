@@ -227,49 +227,6 @@ export function makeDriver(store: FakeStore): ObjectStoreDriver<FakeAccessor, Fa
   }
 }
 
-export class FakeManager {
-  listingTrusted(_folder: string): boolean {
-    return false
-  }
-
-  probedStat(): null {
-    return null
-  }
-
-  readonly writes: string[] = []
-  readonly ancestors: string[] = []
-  readonly unlinks: string[] = []
-  readonly subtrees: string[] = []
-
-  invalidateAfterWrite(path: string | PathSpec): Promise<void> {
-    this.writes.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
-    this.unlinks.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  invalidateAncestors(path: PathSpec): Promise<void> {
-    this.ancestors.push(path.virtual)
-    return Promise.resolve()
-  }
-
-  invalidateSubtree(path: string | PathSpec): Promise<void> {
-    this.subtrees.push(typeof path === 'string' ? path : path.mountPath)
-    return Promise.resolve()
-  }
-
-  cachedSize(_path: PathSpec): Promise<number | null> {
-    return Promise.resolve(null)
-  }
-
-  isCached(_path: PathSpec): Promise<boolean> {
-    return Promise.resolve(false)
-  }
-}
-
 export async function codeOf(promise: Promise<unknown>): Promise<string> {
   try {
     await promise

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import invalidate_after_move, invalidate_ancestors
 from mirage.core.dropbox.api import move_path
 from mirage.core.dropbox.copy import replace_onto
 from mirage.core.dropbox.paths import dropbox_path_of
@@ -43,7 +42,7 @@ async def rename(
     timer = start_op()
     upto = lost_count()
 
-    moved, replaced = await replace_onto(
+    moved, _ = await replace_onto(
         tm,
         src,
         dst,
@@ -51,19 +50,9 @@ async def rename(
         lambda: move_path(tm, from_path, to_path),
         empty_folder=True,
     )
-    replaced_non_file = replaced is not None and replaced.get(".tag") != "file"
-    # A folder carries a subtree under both names. dst also loses one when
-    # the move replaced anything there but a file (an empty folder, or an
-    # entry of no known kind), whose name may still have cached children.
-    # Only a file tag narrows; a reply that names no type keeps the
-    # subtree.
     folder = moved.get(".tag") != "file"
     op = "rename_prefix" if folder else "rename"
     record(op, src.virtual, "dropbox", 0, timer)
     record(op, dst.virtual, "dropbox", 0, timer)
-    await invalidate_after_move(src, folder)
-    await invalidate_ancestors(src)
-    await invalidate_after_move(dst, folder or replaced_non_file)
-    await invalidate_ancestors(dst)
     lift_lost(src, upto, subtree=folder)
     lift_lost(dst, upto, subtree=folder)

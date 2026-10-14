@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { eexist, enoent } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
 import { createFolder, getMetadata } from './api.ts'
-import { invalidateAncestors } from '../../cache/context.ts'
+
 import { dropboxPathOf } from './paths.ts'
 
 async function metadataTag(
@@ -71,6 +71,4 @@ export async function mkdir(
     throw err
   }
   record('mkdir', path.virtual, 'dropbox', 0, timer)
-  await invalidateAfterWrite(path)
-  await invalidateAncestors(path)
 }

@@ -18,7 +18,6 @@ from functools import partial
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import open_flags, resolve_inside
 from mirage.observe.context import record, start_op
@@ -36,4 +35,3 @@ async def pwrite(
             await f.seek(offset)
             await f.write(data)
     record("pwrite", path_spec.virtual, "disk", len(data), timer)
-    await invalidate_after_write(path_spec)

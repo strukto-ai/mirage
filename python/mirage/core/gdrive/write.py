@@ -15,7 +15,6 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.context import evict_after, invalidate_after_write
 from mirage.core.gdrive.resolve import (
     eacces_on_denied,
     resolve_key,
@@ -32,9 +31,6 @@ from mirage.utils.upload import upload_token
 @eacces_on_denied
 async def write(accessor: GDriveAccessor, path: PathSpec, data: bytes) -> None:
     """Upload a new file, or new content for an existing one.
-
-    A failed upload still evicts the path: Drive may have stored the
-    bytes before its reply broke off.
 
     Args:
         accessor (GDriveAccessor): Drive accessor.
@@ -66,4 +62,4 @@ async def write(accessor: GDriveAccessor, path: PathSpec, data: bytes) -> None:
         token = upload_token(await upload, stat_from_item, virtual)
         record("write", virtual, "gdrive", len(data), timer, fingerprint=token)
 
-    await evict_after(send(), lambda _: invalidate_after_write(path))
+    await send()

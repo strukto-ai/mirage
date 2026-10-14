@@ -17,13 +17,11 @@ from dataclasses import replace
 
 import pytest
 
-from mirage.cache.context import push_cache_manager
 from mirage.core.object_store.exists import make_exists
 from mirage.core.object_store.rename import make_rename
 from mirage.core.object_store.stat import make_stat
 from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (
-    FakeManager,
     FakeStore,
     make_driver,
     spec,
@@ -35,55 +33,37 @@ def _rename_for(store: FakeStore):
     return make_rename(driver, make_exists(make_stat(driver)))
 
 
-def _managed(coro):
-    manager = FakeManager()
-    prev = push_cache_manager(manager)
-    try:
-        asyncio.run(coro)
-    finally:
-        push_cache_manager(prev)
-    return manager
-
-
 def test_rename_moves_a_file(accessor):
     store = FakeStore({"a/src.txt": b"hi"})
-    manager = _managed(
+    asyncio.run(
         _rename_for(store)(accessor, spec("/a/src.txt"), spec("/b/dst.txt"))
     )
     assert store.objects == {"b/dst.txt": b"hi"}
     # A file has nothing beneath it, so neither end walks the caches for
     # a subtree: both take the unlink flavor.
-    assert manager.subtrees == []
-    assert manager.unlinks == ["/b/dst.txt", "/a/src.txt"]
-    assert manager.writes == []
-    assert manager.ancestors == ["/mnt/b/dst.txt", "/mnt/a/src.txt"]
 
 
 def test_rename_falls_back_to_the_prefix_walk(accessor):
     store = FakeStore({"dir/f.txt": b"x", "dir/sub/g.txt": b"y"})
-    _managed(_rename_for(store)(accessor, spec("/dir"), spec("/moved")))
+    asyncio.run(_rename_for(store)(accessor, spec("/dir"), spec("/moved")))
     assert store.objects == {"moved/f.txt": b"x", "moved/sub/g.txt": b"y"}
 
 
 def test_rename_missing_source_is_enoent(accessor):
     store = FakeStore()
     with pytest.raises(FileNotFoundError):
-        _managed(_rename_for(store)(accessor, spec("/never"), spec("/dst")))
+        asyncio.run(_rename_for(store)(accessor, spec("/never"), spec("/dst")))
 
 
 def test_rename_onto_the_same_key_is_a_guarded_no_op(accessor):
     store = FakeStore({"a.txt": b"hi"})
-    manager = _managed(
-        _rename_for(store)(accessor, spec("/a.txt"), spec("/a.txt"))
-    )
+    asyncio.run(_rename_for(store)(accessor, spec("/a.txt"), spec("/a.txt")))
     assert store.objects == {"a.txt": b"hi"}
-    assert manager.unlinks == []
-    assert manager.subtrees == []
 
 
 def test_rename_onto_the_same_key_still_fails_when_absent(accessor):
     with pytest.raises(FileNotFoundError):
-        _managed(
+        asyncio.run(
             _rename_for(FakeStore())(accessor, spec("/a.txt"), spec("/a.txt"))
         )
 
@@ -102,7 +82,7 @@ def test_rename_without_native_move_refuses_to_build():
 def _recorded(coro):
     scope = RecordingScope()
     try:
-        _managed(coro)
+        asyncio.run(coro)
     finally:
         scope.close()
     return [(r.op, r.path) for r in scope.records]
@@ -145,7 +125,7 @@ def _recorded_failure(coro, exc_type, match: str | None = None):
     scope = RecordingScope()
     try:
         with pytest.raises(exc_type, match=match):
-            _managed(coro)
+            asyncio.run(coro)
     finally:
         scope.close()
     return [(r.op, r.path) for r in scope.records]
@@ -163,22 +143,6 @@ def test_rename_records_both_retractions_when_the_prefix_walk_fails(accessor):
         RuntimeError,
         "boom",
     ) == [("rename_prefix", "/mnt/d"), ("rename_prefix", "/mnt/e")]
-
-
-def test_rename_evicts_both_subtrees_when_the_prefix_walk_raises(accessor):
-    """The eviction rides with the records, on the same condition."""
-
-    async def run():
-        driver = replace(
-            make_driver(FakeStore({"d/f.txt": b"x"})), move_prefix=_boom
-        )
-        with pytest.raises(RuntimeError):
-            await make_rename(driver, _exists)(
-                accessor, spec("/d"), spec("/e")
-            )
-
-    manager = _managed(run())
-    assert manager.subtrees == ["/e", "/d"]
 
 
 def test_rename_of_a_missing_source_records_nothing(accessor):

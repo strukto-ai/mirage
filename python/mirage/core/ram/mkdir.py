@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import invalidate_after_write, invalidate_ancestors
 from mirage.core.ram.dest import check_dest_parents, check_mkdir_target
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
@@ -36,10 +35,7 @@ async def mkdir(
             store.dirs.add(current)
             if current not in store.modified:
                 store.modified[current] = now
-        await invalidate_after_write(path_spec)
-        await invalidate_ancestors(path_spec)
         return
     check_dest_parents(store, path_spec, p)
     store.dirs.add(p)
     store.modified[p] = now_iso()
-    await invalidate_after_write(path_spec)

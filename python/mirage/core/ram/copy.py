@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import (
     check_dest_parents,
@@ -67,4 +66,3 @@ async def copy(
     check_write_target(store, dst_spec, d)
     store.files[d] = data
     store.modified[d] = now_iso()
-    await invalidate_after_write(dst_spec)

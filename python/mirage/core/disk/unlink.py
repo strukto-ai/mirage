@@ -15,7 +15,6 @@
 import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.errors.fs import eisdir
@@ -33,4 +32,3 @@ async def unlink(accessor: DiskAccessor, path_spec: PathSpec) -> None:
         if await aiofiles.os.path.isdir(p):
             raise eisdir(path_spec) from exc
         raise
-    await invalidate_after_unlink(path_spec)

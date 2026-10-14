@@ -12,12 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.context import (
-    evict_after,
-    invalidate_after_write,
-    invalidate_ancestors,
-    write_condition,
-)
+from mirage.cache.context import settle_after, write_condition
 from mirage.core.object_store.driver import (
     A,
     C,
@@ -35,8 +30,7 @@ from mirage.utils import key_prefix as kp
 
 async def settle_copy(dst_spec: PathSpec, vfs: str, timer: OpTimer) -> None:
     """Account for a copy onto ``dst_spec``: the change is recorded, so a
-    snapshot drops the destination's earlier pin, and its cached bytes
-    and its ancestors' listings are dropped.
+    snapshot drops the destination's earlier pin.
 
     Args:
         dst_spec (PathSpec): the copy's destination.
@@ -47,10 +41,6 @@ async def settle_copy(dst_spec: PathSpec, vfs: str, timer: OpTimer) -> None:
     # leaves src untouched, so only dst's token stops describing its
     # object.
     record("copy", dst_spec.virtual, vfs, 0, timer)
-    # The eviction rides with the record, as in unlink.
-    await invalidate_after_write(dst_spec)
-    # The copy can materialize the destination's missing ancestors.
-    await invalidate_ancestors(dst_spec)
 
 
 def make_copy(
@@ -105,7 +95,7 @@ def make_copy(
                 assert driver.copy_if is not None
                 op = driver.copy_if(conn, src_key, dst_key, cond)
             try:
-                copied = await evict_after(op, settle)
+                copied = await settle_after(op, settle)
             except ConditionLostError as exc:
                 raise await refused(dst_spec, exc, cond) from exc
         if not copied:

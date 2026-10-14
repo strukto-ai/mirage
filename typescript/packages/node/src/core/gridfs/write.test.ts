@@ -20,56 +20,10 @@ vi.mock('./client.ts', async () => {
   return { ...actual, bucket: vi.fn() }
 })
 
-import { runWithCacheManager } from '@struktoai/mirage-core/cache/context'
-import { PathSpec } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
 import * as clientMod from './client.ts'
 import { DRIVER } from './driver.ts'
-import { write } from './write.ts'
-
-class FakeManager {
-  listingTrusted(_folder: string): boolean {
-    return false
-  }
-
-  probedStat(): null {
-    return null
-  }
-
-  writes: string[] = []
-  ancestors: string[] = []
-
-  invalidateAfterWrite(path: PathSpec): Promise<void> {
-    this.writes.push(path.mountPath)
-    return Promise.resolve()
-  }
-
-  invalidateAfterUnlink(_path: PathSpec): Promise<void> {
-    return Promise.resolve()
-  }
-
-  invalidateAncestors(path: PathSpec): Promise<void> {
-    this.ancestors.push(path.virtual)
-    return Promise.resolve()
-  }
-
-  invalidateSubtree(_path: PathSpec): Promise<void> {
-    return Promise.resolve()
-  }
-
-  readThrough(_path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array> {
-    return fetch()
-  }
-
-  cachedSize(_path: PathSpec): Promise<number | null> {
-    return Promise.resolve(null)
-  }
-
-  isCached(_path: PathSpec): Promise<boolean> {
-    return Promise.resolve(false)
-  }
-}
 
 function fakeBucket(keys: string[]): unknown {
   return {
@@ -90,40 +44,6 @@ function fakeBucket(keys: string[]): unknown {
     },
   }
 }
-
-async function runWrite(mountPath: string): Promise<{ manager: FakeManager; keys: string[] }> {
-  const keys: string[] = []
-  vi.mocked(clientMod.bucket).mockResolvedValue(fakeBucket(keys) as never)
-  const manager = new FakeManager()
-  const accessor = new GridFSAccessor({
-    uri: 'mongodb://localhost:27017',
-    database: 'db',
-  } as GridFSConfig)
-  const spec = new PathSpec({
-    vfsPath: mountPath.replace(/^\//, ''),
-    virtual: `/mnt${mountPath}`,
-    directory: '/mnt/',
-  })
-  await runWithCacheManager(manager, async () => {
-    await write(accessor, spec, new TextEncoder().encode('hi'))
-  })
-  return { manager, keys }
-}
-
-describe('gridfs core write', () => {
-  it('invalidates every ancestor listing', async () => {
-    const { manager, keys } = await runWrite('/a/b/c.txt')
-    expect(keys).toEqual(['a/b/c.txt'])
-    // The upload materializes `a` and `a/b` too, so their listings are stale.
-    expect(manager.writes).toEqual(['/a/b/c.txt'])
-    expect(manager.ancestors).toEqual(['/mnt/a/b/c.txt'])
-  })
-
-  it('invalidates only itself at the mount root', async () => {
-    const { manager } = await runWrite('/c.txt')
-    expect(manager.writes).toEqual(['/c.txt'])
-  })
-})
 
 describe('gridfs put token', () => {
   it('reports the new revision as the object token', async () => {

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { invalidateSubtree } from '../../cache/context.ts'
+
 import type { PathSpec } from '../../types.ts'
 import { graphDelete } from '../msgraph/client.ts'
 import { driveLoc, resolve } from './resolve.ts'
@@ -23,5 +23,4 @@ export async function rmR(accessor: SharePointAccessor, path: PathSpec): Promise
   const resolved = await resolve(accessor, path)
   if (resolved.driveId === null || resolved.itemPath === null) return
   await graphDelete(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath).item())
-  await invalidateSubtree(path)
 }

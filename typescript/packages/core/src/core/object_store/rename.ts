@@ -15,9 +15,7 @@
 import type { Accessor } from '../../accessor/base.ts'
 import {
   dropCached,
-  evictAfter,
-  invalidateAfterMove,
-  invalidateAncestors,
+  settleAfter,
   knownVersions,
   moveCondition,
   stale,
@@ -93,28 +91,18 @@ export function makeRename<A extends Accessor, C>(
       op = 'rename_prefix'
       return movePrefix(conn, kp.applyDir(kpfx, src.mountPath), kp.applyDir(kpfx, dst.mountPath))
     }
-    const settle = async (moved: boolean | undefined): Promise<void> => {
+    const settle = (moved: boolean | undefined): Promise<void> => {
       // undefined when the store threw: movePrefix is a paginated walk
       // that can fail having already moved keys, so only a clean false,
       // where nothing moved at all, is skipped.
-      if (moved === false) return
+      if (moved === false) return Promise.resolve()
       // Two records for one op, because a move invalidates the token of
       // both paths: src's object left, dst's was replaced by it. Order is
       // free -- both are pure retractions and deletions commute -- but it
       // stops being free if either carries a token.
       record(op, src.virtual, driver.vfs, 0, timer)
       record(op, dst.virtual, driver.vfs, 0, timer)
-      // The eviction rides with the records, as in unlink. Only a clean
-      // moveFile names a file, which has nothing beneath it; movePrefix
-      // relocates every key under src, and a rejection leaves the kind
-      // unknown, so those evict both subtrees.
-      const folder = op !== 'rename' || moved === undefined
-      await invalidateAfterMove(dst, folder)
-      await invalidateAfterMove(src, folder)
-      // The move can create the destination's missing ancestors and erase
-      // the source's prefix-only ones in the same call.
-      await invalidateAncestors(dst)
-      await invalidateAncestors(src)
+      return Promise.resolve()
     }
     // The path a refusal names and the version its write sent.
     const named = (key: string, err: ConditionLostError): [PathSpec, Measured | null] => {
@@ -126,7 +114,7 @@ export function makeRename<A extends Accessor, C>(
     const { conn, close } = await driver.connect(accessor)
     let moved: boolean
     try {
-      moved = await evictAfter(async () => {
+      moved = await settleAfter(async () => {
         try {
           return await move(conn)
         } finally {

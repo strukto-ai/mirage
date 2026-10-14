@@ -18,7 +18,7 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
-import { invalidateAfterWrite } from '../../cache/context.ts'
+
 import { checkDestParents, checkWriteTarget } from './dest.ts'
 
 export async function appendBytes(
@@ -51,6 +51,5 @@ export async function appendBytes(
   }
   accessor.store.modified.set(p, nowIso())
   record('append', path.virtual, VFSName.RAM, data.byteLength, timer)
-  await invalidateAfterWrite(path)
   return Promise.resolve()
 }

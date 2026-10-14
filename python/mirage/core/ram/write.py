@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.dev.device import active_pipe
 from mirage.core.ram.dest import check_dest_parents, check_write_target
 from mirage.observe.context import record, start_op
@@ -39,4 +38,3 @@ async def write(
     store.files[p] = data
     store.modified[p] = now_iso()
     record("write", path_spec.virtual, "ram", len(data), timer)
-    await invalidate_after_write(path_spec)

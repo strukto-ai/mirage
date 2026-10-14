@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enotdir, isEexist, isEnoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -122,6 +121,4 @@ export async function mkdir(
       await createChain(accessor, driveId, itemPath, path, false)
     }
   }
-  await invalidateAfterWrite(path)
-  if (parents) await invalidateAncestors(path)
 }

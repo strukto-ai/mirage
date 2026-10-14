@@ -923,3 +923,21 @@ describe('version lookups in one line', () => {
     expect(built.length).toBeLessThan(3)
   })
 })
+
+it.each(['/data', '/nested/data'])('evicts ancestors under repeated mount %s', async (prefix) => {
+  const index = new RAMIndexCacheStore({ ttl: 600 })
+  const manager = new CacheManager(null, index, prefix, true)
+  const directory = `${prefix}${prefix}/a`
+  const ancestors = [prefix, `${prefix}${prefix}`, directory]
+  for (const ancestor of ancestors) await index.setDir(ancestor, [])
+  await index.setDir(`${prefix}/unrelated`, [])
+  const path = new PathSpec({
+    virtual: `${directory}/b.txt`,
+    directory,
+    vfsPath: `${directory.slice(prefix.length + 1)}/b.txt`,
+  })
+  await manager.invalidateAfterWrite(path)
+  await manager.invalidateAncestors(path)
+  for (const ancestor of ancestors) expect((await index.listDir(ancestor)).entries).toBeUndefined()
+  expect((await index.listDir(`${prefix}/unrelated`)).entries).toBeDefined()
+})

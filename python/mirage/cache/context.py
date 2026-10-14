@@ -47,16 +47,8 @@ class CacheInvalidator(Protocol):
 
     ``mirage.cache.manager.CacheManager`` satisfies this structurally;
     this module never imports it, keeping the dependency one-way:
-    core mutators -> cache.context <- mount (pushes a manager).
+    backends -> cache.context <- mount (pushes a manager).
     """
-
-    async def invalidate_after_write(self, path: PathSpec) -> None: ...
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None: ...
-
-    async def invalidate_subtree(self, path: PathSpec) -> None: ...
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None: ...
 
     async def cached_size(self, path: PathSpec) -> int | None: ...
 
@@ -73,10 +65,8 @@ def push_cache_manager(
     """Set the active cache manager for the current async context.
 
     The mount entry point pushes its manager before dispatching a
-    command, core backend mutators report through
-    :func:`invalidate_after_write` / :func:`invalidate_after_unlink`, and
-    the caller restores the previous value afterwards by pushing the
-    manager this call returns.
+    command, and the caller restores the previous value afterwards by
+    pushing the manager this call returns.
 
     Args:
         manager (CacheInvalidator | None): Manager to activate, or None
@@ -96,117 +86,32 @@ def active_cache_manager() -> CacheInvalidator | None:
     return current_caller().cache_manager
 
 
-async def invalidate_after_write(path: PathSpec) -> None:
-    """Report a backend write so caches are invalidated at the mutation
-    site. No-op if no cache manager is active.
-
-    Args:
-        path (PathSpec): VFS-relative path that was written.
-    """
-    manager = current_caller().cache_manager
-    if manager is not None:
-        await manager.invalidate_after_write(path)
-
-
-async def invalidate_after_unlink(path: PathSpec) -> None:
-    """Report a backend deletion so caches are invalidated at the
-    mutation site. No-op if no cache manager is active.
-
-    Args:
-        path (PathSpec): VFS-relative path that was removed.
-    """
-    manager = current_caller().cache_manager
-    if manager is not None:
-        await manager.invalidate_after_unlink(path)
-
-
-async def invalidate_subtree(path: PathSpec) -> None:
-    """Report a backend deletion that took a whole subtree with it.
-
-    ``invalidate_after_unlink`` evicts the path's own listing and its
-    parent's, which is the whole story for a file. A recursive delete
-    or a directory rename also strands every listing and every cached
-    body *below* the path, and those were cached under their own keys,
-    so nothing above them evicts one: ``ls`` kept printing a deleted
-    directory's contents and ``cat`` kept serving a deleted file's
-    bytes until the index TTL expired.
-
-    Unlike :func:`invalidate_ancestors`, this cannot be assembled from
-    ``invalidate_after_write`` calls, because the set of keys beneath
-    the path is only known to the caches themselves.
-
-    Args:
-        path (PathSpec): Root of the subtree that is gone.
-    """
-    manager = current_caller().cache_manager
-    if manager is not None:
-        await manager.invalidate_subtree(path)
-
-
-async def invalidate_after_move(path: PathSpec, folder: bool) -> None:
-    """Report one end of a backend rename.
-
-    A renamed folder strands everything cached beneath both of its
-    names, so it takes :func:`invalidate_subtree`. A renamed file has
-    nothing beneath it and takes :func:`invalidate_after_unlink`, which
-    spares the walk of every store. The caller passes ``folder=True``
-    whenever it cannot tell, and for a destination the backend may have
-    replaced a non-empty folder at.
-
-    Args:
-        path (PathSpec): one end of the rename.
-        folder (bool): whether that end may hold a subtree.
-    """
-    if folder:
-        await invalidate_subtree(path)
-    else:
-        await invalidate_after_unlink(path)
-
-
-async def evict_after(
-    op: Awaitable[T], evict: Callable[[T | None], Awaitable[None]]
+async def settle_after(
+    op: Awaitable[T], settle: Callable[[T | None], Awaitable[None]]
 ) -> T:
-    """Run ``op``, then ``evict``, also when ``op`` fails.
+    """Run ``op``, then ``settle``, also when ``op`` fails.
 
     An op that fails partway (a paginated delete, a folder copy that
-    merged some children) has already changed the backend, so what it
-    touched is stale either way. ``evict`` gets the op's result, or None
-    when the op failed. After a failed op an eviction error is logged,
-    not raised, so the caller still learns why the op failed.
+    merged some children) has already changed the backend, so its
+    record is owed either way. ``settle`` gets the op's result, or None
+    when the op failed. After a failed op a settle error is logged, not
+    raised, so the caller still learns why the op failed.
 
     Args:
         op (Awaitable[T]): The backend change.
-        evict (Callable[[T | None], Awaitable[None]]): Records and
-            evicts what the op changed, given its result or None.
+        settle (Callable[[T | None], Awaitable[None]]): Records what the
+            op changed, given its result or None.
     """
     try:
         result = await op
     except BaseException:
         try:
-            await evict(None)
+            await settle(None)
         except Exception as exc:
-            logger.debug("evicting after a failed op: %s", exc)
+            logger.debug("settling after a failed op: %s", exc)
         raise
-    await evict(result)
+    await settle(result)
     return result
-
-
-async def invalidate_ancestors(path: PathSpec) -> None:
-    """Evict every ancestor directory listing of ``path``.
-
-    A single ``invalidate_after_write`` only refreshes the immediate
-    parent listing. When an op materializes several missing levels at
-    once (``mkdir -p a/b/c``, a bucket write that creates parents), the
-    higher ancestors' cached listings stay stale and hide the new
-    entries until the index TTL expires. Walking the chain refreshes
-    each one.
-
-    Args:
-        path (PathSpec): Mutated path, retaining its full virtual path.
-    """
-    manager = current_caller().cache_manager
-    if manager is not None:
-        await manager.invalidate_ancestors(path)
 
 
 def listing_refreshed(folder: str) -> bool:
@@ -502,25 +407,6 @@ async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
         await context.drop(path)
         if keep:
             await context.keep(path, keep)
-
-
-async def evict_keeping_version(path: PathSpec) -> None:
-    """Evict ``path``'s cached bytes and listing, keeping the version held.
-
-    For a request that raised and may have landed: the next write stays
-    conditioned on what the agent read.
-
-    Args:
-        path (PathSpec): the path the request may have changed.
-    """
-    context = current_caller().write_context
-    if context is None:
-        await invalidate_after_write(path)
-        return
-    version = await context.read_version(path)
-    await context.drop(path)
-    if version:
-        await context.keep(path, version)
 
 
 async def stale(

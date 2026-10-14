@@ -19,7 +19,6 @@ import aiofiles.os
 from aiofiles.os import path as aio_path
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_subtree
 from mirage.core.disk.utils import resolve_inside
 from mirage.types import PathSpec
 
@@ -30,4 +29,3 @@ async def rm_r(accessor: DiskAccessor, path_spec: PathSpec) -> None:
         await asyncio.to_thread(shutil.rmtree, p)
     elif await aio_path.exists(p):
         await aiofiles.os.remove(p)
-    await invalidate_subtree(path_spec)

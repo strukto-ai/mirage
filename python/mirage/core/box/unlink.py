@@ -15,11 +15,7 @@
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import (
-    delete_condition,
-    invalidate_after_unlink,
-    native_condition,
-)
+from mirage.cache.context import delete_condition, native_condition
 from mirage.core.box.api import delete_file, refused
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.fingerprint import live_of
@@ -59,5 +55,4 @@ async def unlink(accessor: BoxAccessor, path: PathSpec) -> None:
     timer = start_op()
     await delete_resolved(accessor, path, item)
     record("unlink", path.virtual, "box", 0, timer)
-    await invalidate_after_unlink(path)
     lift_lost(path, upto)

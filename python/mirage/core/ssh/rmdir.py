@@ -15,7 +15,6 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import enoent, enotdir, enotempty
@@ -79,4 +78,3 @@ async def rmdir(
         if await _holds_entries(sftp, remote):
             raise enotempty(path) from exc
         raise
-    await invalidate_after_unlink(path)

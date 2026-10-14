@@ -14,7 +14,6 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ObserveModule from '../../observe/context.ts'
-import type * as CacheContextModule from '../../cache/context.ts'
 import type * as DriveModule from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
 
@@ -29,17 +28,6 @@ vi.mock('../../observe/context.ts', async (importOriginal) => {
     record: (...args: Parameters<typeof actual.record>) => {
       H.order.push('record')
       actual.record(...args)
-    },
-  }
-})
-
-vi.mock('../../cache/context.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof CacheContextModule>()
-  return {
-    ...actual,
-    invalidateAfterWrite: async (...args: Parameters<typeof actual.invalidateAfterWrite>) => {
-      H.order.push('invalidate')
-      await actual.invalidateAfterWrite(...args)
     },
   }
 })
@@ -167,7 +155,7 @@ describe.each([
     expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, token, null]])
     // Recorded before the eviction, so the record exists when the cache
     // reacts to the write.
-    expect(H.order).toEqual(['record', 'invalidate'])
+    expect(H.order).toEqual(['record'])
   })
 })
 
@@ -176,12 +164,4 @@ it('a gdrive write whose reply is empty still records it', async () => {
   // write's claim on the path must not win.
   replyWith(() => null)
   expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, null, null]])
-})
-
-it('a gdrive write whose reply fails still evicts the path', async () => {
-  // Drive may have stored the bytes before the reply broke off, so the cached
-  // copy is stale either way.
-  vi.spyOn(fake, 'uploadFile').mockRejectedValue(new Error('reply cut off'))
-  await expect(writeRecorded()).rejects.toThrow('reply cut off')
-  expect(H.order).toEqual(['invalidate'])
 })

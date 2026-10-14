@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.context import invalidate_after_unlink
 from mirage.core.msgraph.client import GraphError, graph_delete
 from mirage.core.sharepoint.resolve import drive_loc, resolve_item
 from mirage.errors.fs import enoent
@@ -32,4 +31,3 @@ async def unlink(accessor: SharePointAccessor, path: PathSpec) -> None:
         if exc.status == 404:
             raise enoent(path)
         raise
-    await invalidate_after_unlink(path)

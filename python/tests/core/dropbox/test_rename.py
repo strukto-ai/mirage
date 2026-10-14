@@ -17,28 +17,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.context import push_cache_manager
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.rename import rename
 from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
 from tests.core.dropbox.conftest import FakeDropboxRpc
-
-
-class _Moves:
-    """Which invalidation each end of a rename took, in call order."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        self.calls.append(("unlink", path.virtual))
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        self.calls.append(("subtree", path.virtual))
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None:
-        return None
 
 
 def make_accessor() -> DropboxAccessor:
@@ -178,72 +161,4 @@ _CONFLICT_OTHER = DropboxApiError("conflict", 409, "to/conflict/other/...")
 _CONFLICT_FILE = DropboxApiError("conflict", 409, "to/conflict/file/...")
 
 
-async def _moved(*replies, existing: str | None) -> list[tuple[str, str]]:
-    moves = _Moves()
-    prev = push_cache_manager(moves)
-    try:
-        with patch(
-            "mirage.core.dropbox.rename.move_path",
-            new_callable=AsyncMock,
-            side_effect=list(replies),
-        ):
-            with patch(
-                "mirage.core.dropbox.copy.get_metadata",
-                new_callable=AsyncMock,
-                return_value={"name": "b"}
-                if existing is None
-                else {".tag": existing, "name": "b"},
-            ):
-                with patch(
-                    "mirage.core.dropbox.copy.list_folder",
-                    new_callable=AsyncMock,
-                    return_value=[],
-                ):
-                    with patch(
-                        "mirage.core.dropbox.copy.delete_path",
-                        new_callable=AsyncMock,
-                    ):
-                        await rename(
-                            make_accessor(),
-                            PathSpec.from_str_path("/a"),
-                            PathSpec.from_str_path("/b"),
-                        )
-    finally:
-        push_cache_manager(prev)
-    return moves.calls
-
-
 _FILE = {".tag": "file", "name": "b"}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("replies", "existing", "drops"),
-    [
-        ([_FILE], "folder", ("unlink", "unlink")),
-        ([{".tag": "folder", "name": "b"}], "folder", ("subtree", "subtree")),
-        ([{}], "folder", ("subtree", "subtree")),
-        ([_CONFLICT_FOLDER, _FILE], "folder", ("unlink", "subtree")),
-        ([_CONFLICT_OTHER, _FILE], None, ("unlink", "subtree")),
-        ([_CONFLICT_FILE, _FILE], "file", ("unlink", "unlink")),
-    ],
-    ids=[
-        "file",
-        "folder",
-        "no-tag",
-        "file-over-empty-folder",
-        "file-over-no-kind",
-        "file-over-file",
-    ],
-)
-async def test_only_a_moved_file_narrows_and_only_onto_a_file(
-    replies, existing, drops
-):
-    # move_v2 answers with the moved entry's metadata; only a file tag
-    # spares the subtree. A destination the move replaced keeps its
-    # subtree unless that was positively a file: its name may still have
-    # cached children removed outside mirage.
-    assert await _moved(*replies, existing=existing) == [
-        (drops[0], "/a"),
-        (drops[1], "/b"),
-    ]

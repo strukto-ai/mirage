@@ -75,7 +75,11 @@ from mirage.observe.context import (
     record,
     start_op,
 )
-from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
+from mirage.observe.record import (
+    RETRACT_FINGERPRINT_OPS,
+    WRITE_FINGERPRINT_OPS,
+    OpRecord,
+)
 from mirage.policy.boundary import Boundary
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.errors import PolicyDenied, PolicyError
@@ -96,7 +100,7 @@ from mirage.types import (
 )
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import hidden_under, move_reveals, path_visible
-from mirage.utils.key_prefix import mount_key
+from mirage.utils.key_prefix import mount_key, under_path
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent
 from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
@@ -640,6 +644,24 @@ def _follow_or_loop(
         raise eloop(path) from None
 
 
+def _retracted(virtual: str) -> bool:
+    """Whether the running line's newest word on ``virtual`` is that a
+    change it made took the path's version (a copy, a move, a removal).
+
+    Bytes cached before that change are not served: a later step of the
+    same op can still be running, and the path is evicted only once the
+    op ends. A read or write since stamps a newer record.
+
+    Args:
+        virtual (str): the path read.
+    """
+    recorder = active_recorder()
+    if recorder is None:
+        return False
+    rec = recorder.index.newest_version(virtual)
+    return rec is not None and rec.op in RETRACT_FINGERPRINT_OPS
+
+
 def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
     """A custom function's other path arguments, by keyword.
 
@@ -1029,13 +1051,18 @@ class Dispatcher:
         served = await self._serve_cached(call, mount, boundary, mark)
         if served is not None:
             return served, IOResult()
-        result = self._filter(
-            call, await self._call(call, mount, self._filler(call, mount))
-        )
-        if (
+        settles = (
             name in DISPATCH_WRITE_OPS
             or (call.write and name not in POLICY_WRITE_OPS)
-        ) and name not in SERIAL_WRITE_OPS:
+        ) and name not in SERIAL_WRITE_OPS
+        try:
+            ran = await self._call(call, mount, self._filler(call, mount))
+        except BaseException:
+            if settles:
+                await self._evict_failed_write(mount, name, call.path, kwargs)
+            raise
+        result = self._filter(call, ran)
+        if settles:
             await self._settle_write(mount, name, call.path, kwargs, call.vis)
         result = await boundary.complete(mark, call.path, call.write, result)
         return result, IOResult()
@@ -1512,7 +1539,13 @@ class Dispatcher:
             raise exdev(call.path)
         key = f"{id(other.vfs)}:{mount_key(dst.virtual, other.prefix.rstrip('/'))}"
         async with self._writers.with_lock(key):
-            await other.copy_from(mount, call.path.virtual, dst.virtual)
+            try:
+                await other.copy_from(mount, call.path.virtual, dst.virtual)
+            except BaseException:
+                await self._evict_failed_write(
+                    other, "copy", call.path, {"dst": dst}
+                )
+                raise
             await self._settle_write(
                 other, "copy", call.path, {"dst": dst}, call.vis
             )
@@ -1687,6 +1720,7 @@ class Dispatcher:
         cached = await self._cache.get(call.path.virtual)
         if (
             cached is None
+            or _retracted(call.path.virtual)
             or not await self._reconciler.may_serve_cached(
                 mount, call.path.virtual
             )
@@ -1960,6 +1994,11 @@ class Dispatcher:
                     result = await mount.call(
                         call.name, call.path.virtual, **kwargs
                     )
+            except BaseException:
+                await self._evict_failed_write(
+                    mount, call.name, call.path, kwargs
+                )
+                raise
             finally:
                 scope.close()
             _served(call.report, result)
@@ -2198,6 +2237,65 @@ class Dispatcher:
             await self._namespace.rename_under(
                 path.virtual, kwargs["dst"].virtual
             )
+
+    async def _evict_failed_write(
+        self,
+        mount: MountEntry,
+        name: str,
+        path: PathSpec,
+        kwargs: dict[str, Any],
+    ) -> None:
+        """Drop what a write that raised may have made stale.
+
+        A write that fails partway may already have changed the store (a
+        paginated delete, a copy that merged some children), so the
+        caches at and below every name it reaches go either way; the
+        node table moves only with a write that landed. The version the
+        line held for each name is kept, so the next write there stays
+        conditioned on what the agent read, and so is each version the
+        line marked lost under them, which a refused conditional write
+        kept: a retry without a read is refused again. Over-dropping costs
+        a refetch. An eviction error is logged, not raised, so the caller
+        still learns why the write failed.
+
+        Args:
+            mount (MountEntry): the mount the write ran on.
+            name (str): the write op that raised.
+            path (PathSpec): the path it wrote.
+            kwargs (dict[str, Any]): the op's kwargs; a rename's or a
+                copy's ``dst`` is the other name it reaches.
+        """
+        dst = kwargs.get("dst") if name in DESTINATION_OPS else None
+        names = [] if name in COPY_OPS else [path]
+        if isinstance(dst, PathSpec):
+            names.append(dst)
+        names.extend(other for _, other in _operands(name, kwargs))
+        for target in names:
+            try:
+                for owner, alias in self._aliases(mount, target):
+                    manager = self._manager_for(owner)
+                    version = await manager.read_version(alias)
+                    await manager.invalidate_subtree(alias)
+                    await manager.invalidate_ancestors(alias)
+                    if version:
+                        await manager.keep_version(alias, version)
+            except Exception as exc:
+                logger.debug("evicting after a failed %s: %s", name, exc)
+        lost = active_lost()
+        if lost is None:
+            return
+        for key in list(lost.marks):
+            version = lost.version(key)
+            if not version or not any(
+                under_path(key, target.virtual) for target in names
+            ):
+                continue
+            try:
+                spec = PathSpec.from_str_path(key)
+                for owner, alias in self._aliases(mount, spec):
+                    await self._manager_for(owner).keep_version(alias, version)
+            except Exception as exc:
+                logger.debug("keeping %s after a refusal: %s", key, exc)
 
     async def _settle_tree_copy(
         self, mount: MountEntry, src: PathSpec, dst: PathSpec

@@ -15,7 +15,6 @@
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.context import invalidate_after_write
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record, start_op
@@ -32,4 +31,3 @@ async def append_bytes(
         async with aiofiles.open(p, "ab") as f:
             await f.write(data)
     record("append", path_spec.virtual, "disk", len(data), timer)
-    await invalidate_after_write(path_spec)

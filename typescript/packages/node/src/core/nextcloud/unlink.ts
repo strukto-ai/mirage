@@ -1,4 +1,3 @@
-import { invalidateAfterUnlink } from '@struktoai/mirage-core/cache/context'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -16,5 +15,4 @@ export async function unlink(accessor: NextcloudAccessor, path: PathSpec): Promi
     throw error
   }
   record('unlink', path.virtual, VFSName.NEXTCLOUD, 0, timer)
-  await invalidateAfterUnlink(path)
 }

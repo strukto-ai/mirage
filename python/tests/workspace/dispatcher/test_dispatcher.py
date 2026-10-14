@@ -36,6 +36,7 @@ from mirage.errors.types import (
     WalkDeclinedError,
 )
 from mirage.io import OpReport
+from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
     Action,
     CommandRule,
@@ -2121,6 +2122,45 @@ async def test_a_write_during_a_stream_keeps_none_of_it():
         assert [chunk async for chunk in stream][0] == b"0123456789"
         got, _ = await ws.dispatch("read", TAPE)
         assert (got, tape.reads) == (b"new", 0)
+
+
+class _LostReply(Tape):
+    """A store whose write lands and whose reply then breaks off."""
+
+    async def write(
+        self, path: PathSpec, data: bytes, index: IndexCacheStore = NULL_INDEX
+    ) -> None:
+        self.files[path.vfs_path.strip("/")] = data
+        raise ConnectionError("reply lost")
+
+
+@pytest.mark.asyncio
+async def test_a_write_that_raises_still_drops_the_cached_bytes():
+    # The store may hold the new bytes though the write raised, so the
+    # copy cached before it is not served again.
+    tape = _LostReply()
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        await ws.dispatch("read", TAPE)
+        with pytest.raises(ConnectionError):
+            await ws.dispatch("write", TAPE, data=b"new")
+        got, _ = await ws.dispatch("read", TAPE)
+        assert (got, tape.reads) == (b"new", 2)
+
+
+@pytest.mark.asyncio
+async def test_a_path_the_line_retracted_is_not_served_from_the_cache():
+    # A copy still running has recorded that it replaced the path, but the
+    # dispatcher evicts only once the copy ends.
+    tape = Tape()
+    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+        await ws.dispatch("read", TAPE)
+        scope = RecordingScope()
+        try:
+            record("copy", TAPE.virtual, "tape", 0, start_op())
+            await ws.dispatch("read", TAPE)
+        finally:
+            scope.close()
+        assert tape.reads == 2
 
 
 @pytest.mark.asyncio

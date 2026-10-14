@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { invalidateSubtree } from '../../cache/context.ts'
+
 import type { PathSpec } from '../../types.ts'
 import { graphDelete } from '../msgraph/client.ts'
 import { itemUrl } from './client.ts'
@@ -21,5 +21,4 @@ import { itemUrl } from './client.ts'
 export async function rmR(accessor: OneDriveAccessor, path: PathSpec): Promise<void> {
   if (path.vfsPath === '') return
   await graphDelete(accessor.config, itemUrl(accessor.config, path.vfsPath))
-  await invalidateSubtree(path)
 }

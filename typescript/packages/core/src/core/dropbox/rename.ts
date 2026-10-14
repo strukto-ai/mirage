@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { invalidateAfterMove, invalidateAncestors } from '../../cache/context.ts'
+
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { movePath } from './api.ts'
@@ -36,21 +36,11 @@ export async function rename(
   const tm = accessor.tokenManager
   const timer = startOp()
   const upto = lostCount()
-  const [moved, replaced] = await replaceOnto(tm, src, dst, to, () => movePath(tm, from, to), true)
-  const replacedNonFile = replaced !== null && replaced['.tag'] !== 'file'
-  // A folder carries a subtree under both names. dst also loses one when
-  // the move replaced anything there but a file (an empty folder, or an
-  // entry of no known kind), whose name may still have cached children.
-  // Only a file tag narrows; a reply that names no type keeps the
-  // subtree.
+  const [moved] = await replaceOnto(tm, src, dst, to, () => movePath(tm, from, to), true)
   const folder = moved['.tag'] !== 'file'
   const op = folder ? 'rename_prefix' : 'rename'
   record(op, src.virtual, 'dropbox', 0, timer)
   record(op, dst.virtual, 'dropbox', 0, timer)
-  await invalidateAfterMove(src, folder)
-  await invalidateAncestors(src)
-  await invalidateAfterMove(dst, folder || replacedNonFile)
-  await invalidateAncestors(dst)
   liftLost(src, upto, folder)
   liftLost(dst, upto, folder)
 }

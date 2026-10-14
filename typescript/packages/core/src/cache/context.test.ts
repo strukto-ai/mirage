@@ -24,16 +24,11 @@ import {
   activeCacheManager,
   captureRead,
   publishRead,
-  evictAfter,
-  invalidateAfterMove,
-  invalidateAfterUnlink,
-  invalidateAfterWrite,
-  invalidateAncestors,
-  invalidateSubtree,
   listingRefreshed,
   nativeCondition,
   runWithCacheManager,
   runWithWriteContext,
+  settleAfter,
 } from './context.ts'
 import type { WriteContext } from './types.ts'
 
@@ -50,31 +45,6 @@ class FakeManager {
     return fetch()
   }
 
-  writes: string[] = []
-  unlinks: string[] = []
-  subtrees: string[] = []
-  ancestors: PathSpec[] = []
-
-  invalidateAfterWrite(path: string | PathSpec): Promise<void> {
-    this.writes.push(path as string)
-    return Promise.resolve()
-  }
-
-  invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
-    this.unlinks.push(path as string)
-    return Promise.resolve()
-  }
-
-  invalidateAncestors(path: PathSpec): Promise<void> {
-    this.ancestors.push(path)
-    return Promise.resolve()
-  }
-
-  invalidateSubtree(path: string | PathSpec): Promise<void> {
-    this.subtrees.push(path as string)
-    return Promise.resolve()
-  }
-
   cachedSize(_path: PathSpec): Promise<number | null> {
     return Promise.resolve(null)
   }
@@ -85,27 +55,6 @@ class FakeManager {
 }
 
 describe('cache context', () => {
-  it('delegates to the active manager', async () => {
-    const manager = new FakeManager()
-    await runWithCacheManager(manager, async () => {
-      await invalidateAfterWrite('/a.txt')
-      await invalidateAfterUnlink('/b.txt')
-      await invalidateSubtree('/c')
-      await invalidateAfterMove('/d', true)
-      await invalidateAfterMove('/e', false)
-    })
-    expect(manager.writes).toEqual(['/a.txt'])
-    expect(manager.unlinks).toEqual(['/b.txt', '/e'])
-    expect(manager.subtrees).toEqual(['/c', '/d'])
-  })
-
-  it('no-ops without an active manager', async () => {
-    await invalidateAfterWrite('/a.txt')
-    await invalidateAfterUnlink('/b.txt')
-    await invalidateSubtree('/c')
-    await invalidateAncestors(PathSpec.fromStrPath('/c/d'))
-  })
-
   it('scopes the manager to the run', async () => {
     const manager = new FakeManager()
     await runWithCacheManager(manager, async () => {
@@ -126,40 +75,6 @@ describe('cache context', () => {
       expect(activeCacheManager()).toBe(outer)
     })
   })
-
-  it('invalidateAncestors preserves the full virtual path', async () => {
-    const manager = new FakeManager()
-    const path = new PathSpec({
-      virtual: '/data/data/a/b.txt',
-      vfsPath: 'data/a/b.txt',
-      directory: '/data/data/a',
-    })
-    await runWithCacheManager(manager, async () => {
-      await invalidateAncestors(path)
-    })
-    expect(manager.ancestors).toEqual([path])
-    expect(manager.writes).toEqual([])
-  })
-})
-
-it.each(['/data', '/nested/data'])('evicts ancestors under repeated mount %s', async (prefix) => {
-  const index = new RAMIndexCacheStore({ ttl: 600 })
-  const manager = new CacheManager(null, index, prefix, true)
-  const directory = `${prefix}${prefix}/a`
-  const ancestors = [prefix, `${prefix}${prefix}`, directory]
-  for (const ancestor of ancestors) await index.setDir(ancestor, [])
-  await index.setDir(`${prefix}/unrelated`, [])
-  const path = new PathSpec({
-    virtual: `${directory}/b.txt`,
-    directory,
-    vfsPath: `${directory.slice(prefix.length + 1)}/b.txt`,
-  })
-  await runWithCacheManager(manager, async () => {
-    await invalidateAfterWrite(path)
-    await invalidateAncestors(path)
-  })
-  for (const ancestor of ancestors) expect((await index.listDir(ancestor)).entries).toBeUndefined()
-  expect((await index.listDir(`${prefix}/unrelated`)).entries).toBeDefined()
 })
 
 describe('listingRefreshed', () => {
@@ -184,35 +99,32 @@ describe('listingRefreshed', () => {
 })
 
 class OpFailed extends Error {}
-class EvictFailed extends Error {}
+class SettleFailed extends Error {}
 
-describe('evictAfter', () => {
-  // The op's own error wins over an eviction that fails after it; that
-  // eviction error is reported instead.
+describe('settleAfter', () => {
+  // The op's own error wins over a settle that fails after it; that settle
+  // error is reported instead.
   it.each([
     [null, false, null, 'done'],
     [OpFailed, false, OpFailed, undefined],
     [OpFailed, true, OpFailed, undefined],
-    [null, true, EvictFailed, 'done'],
-  ] as const)(
-    'op error %o, eviction breaks %s: raises %o',
-    async (opError, breaks, raised, seen) => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-      const results: (string | undefined)[] = []
-      const run = evictAfter(
-        () => (opError === null ? Promise.resolve('done') : Promise.reject(new opError())),
-        (result) => {
-          results.push(result)
-          return breaks ? Promise.reject(new EvictFailed()) : Promise.resolve()
-        },
-      )
-      if (raised === null) expect(await run).toBe('done')
-      else await expect(run).rejects.toBeInstanceOf(raised)
-      expect(results).toEqual([seen])
-      expect(warn).toHaveBeenCalledTimes(opError !== null && breaks ? 1 : 0)
-      warn.mockRestore()
-    },
-  )
+    [null, true, SettleFailed, 'done'],
+  ] as const)('op error %o, settle breaks %s: raises %o', async (opError, breaks, raised, seen) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const results: (string | undefined)[] = []
+    const run = settleAfter(
+      () => (opError === null ? Promise.resolve('done') : Promise.reject(new opError())),
+      (result) => {
+        results.push(result)
+        return breaks ? Promise.reject(new SettleFailed()) : Promise.resolve()
+      },
+    )
+    if (raised === null) expect(await run).toBe('done')
+    else await expect(run).rejects.toBeInstanceOf(raised)
+    expect(results).toEqual([seen])
+    expect(warn).toHaveBeenCalledTimes(opError !== null && breaks ? 1 : 0)
+    warn.mockRestore()
+  })
 })
 
 it.each([['verified'], [null], ['first', 'second']])(

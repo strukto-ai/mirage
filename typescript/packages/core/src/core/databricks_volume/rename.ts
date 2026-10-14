@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterMove } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
@@ -58,6 +57,4 @@ export async function rename(
   // Only a positive file rules out a subtree at the source. The destination
   // keeps the subtree drop: the upload overwrites whatever stands there,
   // and nothing checks it is not a non-empty directory.
-  await invalidateAfterMove(d, true)
-  await invalidateAfterMove(s, srcStat.type !== FileType.FILE)
 }

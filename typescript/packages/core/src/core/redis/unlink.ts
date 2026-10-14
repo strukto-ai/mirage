@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterUnlink } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { lookupError } from './dest.ts'
@@ -27,5 +26,4 @@ export async function unlink(accessor: RedisAccessor, path: PathSpec): Promise<v
   await store.delFile(p)
   await store.delModified(p)
   await store.delAttrs(p)
-  await invalidateAfterUnlink(p)
 }

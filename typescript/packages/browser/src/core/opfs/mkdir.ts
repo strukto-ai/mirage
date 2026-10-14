@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateAfterWrite, invalidateAncestors } from '@struktoai/mirage-core/cache/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eexist, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
@@ -60,8 +59,6 @@ export async function mkdir(
   await checkMkdirTarget(root, path, norm(virtual), parents)
   if (parents) {
     await resolveDirHandle(root, virtual, { create: true })
-    await invalidateAfterWrite(path)
-    await invalidateAncestors(path)
     return
   }
   let parentDir: FileSystemDirectoryHandle
@@ -74,5 +71,4 @@ export async function mkdir(
     throw destError(err, path)
   }
   await parentDir.getDirectoryHandle(name, { create: true })
-  await invalidateAfterWrite(path)
 }
