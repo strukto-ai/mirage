@@ -367,14 +367,6 @@ describe('MontyRuntime', () => {
     expect(() => new MontyRuntime({ config: { maxMemory: 1048576 } })).not.toThrow()
   })
 
-  it('eval keeps state per session id', async () => {
-    const rt = make()
-    await rt.eval('x = 40', { session: 's1' })
-    const result = await rt.eval('print(x + 2)', { session: 's1' })
-    expect(result.status).toBe('complete')
-    expect(text(result.stdout)).toBe('42\n')
-  }, 30_000)
-
   it('inherits context cwd and honors an explicit run cwd', async () => {
     const rt = new MontyRuntime()
     const ws = new Workspace(
@@ -397,42 +389,6 @@ describe('MontyRuntime', () => {
       await ws.close()
     }
   })
-
-  it('seeds eval cwd once per session', async () => {
-    const rt = new MontyRuntime()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
-    )
-    try {
-      expect(
-        (await ws.shell('mkdir /data/sub; echo child > /data/sub/item; cd /data')).exitCode,
-      ).toBe(0)
-      expect((await rt.eval('import os; os.getcwd()')).value).toBe('/data')
-      const first = await rt.eval('import os; os.getcwd()', { session: 'a' })
-      expect(first.exitCode, text(first.stderr)).toBe(0)
-      expect(first.value).toBe('/data')
-      expect((await ws.shell('cd /')).exitCode).toBe(0)
-      expect((await rt.eval("open('sub/item').read()", { session: 'a' })).value).toBe('child\n')
-      expect((await rt.eval('import os; os.getcwd()', { session: 'b' })).value).toBe('/')
-      expect((await rt.eval('import os; os.getcwd()')).value).toBe('/')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('eval returns the last expression with inputs bound', async () => {
-    const rt = make()
-    const result = await rt.eval("ctx['a'] + 1", { inputs: { ctx: { a: 41 } } })
-    expect(result.value).toBe(42)
-    expect(result.status).toBe('complete')
-  }, 30_000)
-
-  it('eval folds dict values into plain objects, not Maps', async () => {
-    const rt = make()
-    const result = await rt.eval("{'deny': 'no', 'nested': [{'k': 1}]}")
-    expect(result.value).toEqual({ deny: 'no', nested: [{ k: 1 }] })
-  }, 30_000)
 
   it('a failed mutation raises the typed guest exception, not a bare Error', async () => {
     // The real dispatcher rejects with coded fs errors (pinned in
@@ -581,7 +537,7 @@ describe('MontyRuntime', () => {
     expect(text(probe.stdout)).toBe('False\n')
   }, 30_000)
 
-  it('a dead worker maps to exit 1 with a note, and eval propagates it', async () => {
+  it('a dead worker maps to exit 1 with a note', async () => {
     // python's MontyCrashedError cannot be constructed from python
     // (the engine seals it), so this mapping is pinned here only; the
     // JS class is public and a fake pool injects the rejection.
@@ -612,8 +568,6 @@ describe('MontyRuntime', () => {
     const late = await run(timedOut, 'print(1)')
     expect(late.exitCode).toBe(1)
     expect(text(late.stderr)).toBe('monty: worker timed out\n')
-    // eval mirrors python's: the crash propagates to the caller.
-    await expect(timedOut.eval('1')).rejects.toBeInstanceOf(monty.MontyCrashedError)
   }, 30_000)
 
   it('has the monty name', () => {

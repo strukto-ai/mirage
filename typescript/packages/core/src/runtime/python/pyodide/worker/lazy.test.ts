@@ -174,44 +174,6 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     }
   })
 
-  it('refuses a console that started before its runtime was bound, and starts others', async () => {
-    const rt = new PyodideRuntime()
-    try {
-      expect((await rt.eval('x = 1', { session: 'early' })).exitCode).toBe(0)
-      rt.bind(
-        new WorkspaceBinding(
-          (_op, path) => Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' })),
-          new PrefixResolver(() => ['/data/']),
-        ),
-      )
-      await expect(rt.eval('print(x)', { session: 'early' })).rejects.toThrow(
-        'pyodide console "early" started before this runtime was bound to a workspace, so it cannot reach the mounts; start a new console',
-      )
-      const late = await rt.eval("import os; print(os.path.isdir('/data'))", { session: 'late' })
-      expect(DEC.decode(late.stdout)).toBe('True\n')
-    } finally {
-      await rt.close()
-    }
-  })
-
-  it('drops the name of a mount a named console no longer sees', async () => {
-    let prefixes = ['/data/', '/secret/']
-    const dispatch: BridgeDispatchFn = (_op, path) =>
-      Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
-    const rt = new PyodideRuntime()
-    rt.bind(new WorkspaceBinding(dispatch, new PrefixResolver(() => prefixes)))
-    const names = "import os; print(sorted(n for n in os.listdir('/') if n in ('data', 'secret')))"
-    try {
-      expect(DEC.decode((await rt.eval(names, { session: 'one' })).stdout)).toBe(
-        "['data', 'secret']\n",
-      )
-      prefixes = ['/data/']
-      expect(DEC.decode((await rt.eval(names, { session: 'one' })).stdout)).toBe("['data']\n")
-    } finally {
-      await rt.close()
-    }
-  })
-
   it("fails only the close of the file whose write the mount refuses, not another file's", async () => {
     const files = new Map<string, Uint8Array>(
       ['bad', 'good', 'later'].map((name) => [`/data/${name}`, ENC.encode('old')]),
@@ -516,11 +478,11 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
           runWithRecording(() => rt.run(runArgs("print(open('/data/one').read())"))),
         )
         const second = runWithSession(two, () =>
-          runWithRecording(() => rt.eval("open('/data/two').read()")),
+          runWithRecording(() => rt.run(runArgs("print(open('/data/two').read())"))),
         )
-        const [[run, firstRecords], [evaluated, secondRecords]] = await Promise.all([first, second])
+        const [[run, firstRecords], [other, secondRecords]] = await Promise.all([first, second])
         expect(DEC.decode(run.stdout)).toBe('one\n')
-        expect(evaluated.value).toBe('two')
+        expect(DEC.decode(other.stdout)).toBe('two\n')
         expect(calls).toEqual(['stat:one', 'read:one', 'stat:two', 'read:two'])
         expect(firstRecords.map((entry) => entry.path)).toEqual(['/data/one'])
         expect(secondRecords.map((entry) => entry.path)).toEqual(['/data/two'])

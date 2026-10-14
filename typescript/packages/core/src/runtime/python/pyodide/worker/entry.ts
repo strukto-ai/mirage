@@ -60,7 +60,7 @@ let cwd = PathSpec.fromStrPath('/')
 async function execute(request: ExecuteRequest): Promise<void> {
   try {
     prefixes = request.prefixes
-    cwd = PathSpec.fromStrPath(request.cwd ?? request.args?.cwd ?? '/')
+    cwd = PathSpec.fromStrPath(request.cwd ?? request.args.cwd ?? '/')
     if (runtime === null) {
       interrupt =
         request.interruptBuffer === undefined ? undefined : new Int32Array(request.interruptBuffer)
@@ -71,28 +71,19 @@ async function execute(request: ExecuteRequest): Promise<void> {
         ),
       )
     }
-    const value =
-      request.method === 'run' && request.args !== undefined
-        ? await runtime.run({
-            ...request.args,
-            ...(request.args.cwd !== undefined
-              ? { cwd: PathSpec.fromStrPath(request.args.cwd) }
-              : {}),
-            ...(request.args.scriptPath !== undefined
-              ? { scriptPath: new PathSpec(request.args.scriptPath) }
-              : {}),
-          } as Parameters<PyodideRuntime['run']>[0])
-        : await runtime.eval(request.code ?? '', {
-            ...(request.inputs !== undefined ? { inputs: request.inputs } : {}),
-            ...(request.session !== undefined ? { session: request.session } : {}),
-          })
+    const value = await runtime.run({
+      ...request.args,
+      ...(request.args.cwd !== undefined ? { cwd: PathSpec.fromStrPath(request.args.cwd) } : {}),
+      ...(request.args.scriptPath !== undefined
+        ? { scriptPath: new PathSpec(request.args.scriptPath) }
+        : {}),
+    } as Parameters<PyodideRuntime['run']>[0])
     post({ kind: 'result', value })
   } catch (error) {
     post({
       kind: 'error',
       message: failureText(error),
       name: error instanceof Error ? error.name : 'Error',
-      syntax: (error as { syntax?: boolean } | null)?.syntax ?? false,
       ...((error as { seconds?: number } | null)?.seconds !== undefined
         ? { seconds: (error as { seconds: number }).seconds }
         : {}),

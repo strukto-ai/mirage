@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RunArgs, EvalValue, RunResult, EvalResult, BridgeDispatchFn } from '../../../types.ts'
+import type { RunArgs, RunResult, BridgeDispatchFn } from '../../../types.ts'
 import type { PyodideConfig } from '../config.ts'
 import type { MirageMutation } from '../fs/journal.ts'
 
@@ -30,20 +30,16 @@ export interface VfsRequest {
 }
 export interface ExecuteRequest {
   kind: 'execute'
-  method: 'run' | 'eval'
   config: PyodideConfig
   prefixes: string[]
-  args?: Omit<RunArgs, 'cwd' | 'signal'> & { cwd?: string }
-  code?: string
+  args: Omit<RunArgs, 'cwd' | 'signal'> & { cwd?: string }
   cwd?: string
-  inputs?: Record<string, EvalValue>
-  session?: string
   interruptBuffer?: SharedArrayBuffer
 }
 export type WorkerResult =
   | { kind: 'notice'; message: string }
-  | { kind: 'result'; value: RunResult | EvalResult }
-  | { kind: 'error'; message: string; name: string; syntax?: boolean; seconds?: number }
+  | { kind: 'result'; value: RunResult }
+  | { kind: 'error'; message: string; name: string; seconds?: number }
 export type WorkerMessage = VfsRequest | WorkerResult | { kind: 'ready' }
 export interface WorkerPort {
   post(message: unknown): void

@@ -88,20 +88,6 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
       )
       const small = await run('print(1 + 1)')
       expect([small.exitCode, DEC.decode(small.stdout)]).toEqual([0, '2\n'])
-      await expect(rt.eval('bytearray(200 * 1024 * 1024)')).rejects.toThrow(/MemoryError/)
-    } finally {
-      await rt.close()
-    }
-  })
-
-  it('starts a console session over once it passes the cap', async () => {
-    const rt = new PyodideRuntime({ config: { maxMemory: '64M', maxConcurrency: 2 } })
-    try {
-      const big = await rt.eval('x = bytearray(200 * 1024 * 1024)', { session: 's' })
-      expect(big.exitCode).toBe(1)
-      expect(DEC.decode(big.stderr ?? new Uint8Array())).toContain('MemoryError')
-      const fresh = await rt.eval('x', { session: 's' })
-      expect(DEC.decode(fresh.stderr ?? new Uint8Array())).toContain('NameError')
     } finally {
       await rt.close()
     }

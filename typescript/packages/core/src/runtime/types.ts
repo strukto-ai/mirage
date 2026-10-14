@@ -264,53 +264,6 @@ export interface RuntimeCapabilities {
 }
 
 /**
- * The value contract of eval: never richer than JSON plus bytes, so
- * any evaluator (in-process or remote over a serialized transport)
- * can carry it, in either direction (inputs in, verdict out).
- */
-export type EvalValue =
-  | null
-  | boolean
-  | number
-  | string
-  | Uint8Array
-  | EvalValue[]
-  | { [key: string]: EvalValue }
-
-/**
- * "incomplete" is console semantics: the source needs a continuation
- * line (session mode only). "exit" is an explicit exit() call.
- */
-export type EvalStatus = 'complete' | 'incomplete' | 'exit'
-
-/**
- * Outcome of one evaluation (mirrors Python's EvalResult).
- *
- * One-shot mode rejects with EvalError on any failure, so a returned
- * result is always a success. Session (console) mode is a transcript:
- * a failing snippet comes back as a result too (its traceback on
- * stderr, a nonzero exitCode), because a console reports errors and
- * keeps going.
- */
-export interface EvalResult {
-  /**
-   * The program's last expression. In-process evaluators return it
-   * directly; remote ones return what the transport could carry.
-   * Session (console) mode may report null when the evaluator only
-   * streams output.
-   */
-  value: EvalValue
-  /** Output the program printed while running. */
-  stdout: Uint8Array
-  /** Captured standard error, null when empty. */
-  stderr: Uint8Array | null
-  /** 0 outside session mode; a console snippet's exit. */
-  exitCode: number
-  /** Console verdict; always "complete" outside session mode. */
-  status: EvalStatus
-}
-
-/**
  * A program's source: a policy program or a script CLI.
  *
  * A yaml `script:` value references a `.py` or `.js`/`.mjs` file whose

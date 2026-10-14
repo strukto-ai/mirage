@@ -27,11 +27,6 @@ export const MAX_URANDOM_BYTES = 1_048_576
 // reaches; the command limits bound a run instead.
 export const LIMITS = { maxSuspensions: 2 ** 31 - 1 }
 
-// A console tells "keep typing" from "this is broken" by matching
-// monty's own traceback wording, so a version that rephrases either
-// line turns every continuation into an error at the prompt.
-export const INCOMPLETE_MARKERS = ['unexpected EOF', 'Expected an indented block'] as const
-
 /**
  * What a refused readlink may mean "no link here". EINVAL is the backend
  * saying the path is not one, and the other three are CPython's own

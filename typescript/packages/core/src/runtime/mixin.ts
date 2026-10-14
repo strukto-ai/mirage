@@ -12,51 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type {
-  EvalResult,
-  EvalValue,
-  ProcessExecution,
-  RunResult,
-  RuntimeIdentity,
-} from './types.ts'
-
-/**
- * The nominal evaluator brand. Detection is by this marker, never by
- * probing for an `eval` method, so a runtime with an unrelated `eval`
- * cannot become the console's engine. `Symbol.for` keeps the brand
- * stable even when two copies of the package are loaded.
- */
-export const EVALUATOR: unique symbol = Symbol.for('mirage.evaluator')
-
-/**
- * The evaluator capability: named inputs in, a value out. A Runtime that
- * also implements this can evaluate expressions, which is what the
- * Python console (`Workspace.executePythonRepl`) consumes; TypeScript
- * only, as Python has no console of its own. The contract promises the
- * shape, not value fidelity: inputs and the returned value stay within
- * EvalValue so any transport can carry them, and errors surface as the
- * evaluator's own diagnostics wrapped in EvalError.
- */
-export interface Evaluator {
-  readonly [EVALUATOR]: true
-
-  /**
-   * Evaluate one program and return its last expression. `inputs`
-   * bind as globals in the evaluator's own idiom; a `session` id
-   * keeps interpreter state alive per id (console semantics), isolated
-   * from other sessions and runs. Absent evaluates with fresh interpreter
-   * state for this call only.
-   */
-  eval(
-    code: string,
-    opts?: { inputs?: Record<string, EvalValue>; session?: string },
-  ): Promise<EvalResult>
-}
-
-/** Whether this runtime carries the evaluator capability. */
-export function isEvaluator<T extends RuntimeIdentity>(runtime: T): runtime is T & Evaluator {
-  return (runtime as Partial<Evaluator>)[EVALUATOR] === true
-}
+import type { ProcessExecution, RunResult, RuntimeIdentity } from './types.ts'
 
 /**
  * The nominal line-executor brand (python's LineExecutorMixin

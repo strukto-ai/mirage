@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import source from '../../../generated/pyodide.ts'
-import type { EvalStatus, EvalValue, RunArgs } from '../../types.ts'
+import type { RunArgs } from '../../types.ts'
 import type { PyodideInterface } from './loader.ts'
 import type { XattrOp } from './fs/types.ts'
 
@@ -91,36 +91,6 @@ export class PyodideExecution {
       disarm,
     ) as [number[], number[], number]
     return [new Uint8Array(stdout), new Uint8Array(stderr), exitCode]
-  }
-
-  evaluate(
-    code: string,
-    inputs: Record<string, EvalValue>,
-    cwd = '',
-  ): [string, Uint8Array, Uint8Array, boolean, boolean] {
-    const [value, stdout, stderr, ok, syntax] = this.call('evaluate', code, inputs, cwd) as [
-      string,
-      number[],
-      number[],
-      boolean,
-      boolean,
-    ]
-    return [value, new Uint8Array(stdout), new Uint8Array(stderr), ok, syntax]
-  }
-
-  repl(
-    code: string,
-    session: string,
-    inputs: Record<string, EvalValue>,
-    cwd = '',
-  ): [Uint8Array, Uint8Array, number, EvalStatus] {
-    const [stdout, stderr, exitCode, status] = this.call('repl', code, session, inputs, cwd) as [
-      number[],
-      number[],
-      number,
-      EvalStatus,
-    ]
-    return [new Uint8Array(stdout), new Uint8Array(stderr), exitCode, status]
   }
 
   seedSysPath(paths: readonly string[]): string[] {

@@ -22,9 +22,7 @@ import { asyncContextIsolatesTasks } from '../../../utils/async_context.ts'
 import { ConcurrencyLimiter } from '../../../concurrency/limiter.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
-import { EvalError } from '../../errors.ts'
-import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type { EvalResult, EvalValue, RunArgs, RunResult, RuntimeReach } from '../../types.ts'
+import type { RunArgs, RunResult, RuntimeReach } from '../../types.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import type { RuntimeContext } from '../../binding.ts'
 import {
@@ -45,7 +43,6 @@ import { classify } from '../../../errors/index.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { KEYS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
-import { SCRIPT_EVAL_TIMEOUT } from '../../constants.ts'
 
 function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value)
@@ -80,22 +77,6 @@ function appendStderrLines(stderr: Uint8Array | null, lines: string[]): Uint8Arr
   out.set(stderr)
   out.set(extra, stderr.length)
   return out
-}
-
-// The eval wrapper ships python bytes as {'__mirage_bytes__': <b64>}
-// (bytes are valid EvalValues but not JSON); this reviver restores
-// them to Uint8Array while everything else parses as plain JSON.
-const EVAL_BYTES_TAG = '__mirage_bytes__'
-
-function reviveEvalValue(_key: string, value: unknown): unknown {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value
-  const record = value as Record<string, unknown>
-  const tagged = record[EVAL_BYTES_TAG]
-  if (typeof tagged !== 'string' || Object.keys(record).length !== 1) return value
-  const binary = atob(tagged)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return bytes
 }
 
 // Mount prefixes are normalized with a trailing slash; an Emscripten
@@ -183,7 +164,7 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
   )
 }
 
-export class PyodideRuntime extends PythonRuntime implements Evaluator {
+export class PyodideRuntime extends PythonRuntime {
   readonly name = 'pyodide'
   protected override readonly versionSuffix = ' (pyodide)'
   // The WASM guest's filesystem is the workspace-backed Emscripten FS,
@@ -193,7 +174,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   // that installs host capabilities makes this 'process'.
   override readonly reach: RuntimeReach
   override readonly filesystem = ['read', 'write', 'list', 'stat', 'glob'] as const
-  readonly [EVALUATOR] = true as const
   private pyodide: PyodideInterface | null = null
   private guest: PyodideExecution | null = null
   private initPromise: Promise<PyodideInterface> | null = null
@@ -202,8 +182,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private queue: Promise<unknown> = Promise.resolve()
   private pending = new Activity()
   private readonly limiter: ConcurrencyLimiter
-  private readonly concurrent: boolean
-  private readonly sessions = new Map<string, PyodideRuntime>()
   private readonly autoLoadFromImports: boolean
   private readonly bootstrapCode: string | null
   private readonly denyPackages: ReadonlySet<string>
@@ -250,7 +228,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1)
       throw new Error('pyodide config: maxConcurrency must be a positive safe integer')
     this.maxMemory = memoryLimit(config.maxMemory)
-    this.concurrent = asyncContextIsolatesTasks && maxConcurrency > 1
     this.limiter = new ConcurrencyLimiter(asyncContextIsolatesTasks ? maxConcurrency : 1)
     this.reach = config.initModule === undefined ? 'workspace' : 'process'
     this.autoLoadFromImports = config.autoLoadFromImports ?? true
@@ -300,74 +277,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     )
   }
 
-  /**
-   * Evaluate code; the last expression is the value. One-shot mode
-   * runs on the eval wrapper (value crosses the WASM boundary as
-   * JSON); a session id routes through the console wrapper (globals
-   * persist per id, value is streamed output only). Console failures
-   * come back as transcript results; one-shot failures reject with
-   * EvalError.
-   */
-  async eval(
-    code: string,
-    opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
-  ): Promise<EvalResult> {
-    const context = this.captureContext()
-    if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
-      if (opts.session !== undefined)
-        throw new EvalError('nested persistent evaluation is unsupported')
-      return this.withFreshRuntime(async (runtime) =>
-        this.cappedEval(runtime, await runtime.evalOne(code, opts, context)),
-      )
-    }
-    const scope =
-      context?.scope ??
-      new ContextScope([
-        ...captureSessionContext(),
-        ...captureOpPolicies(),
-        ...captureRecordingContext(),
-      ])
-    return this.schedule(async () => {
-      if (opts.session === undefined)
-        return this.withPermit(() =>
-          scope.run(() =>
-            this.withFreshRuntime(async (runtime) =>
-              this.cappedEval(runtime, await runtime.evalOne(code, opts, context)),
-            ),
-          ),
-        )
-      const id = opts.session
-      let runtime = this.sessions.get(id)
-      if (runtime === undefined) {
-        runtime = this.createRuntime()
-        this.sessions.set(id, runtime)
-      }
-      const session = runtime
-      const over: { passed: string | null } = { passed: null }
-      const task = async (): Promise<EvalResult> => {
-        const result = await this.withPermit(() =>
-          scope.run(() => session.evalOne(code, opts, context)),
-        )
-        const passed = this.passedCap(session)
-        over.passed = passed
-        if (passed === null) return result
-        // The console's interpreter keeps its heap, so the session starts
-        // over: no later call reaches it, and it closes once this one is
-        // out of its queue, which its close waits on.
-        if (this.sessions.get(id) === session) this.sessions.delete(id)
-        return {
-          ...result,
-          value: null,
-          stderr: new TextEncoder().encode(`${passed}\n`),
-          exitCode: 1,
-        }
-      }
-      const result = await (this.concurrent ? session.enqueue(task) : task())
-      if (over.passed !== null) await session.close()
-      return result
-    })
-  }
-
   private schedule<T>(task: () => Promise<T>): Promise<T> {
     const release = this.pending.acquire()
     return this.queue.then(task, task).finally(release)
@@ -409,13 +318,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     return { stdout: result.stdout, stderr: new TextEncoder().encode(`${passed}\n`), exitCode: 1 }
   }
 
-  /** A one-shot evaluation's result; one that passed `maxMemory` rejects. */
-  private cappedEval(runtime: PyodideRuntime, result: EvalResult): EvalResult {
-    const passed = this.passedCap(runtime)
-    if (passed !== null) throw new EvalError(passed)
-    return result
-  }
-
   private createRuntime(): PyodideRuntime {
     return new PyodideRuntime(
       { config: this.config as PyodideConfig },
@@ -455,90 +357,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     return result
   }
 
-  private async evalOne(
-    code: string,
-    opts: { inputs?: Record<string, EvalValue>; session?: string },
-    context?: RuntimeContext,
-  ): Promise<EvalResult> {
-    this.files = RuntimeFiles.of(context)
-    const worker = await this.ensureWorker(context)
-    if (worker instanceof PyodideUnavailableError) throw worker
-    if (worker !== null && context !== undefined) {
-      return (await this.onWorker(() =>
-        worker.execute(
-          {
-            kind: 'execute',
-            method: 'eval',
-            config: this.config as PyodideConfig,
-            prefixes: context.resolver.prefixes(),
-            code,
-            cwd: context.cwd.virtual,
-            ...opts,
-          },
-          context,
-        ),
-      )) as EvalResult
-    }
-    // A console that ran before this runtime was bound keeps its names in
-    // an interpreter of its own, which has no bridge to the mounts.
-    if (context !== undefined && this.sync === undefined) {
-      throw new EvalError(
-        `pyodide console ${JSON.stringify(opts.session ?? '')} started before this runtime was bound to a workspace, so it cannot reach the mounts; start a new console`,
-      )
-    }
-    if (opts.session !== undefined) {
-      const repl = await this.runOneRepl(
-        code,
-        opts.session,
-        opts.inputs ?? {},
-        this.guestCwd(context?.cwd),
-      )
-      return { value: null, ...repl }
-    }
-    const pyodide = await this.ensureLoaded()
-    await this.loadImports(pyodide, code)
-    const armed =
-      this.interrupter !== null ? this.interrupter.arm(SCRIPT_EVAL_TIMEOUT.seconds) : null
-    try {
-      const arr = this.guestModule(pyodide).evaluate(
-        code,
-        opts.inputs ?? {},
-        this.guestCwd(context?.cwd),
-      )
-      if (armed?.disarm() === 'deadline') {
-        throw new EvalError(`pyodide eval timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
-      }
-      const flushFailures = this.drainMutations()
-      const [valueJson, out, errBytes, ok, syntax] = arr
-      if (!ok) {
-        for (const failure of flushFailures) console.warn(failure)
-        const detail = new TextDecoder().decode(bridgeBytes(errBytes)).trim()
-        throw new EvalError(detail !== '' ? detail : 'evaluation failed', { syntax })
-      }
-      return {
-        value: JSON.parse(valueJson, reviveEvalValue) as EvalValue,
-        stdout: bridgeBytes(out),
-        stderr: appendStderrLines(bridgeStderr(errBytes), flushFailures),
-        exitCode: flushFailures.length > 0 ? 1 : 0,
-        status: 'complete',
-      }
-    } catch (err) {
-      const deadline = armed?.disarm() === 'deadline'
-      for (const failure of this.drainMutations()) console.warn(failure)
-      if (deadline) {
-        throw new EvalError(
-          `pyodide eval timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`,
-          {
-            cause: err,
-          },
-        )
-      }
-      throw err
-    } finally {
-      armed?.disarm()
-    }
-  }
-
   override close(): Promise<void> {
     const pending = this.pending
     this.pending = new Activity()
@@ -549,17 +367,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   private async closeOne(): Promise<void> {
-    const sessions = [...this.sessions.values()]
-    this.sessions.clear()
-    const results = await Promise.allSettled([
-      ...sessions.map((runtime) => runtime.close()),
-      this.closeEngine(),
-    ])
-    const failures = results
-      .filter((result) => result.status === 'rejected')
-      .map((result) => result.reason as unknown)
-    if (failures.length === 1) throw failures[0]
-    if (failures.length > 1) throw new AggregateError(failures, 'pyodide runtime cleanup failed')
+    await this.closeEngine()
   }
 
   private async closeEngine(): Promise<void> {
@@ -902,11 +710,10 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     if (worker !== null && context !== undefined) {
       const { cwd, signal, ...rest } = args
       try {
-        return (await this.onWorker(() =>
+        return await this.onWorker(() =>
           worker.execute(
             {
               kind: 'execute',
-              method: 'run',
               config: this.config as PyodideConfig,
               prefixes: context.resolver.prefixes(),
               args: { ...rest, ...(cwd !== undefined ? { cwd: cwd.virtual } : {}) },
@@ -914,7 +721,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
             context,
             signal,
           ),
-        )) as RunResult
+        )
       } catch (error) {
         if (!(error instanceof PyodideMemoryError)) throw error
         return {
@@ -994,25 +801,6 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       throw err
     } finally {
       slot.armed?.disarm()
-    }
-  }
-
-  private async runOneRepl(
-    code: string,
-    sessionId: string,
-    inputs: Record<string, EvalValue> = {},
-    cwd = '',
-  ): Promise<Omit<EvalResult, 'value'>> {
-    const pyodide = await this.ensureLoaded()
-    await this.loadImports(pyodide, code)
-
-    const arr = this.guestModule(pyodide).repl(code, sessionId, inputs, cwd)
-    const flushFailures = this.drainMutations()
-    return {
-      stdout: bridgeBytes(arr[0]),
-      stderr: appendStderrLines(bridgeStderr(arr[1]), flushFailures),
-      exitCode: flushFailures.length > 0 && arr[2] === 0 ? 1 : arr[2],
-      status: arr[3],
     }
   }
 

@@ -14,9 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { Runtime } from '../../runtime/base.ts'
-import { EVALUATOR, LINE_EXECUTOR, type Evaluator, type LineExecutor } from '../../runtime/mixin.ts'
+import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
-import type { EvalResult, RunArgs, RunResult } from '../../runtime/types.ts'
+import type { RunArgs, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -38,8 +38,7 @@ function latch(): Latch {
   return { promise, open }
 }
 
-class Engine extends PythonRuntime implements Evaluator {
-  readonly [EVALUATOR] = true as const
+class Engine extends PythonRuntime {
   closed = 0
   entered = latch()
   release: Promise<void> = Promise.resolve()
@@ -57,18 +56,6 @@ class Engine extends PythonRuntime implements Evaluator {
       })
     })
     return { stdout: ENC.encode(`${this.name}\n`), stderr: null, exitCode: 0 }
-  }
-
-  async eval(): Promise<EvalResult> {
-    this.entered.open()
-    await this.release
-    return {
-      value: this.name,
-      stdout: new Uint8Array(),
-      stderr: null,
-      exitCode: 0,
-      status: 'complete',
-    }
   }
 
   override close(): Promise<void> {
@@ -181,52 +168,6 @@ describe('removeRuntime', () => {
     await removing
     expect(await line).toBe('AbortError')
     expect(alpha.closed).toBe(1)
-  })
-
-  it('waits for a running evaluation too', async () => {
-    const alpha = new Engine('alpha')
-    const gate = latch()
-    alpha.release = gate.promise
-    const ws = await workspace(alpha)
-    try {
-      const evaluating = ws.executePythonRepl('x')
-      await alpha.entered.promise
-      let removed = false
-      const removing = ws.removeRuntime('alpha').then(() => {
-        removed = true
-      })
-      await new Promise((resolve) => setTimeout(resolve, 10))
-      expect([removed, alpha.closed]).toEqual([false, 0])
-      gate.open()
-      expect((await evaluating).value).toBe('alpha')
-      await removing
-      expect(alpha.closed).toBe(1)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('refuses a repl call that waited out the removal behind a line', async () => {
-    const alpha = new Engine('alpha')
-    const gate = latch()
-    alpha.release = gate.promise
-    const ws = await workspace(alpha)
-    try {
-      const line = python3(ws)
-      await alpha.entered.promise
-      const repl = ws.executePythonRepl('x')
-      const removing = ws.removeRuntime('alpha')
-      gate.open()
-      await line
-      await removing
-      const result = await repl
-      expect([result.exitCode, DEC.decode(result.stderr ?? new Uint8Array())]).toEqual([
-        1,
-        'python3: alpha: runtime was removed from the workspace\n',
-      ])
-    } finally {
-      await ws.close()
-    }
   })
 
   it('refuses the removed python workspace option', () => {

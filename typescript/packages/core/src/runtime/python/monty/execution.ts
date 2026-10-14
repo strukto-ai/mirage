@@ -13,21 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { EvalError } from '../../errors.ts'
 import { mainFilename } from '../execution.ts'
-import type { EvalResult, EvalValue, RunArgs, RunResult } from '../../types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { RunArgs, RunResult } from '../../types.ts'
 import {
   loadMontyModule,
   type MontyModuleLike,
   type MontyPoolLike,
   type MontySessionLike,
 } from './loader.ts'
-import { DEFAULT_PROG, INCOMPLETE_MARKERS, LIMITS } from './constants.ts'
+import { DEFAULT_PROG, LIMITS } from './constants.ts'
 import { displayError } from './errors.ts'
 import { MontyFs } from './fs.ts'
 import type { RuntimeFiles } from '../../files.ts'
-import { SCRIPT_EVAL_TIMEOUT } from '../../constants.ts'
 
 const INTERRUPTED = Symbol('interrupted')
 
@@ -60,28 +57,12 @@ function killWorker(pid: number | undefined): void {
   }
 }
 
-/**
- * Fold Monty's value shapes into the EvalValue contract: the worker
- * hands python dicts back as Map, but EvalValue promises str-keyed
- * plain objects (what pyodide's JSON transport already yields).
- */
-function toEvalValue(value: unknown): EvalValue {
-  if (value instanceof Map) {
-    const obj: Record<string, EvalValue> = {}
-    for (const [key, entry] of value) obj[String(key)] = toEvalValue(entry)
-    return obj
-  }
-  if (Array.isArray(value)) return value.map(toEvalValue)
-  return value as EvalValue
-}
-
 export class MontyExecution {
   private readonly name = 'monty'
   private readonly limits: typeof LIMITS & { maxMemory?: number }
   private module: MontyModuleLike | null = null
   private pool: MontyPoolLike | null = null
   private poolPromise: Promise<MontyPoolLike> | null = null
-  private readonly evalSessions = new Map<string, MontySessionLike>()
 
   /**
    * Args:
@@ -160,124 +141,7 @@ export class MontyExecution {
     }
   }
 
-  /**
-   * Evaluate code in-process; the last expression is the value.
-   *
-   * One-shot mode evaluates on a throwaway pool session; a session id
-   * keeps the session (heap and namespace) alive per id, which is the
-   * console. Inputs bind as globals via monty's native mechanism, and
-   * the code sees workspace files through the same bridge agent code
-   * uses. Console failures come back as transcript results (stderr +
-   * exitCode 1); one-shot failures reject with EvalError.
-   */
-  async eval(
-    code: string,
-    files: RuntimeFiles | null,
-    opts: { inputs?: Record<string, EvalValue>; session?: string; cwd?: PathSpec } = {},
-  ): Promise<EvalResult> {
-    const pool = await this.ensurePool()
-    const module = await this.loadModule()
-    const fresh = opts.session === undefined || !this.evalSessions.has(opts.session)
-    let session: MontySessionLike
-    if (opts.session !== undefined) {
-      let existing = this.evalSessions.get(opts.session)
-      if (existing === undefined) {
-        existing = await pool.checkout({ limits: this.limits })
-        this.evalSessions.set(opts.session, existing)
-      }
-      session = existing
-    } else {
-      session = await pool.checkout({ limits: this.limits })
-    }
-    const out: string[] = []
-    const err: string[] = []
-    const options: Record<string, unknown> = {
-      inputs: { ...(opts.inputs ?? {}) },
-      cwd: fresh ? opts.cwd?.virtual : undefined,
-      printCallback: (stream: 'stdout' | 'stderr', text: string) => {
-        if (stream === 'stderr') err.push(text)
-        else out.push(text)
-      },
-      os: new MontyFs(module, {}, files).handle,
-    }
-    const enc = new TextEncoder()
-    // One-shot evals get the quickjs-style 10s bound (the policy layer
-    // above times out but cannot stop the worker; SIGKILLing it does).
-    // Console sessions stay unbounded, matching python where
-    // cancellation is ambient.
-    const workerPid = session.workerPid
-    const interruption =
-      opts.session === undefined
-        ? this.installInterruption(undefined, SCRIPT_EVAL_TIMEOUT.seconds)
-        : null
-    try {
-      const fed = session.feedRun(code, options)
-      const winner =
-        interruption !== null ? await Promise.race([fed, interruption.promise]) : await fed
-      if (winner === INTERRUPTED) {
-        fed.catch(() => undefined)
-        killWorker(workerPid)
-        throw new EvalError(`monty eval timed out after ${String(SCRIPT_EVAL_TIMEOUT.seconds)}s`)
-      }
-      const value = toEvalValue(winner)
-      return {
-        value,
-        stdout: enc.encode(out.join('')),
-        stderr: err.length > 0 ? enc.encode(err.join('')) : null,
-        exitCode: 0,
-        status: 'complete',
-      }
-    } catch (caught) {
-      if (caught instanceof module.MontySyntaxError) {
-        const trace = displayError(caught)
-        // Console continuation, not a broken program: the source
-        // merely stopped early (an open block or unclosed suite).
-        const incomplete = INCOMPLETE_MARKERS.some((marker) => trace.includes(marker))
-        if (opts.session !== undefined) {
-          if (incomplete) {
-            return {
-              value: null,
-              stdout: new Uint8Array(),
-              stderr: null,
-              exitCode: 0,
-              status: 'incomplete',
-            }
-          }
-          return {
-            value: null,
-            stdout: enc.encode(out.join('')),
-            stderr: enc.encode(trace + '\n'),
-            exitCode: 1,
-            status: 'complete',
-          }
-        }
-        throw new EvalError(trace, { syntax: true, cause: caught })
-      }
-      if (caught instanceof module.MontyRuntimeError) {
-        const trace = displayError(caught)
-        if (opts.session !== undefined) {
-          return {
-            value: null,
-            stdout: enc.encode(out.join('')),
-            stderr: enc.encode(err.join('') + trace + '\n'),
-            exitCode: 1,
-            status: 'complete',
-          }
-        }
-        throw new EvalError(trace, { cause: caught })
-      }
-      throw caught
-    } finally {
-      interruption?.dispose()
-      if (opts.session === undefined) await session.close()
-    }
-  }
-
   async close(): Promise<void> {
-    for (const session of this.evalSessions.values()) {
-      await session.close()
-    }
-    this.evalSessions.clear()
     // A pool still being opened must be awaited before teardown, or its
     // workers outlive the runtime that asked for them. One that fails to
     // open has nothing to close; the command that asked already reported it.
@@ -351,8 +215,6 @@ export class MontyExecution {
       // A dead worker (hard crash, or the pool's own watchdog) is a
       // failed command, not a broken host: exit 1 with a note, prior
       // stdout kept, mirroring python's MontyCrashedError handler.
-      // eval() deliberately does not map this — python's eval lets it
-      // propagate too.
       if (caught instanceof module.MontyCrashedError) {
         err.push(`${this.name}: worker ${caught.timedOut ? 'timed out' : 'crashed'}\n`)
         return {

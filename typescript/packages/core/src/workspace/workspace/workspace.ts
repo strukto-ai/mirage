@@ -112,11 +112,8 @@ import { asyncContextIsolatesTasks, createAsyncContext } from '../../utils/async
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
-import type { BridgeDispatchFn, DispatchFn, EvalResult } from '../../runtime/types.ts'
-import { MontyUnavailableError } from '../../runtime/python/monty/index.ts'
+import type { BridgeDispatchFn, DispatchFn } from '../../runtime/types.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
-import { isEvaluator } from '../../runtime/mixin.ts'
-import { PyodideUnavailableError } from '../../runtime/python/pyodide/errors.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { explainLine, explainedLine, holds, lineJudgments } from '../node/explain.ts'
@@ -162,7 +159,6 @@ import type {
 } from './types.ts'
 import { Mount } from '../mount/spec.ts'
 import { WatchManager } from './watch.ts'
-import { encodeText } from '../../shell/bytes.ts'
 import { placementRefused } from './failure.ts'
 
 export { ExecuteResult } from './types.ts'
@@ -1875,45 +1871,6 @@ export class Workspace {
       },
       signal,
     )
-  }
-
-  /**
-   * The python console: eval-with-a-session on whatever evaluator
-   * captures `python3`. Snippet failures are transcript results (the
-   * console reports and keeps going); only a missing/incapable
-   * runtime throws.
-   */
-  async executePythonRepl(
-    code: string,
-    options: { sessionId?: string | undefined } = {},
-  ): Promise<EvalResult> {
-    if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    const sessionId = options.sessionId ?? this.sessionManager.defaultId
-    const bound = this.runtimeWorld.bindings.python3
-    if (bound === undefined || !isEvaluator(bound)) {
-      throw new Error('no evaluator runtime bound for the repl')
-    }
-    try {
-      return await this.serializeLine(sessionId, undefined, async () => {
-        const release = bound.admit()
-        try {
-          return await bound.eval(code, { session: sessionId })
-        } finally {
-          release()
-        }
-      })
-    } catch (err) {
-      const unavailable =
-        err instanceof PyodideUnavailableError || err instanceof MontyUnavailableError
-      const msg = err instanceof Error ? err.message : String(err)
-      return {
-        value: null,
-        stdout: new Uint8Array(),
-        stderr: encodeText(`python3: ${msg}\n`),
-        exitCode: unavailable ? 127 : 1,
-        status: 'complete',
-      }
-    }
   }
 
   /**

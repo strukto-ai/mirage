@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PythonRuntime } from '../base.ts'
-import { EVALUATOR, type Evaluator } from '../../mixin.ts'
-import type { EvalResult, EvalValue, RunArgs, RunResult } from '../../types.ts'
+import type { RunArgs, RunResult } from '../../types.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeFiles } from '../../files.ts'
@@ -45,7 +44,7 @@ import { MontyExecution } from './execution.ts'
  * refuses class inheritance, method decorators and `yield` — use the
  * pyodide runtime for a program that needs those.
  */
-export class MontyRuntime extends PythonRuntime implements Evaluator {
+export class MontyRuntime extends PythonRuntime {
   readonly name = 'monty'
   protected override readonly versionSuffix = ' (monty)'
   // The interpreter is an in-process guest with no host syscalls: its
@@ -57,7 +56,6 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   // run; the refusal names this runtime rather than inventing a
   // "No module named" that would imply a search happened.
   override readonly runsModules = false
-  readonly [EVALUATOR] = true as const
   declare config: MontyConfig
   private readonly maxMemory: number | null
   private readonly execution: MontyExecution
@@ -101,26 +99,6 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     merged.set(notice, 0)
     merged.set(stderr, notice.length)
     return { ...result, stderr: merged }
-  }
-
-  eval(
-    code: string,
-    opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
-  ): Promise<EvalResult> {
-    const context = this.captureContext()
-    const nested = (context?.processes?.depth ?? 0) > 0
-    if (nested && opts.session !== undefined)
-      return Promise.reject(new Error('nested persistent evaluation is unsupported'))
-    const execution = nested ? new MontyExecution(this.maxMemory) : this.execution
-    return execution
-      .eval(
-        code,
-        this.perRunVfs(context),
-        context === undefined ? opts : { ...opts, cwd: context.cwd },
-      )
-      .finally(async () => {
-        if (execution !== this.execution) await execution.close()
-      })
   }
 
   override close(): Promise<void> {

@@ -57,18 +57,21 @@ describe('pyodide extended attributes', { timeout: 120_000 }, () => {
   it('answer ENOTSUP where no worker can wait on the dispatcher', async () => {
     const rt = new PyodideRuntime()
     try {
-      const out = await rt.eval(
-        [
+      const out = await rt.run({
+        code: [
           'import errno, os',
           'try:',
           '    os.listxattr("/data")',
           '    answer = "served"',
           'except OSError as exc:',
           '    answer = exc.errno == errno.ENOTSUP',
-          'answer',
+          'print(answer)',
         ].join('\n'),
-      )
-      expect(out.value).toBe(true)
+        args: [],
+        env: {},
+        stdin: null,
+      })
+      expect(new TextDecoder().decode(out.stdout)).toBe('True\n')
     } finally {
       await rt.close()
     }

@@ -1,6 +1,4 @@
-import ast
 import base64
-import codeop
 import errno
 import glob
 import importlib
@@ -489,39 +487,6 @@ class OutputCapture(io.RawIOBase):
         return list(self.data)
 
 
-repl_session_globals = {}
-repl_session_cwds = {}
-
-
-@contextmanager
-def working_directory(cwd, session=None):
-    saved_getcwd, saved_chdir = os.getcwd, os.chdir
-    saved_cwd = saved_getcwd()
-    entered = False
-    if session is not None:
-        # A vanished cwd still fails this feed, but the next can recover.
-        repl_session_cwds[session] = "/"
-    try:
-        if cwd:
-            saved_chdir(cwd)
-        entered = True
-        yield
-    finally:
-        try:
-            if entered and session is not None:
-                repl_session_cwds[session] = saved_getcwd()
-        finally:
-            os.getcwd, os.chdir = saved_getcwd, saved_chdir
-            saved_chdir(saved_cwd)
-
-
-def eval_enc(o):
-    if isinstance(o, (bytes, bytearray)):
-        b64 = base64.b64encode(bytes(o)).decode("ascii")
-        return {"__mirage_bytes__": b64}
-    raise TypeError("%s is not JSON-serializable" % type(o).__name__)
-
-
 class InvocationFlags(tuple):
     """Read-only sys.flags view for switches implemented by a warm guest."""
 
@@ -768,134 +733,6 @@ def run(request, arm_interrupt, disarm_interrupt):
         exit_code = _exit_status
         _exit_status = None
     return (out_bytes.to_list(), err_bytes.to_list(), exit_code)
-
-
-def evaluate(user_code, eval_inputs, cwd=""):
-    out_bytes = OutputCapture()
-    err_bytes = OutputCapture()
-    out_text = out_bytes.text
-    err_text = err_bytes.text
-
-    with out_bytes, err_bytes:
-        ok = True
-        syntax = False
-        value_json = "null"
-        try:
-            tree = ast.parse(user_code)
-        except SyntaxError:
-            ok = False
-            syntax = True
-            err_bytes.diagnostic(traceback.format_exc())
-        else:
-            last = None
-            if tree.body and isinstance(tree.body[-1], ast.Expr):
-                last = ast.Expression(tree.body[-1].value)
-                tree.body = tree.body[:-1]
-            g = dict(eval_inputs)
-            g.setdefault("__builtins__", __builtins__)
-            saved_stdout, saved_stderr = sys.stdout, sys.stderr
-            sys.stdout, sys.stderr = out_text, err_text
-            try:
-                with working_directory(cwd):
-                    exec(compile(tree, "<eval>", "exec"), g)
-                    value = None
-                    if last is not None:
-                        value = eval(compile(last, "<eval>", "eval"), g)
-                try:
-                    value_json = json.dumps(value, default=eval_enc)
-                except TypeError:
-                    ok = False
-                    err_bytes.diagnostic(
-                        "eval: result of type %s is not JSON-serializable\n"
-                        % type(value).__name__
-                    )
-            except BaseException:
-                ok = False
-                err_bytes.diagnostic(traceback.format_exc())
-            finally:
-                sys.stdout, sys.stderr = saved_stdout, saved_stderr
-
-    return (value_json, out_bytes.to_list(), err_bytes.to_list(), ok, syntax)
-
-
-def repl(user_code, repl_session_id, repl_inputs, cwd=""):
-    global _exit_status
-    sid = repl_session_id
-    if sid not in repl_session_globals:
-        repl_session_cwds[sid] = cwd or os.getcwd()
-        repl_session_globals[sid] = {
-            "__name__": "__main__",
-            "__doc__": None,
-            "__package__": None,
-            "__loader__": None,
-            "__spec__": None,
-            "__annotations__": {},
-            "__builtins__": __builtins__,
-        }
-    repl_globals = repl_session_globals[sid]
-    repl_globals.update(dict(repl_inputs))
-
-    out_bytes = OutputCapture()
-    err_bytes = OutputCapture()
-    out_text = out_bytes.text
-    err_text = err_bytes.text
-
-    with out_bytes, err_bytes:
-        status = "complete"
-        exit_code = 0
-        codeobj = None
-
-        try:
-            codeobj = codeop.compile_command(user_code, "<repl>", "single")
-        except (SyntaxError, ValueError, OverflowError):
-            err_bytes.diagnostic(traceback.format_exc())
-            exit_code = 1
-            codeobj = False
-
-        if codeobj is None:
-            status = "incomplete"
-        elif codeobj is not False:
-            saved_stdout = sys.stdout
-            saved_stderr = sys.stderr
-            saved_stdin = sys.stdin
-            saved_exit = os._exit
-            sys.stdout = out_text
-            sys.stderr = err_text
-            sys.stdin = io.TextIOWrapper(
-                io.BytesIO(b""), encoding="utf-8", errors="replace"
-            )
-            os._exit = program_exit
-            try:
-                with working_directory(repl_session_cwds[sid], sid):
-                    exec(codeobj, repl_globals)
-            except SystemExit as e:
-                code = e.code
-                if code is None:
-                    exit_code = 0
-                elif isinstance(code, bool):
-                    exit_code = int(code)
-                elif isinstance(code, int):
-                    exit_code = code
-                else:
-                    err_bytes.diagnostic(str(code) + "\n")
-                    exit_code = 1
-                status = "exit"
-            except ProgramExit as e:
-                exit_code = e.code
-                status = "exit"
-            except BaseException:
-                err_bytes.diagnostic(traceback.format_exc())
-                exit_code = 1
-            finally:
-                sys.stdout = saved_stdout
-                sys.stderr = saved_stderr
-                sys.stdin = saved_stdin
-                os._exit = saved_exit
-
-    if _exit_status is not None:
-        exit_code, status = _exit_status, "exit"
-        _exit_status = None
-    return (out_bytes.to_list(), err_bytes.to_list(), exit_code, status)
 
 
 def seed_sys_path(paths):

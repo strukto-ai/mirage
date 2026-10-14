@@ -24,10 +24,6 @@ import type { RuntimeOptions } from '../config.ts'
  * `language` and the default captures are declared once and
  * python-tier behavior has one home. A new Python engine subclasses
  * this, not LanguageRuntime.
- *
- * The repl is deliberately not part of this tier: it rides the general
- * Evaluator capability (`isEvaluator` plus `eval` with a session id),
- * which nothing about it makes python-shaped.
  */
 export abstract class PythonRuntime extends LanguageRuntime {
   readonly language: RuntimeLanguage = 'python'

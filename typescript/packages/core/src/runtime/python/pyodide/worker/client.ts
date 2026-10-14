@@ -15,10 +15,9 @@
 import { noWorker, PyodideMemoryError, PyodideUnavailableError } from '../errors.ts'
 import { watchMemory } from '../watchdog.ts'
 import { memoryLimit } from '../../../config.ts'
-import { EvalError } from '../../../errors.ts'
 import { classify } from '../../../../errors/classify.ts'
 import { CommandTimeoutError } from '../../../../errors/types.ts'
-import type { BridgeDispatchFn, EvalResult, RunResult } from '../../../types.ts'
+import type { BridgeDispatchFn, RunResult } from '../../../types.ts'
 import type { RuntimeContext } from '../../../binding.ts'
 import { RuntimeFiles } from '../../../files.ts'
 import { applyMutation } from '../fs/journal.ts'
@@ -161,14 +160,12 @@ export class PyodideWorkerClient {
     request: ExecuteRequest,
     context: RuntimeContext,
     signal?: AbortSignal,
-  ): Promise<RunResult | EvalResult> {
+  ): Promise<RunResult> {
     if (this.failure !== null) throw this.failure
     const files = RuntimeFiles.of(context)
     const { dispatch, scope } = context
     const responses = new Set<Promise<void>>()
-    const processes = new GuestProcessTable(
-      request.method === 'run' ? context : { ...context, processes: null },
-    )
+    const processes = new GuestProcessTable(context)
     const cap = request.config.maxMemory ?? null
     const limit = memoryLimit(cap)
     const unwatch =
@@ -209,8 +206,6 @@ export class PyodideWorkerClient {
         if (message.kind === 'result') return message.value
         if (message.name === 'PyodideUnavailableError')
           throw new PyodideUnavailableError(message.message)
-        if (message.name === 'EvalError')
-          throw new EvalError(message.message, { syntax: message.syntax ?? false })
         if (message.name === 'CommandTimeoutError' && message.seconds !== undefined)
           throw new CommandTimeoutError('pyodide', message.seconds)
         throw new Error(message.message)
