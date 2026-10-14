@@ -234,9 +234,9 @@ interface PrimitiveFails {
 function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails: PrimitiveFails) {
   const backend = makeBackend(files, dirs)
   const statErr = fails.statFails ?? new Map<string, Error>()
-  const stat: StatFn = (p, index) => {
+  const stat: StatFn = (p) => {
     const err = statErr.get(key(p))
-    return err === undefined ? backend.stat(p, index) : Promise.reject(err)
+    return err === undefined ? backend.stat(p) : Promise.reject(err)
   }
   const readErr = fails.readFails ?? new Map<string, Error>()
   const writeErr = fails.writeFails ?? new Map<string, Error>()

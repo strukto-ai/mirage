@@ -642,6 +642,7 @@ async function holdsDirectory(
     return await isDirectory(stat, path, index)
   } catch (err) {
     if (!isFsError(err)) throw err
+    console.debug(`cp: destination probe of ${path.virtual} failed: ${String(err)}`)
     return false
   }
 }

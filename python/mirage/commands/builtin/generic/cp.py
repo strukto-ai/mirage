@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import logging
 from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
@@ -72,6 +73,8 @@ from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import CycleError, parent, resolve_path
 from mirage.utils.quote import shell_quote_always
 from mirage.view.types import LinkView
+
+_logger = logging.getLogger(__name__)
 
 UPDATE_MODES = ("all", "none", "none-fail", "older")
 SPECIAL_FILE_NOUNS = {
@@ -828,7 +831,10 @@ async def _holds_directory(stat: StatFn, path: PathSpec) -> bool:
     """
     try:
         return await is_directory(stat, path)
-    except FS_ERRORS:
+    except FS_ERRORS as exc:
+        _logger.debug(
+            "cp: destination probe of %s failed: %s", path.virtual, exc
+        )
         return False
 
 
