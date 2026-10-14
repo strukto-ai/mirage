@@ -22,7 +22,7 @@ from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkError
-from mirage.io.stream import ensure_stream
+from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -357,6 +357,32 @@ async def merge_split_errors(
     io.stderr = existing + err
     io.exit_code = exit_code
     return out, io
+
+
+async def reported_stream(
+    source: AsyncIterator[bytes], io: IOResult, path: PathSpec, cmd_name: str
+) -> AsyncIterator[bytes]:
+    """Report a deferred filesystem error while allowing later operands.
+
+    A read that fails once the stat passed is reported like a missing
+    operand, and the next operand still prints. Mirrors TypeScript's
+    ``reportedStream``.
+
+    Args:
+        source (AsyncIterator[bytes]): the operand's bytes.
+        io (IOResult): the result its failure is reported on.
+        path (PathSpec): the operand.
+        cmd_name (str): the command whose diagnostic is reported.
+    """
+    try:
+        async for chunk in source:
+            yield chunk
+    except FS_ERRORS as exc:
+        existing = await materialize(io.stderr)
+        io.stderr = existing + encode_text(fs_error_line(cmd_name, path, exc))
+        io.exit_code = 1
+    finally:
+        await close_quietly(source)
 
 
 async def _awaited_stream(

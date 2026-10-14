@@ -4735,6 +4735,58 @@
           }
         }
       ]
+    },
+    {
+      "id": "stream_cut_continues_after_read_failure",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/denied": "first,x\nsecond,y\n",
+                "/good": "good,x\n"
+              },
+              "chunk_size": 8,
+              "fail_after": 1,
+              "fail_errno": "EACCES"
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cut -d, -f1 /data/missing /data/denied /data/good",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "first\ngood\n",
+              "stderr": "cut: /data/missing: No such file or directory\ncut: /data/denied: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 2
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/denied",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
     }
   ]
 }

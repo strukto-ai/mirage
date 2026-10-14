@@ -262,6 +262,7 @@ class TrackedStreamVFS extends CachedRAMVFS {
     private readonly chunkSize: number,
     private readonly failAfter?: number,
     private readonly stallAfter?: number,
+    private readonly failErrno?: string,
   ) {
     super()
   }
@@ -279,7 +280,7 @@ class TrackedStreamVFS extends CachedRAMVFS {
           await sleep(Infinity, signal)
         }
         if (this.failAfter !== undefined && offset / this.chunkSize >= this.failAfter) {
-          throw new Error('stream tail fetched')
+          throw Object.assign(new Error('stream tail fetched'), { code: this.failErrno })
         }
         yield data.subarray(offset, offset + this.chunkSize)
       }
@@ -336,6 +337,7 @@ for (const register of [registerNodeVfs, registerBrowserVfs]) {
       (config.chunk_size as number | undefined) ?? 16384,
       config.fail_after as number | undefined,
       config.stall_after as number | undefined,
+      config.fail_errno as string | undefined,
     )
     const files = (config.files ?? {}) as Record<string, string>
     vfs.loadState({

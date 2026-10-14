@@ -1,7 +1,11 @@
+import asyncio
+
 import pytest
 
-from mirage.commands.builtin.generic.cut import cut, parse_flags
+from mirage.commands.builtin.generic.cut import cut, cut_generic, parse_flags
+from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
+from mirage.types import FileStat, FileType, PathSpec
 
 
 def test_multi_char_delimiter_is_rejected():
@@ -107,3 +111,63 @@ async def test_cut_records_survive_one_byte_chunks(data, expected):
         },
     )
     assert await materialize(output) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", [b"", b"first,x\n"])
+async def test_cut_reports_late_read_errors_and_continues(prefix):
+    closed = []
+
+    async def stat(path):
+        if path.virtual == "/missing":
+            raise FileNotFoundError(path.virtual)
+        return FileStat(name=path.virtual, type=FileType.FILE)
+
+    async def source(path):
+        try:
+            if path.virtual == "/denied":
+                if prefix:
+                    yield prefix
+                raise PermissionError(path.virtual)
+            yield b"good,x\n"
+        finally:
+            closed.append(path.virtual)
+
+    out, io = await cut_generic(
+        [PathSpec.from_str_path(p) for p in ("/missing", "/denied", "/good")],
+        [],
+        CommandOpts(flags={"fields": "1", "delimiter": ","}),
+        stat,
+        source,
+    )
+    assert (
+        await materialize(out) == (b"first\n" if prefix else b"") + b"good\n"
+    )
+    assert await materialize(io.stderr) == (
+        b"cut: /missing: No such file or directory\n"
+        b"cut: /denied: Permission denied\n"
+    )
+    assert io.exit_code == 1
+    assert closed == ["/denied", "/good"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error", [RuntimeError("backend failed"), asyncio.CancelledError()]
+)
+async def test_cut_does_not_continue_after_fatal_error_or_cancellation(error):
+    opened = []
+
+    async def source(path):
+        opened.append(path.virtual)
+        raise error
+        yield b""
+
+    out, _ = await cut(
+        [PathSpec.from_str_path(p) for p in ("/failed", "/untouched")],
+        read_stream=source,
+        flags={"fields": "1"},
+    )
+    with pytest.raises(type(error)):
+        await materialize(out)
+    assert opened == ["/failed"]

@@ -100,12 +100,14 @@ class TrackedStreamVFS(CachedRAMVFS):
         fail_after: int | None = None,
         stall_after: int | None = None,
         repeat: int = 1,
+        fail_errno: str | None = None,
     ) -> None:
         super().__init__(
             {path: data * repeat for path, data in (files or {}).items()}
         )
         self.chunk_size = chunk_size
         self.fail_after = fail_after
+        self.fail_errno = fail_errno
         self.stall_after = stall_after
         self.pulls = 0
         self.closed = 0
@@ -126,6 +128,11 @@ class TrackedStreamVFS(CachedRAMVFS):
                     self.fail_after is not None
                     and offset // self.chunk_size >= self.fail_after
                 ):
+                    if self.fail_errno is not None:
+                        raise OSError(
+                            getattr(errno, self.fail_errno),
+                            "stream tail fetched",
+                        )
                     raise OSError("stream tail fetched")
                 yield data[offset : offset + self.chunk_size]
         finally:

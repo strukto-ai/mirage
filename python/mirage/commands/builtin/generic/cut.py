@@ -5,6 +5,7 @@ from mirage.commands.builtin.cut_ranges import cut_stream, parse_ranges
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     normalized_read,
+    reported_stream,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
@@ -112,22 +113,28 @@ async def cut(
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     read_stream = stdin_stream(read_stream, stdin)
     if paths:
+        io = IOResult()
         outputs = [
-            cut_stream(
-                read_stream(path),
-                ranges=ranges,
-                mode=parsed.mode,
-                delimiter=parsed.delimiter,
-                complement=parsed.complement,
-                only_delimited=parsed.only_delimited,
-                whitespace=parsed.whitespace,
-                no_partial=parsed.no_partial,
-                output_delimiter=parsed.output_delimiter,
-                zero_terminated=parsed.zero_terminated,
+            reported_stream(
+                cut_stream(
+                    read_stream(path),
+                    ranges=ranges,
+                    mode=parsed.mode,
+                    delimiter=parsed.delimiter,
+                    complement=parsed.complement,
+                    only_delimited=parsed.only_delimited,
+                    whitespace=parsed.whitespace,
+                    no_partial=parsed.no_partial,
+                    output_delimiter=parsed.output_delimiter,
+                    zero_terminated=parsed.zero_terminated,
+                ),
+                io,
+                path,
+                "cut",
             )
             for path in paths
         ]
-        return async_chain(outputs), IOResult()
+        return async_chain(outputs), io
     source = resolve_source(stdin)
     return cut_stream(
         source,

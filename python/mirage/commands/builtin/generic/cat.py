@@ -6,6 +6,7 @@ from mirage.commands.builtin.utils.limit import truncate_stream
 from mirage.commands.builtin.utils.operands import (
     normalized_read,
     operands_io,
+    reported_stream,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
@@ -59,31 +60,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CatFlags:
             or show_all
         ),
     )
-
-
-async def _reported(
-    source: AsyncIterator[bytes], io: IOResult, path: PathSpec
-) -> AsyncIterator[bytes]:
-    """One operand of a multi-operand cat, reported if its read fails.
-
-    A read that fails once the stat passed is reported like a missing
-    operand, and the next operand still prints. Mirrors TypeScript's
-    ``reported``.
-
-    Args:
-        source (AsyncIterator[bytes]): the operand's bytes.
-        io (IOResult): the result its failure is reported on.
-        path (PathSpec): the operand.
-    """
-    try:
-        async for chunk in source:
-            yield chunk
-    except FS_ERRORS as exc:
-        existing = io.stderr if isinstance(io.stderr, bytes) else b""
-        io.stderr = existing + encode_text(fs_error_line("cat", path, exc))
-        io.exit_code = 1
-    finally:
-        await close_quietly(source)
 
 
 def _wants_display(parsed: CatFlags) -> bool:
@@ -155,7 +131,10 @@ async def cat_generic(
             source: ByteSource = await source_for(readable[0])
         elif local:
             source = async_chain(
-                [_reported(await source_for(p), io, p) for p in readable]
+                [
+                    reported_stream(await source_for(p), io, p, "cat")
+                    for p in readable
+                ]
             )
         else:
             parts: list[bytes] = []

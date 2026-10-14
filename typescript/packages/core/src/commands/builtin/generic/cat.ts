@@ -17,12 +17,10 @@ import { concat } from '../../../utils/bytes.ts'
 import { asyncChain, ensureStream } from '../../../io/stream.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
-import { isFsError } from '../../../errors/fs.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { splitReadable } from '../utils/operands.ts'
+import { reportedStream, splitReadable } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
@@ -92,25 +90,6 @@ function visible(
     }
   }
   return Uint8Array.from(out)
-}
-
-// One operand of a multi-operand cat: a read that fails once the stat passed
-// (a table past its read cap) is reported like a missing operand, and the
-// next operand still prints. The dispatcher keeps only a read that ends, so
-// nothing partial reaches the cache. Mirrors the python non-local loop in
-// cat_generic.
-async function* reported(
-  source: AsyncIterable<Uint8Array>,
-  io: IOResult,
-  path: PathSpec,
-): AsyncIterable<Uint8Array> {
-  try {
-    yield* source
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine('cat', path, err))])
-    io.exitCode = 1
-  }
 }
 
 /**
@@ -204,7 +183,7 @@ export async function catGeneric(
         source = truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
       }
       const out = ensureStream(source)
-      outputs.push(readable.length === 1 ? out : reported(out, io, p))
+      outputs.push(readable.length === 1 ? out : reportedStream(out, io, p, 'cat'))
     }
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)
     if (merged === undefined) throw new Error('cat: missing readable stream')

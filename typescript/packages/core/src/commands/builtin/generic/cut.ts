@@ -20,7 +20,7 @@ import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { cutStream, parseRanges, type CutOptions } from '../cut_ranges.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { operandsIo, splitReadable } from '../utils/operands.ts'
+import { operandsIo, reportedStream, splitReadable } from '../utils/operands.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
@@ -102,7 +102,9 @@ export async function cutGeneric(
     const [ok, err] = await splitReadable(paths, stdinStat(stat), 'cut')
     const io = operandsIo(err)
     if (ok.length === 0 && err !== '') return [null, io]
-    const outputs = ok.map((operand) => cutStream(stream(operand), parsed))
+    const outputs = ok.map((operand) =>
+      reportedStream(cutStream(stream(operand), parsed), io, operand, 'cut'),
+    )
     const out: ByteSource = asyncChain(outputs)
     return [out, io]
   }

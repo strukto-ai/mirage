@@ -23,6 +23,7 @@ import { readFailExitCode } from '../../spec/usage.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 type Stat = (p: PathSpec) => Promise<FileStat>
 
@@ -240,4 +241,20 @@ export function operandsIo(err: string, init?: { exitCode?: number }): IOResult 
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function* singleChunk(data: Uint8Array): AsyncIterable<Uint8Array> {
   if (data.byteLength > 0) yield data
+}
+
+/** Report a deferred filesystem error while allowing later operands. */
+export async function* reportedStream(
+  source: AsyncIterable<Uint8Array>,
+  io: IOResult,
+  path: PathSpec,
+  cmdName: string,
+): AsyncIterable<Uint8Array> {
+  try {
+    yield* source
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine(cmdName, path, err))])
+    io.exitCode = 1
+  }
 }
