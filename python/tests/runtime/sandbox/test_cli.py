@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import contextlib
 import os
 import signal
 import sys
@@ -152,8 +151,7 @@ async def test_a_cancelled_call_does_not_wait_on_a_descendant_that_left(
             with pytest.raises(asyncio.CancelledError):
                 await task
     finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(escaped, signal.SIGKILL)
+        os.kill(escaped, signal.SIGKILL)
 
 
 @pytest.mark.asyncio
@@ -178,5 +176,4 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
             _, _, code = await task
         assert code != 0 and not children
     finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(escaped, signal.SIGKILL)
+        os.kill(escaped, signal.SIGKILL)
