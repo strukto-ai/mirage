@@ -98,6 +98,10 @@ describe('attrsToFileStat', () => {
 const ENC = new TextEncoder()
 const TOP = 'd 755 4096 1700000000.5 1700000001.0 1000 1000 \0'
 
+function bytes(text: string): Uint8Array {
+  return ENC.encode(text)
+}
+
 function scope(vfsPath = ''): PathSpec {
   const virtual = vfsPath === '' ? '/s' : `/s/${vfsPath}`
   return new PathSpec({ virtual, directory: virtual, vfsPath, rawPath: virtual })
@@ -143,7 +147,6 @@ describe('tree', () => {
     expect(rows).toEqual(new Map())
   })
 
-  const bytes = (text: string): Uint8Array => ENC.encode(text)
   it.each<[string, RunAnswer]>([
     ['a failed find', [1, bytes(TOP), new Uint8Array()]],
     ['stderr', [0, bytes(TOP), bytes("find: 'x': Permission denied\n")]],

@@ -33,6 +33,10 @@ TREE = {
 }
 
 
+async def _blob_stream(config, owner, repo, blob_sha, session=None):
+    yield blob_sha.encode()
+
+
 @pytest.fixture
 def tree_calls(monkeypatch):
     calls = []
@@ -197,15 +201,12 @@ async def test_always_reads_current_github_blob_after_probe(
     async def read_bytes(config, owner, repo, blob_sha, session=None):
         return blob_sha.encode()
 
-    async def blob_stream(config, owner, repo, blob_sha, session=None):
-        yield blob_sha.encode()
-
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
     monkeypatch.setattr(
         "mirage.core.github.tree.fetch_dir_page", fetch_dir_page
     )
     monkeypatch.setattr("mirage.core.github.read.read_bytes", read_bytes)
-    monkeypatch.setattr("mirage.core.github.read.stream_blob", blob_stream)
+    monkeypatch.setattr("mirage.core.github.read.stream_blob", _blob_stream)
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
     ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     try:

@@ -21,6 +21,15 @@ function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
 }
 
+function file(vfsPath: string): PathSpec {
+  return new PathSpec({
+    virtual: `/s/${vfsPath}`,
+    directory: '/s',
+    vfsPath,
+    rawPath: `/s/${vfsPath}`,
+  })
+}
+
 describe('core/ssh/read', () => {
   it('returns file bytes for an existing file', async () => {
     const accessor = makeFakeAccessor({
@@ -60,8 +69,6 @@ describe('core/ssh/read', () => {
 
 describe('lineCount', () => {
   const ENC = new TextEncoder()
-  const file = (vfsPath: string): PathSpec =>
-    new PathSpec({ virtual: `/s/${vfsPath}`, directory: '/s', vfsPath, rawPath: `/s/${vfsPath}` })
 
   it.each(['42\n', '     42\n'])('is what wc counts (%j)', async (out) => {
     const accessor = new RunAccessor('data', [0, ENC.encode(out), new Uint8Array()])

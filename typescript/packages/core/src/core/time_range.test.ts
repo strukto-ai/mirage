@@ -9,6 +9,10 @@ function dayMatch(day: string): ScopeMatch {
   return { kind: 'day', vfsPath: `/c/${day}`, slots: { day }, scope: null, pattern: null }
 }
 
+function msgs(...stamps: string[]): { ts: string }[] {
+  return stamps.map((ts) => ({ ts }))
+}
+
 describe('parseTime', () => {
   it('honors the offset and milliseconds', () => {
     expect(parseTime('2026-06-01T00:00:00Z')).toBe(JUNE_1)
@@ -96,7 +100,6 @@ describe('guardDay', () => {
 
 describe('followedDay', () => {
   const DEC = new TextDecoder()
-  const msgs = (...stamps: string[]): { ts: string }[] => stamps.map((ts) => ({ ts }))
   const text = (step: IteratorResult<Uint8Array>): string =>
     DEC.decode((step.value as Uint8Array | undefined) ?? new Uint8Array())
 
