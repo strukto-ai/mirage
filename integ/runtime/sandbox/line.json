@@ -3,11 +3,12 @@
     {
       "id": "echo",
       "runtimes": [
+        "apple_container",
         "docker",
-        "ssh",
         "e2b",
+        "microsandbox",
         "smolvm",
-        "apple_container"
+        "ssh"
       ],
       "steps": [
         {
@@ -22,11 +23,12 @@
     {
       "id": "exit_code",
       "runtimes": [
+        "apple_container",
         "docker",
-        "ssh",
         "e2b",
+        "microsandbox",
         "smolvm",
-        "apple_container"
+        "ssh"
       ],
       "steps": [
         {
@@ -40,8 +42,8 @@
     {
       "id": "quoting",
       "runtimes": [
-        "ssh",
-        "e2b"
+        "e2b",
+        "ssh"
       ],
       "steps": [
         {

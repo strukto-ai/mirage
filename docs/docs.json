@@ -245,12 +245,13 @@
                 "icon": "server",
                 "pages": [
                   "home/setup/runtime/sandbox",
-                  "home/setup/runtime/sandbox/sandlock",
-                  "home/setup/runtime/sandbox/docker",
                   "home/setup/runtime/sandbox/apple_container",
-                  "home/setup/runtime/sandbox/smolvm",
                   "home/setup/runtime/sandbox/daytona",
+                  "home/setup/runtime/sandbox/docker",
                   "home/setup/runtime/sandbox/e2b",
+                  "home/setup/runtime/sandbox/microsandbox",
+                  "home/setup/runtime/sandbox/sandlock",
+                  "home/setup/runtime/sandbox/smolvm",
                   "home/setup/runtime/sandbox/ssh"
                 ]
               }

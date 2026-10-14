@@ -1,0 +1,233 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import json
+import os
+
+import pytest
+
+from mirage import RAMVFS, MountMode, Workspace
+from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
+from mirage.runtime.table import build_runtime
+from mirage.runtime.types import ProcessExecution, ShellRequest
+from mirage.types import PathSpec
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (b'{"status":"Stopped"}', "not running"),
+        (b'{"status":"Paused"}', "not running"),
+        (b'{"status":"Crashed"}', "not running"),
+        (b'{"status":"Draining"}', "not running"),
+        (b'{"status":"Starting"}', "not running"),
+        (b'{"status":"Created"}', "not running"),
+        (b'{"status":"unknown"}', "not running"),
+        (b"{}", "not running"),
+        (b"null", "invalid status object"),
+        (b"[]", "invalid status object"),
+        (b"not json", "unreadable json"),
+    ],
+)
+async def test_refuses_unusable_status_before_exec(
+    monkeypatch, status, message
+):
+    calls = []
+
+    async def invoke(executable, hint, args, stdin):
+        calls.append(args)
+        return status, b"", 0
+
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.microsandbox.runtime.run_cli", invoke
+    )
+    runtime = build_runtime("microsandbox", config={"sandbox": "box"})
+    with pytest.raises(RuntimeError, match=message):
+        await runtime.execute(
+            ShellRequest(
+                line="touch /must-not-exist", cwd=PathSpec.from_str_path("/")
+            )
+        )
+    assert calls == [["inspect", "box", "--format", "json"]]
+
+
+@pytest.mark.asyncio
+async def test_inspect_failure_preserves_cli_error(monkeypatch):
+    async def invoke(executable, hint, args, stdin):
+        return b"", b"sandbox not found", 1
+
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.microsandbox.runtime.run_cli", invoke
+    )
+    with pytest.raises(RuntimeError, match="sandbox not found"):
+        await MicrosandboxRuntime(config={"sandbox": "missing"}).connect()
+
+
+SANDBOX = os.environ.get("MIRAGE_INTEG_MICROSANDBOX_SANDBOX")
+
+
+@pytest.mark.asyncio
+async def test_process_maps_the_msb_cli_contract(monkeypatch):
+    calls = []
+
+    async def invoke(executable, hint, args, stdin):
+        calls.append((executable, args, stdin))
+        if args[0] == "inspect":
+            return b'{"status":"Running"}', b"", 0
+        return b"output", b"diagnostic", 7
+
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.microsandbox.runtime.run_cli", invoke
+    )
+    runtime = build_runtime(
+        "microsandbox", config={"sandbox": "box", "env": {"MARK": "config"}}
+    )
+    words = ("python3", "a b", "$(literal)", "", "--flag")
+    result = await runtime.execute(
+        ProcessExecution(
+            argv=words,
+            cwd=PathSpec.from_str_path("/work"),
+            env={"MARK": "request"},
+            stdin=b"input",
+        )
+    )
+    assert calls == [
+        ("msb", ["inspect", "box", "--format", "json"], None),
+        (
+            "msb",
+            [
+                "exec",
+                "box",
+                "--quiet",
+                "--no-tty",
+                "-w",
+                "/work",
+                "-e",
+                "MARK=request",
+                "--",
+                *words,
+            ],
+            b"input",
+        ),
+    ]
+    assert (result.stdout, result.stderr, result.exit_code) == (
+        b"output",
+        b"diagnostic",
+        7,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not SANDBOX,
+    reason="set MIRAGE_INTEG_MICROSANDBOX_SANDBOX to a guest with Python and /data",
+)
+async def test_real_guest_process_shell_and_fuse():
+    runtime = build_runtime(
+        "microsandbox", config={"sandbox": SANDBOX, "env": {"MARK": "config"}}
+    )
+    assert isinstance(runtime, MicrosandboxRuntime)
+    cwd = PathSpec.from_str_path("/data")
+    payload = b"input\x00\xff\r\n"
+    words = ("a b", "$(echo literal)", "", "--flag")
+    result = await runtime.execute(
+        ProcessExecution(
+            argv=(
+                "python3",
+                "-c",
+                "import json,os,sys; "
+                "sys.stdout.buffer.write(sys.stdin.buffer.read()); "
+                "sys.stderr.write(json.dumps("
+                "[os.getcwd(),os.environ['MARK'],sys.argv[1:]])); "
+                "sys.exit(7)",
+                *words,
+            ),
+            cwd=cwd,
+            env={"MARK": "request"},
+            stdin=payload,
+        )
+    )
+    assert result.stdout == payload
+    assert json.loads(result.stderr) == ["/data", "request", list(words)]
+    assert result.exit_code == 7
+    shell = await runtime.execute(
+        ShellRequest(line='printf "%s" "$MARK"; pwd', cwd=cwd)
+    )
+    assert shell.stdout == b"config/data\n"
+    assert shell.stderr == b""
+    assert shell.exit_code == 0
+    files = await runtime.execute(
+        ProcessExecution(
+            argv=(
+                "python3",
+                "-c",
+                "from pathlib import Path; "
+                "assert any(' /data fuse ' in line for line in "
+                "Path('/proc/mounts').read_text().splitlines()); "
+                "assert Path('hello.txt').read_text() == 'hello from Mirage FUSE\\n'; "
+                "Path('python.txt').write_text('python adapter\\n'); "
+                "assert Path('python.txt').read_text() == 'python adapter\\n'; "
+                "print('Mirage FUSE read/write passed')",
+            ),
+            cwd=cwd,
+        )
+    )
+    assert files.stdout == b"Mirage FUSE read/write passed\n"
+    assert files.stderr == b""
+    assert files.exit_code == 0
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[
+            MicrosandboxRuntime(
+                captures=["python3", "@external"],
+                config={"sandbox": SANDBOX},
+            ),
+            "workspace",
+        ],
+    )
+    try:
+        routed = await ws.shell(
+            "python3 -c 'from pathlib import Path; "
+            'print(Path("/data/python.txt").read_text(), end="")\''
+        )
+        assert routed.stdout == b"python adapter\n"
+        assert not routed.stderr
+        assert routed.exit_code == 0
+    finally:
+        await ws.close()
+    await runtime.close()
+    await build_runtime("microsandbox", config={"sandbox": SANDBOX}).connect()
+
+
+STOPPED_SANDBOX = os.environ.get("MIRAGE_INTEG_MICROSANDBOX_STOPPED_SANDBOX")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not STOPPED_SANDBOX, reason="set a stopped guest to check refusal"
+)
+async def test_real_stopped_guest_is_not_started():
+    runtime = MicrosandboxRuntime(config={"sandbox": STOPPED_SANDBOX})
+    with pytest.raises(RuntimeError, match="status: Stopped"):
+        await runtime.execute(
+            ShellRequest(
+                line="echo must-not-run", cwd=PathSpec.from_str_path("/")
+            )
+        )
+    with pytest.raises(RuntimeError, match="status: Stopped"):
+        await MicrosandboxRuntime(
+            config={"sandbox": STOPPED_SANDBOX}
+        ).connect()

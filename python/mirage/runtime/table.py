@@ -49,6 +49,7 @@ SANDBOX_MODULES: dict[str, str] = {
     "daytona": "mirage.runtime.sandbox.daytona:DaytonaRuntime",
     "docker": "mirage.runtime.sandbox.docker:DockerRuntime",
     "e2b": "mirage.runtime.sandbox.e2b:E2BRuntime",
+    "microsandbox": "mirage.runtime.sandbox.microsandbox:MicrosandboxRuntime",
     "smolvm": "mirage.runtime.sandbox.smolvm:SmolvmRuntime",
     "ssh": "mirage.runtime.sandbox.ssh:SSHRuntime",
 }

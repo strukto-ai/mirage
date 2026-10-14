@@ -50,11 +50,12 @@ def test_coerce_rejects_a_sibling_provider_config():
 @pytest.mark.parametrize(
     "runtime, field",
     [
+        ("daytona", "sandbox_id"),
         ("docker", "container"),
+        ("e2b", "sandbox_id"),
+        ("microsandbox", "sandbox"),
         ("smolvm", "machine"),
         ("ssh", "host"),
-        ("daytona", "sandbox_id"),
-        ("e2b", "sandbox_id"),
     ],
 )
 @pytest.mark.parametrize("blank", ["", "  "])

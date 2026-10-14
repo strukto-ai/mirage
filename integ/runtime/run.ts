@@ -972,18 +972,19 @@ const BACKEND_REQUIRES: Record<string, string[]> = {
 // the line head a step's program runs under in it. A sandbox has none: it
 // runs whole lines, so a case's plain commands are its program.
 const RUNTIME_LANGUAGE: Record<string, string | null> = {
+  apple_container: null,
+  docker: null,
+  e2b: null,
+  host: 'node',
+  local: 'python',
+  microsandbox: null,
   monty: 'python',
-  wasi: 'python',
   pyodide: 'python',
   quickjs: 'js',
-  local: 'python',
   sandlock: 'python',
-  host: 'node',
-  docker: null,
-  ssh: null,
-  e2b: null,
   smolvm: null,
-  apple_container: null,
+  ssh: null,
+  wasi: 'python',
 }
 const PROGRAM_HEAD: Record<string, string> = { python: 'python3 -c', js: 'node -e' }
 // Every language a program or an `expect` may be keyed by. `node` is the
@@ -1000,22 +1001,30 @@ const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 // variant is not listed at all. e2b is left out: E2B's sandbox proxy drops
 // the JS SDK's command streams now and then (see the README).
 const RUNTIME_REQUIRES: Record<string, string[]> = {
+  apple_container: ['env:MIRAGE_INTEG_APPLE_CONTAINER'],
+  docker: ['env:MIRAGE_INTEG_DOCKER_CONTAINER'],
+  host: [],
+  local: [],
+  microsandbox: ['env:MIRAGE_INTEG_MICROSANDBOX_SANDBOX'],
   monty: [],
   pyodide: [],
   quickjs: [],
-  local: [],
   sandlock: ['env:MIRAGE_INTEG_SANDLOCK'],
-  host: [],
-  docker: ['env:MIRAGE_INTEG_DOCKER_CONTAINER'],
-  ssh: ['env:MIRAGE_INTEG_SSH_HOST'],
   smolvm: ['env:MIRAGE_INTEG_SMOLVM_MACHINE'],
-  apple_container: ['env:MIRAGE_INTEG_APPLE_CONTAINER'],
+  ssh: ['env:MIRAGE_INTEG_SSH_HOST'],
 }
 // The world entry a runtime is built from, before a case's own `entry`
 // narrows its captures or adds config. Mirrors run.py RUNTIME_ENTRY.
 const RUNTIME_ENTRY: Record<string, { captures?: string[]; config?: Record<string, unknown> }> = {
-  sandlock: { captures: ['python3', 'node', '@external'] },
+  apple_container: {
+    captures: ['*'],
+    config: { container: '${MIRAGE_INTEG_APPLE_CONTAINER}' },
+  },
   docker: { captures: ['*'], config: { container: '${MIRAGE_INTEG_DOCKER_CONTAINER}' } },
+  e2b: { captures: ['*'], config: { sandbox_id: '${MIRAGE_INTEG_E2B_SANDBOX}' } },
+  microsandbox: { captures: ['*'], config: { sandbox: '${MIRAGE_INTEG_MICROSANDBOX_SANDBOX}' } },
+  sandlock: { captures: ['python3', 'node', '@external'] },
+  smolvm: { captures: ['*'], config: { machine: '${MIRAGE_INTEG_SMOLVM_MACHINE}' } },
   ssh: {
     captures: ['*'],
     config: {
@@ -1025,16 +1034,10 @@ const RUNTIME_ENTRY: Record<string, { captures?: string[]; config?: Record<strin
       identity_file: '${MIRAGE_INTEG_SSH_KEY}',
     },
   },
-  e2b: { captures: ['*'], config: { sandbox_id: '${MIRAGE_INTEG_E2B_SANDBOX}' } },
-  smolvm: { captures: ['*'], config: { machine: '${MIRAGE_INTEG_SMOLVM_MACHINE}' } },
-  apple_container: {
-    captures: ['*'],
-    config: { container: '${MIRAGE_INTEG_APPLE_CONTAINER}' },
-  },
 }
 // Runtimes that need a host the hosted runners do not give every job: an
 // unmet requirement skips their variants even under INTEG_RUNTIME_STRICT.
-const OPTIONAL_RUNTIMES = new Set(['sandlock', 'e2b', 'smolvm', 'apple_container'])
+const OPTIONAL_RUNTIMES = new Set(['apple_container', 'e2b', 'microsandbox', 'sandlock', 'smolvm'])
 
 /** The world entry for one runtime of a case's matrix. Mirrors run.py `_entry`. */
 function runtimeEntry(

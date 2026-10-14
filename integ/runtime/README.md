@@ -56,7 +56,7 @@ differs.
 | local                                | the host's `python3`                          | the host's `python3`                           |
 | host                                 | the runner itself, inside `with ws:`          | the runner itself, under `patchNodeFs`         |
 | sandlock                             | host `python3` and `node` under Landlock      | the same                                       |
-| docker, ssh, smolvm, apple_container | whole lines in a box the user runs            | the same                                       |
+| apple_container, docker, microsandbox, smolvm, ssh | whole lines in a box the user runs            | the same                                       |
 | e2b                                  | whole lines in an E2B sandbox                 | not run here (below)                           |
 
 The e2b variants run on the python host only. E2B's sandbox proxy now and
@@ -98,7 +98,7 @@ because the runners run one case at a time. No CLI reaches a process's own
 - `backends` repeats a case over `ram`, `disk`, `ssh`, `s3` and `redis`;
   each mount gets its own key space or directory. `ssh` mounts a fresh
   directory on the ssh runtime's box over SFTP.
-- A runtime the hosted runners cannot give every job (e2b, smolvm,
+- A runtime the hosted runners cannot give every job (e2b, microsandbox, smolvm,
   apple_container, sandlock) is skipped when its requirement is unmet, even
   under `INTEG_RUNTIME_STRICT=1`.
 
@@ -124,18 +124,19 @@ bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/
 
 | Needs                                        | For                                                 |
 | -------------------------------------------- | --------------------------------------------------- |
-| `MIRAGE_WASI_HOME`                           | wasi                                                |
-| `MIRAGE_QUICKJS_HOME`                        | quickjs on the python host                          |
-| `S3_ENDPOINT`                                | `s3` variants and `backend/` on the typescript host |
-| `REDIS_URL`                                  | `redis` variants and `backend/redis.json`           |
-| `MONGODB_URI`                                | `backend/mongodb.json`                              |
-| `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                              |
-| `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                         |
-| `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                 |
-| `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`: sshfs, FUSE, `/boxdata`      |
-| `MIRAGE_INTEG_SMOLVM_MACHINE`                | smolvm                                              |
 | `MIRAGE_INTEG_APPLE_CONTAINER`               | apple_container                                     |
+| `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`: sshfs, FUSE, `/boxdata`      |
+| `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                              |
+| `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                 |
+| `MIRAGE_INTEG_MICROSANDBOX_SANDBOX`          | microsandbox                                        |
 | `MIRAGE_INTEG_SANDLOCK`                      | sandlock                                            |
+| `MIRAGE_INTEG_SMOLVM_MACHINE`                | smolvm                                              |
+| `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                         |
+| `MIRAGE_QUICKJS_HOME`                        | quickjs on the python host                          |
+| `MIRAGE_WASI_HOME`                           | wasi                                                |
+| `MONGODB_URI`                                | `backend/mongodb.json`                              |
+| `REDIS_URL`                                  | `redis` variants and `backend/redis.json`           |
+| `S3_ENDPOINT`                                | `s3` variants and `backend/` on the typescript host |
 
 With `INTEG_RUNTIME_STRICT=1` an unmet requirement fails instead of
 skipping. `MIRAGE_INTEG_BOX_MOUNTS` says the docker or e2b box has sshfs,

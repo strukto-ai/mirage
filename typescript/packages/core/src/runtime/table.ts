@@ -50,6 +50,7 @@ const NODE_RUNTIMES: readonly string[] = [
   'daytona',
   'docker',
   'local',
+  'microsandbox',
   'sandlock',
   'smolvm',
   'ssh',

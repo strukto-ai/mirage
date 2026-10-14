@@ -1,0 +1,143 @@
+---
+title: Microsandbox
+icon: server
+description: Run captured programs in an existing Microsandbox microVM.
+---
+
+`microsandbox` runs captured programs in a running
+[Microsandbox](https://microsandbox.dev) guest, by name. Python and Node
+use the `msb` CLI, just like the smolvm provider uses its CLI. No Microsandbox
+SDK package is needed. You create and start the sandbox; Mirage only runs
+programs in it.
+
+## Installation
+
+Install `msb` on the host and put it on `PATH`. Create a sandbox from an
+image with Mirage, `fuse3`, and the programs your captures need. The
+[sandbox image](/home/setup/runtime/sandbox#the-sandbox-image) can be pushed
+to an OCI registry and used by Microsandbox:
+
+```bash
+msb create my-registry/mirage-fuse:latest --name mirage-box
+```
+
+Guest FUSE was verified with Microsandbox 0.7.8 on macOS Apple Silicon,
+using its Linux aarch64 guest kernel. `/dev/fuse` was present and usable
+as root. If programs run as another user, configure that user's device
+and mount permissions inside the guest.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/runtime/overview#captures).
+Add `python3` to run Python programs in the guest too.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import RAMVFS, MountMode, Workspace
+    from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
+
+    runtime = MicrosandboxRuntime(
+        captures=["python3", "@external"],
+        config={"sandbox": "mirage-box"},
+    )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, MicrosandboxRuntime, Workspace } from '@struktoai/mirage-node'
+
+    const runtime = new MicrosandboxRuntime({
+      captures: ['python3', '@external'],
+      config: { sandbox: 'mirage-box' },
+    })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
+    await ws.shell("python3 -c 'print(1 + 1)'")
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mode: exec
+    runtimes:
+      - name: microsandbox
+        captures: ["python3", "@external"]
+        config:
+          sandbox: mirage-box
+    mounts:
+      /data:
+        vfs: ram
+    ```
+  </Tab>
+</Tabs>
+
+## Connecting the workspace
+
+As with smolvm, serve the workspace with Mirage inside the guest at the
+same paths. Put a `sandbox.yaml` in the image or copy it into the sandbox:
+
+```yaml
+mounts:
+  /data:
+    vfs: ram
+    mode: WRITE
+    backend: fuse
+    mountpoint: /data
+```
+
+```bash
+msb copy sandbox.yaml mirage-box:/tmp/sandbox.yaml
+msb exec mirage-box -- mkdir -p /data
+msb exec mirage-box -- mirage workspace create /tmp/sandbox.yaml
+```
+
+The guest serves its own workspace. A RAM mount there has its own data;
+matching the host's path does not share the host's RAM mount. To share an
+external backend, configure both workspaces to use it. The guest config
+decides its permissions and credentials; the host workspace's policies
+do not automatically apply to guest file operations.
+
+## Notes
+
+- The first command checks `msb inspect --format json` and requires `Running`.
+- Commands preserve stdin, stdout, stderr, exit status, environment and cwd.
+  Process requests pass argument arrays directly, without shell expansion.
+- Closing the runtime leaves the user's sandbox running.
+- Each sandbox shares files and processes across its commands. Use a
+  separate sandbox per tenant.
+- A Mirage timeout cancels the host CLI call; do not rely on it to kill
+  every guest process. Use Microsandbox's own limits when required.
+
+## Real guest checks
+
+The adapter tests can use a running guest with Python and the guest Mirage
+FUSE workspace above. Seed `/data/hello.txt` with
+`hello from Mirage FUSE` followed by a newline before running them:
+
+```bash
+msb exec mirage-box -- sh -c 'printf "hello from Mirage FUSE\n" > /data/hello.txt'
+MIRAGE_INTEG_MICROSANDBOX_SANDBOX=mirage-box \
+  python/.venv/bin/pytest python/tests/runtime/sandbox/microsandbox
+cd typescript
+MIRAGE_INTEG_MICROSANDBOX_SANDBOX=mirage-box \
+  pnpm --filter @struktoai/mirage-node test src/runtime/sandbox/microsandbox/runtime.test.ts
+```
+
+These checks exercise both execution interfaces, binary input, literal
+arguments, environment overrides, separate stderr, nonzero exit status,
+and reading and writing the guest's Mirage FUSE mount.
+
+To check that neither adapter starts a stopped sandbox, run the same test
+files with `MIRAGE_INTEG_MICROSANDBOX_STOPPED_SANDBOX` naming a stopped guest
+and leave `MIRAGE_INTEG_MICROSANDBOX_SANDBOX` unset. Both live checks are
+skipped by default; the tests never create, stop or remove your sandbox.
+
+The shared sandbox corpus also runs on both hosts:
+
+```bash
+INTEG_RUNTIMES=microsandbox MIRAGE_INTEG_MICROSANDBOX_SANDBOX=mirage-box \
+  python/.venv/bin/python integ/runtime/run.py sandbox
+INTEG_RUNTIMES=microsandbox MIRAGE_INTEG_MICROSANDBOX_SANDBOX=mirage-box \
+  pnpm --dir typescript --filter @struktoai/mirage-integ run runtime sandbox
+```

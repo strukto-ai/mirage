@@ -1,6 +1,11 @@
 {
   "baseline": 3484,
  "modules": {
+  "runtime/sandbox/microsandbox/config": {
+   "typescript_only": {
+    "MICROSANDBOX_CONFIG_KEYS": "TypeScript validates interface fields at runtime with an explicit key list; Python's dataclass fields provide that list."
+   }
+  },
   "core/api/client": {
    "typescript_only": {
     "bodyChunks": "Reads a fetch ReadableStream, shared by apiStream and the GitHub transport's stream; Python's api_stream reads aiohttp's iter_chunked."
