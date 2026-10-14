@@ -346,6 +346,8 @@ class MirageSFTPServer(asyncssh.SFTPServer):
             runs one op on the workspace's loop; None awaits it here.
         on_exit (Callable[[], Awaitable[None]] | None): what the client's
             exit ends.
+        passive_sshfs (bool): decode sshfs's reversed symlink arguments
+            on a pipe without SSH peer identification.
     """
 
     def __init__(
@@ -355,11 +357,14 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         run: Callable[[Coroutine[Any, Any, Any]], Awaitable[Any]]
         | None = None,
         on_exit: Callable[[], Awaitable[None]] | None = None,
+        *,
+        passive_sshfs: bool = False,
     ) -> None:
         super().__init__(cast(asyncssh.SSHServerChannel[bytes], chan))
         self._make_core = make_core
         self._run = run
         self._on_exit = on_exit
+        self._passive_sshfs = passive_sshfs
         self._core: MountCore | None = None
         self._lock = asyncio.Lock()
 
@@ -500,6 +505,8 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         return self._encode(await self._call(lambda core: core.readlink(p)))
 
     async def symlink(self, oldpath: bytes, newpath: bytes) -> None:
+        if self._passive_sshfs:
+            oldpath, newpath = newpath, oldpath
         target = oldpath.decode(ENCODING, ERRORS)
         link = self._path(newpath)
         await self._call(lambda core: core.symlink(link, target))
@@ -556,8 +563,8 @@ async def serve_pipe(
 ) -> None:
     """Answer SFTP on a byte pipe as ``session``, until the client closes it.
 
-    The client is ``sshfs -o passive`` (or anything else speaking SFTP on
-    its stdin and stdout); every request it makes is a request of
+    The client is ``sshfs -o passive``, using OpenSSH's reversed symlink
+    wire order. Every request it makes is a request of
     ``session``, held to its hides, modes and policies.
 
     Args:
@@ -573,7 +580,7 @@ async def serve_pipe(
 
     try:
         await run_sftp_server(
-            MirageSFTPServer(None, make_core),
+            MirageSFTPServer(None, make_core, passive_sshfs=True),
             cast("asyncssh.SSHReader[bytes]", PipeReader(reader)),
             cast("asyncssh.SSHWriter[bytes]", writer),
             SFTP_VERSION,

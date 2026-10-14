@@ -50,10 +50,12 @@ HOST_SAFE = {
 # SFTP v3 packet types and the one status code the pipe tests read.
 FXP_INIT = 1
 FXP_STAT = 17
+FXP_SYMLINK = 20
 FXP_VERSION = 2
 FXP_STATUS = 101
 FXP_ATTRS = 105
 FX_NO_SUCH_FILE = 2
+FX_OK = 0
 
 
 def test_every_host_reaching_method_is_overridden():
@@ -216,6 +218,46 @@ async def test_a_pipe_answers_as_its_session():
     requests.feed_eof()
     await asyncio.wait_for(served, 5)
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [b"real", b"missing"])
+async def test_a_pipe_accepts_sshfs_symlink_wire_order(target):
+    ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/notes/real", b"target")
+    await ws.session("agent")
+    requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
+    served = asyncio.create_task(
+        serve_pipe(ws.vfs, ws.get_session("agent"), requests, Feed(answers))
+    )
+    try:
+        requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
+        await answer(answers)
+        link = b"/notes/link"
+        requests.feed_data(
+            packet(
+                FXP_SYMLINK,
+                struct.pack(">I", 1)
+                + struct.pack(">I", len(target))
+                + target
+                + struct.pack(">I", len(link))
+                + link,
+            )
+        )
+        kind, body = await answer(answers)
+        assert (kind, struct.unpack(">II", body[:8])) == (
+            FXP_STATUS,
+            (1, FX_OK),
+        )
+        assert (
+            await ws.shell("readlink /notes/link")
+        ).stdout == target + b"\n"
+        if target == b"real":
+            assert await ws.vfs.read("/notes/link") == b"target"
+    finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
+        await ws.close()
 
 
 @pytest.mark.asyncio

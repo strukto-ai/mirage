@@ -24,6 +24,7 @@ const FXP_INIT = 1
 const FXP_OPEN = 3
 const FXP_WRITE = 6
 const FXP_STAT = 17
+const FXP_SYMLINK = 20
 const FXP_VERSION = 2
 const FXP_STATUS = 101
 const FXP_HANDLE = 102
@@ -133,6 +134,38 @@ describe('helpers', () => {
 })
 
 describe('servePipe', () => {
+  it.each(['real', 'missing'])('accepts sshfs symlink wire order (target=%s)', async (target) => {
+    const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/notes/real', 'target')
+    await ws.session('agent')
+    const end = client()
+    const served = servePipe(ws.vfs, ws.getSession('agent'), end.reader, end.writer)
+    try {
+      end.send(packet(FXP_INIT, uint32(3)))
+      await end.answer()
+      end.send(
+        packet(
+          FXP_SYMLINK,
+          Buffer.concat([
+            uint32(1),
+            sftpString(Buffer.from(target)),
+            sftpString(Buffer.from('/notes/link')),
+          ]),
+        ),
+      )
+      const [kind, body] = await end.answer()
+      expect([kind, body.readUInt32BE(0), body.readUInt32BE(4)]).toEqual([FXP_STATUS, 1, STATUS.OK])
+      expect((await ws.shell('readlink /notes/link')).stdoutText).toBe(target + '\n')
+      if (target === 'real') {
+        expect(new TextDecoder().decode(await ws.vfs.read('/notes/link'))).toBe('target')
+      }
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
   it('answers as its session', async () => {
     const ws = new Workspace(
       { '/notes': new RAMVFS() },

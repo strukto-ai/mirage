@@ -58,6 +58,14 @@
           }
         },
         {
+          "command": "dash -c 'ln -s plan.txt /served/link && cat /served/link && readlink /served/link && rm /served/link'",
+          "expect": {
+            "exit": 0,
+            "stdout": "plan\nplan.txt\n",
+            "stderr": ""
+          }
+        },
+        {
           "command": "dash -c 'echo made > /served/new.txt'",
           "expect": {
             "exit": 0,

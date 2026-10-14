@@ -141,11 +141,14 @@ export class MirageSFTPServer {
    * @param makeCore makes the core on the first request.
    * @param onExit what the client's exit ends, after its handles are
    *   released.
+   * @param passiveSshfs decode sshfs's reversed symlink arguments on a
+   *   pipe without SSH peer identification.
    */
   constructor(
     private readonly sftp: SFTPWrapper,
     private readonly makeCore: () => Promise<MountCore>,
     private readonly onExit?: () => Promise<void>,
+    private readonly passiveSshfs = false,
   ) {}
 
   /** Answer the client's requests; settles once it has left and its handles are released. */
@@ -209,10 +212,11 @@ export class MirageSFTPServer {
     s.on('READLINK', (id, path) => {
       this.serve(id, () => this.readlink(id, path))
     })
-    // ssh2 emits (link, target) whichever order the client sent them in
-    // (it undoes OpenSSH's swap), as its README documents; @types/ssh2
-    // names the two parameters the other way round.
+    // SSH channels let ssh2 normalize OpenSSH's swap. Passive sshfs pipes
+    // have no peer identification, so normalize their wire order here.
+    // @types/ssh2 names the emitted parameters the other way round.
     s.on('SYMLINK', (id, linkPath, targetPath) => {
+      if (this.passiveSshfs) [linkPath, targetPath] = [targetPath, linkPath]
       this.serve(id, () =>
         this.simple(id, (core) => core.symlink(targetPath, workspacePath(linkPath))),
       )
@@ -458,8 +462,8 @@ function loadSftp(): Ssh2Sftp {
 /**
  * Answer SFTP on a byte pipe as `session`, until the client closes it.
  *
- * The client is `sshfs -o passive` (or anything else speaking SFTP on its
- * stdin and stdout); every request it makes is a request of `session`,
+ * The client is `sshfs -o passive`, using OpenSSH's reversed symlink
+ * wire order. Every request it makes is a request of `session`,
  * held to its hides, modes and policies.
  */
 export async function servePipe(
@@ -485,7 +489,7 @@ export async function servePipe(
     { type: 'session', incoming: side(), outgoing: side() },
     { server: true },
   )
-  const served = new MirageSFTPServer(sftp, () => Promise.resolve(core)).attach()
+  const served = new MirageSFTPServer(sftp, () => Promise.resolve(core), undefined, true).attach()
   const chunks = reader.getReader()
   try {
     for (;;) {
