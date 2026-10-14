@@ -32,6 +32,7 @@ from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
+from mirage.policy.decisions import reset_op_call, set_op_call
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision, RouteError
@@ -761,6 +762,12 @@ async def run_prepared_line(
         if handed is None:
             handed = HandOff()
         line_handed = handed
+        # A session write on the line is a call of the line's: its nod
+        # stands until the line ends, so a retry of a line held on a
+        # later question (`x=1 cmd`, `export a=1; export b=2`) finds it.
+        call_token = set_op_call(
+            ws.registry.decisions, handed, effective_session.session_id
+        )
         judgments: list[list[tuple[Walked, list[Judged]]]] = []
 
         async def judged() -> list[tuple[Walked, list[Judged]]]:
@@ -1028,6 +1035,7 @@ async def run_prepared_line(
             held = is_pending_refusal(io.refusal)
         finally:
             reset_refusal_sink(sink_token)
+            reset_op_call(call_token)
             if held:
                 ws.registry.decisions.release(
                     effective_session.session_id, handed

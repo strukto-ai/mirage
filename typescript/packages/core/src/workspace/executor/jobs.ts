@@ -29,12 +29,18 @@ import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
-import { isProgramInvocation, runWithEvaluation } from '../../context/session_context.ts'
+import {
+  isProgramInvocation,
+  refusalSink,
+  runWithEvaluation,
+  runWithRefusalSink,
+} from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, mergeSignals } from '../../utils/abort.ts'
 import type { SessionView } from '../../view/types.ts'
-import type { Decisions } from '../../policy/decisions.ts'
+import { type Decisions, runWithOpCall } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
+import type { Refusal } from '../../types.ts'
 import type { ProcessInfo, ProcessState } from '../../process/types.ts'
 import type { ProcessView } from '../../process/view.ts'
 import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
@@ -215,6 +221,14 @@ export async function handleBackground(
     // writes as it is written: the terminal, or the substitution or pipe
     // it was started in.
     const console_ = new Tee(job.console, new JobCopy(output, killed))
+    const hold = { held: false }
+    const lineSink = refusalSink()
+    // The line still hears of every refusal; a question left waiting also
+    // holds the job.
+    const note = (refusal: Refusal): void => {
+      hold.held ||= refusal.kind === 'pending'
+      lineSink?.(refusal)
+    }
     const body = async (): Promise<[IOResult, ExecutionNode]> => {
       let stdout: ByteSource | null
       let io: IOResult
@@ -273,19 +287,37 @@ export async function handleBackground(
       if (stderr.byteLength > 0) {
         await console_.emit(Channel.STDERR, stderr)
       }
+      hold.held ||= io.refusal?.kind === 'pending'
       return [io, execNode]
+    }
+    // The job's session writes are calls of the job's, spent at its end,
+    // not of the line it outlives. Without task isolation a frame the job
+    // bound would reach every other task, after the line ended too, so
+    // there it binds neither.
+    const framed = (): Promise<[IOResult, ExecutionNode]> => {
+      if (!asyncContextIsolatesTasks) return body()
+      const called =
+        jobHanded !== null && decisions !== null
+          ? () => runWithOpCall(decisions, jobHanded, session.sessionId, body)
+          : body
+      return lineSink !== null ? runWithRefusalSink(note, called) : called()
     }
     // Task-local bindings keep dispatcher and host callbacks in the job's
     // fork. The fallback cannot attribute ambient reads to a task, so
     // it keeps the outer binding; nested shell evaluations carry the
     // walker's exact session explicitly on both runtimes.
     try {
-      return await (asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, body) : body())
+      return await (asyncContextIsolatesTasks
+        ? runWithEvaluation(childEvaluation, framed)
+        : framed())
     } finally {
       releaseProgram()
 
       if (jobHanded !== null && decisions !== null) {
-        await decisions.revoke(session.sessionId, jobHanded)
+        // A job held on a question leaves its grants standing for the
+        // retry, as a held line does.
+        if (hold.held) decisions.release(session.sessionId, jobHanded)
+        else await decisions.revoke(session.sessionId, jobHanded)
       }
     }
   }

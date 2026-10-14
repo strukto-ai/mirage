@@ -24,8 +24,11 @@ from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.context import (
     program_invocation,
+    refusal_sink,
     reset_current_session,
+    reset_refusal_sink,
     set_current_evaluation,
+    set_refusal_sink,
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -33,7 +36,7 @@ from mirage.io.async_line_iterator import SharedInput
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
-from mirage.policy.decisions import Decisions
+from mirage.policy.decisions import Decisions, reset_op_call, set_op_call
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessState
 from mirage.process.view import ProcessView
@@ -59,6 +62,7 @@ from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
+from mirage.types import Refusal
 from mirage.utils.timezone import zone_from_env
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
@@ -261,6 +265,25 @@ async def handle_background(
         # nested eval inside the job resolves the ambient outer session
         # and escapes the fork.
         token = set_current_evaluation(child_evaluation)
+        # The job's session writes are calls of the job's, spent at its
+        # end, not of the line it outlives.
+        call = (
+            set_op_call(decisions, job_handed, session.session_id)
+            if job_handed is not None and decisions is not None
+            else None
+        )
+        held = False
+        line_sink = refusal_sink()
+
+        def note(refusal: Refusal) -> None:
+            # The line still hears of every refusal; a question left
+            # waiting also holds the job.
+            nonlocal held
+            held = held or refusal.kind == "pending"
+            if line_sink is not None:
+                line_sink(refusal)
+
+        sink = None if line_sink is None else set_refusal_sink(note)
         try:
             try:
                 # Handing the console down as a sink is what makes
@@ -328,12 +351,24 @@ async def handle_background(
             stderr = await io.materialize_stderr()
             if stderr:
                 await console.emit(Channel.STDERR, stderr)
+            held = held or (
+                io.refusal is not None and io.refusal.kind == "pending"
+            )
             return io, exec_node
         finally:
             release_job()
             reset_current_session(token)
+            if sink is not None:
+                reset_refusal_sink(sink)
+            if call is not None:
+                reset_op_call(call)
             if job_handed is not None and decisions is not None:
-                await decisions.revoke(session.session_id, job_handed)
+                # A job held on a question leaves its grants standing
+                # for the retry, as a held line does.
+                if held:
+                    decisions.release(session.session_id, job_handed)
+                else:
+                    await decisions.revoke(session.session_id, job_handed)
 
     cmd_str = get_text(left) if hasattr(left, "text") else str(left)
 

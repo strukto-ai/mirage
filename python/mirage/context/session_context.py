@@ -389,6 +389,12 @@ def reset_refusal_sink(token: Token[Any]) -> None:
     _refusal_sink.reset(token)
 
 
+def refusal_sink() -> RefusalSink | None:
+    """The sink the line running in this context bound, None outside a
+    line."""
+    return _refusal_sink.get()
+
+
 def line_running() -> bool:
     """Whether a typed line is running in this context: the entry point it
     reaches is inside a command, not a file tool's or the host's own

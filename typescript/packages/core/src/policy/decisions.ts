@@ -502,7 +502,8 @@ export class Decisions {
    * tool reads the file back to stamp its version), and the call's end
    * spends it, unless the call is held on a question still waiting: its
    * retry finds the grants standing, as a held line's does. A call made
-   * inside another runs in the outer one; a call another ledger runs (a
+   * inside another runs in the outer one, so a session write on a line or
+   * in a job is spent when that ends; a call another ledger runs (a
    * host callback reaching a second workspace mid-call) is no call of this
    * one's. Without task isolation a call's claims may be another task's,
    * so a held call spends them too. Mirrors Python's `within_call`.
@@ -883,9 +884,10 @@ export class Decisions {
 const opCallStorage = createAsyncContext<readonly [Decisions, HandOff, string]>()
 
 /**
- * Run one call made outside a line (a file tool's), the unit an op-level
- * answer covers: a grant one of its ops is answered by is claimed on
- * `handed` for the call's other ops on that path. `owner` is the ledger
+ * Run one call, the unit an op-level answer covers: a file tool's, or a
+ * line's or a job's, whose session writes are its ops. A grant one of its
+ * ops is answered by is claimed on `handed` for the call's other ops on
+ * that subject. `owner` is the ledger
  * the call runs under, the only one that claims on `handed` and spends
  * it. Mirrors Python's `set_op_call`.
  */
@@ -899,8 +901,8 @@ export function runWithOpCall<T>(
 }
 
 /**
- * The call made outside a line running in this context under `owner`'s
- * ledger for `sessionId`, null for a bare op, for a call another ledger
+ * The call running in this context under `owner`'s ledger for
+ * `sessionId`, null for a bare op, for a call another ledger
  * runs (a host callback reaching a second workspace mid-call) or for
  * another session's call. Without task isolation every live call is in
  * reach, so the newest of this ledger's and session's is taken.

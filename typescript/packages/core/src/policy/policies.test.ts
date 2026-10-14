@@ -907,6 +907,18 @@ describe('the op-policies binding', () => {
   })
 })
 
+async function askedRounds(ws: Workspace, line: string, count: number): Promise<string[][]> {
+  const asked: string[][] = []
+  for (let i = 0; i < count; i++) {
+    const held = await ws.shell(line)
+    expect(held.refusal?.kind).toBe('pending')
+    const records = ws.decisions.pending()
+    asked.push(records.map((r) => [r.reason, ...r.argv].join(' ')).sort())
+    for (const record of records) await ws.decisions.answer(record.id, Outcome.ALLOW)
+  }
+  return asked
+}
+
 describe('every method answers Deny and Ask', () => {
   class AskSecrets implements Policy {
     preSession(ctx: SessionContext): Action | null {
@@ -946,21 +958,31 @@ describe('every method answers Deny and Ask', () => {
     }
   }
 
-  it('a write asked before and after asks each once', async () => {
-    // The nod to the first question stands while the second waits.
+  it.each(['export B=1', 'B=1 true', '{ export B=1; } & wait'])(
+    'a write asked before and after asks each once: %s',
+    async (line) => {
+      // The nod to the first question stands while the second waits.
+      const ws = executableWorkspace(undefined, [new AskAround()])
+      try {
+        expect(await askedRounds(ws, line, 2)).toEqual([['before B 1'], ['after B 1']])
+        expect((await ws.shell(line)).exitCode).toBe(0)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('the writes of a line are spent when it ends', async () => {
+    // A retry finds the nods for the writes before the one it waits on.
     const ws = executableWorkspace(undefined, [new AskAround()])
     try {
-      const reasons: string[] = []
-      for (let i = 0; i < 2; i++) {
-        const held = await ws.shell('export B=1')
-        expect(held.refusal?.kind).toBe('pending')
-        const pending = ws.decisions.pending()
-        expect(pending).toHaveLength(1)
-        reasons.push(pending[0]?.reason ?? '')
-        await ws.decisions.answer(pending[0]?.id ?? '', Outcome.ALLOW)
-      }
-      expect(reasons).toEqual(['before', 'after'])
-      expect((await ws.shell('export B=1')).exitCode).toBe(0)
+      const line = 'B=1 true; export C=2'
+      expect(await askedRounds(ws, line, 2)).toEqual([
+        ['before B 1', 'before C 2'],
+        ['after B 1', 'after C 2'],
+      ])
+      expect((await ws.shell(line)).exitCode).toBe(0)
+      expect(await askedRounds(ws, line, 1)).toEqual([['before B 1', 'before C 2']])
     } finally {
       await ws.close()
     }

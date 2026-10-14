@@ -451,6 +451,20 @@
     {"op": "exec", "session": "agent", "command": "printf x", "expect": {"value": {"exit_code": 0, "stdout": "x", "stderr": "", "refusal": null}}},
     {"op": "exec", "command": "echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "refusal": null}}}
    ]
+  },
+  {
+   "id": "a_held_line_keeps_the_nods_for_its_writes",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent"},
+    {"op": "register_policy", "id": "writes", "pre_session": {"B": {"ask": "B before"}, "C": {"ask": "C before"}}, "post_session": {"B": {"ask": "B after"}}},
+    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "\n", "stderr": "bash: B: permission denied\nC: permission denied\n", "refusal": "C before"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: B: permission denied\n", "refusal": "B after"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "1\n2\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: B: permission denied\nC: permission denied\n", "refusal": "C before"}}}
+   ]
   }
  ]
 }

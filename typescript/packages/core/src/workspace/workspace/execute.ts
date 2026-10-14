@@ -57,6 +57,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { RouteError } from '../../runtime/routing/errors.ts'
 import type { Deny, HandOff, Pending } from '../../policy/index.ts'
+import { runWithOpCall } from '../../policy/decisions.ts'
 import type { Refusal } from '../../types.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
@@ -836,6 +837,15 @@ async function runParsedLine(
   const note = (refusal: Refusal): void => {
     nested.latest = refusal
   }
+  // A session write on the line is a call of the line's: its nod stands
+  // until the line ends, so a retry of a line held on a later question
+  // (`x=1 cmd`, `export a=1; export b=2`) finds it. Without task isolation
+  // a live call is in reach of every task, so each write stays a call of
+  // its own there.
+  const inLineCall = <T>(fn: () => Promise<T>): Promise<T> =>
+    asyncContextIsolatesTasks
+      ? runWithOpCall(env.registry.decisions, handed, effectiveSession.sessionId, fn)
+      : fn()
   // The line-reader decision (GNU: history is appended where the typed
   // line is read, never inside the evaluator). Internal evaluations run
   // with record:false: no new recording scope, so their ops land in the
@@ -983,18 +993,20 @@ async function runParsedLine(
         : null
       const result = await abortable(
         runWithRefusalSink(note, () =>
-          runWholeLine(
-            lineRuntime,
-            command,
-            stdin,
-            effectiveSession,
-            env.registry.allMounts(),
-            env.registry.policies,
-            () => env.invalidateAllAfterRemote(),
-            killed,
-            env.registry.commandLimits,
-            claimantFor(rootNode, handed),
-            route,
+          inLineCall(() =>
+            runWholeLine(
+              lineRuntime,
+              command,
+              stdin,
+              effectiveSession,
+              env.registry.allMounts(),
+              env.registry.policies,
+              () => env.invalidateAllAfterRemote(),
+              killed,
+              env.registry.commandLimits,
+              claimantFor(rootNode, handed),
+              route,
+            ),
           ),
         ),
         killed,
@@ -1110,8 +1122,8 @@ async function runParsedLine(
       }
     }
     try {
-      execResult = await runWithRefusalSink(note, async () =>
-        isLine ? runWithRecording(runBody) : [await runBody(), []],
+      execResult = await runWithRefusalSink(note, () =>
+        inLineCall(async () => (isLine ? runWithRecording(runBody) : [await runBody(), []])),
       )
       // A record a nested line earned is the line's to report when its
       // own tree earned none (see NestedRefusal). A question a gate left

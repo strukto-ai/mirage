@@ -545,8 +545,9 @@ class Decisions:
         tool reads the file back to stamp its version), and the call's
         end spends it, unless the call is held on a question still
         waiting: its retry finds the grants standing, as a held line's
-        does. A call made inside another runs in the outer one;
-        a call another ledger runs (a host callback reaching a second
+        does. A call made inside another runs in the outer one, so a
+        session write on a line or in a job is spent when that ends; a
+        call another ledger runs (a host callback reaching a second
         workspace mid-call) is no call of this one's.
 
         Args:
@@ -1031,9 +1032,10 @@ _op_call: ContextVar[tuple[Decisions, HandOff, str] | None] = ContextVar(
 def set_op_call(
     owner: Decisions, handed: HandOff, session_id: str
 ) -> Token[tuple[Decisions, HandOff, str] | None]:
-    """Bind one call made outside a line (a file tool's), the unit an
-    op-level answer covers: a grant one of its ops is answered by is
-    claimed on ``handed`` for the call's other ops on that path.
+    """Bind one call, the unit an op-level answer covers: a file
+    tool's, or a line's or a job's, whose session writes are its ops. A
+    grant one of its ops is answered by is claimed on ``handed`` for the
+    call's other ops on that subject.
 
     Args:
         owner (Decisions): the ledger the call runs under, the only one
@@ -1052,10 +1054,10 @@ def reset_op_call(
 
 
 def get_op_call(owner: Decisions, session_id: str) -> HandOff | None:
-    """The call made outside a line running in this context under
-    ``owner``'s ledger for ``session_id``, None for a bare op, for a
-    call another ledger runs (a host callback reaching a second
-    workspace mid-call) or for another session's call.
+    """The call running in this context under ``owner``'s ledger for
+    ``session_id``, None for a bare op, for a call another ledger runs
+    (a host callback reaching a second workspace mid-call) or for
+    another session's call.
 
     Args:
         owner (Decisions): the ledger asking.

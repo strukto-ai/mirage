@@ -1403,20 +1403,50 @@ class AskAround(Policy):
         return Ask("after")
 
 
+async def _asked(
+    ws: Workspace, line: str, count: int
+) -> list[set[tuple[str, ...]]]:
+    asked = []
+    for _ in range(count):
+        held = await ws.shell(line)
+        assert held.refusal is not None and held.refusal.kind == "pending"
+        records = ws.decisions.pending()
+        asked.append({(r.reason, *r.argv) for r in records})
+        for record in records:
+            await ws.decisions.answer(record.id, Outcome.ALLOW)
+    return asked
+
+
 @pytest.mark.asyncio
-async def test_a_write_asked_before_and_after_asks_each_once():
+@pytest.mark.parametrize(
+    "line", ["export B=1", "B=1 true", "{ export B=1; } & wait"]
+)
+async def test_a_write_asked_before_and_after_asks_each_once(line: str):
     # The nod to the first question stands while the second waits.
     ws = Workspace({"/data/": RAMVFS()}, policies=[AskAround()])
     try:
-        reasons = []
-        for _ in range(2):
-            held = await ws.shell("export B=1")
-            assert held.refusal is not None and held.refusal.kind == "pending"
-            (record,) = ws.decisions.pending()
-            reasons.append(record.reason)
-            await ws.decisions.answer(record.id, Outcome.ALLOW)
-        assert reasons == ["before", "after"]
-        assert (await ws.shell("export B=1")).exit_code == 0
+        asked = await _asked(ws, line, 2)
+        assert asked == [{("before", "B", "1")}, {("after", "B", "1")}]
+        assert (await ws.shell(line)).exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_writes_of_a_line_are_spent_when_it_ends():
+    # A retry finds the nods for the writes before the one it waits on.
+    ws = Workspace({"/data/": RAMVFS()}, policies=[AskAround()])
+    try:
+        line = "B=1 true; export C=2"
+        asked = await _asked(ws, line, 2)
+        assert asked == [
+            {("before", "B", "1"), ("before", "C", "2")},
+            {("after", "B", "1"), ("after", "C", "2")},
+        ]
+        assert (await ws.shell(line)).exit_code == 0
+        assert (await _asked(ws, line, 1)) == [
+            {("before", "B", "1"), ("before", "C", "2")}
+        ]
     finally:
         await ws.close()
 

@@ -397,6 +397,14 @@ export function lineRunning(): boolean {
   return refusalSinkStorage.getStore() !== undefined
 }
 
+/**
+ * The sink the line running in this context bound, null outside a line.
+ * Mirrors Python's `refusal_sink`.
+ */
+export function refusalSink(): RefusalSink | null {
+  return refusalSinkStorage.getStore() ?? null
+}
+
 const explainingStorage = createAsyncContext<VfsExplanation[] | DryRun | null>()
 
 /**
