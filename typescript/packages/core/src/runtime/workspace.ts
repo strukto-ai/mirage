@@ -31,7 +31,7 @@ import type { RuntimeOptions } from './config.ts'
  * the line takes anyway, so there is no interpreter entry point (run) and no
  * delegate entry point (runLine) to implement.
  *
- * Constructed like every runtime (captures, config, script), with two
+ * Constructed like every runtime (captures, config), with two
  * workspace readings: captures undefined (the default) keeps the catch-all
  * behavior, an empty array serves nothing (full lockdown); and the
  * config has no fields today, the slot exists for uniformity.

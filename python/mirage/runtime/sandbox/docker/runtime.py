@@ -36,8 +36,6 @@ class DockerRuntime(RemoteSandbox):
     Args:
         captures (Sequence[str] | None): commands routed to this runtime.
         config (DockerConfig | dict[str, Any] | None): how to reach the sandbox.
-        script (Callable[..., Any] | ScriptSource | None): whether the
-            runtime takes a line.
     """
 
     name = "docker"

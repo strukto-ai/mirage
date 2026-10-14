@@ -45,10 +45,10 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
     entrypoint or by hand). The whole-line entry point is
     LineExecutorMixin's run_line, and there is no interpreter entry
     point. Subclasses adapt one provider by implementing connect() and
-    exec_line(), and open_pipe() for a ``mount_type``; routing,
-    captures, and per-line scripts are inherited. Constructed like
-    every runtime (captures, config); config is how to reach
-    the sandbox, coerced through the provider's own config class.
+    exec_line(), and open_pipe() for a ``mount_type``; routing and
+    captures are inherited. Constructed like every runtime (captures,
+    config); config is how to reach the sandbox, coerced through the
+    provider's own config class.
     """
 
     # Lines execute on the provider's machine and act on that

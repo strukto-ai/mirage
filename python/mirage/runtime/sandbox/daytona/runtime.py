@@ -38,8 +38,6 @@ class DaytonaRuntime(RemoteSandbox):
     Args:
         captures (Sequence[str] | None): commands routed to this runtime.
         config (DaytonaConfig | dict[str, Any] | None): how to reach the sandbox.
-        script (Callable[..., Any] | ScriptSource | None): whether the
-            runtime takes a line.
     """
 
     name = "daytona"

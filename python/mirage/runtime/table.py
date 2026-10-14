@@ -74,7 +74,7 @@ def register_runtime(name: str, cls: type[Runtime]) -> None:
         name (str): the name config spells; also what ``build_runtime``
             resolves.
         cls (type[Runtime]): the runtime class, constructed with the
-            uniform ``(captures, config, script)`` shape every runtime
+            uniform ``(captures, config)`` shape every runtime
             takes, which is how a yaml entry's keys reach it.
 
     Raises:
