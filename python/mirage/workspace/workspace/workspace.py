@@ -46,6 +46,7 @@ from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.concurrency.limiter import run_blocking
 from mirage.context import (
+    Caller,
     bind_caller,
     current_caller,
     get_admission,
@@ -225,6 +226,7 @@ from mirage.workspace.workspace.types import VFSMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
 
 logger = logging.getLogger(__name__)
+
 
 class Workspace:
     """Unified virtual filesystem over heterogeneous mounts.
@@ -2110,26 +2112,29 @@ class Workspace:
         self._admitted.add(stop)
 
     @asynccontextmanager
-    async def _admit_write(self) -> AsyncIterator[None]:
+    async def _admit_write(self, caller: Caller) -> AsyncIterator[Caller]:
         """Hold a write while a capture reads, unless its line is waited for.
 
         A write from a running top-level line passes: the capture waits
         for that line. Any other (an entry point's file op, SFTP, FUSE, a
         background job) waits for the capture to finish, and counts as
         under way until it ends, so a capture that starts waits it out.
+        The caller handed back holds the admission, so the ops the write
+        runs itself are not held behind it.
+
+        Args:
+            caller (Caller): who makes the write.
         """
-        if current_caller().write_held or current_caller().stop in self._admitted:
-            yield
+        if caller.write_held or caller.stop in self._admitted:
+            yield caller
             return
         while not self._admitting.is_set():
             await self._admitting.wait()
         self._writes += 1
         self._writes_idle.clear()
-        token = bind_caller(replace(current_caller(), write_held=True))
         try:
-            yield
+            yield replace(caller, write_held=True)
         finally:
-            reset_caller(token)
             self._writes -= 1
             if self._writes == 0:
                 self._writes_idle.set()

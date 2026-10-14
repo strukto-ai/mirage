@@ -41,7 +41,14 @@ import { IOResult, materialize } from '../io/types.ts'
 import { handleXargs as streamXargs } from '../workspace/executor/builtins/xargs/xargs.ts'
 import { seedVar, sessionView } from '../workspace/session/state.ts'
 import { MountMode, PathSpec } from '../types.ts'
-import { type CommandRule, type Decision, type EntryGate, Outcome, Scope } from '../policy/types.ts'
+import {
+  type Action,
+  type CommandRule,
+  type Decision,
+  type EntryGate,
+  Outcome,
+  Scope,
+} from '../policy/types.ts'
 import type { Policy } from '../policy/base.ts'
 import { type Policies, runWithOpPolicies, getOpPolicies } from '../policy/policies.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
@@ -523,7 +530,37 @@ describe('a named facade session on the fallback storage', () => {
 })
 
 describe('dry runs on the fallback storage', () => {
-  it('refuse explain.vfs and leave a concurrent write alone', async () => {
+  it('explain a vfs call and leave a concurrent write alone', async () => {
+    // The dry run rides its own call, not the frame stack: a real op
+    // another task makes meanwhile runs for real.
+    const ws = new Workspace(
+      { '/data': [new RAMVFS(), MountMode.WRITE] as const },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const session = new Session(ws, ws.defaultSessionId)
+      const [reading, read] = gate()
+      const [asking, asked] = gate()
+      ws.policies.add({
+        async preVfs(ctx): Promise<Action | null> {
+          if (ctx.path.virtual !== '/data/x') return null
+          asked()
+          await reading
+          return { kind: 'deny', reason: 'x is sealed' }
+        },
+      })
+      const dry = session.explain.vfs.read('/data/x')
+      await asking
+      await ws.vfs.write('/data/z', 'z')
+      read()
+      expect(await dry).toMatchObject({ outcome: Outcome.DENY, reason: 'x is sealed' })
+      expect(await ws.vfs.cat('/data/z')).toBe('z')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explain a line and leave a concurrent write alone', async () => {
     // Without task isolation a dry run's binding would sit on top of the
     // frame stack for every concurrent task: a real op would be stopped
     // as explained, or refused as a deciding policy's write.
@@ -533,7 +570,6 @@ describe('dry runs on the fallback storage', () => {
     )
     try {
       const session = new Session(ws, ws.defaultSessionId)
-      await expect(session.explain.vfs.read('/data/x')).rejects.toThrow(/isolates async tasks/)
       const [held, release] = gate()
       const [deciding, decided] = gate()
       const waits: Policy = {

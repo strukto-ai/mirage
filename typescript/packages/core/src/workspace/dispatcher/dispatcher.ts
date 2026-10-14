@@ -57,7 +57,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { CycleError, norm, parent, posixNormpath } from '../../utils/path.ts'
 import type { Visibility } from '../../types.ts'
-import type { EntryGate } from '../../policy/types.ts'
+import type { DryRun, EntryGate, VfsExplanation } from '../../policy/types.ts'
 import {
   activeRecords,
   commandRecords,
@@ -117,14 +117,17 @@ import {
   XATTR_OPS,
 } from './constants.ts'
 import {
+  type Caller,
   effectivePathMode,
   explaining,
   getCurrentSession,
   hiddenRefusal,
   lineRunning,
+  runWithCaller,
   sessionVisibility,
   sessionAccess,
 } from '../../context/session_context.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -528,6 +531,9 @@ export class Dispatcher {
   // no line is running.
   private readonly decisions: Decisions | null
   private access: SessionAccess | undefined
+  // Who makes the op, when the entry point said so; null reads the
+  // async context's, which on the fallback storage folds every live one.
+  private caller: Caller | null = null
   private state = { writers: new KeyLock(), stores: new WeakMap<BaseVFS, number>(), storeCount: 0 }
   readonly reconciler: Reconciler
 
@@ -558,12 +564,45 @@ export class Dispatcher {
       this.decisions ?? undefined,
     )
     bound.access = sessionAccess(session)
+    bound.caller = this.caller
+    bound.state = this.state
+    return bound
+  }
+
+  /**
+   * This dispatcher run as `caller`: its checks read that caller's
+   * session, line, dry run and call, not the async context's. A session
+   * a `forSession` view already bound stays its own. Mirrors Python's
+   * `caller` keyword on Dispatcher.dispatch.
+   */
+  private forCaller(caller: Caller): Dispatcher {
+    const bound = new Dispatcher(
+      this.namespace,
+      this.cache,
+      this.policies,
+      this.drift ?? undefined,
+      this.admitWrite ?? undefined,
+      this.decisions ?? undefined,
+    )
+    bound.access =
+      this.access ?? (caller.session === null ? undefined : sessionAccess(caller.session))
+    bound.caller = caller
     bound.state = this.state
     return bound
   }
 
   private sessionId(): string {
     return this.access?.sessionId ?? sessionId()
+  }
+
+  /** The dry run the op is part of: the caller's, else the async context's. */
+  private explaining(): VfsExplanation[] | DryRun | null {
+    return this.caller === null ? explaining() : this.caller.explaining
+  }
+
+  /** Whether the op is a running line's: the caller's, else the async context's. */
+  private lineRunning(): boolean {
+    return this.caller === null ? lineRunning() : this.caller.refusals !== null
   }
 
   /**
@@ -585,10 +624,20 @@ export class Dispatcher {
     return null
   }
 
-  dispatch: DispatchFn = (name, path, args, kwargs, report) => {
-    // Only forSession knows the owner. An unbound browser call must keep
-    // the conservative live-session checks rather than borrow the newest
-    // binding, which can belong to a wider concurrent session.
+  dispatch: DispatchFn = (name, path, args, kwargs, report, caller) => {
+    if (caller !== undefined && caller !== this.caller) {
+      const view = this.forCaller(caller)
+      const run = (): ReturnType<DispatchFn> => view.dispatch(name, path, args, kwargs, report)
+      // What runs below the dispatcher (a policy, a backend's record)
+      // reads the caller the dispatcher judges by. Without task isolation
+      // that binding would reach other tasks' ops, so there only the
+      // dispatcher's own checks read it.
+      return asyncContextIsolatesTasks ? runWithCaller(caller, run) : run()
+    }
+    // Only forSession and forCaller know the owner. An unbound browser
+    // call must keep the conservative live-session checks rather than
+    // borrow the newest binding, which can belong to a wider concurrent
+    // session.
     const run = (): ReturnType<DispatchFn> =>
       this.dispatchAdmitted(name, path, args, kwargs, report)
     if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return run()
@@ -649,7 +698,7 @@ export class Dispatcher {
     const looksUp =
       owner !== null &&
       name === 'mkdir' &&
-      explaining() === null &&
+      this.explaining() === null &&
       effectivePathMode(call.path.virtual, owner.prefix, owner.mode, this.access) === MountMode.READ
     const boundary = looksUp
       ? new Boundary(
@@ -659,6 +708,7 @@ export class Dispatcher {
           this.sessionId(),
           this.decisions,
           this.access,
+          this.caller ?? undefined,
         )
       : this.boundary(owner)
     if (owner !== null) {
@@ -745,7 +795,7 @@ export class Dispatcher {
    */
   private async prepare(): Promise<void> {
     await this.namespace.ensureLoaded()
-    if (this.drift?.pending === true && explaining() === null) {
+    if (this.drift?.pending === true && this.explaining() === null) {
       // Resolve backend IDs afresh without consulting the restored index.
       await this.drift.drain(this.namespace, async (p) => {
         const [stat] = await this.dispatch('stat', PathSpec.fromStrPath(p), [], {
@@ -1035,7 +1085,7 @@ export class Dispatcher {
       return true
     }
     if (call.ruleGate !== null) return paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
-    return this.policies.wantsFor('preVfs', this.sessionId(), lineRunning())
+    return this.policies.wantsFor('preVfs', this.sessionId(), this.lineRunning())
   }
 
   /**
@@ -1145,7 +1195,7 @@ export class Dispatcher {
     ) {
       return false
     }
-    return lineRunning() || !(await this.policies.wantsFor('postVfs', this.sessionId()))
+    return this.lineRunning() || !(await this.policies.wantsFor('postVfs', this.sessionId()))
   }
 
   /**
@@ -1798,6 +1848,7 @@ export class Dispatcher {
       this.sessionId(),
       this.decisions,
       this.access,
+      this.caller ?? undefined,
     )
   }
 
@@ -1836,6 +1887,7 @@ export class Dispatcher {
       this.sessionId(),
       this.decisions,
       this.access,
+      this.caller ?? undefined,
     )
     if (mark !== null && write) {
       // The same pre-vfs admission a dispatched op answers, with the

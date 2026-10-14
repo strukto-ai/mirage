@@ -20,7 +20,7 @@ import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import type { DispatchFn } from '../runtime/types.ts'
-import { getCurrentSession } from '../context/session_context.ts'
+import { type Caller, currentCaller, getCurrentSession } from '../context/session_context.ts'
 import type { NamespaceLinks, OpKwargs, SessionAccess, SessionBind } from '../view/types.ts'
 
 /** Receives each record with the id of the session the op ran as. */
@@ -36,6 +36,9 @@ export type OwnerOf = (path: string) => MountOwner | null
 /** What a derived facade carries over and a constructor may set. */
 export interface FilesOptions {
   bind?: SessionBind | null
+  // What every op says of its caller over the async context's: the call
+  // an op-level answer covers, a dry run's trace.
+  caller?: Partial<Caller> | null
   // The dispatcher bound to the session a bind put in place; the plain
   // dispatch serves an op that kept the caller's ambient session.
   dispatchAs?: ((owner: SessionAccess) => DispatchFn) | null
@@ -119,6 +122,7 @@ export class Files {
   private readonly ownerOf: OwnerOf
   private readonly bind: SessionBind | null
   private readonly dispatchAs: ((owner: SessionAccess) => DispatchFn) | null
+  private readonly caller: Partial<Caller> | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
   /**
@@ -141,6 +145,7 @@ export class Files {
     this.ownerOf = ownerOf
     this.bind = options.bind ?? null
     this.dispatchAs = options.dispatchAs ?? null
+    this.caller = options.caller ?? null
     this.sessionId = options.sessionId ?? null
     this.records = options.records ?? []
   }
@@ -162,6 +167,27 @@ export class Files {
       bind: this.bind,
       dispatchAs: this.dispatchAs,
       sessionId,
+      records: this.records,
+    })
+  }
+
+  /**
+   * The same facade with `changes` said of every op's caller: a file
+   * tool's call, the unit an op-level answer covers, so an approval one op
+   * is answered by is claimed for the call's other ops and a call running
+   * at the same time is never taken for this one; or a dry run's trace.
+   * Said on each op, not bound in the async context, which without task
+   * isolation another task would read.
+   *
+   * @internal The mechanism behind a file tool's call and `explain.vfs`;
+   * Python's task context carries both.
+   */
+  forCaller(changes: Partial<Caller>): Files {
+    return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
+      bind: this.bind,
+      dispatchAs: this.dispatchAs,
+      caller: { ...this.caller, ...changes },
+      sessionId: this.sessionId,
       records: this.records,
     })
   }
@@ -234,7 +260,8 @@ export class Files {
       const typed = PathSpec.fromStrPath(path, undefined, '/')
       const dispatch =
         bound === null || this.dispatchAs === null ? this.dispatchFn : this.dispatchAs(bound)
-      return dispatch(op, typed, args, kwargs, report)
+      const caller = this.caller === null ? undefined : { ...currentCaller(), ...this.caller }
+      return dispatch(op, typed, args, kwargs, report, caller)
     }
     let result: unknown
     let owner: MountOwner | null = null

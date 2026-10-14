@@ -259,11 +259,7 @@ export class PyodideRuntime extends PythonRuntime {
       )
     }
     const scope =
-      context?.scope ??
-      new ContextScope([
-        ...captureSessionContext(),
-        ...captureRecordingContext(),
-      ])
+      context?.scope ?? new ContextScope([...captureSessionContext(), ...captureRecordingContext()])
     return this.schedule(() =>
       this.withPermit(() =>
         scope.run(() =>

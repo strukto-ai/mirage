@@ -1261,9 +1261,11 @@ export function withCommandGuards<A extends Accessor>(
  * `withCommandGuards` lets `stat` pass.
  */
 export function withDispatchRuleGuard(dispatch: DispatchFn, gate = getAdmission()): DispatchFn {
-  return async (op, path, args, options, report) => {
-    if (gate === null || METADATA_OPS.has(op)) return dispatch(op, path, args, options, report)
-    return dispatch(op, path, args, { ...options, ruleGate: gate }, report)
+  return async (op, path, args, options, report, caller) => {
+    if (gate === null || METADATA_OPS.has(op)) {
+      return dispatch(op, path, args, options, report, caller)
+    }
+    return dispatch(op, path, args, { ...options, ruleGate: gate }, report, caller)
   }
 }
 

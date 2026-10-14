@@ -15,6 +15,7 @@
 import { operandExitCode } from '../commands/spec/usage.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
+  type Caller,
   currentCaller,
   explaining,
   lineRunning,
@@ -152,15 +153,20 @@ export function settled(answers: readonly (Deny | Ask | Route)[]): Deny | Ask | 
  * says what the terminal would (`Permission denied` unless the entry point words
  * its own); the reason (or the ask id the agent quotes) rides the record,
  * on the error for a caller that catches it and on the line's result for
- * one that only reads what a command printed.
+ * one that only reads what a command printed. `caller` is who was refused,
+ * whose line notes the record; without one, the async context's line.
  */
 export function policyDenied(
   action: Deny | Pending,
   filename: string,
   message = posixPhrase('EACCES'),
+  caller?: Caller,
 ): PolicyDenied {
   const refusal = refusalOf(action)
-  if (refusal !== null) noteRefusal(refusal)
+  if (refusal !== null) {
+    if (caller === undefined) noteRefusal(refusal)
+    else caller.refusals?.(refusal)
+  }
   return new PolicyDenied(message, filename, refusal)
 }
 
@@ -174,6 +180,7 @@ async function explainedOp(
   policies: Policies,
   ctx: VfsContext,
   decisions: Decisions | null,
+  line: boolean,
 ): Promise<VfsExplanation> {
   const answers = (await policies.answers('preVfs', ctx)).filter(
     (a): a is Deny | Ask => a.kind !== 'route',
@@ -193,7 +200,7 @@ async function explainedOp(
   let action: Deny | Pending | null = winner.kind === 'deny' ? winner : null
   if (winner.kind === 'ask') {
     action =
-      decisions === null || lineRunning()
+      decisions === null || line
         ? {
             kind: 'deny',
             reason: winner.reason,
@@ -238,7 +245,8 @@ async function explainedOp(
  * once the op would refuse or has no gate left, so the entry point stops before
  * any backend or cache is touched; a write a policy makes while it
  * decides that op throws EROFS, since the dry run may change nothing, and
- * an ask its read meets reads the ledger and records nothing.
+ * an ask its read meets reads the ledger and records nothing. `caller` is
+ * who makes the call; without one, the gate reads the async context's.
  */
 export async function preVfsGate(
   policies: Policies,
@@ -252,9 +260,10 @@ export async function preVfsGate(
     checkHidden?: boolean
     decisions?: Decisions | null
     final?: boolean
+    caller?: Caller
   } = {},
 ): Promise<void> {
-  const { checkHidden = true, decisions = null, final = true, ...context } = access
+  const { checkHidden = true, decisions = null, final = true, caller, ...context } = access
   const ctx: VfsContext = {
     call,
     path,
@@ -264,11 +273,18 @@ export async function preVfsGate(
     ...(issuer !== undefined ? { issuer } : {}),
     ...context,
   }
-  const trace = explaining()
+  const trace = caller === undefined ? explaining() : caller.explaining
+  const line = caller === undefined ? lineRunning() : caller.refusals !== null
   if (Array.isArray(trace)) {
-    const noted = await runExplaining(DryRun.DECIDING, async () =>
-      checkHidden && (await policies.hides(ctx)) ? null : explainedOp(policies, ctx, decisions),
-    )
+    const decide = async (): Promise<VfsExplanation | null> =>
+      checkHidden && (await policies.hides(ctx))
+        ? null
+        : explainedOp(policies, ctx, decisions, line)
+    // Without task isolation the binding would reach other tasks' ops; there
+    // a deciding method gets no files and a session it cannot write.
+    const noted = await (asyncContextIsolatesTasks
+      ? runExplaining(DryRun.DECIDING, decide)
+      : decide())
     if (noted === null) throw new Explained()
     trace.push(noted)
     if (final || noted.error !== '') throw new Explained()
@@ -279,31 +295,33 @@ export async function preVfsGate(
   if (!(policies.wants('preVfs') || checkHidden || (write && context.mode !== undefined))) {
     return
   }
-  const answer: Hide | Deny | Ask | null = await policies.preVfs(
-    ctx,
-    checkHidden,
-    lineRunning() || deciding,
-  )
+  const answer: Hide | Deny | Ask | null = await policies.preVfs(ctx, checkHidden, line || deciding)
   if (answer?.kind === 'hide') throw answer.error
-  await refuseOp(ctx, answer, lineRunning() ? null : decisions)
+  await refuseOp(ctx, answer, line ? null : decisions, caller)
 }
 
 async function refuseOp(
   ctx: VfsContext,
   answer: Deny | Ask | null,
   decisions: Decisions | null,
+  caller: Caller | undefined,
 ): Promise<void> {
   let refused: Deny | Pending | null
   if (answer?.kind === 'ask') {
     if (decisions === null) {
-      throw policyDenied({ kind: 'deny', reason: answer.reason }, ctx.path.virtual)
+      throw policyDenied(
+        { kind: 'deny', reason: answer.reason },
+        ctx.path.virtual,
+        undefined,
+        caller,
+      )
     }
-    refused = await decisions.resolveOp(ctx, answer)
+    refused = await decisions.resolveOp(ctx, answer, caller)
   } else {
     refused = answer
   }
   if (refused?.kind === 'deny' && refused.error !== undefined) throw refused.error
-  if (refused !== null) throw policyDenied(refused, ctx.path.virtual)
+  if (refused !== null) throw policyDenied(refused, ctx.path.virtual, undefined, caller)
 }
 
 /**
@@ -323,16 +341,15 @@ export async function postVfsGate(
   issuer?: symbol,
   access: Pick<VfsContext, 'mode' | 'access'> & {
     decisions?: Decisions | null
+    caller?: Caller
   } = {},
 ): Promise<void> {
-  if (
-    lineRunning() ||
-    explaining() === DryRun.DECIDING ||
-    !(await policies.wantsFor('postVfs', sessionId))
-  ) {
+  const { decisions = null, caller, ...context } = access
+  const line = caller === undefined ? lineRunning() : caller.refusals !== null
+  const trace = caller === undefined ? explaining() : caller.explaining
+  if (line || trace === DryRun.DECIDING || !(await policies.wantsFor('postVfs', sessionId))) {
     return
   }
-  const { decisions = null, ...context } = access
   const ctx: VfsResultContext = {
     call,
     path,
@@ -343,7 +360,7 @@ export async function postVfsGate(
     ...context,
     result,
   }
-  await refuseOp(ctx, await policies.postVfs(ctx), decisions)
+  await refuseOp(ctx, await policies.postVfs(ctx), decisions, caller)
 }
 
 /**

@@ -74,10 +74,7 @@ export function captureBinding(
     // own serves a context captured with no session named.
     dispatch?: BridgeDispatchFn
   } = {},
-  scope = new ContextScope([
-    ...captureSessionContext(),
-    ...captureRecordingContext(),
-  ]),
+  scope = new ContextScope([...captureSessionContext(), ...captureRecordingContext()]),
 ): RuntimeContext {
   const source = views.ns ?? {}
   const links = source.links

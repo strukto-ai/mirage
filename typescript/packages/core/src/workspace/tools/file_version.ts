@@ -59,6 +59,15 @@ export class FileVersionTracker {
     private readonly enabled = true,
   ) {}
 
+  /**
+   * This tracker read and written through `vfs`: one call's own view of
+   * the session's files, which records what it sees where every other
+   * call of the session finds it.
+   */
+  through(vfs: Files): FileVersionTracker {
+    return Object.create(this, { vfs: { value: vfs } }) as FileVersionTracker
+  }
+
   // The stamp key for a path: one key per file, not per spelling.
   // readFile and writeFile follow the namespace symlink table, so
   // `/alias` and `/target` are the same file. Keying by the caller's

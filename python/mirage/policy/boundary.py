@@ -15,6 +15,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from mirage.context import Caller
 from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.types import VfsCall
@@ -31,16 +32,24 @@ class Boundary:
         policies (Policies): ordered builtin and user policies.
         prefix (str): owning mount prefix.
         mode (MountMode | None): configured authorization ceiling.
-        session_id (str): session whose grants govern this operation.
         decisions (Decisions | None): the approval ledger a path rule
             that asks is put to where no line is running.
+        caller (Caller): who makes the operation; its session's grants
+            govern it.
     """
 
     policies: Policies
     prefix: str = ""
     mode: MountMode | None = None
-    session_id: str = ""
     decisions: "Decisions | None" = None
+    caller: Caller = Caller()
+
+    @property
+    def session_id(self) -> str:
+        """The id of the session whose grants govern the operation,
+        empty for the unbound host view."""
+        session = self.caller.session
+        return session.session_id if session is not None else ""
 
     async def admit(
         self,
@@ -62,6 +71,7 @@ class Boundary:
             check_hidden=check_hidden,
             decisions=self.decisions,
             final=final,
+            caller=self.caller,
         )
 
     async def complete(
@@ -86,5 +96,6 @@ class Boundary:
             self.session_id,
             mode=self.mode,
             decisions=self.decisions,
+            caller=self.caller,
         )
         return result

@@ -14,6 +14,7 @@
 
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
+  type Caller,
   currentCaller,
   explaining,
   liveCallers,
@@ -470,15 +471,26 @@ export class Decisions {
    * the rule and the subject are the key (`opQuestion`). A ONCE answer passes the next call on that subject under
    * that rule (every op of it, `withinCall`; a bare op is a call of its
    * own) and is spent when the call ends; a SESSION answer passes every one
-   * the rule covers, lines included. Without task isolation the call in
-   * reach may be another task's, so a session write spends its answer at
-   * once. Mirrors Python's `resolve_op`.
+   * the rule covers, lines included. `caller` is who asked, with the call the answer is claimed on; without
+   * one, the call in the async context, which without task isolation may be
+   * another task's, so a session write spends its answer at once. Mirrors
+   * Python's `resolve_op`.
    */
-  async resolveOp(ctx: VfsContext | SessionContext, ask: Ask): Promise<Deny | Pending | null> {
-    if (explaining() === DryRun.DECIDING) return this.heldOp(ctx, ask)
+  async resolveOp(
+    ctx: VfsContext | SessionContext,
+    ask: Ask,
+    caller?: Caller,
+  ): Promise<Deny | Pending | null> {
+    const trace = caller === undefined ? explaining() : caller.explaining
+    if (trace === DryRun.DECIDING) return this.heldOp(ctx, ask)
     const [asked, keyed] = opQuestion(ctx, ask)
     const sessionId = ctx.sessionId ?? ''
-    const call = asyncContextIsolatesTasks || !('verb' in ctx) ? getOpCall(this, sessionId) : null
+    const call =
+      caller !== undefined
+        ? callOf(caller, this, sessionId)
+        : asyncContextIsolatesTasks || !('verb' in ctx)
+          ? getOpCall(this, sessionId)
+          : null
     const claimant: Claimant | null =
       call === null
         ? null
@@ -506,18 +518,23 @@ export class Decisions {
    * for the call, so every op of the call on that path runs on it (a write
    * tool reads the file back to stamp its version), and the call's end
    * spends it, unless the call is held on a question still waiting: its
-   * retry finds the grants standing, as a held line's does. A call made
-   * inside another runs in the outer one, so a session write on a line or
-   * in a job is spent when that ends; a call another ledger runs (a
-   * host callback reaching a second workspace mid-call) is no call of this
-   * one's. Without task isolation a call's claims may be another task's,
-   * so a held call spends them too. Mirrors Python's `within_call`.
+   * retry finds the grants standing, as a held line's does. `run` gets the
+   * call's hand-off, for its ops to carry. A call made inside another runs
+   * in the outer one, so a session write on a line or in a job is spent
+   * when that ends; a call another ledger runs (a host callback reaching a
+   * second workspace mid-call) is no call of this one's. Without task
+   * isolation a live call may be another task's, so every call runs as its
+   * own and a held call spends its claims too. Mirrors Python's
+   * `within_call`.
    */
-  async withinCall<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-    if (getOpCall(this, sessionId) !== null) return run()
+  async withinCall<T>(sessionId: string, run: (handed: HandOff) => Promise<T>): Promise<T> {
+    // Without task isolation a live call may be another task's, so every
+    // call runs as its own.
+    const outer = asyncContextIsolatesTasks ? getOpCall(this, sessionId) : null
+    if (outer !== null) return run(outer)
     const handed: HandOff = { claimed: [], parent: null, origin: null }
     try {
-      return await runWithOpCall(this, handed, sessionId, run)
+      return await runWithOpCall(this, handed, sessionId, () => run(handed))
     } catch (err) {
       const held = err instanceof PolicyDenied && err.refusal?.kind === 'pending'
       if (held && asyncContextIsolatesTasks) this.release(sessionId, handed)
@@ -916,4 +933,15 @@ export function getOpCall(owner: Decisions, sessionId: string): HandOff | null {
     .reverse()
     .find(([ledger, , session]) => ledger === owner && session === sessionId)
   return call?.[1] ?? null
+}
+
+/**
+ * The call `caller` runs in under `owner`'s ledger for `sessionId`, null
+ * for a bare op, for a call another ledger runs or for another session's
+ * call. Mirrors Python's `call_of`.
+ */
+export function callOf(caller: Caller, owner: Decisions, sessionId: string): HandOff | null {
+  const call = caller.call
+  if (call?.[0] !== owner || call[2] !== sessionId) return null
+  return call[1]
 }

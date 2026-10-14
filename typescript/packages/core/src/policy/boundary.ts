@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Caller } from '../context/session_context.ts'
 import type { SessionAccess } from '../view/types.ts'
 import type { Decisions } from './decisions.ts'
 import type { EntryGate } from './types.ts'
@@ -23,8 +24,9 @@ import type { VfsCall } from '../vfs/types.ts'
 /** The POSIX policy boundary for dispatched filesystem operations: the
  * ordered builtin and user policies, the owning mount prefix, its
  * configured mode (the authorization ceiling), the session whose grants
- * govern the op, and the approval ledger a path rule that asks is put to
- * where no line is running. Mirrors Python's Boundary. */
+ * govern the op, the approval ledger a path rule that asks is put to
+ * where no line is running, and who makes the op (without one, the gates
+ * read the async context's). Mirrors Python's Boundary. */
 export class Boundary {
   constructor(
     readonly policies: Policies,
@@ -33,6 +35,7 @@ export class Boundary {
     readonly sessionId = '',
     readonly decisions: Decisions | null = null,
     readonly access?: SessionAccess,
+    readonly caller?: Caller,
   ) {}
 
   async admit(
@@ -46,6 +49,7 @@ export class Boundary {
       ...(this.mode === undefined ? {} : { mode: this.mode }),
       decisions: this.decisions,
       ...(this.access === undefined ? {} : { access: this.access }),
+      ...(this.caller === undefined ? {} : { caller: this.caller }),
       ...access,
     })
   }
@@ -71,6 +75,7 @@ export class Boundary {
         ...(this.mode === undefined ? {} : { mode: this.mode }),
         decisions: this.decisions,
         ...(this.access === undefined ? {} : { access: this.access }),
+        ...(this.caller === undefined ? {} : { caller: this.caller }),
       },
     )
     return result

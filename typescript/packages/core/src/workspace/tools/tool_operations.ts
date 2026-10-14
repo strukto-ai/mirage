@@ -150,10 +150,14 @@ export function writes(session: SessionState, mounts: readonly MountEntry[]): bo
 /**
  * A file tool's call as the unit an op-level answer covers
  * (`Decisions.withinCall`): an approval for a path runs every op the call
- * makes on it, and the call's end spends it. Mirrors Python's `one_call`.
+ * makes on it, and the call's end spends it. `run` gets the session's
+ * files as that call, so each op carries it and a call running at the
+ * same time never claims this one's approval. Mirrors Python's `one_call`.
  */
-function oneCall<T>(session: SessionLike, run: () => Promise<T>): Promise<T> {
-  return session.decisions.withinCall(session.sessionId, run)
+function oneCall<T>(session: SessionLike, run: (vfs: Files) => Promise<T>): Promise<T> {
+  return session.decisions.withinCall(session.sessionId, (handed) =>
+    run(session.vfs.forCaller({ call: [session.decisions, handed, session.sessionId] })),
+  )
 }
 
 /**
@@ -243,8 +247,8 @@ export class MirageToolOperations {
   }
 
   read(path: string, offset = 0, limit = 2000): Promise<ToolResult> {
-    return oneCall(this.session, async () => {
-      const versions = await this.versions()
+    return oneCall(this.session, async (vfs) => {
+      const versions = (await this.versions()).through(vfs)
       let data: Uint8Array
       try {
         data = await versions.read(path)
@@ -313,8 +317,8 @@ export class MirageToolOperations {
    * change since, so a write never clobbers text the agent has not seen.
    */
   write(path: string, content: string): Promise<ToolResult> {
-    return oneCall(this.session, async () => {
-      const versions = await this.versions()
+    return oneCall(this.session, async (vfs) => {
+      const versions = (await this.versions()).through(vfs)
       let present: boolean
       try {
         present = await versions.vfs.exists(path)
@@ -341,8 +345,8 @@ export class MirageToolOperations {
     newString: string,
     replaceAll = false,
   ): Promise<ToolResult> {
-    return oneCall(this.session, async () => {
-      const versions = await this.versions()
+    return oneCall(this.session, async (vfs) => {
+      const versions = (await this.versions()).through(vfs)
       let content: string
       try {
         content = decode(await versions.readForEdit(path))
@@ -421,7 +425,7 @@ export class MirageToolOperations {
    * short list.
    */
   glob(pattern: string, path = '/'): Promise<ToolResult> {
-    return oneCall(this.session, async () => {
+    return oneCall(this.session, async (vfs) => {
       const full =
         pattern.startsWith('/') || path === ''
           ? pattern
@@ -438,7 +442,7 @@ export class MirageToolOperations {
       const files: string[] = []
       for (const match of matches) {
         try {
-          if (await this.session.vfs.isFile(match)) files.push(match)
+          if (await vfs.isFile(match)) files.push(match)
         } catch (err) {
           if (!isEacces(err)) throw err
         }

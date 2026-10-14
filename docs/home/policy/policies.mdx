@@ -166,6 +166,8 @@ For `tar -cf a.tar -C /mnt /data`:
 
 A method only reads. A write it makes through Mirage is refused (`EROFS`
 for a file, `EACCES` for a variable), and its reads are not judged again.
+The session's history is `/.bash_history`, which a method reads through
+`ctx.vfs` like any file.
 
 ### What the agent controls
 

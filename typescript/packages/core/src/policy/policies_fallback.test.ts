@@ -209,4 +209,51 @@ describe('a method without task isolation', () => {
       await ws.close()
     }
   })
+
+  it("keeps one call's nod off the same session's next calls", async () => {
+    // A read waits on the host while the same session's write is answered
+    // once: the nod covers that write, not the read and write after it.
+    let entered!: () => void
+    let release!: () => void
+    const reached = new Promise<void>((resolve) => (entered = resolve))
+    const held = new Promise<void>((resolve) => (release = resolve))
+    const asked: string[] = []
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        onAsk: async (record: Decision) => {
+          asked.push(record.argv.join(' '))
+          if (asked.length === 1) {
+            entered()
+            await held
+          }
+          return { ...record, outcome: Outcome.ALLOW }
+        },
+      },
+    )
+    ws.createSession('agent', {
+      profile: { commands: { ask: [{ reason: 'outbox needs a nod', paths: ['/data/out/*'] }] } },
+    })
+    await ws.shell('mkdir -p /data/out && echo x > /data/out/f.txt')
+    const tools = new Session(ws, 'agent').tools
+    try {
+      const slow = tools.read('/data/out/f.txt')
+      await reached
+      expect((await tools.write('/data/out/a.txt', 'one')).isError).toBeUndefined()
+      expect((await tools.read('/data/out/a.txt')).isError).toBeUndefined()
+      expect((await tools.write('/data/out/a.txt', 'two')).isError).toBeUndefined()
+      expect(asked).toEqual([
+        '/data/out/f.txt',
+        '/data/out/a.txt',
+        '/data/out/a.txt',
+        '/data/out/a.txt',
+      ])
+      release()
+      expect((await slow).isError).toBeUndefined()
+    } finally {
+      await ws.close()
+    }
+  })
 })

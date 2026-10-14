@@ -502,9 +502,9 @@ export class Workspace {
     // It runs as the default session, as a bare `shell` does, so the
     // default profile confines it too.
     this.vfs = new Files(
-      (op, path, args, kwargs, report) => {
+      (op, path, args, kwargs, report, caller) => {
         if (this.isShuttingDown()) throw new Error('Workspace is closed')
-        return this.dispatcher.dispatch(op, path, args, kwargs, report)
+        return this.dispatcher.dispatch(op, path, args, kwargs, report, caller)
       },
       async (rec, sessionId) => {
         await this.observer.logOp(rec, sessionId)
@@ -520,9 +520,9 @@ export class Workspace {
         // so on the fallback storage a newer binding cannot judge its op.
         dispatchAs: (owner) => {
           const bound = this.dispatcher.forSession(owner)
-          return (op, path, args, kwargs, report) => {
+          return (op, path, args, kwargs, report, caller) => {
             if (this.isShuttingDown()) throw new Error('Workspace is closed')
-            return bound.dispatch(op, path, args, kwargs, report)
+            return bound.dispatch(op, path, args, kwargs, report, caller)
           }
         },
       },

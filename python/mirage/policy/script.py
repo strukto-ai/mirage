@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 # as the mounts it shows, the files through the program's own open().
 _LIVE = frozenset({"session", "ns", "vfs"})
 
+
 def _plain(value: Any) -> JsonValue:
     """A value as a program reads it: JSON-shaped data, bytes as text,
     a path as its virtual spelling, a model or record as its fields

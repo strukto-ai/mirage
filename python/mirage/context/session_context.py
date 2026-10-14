@@ -131,7 +131,7 @@ class Caller:
     """
 
     session: SessionState | None = None
-    owner: "SessionOwner | None" = None
+    owner: SessionOwner | None = None
     evaluation: EvaluationContext | None = None
     gate: EntryGate | None = None
     mount: tuple[str, MountMode] | None = None
@@ -143,18 +143,23 @@ class Caller:
             int,
             tuple[PathSpec, ...],
             RedirectRunner | None,
-            tuple["Redirect", ...],
+            tuple[Redirect, ...],
         ]
         | None
     ) = None
     program: SessionState | None = None
-    call: "tuple[Decisions, HandOff, str] | None" = None
-    policies: "Policies | None" = None
+    call: tuple[Decisions, HandOff, str] | None = None
+    policies: Policies | None = None
     policy_read: bool = False
     stop: asyncio.Event | None = None
     write_held: bool = False
-    line_writer: "StatusWriter | None" = None
+    line_writer: StatusWriter | None = None
     execution_id: str | None = None
+
+    @property
+    def visibility(self) -> Visibility | None:
+        """What the caller's session sees, None when unrestricted."""
+        return self.session.visibility if self.session is not None else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -567,7 +572,7 @@ def set_redirect_paths(
     node_id: int,
     paths: tuple[PathSpec, ...],
     runner: RedirectRunner | None = None,
-    syntax: tuple["Redirect", ...] = (),
+    syntax: tuple[Redirect, ...] = (),
 ) -> CallerToken:
     """Bind a statement's expanded redirect targets to the command node
     they belong to, for that node's run.
@@ -610,7 +615,7 @@ def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
     return bound[1]
 
 
-def redirect_syntax_for(node_id: int) -> tuple["Redirect", ...]:
+def redirect_syntax_for(node_id: int) -> tuple[Redirect, ...]:
     """Pending redirects, before a rewritten command reaches admission.
 
     Args:

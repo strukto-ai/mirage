@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Caller } from '../context/session_context.ts'
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 import type { PathSpec, SetAttrFields } from '../types.ts'
 
@@ -68,6 +69,8 @@ export type MountType = 'ssh' | 'fuse' | 'both'
  * `report`, when a caller passes one, is stamped by the dispatcher the moment
  * the op completes, so an observer reads what ran even when a later
  * step throws the result away; runtimes and combiners never pass it.
+ * `caller` is who makes the op; without one the dispatcher reads the
+ * async context's.
  */
 export type DispatchFn = (
   name: string,
@@ -75,6 +78,7 @@ export type DispatchFn = (
   args?: readonly unknown[],
   kwargs?: Record<string, unknown>,
   report?: OpReport,
+  caller?: Caller,
 ) => Promise<[unknown, IOResult]>
 
 /**

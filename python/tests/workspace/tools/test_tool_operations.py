@@ -1,4 +1,6 @@
+import asyncio
 import errno
+from dataclasses import replace
 
 import pytest
 
@@ -7,7 +9,7 @@ from mirage.context.session_context import (
     reset_current_session,
     set_current_session,
 )
-from mirage.policy import Outcome, VfsContext
+from mirage.policy import Decision, Outcome, VfsContext
 from mirage.workspace.files import Files
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 from mirage.workspace.tools.tool_operations import TOOL_NAMES, number_lines
@@ -487,6 +489,52 @@ async def test_a_tool_the_profile_does_not_offer_is_no_tool():
         await Session(ws, "ro").tools.call(
             "write", {"path": "/x", "content": "y"}
         )
+
+
+@pytest.mark.asyncio
+async def test_one_calls_nod_stays_off_the_same_sessions_next_calls():
+    # A read waits on the host while the same session's write is answered
+    # once: the nod covers that write, not the read and write after it.
+    reached = asyncio.Event()
+    held = asyncio.Event()
+    asked: list[tuple[str, ...]] = []
+
+    async def answer(record: Decision) -> Decision:
+        asked.append(record.paths)
+        if len(asked) == 1:
+            reached.set()
+            await held.wait()
+        return replace(record, outcome=Outcome.ALLOW)
+
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, on_ask=answer)
+    ws.create_session(
+        "agent",
+        profile={
+            "commands": {
+                "ask": [
+                    {"reason": "outbox needs a nod", "paths": ["/data/out/*"]}
+                ]
+            }
+        },
+    )
+    await ws.shell("mkdir -p /data/out && echo x > /data/out/f.txt")
+    tools = Session(ws, "agent").tools
+    try:
+        slow = asyncio.create_task(tools.read("/data/out/f.txt"))
+        await reached.wait()
+        assert not (await tools.write("/data/out/a.txt", "one")).is_error
+        assert not (await tools.read("/data/out/a.txt")).is_error
+        assert not (await tools.write("/data/out/a.txt", "two")).is_error
+        assert asked == [
+            ("/data/out/f.txt",),
+            ("/data/out/a.txt",),
+            ("/data/out/a.txt",),
+            ("/data/out/a.txt",),
+        ]
+        held.set()
+        assert not (await slow).is_error
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

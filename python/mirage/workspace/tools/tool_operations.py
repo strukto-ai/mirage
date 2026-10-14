@@ -231,7 +231,7 @@ def one_call(
     ) -> R:
         session = self._session
         return await session.decisions.within_call(
-            session.session_id, lambda: method(self, *args, **kwargs)
+            session.session_id, lambda _: method(self, *args, **kwargs)
         )
 
     return call

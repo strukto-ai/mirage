@@ -122,9 +122,9 @@ export function abortedLine(session: SessionState): AbortSignal | undefined {
  */
 export function guardDispatch(dispatch: DispatchFn, signal: AbortSignal | undefined): DispatchFn {
   if (signal === undefined) return dispatch
-  return (op, path, args, kwargs, report) => {
+  return (op, path, args, kwargs, report, caller) => {
     if (signal.aborted) return Promise.reject(makeAbortError(signal))
-    return dispatch(op, path, args, kwargs, report)
+    return dispatch(op, path, args, kwargs, report, caller)
   }
 }
 

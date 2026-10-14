@@ -1646,7 +1646,7 @@ def _one_call(
 
     async def call(*args: P.args, **kwargs: P.kwargs) -> None:
         await policies.decisions.within_call(
-            session.session_id, lambda: write(*args, **kwargs)
+            session.session_id, lambda _: write(*args, **kwargs)
         )
 
     return call

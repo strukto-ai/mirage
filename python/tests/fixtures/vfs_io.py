@@ -19,6 +19,7 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.config import CommandIO
+from mirage.context import Caller
 from mirage.io import IOResult
 from mirage.types import PathSpec
 from mirage.vfs.base import BaseVFS
@@ -209,10 +210,10 @@ def dispatched(ws: Workspace) -> list[tuple[str, str]]:
     real = ws._dispatcher._dispatch
 
     async def recording(
-        name: str, path: PathSpec, /, **kwargs: Any
+        name: str, path: PathSpec, caller: Caller, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
         seen.append((name, path.virtual))
-        return await real(name, path, **kwargs)
+        return await real(name, path, caller, **kwargs)
 
     ws._dispatcher._dispatch = recording
     return seen

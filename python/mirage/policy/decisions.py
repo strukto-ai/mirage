@@ -18,8 +18,8 @@ import hashlib
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TypeVar
 
-from mirage.context import explaining
 from mirage.context.session_context import (
+    Caller,
     CallerToken,
     bind_caller,
     current_caller,
@@ -492,7 +492,10 @@ class Decisions:
         return None
 
     async def resolve_op(
-        self, ctx: VfsContext | SessionContext, ask: Ask
+        self,
+        ctx: VfsContext | SessionContext,
+        ask: Ask,
+        caller: Caller | None = None,
     ) -> Deny | Pending | None:
         """An Ask about a VFS call or a session write: a standing answer
         settles it, else the question is raised now. In a dry run's
@@ -509,15 +512,19 @@ class Decisions:
         Args:
             ctx (VfsContext | SessionContext): what was asked about.
             ask (Ask): the chain's answer.
+            caller (Caller | None): who asked, with the call the answer
+                is claimed on; None for the caller bound here.
 
         Returns:
             None to go on, a Deny to refuse, a Pending when the host has
             not decided.
         """
-        if explaining() is DryRun.DECIDING:
+        if caller is None:
+            caller = current_caller()
+        if caller.explaining is DryRun.DECIDING:
             return self.held_op(ctx, ask)
         asked, keyed = op_question(ctx, ask)
-        call = get_op_call(self, ctx.session_id)
+        call = call_of(caller, self, ctx.session_id)
         claimant = (
             Claimant(call, Occurrence(None, asked.argv[0], 0, 0))
             if call is not None
@@ -540,7 +547,7 @@ class Decisions:
         return self.held(*op_question(ctx, ask))
 
     async def within_call(
-        self, session_id: str, run: Callable[[], Awaitable[T]]
+        self, session_id: str, run: Callable[[HandOff], Awaitable[T]]
     ) -> T:
         """Run one call (a file tool's, a session write) as the unit an
         op-level answer covers.
@@ -550,24 +557,26 @@ class Decisions:
         tool reads the file back to stamp its version), and the call's
         end spends it, unless the call is held on a question still
         waiting: its retry finds the grants standing, as a held line's
-        does. A call made inside another runs in the outer one, so a
-        session write on a line or in a job is spent when that ends; a
-        call another ledger runs (a host callback reaching a second
-        workspace mid-call) is no call of this one's.
+        does. ``run`` gets the call's hand-off, for its ops to carry. A
+        call made inside another runs in the outer one, so a session
+        write on a line or in a job is spent when that ends; a call
+        another ledger runs (a host callback reaching a second workspace
+        mid-call) is no call of this one's.
 
         Args:
             session_id (str): the session the call runs as.
-            run (Callable[[], Awaitable[T]]): the call.
+            run (Callable[[HandOff], Awaitable[T]]): the call.
 
         Returns:
             T: what the call returned.
         """
-        if get_op_call(self, session_id) is not None:
-            return await run()
+        outer = get_op_call(self, session_id)
+        if outer is not None:
+            return await run(outer)
         handed = HandOff()
         token = set_op_call(self, handed, session_id)
         try:
-            return await run()
+            return await run(handed)
         except PolicyDenied as exc:
             if exc.refusal is not None and exc.refusal.kind == "pending":
                 self.release(session_id, handed)
@@ -1043,9 +1052,7 @@ def set_op_call(
         session_id (str): the session the call runs as.
     """
     return bind_caller(
-        dataclasses.replace(
-            current_caller(), call=(owner, handed, session_id)
-        )
+        dataclasses.replace(current_caller(), call=(owner, handed, session_id))
     )
 
 
@@ -1064,7 +1071,22 @@ def get_op_call(owner: Decisions, session_id: str) -> HandOff | None:
         owner (Decisions): the ledger asking.
         session_id (str): the session asking.
     """
-    call = current_caller().call
+    return call_of(current_caller(), owner, session_id)
+
+
+def call_of(
+    caller: Caller, owner: Decisions, session_id: str
+) -> HandOff | None:
+    """The call ``caller`` runs in under ``owner``'s ledger for
+    ``session_id``, None for a bare op, for a call another ledger runs
+    or for another session's call.
+
+    Args:
+        caller (Caller): who is calling.
+        owner (Decisions): the ledger asking.
+        session_id (str): the session asking.
+    """
+    call = caller.call
     if call is None or call[0] is not owner or call[2] != session_id:
         return None
     return call[1]

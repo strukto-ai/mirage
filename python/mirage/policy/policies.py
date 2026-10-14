@@ -23,12 +23,11 @@ from typing import TYPE_CHECKING, Any
 from mirage.commands.spec.usage import operand_exit_code
 from mirage.context import (
     explaining,
-    line_running,
-    note_refusal,
     reset_explaining,
     set_explaining,
 )
 from mirage.context.session_context import (
+    Caller,
     CallerToken,
     bind_caller,
     current_caller,
@@ -156,6 +155,7 @@ def policy_denied(
     action: Deny | Pending,
     filename: str,
     strerror: str = posix_phrase(FsCondition.EACCES),
+    caller: Caller | None = None,
 ) -> PolicyDenied:
     """The error an entry point raises for a policy's Deny, or for a question
     the host has not answered, its record noted for the line running it.
@@ -171,10 +171,13 @@ def policy_denied(
         filename (str): the path or name refused.
         strerror (str): the terminal's words, ``Permission denied``
             unless the entry point words its own.
+        caller (Caller | None): who was refused, whose line notes the
+            record; None for the caller bound here.
     """
     refusal = refusal_of(action)
-    if refusal is not None:
-        note_refusal(refusal)
+    sink = (caller if caller is not None else current_caller()).refusals
+    if refusal is not None and sink is not None:
+        sink(refusal)
     return PolicyDenied(
         posix_errno(FsCondition.EACCES), strerror, filename, refusal=refusal
     )
@@ -192,6 +195,7 @@ async def pre_vfs_gate(
     check_hidden: bool = True,
     decisions: Decisions | None = None,
     final: bool = True,
+    caller: Caller | None = None,
 ) -> None:
     """Fire pre_vfs at a dispatcher; a Deny becomes EACCES.
 
@@ -224,6 +228,8 @@ async def pre_vfs_gate(
             entry point that cannot ask.
         final (bool): the op's last gate; False for a rename's source,
             whose destination is gated next.
+        caller (Caller | None): who makes the call; None for the caller
+            bound here.
 
     Raises:
         Explained: in a dry run (``explaining``), once the gate's answer
@@ -241,7 +247,10 @@ async def pre_vfs_gate(
         session_id=session_id,
         mode=mode,
     )
-    trace = explaining()
+    if caller is None:
+        caller = current_caller()
+    trace = caller.explaining
+    line = caller.refusals is not None
     if isinstance(trace, list):
         token = set_explaining(DryRun.DECIDING)
         try:
@@ -249,7 +258,7 @@ async def pre_vfs_gate(
             noted = (
                 None
                 if hidden
-                else await _explained_op(policies, ctx, decisions)
+                else await _explained_op(policies, ctx, decisions, line)
             )
         finally:
             reset_explaining(token)
@@ -269,30 +278,38 @@ async def pre_vfs_gate(
     ):
         return
     answer = await policies.pre_vfs(
-        ctx, check_hidden=check_hidden, rules_only=line_running() or deciding
+        ctx, check_hidden=check_hidden, rules_only=line or deciding
     )
     if isinstance(answer, Hide):
         raise answer.error
-    await _refuse_op(ctx, answer, None if line_running() else decisions)
+    await _refuse_op(ctx, answer, None if line else decisions, caller)
 
 
 async def _refuse_op(
-    ctx: VfsContext, answer: Deny | Ask | None, decisions: Decisions | None
+    ctx: VfsContext,
+    answer: Deny | Ask | None,
+    decisions: Decisions | None,
+    caller: Caller,
 ) -> None:
     if isinstance(answer, Ask):
         if decisions is None:
-            raise policy_denied(Deny(answer.reason), ctx.path.virtual)
-        refused = await decisions.resolve_op(ctx, answer)
+            raise policy_denied(
+                Deny(answer.reason), ctx.path.virtual, caller=caller
+            )
+        refused = await decisions.resolve_op(ctx, answer, caller)
     else:
         refused = answer
     if isinstance(refused, Deny) and refused.error is not None:
         raise refused.error
     if refused is not None:
-        raise policy_denied(refused, ctx.path.virtual)
+        raise policy_denied(refused, ctx.path.virtual, caller=caller)
 
 
 async def _explained_op(
-    policies: "Policies", ctx: VfsContext, decisions: Decisions | None
+    policies: "Policies",
+    ctx: VfsContext,
+    decisions: Decisions | None,
+    line: bool,
 ) -> VfsExplanation:
     """What the gate would answer one VFS call, as ``pre_vfs_gate``
     decides it and without its consequences: every policy's answer, the
@@ -304,6 +321,8 @@ async def _explained_op(
         ctx (VfsContext): the call the gate sees.
         decisions (Decisions | None): the approval ledger, None at an
             entry point that cannot ask.
+        line (bool): whether the call is a running line's, which asks
+            no question.
     """
     said = await policies.answers("pre_vfs", ctx)
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
@@ -320,7 +339,7 @@ async def _explained_op(
     if isinstance(winner, Ask):
         action = (
             Deny(winner.reason, policy=winner.policy)
-            if decisions is None or line_running()
+            if decisions is None or line
             else decisions.held_op(ctx, winner)
         )
     decided = replace(
@@ -353,6 +372,7 @@ async def post_vfs_gate(
     *,
     mode: MountMode | None = None,
     decisions: Decisions | None = None,
+    caller: Caller | None = None,
 ) -> None:
     """Fire post_vfs at a dispatcher; a Deny, or an Ask the host has not
     approved, drops the result with EACCES.
@@ -373,10 +393,14 @@ async def post_vfs_gate(
             it.
         decisions (Decisions | None): the approval ledger, None at an
             entry point that cannot ask.
+        caller (Caller | None): who made the call; None for the caller
+            bound here.
     """
+    if caller is None:
+        caller = current_caller()
     if (
-        line_running()
-        or explaining() is DryRun.DECIDING
+        caller.refusals is not None
+        or caller.explaining is DryRun.DECIDING
         or not await policies.wants_for("post_vfs", session_id)
     ):
         return None
@@ -389,7 +413,7 @@ async def post_vfs_gate(
         mode=mode,
         result=result,
     )
-    await _refuse_op(ctx, await policies.post_vfs(ctx), decisions)
+    await _refuse_op(ctx, await policies.post_vfs(ctx), decisions, caller)
 
 
 async def pre_session_gate(

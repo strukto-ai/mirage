@@ -9,7 +9,9 @@ export function newExecutionId(): string {
 export function currentExecutionId(): string | null {
   const id = currentCaller().executionId
   if (id === null) return null
-  const sibling = liveCallers().some((caller) => caller.executionId !== null && caller.executionId !== id)
+  const sibling = liveCallers().some(
+    (caller) => caller.executionId !== null && caller.executionId !== id,
+  )
   return sibling ? null : id
 }
 
