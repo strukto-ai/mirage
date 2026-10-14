@@ -175,18 +175,26 @@ def test_per_kind_answers_its_kinds_after_the_guard(accessor):
     assert guarded == ["/h/rooms/red/a.json"]
 
 
-def test_per_kind_is_none_for_any_other_kind_without_the_guard(accessor):
-    async def guard(accessor, match, virtual):
-        raise AssertionError("no guard for a kind with no answer")
+async def _unexpected_guard(
+    accessor: FakeAccessor, match: ScopeMatch, virtual: str
+) -> None:
+    raise AssertionError("no guard for a kind with no answer")
 
-    first = per_kind(detect_scope, {"note": _note_lines}, guard=guard)
+
+async def _missing_guard(
+    accessor: FakeAccessor, match: ScopeMatch, virtual: str
+) -> None:
+    raise FileNotFoundError(virtual)
+
+
+def test_per_kind_is_none_for_any_other_kind_without_the_guard(accessor):
+    first = per_kind(
+        detect_scope, {"note": _note_lines}, guard=_unexpected_guard
+    )
     assert asyncio.run(first(accessor, spec("/rooms/red"), 3)) is None
 
 
 def test_per_kind_raises_what_the_guard_raises(accessor):
-    async def guard(accessor, match, virtual):
-        raise FileNotFoundError(virtual)
-
-    first = per_kind(detect_scope, {"note": _note_lines}, guard=guard)
+    first = per_kind(detect_scope, {"note": _note_lines}, guard=_missing_guard)
     with pytest.raises(FileNotFoundError):
         asyncio.run(first(accessor, spec("/rooms/red/a.json"), 3))

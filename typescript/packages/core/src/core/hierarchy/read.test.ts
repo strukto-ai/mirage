@@ -21,12 +21,14 @@ import { JSON_NAME } from './codec.ts'
 import {
   makeRead,
   makeReadRange,
+  perKind,
+  type Guard,
   type RangedReader,
   type Reader,
   type WindowedReader,
 } from './read.ts'
 import { makeReaddir, type Lister } from './readdir.ts'
-import { Slot, Scope, makeDetectScope } from './scope.ts'
+import { Slot, Scope, makeDetectScope, type ScopeMatch } from './scope.ts'
 import { makeStat } from './stat.ts'
 
 const SCOPES: readonly Scope[] = [
@@ -182,5 +184,43 @@ describe('hierarchy makeReadRange', () => {
     const readRange = makeReadRange<FakeAccessor>(detectScope, READ, {})
     const out = await readRange(new FakeAccessor(), spec('/rooms/red/a.json'))
     expect(new TextDecoder().decode(out)).toBe('red:a')
+  })
+})
+
+const noteLines = (
+  _accessor: FakeAccessor,
+  match: ScopeMatch,
+  _path: PathSpec,
+  n: number,
+): Promise<string> => Promise.resolve(`${match.slots.note ?? ''}:${String(n)}`)
+
+const unexpectedGuard: Guard<FakeAccessor> = () =>
+  Promise.reject(new Error('no guard for a kind with no answer'))
+
+const missingGuard: Guard<FakeAccessor> = (_accessor, _match, virtual) =>
+  Promise.reject(new Error(`missing ${virtual}`))
+
+describe('hierarchy perKind', () => {
+  it('answers its kinds after the guard', async () => {
+    const guarded: string[] = []
+    const guard: Guard<FakeAccessor> = (_accessor, _match, virtual) => {
+      guarded.push(virtual)
+      return Promise.resolve()
+    }
+    const first = perKind(detectScope, { note: noteLines }, { guard })
+    expect(await first(new FakeAccessor(), spec('/rooms/red/a.json'), 3)).toBe('a:3')
+    expect(guarded).toEqual(['/h/rooms/red/a.json'])
+  })
+
+  it('is null for any other kind without the guard', async () => {
+    const first = perKind(detectScope, { note: noteLines }, { guard: unexpectedGuard })
+    expect(await first(new FakeAccessor(), spec('/rooms/red'), 3)).toBeNull()
+  })
+
+  it('raises what the guard raises', async () => {
+    const first = perKind(detectScope, { note: noteLines }, { guard: missingGuard })
+    await expect(first(new FakeAccessor(), spec('/rooms/red/a.json'), 3)).rejects.toThrow(
+      'missing /h/rooms/red/a.json',
+    )
   })
 })
