@@ -94,7 +94,6 @@ import {
   type RuntimeContext,
 } from '../../runtime/binding.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
-import { captureRecordingContext } from '../../observe/context.ts'
 import {
   captureSessionContext,
   currentCaller,
@@ -655,10 +654,7 @@ export class Workspace {
     // capture keeps the dispatcher's fold across every live session.
     const dispatcher =
       sessionId === undefined ? this.dispatcher : this.dispatcher.forSession(session)
-    const scope = new ContextScope([
-      ...captureSessionContext(session, this.sessionManager),
-      ...captureRecordingContext(),
-    ])
+    const scope = new ContextScope([...captureSessionContext(session, this.sessionManager)])
     return captureBinding(
       this.runtimeBinding,
       {
@@ -726,10 +722,7 @@ export class Workspace {
     // terminal, so the command limits bound what it hands back wherever
     // the parent's own output goes.
     child.terminalOutput = true
-    const scope = new ContextScope([
-      ...captureSessionContext(child, this.sessionManager),
-      ...captureRecordingContext(),
-    ])
+    const scope = new ContextScope([...captureSessionContext(child, this.sessionManager)])
     const input = new ProcessInput(this.io.bufferBytes),
       output = new ProcessOutput(request.mergeStderr, this.io.bufferBytes),
       abort = new AbortController()

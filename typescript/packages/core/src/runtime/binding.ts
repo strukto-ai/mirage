@@ -14,7 +14,6 @@
 
 import type { ProcessView } from '../process/view.ts'
 import { captureSessionContext } from '../context/session_context.ts'
-import { captureRecordingContext } from '../observe/context.ts'
 import type { NamespaceView, OpKwargs, SessionView } from '../view/types.ts'
 import { PathSpec } from '../types.ts'
 import { ContextScope } from '../utils/context_scope.ts'
@@ -74,7 +73,7 @@ export function captureBinding(
     // own serves a context captured with no session named.
     dispatch?: BridgeDispatchFn
   } = {},
-  scope = new ContextScope([...captureSessionContext(), ...captureRecordingContext()]),
+  scope = new ContextScope(captureSessionContext()),
 ): RuntimeContext {
   const source = views.ns ?? {}
   const links = source.links

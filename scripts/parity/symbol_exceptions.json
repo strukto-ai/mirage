@@ -1,5 +1,5 @@
 {
-  "baseline": 3741,
+  "baseline": 3737,
  "modules": {
   "core/render/json": {
    "python_only": {
@@ -555,17 +555,14 @@
   },
   "cache/context": {
    "python_only": {
-    "_write": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split.",
     "own_write_version": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split.",
     "push_write_context": "Python binds per-call context by setting and restoring a ContextVar (push_cache_manager and _active already do); TypeScript runs a callback in a scoped async-context store (runWithCacheManager and storage). The write context and the op's own version follow that same split.",
     "_own_version_for": "Python keeps the op's own version in one ContextVar paired with its path and reads it here; TypeScript filters its live async-context frames by path inside ownVersion, which Python's _own_version pairs with."
    },
    "typescript_only": {
     "activeWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
-    "ownVersionStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "runWithOwnVersion": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "runWithWriteContext": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
-    "writeStorage": "TypeScript binds per-call context by running a callback in a scoped async-context store, as runWithCacheManager does; Python sets and restores a ContextVar instead. The write context and the op's own version follow that same split.",
     "agree": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
     "overlapping": "TypeScript's fallback async-context storage can hold several live frames that disagree on the write context or the op's own version; Python's ContextVar is always task-isolated, so there is nothing to agree.",
     "ownersOf": "TypeScript's fallback async-context storage can hold live frames of several overlapping lines at once, so a path is answered by the frames of the longest prefix covering it; Python's ContextVar is always task-isolated, so its one frame is the owner."

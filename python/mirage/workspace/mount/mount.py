@@ -22,10 +22,6 @@ from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Callable, cast
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.context import (
-    push_cache_manager,
-    push_write_context,
-)
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig
 from mirage.cache.index.factory import build_index
@@ -53,12 +49,12 @@ from mirage.commands.spec.standard import has_injected_version
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context import (
+    Caller,
+    bind_caller,
+    current_caller,
     effective_mount_mode,
     require_paths_writable,
-    reset_mount_gate,
-    reset_walk_probe,
-    set_mount_gate,
-    set_walk_probe,
+    reset_caller,
     strongest_mode_under,
 )
 from mirage.core.dev.device import active_pipe, pipe_below
@@ -76,14 +72,7 @@ from mirage.errors.types import CommandTimeoutError
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.observe.context import (
-    push_mount_context,
-    push_revisions,
-    reset_active_recorder,
-    reset_revisions,
-    with_mount_context,
-    with_revisions,
-)
+from mirage.observe.context import with_mount_context, with_revisions
 from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
@@ -992,32 +981,30 @@ class MountEntry:
         Args:
             context (ExecContext): the invocation's execution context.
         """
-        recording_token = push_mount_context(self.mount_id)
-        revs_token = push_revisions(self.revisions or None)
-        prev_manager = push_cache_manager(self.cache_manager)
-        prev_write = push_write_context(self.write_context())
-        gate_token = set_mount_gate(self.prefix, self.mode)
+        outer = current_caller()
         links = context.ns.links if context.ns is not None else None
-        walk_token = (
-            set_walk_probe(
-                WalkProbe(
-                    stat=functools.partial(dispatch_stat, context.dispatch),
-                    follow=link_follow(links),
-                )
+        token = bind_caller(
+            dataclasses.replace(
+                self._on_mount(outer),
+                revisions=self.revisions or None,
+                cache_manager=self.cache_manager,
+                mount=(self.prefix, self.mode),
+                walk_probe=(
+                    WalkProbe(
+                        stat=functools.partial(
+                            dispatch_stat, context.dispatch
+                        ),
+                        follow=link_follow(links),
+                    )
+                    if context.dispatch is not None
+                    else outer.walk_probe
+                ),
             )
-            if context.dispatch is not None
-            else None
         )
         try:
             yield
         finally:
-            if walk_token is not None:
-                reset_walk_probe(walk_token)
-            reset_mount_gate(gate_token)
-            reset_revisions(revs_token)
-            reset_active_recorder(recording_token)
-            push_cache_manager(prev_manager)
-            push_write_context(prev_write)
+            reset_caller(token)
 
     def _read_only_refusal(
         self,
@@ -1306,9 +1293,12 @@ class MountEntry:
             scope = self._scope(path)
             kwargs.setdefault("index", self.index)
             op_timeout = self._op_timeout(name)
-            recording_token = push_mount_context(self.mount_id)
-            revs_token = push_revisions(self.revisions or None)
-            prev_write = push_write_context(self.write_context())
+            token = bind_caller(
+                dataclasses.replace(
+                    self._on_mount(current_caller()),
+                    revisions=self.revisions or None,
+                )
+            )
             try:
                 for fn in levels:
                     # The backend's own paths are host paths, so the process
@@ -1328,9 +1318,26 @@ class MountEntry:
                         )
                 return None
             finally:
-                reset_revisions(revs_token)
-                reset_active_recorder(recording_token)
-                push_write_context(prev_write)
+                reset_caller(token)
+
+    def _on_mount(self, caller: Caller) -> Caller:
+        """``caller`` running on this mount: its records name this mount,
+        and its writes are checked against this mount's write context.
+
+        Args:
+            caller (Caller): who makes the call.
+        """
+        return dataclasses.replace(
+            caller,
+            recorder=(
+                None
+                if caller.recorder is None
+                else dataclasses.replace(
+                    caller.recorder, mount_id=self.mount_id
+                )
+            ),
+            write_context=self.write_context(),
+        )
 
     def _scope(self, path: str) -> PathSpec:
         """``path`` as this mount's VFS addresses it.
@@ -1401,8 +1408,7 @@ class MountEntry:
         """
         async with self.use(), source.use():
             self.require_writable("write", PathSpec.from_str_path(dst), ())
-            recording_token = push_mount_context(self.mount_id)
-            prev_write = push_write_context(self.write_context())
+            token = bind_caller(self._on_mount(current_caller()))
             try:
                 with host_io():
                     await run_with_timeout(
@@ -1413,8 +1419,7 @@ class MountEntry:
                         "copy",
                     )
             finally:
-                reset_active_recorder(recording_token)
-                push_write_context(prev_write)
+                reset_caller(token)
 
     def live_pipe(self, path: str) -> DevicePipe | None:
         """The live pipe a read of ``path`` takes bytes from, which another
@@ -1475,11 +1480,15 @@ class MountEntry:
             self.revisions or None,
             with_mount_context(stream, self.mount_id),
         )
-        prev_write = push_write_context(self.write_context())
+        token = bind_caller(
+            dataclasses.replace(
+                current_caller(), write_context=self.write_context()
+            )
+        )
         try:
             pulls = ContextScope()
         finally:
-            push_write_context(prev_write)
+            reset_caller(token)
         return cast(
             AsyncIterator[bytes],
             self.activity.hold(pulls.stream(with_host_io(stream))),

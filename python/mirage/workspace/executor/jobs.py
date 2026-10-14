@@ -16,19 +16,17 @@ import asyncio
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from typing import Any
 
 from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.context import (
+    bind_caller,
+    current_caller,
     program_invocation,
-    refusal_sink,
-    reset_current_session,
-    reset_refusal_sink,
-    set_current_evaluation,
-    set_refusal_sink,
+    reset_caller,
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -36,7 +34,7 @@ from mirage.io.async_line_iterator import SharedInput
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
-from mirage.policy.decisions import Decisions, reset_op_call, set_op_call
+from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessState
 from mirage.process.view import ProcessView
@@ -259,22 +257,10 @@ async def handle_background(
         # substitution or pipe it was started in.
         console = Tee(job.console, output)
         cmd_str_inner = get_text(left) if hasattr(left, "text") else str(left)
-        # The task's context snapshot still points at the OUTER session
-        # (create_task copies the context before the fork can be bound),
-        # and the fork keeps its parent's id, so without this rebind a
-        # nested eval inside the job resolves the ambient outer session
-        # and escapes the fork.
-        token = set_current_evaluation(child_evaluation)
-        # The job's session writes are calls of the job's, spent at its
-        # end, not of the line it outlives.
-        call = (
-            set_op_call(decisions, job_handed, session.session_id)
-            if job_handed is not None and decisions is not None
-            else None
-        )
         held = False
         ended_held = False
-        line_sink = refusal_sink()
+        outer = current_caller()
+        line_sink = outer.refusals
 
         def note(refusal: Refusal) -> None:
             # The line still hears of every refusal; a question left
@@ -284,7 +270,26 @@ async def handle_background(
             if line_sink is not None:
                 line_sink(refusal)
 
-        sink = None if line_sink is None else set_refusal_sink(note)
+        # The job's own layer of the caller. The task's context snapshot
+        # still points at the OUTER session (create_task copies the
+        # context before the fork can be bound), and the fork keeps its
+        # parent's id, so without it a nested eval inside the job resolves
+        # the outer session and escapes the fork. The job's session writes
+        # are calls of the job's, spent at its end, not of the line it
+        # outlives.
+        token = bind_caller(
+            replace(
+                outer,
+                session=child_evaluation.session,
+                evaluation=child_evaluation,
+                call=(
+                    (decisions, job_handed, session.session_id)
+                    if job_handed is not None and decisions is not None
+                    else outer.call
+                ),
+                refusals=note if line_sink is not None else None,
+            )
+        )
         try:
             try:
                 # Handing the console down as a sink is what makes
@@ -358,11 +363,7 @@ async def handle_background(
             return io, exec_node
         finally:
             release_job()
-            reset_current_session(token)
-            if sink is not None:
-                reset_refusal_sink(sink)
-            if call is not None:
-                reset_op_call(call)
+            reset_caller(token)
             if job_handed is not None and decisions is not None:
                 # A job that ended held on a question leaves its grants
                 # standing for the retry, as a held line does; a killed

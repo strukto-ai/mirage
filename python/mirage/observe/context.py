@@ -15,9 +15,14 @@
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from mirage.context.session_context import (
+    CallerToken,
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.execution.context import current_execution_id
 from mirage.observe.record import STAMP_FINGERPRINT_OPS, OpRecord, RecordIndex
 from mirage.types import PathSpec
@@ -162,7 +167,8 @@ class Recorder:
     mount_id: str | None = None
 
 
-_recorder: ContextVar[Recorder | None] = ContextVar("_recorder", default=None)
+def _set_recorder(rec: Recorder | None) -> CallerToken:
+    return bind_caller(replace(current_caller(), recorder=rec))
 
 
 class RecordingScope:
@@ -189,12 +195,12 @@ class RecordingScope:
                 sink=sink, lost=LostPaths(sink), index=RecordIndex(sink)
             )
             self.records = rec.sink
-            self._token = _recorder.set(rec)
+            self._token = _set_recorder(rec)
 
     def close(self) -> None:
         """Restore the previous recorder. Idempotent."""
         if self._token is not None:
-            _recorder.reset(self._token)
+            reset_caller(self._token)
             self._token = None
 
 
@@ -210,13 +216,14 @@ def active_records() -> list[OpRecord] | None:
     Returns:
         list[OpRecord] | None: the active recorder's sink, or None.
     """
-    rec = _recorder.get()
+    rec = current_caller().recorder
     return rec.sink if rec is not None else None
 
 
-_command_sink: ContextVar[
-    tuple[list[OpRecord] | None, list[OpRecord]] | None
-] = ContextVar("_command_sink", default=None)
+def _set_command_sink(
+    sink: tuple[list[OpRecord] | None, list[OpRecord]] | None,
+) -> CallerToken:
+    return bind_caller(replace(current_caller(), command_sink=sink))
 
 
 @contextmanager
@@ -242,18 +249,18 @@ def command_records(own: bool = False) -> Iterator[list[OpRecord]]:
         line's sink.
     """
     mine: list[OpRecord] = []
-    held = _command_sink.get()
+    held = current_caller().command_sink
     command = mine if own else held[0] if held is not None else None
-    token = _command_sink.set((command, mine))
+    token = _set_command_sink((command, mine))
     try:
         yield mine
     finally:
-        _command_sink.reset(token)
+        reset_caller(token)
 
 
 def active_lost() -> LostPaths | None:
     """The running line's lost paths, None outside a recorded line."""
-    rec = _recorder.get()
+    rec = current_caller().recorder
     return rec.lost if rec is not None else None
 
 
@@ -290,7 +297,7 @@ def lift_lost(path: PathSpec, upto: int, subtree: bool = False) -> None:
 
 def active_recorder() -> Recorder | None:
     """Return the active Recorder for the current async context, if any."""
-    return _recorder.get()
+    return current_caller().recorder
 
 
 def reset_active_recorder(token) -> None:
@@ -299,7 +306,7 @@ def reset_active_recorder(token) -> None:
     Args:
         token: The token returned by ``push_mount_context``.
     """
-    _recorder.reset(token)
+    reset_caller(token)
 
 
 def push_mount_context(mount_id: str | None):
@@ -314,8 +321,8 @@ def push_mount_context(mount_id: str | None):
     Args:
         mount_id (str | None): instance identity, absent outside a mount.
     """
-    rec = _recorder.get()
-    return _recorder.set(
+    rec = current_caller().recorder
+    return _set_recorder(
         None
         if rec is None
         else Recorder(
@@ -342,7 +349,7 @@ async def with_mount_context(
     aiter = it.__aiter__()
     try:
         while True:
-            previous = _recorder.get()
+            previous = current_caller().recorder
             token = push_mount_context(
                 mount_id
                 if mount_id is not None
@@ -420,7 +427,7 @@ def finish_record(
             backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
     """
     elapsed = timer.elapsed_ms
-    recorder = _recorder.get()
+    recorder = current_caller().recorder
     return OpRecord(
         op=op,
         path=path,
@@ -436,7 +443,7 @@ def finish_record(
 
 
 def _charge(op_rec: OpRecord) -> None:
-    held = _command_sink.get()
+    held = current_caller().command_sink
     if held is not None:
         command, mine = held
         mine.append(op_rec)
@@ -468,7 +475,7 @@ def record(
             backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
             Used to pin replay reads to the exact recorded version.
     """
-    rec = _recorder.get()
+    rec = current_caller().recorder
     if rec is None:
         return
     op_rec = finish_record(
@@ -514,7 +521,7 @@ def record_stream(
     Returns:
         OpRecord | None: Mutable record, or None if not recording.
     """
-    rec = _recorder.get()
+    rec = current_caller().recorder
     if rec is None:
         return None
     op_rec = OpRecord(
@@ -534,9 +541,8 @@ def record_stream(
     return op_rec
 
 
-_revisions: ContextVar[dict[str, str] | None] = ContextVar(
-    "_revisions", default=None
-)
+def _set_revisions(revisions: dict[str, str] | None) -> CallerToken:
+    return bind_caller(replace(current_caller(), revisions=revisions))
 
 
 def push_revisions(revisions: dict[str, str] | None):
@@ -560,7 +566,7 @@ def push_revisions(revisions: dict[str, str] | None):
     Returns:
         Token: passable to ``reset_revisions``.
     """
-    return _revisions.set(revisions)
+    return _set_revisions(revisions)
 
 
 def reset_revisions(token) -> None:
@@ -569,7 +575,7 @@ def reset_revisions(token) -> None:
     Args:
         token: The token returned by ``push_revisions``.
     """
-    _revisions.reset(token)
+    reset_caller(token)
 
 
 def revision_for(path: str) -> str | None:
@@ -582,7 +588,7 @@ def revision_for(path: str) -> str | None:
         str | None: The pinned revision, or None if no revisions
         context is active or the path has no pin.
     """
-    revs = _revisions.get()
+    revs = current_caller().revisions
     if revs is None:
         return None
     return revs.get(path)

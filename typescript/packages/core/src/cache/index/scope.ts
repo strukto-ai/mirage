@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ContextCall, createAsyncContext } from '../../utils/async_context.ts'
+import { currentCaller, liveCallers, runWithCaller } from '../../context/session_context.ts'
 
 let sequence = 0
-const started = createAsyncContext<number>()
 
 /**
  * The next point in the one order commands and listing writes share.
@@ -37,7 +36,9 @@ export function tick(): number {
  * which fails toward a re-list rather than toward a stale one.
  */
 export function commandStarted(): number | null {
-  const stamps = started.liveStores()
+  const stamps = liveCallers().flatMap((caller) =>
+    caller.started === null ? [] : [caller.started],
+  )
   return stamps.length === 0 ? null : Math.max(...stamps)
 }
 
@@ -49,17 +50,5 @@ export function commandStarted(): number | null {
  * and the outer one comes back when it ends.
  */
 export function runInCommandScope<T>(fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(started.run(tick(), fn))
-}
-
-/**
- * Keep the running command's stamp while its lazy output is read.
- *
- * Python's stream wrapper copies the whole context, stamp included; here
- * each storage is captured by name, so a stream a command hands back
- * would otherwise drain as an unscoped read, trusting only listings from
- * the last second rather than the ones its own command wrote.
- */
-export function captureCommandScope(): ContextCall {
-  return started.capture()
+  return runWithCaller({ ...currentCaller(), started: tick() }, fn)
 }

@@ -16,7 +16,7 @@ import { enotsup, staleWrite } from '../errors/fs.ts'
 import type { FsError, StaleWriteError } from '../errors/types.ts'
 import { markLost } from '../observe/context.ts'
 import type { FileStat, PathSpec } from '../types.ts'
-import { type ContextCall, createAsyncContext } from '../utils/async_context.ts'
+import { currentCaller, liveCallers, runWithCaller } from '../context/session_context.ts'
 import { keyPath, underPath } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import {
@@ -45,11 +45,9 @@ export interface CacheInvalidator {
   probedStat(path: PathSpec): FileStat | null
 }
 
-interface CacheContextState {
+export interface CacheContextState {
   manager: CacheInvalidator | null
 }
-
-const storage = createAsyncContext<CacheContextState>()
 
 /**
  * Run `fn` with `manager` active for the current async context.
@@ -61,12 +59,7 @@ export function runWithCacheManager<T>(
   manager: CacheInvalidator | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(storage.run({ manager }, fn))
-}
-
-/** Keep the mount's cache manager bound while a command's lazy output is read. */
-export function captureCacheContext(): ContextCall {
-  return storage.capture()
+  return runWithCaller({ ...currentCaller(), cache: { manager } }, fn)
 }
 
 /**
@@ -81,7 +74,7 @@ export function captureCacheContext(): ContextCall {
  * manager, failing toward the cold read.
  */
 export function activeCacheManager(): CacheInvalidator | null {
-  const states = storage.liveStores()
+  const states = liveCallers().flatMap((caller) => (caller.cache === null ? [] : [caller.cache]))
   const first = states[0]
   if (first === undefined) return null
   for (const state of states) {
@@ -99,7 +92,9 @@ export function activeCacheManager(): CacheInvalidator | null {
  */
 function liveManagers(): CacheInvalidator[] {
   const managers: CacheInvalidator[] = []
-  for (const state of storage.liveStores()) {
+  for (const state of liveCallers().flatMap((caller) =>
+    caller.cache === null ? [] : [caller.cache],
+  )) {
     const manager = state.manager
     if (manager !== null && !managers.includes(manager)) managers.push(manager)
   }
@@ -214,10 +209,11 @@ export function listingRefreshed(folder: string): boolean {
   return activeCacheManager()?.listingTrusted(folder) === true
 }
 
-const readFacts = createAsyncContext<{
+/** A fetch collecting the tokens its bytes carried. */
+export interface ReadFacts {
   path: string
   facts: WeakMap<Uint8Array, (string | null)[]>
-}>()
+}
 
 /** Collect tokens belonging to the exact bytes returned by a fetch. */
 export async function captureRead<T>(
@@ -225,7 +221,7 @@ export async function captureRead<T>(
   fetch: () => Promise<T>,
 ): Promise<[T, (string | null)[]]> {
   const facts = new WeakMap<Uint8Array, (string | null)[]>()
-  return readFacts.run({ path, facts }, async () => {
+  return runWithCaller({ ...currentCaller(), readFacts: { path, facts } }, async () => {
     const data = await fetch()
     return [data, data instanceof Uint8Array ? (facts.get(data) ?? []) : []]
   })
@@ -234,7 +230,9 @@ export async function captureRead<T>(
 /** Publish a backend-verified token without activating observation. */
 export function publishRead(path: string, data: Uint8Array, fingerprint: string | null): void {
   // Fallback contexts overlap; exact result identity makes broadcast safe.
-  for (const capture of readFacts.liveStores()) {
+  for (const capture of liveCallers().flatMap((caller) =>
+    caller.readFacts === null ? [] : [caller.readFacts],
+  )) {
     if (capture.path !== path) continue
     const tokens = capture.facts.get(data) ?? []
     tokens.push(fingerprint)
@@ -242,8 +240,17 @@ export function publishRead(path: string, data: Uint8Array, fingerprint: string 
   }
 }
 
-const writeStorage = createAsyncContext<{ prefix: string; context: WriteContext | null }>()
-const ownVersionStorage = createAsyncContext<{ path: string; version: string | OwnRead | null }>()
+/** The write context of the mount at `prefix`. */
+export interface WriteBinding {
+  prefix: string
+  context: WriteContext | null
+}
+
+/** The version a write's own read stamped on `path`. */
+export interface OwnVersionBinding {
+  path: string
+  version: string | OwnRead | null
+}
 
 /** Run `fn` with `context` bound as the write context of the mount at `prefix`. */
 export function runWithWriteContext<T>(
@@ -251,7 +258,7 @@ export function runWithWriteContext<T>(
   context: WriteContext | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(writeStorage.run({ prefix, context }, fn))
+  return runWithCaller({ ...currentCaller(), write: { prefix, context } }, fn)
 }
 
 /**
@@ -263,7 +270,7 @@ export function runWithWriteContext<T>(
  * unconditioned, so the write is refused instead.
  */
 function activeWriteContext(path: PathSpec): WriteContext | null {
-  const states = writeStorage.liveStores()
+  const states = liveCallers().flatMap((caller) => (caller.write === null ? [] : [caller.write]))
   if (agree(states, (state) => state.context)) return states[0]?.context ?? null
   const owners = ownersOf(path, states)
   if (owners.length === 0 || !agree(owners, (state) => state.context)) throw overlapping(path)
@@ -302,7 +309,7 @@ export function runWithOwnVersion<T>(
   version: string | OwnRead | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(ownVersionStorage.run({ path: path.virtual, version }, fn))
+  return runWithCaller({ ...currentCaller(), ownVersion: { path: path.virtual, version } }, fn)
 }
 
 /**
@@ -313,7 +320,9 @@ export function runWithOwnVersion<T>(
  * op's own.
  */
 function ownVersion(path: PathSpec): string | OwnRead | null {
-  const states = ownVersionStorage.liveStores().filter((state) => state.path === path.virtual)
+  const states = liveCallers()
+    .flatMap((caller) => (caller.ownVersion === null ? [] : [caller.ownVersion]))
+    .filter((state) => state.path === path.virtual)
   if (!agree(states, (state) => state.version)) throw overlapping(path)
   return states[0]?.version ?? null
 }
@@ -474,7 +483,7 @@ export async function heldVersions(paths: readonly PathSpec[]): Promise<(string 
  * `writes_conditioned`.
  */
 export function writesConditioned(path: PathSpec): boolean {
-  const states = writeStorage.liveStores()
+  const states = liveCallers().flatMap((caller) => (caller.write === null ? [] : [caller.write]))
   if (agree(states, (state) => state.context)) return (states[0]?.context ?? null) !== null
   const owners = ownersOf(path, states)
   return owners.length === 0 || owners.some((state) => state.context !== null)

@@ -232,7 +232,7 @@ it('a pending capture owns completed same-path bodies only weakly', async () => 
         })
       }
     }
-    const state = captureState.value as Record<string, unknown>
+    const state = (captureState.value as { readFacts: Record<string, unknown> }).readFacts
     expect(Object.keys(state).sort()).toEqual(['facts', 'path'])
     expect(state.path).toBe('/m/x')
     expect(state.facts).toBeInstanceOf(WeakMap)

@@ -14,7 +14,6 @@
 
 import { captureSessionContext } from '../../../context/session_context.ts'
 import type { PathSpec } from '../../../types.ts'
-import { captureRecordingContext } from '../../../observe/context.ts'
 import { ContextScope } from '../../../utils/context_scope.ts'
 import { Activity } from '../../../utils/activity.ts'
 import { asyncContextIsolatesTasks } from '../../../utils/async_context.ts'
@@ -258,8 +257,7 @@ export class PyodideRuntime extends PythonRuntime {
         this.capped(runtime, await runtime.runOne(args, context)),
       )
     }
-    const scope =
-      context?.scope ?? new ContextScope([...captureSessionContext(), ...captureRecordingContext()])
+    const scope = context?.scope ?? new ContextScope(captureSessionContext())
     return this.schedule(() =>
       this.withPermit(() =>
         scope.run(() =>

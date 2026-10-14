@@ -15,10 +15,15 @@
 import itertools
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
+from dataclasses import replace
+
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 
 _sequence = itertools.count(1)
-_started: ContextVar[int | None] = ContextVar("_command_started", default=None)
 
 
 def tick() -> int:
@@ -32,7 +37,7 @@ def tick() -> int:
 
 def command_started() -> int | None:
     """When the running command started, or None outside any command."""
-    return _started.get()
+    return current_caller().command_started
 
 
 @asynccontextmanager
@@ -43,8 +48,8 @@ async def command_scope() -> AsyncIterator[None]:
     nested command (a ``$(...)``, a function body) gets its own later
     stamp, and the outer one comes back when it ends.
     """
-    token = _started.set(tick())
+    token = bind_caller(replace(current_caller(), command_started=tick()))
     try:
         yield
     finally:
-        _started.reset(token)
+        reset_caller(token)

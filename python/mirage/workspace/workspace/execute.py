@@ -15,15 +15,16 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any
 
 from mirage.context import (
+    bind_caller,
+    current_caller,
     get_current_evaluation,
-    reset_refusal_sink,
+    reset_caller,
     set_current_evaluation,
-    set_refusal_sink,
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -32,7 +33,6 @@ from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
-from mirage.policy.decisions import reset_op_call, set_op_call
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision, RouteError
@@ -747,12 +747,6 @@ async def run_prepared_line(
         def note(refusal: Refusal) -> None:
             nested.latest = refusal
 
-        # An op a policy refuses inside a command prints the command's
-        # own GNU line, so the dispatcher notes the record here, for the line
-        # to carry on its result. Bound before placement, so an op a
-        # policy script makes while the line is judged is inside the
-        # line, never a question of its own.
-        sink_token = set_refusal_sink(note)
         # The line's hand-off: the grants its passes and gates claim
         # for its commands, which the gates run on and the line's end
         # spends. A nested evaluation runs on one made under the
@@ -762,11 +756,25 @@ async def run_prepared_line(
         if handed is None:
             handed = HandOff()
         line_handed = handed
-        # A session write on the line is a call of the line's: its nod
-        # stands until the line ends, so a retry of a line held on a
-        # later question (`x=1 cmd`, `export a=1; export b=2`) finds it.
-        call_token = set_op_call(
-            ws.registry.decisions, handed, effective_session.session_id
+        # The line's own layer of the caller, bound before placement, so
+        # an op a policy script makes while the line is judged is inside
+        # the line, never a question of its own. An op a policy refuses
+        # inside a command prints the command's own GNU line, so the
+        # dispatcher notes the record on the line's sink, for the line to
+        # carry on its result. A session write on the line is a call of
+        # the line's: its nod stands until the line ends, so a retry of a
+        # line held on a later question (`x=1 cmd`, `export a=1; export
+        # b=2`) finds it.
+        line_token = bind_caller(
+            replace(
+                current_caller(),
+                refusals=note,
+                call=(
+                    ws.registry.decisions,
+                    handed,
+                    effective_session.session_id,
+                ),
+            )
         )
         judgments: list[list[tuple[Walked, list[Judged]]]] = []
 
@@ -1034,8 +1042,7 @@ async def run_prepared_line(
             # would be taken by the first spelling the pass reads.
             held = is_pending_refusal(io.refusal)
         finally:
-            reset_refusal_sink(sink_token)
-            reset_op_call(call_token)
+            reset_caller(line_token)
             if held:
                 ws.registry.decisions.release(
                     effective_session.session_id, handed

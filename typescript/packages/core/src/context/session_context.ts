@@ -29,6 +29,14 @@ import type { DryRun, VfsExplanation, EntryGate, HandOff } from '../policy/types
 import type { Decisions } from '../policy/decisions.ts'
 import type { Policies } from '../policy/policies.ts'
 import type { LineAbortFrame } from '../workspace/abort.ts'
+import type { OpRecord } from '../observe/record.ts'
+import type { RecordingState, RevisionsState } from '../observe/context.ts'
+import type {
+  CacheContextState,
+  OwnVersionBinding,
+  ReadFacts,
+  WriteBinding,
+} from '../cache/context.ts'
 import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
@@ -93,6 +101,18 @@ export interface Caller {
   readonly writeHeld: boolean
   readonly lineAbort: LineAbortFrame | null
   readonly executionId: string | null
+  // Where the running line records its calls, with the mount serving them.
+  readonly recording: RecordingState | null
+  readonly revisions: RevisionsState | null
+  // The running command's own records, and those of the command it runs in.
+  readonly commandSink: readonly [OpRecord[] | null, OpRecord[]] | null
+  // The cache a backend's writes report to.
+  readonly cache: CacheContextState | null
+  readonly readFacts: ReadFacts | null
+  readonly write: WriteBinding | null
+  readonly ownVersion: OwnVersionBinding | null
+  // When the running command started.
+  readonly started: number | null
 }
 
 const UNBOUND: Caller = {
@@ -113,6 +133,14 @@ const UNBOUND: Caller = {
   writeHeld: false,
   lineAbort: null,
   executionId: null,
+  recording: null,
+  revisions: null,
+  commandSink: null,
+  cache: null,
+  readFacts: null,
+  write: null,
+  ownVersion: null,
+  started: null,
 }
 
 const callerStorage = createAsyncContext<Caller>()
@@ -486,14 +514,6 @@ export function lineRunning(): boolean {
 }
 
 /**
- * The sink the line running in this context bound, null outside a line.
- * Mirrors Python's `refusal_sink`.
- */
-export function refusalSink(): RefusalSink | null {
-  return currentCaller().refusals
-}
-
-/**
  * Run `fn` as a dry run: the op gate notes on `trace` what it would
  * answer and stops the op before any backend or cache is touched.
  * `DryRun.DECIDING` is what a policy does while it decides the op
@@ -522,24 +542,6 @@ export function explaining(): VfsExplanation[] | DryRun | null {
  */
 export function noteRefusal(refusal: Refusal): void {
   currentCaller().refusals?.(refusal)
-}
-
-/**
- * Bind what a command's dot walks read, for the duration of `fn`: the run
- * of one command.
- *
- * Bound by `Mount.runCommand` around the handler, beside the mount gate: the
- * command tier reaches its backend without passing the dispatcher,
- * so the walk guard on its I/O proves an operand's `.` and `..` with the
- * dispatcher's stat and link follow through this binding. Mirrors Python's
- * set_walk_probe.
- */
-export function runWithWalkProbe<T>(
-  prefix: string,
-  probe: WalkProbe,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return runChanged({ walkProbe: [prefix, probe] }, fn)
 }
 
 /**

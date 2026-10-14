@@ -14,6 +14,7 @@
 
 import functools
 from dataclasses import replace
+from typing import Any
 
 from mirage.commands.builtin.find_parse import (
     find_expr_tail,
@@ -273,10 +274,16 @@ async def handle_command(
     # its gate included, so a rule scoped to a CLI reaches its own reads,
     # those its output stream makes once it returned included.
     if dispatch is not None:
-        caller = current_caller()
-        dispatch = functools.partial(
-            dispatch, caller=replace(caller, rule_gate=caller.gate)
-        )
+        gate = current_caller().gate
+        unbound = dispatch
+
+        async def made_by_command(
+            name: str, path: PathSpec, /, **kwargs: Any
+        ) -> tuple[Any, IOResult]:
+            caller = replace(current_caller(), rule_gate=gate)
+            return await unbound(name, path, caller=caller, **kwargs)
+
+        dispatch = made_by_command
 
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)

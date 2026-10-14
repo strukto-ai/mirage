@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type Caller,
-  currentCaller,
-  getAdmission,
-  sessionAccess,
-} from '../../../context/session_context.ts'
+import { currentCaller, getAdmission, sessionAccess } from '../../../context/session_context.ts'
 import type { EntryGate } from '../../../policy/types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { isBuiltinGrammar, registeredSpec } from '../../../commands/spec/builtins.ts'
@@ -252,10 +247,16 @@ export async function handleCommand(
   // Every op the command or CLI issues from here is made by the command,
   // its gate included, so a rule scoped to a CLI reaches its own reads, and
   // so does every mount run below: one run, a fan-out or a cross-mount.
-  const own: Caller = { ...currentCaller(), ruleGate: admission }
   const commandDispatch = dispatch
   dispatch = (op, path, args, kwargs, report, caller) =>
-    commandDispatch(op, path, args, kwargs, report, caller ?? own)
+    commandDispatch(
+      op,
+      path,
+      args,
+      kwargs,
+      report,
+      caller ?? { ...currentCaller(), ruleGate: admission },
+    )
 
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)

@@ -30,15 +30,15 @@ import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
 import {
+  type Caller,
+  currentCaller,
   isProgramInvocation,
-  refusalSink,
-  runWithEvaluation,
-  runWithRefusalSink,
+  runWithCaller,
 } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, mergeSignals } from '../../utils/abort.ts'
 import type { SessionView } from '../../view/types.ts'
-import { type Decisions, runWithOpCall } from '../../policy/decisions.ts'
+import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { Refusal } from '../../types.ts'
 import type { ProcessInfo, ProcessState } from '../../process/types.ts'
@@ -222,7 +222,7 @@ export async function handleBackground(
     // it was started in.
     const console_ = new Tee(job.console, new JobCopy(output, killed))
     const hold = { held: false, ended: false }
-    const lineSink = refusalSink()
+    const lineSink = currentCaller().refusals
     // The line still hears of every refusal; a question left waiting also
     // holds the job.
     const note = (refusal: Refusal): void => {
@@ -290,26 +290,26 @@ export async function handleBackground(
       hold.ended = hold.held || io.refusal?.kind === 'pending'
       return [io, execNode]
     }
-    // The job's session writes are calls of the job's, spent at its end,
-    // not of the line it outlives. Without task isolation a frame the job
-    // bound would reach every other task, after the line ended too, so
-    // there it binds neither.
-    const framed = (): Promise<[IOResult, ExecutionNode]> => {
-      if (!asyncContextIsolatesTasks) return body()
-      const called =
+    // The job's own layer of the caller: its fork, so dispatcher and host
+    // callbacks stay in it; its session writes, calls of the job's spent
+    // at its end, not of the line it outlives; and a sink that tells the
+    // line of every refusal. Without task isolation a frame the job bound
+    // would reach every other task, after the line ended too, so there it
+    // binds none; nested shell evaluations carry the walker's exact session
+    // explicitly on both runtimes.
+    const outer = currentCaller()
+    const own: Caller = {
+      ...outer,
+      session: childEvaluation.session,
+      evaluation: childEvaluation,
+      call:
         jobHanded !== null && decisions !== null
-          ? () => runWithOpCall(decisions, jobHanded, session.sessionId, body)
-          : body
-      return lineSink !== null ? runWithRefusalSink(note, called) : called()
+          ? [decisions, jobHanded, session.sessionId]
+          : outer.call,
+      refusals: lineSink !== null ? note : null,
     }
-    // Task-local bindings keep dispatcher and host callbacks in the job's
-    // fork. The fallback cannot attribute ambient reads to a task, so
-    // it keeps the outer binding; nested shell evaluations carry the
-    // walker's exact session explicitly on both runtimes.
     try {
-      return await (asyncContextIsolatesTasks
-        ? runWithEvaluation(childEvaluation, framed)
-        : framed())
+      return await (asyncContextIsolatesTasks ? runWithCaller(own, body) : body())
     } finally {
       releaseProgram()
 

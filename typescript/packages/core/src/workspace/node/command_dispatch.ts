@@ -21,15 +21,15 @@ import { seedVar, setAttr } from '../session/state.ts'
 import { type ShellVar, TempEnv, VarAttr } from '../../shell/variable.ts'
 import {
   type RedirectRunner,
+  currentCaller,
   noteRefusal,
   redirectRunnerFor,
   redirectSyntaxFor,
+  runWithCaller,
   runWithRedirectPaths,
   isProgramInvocation,
   redirectPathsFor,
-  runWithAdmission,
 } from '../../context/session_context.ts'
-import { runWithOpPolicies } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch } from '../abort.ts'
@@ -712,10 +712,13 @@ async function runArgv(
     const judging = gated !== null && (await policies.wantsFor('postCommand', sessionId))
     const watched = judging || (await policies.wantsFor('postExecute', sessionId))
     let mine: OpRecord[] = []
-    const result = await runWithOpPolicies(policies, () =>
+    // The command's own layer of the caller: the policies its file calls
+    // consult and, once admitted, its gate.
+    const outer = currentCaller()
+    const result = await runWithCaller({ ...outer, policies, gate: gated ?? outer.gate }, () =>
       commandRecords((records) => {
         mine = records
-        return gated === null ? route() : runWithAdmission(gated, route)
+        return route()
       }, true),
     )
     if (!watched) return result

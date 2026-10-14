@@ -17,9 +17,9 @@ import { describe, expect, it } from 'vitest'
 import { MountMode } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ContextScope } from '../utils/context_scope.ts'
+import { captureSessionContext } from '../context/session_context.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import {
-  captureRecordingContext,
   commandRecords,
   record,
   recordStream,
@@ -323,7 +323,7 @@ describe('commandRecords', () => {
     const [mine] = await runWithRecording(async () => {
       let captured: ContextScope | undefined
       const list = await commandRecords(async (records) => {
-        captured = new ContextScope(captureRecordingContext())
+        captured = new ContextScope(captureSessionContext())
         return records
       })
       await captured?.run(async () => {

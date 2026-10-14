@@ -12,42 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createAsyncContext } from '../utils/async_context.ts'
-import type { ContextCall } from '../utils/async_context.ts'
+import { currentCaller, liveCallers, runWithCaller } from '../context/session_context.ts'
 import { OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS } from './record.ts'
 import { underPath } from '../utils/key_prefix.ts'
 import type { PathSpec } from '../types.ts'
 import { currentExecutionId } from '../execution/context.ts'
 
-interface RecordingState {
+/** A line's recording: its records and the mount serving them. */
+export interface RecordingState {
   records: OpRecord[]
   mountId: string | null
 }
-
-const storage = createAsyncContext<RecordingState>()
 
 /**
  * Per-task revision pins. Independent of the recording context so that
  * direct {@link Workspace.dispatch} calls (which run outside
  * {@link runWithRecording}) still honour installed pins.
  */
-interface RevisionsState {
+export interface RevisionsState {
   map: Map<string, string> | null
-}
-
-const revisionsStorage = createAsyncContext<RevisionsState>()
-
-/**
- * The running command's own records. A storage of its own, not a field on
- * `RecordingState`: {@link runWithMountContext} rebuilds that state inside
- * every `runCommand` and dispatcher op, and binding one would flip
- * {@link recordingActive} for an unrecorded command.
- */
-const commandSink = createAsyncContext<readonly [OpRecord[] | null, OpRecord[]]>()
-
-/** Preserve attribution and revision pins when an operation crosses a worker boundary. */
-export function captureRecordingContext(): ContextCall[] {
-  return [storage.capture(), revisionsStorage.capture(), commandSink.capture()]
 }
 
 /**
@@ -70,9 +53,9 @@ export async function commandRecords<T>(
   own = false,
 ): Promise<T> {
   const mine: OpRecord[] = []
-  const held = commandSink.getStore()
+  const held = currentCaller().commandSink
   const command = own ? mine : (held?.[0] ?? null)
-  return commandSink.run([command, mine], () => fn(mine))
+  return runWithCaller({ ...currentCaller(), commandSink: [command, mine] }, () => fn(mine))
 }
 
 /** One lost path's mark. Mirrors Python's `LostMark`. */
@@ -180,26 +163,26 @@ export function lostPaths(records: readonly OpRecord[] | undefined): LostPaths |
 
 /** Mark `key` lost on the running line, if one is recording. */
 export function markLost(path: PathSpec, version: string | null = null): void {
-  lostPaths(storage.getStore()?.records)?.mark(path.virtual, version)
+  lostPaths(currentCaller().recording?.records)?.mark(path.virtual, version)
 }
 
 /** The running line's marks so far, for a later `liftLost`. Mirrors Python's `lost_count`. */
 export function lostCount(): number {
-  return lostPaths(storage.getStore()?.records)?.count ?? 0
+  return lostPaths(currentCaller().recording?.records)?.count ?? 0
 }
 
 /** Lift the running line's marks a removal or move of `key` ended. Mirrors Python's `lift_lost`. */
 export function liftLost(path: PathSpec, upto: number, subtree = false): void {
-  lostPaths(storage.getStore()?.records)?.lift(path.virtual, upto, subtree)
+  lostPaths(currentCaller().recording?.records)?.lift(path.virtual, upto, subtree)
 }
 
 export function activeRecords(): readonly OpRecord[] | undefined {
-  return storage.getStore()?.records
+  return currentCaller().recording?.records
 }
 
 export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpRecord[]]> {
   const state: RecordingState = { records: [], mountId: null }
-  const value = await storage.run(state, fn)
+  const value = await runWithCaller({ ...currentCaller(), recording: state }, fn)
   return [value, state.records]
 }
 
@@ -215,16 +198,17 @@ export async function runWithRecording<T>(fn: () => Promise<T>): Promise<[T, OpR
  * Inert (runs `fn` unchanged) when no recording context is active.
  */
 export function runWithMountContext<T>(fn: () => Promise<T>, mountId?: string | null): Promise<T> {
-  const state = storage.getStore()
-  if (state === undefined) return fn()
-  return Promise.resolve(
-    storage.run(
-      {
+  const state = currentCaller().recording
+  if (state === null) return fn()
+  return runWithCaller(
+    {
+      ...currentCaller(),
+      recording: {
         records: state.records,
         mountId: mountId === undefined ? state.mountId : mountId,
       },
-      fn,
-    ),
+    },
+    fn,
   )
 }
 
@@ -255,7 +239,7 @@ export async function* withMountContext(
 // call to capture fingerprint/revision metadata (Drive, Graph) gate it on
 // this so unrecorded reads stay single-request.
 export function recordingActive(): boolean {
-  return storage.getStore() !== undefined
+  return currentCaller().recording !== null
 }
 
 export interface RecordOptions {
@@ -318,14 +302,14 @@ export function finishRecord(
     durationMs: elapsed,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
-    mountId: storage.getStore()?.mountId ?? null,
+    mountId: currentCaller().recording?.mountId ?? null,
     executionId: currentExecutionId(),
   })
 }
 
 function charge(rec: OpRecord): void {
-  const held = commandSink.getStore()
-  if (held !== undefined) {
+  const held = currentCaller().commandSink
+  if (held !== null) {
     held[1].push(rec)
     if (held[0] !== null && held[0] !== held[1]) held[0].push(rec)
   }
@@ -344,8 +328,8 @@ export function record(
   timer: OpTimer,
   options: RecordOptions = {},
 ): void {
-  const state = storage.getStore()
-  if (state === undefined) return
+  const state = currentCaller().recording
+  if (state === null) return
   const rec = finishRecord(op, path, source, nbytes, timer, options)
   state.records.push(rec)
   charge(rec)
@@ -362,8 +346,8 @@ export function recordStream(
   source: string,
   options: RecordOptions = {},
 ): OpRecord | null {
-  const state = storage.getStore()
-  if (state === undefined) return null
+  const state = currentCaller().recording
+  if (state === null) return null
   const rec = new OpRecord({
     op,
     path,
@@ -373,7 +357,7 @@ export function recordStream(
     durationMs: 0,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
-    mountId: storage.getStore()?.mountId ?? null,
+    mountId: currentCaller().recording?.mountId ?? null,
     executionId: currentExecutionId(),
   })
   state.records.push(rec)
@@ -395,7 +379,7 @@ export function runWithRevisions<T>(
   revisions: Map<string, string> | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(revisionsStorage.run({ map: revisions }, fn))
+  return runWithCaller({ ...currentCaller(), revisions: { map: revisions } }, fn)
 }
 
 /**
@@ -411,7 +395,9 @@ export function runWithRevisions<T>(
  * op's frame shadows the newest slot.
  */
 export function revisionFor(path: string): string | null {
-  for (const state of revisionsStorage.liveStores()) {
+  for (const state of liveCallers().flatMap((caller) =>
+    caller.revisions === null ? [] : [caller.revisions],
+  )) {
     const pin = state.map?.get(path)
     if (pin !== undefined) return pin
   }

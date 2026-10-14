@@ -26,13 +26,14 @@ from mirage.commands.builtin.utils.limit import (
 )
 from mirage.context import (
     RedirectRunner,
+    bind_caller,
+    current_caller,
     note_refusal,
     program_invocation,
     redirect_paths_for,
     redirect_runner_for,
-    reset_admission,
+    reset_caller,
     reset_redirect_paths,
-    set_admission,
     set_redirect_paths,
 )
 from mirage.context.session_context import RedirectResult, redirect_syntax_for
@@ -48,7 +49,6 @@ from mirage.policy import (
     resolve_limit,
     resolve_producer,
 )
-from mirage.policy.policies import reset_op_policies, set_op_policies
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
@@ -713,8 +713,16 @@ async def _run_argv(
             await policies.wants_for("post_command", sid)
         )
         watched = judging or await policies.wants_for("post_execute", sid)
-        ptoken = set_op_policies(policies)
-        token = set_admission(admitted) if admitted is not None else None
+        # The command's own layer of the caller: the policies its file
+        # calls consult and, once admitted, its gate.
+        outer = current_caller()
+        token = bind_caller(
+            dataclasses.replace(
+                outer,
+                policies=policies,
+                gate=admitted if admitted is not None else outer.gate,
+            )
+        )
         try:
             with command_records(own=True) as mine:
                 result = await _route_argv(
@@ -735,9 +743,7 @@ async def _run_argv(
                     output,
                 )
         finally:
-            if token is not None:
-                reset_admission(token)
-            reset_op_policies(ptoken)
+            reset_caller(token)
         if not watched:
             return result
         stdout, io, node = result

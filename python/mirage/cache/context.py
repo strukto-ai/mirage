@@ -15,7 +15,7 @@
 import logging
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar
+from dataclasses import replace
 from typing import Literal, Protocol, TypeVar
 
 from mirage.cache.types import (
@@ -25,6 +25,11 @@ from mirage.cache.types import (
     WriteCondition,
     WriteContext,
     WriteKind,
+)
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
 )
 from mirage.errors.fs import enotsup, stale_write
 from mirage.errors.types import StaleWriteError
@@ -62,11 +67,6 @@ class CacheInvalidator(Protocol):
     def probed_stat(self, path: PathSpec) -> FileStat | None: ...
 
 
-_active: ContextVar[CacheInvalidator | None] = ContextVar(
-    "_active_cache_manager", default=None
-)
-
-
 def push_cache_manager(
     manager: CacheInvalidator | None,
 ) -> CacheInvalidator | None:
@@ -86,14 +86,14 @@ def push_cache_manager(
         CacheInvalidator | None: The previously active manager, so
         callers can restore it.
     """
-    prev = _active.get()
-    _active.set(manager)
+    prev = current_caller().cache_manager
+    bind_caller(replace(current_caller(), cache_manager=manager))
     return prev
 
 
 def active_cache_manager() -> CacheInvalidator | None:
     """Return the active cache manager for the current async context."""
-    return _active.get()
+    return current_caller().cache_manager
 
 
 async def invalidate_after_write(path: PathSpec) -> None:
@@ -103,7 +103,7 @@ async def invalidate_after_write(path: PathSpec) -> None:
     Args:
         path (PathSpec): VFS-relative path that was written.
     """
-    manager = _active.get()
+    manager = current_caller().cache_manager
     if manager is not None:
         await manager.invalidate_after_write(path)
 
@@ -115,7 +115,7 @@ async def invalidate_after_unlink(path: PathSpec) -> None:
     Args:
         path (PathSpec): VFS-relative path that was removed.
     """
-    manager = _active.get()
+    manager = current_caller().cache_manager
     if manager is not None:
         await manager.invalidate_after_unlink(path)
 
@@ -138,7 +138,7 @@ async def invalidate_subtree(path: PathSpec) -> None:
     Args:
         path (PathSpec): Root of the subtree that is gone.
     """
-    manager = _active.get()
+    manager = current_caller().cache_manager
     if manager is not None:
         await manager.invalidate_subtree(path)
 
@@ -204,7 +204,7 @@ async def invalidate_ancestors(path: PathSpec) -> None:
     Args:
         path (PathSpec): Mutated path, retaining its full virtual path.
     """
-    manager = _active.get()
+    manager = current_caller().cache_manager
     if manager is not None:
         await manager.invalidate_ancestors(path)
 
@@ -222,11 +222,6 @@ def listing_refreshed(folder: str) -> bool:
     return manager is not None and manager.listing_trusted(folder)
 
 
-_read_facts: ContextVar[tuple[str, list[tuple[bytes, str | None]]] | None] = (
-    ContextVar("_cache_read_facts", default=None)
-)
-
-
 async def capture_read(
     path: str, fetch: Callable[[], Awaitable[T]]
 ) -> tuple[T, list[str | None]]:
@@ -237,12 +232,12 @@ async def capture_read(
         fetch (Callable): whole-file backend reader.
     """
     facts: list[tuple[bytes, str | None]] = []
-    token = _read_facts.set((path, facts))
+    token = bind_caller(replace(current_caller(), read_facts=(path, facts)))
     try:
         data = await fetch()
         return data, [fp for body, fp in facts if body is data]
     finally:
-        _read_facts.reset(token)
+        reset_caller(token)
 
 
 def publish_read(path: str, data: bytes, fingerprint: str | None) -> None:
@@ -253,19 +248,9 @@ def publish_read(path: str, data: bytes, fingerprint: str | None) -> None:
         data (bytes): the exact object the reader returns.
         fingerprint (str | None): token proven by these bytes, or unknown.
     """
-    capture = _read_facts.get()
+    capture = current_caller().read_facts
     if capture is not None and capture[0] == path:
         capture[1].append((data, fingerprint))
-
-
-_write: ContextVar[WriteContext | None] = ContextVar(
-    "_write_context", default=None
-)
-
-
-_own_version: ContextVar[tuple[str, str | OwnRead | None] | None] = ContextVar(
-    "_own_write_version", default=None
-)
 
 
 def push_write_context(context: WriteContext | None) -> WriteContext | None:
@@ -278,8 +263,8 @@ def push_write_context(context: WriteContext | None) -> WriteContext | None:
     Returns:
         WriteContext | None: the previous one, for the caller to restore.
     """
-    prev = _write.get()
-    _write.set(context)
+    prev = current_caller().write_context
+    bind_caller(replace(current_caller(), write_context=context))
     return prev
 
 
@@ -316,11 +301,13 @@ def own_write_version(
         version (str | OwnRead | None): the token of the bytes the op
             read, or ABSENT when its read found no file.
     """
-    token = _own_version.set((path.virtual, version))
+    token = bind_caller(
+        replace(current_caller(), own_version=(path.virtual, version))
+    )
     try:
         yield
     finally:
-        _own_version.reset(token)
+        reset_caller(token)
 
 
 async def write_condition(
@@ -341,7 +328,7 @@ async def write_condition(
         StaleWriteError: the op found removed a file the mount saw.
         OperationNotSupportedError: the backend cannot condition this op.
     """
-    context = _write.get()
+    context = current_caller().write_context
     if context is None:
         return None
     cached = await context.read_version(path)
@@ -363,7 +350,7 @@ async def delete_condition(
     Raises:
         OperationNotSupportedError: the backend cannot condition a delete.
     """
-    context = _write.get()
+    context = current_caller().write_context
     if context is None:
         return None
     cached = await context.read_version(path)
@@ -390,7 +377,7 @@ async def move_condition(
         StaleWriteError: the op found removed a file the mount saw.
         OperationNotSupportedError: the backend cannot condition the move.
     """
-    context = _write.get()
+    context = current_caller().write_context
     if context is None:
         return None, None
     dst_cached, src_cached = await context.read_versions([dst, src])
@@ -404,7 +391,7 @@ async def move_condition(
 
 
 def _own_version_for(path: PathSpec) -> str | OwnRead | None:
-    held = _own_version.get()
+    held = current_caller().own_version
     return held[1] if held is not None and held[0] == path.virtual else None
 
 
@@ -466,7 +453,7 @@ async def native_condition(
     if live.content != held:
         raise await stale(path, version=held)
     if not live.native:
-        context = _write.get()
+        context = current_caller().write_context
         assert context is not None
         raise enotsup(context.vfs, f"conditional {kind}", path)
     return live.native
@@ -474,7 +461,7 @@ async def native_condition(
 
 def writes_conditioned() -> bool:
     """Whether the mount running this op is a ``write: conditional`` one."""
-    return _write.get() is not None
+    return current_caller().write_context is not None
 
 
 def conditioned(path: PathSpec, kind: Literal["copy", "delete"]) -> bool:
@@ -490,7 +477,7 @@ def conditioned(path: PathSpec, kind: Literal["copy", "delete"]) -> bool:
     Raises:
         OperationNotSupportedError: the backend cannot condition this op.
     """
-    context = _write.get()
+    context = current_caller().write_context
     if context is None:
         return False
     _require(context, path, kind)
@@ -510,7 +497,7 @@ async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
         keep (str | None): the version to keep without bytes, if any.
     """
     mark_lost(path, keep)
-    context = _write.get()
+    context = current_caller().write_context
     if context is not None:
         await context.drop(path)
         if keep:
@@ -526,7 +513,7 @@ async def evict_keeping_version(path: PathSpec) -> None:
     Args:
         path (PathSpec): the path the request may have changed.
     """
-    context = _write.get()
+    context = current_caller().write_context
     if context is None:
         await invalidate_after_write(path)
         return
@@ -557,7 +544,7 @@ async def stale(
             the line no longer names it (a move retracts both paths);
             ABSENT when the op found the file gone, which keeps none.
     """
-    context = _write.get()
+    context = current_caller().write_context
     keep = None
     if not gone and version is not OwnRead.ABSENT and context is not None:
         keep = version or await context.read_version(path)
@@ -587,7 +574,7 @@ async def held_versions(paths: list[PathSpec]) -> list[str | None]:
     Args:
         paths (list[PathSpec]): the paths, in order.
     """
-    context = _write.get()
+    context = current_caller().write_context
     if context is None or not paths:
         return [None] * len(paths)
     return await context.read_versions(paths)
@@ -605,7 +592,7 @@ def known_versions(root: PathSpec, key_prefix: str) -> KnownVersions:
     """
 
     async def known(keys: list[str]) -> dict[str, str]:
-        context = _write.get()
+        context = current_caller().write_context
         if context is None or not keys:
             return {}
         tokens = await context.read_versions(

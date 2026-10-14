@@ -42,7 +42,11 @@ from mirage.utils.path import norm, parent
 from mirage.view.types import SessionAccess
 
 if TYPE_CHECKING:
+    from mirage.cache.context import CacheInvalidator
+    from mirage.cache.types import OwnRead, WriteContext
     from mirage.io.types import ByteSource, IOResult
+    from mirage.observe.context import Recorder
+    from mirage.observe.record import OpRecord
     from mirage.policy.decisions import Decisions, HandOff
     from mirage.policy.policies import Policies
     from mirage.policy.types import DryRun, EntryGate, VfsExplanation
@@ -131,6 +135,19 @@ class Caller:
         line_writer (StatusWriter | None): the identity of the line
             running on this task.
         execution_id (str | None): the running execution's id.
+        recorder (Recorder | None): where the running line records its
+            calls, with the mount serving them.
+        command_sink (tuple | None): the running command's own records,
+            and those of the command it runs in.
+        revisions (dict[str, str] | None): the revision pins reads honor.
+        cache_manager (CacheInvalidator | None): the cache a backend's
+            writes report to.
+        read_facts (tuple | None): the tokens a fetch's bytes carried.
+        write_context (WriteContext | None): what a conditional write is
+            checked against.
+        own_version (tuple | None): the version a write's own read
+            stamped.
+        command_started (int | None): when the running command started.
     """
 
     session: SessionState | None = None
@@ -159,6 +176,14 @@ class Caller:
     write_held: bool = False
     line_writer: StatusWriter | None = None
     execution_id: str | None = None
+    recorder: Recorder | None = None
+    command_sink: tuple[list[OpRecord] | None, list[OpRecord]] | None = None
+    revisions: dict[str, str] | None = None
+    cache_manager: CacheInvalidator | None = None
+    read_facts: tuple[str, list[tuple[bytes, str | None]]] | None = None
+    write_context: WriteContext | None = None
+    own_version: tuple[str, str | OwnRead | None] | None = None
+    command_started: int | None = None
 
     @property
     def visibility(self) -> Visibility | None:
@@ -493,12 +518,6 @@ def reset_refusal_sink(token: CallerToken) -> None:
     reset_caller(token)
 
 
-def refusal_sink() -> RefusalSink | None:
-    """The sink the line running in this context bound, None outside a
-    line."""
-    return _caller.get().refusals
-
-
 def line_running() -> bool:
     """Whether a typed line is running in this context: the entry point it
     reaches is inside a command, not a file tool's or the host's own
@@ -544,26 +563,6 @@ def note_refusal(refusal: Refusal) -> None:
     sink = _caller.get().refusals
     if sink is not None:
         sink(refusal)
-
-
-def set_walk_probe(probe: WalkProbe) -> CallerToken:
-    """Bind what a command's dot walks read, for the run of one command.
-
-    Set by ``Mount.run_command`` around the handler, beside the mount
-    gate: the command tier reaches its backend without passing the
-    dispatcher, so the walk guard on its I/O proves an operand's
-    ``.`` and ``..`` with the dispatcher's stat and link follow through this
-    binding.
-
-    Args:
-        probe (WalkProbe): the dispatcher's stat and the namespace's follow.
-    """
-    return _bind(walk_probe=probe)
-
-
-def reset_walk_probe(token: CallerToken) -> None:
-    """Restore the previous walk-probe binding."""
-    reset_caller(token)
 
 
 def get_walk_probe() -> WalkProbe | None:
