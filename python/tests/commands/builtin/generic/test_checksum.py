@@ -160,11 +160,18 @@ async def test_a_stored_digest_stands_in_for_the_read():
     assert reads == ["/b"]
 
 
+async def _never_stored(p: PathSpec, algorithm: str) -> str | None:
+    raise AssertionError("asked a stored digest under -c")
+
+
+async def _stored_but_b(p: PathSpec, algorithm: str) -> str | None:
+    if p.virtual == "/b":
+        raise FileNotFoundError(2, "No such file or directory", "/b")
+    return "f" * 32
+
+
 @pytest.mark.asyncio
 async def test_check_reads_the_bytes_and_asks_no_stored_digest():
-    async def stored(p: PathSpec, algorithm: str) -> str | None:
-        raise AssertionError("asked a stored digest under -c")
-
     read_bytes, read_stream = _fs({"/list": f"{_DIGEST}  /f\n", "/f": "abc"})
     out, io = await checksum(
         [_spec("/list")],
@@ -173,18 +180,13 @@ async def test_check_reads_the_bytes_and_asks_no_stored_digest():
         read_bytes=read_bytes,
         read_stream=read_stream,
         check=True,
-        stored=stored,
+        stored=_never_stored,
     )
     assert (out, io.exit_code) == (b"/f: OK\n", 0)
 
 
 @pytest.mark.asyncio
 async def test_a_failed_stored_digest_is_reported_and_the_rest_hash():
-    async def stored(p: PathSpec, algorithm: str) -> str | None:
-        if p.virtual == "/b":
-            raise FileNotFoundError(2, "No such file or directory", "/b")
-        return "f" * 32
-
     read_bytes, read_stream = _fs({})
     out, io = await checksum(
         [_spec("/a"), _spec("/b"), _spec("/c")],
@@ -192,7 +194,7 @@ async def test_a_failed_stored_digest_is_reported_and_the_rest_hash():
         algorithm="md5",
         read_bytes=read_bytes,
         read_stream=read_stream,
-        stored=stored,
+        stored=_stored_but_b,
     )
     got = b"".join([chunk async for chunk in out])
     assert got == f"{'f' * 32}  /a\n{'f' * 32}  /c\n".encode()

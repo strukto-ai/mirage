@@ -99,6 +99,10 @@ async def test_a_seek_before_the_start_cannot_seek(seek):
     )
 
 
+async def _empty(path):
+    yield b""
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "seek,code,out",
@@ -109,11 +113,8 @@ async def test_a_seek_before_the_start_cannot_seek(seek):
     ],
 )
 async def test_stdin_is_read_off_and_cannot_seek_back(seek, code, out):
-    async def stream(path):
-        yield b""
-
     stdout, io = await xxd(
-        [], read_stream=stream, stdin=DATA, seek=parse_seek(seek)
+        [], read_stream=_empty, stdin=DATA, seek=parse_seek(seek)
     )
     got = b"" if stdout is None else await materialize(stdout)
     assert (got.decode(), io.exit_code) == (out, code)

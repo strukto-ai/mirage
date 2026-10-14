@@ -1369,18 +1369,25 @@ export class MountEntry {
    * For `cp` and `mv` between two mounts, once the dispatcher has judged
    * `src` as a read and `dst` as a create. Rejects EXDEV when this mount's VFS
    * cannot copy from that one, and when the store's object is not what the
-   * move's read and write would carry: a cached or pinned source reads other
-   * bytes, and a conditional mount on either end holds a version for the
-   * write or for `mv`'s delete. The caller then moves the bytes itself.
-   * Mirrors Python's `copy_from`.
+   * move's read and write would carry: a cached, pinned or rendered source
+   * reads other bytes, and a conditional mount on either end holds a version
+   * for the write or for `mv`'s delete. The caller then moves the bytes
+   * itself. `onCall` receives the store's own call once it starts, which a
+   * timeout does not stop. Mirrors Python's `copy_from`.
    */
-  async copyFrom(source: MountEntry, src: string, dst: string): Promise<void> {
+  async copyFrom(
+    source: MountEntry,
+    src: string,
+    dst: string,
+    onCall?: (storeCall: Promise<unknown>) => void,
+  ): Promise<void> {
     const srcSpec = source.scope(src)
     if (
       !this.vfs.supports('copyFrom') ||
       this.write === WritePolicy.CONDITIONAL ||
       source.write === WritePolicy.CONDITIONAL ||
       source.revisions.has(src) ||
+      source.renders(getExtension(src)) ||
       (source.cacheManager !== null && (await source.cacheManager.isCached(srcSpec)))
     ) {
       throw exdev(src)
@@ -1391,11 +1398,9 @@ export class MountEntry {
           () =>
             this.runWithWriteRevisions(async () => {
               this.requireWritable('write', PathSpec.fromStrPath(dst), [])
-              await runWithTimeout(
-                this.vfs.copyFrom(source.vfs, srcSpec, this.scope(dst)),
-                this.opTimeout('copy'),
-                'copy',
-              )
+              const pending = this.vfs.copyFrom(source.vfs, srcSpec, this.scope(dst))
+              onCall?.(pending)
+              await runWithTimeout(pending, this.opTimeout('copy'), 'copy')
             }),
           this.mountId,
         ),

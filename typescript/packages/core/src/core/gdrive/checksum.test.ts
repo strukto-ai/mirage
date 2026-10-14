@@ -23,7 +23,7 @@ vi.mock('../google/client.ts', async () => {
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { runWithRevisions } from '../../observe/context.ts'
+import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from '../google/client.ts'
 import type { TokenManager } from '../google/client.ts'
@@ -53,12 +53,20 @@ describe('Drive checksum', () => {
     ['sha1', 'sha1Checksum'],
     ['sha256', 'sha256Checksum'],
   ])('answers the %s Drive keeps', async (algorithm, field) => {
-    vi.mocked(client.googleGet).mockResolvedValue({ [field]: 'ABC123' })
-    expect(await checksum(accessor, SCOPE, algorithm, await indexed('gdrive/file'))).toBe('abc123')
-    expect(vi.mocked(client.googleGet).mock.calls[0]?.[2]).toEqual({
-      fields: field,
-      supportsAllDrives: 'true',
-    })
+    const reply = { md5Checksum: 'm5', headRevisionId: 'h1', [field]: 'ABC123' }
+    vi.mocked(client.googleGet).mockResolvedValue(reply)
+    const index = await indexed('gdrive/file')
+    const [found, records] = await runWithRecording(() =>
+      checksum(accessor, SCOPE, algorithm, index),
+    )
+    expect(found).toBe('abc123')
+    const params = vi.mocked(client.googleGet).mock.calls[0]?.[2] as { fields: string }
+    const fields = params.fields.split(',')
+    expect(fields[0]).toBe(field)
+    expect(fields).toEqual(expect.arrayContaining(['md5Checksum', 'headRevisionId']))
+    expect(records.map((r) => [r.op, r.path, r.fingerprint, r.revision])).toEqual([
+      ['read', '/r.pdf', reply.md5Checksum, 'h1'],
+    ])
   })
 
   // Mirrors python's test_a_native_file_or_another_algorithm_reads.

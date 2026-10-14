@@ -13,17 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
+import { writesConditioned } from '../../cache/context.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { getFileInfo } from './api.ts'
 import { SHA1 } from './constants.ts'
-import { tokenOf } from './fingerprint.ts'
+import { readToken, tokenOf } from './fingerprint.ts'
 import { fileEntry } from './read.ts'
 
 /**
  * The sha1 Box keeps for a file's content, asked live: a listing row's sha1
  * can be older than the bytes a read downloads, so the file's own record is
- * asked. Box keeps no other digest. Mirrors Python's core/box/checksum.py.
+ * asked. Box keeps no other digest. A digest answered is recorded as the read
+ * it stands in for, with the token a whole read of those bytes would record.
+ * Mirrors Python's core/box/checksum.py.
  */
 export async function checksum(
   accessor: BoxAccessor,
@@ -33,7 +37,13 @@ export async function checksum(
 ): Promise<string | null> {
   if (algorithm !== SHA1) return null
   const entry = await fileEntry(accessor, path, index)
+  const timer = startOp()
   const item = await getFileInfo(accessor.tokenManager, entry.id)
   const found = tokenOf(item.sha1)
-  return found !== null ? found.toLowerCase() : null
+  if (found === null) return null
+  const digest = found.toLowerCase()
+  record('read', path.virtual, 'box', 0, timer, {
+    fingerprint: writesConditioned(path) ? digest : readToken(entry, digest),
+  })
+  return digest
 }

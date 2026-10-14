@@ -18,6 +18,7 @@ import pytest
 
 from mirage.cache.index.config import IndexEntry
 from mirage.core.box.checksum import checksum
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
 SCOPE = PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/a.txt")
@@ -72,3 +73,26 @@ async def test_box_keeps_no_md5(accessor, index):
     ) as info:
         assert await checksum(accessor, SCOPE, "md5", index) is None
     info.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "listed,token", [("ab" * 20, "ab" * 20), ("0" * 40, None)]
+)
+async def test_box_records_the_token_a_read_would(
+    accessor, index, listed, token
+):
+    await _listed(index, listed)
+    scope = RecordingScope()
+    try:
+        with patch(
+            "mirage.core.box.checksum.get_file_info",
+            new_callable=AsyncMock,
+            return_value={"id": "200", "sha1": "AB" * 20},
+        ):
+            await checksum(accessor, SCOPE, "sha1", index)
+    finally:
+        scope.close()
+    assert [(r.op, r.path, r.fingerprint) for r in scope.records] == [
+        ("read", "/a.txt", token)
+    ]

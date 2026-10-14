@@ -252,16 +252,18 @@ async def test_bytes_alone_come_from_the_size(flags, sized, read):
     assert (bool(asked), bool(reads)) == (sized, read)
 
 
+async def _five_bytes(path):
+    yield b"abcde"
+
+
+async def _unknown_size(path):
+    return None
+
+
 @pytest.mark.asyncio
 async def test_an_unknown_size_reads_the_file():
-    async def stream(path):
-        yield b"abcde"
-
-    async def size_of(path):
-        return None
-
     p = PathSpec.from_str_path("/f", "")
     body, _, _ = await format_multi(
-        [p], read=stream, size_of=size_of, bytes_=True
+        [p], read=_five_bytes, size_of=_unknown_size, bytes_=True
     )
     assert body == b"5 /f\n"

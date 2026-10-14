@@ -22,8 +22,9 @@ from mirage.core.s3.client import (
     async_session,
     is_not_found,
 )
+from mirage.core.s3.read import _fp_rev_from_s3_response
 from mirage.errors.fs import enoent
-from mirage.observe.context import revision_for
+from mirage.observe.context import record, revision_for, start_op
 from mirage.types import PathSpec
 
 # An MD5 as an ETag spells it: 32 lowercase hex digits, no part count.
@@ -43,7 +44,10 @@ async def checksum(
     upload kept unencrypted, or on AWS under SSE-S3: a multipart ETag
     ends in ``-N``, and an object under SSE-KMS or SSE-C carries some
     other 32 hex digits, which no look at the ETag tells apart, so the
-    head's encryption decides. Every other algorithm is None.
+    head's encryption decides. Every other algorithm is None. A digest
+    answered is recorded as the read it stands in for, with the ETag and
+    version the head saw, so a snapshot pins them and a conditional
+    write later in the line is conditioned on them.
 
     Args:
         accessor (S3Accessor): S3 accessor.
@@ -66,6 +70,7 @@ async def checksum(
     client = await accessor.cached_client(
         lambda: async_session(config).client(**_client_kwargs(config))
     )
+    timer = start_op()
     try:
         resp = await client.head_object(**kwargs)
     except Exception as exc:
@@ -78,4 +83,16 @@ async def checksum(
     ):
         return None
     etag = str(resp.get("ETag") or "").strip('"')
-    return etag if MD5_ETAG.fullmatch(etag) else None
+    if not MD5_ETAG.fullmatch(etag):
+        return None
+    fingerprint, revision = _fp_rev_from_s3_response(resp)
+    record(
+        "read",
+        virtual,
+        "s3",
+        0,
+        timer,
+        fingerprint=fingerprint,
+        revision=revision,
+    )
+    return etag

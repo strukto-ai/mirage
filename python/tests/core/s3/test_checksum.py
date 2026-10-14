@@ -18,6 +18,7 @@ import pytest
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.checksum import checksum
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.s3 import S3Config
 
@@ -83,3 +84,17 @@ async def test_another_algorithm_asks_nothing(monkeypatch):
     accessor = _accessor(client, monkeypatch)
     assert await checksum(accessor, SCOPE, "sha256", True) is None
     assert client.asked == []
+
+
+@pytest.mark.asyncio
+async def test_an_answered_digest_records_the_version_it_saw(monkeypatch):
+    client = HeadClient({"ETag": f'"{MD5}"', "VersionId": "v3"})
+    accessor = _accessor(client, monkeypatch)
+    scope = RecordingScope()
+    try:
+        assert await checksum(accessor, SCOPE, "md5", True) == MD5
+    finally:
+        scope.close()
+    assert [
+        (r.op, r.path, r.fingerprint, r.revision) for r in scope.records
+    ] == [("read", "/foo.txt", MD5, "v3")]

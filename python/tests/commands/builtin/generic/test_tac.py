@@ -59,6 +59,12 @@ async def test_tac_keeps_bytes_and_puts_b_before_the_record(
     assert got == expect
 
 
+async def _refusing_bad(path: PathSpec):
+    if path.virtual == "/bad":
+        raise PermissionError(13, "Permission denied", "/bad")
+    yield b"a\nb\n"
+
+
 @pytest.mark.asyncio
 async def test_a_file_that_fails_to_read_is_reported_and_tac_goes_on():
     bad = PathSpec(
@@ -67,13 +73,7 @@ async def test_a_file_that_fails_to_read_is_reported_and_tac_goes_on():
     good = PathSpec(
         vfs_path="good", virtual="/good", directory="/", resolved=True
     )
-
-    async def read_stream(path):
-        if path.virtual == "/bad":
-            raise PermissionError(13, "Permission denied", "/bad")
-        yield b"a\nb\n"
-
-    out, io = await tac([bad, good], read_stream=read_stream)
+    out, io = await tac([bad, good], read_stream=_refusing_bad)
     assert await _drain(out) == ["b", "a"]
     assert io.exit_code == 1
     assert b"/bad" in io.stderr

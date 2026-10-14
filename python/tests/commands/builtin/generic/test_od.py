@@ -130,6 +130,8 @@ def _p(name: str) -> PathSpec:
             ["/a", "/b"],
         ),
         (["/x"], 0, None, "", "od: /x: No such file or directory\n", ["/x"]),
+        (["/a", "/b"], 5, 0, "0000005\n", "", ["/a", "/b"]),
+        (["/a", "/x"], 2, 0, "0000002\n", "", ["/a"]),
     ],
 )
 async def test_od_skips_and_limits_across_operands(

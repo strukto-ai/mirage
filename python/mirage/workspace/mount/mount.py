@@ -1366,9 +1366,9 @@ class MountEntry:
         has judged ``src`` as a read and ``dst`` as a create. Raises
         EXDEV when this mount's VFS cannot copy from that one, and when
         the store's object is not what the move's read and write would
-        carry: a cached or pinned source reads other bytes, and a
-        conditional mount on either end holds a version for the write or
-        for ``mv``'s delete. The caller then moves the bytes itself.
+        carry: a cached, pinned or rendered source reads other bytes, and
+        a conditional mount on either end holds a version for the write
+        or for ``mv``'s delete. The caller then moves the bytes itself.
 
         Args:
             source (MountEntry): the mount ``src`` is on.
@@ -1381,6 +1381,7 @@ class MountEntry:
             not self.vfs.supports("copy_from")
             or WritePolicy.CONDITIONAL in (self.write, source.write)
             or src in source.revisions
+            or source.renders(get_extension(src))
             or (manager is not None and await manager.is_cached(src_spec))
         ):
             raise exdev(src)

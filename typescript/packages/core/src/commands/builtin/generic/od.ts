@@ -78,8 +78,8 @@ function formatValues(data: Uint8Array, typeSpec: string): string {
 const SKIP_PAST_END = 'od: cannot skip past end of combined input\n'
 
 /** One operand's bytes past `skip` and up to `left`, the stream closed once
- * `left` are in; returns them and the skip left over. Mirrors Python's
- * _taken. */
+ * the skip is spent and `left` are in; returns them and the skip left over.
+ * Mirrors Python's _taken. */
 async function taken(
   source: AsyncIterable<Uint8Array>,
   skip: number,
@@ -100,7 +100,7 @@ async function taken(
       toKeep -= chunk.byteLength
     }
     if (chunk.byteLength > 0) kept.push(chunk)
-    if (toKeep === 0) break
+    if (toKeep === 0 && toSkip === 0) break
   }
   return [kept, toSkip]
 }
@@ -109,9 +109,9 @@ async function taken(
  * The operands as od's one input, past `skip` and within `limit`. As GNU od:
  * an operand that cannot be opened is reported and passed over; one that fails
  * to read (a directory) is reported, ends any skip, and counts as opened. Once
- * `limit` bytes are in, no later operand is opened. Returns the bytes, the
- * error lines, whether any operand opened, and the skip left unspent. Mirrors
- * Python's _combined.
+ * the skip is spent and `limit` bytes are in, no later operand is opened.
+ * Returns the bytes, the error lines, whether any operand opened, and the skip
+ * left unspent. Mirrors Python's _combined.
  */
 async function combined(
   paths: readonly PathSpec[],
@@ -125,7 +125,7 @@ async function combined(
   let toSkip = skip
   let left = limit
   for (const p of paths) {
-    if (left === 0 && opened) break
+    if (left === 0 && opened && toSkip === 0) break
     let part: Uint8Array[]
     try {
       ;[part, toSkip] = await taken(read(p), toSkip, left)

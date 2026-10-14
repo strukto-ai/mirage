@@ -22,7 +22,11 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdrive.checksum import checksum
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.observe.context import push_revisions, reset_revisions
+from mirage.observe.context import (
+    RecordingScope,
+    push_revisions,
+    reset_revisions,
+)
 from mirage.types import PathSpec
 
 SCOPE = PathSpec(vfs_path="r.pdf", virtual="/r.pdf", directory="/")
@@ -69,13 +73,24 @@ async def _index(resource_type: str) -> RAMIndexCacheStore:
 )
 async def test_drive_answers_the_digest_it_keeps(accessor, algorithm, field):
     index = await _index("gdrive/file")
-    with patch(
-        "mirage.core.gdrive.checksum.google_get",
-        new_callable=AsyncMock,
-        return_value={field: "ABC123"},
-    ) as get:
-        assert await checksum(accessor, SCOPE, algorithm, index) == "abc123"
-    assert get.await_args.kwargs["params"]["fields"] == field
+    reply = {"md5Checksum": "m5", "headRevisionId": "h1", field: "ABC123"}
+    scope = RecordingScope()
+    try:
+        with patch(
+            "mirage.core.gdrive.checksum.google_get",
+            new_callable=AsyncMock,
+            return_value=reply,
+        ) as get:
+            got = await checksum(accessor, SCOPE, algorithm, index)
+    finally:
+        scope.close()
+    assert got == "abc123"
+    fields = get.await_args.kwargs["params"]["fields"].split(",")
+    assert fields[0] == field
+    assert {"md5Checksum", "headRevisionId"} <= set(fields)
+    assert [
+        (r.op, r.path, r.fingerprint, r.revision) for r in scope.records
+    ] == [("read", "/r.pdf", reply["md5Checksum"], "h1")]
 
 
 @pytest.mark.asyncio

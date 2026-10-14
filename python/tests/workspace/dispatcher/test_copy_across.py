@@ -134,14 +134,28 @@ async def test_a_conditional_mount_moves_the_bytes(prefix):
     assert b.copied == []
 
 
+class SlowStoreRAM(StoreRAM):
+    """A destination whose store copy outlasts any deadline."""
+
+    async def copy_from(self, source, src, dst):
+        await asyncio.sleep(5)
+
+
 @pytest.mark.asyncio
 async def test_a_store_copy_keeps_the_copy_timeout():
-    class Slow(StoreRAM):
-        async def copy_from(self, source, src, dst):
-            await asyncio.sleep(5)
-
-    a, b = StoreRAM(), Slow()
+    a, b = StoreRAM(), SlowStoreRAM()
     ws = await _seeded(a, b)
     _mount(ws, "/b/").command_limits["copy"] = Limit(timeout_seconds=0.05)
     io = await ws.shell("cp /a/f /b/g")
     assert io.exit_code != 0
+
+
+@pytest.mark.asyncio
+async def test_a_rendered_source_moves_the_bytes_a_read_gives():
+    a, b = StoreRAM(), StoreRAM()
+    ws = await _seeded(a, b)
+    a.renderers = {".txt": "read"}
+    await ws.shell("printf 'payload\\n' > /a/f.txt")
+    io = await ws.shell("cp /a/f.txt /b/g")
+    assert io.exit_code == 0, io.stderr
+    assert b.copied == []

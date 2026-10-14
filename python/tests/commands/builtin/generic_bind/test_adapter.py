@@ -916,17 +916,18 @@ async def test_command_guards_wrap_time_capture_covers_late_calls():
     assert ("readdir", "/data/secret") not in calls
 
 
+async def _unused(*_args):
+    raise AssertionError("not used")
+
+
 def _sized_ops(st: FileStat) -> CommandIO:
     async def stat(_accessor, path, _index):
         return st
 
-    async def unused(*_args):
-        raise AssertionError("not used")
-
     return CommandIO(
-        readdir=unused,
-        read_bytes=unused,
-        read_stream=unused,
+        readdir=_unused,
+        read_bytes=_unused,
+        read_stream=_unused,
         stat=stat,
         is_mounted=lambda _a: True,
     )

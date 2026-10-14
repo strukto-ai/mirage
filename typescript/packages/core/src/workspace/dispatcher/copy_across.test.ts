@@ -167,4 +167,16 @@ describe('a copy a read would answer otherwise', () => {
     const io = await ws.shell('cp /a/f /b/g')
     expect(io.exitCode).not.toBe(0)
   })
+
+  // Mirrors python's test_a_rendered_source_moves_the_bytes_a_read_gives.
+  it('moves the bytes of a rendered source', async () => {
+    const a = new StoreRAM()
+    const b = new StoreRAM()
+    const ws = await seeded(a, b)
+    ;(a as { renderers: Record<string, string> }).renderers = { '.txt': 'read' }
+    await ws.shell("printf 'payload\\n' > /a/f.txt")
+    const io = await ws.shell('cp /a/f.txt /b/g')
+    expect(io.exitCode).toBe(0)
+    expect(b.copied).toEqual([])
+  })
 })

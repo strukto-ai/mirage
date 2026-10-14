@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
 
 import { S3Accessor } from '../../accessor/s3.ts'
+import { runWithRecording } from '../../observe/context.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { PathSpec } from '../../types.ts'
 import { checksum } from './checksum.ts'
@@ -70,5 +71,15 @@ describe('S3 checksum', () => {
     head.reply = { ETag: `"${MD5}"` }
     expect(await checksum(accessor, SCOPE, 'sha256', true)).toBeNull()
     expect(head.sent).toEqual([])
+  })
+
+  // Mirrors python's test_an_answered_digest_records_the_version_it_saw.
+  it('records the version an answered digest saw', async () => {
+    head.reply = { ETag: `"${MD5}"`, VersionId: 'v3' }
+    const [found, records] = await runWithRecording(() => checksum(accessor, SCOPE, 'md5', true))
+    expect(found).toBe(MD5)
+    expect(records.map((r) => [r.op, r.path, r.fingerprint, r.revision])).toEqual([
+      ['read', '/foo.txt', MD5, 'v3'],
+    ])
   })
 })

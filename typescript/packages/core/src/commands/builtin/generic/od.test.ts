@@ -88,6 +88,8 @@ describe('od skips and limits across operands', () => {
     ],
     [['/a', '/b'], 10, null, '', 'od: cannot skip past end of combined input\n', ['/a', '/b']],
     [['/x'], 0, null, '', 'od: /x: No such file or directory\n', ['/x']],
+    [['/a', '/b'], 5, 0, '0000005\n', '', ['/a', '/b']],
+    [['/a', '/x'], 2, 0, '0000002\n', '', ['/a']],
   ] as const)('%j -j %d -N %s', async (names, skip, limit, out, err, reads) => {
     const read: string[] = []
     const stream = async function* (q: PathSpec): AsyncIterable<Uint8Array> {

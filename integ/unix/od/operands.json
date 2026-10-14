@@ -191,6 +191,45 @@
         "c",
         "j"
       ]
+    },
+    {
+      "id": "od_n_zero_still_spends_the_skip",
+      "seq": 17000022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "od -c -j 25 -N 0 /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000031\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "j",
+        "N"
+      ]
     }
   ]
 }

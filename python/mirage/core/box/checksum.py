@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
+from mirage.cache.context import writes_conditioned
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.box.api import get_file_info
 from mirage.core.box.constants import SHA1
-from mirage.core.box.fingerprint import token_of
+from mirage.core.box.fingerprint import read_token, token_of
 from mirage.core.box.read import file_entry
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -30,7 +32,9 @@ async def checksum(
     """The sha1 Box keeps for a file's content, asked live.
 
     A listing row's sha1 can be older than the bytes a read downloads,
-    so the file's own record is asked. Box keeps no other digest.
+    so the file's own record is asked. Box keeps no other digest. A
+    digest answered is recorded as the read it stands in for, with the
+    token a whole read of those bytes would record.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -41,6 +45,20 @@ async def checksum(
     if algorithm != SHA1:
         return None
     entry = await file_entry(accessor, path, index)
+    timer = start_op()
     item = await get_file_info(accessor.token_manager, entry.id)
     found = token_of(item.get(SHA1))
-    return found.lower() if found is not None else None
+    if found is None:
+        return None
+    digest = found.lower()
+    record(
+        "read",
+        path.virtual,
+        "box",
+        0,
+        timer,
+        fingerprint=(
+            digest if writes_conditioned() else read_token(entry, digest)
+        ),
+    )
+    return digest

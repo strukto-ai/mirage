@@ -952,7 +952,8 @@ export class Dispatcher {
    * another under one set of credentials); otherwise it answers EXDEV, as a
    * copy between two mounts always did, and the caller moves the bytes
    * itself. The destination's name is held, and its caches settled, on its
-   * own mount. Mirrors Python's Dispatcher._copy_across.
+   * own mount; a copy past its timeout keeps the name until the store
+   * answers. Mirrors Python's Dispatcher._copy_across.
    */
   private async copyAcross(call: Call, owner: MountEntry, other: MountEntry): Promise<void> {
     const dst = call.dst
@@ -960,10 +961,16 @@ export class Dispatcher {
     await owner.ensureReady()
     await other.ensureReady()
     const key = `${String(this.storeId(other.vfs))}:${mountKey(dst.virtual, rstripSlash(other.prefix))}`
-    await this.state.writers.withLock(key, async () => {
-      await other.copyFrom(owner, call.path.virtual, dst.virtual)
-      await this.settleWrite('copy', call.path, dst, [dst], [])
-    })
+    await this.holdWrite(
+      [key],
+      other.opTimeout('copy'),
+      'copy',
+      `copy ${call.path.virtual}`,
+      (onCall) => other.copyFrom(owner, call.path.virtual, dst.virtual, onCall),
+      async () => {
+        await this.settleWrite('copy', call.path, dst, [dst], [])
+      },
+    )
   }
 
   /**

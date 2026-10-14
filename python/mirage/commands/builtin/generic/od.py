@@ -96,7 +96,7 @@ async def _taken(
     source: AsyncIterator[bytes], skip: int, left: int | None
 ) -> tuple[list[bytes], int]:
     """One operand's bytes past ``skip`` and up to ``left``, the stream
-    closed once ``left`` are in.
+    closed once the skip is spent and ``left`` are in.
 
     Args:
         source (AsyncIterator[bytes]): the operand's stream.
@@ -119,7 +119,7 @@ async def _taken(
                 left -= len(chunk)
             if chunk:
                 kept.append(chunk)
-            if left == 0:
+            if left == 0 and not skip:
                 break
     finally:
         await stream.aclose()
@@ -136,8 +136,8 @@ async def _combined(
 
     As GNU od: an operand that cannot be opened is reported and passed
     over; one that fails to read (a directory) is reported, ends any
-    skip, and counts as opened. Once ``limit`` bytes are in, no later
-    operand is opened.
+    skip, and counts as opened. Once the skip is spent and ``limit``
+    bytes are in, no later operand is opened.
 
     Args:
         paths (list[PathSpec]): the operands.
@@ -154,7 +154,7 @@ async def _combined(
     opened = False
     left = limit
     for p in paths:
-        if left == 0 and opened:
+        if left == 0 and opened and not skip:
             break
         try:
             part, skip = await _taken(read(p), skip, left)

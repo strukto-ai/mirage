@@ -14,11 +14,12 @@
 
 import { rawPathOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { revisionFor } from '../../observe/context.ts'
-import type { PathSpec } from '../../types.ts'
+import { record, revisionFor, startOp } from '../../observe/context.ts'
+import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './client.ts'
 import { enoent } from '../../errors/fs.ts'
+import { fpRevFromS3Response } from './read.ts'
 
 // An MD5 as an ETag spells it: 32 lowercase hex digits, no part count.
 const MD5_ETAG = /^[0-9a-f]{32}$/
@@ -31,7 +32,10 @@ const MD5_ETAG = /^[0-9a-f]{32}$/
  * an object under SSE-KMS or SSE-C carries some other 32 hex digits, which no
  * look at the ETag tells apart, so the head's encryption decides. `aws` says
  * the store is AWS itself, where SSE-S3 keeps the MD5. Every other algorithm
- * is null. Mirrors Python's core/s3/checksum.py.
+ * is null. A digest answered is recorded as the read it stands in for, with
+ * the ETag and version the head saw, so a snapshot pins them and a
+ * conditional write later in the line is conditioned on them. Mirrors
+ * Python's core/s3/checksum.py.
  */
 export async function checksum(
   accessor: S3Accessor,
@@ -50,7 +54,13 @@ export async function checksum(
   }
   const pinned = revisionFor(path.virtual)
   if (pinned !== null) input.VersionId = pinned
-  let resp: { ETag?: string; ServerSideEncryption?: string; SSECustomerAlgorithm?: string }
+  let resp: {
+    ETag?: string
+    VersionId?: string
+    ServerSideEncryption?: string
+    SSECustomerAlgorithm?: string
+  }
+  const timer = startOp()
   try {
     resp = await (client as unknown as { send: (cmd: unknown) => Promise<typeof resp> }).send(
       new HeadObjectCommand(input),
@@ -65,5 +75,7 @@ export async function checksum(
   if ((resp.SSECustomerAlgorithm ?? null) !== null) return null
   if (sse !== null && !(aws && sse === 'AES256')) return null
   const etag = (resp.ETag ?? '').replace(/^"|"$/g, '')
-  return MD5_ETAG.test(etag) ? etag : null
+  if (!MD5_ETAG.test(etag)) return null
+  record('read', path.virtual, VFSName.S3, 0, timer, fpRevFromS3Response(resp))
+  return etag
 }

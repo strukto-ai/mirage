@@ -173,20 +173,20 @@ def test_parse_count_leaves_the_value_unescaped(value):
     )
 
 
+async def _unread(path: PathSpec):
+    raise AssertionError(f"read {path.virtual}")
+    yield b""
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("texts", [(), ("1", "0")])
 async def test_two_stdin_operands_at_one_offset_are_equal_unread(texts):
     # One name at one skip, or the second skip of zero that leaves the one
     # descriptor where the first put it: diffutils 3.10 reads neither.
-
-    async def unread(path: PathSpec):
-        raise AssertionError(f"read {path.virtual}")
-        yield b""
-
     src, io = await cmp_cmd(
         [DASH, DEV_STDIN] if not texts else [DASH, DASH],
         texts,
-        stream=unread,
+        stream=_unread,
         stdin=b"abc",
         skip=(1, 1) if not texts else (0, 0),
     )
