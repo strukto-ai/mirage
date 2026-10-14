@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.airtable import AirtableAccessor
@@ -19,6 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.airtable.config import AirtableConfig
 from mirage.core.airtable.read import first_lines as _first_lines
 from mirage.core.airtable.read import read as _read
+from mirage.core.airtable.read import read_stream as _read_stream
 from mirage.core.airtable.readdir import readdir as _readdir
 from mirage.core.airtable.search import (
     lines_containing as _lines_containing,
@@ -67,6 +69,11 @@ class AirtableVFS(BaseVFS):
     ) -> bytes:
         data = await _read(self.accessor, path, index)
         return slice_window(data, offset, size)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

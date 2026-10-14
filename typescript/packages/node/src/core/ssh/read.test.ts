@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { makeFakeAccessor } from './_test_utils.ts'
-import { read } from './read.ts'
+import { RunAccessor, makeFakeAccessor, type RunAnswer } from './_test_utils.ts'
+import { lineCount, read } from './read.ts'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -55,5 +55,35 @@ describe('core/ssh/read', () => {
     )
     const data = await read(accessor, spec('/data/a.txt'))
     expect(new TextDecoder().decode(data)).toBe('rooted')
+  })
+})
+
+describe('lineCount', () => {
+  const ENC = new TextEncoder()
+  const file = (vfsPath: string): PathSpec =>
+    new PathSpec({ virtual: `/s/${vfsPath}`, directory: '/s', vfsPath, rawPath: `/s/${vfsPath}` })
+
+  it.each(['42\n', '     42\n'])('is what wc counts (%j)', async (out) => {
+    const accessor = new RunAccessor('data', [0, ENC.encode(out), new Uint8Array()])
+    expect(await lineCount(accessor, file('a b.txt'))).toBe(42)
+    expect(accessor.sent).toEqual(["env LC_ALL=C wc -l < 'data/a b.txt'"])
+  })
+
+  it.each<[string, RunAnswer]>([
+    ['a directory', [1, new Uint8Array(), ENC.encode("wc: 'standard input': Is a directory\n")]],
+    [
+      'a missing file',
+      [1, new Uint8Array(), ENC.encode('sh: data/x: No such file or directory\n')],
+    ],
+    ['stderr', [0, ENC.encode('3\n'), ENC.encode('warning\n')]],
+    ['no newline', [0, ENC.encode('3'), new Uint8Array()]],
+    ['two words', [0, ENC.encode('3 x\n'), new Uint8Array()]],
+    [
+      'a refused command',
+      [127, new Uint8Array(), ENC.encode("only the mount's own commands run here\n")],
+    ],
+    ['a closed connection', new Error('closed')],
+  ])('leaves the read on %s', async (_name, answer) => {
+    expect(await lineCount(new RunAccessor('data', answer), file('x'))).toBeNull()
   })
 })

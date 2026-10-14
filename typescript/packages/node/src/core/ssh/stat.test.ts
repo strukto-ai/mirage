@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileType, PathSpec } from '@struktoai/mirage-core/types'
-import { makeFakeAccessor } from './_test_utils.ts'
-import { attrsToFileStat, stat } from './stat.ts'
+import { RunAccessor, makeFakeAccessor, type RunAnswer } from './_test_utils.ts'
+import { attrsToFileStat, stat, tree, treeCommand } from './stat.ts'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -92,5 +92,72 @@ describe('attrsToFileStat', () => {
     expect(s.modified).toBeNull()
     expect(s.fingerprint).toBeNull()
     expect(attrsToFileStat('mydir', { mode: DIR_MODE }).fingerprint).toBeNull()
+  })
+})
+
+const ENC = new TextEncoder()
+const TOP = 'd 755 4096 1700000000.5 1700000001.0 1000 1000 \0'
+
+function scope(vfsPath = ''): PathSpec {
+  const virtual = vfsPath === '' ? '/s' : `/s/${vfsPath}`
+  return new PathSpec({ virtual, directory: virtual, vfsPath, rawPath: virtual })
+}
+
+describe('treeCommand', () => {
+  it('quotes the scope and the format', () => {
+    expect(treeCommand('data/a b')).toBe(
+      "env LC_ALL=C find -L 'data/a b' -printf '%y %m %s %T@ %A@ %U %G %P\\0'",
+    )
+  })
+})
+
+describe('tree', () => {
+  it('renders each entry as stat does', async () => {
+    const out =
+      TOP +
+      'f 644 5 1700000000.9 1700000002.0 1000 1000 a.txt\0' +
+      'd 700 4096 1700000003.0 1700000003.0 1000 1000 sub\0' +
+      'f 4600 0 1700000004.2 1700000004.0 1000 1000 sub/b b.md\0'
+    const accessor = new RunAccessor('data', [0, ENC.encode(out), new Uint8Array()])
+    const rows = await tree(accessor, scope('in'))
+    expect(accessor.sent).toEqual([treeCommand('data/in')])
+    expect([...(rows?.keys() ?? [])].sort()).toEqual(['a.txt', 'sub', 'sub/b b.md'])
+    expect(rows?.get('a.txt')).toEqual(
+      attrsToFileStat('a.txt', {
+        mode: FILE_MODE,
+        size: 5,
+        atime: 1700000002,
+        mtime: 1700000000,
+        uid: 1000,
+        gid: 1000,
+      }),
+    )
+    expect(rows?.get('sub')?.type).toBe(FileType.DIRECTORY)
+    expect(rows?.get('sub')?.size).toBeNull()
+    expect(rows?.get('sub/b b.md')?.name).toBe('b b.md')
+    expect(rows?.get('sub/b b.md')?.mode).toBe(0o4600)
+  })
+
+  it('has no rows for an empty directory', async () => {
+    const rows = await tree(new RunAccessor('/', [0, ENC.encode(TOP), new Uint8Array()]), scope())
+    expect(rows).toEqual(new Map())
+  })
+
+  const bytes = (text: string): Uint8Array => ENC.encode(text)
+  it.each<[string, RunAnswer]>([
+    ['a failed find', [1, bytes(TOP), new Uint8Array()]],
+    ['stderr', [0, bytes(TOP), bytes("find: 'x': Permission denied\n")]],
+    ['a broken link', [0, bytes(`${TOP}l 777 7 1.0 1.0 0 0 gone\0`), new Uint8Array()]],
+    ['a fifo', [0, bytes(`${TOP}p 644 0 1.0 1.0 0 0 fifo\0`), new Uint8Array()]],
+    ['a file at the scope', [0, bytes('f 644 5 1.0 1.0 0 0 \0'), new Uint8Array()]],
+    ['a short record', [0, bytes(`${TOP}f 644 5 1.0\0`), new Uint8Array()]],
+    ['no closing NUL', [0, bytes(TOP.slice(0, -1)), new Uint8Array()]],
+    [
+      'an sftp-only server',
+      [1, bytes('This service allows sftp connections only.\n'), new Uint8Array()],
+    ],
+    ['a closed connection', new Error('closed')],
+  ])('leaves the walk on %s', async (_name, answer) => {
+    expect(await tree(new RunAccessor('/', answer), scope())).toBeNull()
   })
 })

@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any
 
@@ -91,18 +92,37 @@ async def cursor_items(
         PaginationStalledError: the endpoint repeated a cursor.
     """
     collected: list[Any] = []
+    async with aclosing(cursor_pages(fetch_page, shape=shape)) as pages:
+        async for page in pages:
+            collected.extend(page)
+            if max_results is not None and len(collected) >= max_results:
+                return collected[:max_results]
+    return collected
+
+
+async def cursor_pages(
+    fetch_page: PageFetch, *, shape: PageShape = HAS_MORE_PAGES
+) -> AsyncGenerator[list[Any], None]:
+    """Each page's items from a cursor-paginated endpoint, the next page
+    fetched only when the caller pulls it.
+
+    Args:
+        fetch_page (PageFetch): performs one page request; receives the
+            cursor to resume from, or None for the first page.
+        shape (PageShape): where the reply keeps its items and cursor.
+
+    Raises:
+        PaginationStalledError: the endpoint repeated a cursor.
+    """
     seen: set[str] = set()
     cursor: str | None = None
     while True:
         data = await fetch_page(cursor)
         page = data.get(shape.items_key)
-        if isinstance(page, list):
-            collected.extend(page)
-        if max_results is not None and len(collected) >= max_results:
-            return collected[:max_results]
+        yield page if isinstance(page, list) else []
         cursor = shape.next_cursor(data)
         if cursor is None:
-            return collected
+            return
         if cursor in seen:
             raise PaginationStalledError(cursor)
         seen.add(cursor)

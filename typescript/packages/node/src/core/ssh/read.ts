@@ -19,7 +19,10 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { readChunks } from './stream.ts'
+import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { isNoSuchFile, joinRoot, stripPrefix } from './utils.ts'
+
+export const WC = 'env LC_ALL=C wc -l'
 
 /**
  * Read a file, optionally only a byte range of it.
@@ -73,4 +76,27 @@ export async function read(
   }
   record('read', p.virtual, VFSName.SSH, total, timer)
   return out
+}
+
+/**
+ * How many newlines a file holds, by wc on the server. Only an exit of 0 with
+ * nothing on stderr and one count on stdout answers: a server that runs no
+ * commands, a directory or a file wc could not read leaves the file to be
+ * read, which reports it. Mirrors Python's `line_count`.
+ */
+export async function lineCount(accessor: SSHAccessor, p: PathSpec): Promise<number | null> {
+  const remote = joinRoot(accessor.config.root ?? '/', stripPrefix(p))
+  let status: number | null
+  let out: Uint8Array
+  let err: Uint8Array
+  try {
+    ;[status, out, err] = await accessor.run(`${WC} < ${singleQuote(remote)}`)
+  } catch (error) {
+    console.debug(`ssh line count left to the read: ${String(error)}`)
+    return null
+  }
+  const text = new TextDecoder().decode(out)
+  const count = text.trim()
+  if (status !== 0 || err.length > 0 || !text.endsWith('\n') || !/^\d+$/.test(count)) return null
+  return Number(count)
 }

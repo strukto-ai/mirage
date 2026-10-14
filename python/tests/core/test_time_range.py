@@ -1,10 +1,17 @@
+import asyncio
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
 import pytest
 
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.time_range import TimeRange, guard_day, parse_time
+from mirage.core.time_range import (
+    TimeRange,
+    followed_day,
+    guard_day,
+    parse_time,
+)
 
 JUNE_1 = datetime(2026, 6, 1, tzinfo=timezone.utc).timestamp()
 JUNE_2 = datetime(2026, 6, 2, tzinfo=timezone.utc).timestamp()
@@ -110,3 +117,62 @@ async def test_guard_day_reads_the_day_slot():
             ),
             "/m/c/2026-06-02",
         )
+
+
+def _messages(*stamps: str) -> list[dict]:
+    return [{"ts": stamp} for stamp in stamps]
+
+
+@pytest.mark.asyncio
+async def test_a_followed_day_prints_its_last_lines_then_what_lands():
+    asked: list[dict | None] = []
+    answers = [_messages("3"), [], _messages("4", "5")]
+
+    async def after(last):
+        asked.append(last)
+        return answers.pop(0) if answers else []
+
+    stream = followed_day(
+        _messages("1", "2"), 1, time.time() + 60, 0.001, after
+    )
+    try:
+        assert await anext(stream) == b'{"ts":"2"}\n'
+        assert await anext(stream) == b'{"ts":"3"}\n'
+        assert await anext(stream) == b'{"ts":"4"}\n{"ts":"5"}\n'
+    finally:
+        await stream.aclose()
+    assert asked == [{"ts": "2"}, {"ts": "3"}, {"ts": "3"}]
+
+
+@pytest.mark.asyncio
+async def test_a_followed_day_asks_for_the_whole_day_while_it_has_none():
+    asked: list[dict | None] = []
+
+    async def after(last):
+        asked.append(last)
+        return _messages("1")
+
+    stream = followed_day([], 5, time.time() + 60, 0.001, after)
+    try:
+        assert await anext(stream) == b'{"ts":"1"}\n'
+    finally:
+        await stream.aclose()
+    assert asked == [None]
+
+
+@pytest.mark.asyncio
+async def test_a_day_that_is_over_is_asked_once_more_then_waits():
+    asked: list[dict | None] = []
+
+    async def after(last):
+        asked.append(last)
+        return _messages("9") if len(asked) == 1 else []
+
+    stream = followed_day(_messages("1"), 0, time.time(), 0.001, after)
+    try:
+        assert await anext(stream) == b'{"ts":"9"}\n'
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(anext(stream), 0.05)
+    finally:
+        await stream.aclose()
+    assert asked == [{"ts": "1"}]

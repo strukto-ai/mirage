@@ -15,33 +15,9 @@
 import asyncssh
 import pytest
 
-from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh.search import files_containing, grep_command
 from mirage.types import PathSpec
-from mirage.vfs.ssh.config import SSHConfig
-
-Answer = tuple[int | None, bytes, bytes] | Exception
-
-
-class _Accessor(SSHAccessor):
-    """An accessor whose server answers every command with ``answer``.
-
-    Args:
-        root (str): the mount's remote root.
-        answer (Answer): the run's status, output and error output, or
-            what it raises.
-    """
-
-    def __init__(self, root: str, answer: Answer) -> None:
-        super().__init__(SSHConfig(host="example.test", root=root))
-        self.answer = answer
-        self.sent: list[str] = []
-
-    async def run(self, command: str) -> tuple[int | None, bytes, bytes]:
-        self.sent.append(command)
-        if isinstance(self.answer, Exception):
-            raise self.answer
-        return self.answer
+from tests.fixtures.ssh_run import RunAccessor
 
 
 def _scope(vfs_path: str = "") -> PathSpec:
@@ -71,7 +47,7 @@ def test_grep_command_quotes_the_text_and_every_scope():
 async def test_files_containing_names_what_grep_lists(
     root, under, scope, out, want
 ):
-    accessor = _Accessor(root, (0 if out else 1, out, b""))
+    accessor = RunAccessor(root, (0 if out else 1, out, b""))
     hits = await files_containing(accessor, "hello", [_scope(under)], False)
     assert hits is not None
     assert [p.vfs_path for p in hits] == want
@@ -98,5 +74,5 @@ async def test_files_containing_names_what_grep_lists(
     ],
 )
 async def test_files_containing_leaves_an_unclean_run_to_the_scan(answer):
-    accessor = _Accessor("/data", answer)
+    accessor = RunAccessor("/data", answer)
     assert await files_containing(accessor, "hello", [_scope()], False) is None

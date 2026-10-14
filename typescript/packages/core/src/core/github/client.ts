@@ -16,7 +16,8 @@ import { Octokit } from '@octokit/core'
 import { RequestError } from '@octokit/request-error'
 import { retry } from '@octokit/plugin-retry'
 import { throttling } from '@octokit/plugin-throttling'
-import { GRAPHQL_PATH, SEARCH_PAGE_SIZE } from './constants.ts'
+import { bodyChunks } from '../api/client.ts'
+import { GRAPHQL_PATH, RAW_MEDIA_TYPE, SEARCH_PAGE_SIZE } from './constants.ts'
 
 export const GITHUB_API_BASE = 'https://api.github.com'
 export const GITHUB_API_VERSION = '2022-11-28'
@@ -50,6 +51,8 @@ export interface GitHubTransport {
     params?: Record<string, string>,
     headers?: Record<string, string>,
   ): Promise<GitHubResponse>
+  /** GET a path's raw media type as its bytes arrive. */
+  stream?(path: string): AsyncIterable<Uint8Array>
 }
 
 export interface GitHubResponse {
@@ -149,6 +152,35 @@ export class HttpGitHubTransport implements GitHubTransport {
     params?: Record<string, string>,
     headers?: Record<string, string>,
   ): Promise<GitHubResponse> {
+    const r = await this.send(method, path, body, params, headers, true)
+    // 204 and an empty 202 decode to '' rather than a body; the caller gets
+    // null on a call that worked. A binary body, such as a run's log
+    // archive, arrives as an ArrayBuffer and is handed on as bytes.
+    const responseHeaders: Record<string, string> = {}
+    for (const [key, value] of Object.entries(r.headers)) {
+      if (value !== undefined) responseHeaders[key.toLowerCase()] = String(value)
+    }
+    return {
+      data: r.data === '' ? null : r.data instanceof ArrayBuffer ? new Uint8Array(r.data) : r.data,
+      status: r.status,
+      headers: responseHeaders,
+    }
+  }
+
+  async *stream(path: string): AsyncGenerator<Uint8Array, void> {
+    const r = await this.send('GET', path, undefined, undefined, { accept: RAW_MEDIA_TYPE }, false)
+    const body = r.data as ReadableStream<Uint8Array> | null
+    if (body !== null) yield* bodyChunks(body)
+  }
+
+  private async send(
+    method: string,
+    path: string,
+    body: unknown,
+    params: Record<string, string> | undefined,
+    headers: Record<string, string> | undefined,
+    parse: boolean,
+  ): Promise<Awaited<ReturnType<InstanceType<typeof Kit>['request']>>> {
     let failed: Response | undefined
     try {
       // Octokit reads loose parameters off the same object that carries
@@ -160,7 +192,7 @@ export class HttpGitHubTransport implements GitHubTransport {
       // at all, which is what a bare DELETE has to look like on the wire.
       const query = new URLSearchParams(params ?? {}).toString()
       const target = path === GRAPHQL_PATH ? graphqlUrl(this.baseUrl) : path
-      const r = await this.kit.request({
+      return await this.kit.request({
         method: method.toUpperCase(),
         url:
           escapeRoute(target) + (query === '' ? '' : `${target.includes('?') ? '&' : '?'}${query}`),
@@ -172,22 +204,10 @@ export class HttpGitHubTransport implements GitHubTransport {
             if (response.status >= 400) failed = response.clone()
             return response
           },
+          parseSuccessResponseBody: parse,
         },
         ...(body === undefined ? {} : { data: body }),
       })
-      // 204 and an empty 202 decode to '' rather than a body; the caller gets
-      // null on a call that worked. A binary body, such as a run's log
-      // archive, arrives as an ArrayBuffer and is handed on as bytes.
-      const responseHeaders: Record<string, string> = {}
-      for (const [key, value] of Object.entries(r.headers)) {
-        if (value !== undefined) responseHeaders[key.toLowerCase()] = String(value)
-      }
-      return {
-        data:
-          r.data === '' ? null : r.data instanceof ArrayBuffer ? new Uint8Array(r.data) : r.data,
-        status: r.status,
-        headers: responseHeaders,
-      }
     } catch (err) {
       if (err instanceof RequestError) {
         // Octokit composes its message as `<message> - <documentation_url>`.
@@ -350,7 +370,7 @@ export async function fetchBlob(
   repo: string,
   sha: string,
 ): Promise<Uint8Array> {
-  const data = (await transport.get(`/repos/${owner}/${repo}/git/blobs/${sha}`)) as GitHubBlob
+  const data = (await transport.get(blobPath(owner, repo, sha))) as GitHubBlob
   if (data.encoding !== 'base64') {
     throw new GitHubApiError(`unexpected blob encoding: ${data.encoding}`, 0)
   }
@@ -358,6 +378,24 @@ export async function fetchBlob(
   const out = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
   return out
+}
+
+/**
+ * A blob's bytes as they download, in GitHub's raw media type, or whole from
+ * a transport that cannot stream.
+ */
+export async function* streamBlob(
+  transport: GitHubTransport,
+  owner: string,
+  repo: string,
+  sha: string,
+): AsyncGenerator<Uint8Array, void> {
+  if (transport.stream === undefined) yield await fetchBlob(transport, owner, repo, sha)
+  else yield* transport.stream(blobPath(owner, repo, sha))
+}
+
+function blobPath(owner: string, repo: string, sha: string): string {
+  return `/repos/${owner}/${repo}/git/blobs/${sha}`
 }
 
 export interface GitHubCodeSearchResult {

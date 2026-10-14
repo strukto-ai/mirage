@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import AsyncGenerator
 from typing import Any, cast
 from urllib.parse import urlencode
 
@@ -23,9 +24,16 @@ from mirage.core.api.client import (
     ApiResponse,
     SessionArg,
     api_request,
+    api_stream,
     status_error,
 )
-from mirage.core.github.constants import API_BASE, API_VERSION, GRAPHQL_PATH
+from mirage.core.github.config import GitHubConfig
+from mirage.core.github.constants import (
+    API_BASE,
+    API_VERSION,
+    GRAPHQL_PATH,
+    RAW_MEDIA_TYPE,
+)
 from mirage.types import JsonValue
 from mirage.vfs.secrets import reveal_secret
 
@@ -320,3 +328,38 @@ def _api_message(text: str, reason: str | None) -> str:
         if isinstance(message, str):
             return message
     return reason or text
+
+
+def blob_path(owner: str, repo: str, sha: str) -> str:
+    """The blob endpoint for ``sha`` in ``owner/repo``.
+
+    Args:
+        owner (str): the repository's owner.
+        repo (str): the repository.
+        sha (str): the blob's sha.
+    """
+    return f"/repos/{owner}/{repo}/git/blobs/{sha}"
+
+
+def stream_blob(
+    config: GitHubConfig,
+    owner: str,
+    repo: str,
+    sha: str,
+    session: SessionArg = None,
+) -> AsyncGenerator[bytes, None]:
+    """A blob's bytes as they download, in GitHub's raw media type.
+
+    Args:
+        config (GitHubConfig): the token and API base.
+        owner (str): the repository's owner.
+        repo (str): the repository.
+        sha (str): the blob's sha.
+        session (SessionArg): pool or live session to ride.
+    """
+    return api_stream(
+        github_url(blob_path(owner, repo, sha), config.base_url),
+        error_of=status_error,
+        headers={**github_headers(config.token), "Accept": RAW_MEDIA_TYPE},
+        session=session,
+    )

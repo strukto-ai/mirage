@@ -16,6 +16,7 @@ import re
 
 API_BASE = "https://api.github.com"
 API_VERSION = "2022-11-28"
+RAW_MEDIA_TYPE = "application/vnd.github.raw+json"
 SCOPE_WARN = 100
 # GitHub's code search does not index a file at or over this size.
 CODE_SEARCH_SIZE_LIMIT = 384 * 1024

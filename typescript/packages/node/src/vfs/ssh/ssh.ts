@@ -23,8 +23,8 @@ import type { PathSpec, FileStat, SetAttrFields } from '@struktoai/mirage-core/t
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import type { MkdirOp } from '@struktoai/mirage-core/vfs/types'
 import { readdir as sshReaddir } from '../../core/ssh/readdir.ts'
-import { read as sshRead } from '../../core/ssh/read.ts'
-import { stat as sshStat } from '../../core/ssh/stat.ts'
+import { lineCount as sshLineCount, read as sshRead } from '../../core/ssh/read.ts'
+import { stat as sshStat, tree as sshTree } from '../../core/ssh/stat.ts'
 import { readStream as sshStream } from '../../core/ssh/stream.ts'
 import { exists as sshExists } from '../../core/ssh/exists.ts'
 import { filesContaining as sshFilesContaining } from '../../core/ssh/search.ts'
@@ -108,6 +108,17 @@ export class SSHVFS extends BaseVFS {
 
   override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
     return sshStream(this.accessor, path)
+  }
+
+  override readTree(
+    path: PathSpec,
+    _index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    return sshTree(this.accessor, path)
+  }
+
+  override lineCount(path: PathSpec, _index?: IndexCacheStore): Promise<number | null> {
+    return sshLineCount(this.accessor, path)
   }
 
   override exists(path: PathSpec): Promise<boolean> {

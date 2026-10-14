@@ -6,8 +6,9 @@ icon: list-ol
 
 A VFS that defines these methods lets `head`, `tail` and `wc` answer without
 reading the whole file: a database fetches the first rows with a `LIMIT`,
-counts them with `COUNT(*)`, or hands over new rows as they land. The answer
-stands in for the file, so the output is the same as a full read.
+counts them with `COUNT(*)`, or hands over new rows as they land, and a chat
+asks only for the messages posted since its last poll. The answer stands in
+for the file, so the output is the same as a full read.
 
 ## Interface
 
@@ -33,7 +34,7 @@ class MyVFS(BaseVFS):
     ) -> int | None: ...
 
     async def follow(
-        self, path: PathSpec, n: int, index=NULL_INDEX
+        self, path: PathSpec, n: int, interval: float, index=NULL_INDEX
     ) -> AsyncIterator[bytes] | None: ...
 ```
 
@@ -47,7 +48,11 @@ class MyVFS extends BaseVFS {
 
   override lineCount(path: PathSpec): Promise<number | null> { /* ... */ }
 
-  override follow(path: PathSpec, n: number): Promise<AsyncIterable<Uint8Array> | null> { /* ... */ }
+  override follow(
+    path: PathSpec,
+    n: number,
+    interval: number,
+  ): Promise<AsyncIterable<Uint8Array> | null> { /* ... */ }
 }
 ```
 
@@ -58,7 +63,7 @@ class MyVFS extends BaseVFS {
 | `first_lines` | the first `n` lines a read gives, each with its newline; the whole file when it has fewer | `None`: the file is read |
 | `last_lines` | the last `n` lines a read gives, each with its newline; the whole file when it has fewer | `None`: the file is read |
 | `line_count` | how many newlines a read gives | `None`: the file is read |
-| `follow` | a stream of the last `n` lines, then each line added to the file, ending only when the caller closes it | `None`: `tail` reads the file and polls it every `-s` seconds |
+| `follow` | a stream of the last `n` lines, then each line added to the file, ending only when the caller closes it; `interval` is `tail -s`, for a backend that asks for what is new rather than being told | `None`: `tail` reads the file and polls it every `-s` seconds |
 
 An answer must match the file byte for byte: a missing or extra line is a
 wrong answer. Raise the error a read of the file would raise, such as
@@ -98,6 +103,9 @@ files' total size.
 | PostgreSQL | `LIMIT` on `rows.jsonl` | `COUNT(*)`, then `LIMIT` and `OFFSET` | `COUNT(*)` | | `max_read_rows` |
 | MongoDB | | sort by `_id` descending with a limit, on `documents.jsonl` | `count_documents` | the last documents at one snapshot, then a change stream of the inserts after it, on a collection's `documents.jsonl` | `max_doc_limit` |
 | Airtable | `maxRecords` on `records.jsonl` and view files | | | | `max_read_records` |
+| SSH | | | `wc -l` on the server | | |
+| Slack | | | | the day's last messages, then `conversations.history` for the messages after the last one, every `-s` seconds while the day lasts, on a `chat.jsonl` | |
+| Discord | | | | the day's last messages, then the channel's messages `after` the last one, every `-s` seconds while the day lasts, on a `chat.jsonl` | |
 
 A count past the ceiling that the table fills is `File too large`, the same
 as a whole read of that table: `head -n 20000` on a 50,000-row PostgreSQL
@@ -107,3 +115,9 @@ past the ceiling. Every other file on these mounts (`schema.json`,
 `database.json`, a view's schema) is read as usual. MongoDB's `head` reads the
 collection as a stream and stops after the count, so it needs no
 `first_lines`.
+
+SSH asks the server's `wc -l` only when it can run commands: a server limited
+to SFTP, or a `wc` that fails, leaves the file to be read. Slack and Discord
+read a followed day once, then fetch only new messages; once the UTC day is
+over, nothing more lands in its file, so they ask one last time and stop
+polling while `tail -f` keeps waiting.

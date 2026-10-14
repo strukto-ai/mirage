@@ -32,7 +32,15 @@ export async function* apiStream(
   })
   if (response.status >= 400) throw options.errorOf(response, await response.text())
   if (response.body === null) return
-  const reader = response.body.getReader()
+  yield* bodyChunks(response.body, options.signal)
+}
+
+/** Pull a response body in bounded chunks, cancelling it on early exit. */
+export async function* bodyChunks(
+  body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array, void> {
+  const reader = body.getReader()
   let finished = false
   try {
     for (;;) {
@@ -41,7 +49,7 @@ export async function* apiStream(
         finished = true
         return
       }
-      yield* chunks(result.value, options.signal)
+      yield* chunks(result.value, signal)
     }
   } finally {
     try {

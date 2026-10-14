@@ -21,6 +21,7 @@ import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { dispatched, render } from '../../test-utils.ts'
+import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -1217,6 +1218,40 @@ describe('a cold read keeps its bytes for the next reader', () => {
     await ws.cache.remove('/data/f.count')
     await ws.dispatch('read', '/data/f.count', [], { direct: true })
     expect(await ws.cache.exists('/data/f.count')).toBe(false)
+  })
+
+  it('asks past a stale listing on a fresh stat', async () => {
+    // The index holds a listing up to its TTL old: `wc -c` and `cmp -s` take
+    // the size from a stat that asks the backend now. Mirrors python's
+    // test_a_fresh_stat_asks_past_a_stale_listing.
+    class ListedRAM extends RAMVFS {
+      override async stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+        const row = index === undefined ? null : (await index.get(path.virtual)).entry
+        if (row !== null && row !== undefined) {
+          return new FileStat({ name: row.name, type: FileType.FILE, size: row.size })
+        }
+        return super.stat(path, index)
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/m': new ListedRAM() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.vfs.write('/m/f', 'grown\n')
+      await ws
+        .mount('/m')
+        .index.setDir('/m', [
+          ['f', new IndexEntry({ id: 'f', name: 'f', resourceType: 'file', size: 3 })],
+        ])
+      const listed = (await ws.dispatch('stat', '/m/f')) as FileStat
+      const now = (await ws.dispatch('stat', '/m/f', [], { fresh: true })) as FileStat
+      expect([listed.size, now.size]).toEqual([3, 6])
+      expect(DEC.decode((await ws.shell('wc -c /m/f')).stdout)).toBe('6 /m/f\n')
+    } finally {
+      await ws.close()
+    }
   })
 
   it('keeps nothing from a natively ranged read', async () => {

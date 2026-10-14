@@ -23,7 +23,7 @@ import { type DeltaHook } from '../../watch/index.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { readdir as gdriveReaddir } from '../../core/gdrive/readdir.ts'
-import { read as gdriveRead } from '../../core/gdrive/read.ts'
+import { read as gdriveRead, readStream as gdriveStream } from '../../core/gdrive/read.ts'
 import { checksum as gdriveChecksum } from '../../core/gdrive/checksum.ts'
 import { stat as gdriveStat } from '../../core/gdrive/stat.ts'
 import { exists as gdriveExists } from '../../core/gdrive/exists.ts'
@@ -86,6 +86,10 @@ export class GDriveVFS extends BaseVFS {
     index?: IndexCacheStore,
   ): Promise<string | null> {
     return gdriveChecksum(this.accessor, path, algorithm, index)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return gdriveStream(this.accessor, path, index)
   }
 
   override exists(path: PathSpec): Promise<boolean> {

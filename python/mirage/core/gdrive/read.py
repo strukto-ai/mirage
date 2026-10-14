@@ -14,6 +14,8 @@
 
 import hashlib
 import posixpath
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
@@ -26,15 +28,17 @@ from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.versions import (
     capture_file_metadata,
     download_revision,
+    download_revision_stream,
 )
 from mirage.core.google.client import TokenManager
-from mirage.core.google.drive import download_file
+from mirage.core.google.drive import download_file, download_file_stream
 from mirage.core.gsheets.read import read_spreadsheet
 from mirage.core.gslides.read import read_presentation
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import (
     active_recorder,
     record,
+    record_stream,
     revision_for,
     start_op,
 )
@@ -218,3 +222,54 @@ async def read(
         revision=None,
     )
     return sliced
+
+
+async def read_stream(
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> AsyncIterator[bytes]:
+    """Stream a Drive file as it downloads.
+
+    A google-apps file exists only once rendered, so it comes in one
+    chunk, as :func:`read` gives it. A binary file is stamped as
+    :func:`read_file_versioned` stamps a whole read, once the last chunk
+    is in and checked against the md5 Drive gave: a stream abandoned
+    part-way stamps nothing.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        path (PathSpec): the path to read.
+        index (IndexCacheStore): listing cache, consulted for the file id.
+    """
+    entry = await file_entry(accessor, path, index)
+    if entry.resource_type in NATIVE_RESOURCE_TYPES:
+        yield await read(accessor, path, index)
+        return
+    tm = accessor.token_manager
+    pinned = revision_for(path.virtual)
+    rec = record_stream("read", path.virtual, "gdrive", revision=pinned)
+    md5: str | None = None
+    revision = None
+    if pinned:
+        chunks = download_revision_stream(tm, entry.id, pinned)
+    else:
+        if rec is not None:
+            md5, revision = await capture_file_metadata(tm, entry.id)
+        chunks = download_file_stream(tm, entry.id)
+    digest = hashlib.md5() if md5 else None
+    async with aclosing(chunks) as source:
+        async for chunk in source:
+            if digest is not None:
+                digest.update(chunk)
+            if rec is not None:
+                rec.bytes += len(chunk)
+            yield chunk
+    if rec is None or pinned:
+        return
+    if digest is not None and digest.hexdigest() != md5:
+        return
+    rec.revision = revision
+    rec.fingerprint = drive_fingerprint(
+        entry.resource_type, md5, revision, entry.remote_time
+    )

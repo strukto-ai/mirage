@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
@@ -22,6 +23,7 @@ from mirage.core.gdrive.create import create as _create
 from mirage.core.gdrive.exists import exists as _exists
 from mirage.core.gdrive.mkdir import mkdir as _mkdir
 from mirage.core.gdrive.read import read as _read
+from mirage.core.gdrive.read import read_stream as _read_stream
 from mirage.core.gdrive.readdir import readdir as _readdir
 from mirage.core.gdrive.rename import rename as _rename
 from mirage.core.gdrive.rm import rm_r as _rm_r
@@ -88,6 +90,11 @@ class GoogleDriveVFS(BaseVFS):
         index: IndexCacheStore = NULL_INDEX,
     ) -> str | None:
         return await _checksum(self.accessor, path, algorithm, index)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)

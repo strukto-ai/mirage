@@ -830,7 +830,7 @@ describe('tail asks the mount for the last lines', () => {
     const fs = new Growing(new Map())
     fs.set('/d/log', 'a\nb\nc\n')
     const abort = new AbortController()
-    const asked: number[] = []
+    const asked: [number, number][] = []
     const added = async function* (): AsyncIterable<Uint8Array> {
       yield ENC.encode('c\n')
       await sleep(40)
@@ -845,14 +845,14 @@ describe('tail asks the mount for the last lines', () => {
       fs.stat,
       fs.readRange,
       () => Promise.reject(new Error('a follow asked for the last lines')),
-      (_p, n) => {
-        asked.push(n)
+      (_p, n, interval) => {
+        asked.push([n, interval])
         return Promise.resolve(added())
       },
     )
     const [stream] = result as [AsyncIterable<Uint8Array>, IOResult]
     expect(await drainFor(stream, 120, abort)).toBe('c\nd\n')
-    expect(asked).toEqual([1])
+    expect(asked).toEqual([[1, 0.02]])
   })
 
   it('closes the follow when the reader stops at its header', async () => {

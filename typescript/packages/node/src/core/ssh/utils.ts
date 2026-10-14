@@ -21,8 +21,8 @@ import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { FXF_CREAT, FXF_WRITE } from './constants.ts'
 
 const S_IFMT = 0o170000
-const S_IFDIR = 0o040000
-const S_IFREG = 0o100000
+export const S_IFDIR = 0o040000
+export const S_IFREG = 0o100000
 
 export function stripPrefix(p: PathSpec): string {
   if (

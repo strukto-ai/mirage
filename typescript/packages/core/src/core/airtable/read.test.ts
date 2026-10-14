@@ -17,7 +17,7 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FakeAirtable, makeAccessor } from './_test_util.ts'
-import { read } from './read.ts'
+import { read, readStream } from './read.ts'
 
 const ROOT = '/at'
 const BASE = `${ROOT}/bases/Product_Roadmap__appRoadmapBase001`
@@ -164,5 +164,74 @@ describe('airtable read', () => {
     await expect(
       read(makeAccessor(fake), spec(DONE), new RAMIndexCacheStore()),
     ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
+async function drain(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
+  const chunks: Uint8Array[] = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return chunks
+}
+
+describe('airtable read stream', () => {
+  it('renders the read a page at a time', async () => {
+    const accessor = makeAccessor(new FakeAirtable())
+    const chunks = await drain(readStream(accessor, spec(RECORDS), new RAMIndexCacheStore()))
+    expect(chunks.map((c) => ids(c).length)).toEqual([3, 3, 1])
+    expect(Buffer.concat(chunks)).toEqual(
+      Buffer.from(await read(accessor, spec(RECORDS), new RAMIndexCacheStore())),
+    )
+  })
+
+  it('stops paging when the reader stops', async () => {
+    const fake = new FakeAirtable()
+    const stream = readStream(makeAccessor(fake), spec(RECORDS), new RAMIndexCacheStore())
+    const first = await stream.next()
+    await stream.return()
+    expect(ids(first.value as Uint8Array)).toHaveLength(3)
+    expect(fake.recordCalls()).toHaveLength(1)
+  })
+
+  it('stops past the cap after that many records', async () => {
+    const fake = new FakeAirtable()
+    const got: Uint8Array[] = []
+    await expect(
+      (async () => {
+        for await (const chunk of readStream(
+          makeAccessor(fake, { maxReadRecords: 5 }),
+          spec(RECORDS),
+          new RAMIndexCacheStore(),
+        ))
+          got.push(chunk)
+      })(),
+    ).rejects.toMatchObject({ code: 'EFBIG' })
+    expect(ids(Buffer.concat(got))).toHaveLength(5)
+    expect(fake.recordCalls().at(-1)?.maxRecords).toBe('6')
+  })
+
+  it('applies a view and proves its paths', async () => {
+    const accessor = makeAccessor(new FakeAirtable())
+    const body = Buffer.concat(
+      await drain(readStream(accessor, spec(DONE), new RAMIndexCacheStore())),
+    )
+    expect(ids(body)).toHaveLength(4)
+    for (const path of [
+      `${BASE}/Gone__tblGone0000000001/records.jsonl`,
+      `${TABLE}/views/Gone__viwGone0000000001.jsonl`,
+    ]) {
+      await expect(
+        drain(readStream(accessor, spec(path), new RAMIndexCacheStore())),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
+  it('reads another file whole', async () => {
+    const accessor = makeAccessor(new FakeAirtable())
+    const chunks = await drain(
+      readStream(accessor, spec(`${TABLE}/table.json`), new RAMIndexCacheStore()),
+    )
+    expect(chunks).toEqual([
+      await read(accessor, spec(`${TABLE}/table.json`), new RAMIndexCacheStore()),
+    ])
   })
 })

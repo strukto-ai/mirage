@@ -17,7 +17,7 @@ import json
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.airtable.read import read
+from mirage.core.airtable.read import read, read_stream
 from mirage.errors.types import FileTooLargeError
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -162,3 +162,82 @@ async def test_a_view_gone_since_its_listing_is_enoent(airtable_api):
     airtable_api.views.pop("viwDone0000000001")
     with pytest.raises(FileNotFoundError):
         await read(make_accessor(), _spec(DONE), RAMIndexCacheStore())
+
+
+@pytest.mark.asyncio
+async def test_a_stream_renders_the_read_a_page_at_a_time(airtable_api):
+    accessor = make_accessor()
+    chunks = [
+        c
+        async for c in read_stream(
+            accessor, _spec(RECORDS), RAMIndexCacheStore()
+        )
+    ]
+    assert [len(_ids(c)) for c in chunks] == [3, 3, 1]
+    assert b"".join(chunks) == await read(
+        accessor, _spec(RECORDS), RAMIndexCacheStore()
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_stream_stops_paging_when_the_reader_stops(airtable_api):
+    stream = read_stream(make_accessor(), _spec(RECORDS), RAMIndexCacheStore())
+    first = await anext(stream)
+    await stream.aclose()
+    assert len(_ids(first)) == 3
+    assert len(airtable_api.record_calls()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stream_past_the_cap_stops_after_that_many_records(
+    airtable_api,
+):
+    got: list[bytes] = []
+    with pytest.raises(FileTooLargeError):
+        async for chunk in read_stream(
+            make_accessor(max_read_records=5),
+            _spec(RECORDS),
+            RAMIndexCacheStore(),
+        ):
+            got.append(chunk)
+    assert len(_ids(b"".join(got))) == 5
+    assert airtable_api.record_calls()[-1]["maxRecords"] == "6"
+
+
+@pytest.mark.asyncio
+async def test_a_stream_applies_a_view_and_proves_its_paths(airtable_api):
+    accessor = make_accessor()
+    body = b"".join(
+        [
+            c
+            async for c in read_stream(
+                accessor, _spec(DONE), RAMIndexCacheStore()
+            )
+        ]
+    )
+    assert len(_ids(body)) == 4
+    for path in (
+        f"{BASE}/Gone__tblGone0000000001/records.jsonl",
+        f"{TABLE}/views/Gone__viwGone0000000001.jsonl",
+    ):
+        with pytest.raises(FileNotFoundError):
+            async for _ in read_stream(
+                accessor, _spec(path), RAMIndexCacheStore()
+            ):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_a_stream_of_another_file_is_its_read(airtable_api):
+    accessor = make_accessor()
+    chunks = [
+        c
+        async for c in read_stream(
+            accessor, _spec(f"{TABLE}/table.json"), RAMIndexCacheStore()
+        )
+    ]
+    assert chunks == [
+        await read(
+            accessor, _spec(f"{TABLE}/table.json"), RAMIndexCacheStore()
+        )
+    ]

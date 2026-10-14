@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator
+
 from mirage.core.google.client import (
     TokenManager,
     drive_base,
     google_get,
     google_get_bytes,
+    google_get_stream,
 )
 from mirage.utils.ranges import ByteWindow
 
@@ -36,11 +39,35 @@ async def download_revision(
         window (ByteWindow | None): the byte window to fetch, or None
             for all of it.
     """
-    url = (
+    return await google_get_bytes(
+        token_manager,
+        _revision_url(token_manager, file_id, revision_id),
+        window,
+    )
+
+
+def download_revision_stream(
+    token_manager: TokenManager, file_id: str, revision_id: str
+) -> AsyncGenerator[bytes, None]:
+    """Stream a pinned revision's content as it downloads.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        file_id (str): file ID.
+        revision_id (str): revision ID to read.
+    """
+    return google_get_stream(
+        token_manager, _revision_url(token_manager, file_id, revision_id)
+    )
+
+
+def _revision_url(
+    token_manager: TokenManager, file_id: str, revision_id: str
+) -> str:
+    return (
         f"{drive_base(token_manager)}/files/{file_id}"
         f"/revisions/{revision_id}?alt=media"
     )
-    return await google_get_bytes(token_manager, url, window)
 
 
 async def capture_file_metadata(

@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.discord.read import follow as _follow
 from mirage.core.discord.read import read as _read
 from mirage.core.discord.read import read_range as _read_range
 from mirage.core.discord.read import read_stream as _read_stream
@@ -71,6 +72,15 @@ class DiscordVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
         return _read_stream(self.accessor, path, index)
+
+    async def follow(
+        self,
+        path: PathSpec,
+        n: int,
+        interval: float,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> AsyncIterator[bytes] | None:
+        return await _follow(self.accessor, path, n, interval, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

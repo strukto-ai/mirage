@@ -15,6 +15,7 @@
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import {
+  follow as discordFollow,
   read as discordRead,
   readRange as discordReadRange,
   readStream as discordReadStream,
@@ -56,6 +57,15 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
     signal?: AbortSignal,
   ): AsyncIterable<Uint8Array> {
     return discordReadStream(this.accessor, path, index, signal)
+  }
+
+  override follow(
+    path: PathSpec,
+    n: number,
+    interval: number,
+    index?: IndexCacheStore,
+  ): Promise<AsyncIterable<Uint8Array> | null> {
+    return discordFollow(this.accessor, path, n, interval, index)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

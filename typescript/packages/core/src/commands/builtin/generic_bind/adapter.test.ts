@@ -22,10 +22,12 @@ import {
 import type { Policy } from '../../../policy/base.ts'
 import { Policies, runWithOpPolicies } from '../../../policy/policies.ts'
 import type { Action, VfsContext } from '../../../policy/types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import { requireOp, withAbortGuard, withCommandGuards } from './adapter.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { eacces, eisdir, enoent } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
+import { IOResult } from '../../../io/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts, CommandIO } from '../../config.ts'
@@ -702,7 +704,7 @@ describe('withAbortGuard', () => {
     await expect(guarded.firstLines?.(accessor, spec('/t'), 1)).rejects.toMatchObject(aborted)
     await expect(guarded.lastLines?.(accessor, spec('/t'), 1)).rejects.toMatchObject(aborted)
     await expect(guarded.lineCount?.(accessor, spec('/t'))).rejects.toMatchObject(aborted)
-    await expect(guarded.follow?.(accessor, spec('/t'), 1)).rejects.toMatchObject(aborted)
+    await expect(guarded.follow?.(accessor, spec('/t'), 1, 1)).rejects.toMatchObject(aborted)
     expect(calls).toEqual([])
   })
 
@@ -912,6 +914,25 @@ describe('fileSize', () => {
     [new FileStat({ name: 'f', type: FileType.CHAR_DEVICE, size: 0 }), null],
   ])('answers %j as %s', async (st, size) => {
     expect(await fileSize(sized(st), accessor, NO_NS)(PathSpec.fromStrPath('/f'))).toBe(size)
+  })
+
+  // Mirrors python's test_file_size_takes_the_size_from_a_fresh_stat.
+  it('takes the size from a fresh stat', async () => {
+    const asked: unknown[] = []
+    const dispatch: DispatchFn = (name, _path, _args, kwargs) => {
+      asked.push([name, kwargs])
+      return Promise.resolve([
+        new FileStat({ name: 'f', type: FileType.FILE, size: 9 }),
+        new IOResult(),
+      ])
+    }
+    const bound = fileSize(
+      sized(new FileStat({ name: 'f', type: FileType.FILE, size: 7 })),
+      accessor,
+      { ...NO_NS, dispatch },
+    )
+    expect(await bound(PathSpec.fromStrPath('/f'))).toBe(9)
+    expect(asked).toEqual([['stat', { fresh: true }]])
   })
 
   // Mirrors python's test_file_size_reads_a_path_pinned_to_a_revision.

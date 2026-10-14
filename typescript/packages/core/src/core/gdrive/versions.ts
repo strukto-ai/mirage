@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TokenManager } from '../google/client.ts'
-import { driveBase, googleGet, googleGetBytes } from '../google/client.ts'
+import { driveBase, googleGet, googleGetBytes, googleGetStream } from '../google/client.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 
 // Download a pinned revision's content (binary files only).
@@ -23,8 +23,20 @@ export async function downloadRevision(
   revisionId: string,
   window?: ByteWindow,
 ): Promise<Uint8Array> {
-  const url = `${driveBase(tm)}/files/${fileId}/revisions/${revisionId}?alt=media`
-  return googleGetBytes(tm, url, window)
+  return googleGetBytes(tm, revisionUrl(tm, fileId, revisionId), window)
+}
+
+/** Stream a pinned revision's content as it downloads. */
+export function downloadRevisionStream(
+  tm: TokenManager,
+  fileId: string,
+  revisionId: string,
+): AsyncGenerator<Uint8Array, void> {
+  return googleGetStream(tm, revisionUrl(tm, fileId, revisionId))
+}
+
+function revisionUrl(tm: TokenManager, fileId: string, revisionId: string): string {
+  return `${driveBase(tm)}/files/${fileId}/revisions/${revisionId}?alt=media`
 }
 
 // Fetch a file's md5 and head revision at read time, raw rather than

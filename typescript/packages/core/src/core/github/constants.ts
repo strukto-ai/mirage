@@ -32,3 +32,4 @@ export const GRAPHQL_PATH = 'graphql'
 // A full commit sha, SHA-1 or SHA-256, as GitHub answers it (lowercase). A
 // mount whose ref matches is pinned to a commit that cannot move.
 export const COMMIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+export const RAW_MEDIA_TYPE = 'application/vnd.github.raw+json'

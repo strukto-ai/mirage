@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import api_request
+from mirage.core.api.client import api_request, api_stream
 from mirage.core.api.oauth import TokenManager as OAuthTokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.constants import (
@@ -306,3 +307,21 @@ async def google_get_bytes(
         session=token_manager.pool,
     )
     return data
+
+
+async def google_get_stream(
+    token_manager: TokenManager, url: str
+) -> AsyncGenerator[bytes, None]:
+    """GET a URL's raw bytes as they arrive.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        url (str): API URL.
+    """
+    async for chunk in api_stream(
+        url,
+        error_of=_error_of,
+        headers=await google_headers(token_manager),
+        session=token_manager.pool,
+    ):
+        yield chunk

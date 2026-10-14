@@ -58,17 +58,32 @@ export async function cursorItems(
   shape: PageShape = HAS_MORE_PAGES,
 ): Promise<unknown[]> {
   const collected: unknown[] = []
+  for await (const page of cursorPages(fetchPage, shape)) {
+    collected.push(...page)
+    if (maxResults !== undefined && collected.length >= maxResults) {
+      return collected.slice(0, maxResults)
+    }
+  }
+  return collected
+}
+
+/**
+ * Each page's items from a cursor-paginated endpoint, the next page fetched
+ * only when the caller pulls it. Fails with `PaginationStalledError` when the
+ * reply names a cursor it already sent. Mirrors Python's `cursor_pages`.
+ */
+export async function* cursorPages(
+  fetchPage: PageFetch,
+  shape: PageShape = HAS_MORE_PAGES,
+): AsyncGenerator<unknown[], void> {
   const seen = new Set<string>()
   let cursor: string | null = null
   for (;;) {
     const data = await fetchPage(cursor)
     const page = data[shape.itemsKey]
-    if (Array.isArray(page)) collected.push(...(page as unknown[]))
-    if (maxResults !== undefined && collected.length >= maxResults) {
-      return collected.slice(0, maxResults)
-    }
+    yield Array.isArray(page) ? (page as unknown[]) : []
     cursor = shape.nextCursor(data)
-    if (cursor === null) return collected
+    if (cursor === null) return
     if (seen.has(cursor)) throw new PaginationStalledError(cursor)
     seen.add(cursor)
   }

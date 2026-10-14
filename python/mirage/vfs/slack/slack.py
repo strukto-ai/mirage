@@ -18,6 +18,7 @@ from typing import Any
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.slack.constants import DU_MAX_ENTRIES
+from mirage.core.slack.read import follow as _follow
 from mirage.core.slack.read import read as _read
 from mirage.core.slack.read import read_range as _read_range
 from mirage.core.slack.read import read_stream as _read_stream
@@ -79,6 +80,15 @@ class SlackVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
         return _read_stream(self.accessor, path, index)
+
+    async def follow(
+        self,
+        path: PathSpec,
+        n: int,
+        interval: float,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> AsyncIterator[bytes] | None:
+        return await _follow(self.accessor, path, n, interval, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

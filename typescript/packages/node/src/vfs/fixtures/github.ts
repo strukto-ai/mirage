@@ -123,6 +123,8 @@ export class InlineGitHub {
       this.log.push('blob')
       const data = [...this.files.values()].find((d) => blobSha(d) === blob[1])
       if (data === undefined) return reply({ message: 'Not Found' }, 404)
+      if ((new Request(input, init).headers.get('accept') ?? '').includes('raw'))
+        return Promise.resolve(new Response(Buffer.from(data)))
       return reply({ content: Buffer.from(data).toString('base64'), encoding: 'base64' })
     }
     if (/^\/repos\/[^/]+\/[^/]+$/.test(url.pathname)) return reply({ default_branch: 'main' })

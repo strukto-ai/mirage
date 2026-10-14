@@ -14,7 +14,7 @@
 
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
 import { apiRequest, type RetryPolicy, type ErrorOf } from '../api/client.ts'
-import { cursorItems, offsetCursor, type PageShape } from '../api/paginate.ts'
+import { cursorItems, cursorPages, offsetCursor, type PageShape } from '../api/paginate.ts'
 import { MAX_BATCH, META_KEY, PAGE_SIZE } from './constants.ts'
 import { AirtableApiError, errorParts } from './errors.ts'
 import { asRow, asRows, type Row } from './normalize.ts'
@@ -158,10 +158,7 @@ export async function listRecords(
   tableId: string,
   options: { view?: string; formula?: string; maxRecords?: number } = {},
 ): Promise<Row[]> {
-  const params: Record<string, string | number> = { pageSize: PAGE_SIZE }
-  if (options.view !== undefined) params.view = options.view
-  if (options.formula !== undefined) params.filterByFormula = options.formula
-  if (options.maxRecords !== undefined) params.maxRecords = options.maxRecords
+  const params = recordParams(options)
   const path = tablePath(baseId, tableId)
   const found = await cursorItems(
     (cursor) => page(accessor, baseId, path, params, cursor),
@@ -169,6 +166,38 @@ export async function listRecords(
     RECORDS,
   )
   return asRows(found)
+}
+
+/**
+ * A table's records as `listRecords` lists them, one page at a time, the
+ * next page fetched only when the caller pulls it. Mirrors Python's
+ * `record_pages`.
+ */
+export async function* recordPages(
+  accessor: AirtableAccessor,
+  baseId: string,
+  tableId: string,
+  options: { view?: string; maxRecords?: number } = {},
+): AsyncGenerator<Row[], void> {
+  const params = recordParams(options)
+  const path = tablePath(baseId, tableId)
+  for await (const found of cursorPages(
+    (cursor) => page(accessor, baseId, path, params, cursor),
+    RECORDS,
+  ))
+    yield asRows(found)
+}
+
+function recordParams(options: {
+  view?: string
+  formula?: string
+  maxRecords?: number
+}): Record<string, string | number> {
+  const params: Record<string, string | number> = { pageSize: PAGE_SIZE }
+  if (options.view !== undefined) params.view = options.view
+  if (options.formula !== undefined) params.filterByFormula = options.formula
+  if (options.maxRecords !== undefined) params.maxRecords = options.maxRecords
+  return params
 }
 
 /** One record by id; the table is named by id or by name. */

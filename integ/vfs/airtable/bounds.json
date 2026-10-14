@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "at_full_read_past_cap_refused",
+      "id": "at_full_read_past_cap_stops_at_the_cap",
       "seq": 720200,
       "targets": [
         "airtable"
@@ -9,7 +9,7 @@
       "command": "cat /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl",
       "expect": {
         "exit": 1,
-        "stdout": "",
+        "stdout": "{\"record_id\":\"recBack0000000001\",\"created_time\":\"2026-03-01T00:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 01\",\"Priority\":4}}\n{\"record_id\":\"recBack0000000002\",\"created_time\":\"2026-03-01T01:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 02\",\"Priority\":2}}\n{\"record_id\":\"recBack0000000003\",\"created_time\":\"2026-03-01T02:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 03\",\"Priority\":5}}\n{\"record_id\":\"recBack0000000004\",\"created_time\":\"2026-03-01T03:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 04\",\"Priority\":3}}\n{\"record_id\":\"recBack0000000005\",\"created_time\":\"2026-03-01T04:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 05\",\"Priority\":1}}\n{\"record_id\":\"recBack0000000006\",\"created_time\":\"2026-03-01T05:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 06\",\"Priority\":4}}\n{\"record_id\":\"recBack0000000007\",\"created_time\":\"2026-03-01T06:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 07\",\"Priority\":2}}\n{\"record_id\":\"recBack0000000008\",\"created_time\":\"2026-03-01T07:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 08\",\"Priority\":5}}\n{\"record_id\":\"recBack0000000009\",\"created_time\":\"2026-03-01T08:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 09\",\"Priority\":3}}\n{\"record_id\":\"recBack0000000010\",\"created_time\":\"2026-03-01T09:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 10\",\"Priority\":1}}\n{\"record_id\":\"recBack0000000011\",\"created_time\":\"2026-03-01T10:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 11\",\"Priority\":4}}\n{\"record_id\":\"recBack0000000012\",\"created_time\":\"2026-03-01T11:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 12\",\"Priority\":2}}\n{\"record_id\":\"recBack0000000013\",\"created_time\":\"2026-03-01T12:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 13\",\"Priority\":5}}\n{\"record_id\":\"recBack0000000014\",\"created_time\":\"2026-03-01T13:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 14\",\"Priority\":3}}\n{\"record_id\":\"recBack0000000015\",\"created_time\":\"2026-03-01T14:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 15\",\"Priority\":1}}\n{\"record_id\":\"recBack0000000016\",\"created_time\":\"2026-03-01T15:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 16\",\"Priority\":4}}\n{\"record_id\":\"recBack0000000017\",\"created_time\":\"2026-03-01T16:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 17\",\"Priority\":2}}\n{\"record_id\":\"recBack0000000018\",\"created_time\":\"2026-03-01T17:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 18\",\"Priority\":5}}\n{\"record_id\":\"recBack0000000019\",\"created_time\":\"2026-03-01T18:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 19\",\"Priority\":3}}\n{\"record_id\":\"recBack0000000020\",\"created_time\":\"2026-03-01T19:00:00.000Z\",\"fields\":{\"Name\":\"Backlog item 20\",\"Priority\":1}}\n",
         "stderr": "cat: /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl: File too large\n"
       }
     },
@@ -79,16 +79,16 @@
       }
     },
     {
-      "id": "at_head_byte_read_past_cap_refused",
+      "id": "at_head_byte_read_past_cap_answers",
       "seq": 720206,
       "targets": [
         "airtable"
       ],
       "command": "head -c 12 /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "head: error reading '/airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl': File too large\n"
+        "exit": 0,
+        "stdout": "{\"record_id\"",
+        "stderr": ""
       }
     }
   ]

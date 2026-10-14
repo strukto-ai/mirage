@@ -485,7 +485,7 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "last_lines": ("last_lines", ("n", "index")),
     "line_count": ("line_count", ("index",)),
     "checksum": ("checksum", ("algorithm", "index")),
-    "follow": ("follow", ("n", "index")),
+    "follow": ("follow", ("n", "interval", "index")),
     "files_containing": ("files_containing", ("text",)),
     "lines_containing": ("lines_containing", ("text",)),
 }
@@ -942,8 +942,11 @@ def file_size(
     permission bits (a disk, SFTP), where a file the stat sees may still
     refuse its read, and a disk's named pipe stats as a file. A store
     without them grants the read with the stat. A directory fails with
-    EISDIR as ``dir_aware_stat`` has it. Called as ``size(path)``;
-    mirrors ``fileSize`` in adapter.ts.
+    EISDIR as ``dir_aware_stat`` has it. The size itself comes from a
+    stat that asks the backend past the mount's index (``fresh``): a
+    listing the index holds can be up to its TTL old, and a size read
+    off it would count bytes a read would not. Called as
+    ``size(path)``; mirrors ``fileSize`` in adapter.ts.
 
     Args:
         ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``.
@@ -961,7 +964,12 @@ def file_size(
         st = await _stat_refusing_dirs(ops, accessor, opts, path)
         if st.type != FileType.FILE or st.mode is not None:
             return None
-        return st.size
+        if opts.dispatch is None:
+            return st.size
+        now, _ = await opts.dispatch("stat", path, fresh=True)
+        if not isinstance(now, FileStat) or now.type != FileType.FILE:
+            return None
+        return now.size
 
     return size
 

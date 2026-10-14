@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ScopeMatch } from './hierarchy/scope.ts'
-import { guardDay, parseTime, TimeRange } from './time_range.ts'
+import { followedDay, guardDay, parseTime, TimeRange } from './time_range.ts'
 
 const JUNE_1 = Date.parse('2026-06-01T00:00:00Z') / 1000
 const JUNE_2 = Date.parse('2026-06-02T00:00:00Z') / 1000
@@ -91,5 +91,50 @@ describe('guardDay', () => {
     expect(() => guardDay(accessor, dayMatch('2026-06-02'), '/m/c/2026-06-02')).toThrow(
       expect.objectContaining({ code: 'ENOENT' }),
     )
+  })
+})
+
+describe('followedDay', () => {
+  const DEC = new TextDecoder()
+  const msgs = (...stamps: string[]): { ts: string }[] => stamps.map((ts) => ({ ts }))
+  const text = (step: IteratorResult<Uint8Array>): string =>
+    DEC.decode((step.value as Uint8Array | undefined) ?? new Uint8Array())
+
+  it('prints its last lines, then what lands', async () => {
+    const asked: ({ ts: string } | null)[] = []
+    const answers = [msgs('3'), [], msgs('4', '5')]
+    const it = followedDay(msgs('1', '2'), 1, Date.now() / 1000 + 60, 0.001, (last) => {
+      asked.push(last)
+      return Promise.resolve(answers.shift() ?? [])
+    })
+    expect(text(await it.next())).toBe('{"ts":"2"}\n')
+    expect(text(await it.next())).toBe('{"ts":"3"}\n')
+    expect(text(await it.next())).toBe('{"ts":"4"}\n{"ts":"5"}\n')
+    await it.return?.()
+    expect(asked).toEqual([{ ts: '2' }, { ts: '3' }, { ts: '3' }])
+  })
+
+  it('asks for the whole day while it has none', async () => {
+    const asked: ({ ts: string } | null)[] = []
+    const it = followedDay<{ ts: string }>([], 5, Date.now() / 1000 + 60, 0.001, (last) => {
+      asked.push(last)
+      return Promise.resolve(msgs('1'))
+    })
+    expect(text(await it.next())).toBe('{"ts":"1"}\n')
+    await it.return?.()
+    expect(asked).toEqual([null])
+  })
+
+  it('asks a day that is over once more, then waits to be closed', async () => {
+    const asked: ({ ts: string } | null)[] = []
+    const it = followedDay(msgs('1'), 0, Date.now() / 1000, 0.001, (last) => {
+      asked.push(last)
+      return Promise.resolve(asked.length === 1 ? msgs('9') : [])
+    })
+    expect(text(await it.next())).toBe('{"ts":"9"}\n')
+    const idle = it.next()
+    await it.return?.()
+    expect((await idle).done).toBe(true)
+    expect(asked).toEqual([{ ts: '1' }])
   })
 })

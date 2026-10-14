@@ -26,7 +26,7 @@ ws = Workspace({"/airtable": vfs}, mode=MountMode.READ)
 | --- | --- | --- |
 | `token` | required | Personal access token (or OAuth access token). Redacted in snapshots. |
 | `base_ids` | none | Only these bases are listed or readable; every other path is `ENOENT`. |
-| `max_read_records` | `10000` | The most records one file renders; a larger table is refused on a full read. |
+| `max_read_records` | `10000` | The most records one file renders; a full read of a larger table stops at the cap. |
 | `requests_per_second` | `5` | Pacing per base. Airtable allows 5 and answers a burst with a 30 second penalty. |
 | `base_url` | `https://api.airtable.com/v0` | Override to point at a fake or proxy. |
 
@@ -87,8 +87,11 @@ grep -c Done .../views/Done_shipped__viwDone0000000001.jsonl
 - **`head -n N` fetches N records.** The line count is pushed into Airtable's
   `maxRecords`, so the first lines of a large table cost one request.
 - **A full read is bounded.** A file holding more than `max_read_records`
-  records is refused with GNU's `File too large` (`cat: <path>: File too
-  large`), rather than paged for minutes at 5 requests per second. Every
+  records ends with GNU's `File too large` (`cat: <path>: File too large`),
+  rather than paging for minutes at 5 requests per second. `cat` and `grep`
+  print each page of records as it arrives, so the first `max_read_records`
+  records come before the error, and a reader that stops first
+  (`head -c 100`, `grep -l`) stops the paging and never reaches it. Every
   command reports it per file and moves on, so `grep -l x a b` still answers
   for the files under the cap. Use `head`, a view, or raise the cap.
 - **Order.** `records.jsonl` follows the API's own order, which Airtable calls

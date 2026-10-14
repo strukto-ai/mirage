@@ -190,9 +190,9 @@
       ],
       "command": "grep -l Name /airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl",
       "expect": {
-        "exit": 2,
-        "stdout": "/airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl\n",
-        "stderr": "grep: /airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl: File too large\n"
+        "exit": 0,
+        "stdout": "/airtable/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001/records.jsonl\n/airtable/bases/Product_Roadmap__appRoadmapBase001/Backlog__tblBacklog0000003/records.jsonl\n",
+        "stderr": ""
       }
     },
     {

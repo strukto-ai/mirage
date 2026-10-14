@@ -25,8 +25,8 @@ import {
  * Credentials and bounds for one Airtable account. `token` is a personal
  * access token (or an OAuth access token) sent as `Authorization: Bearer`;
  * `baseIds` restricts the mount to those bases; `maxReadRecords` is the
- * most records one file may render, so a larger table is refused on a full
- * read rather than paged at 5 requests a second for minutes; and
+ * most records one file may render, so a full read of a larger table stops
+ * at the cap rather than paging at 5 requests a second for minutes; and
  * `requestsPerSecond` paces each base (Airtable allows 5 and answers a
  * burst with a 30-second penalty).
  */

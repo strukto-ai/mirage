@@ -19,8 +19,9 @@ import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.read import read, read_range, read_stream
+from mirage.core.slack.read import follow, read, read_range, read_stream
 from mirage.types import PathSpec
 
 pytestmark = pytest.mark.asyncio
@@ -221,3 +222,36 @@ async def test_attachment_stream_closes_before_fetching_tail(accessor, index):
         assert await anext(stream) == b"first\n"
         await stream.aclose()
     assert closed == [True]
+
+
+async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
+    accessor, index
+):
+    await _populate_index(index)
+    first = [
+        {"text": "a", "ts": "1700000001.000000"},
+        {"text": "b", "ts": "1700000002.000000"},
+    ]
+    added = [{"text": "c", "ts": "1700000003.000000"}]
+    with patch(
+        "mirage.core.slack.read.fetch_messages_for_day",
+        new_callable=AsyncMock,
+        side_effect=[first, added, []],
+    ) as fetch:
+        stream = await follow(accessor, spec(CHAT), 1, 0.001, index)
+        try:
+            assert await anext(stream) == jsonl_bytes(first[1:])
+            assert await anext(stream) == jsonl_bytes(added)
+        finally:
+            await stream.aclose()
+    assert "after" not in fetch.await_args_list[0].kwargs
+    assert fetch.await_args_list[1].kwargs["after"] == "1700000002.000000"
+    assert fetch.await_args_list[0].args[1:3] == ("C001", "2023-11-14")
+
+
+async def test_only_a_chat_day_is_followed(accessor, index):
+    await _populate_index(index)
+    assert (
+        await follow(accessor, spec("/users/alice__U001.json"), 1, 1.0, index)
+        is None
+    )

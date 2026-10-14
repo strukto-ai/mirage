@@ -18,15 +18,21 @@ import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { PathSpec } from '../../types.ts'
-import { record, recordingActive, revisionFor, startOp } from '../../observe/context.ts'
+import {
+  record,
+  recordStream,
+  recordingActive,
+  revisionFor,
+  startOp,
+} from '../../observe/context.ts'
 import { readDoc } from '../gdocs/read.ts'
-import { downloadFile } from '../google/drive.ts'
-import { captureFileMetadata, downloadRevision } from './versions.ts'
+import { downloadFile, downloadFileStream } from '../google/drive.ts'
+import { captureFileMetadata, downloadRevision, downloadRevisionStream } from './versions.ts'
 import { readSpreadsheet } from '../gsheets/read.ts'
 import { readPresentation } from '../gslides/read.ts'
 import type { TokenManager } from '../google/client.ts'
 import { driveFingerprint, entryFingerprint } from './fingerprint.ts'
-import { md5HexAsync } from '../../utils/hash.ts'
+import { Md5, md5HexAsync } from '../../utils/hash.ts'
 import { DIRECTORY_RESOURCE_TYPES, NATIVE_RESOURCE_TYPES, readdir } from './readdir.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
@@ -149,4 +155,45 @@ export async function read(
     revision: null,
   })
   return sliced
+}
+
+/**
+ * Stream a Drive file as it downloads. A google-apps file exists only once
+ * rendered, so it comes in one chunk, as `read` gives it. A binary file is
+ * stamped as `readFileVersioned` stamps a whole read, once the last chunk is
+ * in and checked against the md5 Drive gave: a stream abandoned part-way
+ * stamps nothing. Mirrors Python's `read_stream`.
+ */
+export async function* readStream(
+  accessor: GDriveAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncGenerator<Uint8Array, void> {
+  const entry = await fileEntry(accessor, path, index)
+  if (NATIVE_RESOURCE_TYPES.has(entry.resourceType)) {
+    yield await read(accessor, path, index)
+    return
+  }
+  const tm = accessor.tokenManager
+  const pinned = revisionFor(path.virtual)
+  const rec = recordStream('read', path.virtual, 'gdrive', { revision: pinned })
+  let md5: string | null = null
+  let revision: string | null = null
+  let chunks: AsyncGenerator<Uint8Array, void>
+  if (pinned !== null) {
+    chunks = downloadRevisionStream(tm, entry.id, pinned)
+  } else {
+    if (rec !== null) [md5, revision] = await captureFileMetadata(tm, entry.id)
+    chunks = downloadFileStream(tm, entry.id)
+  }
+  const digest = md5 !== null && md5 !== '' ? new Md5() : null
+  for await (const chunk of chunks) {
+    digest?.update(chunk)
+    if (rec !== null) rec.bytes += chunk.byteLength
+    yield chunk
+  }
+  if (rec === null || pinned !== null) return
+  if (digest !== null && digest.digest() !== md5) return
+  rec.revision = revision
+  rec.fingerprint = driveFingerprint(entry.resourceType, md5, revision, entry.remoteTime)
 }

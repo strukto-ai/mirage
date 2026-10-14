@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
+from contextlib import aclosing
 from dataclasses import replace
 from functools import partial
 from typing import Any, TypeVar
@@ -25,7 +26,12 @@ from mirage.core.airtable.constants import MAX_BATCH, META_KEY, PAGE_SIZE
 from mirage.core.airtable.errors import AirtableAPIError, error_parts
 from mirage.core.airtable.normalize import as_row, as_rows
 from mirage.core.api.client import RetryPolicy, api_request
-from mirage.core.api.paginate import PageShape, cursor_items, offset_cursor
+from mirage.core.api.paginate import (
+    PageShape,
+    cursor_items,
+    cursor_pages,
+    offset_cursor,
+)
 from mirage.vfs.secrets import reveal_secret
 
 BASES = PageShape(items_key="bases", next_cursor=offset_cursor)
@@ -206,6 +212,58 @@ async def list_records(
         max_records (int | None): stop after this many records, both on
             the wire (``maxRecords``) and in the collector.
     """
+    records = await cursor_items(
+        partial(
+            _page,
+            accessor,
+            base_id,
+            _table_path(base_id, table_id),
+            _record_params(view, formula, max_records),
+        ),
+        max_results=max_records,
+        shape=RECORDS,
+    )
+    return as_rows(records)
+
+
+async def record_pages(
+    accessor: AirtableAccessor,
+    base_id: str,
+    table_id: str,
+    *,
+    view: str | None = None,
+    max_records: int | None = None,
+) -> AsyncGenerator[list[dict[str, Any]], None]:
+    """A table's records as :func:`list_records` lists them, one page at
+    a time, the next page fetched only when the caller pulls it.
+
+    Args:
+        accessor (AirtableAccessor): the account.
+        base_id (str): the base.
+        table_id (str): the table, by id or by name.
+        view (str | None): a view, by id or by name; its filter and
+            order apply.
+        max_records (int | None): stop after this many records on the
+            wire (``maxRecords``).
+    """
+    pages = cursor_pages(
+        partial(
+            _page,
+            accessor,
+            base_id,
+            _table_path(base_id, table_id),
+            _record_params(view, None, max_records),
+        ),
+        shape=RECORDS,
+    )
+    async with aclosing(pages):
+        async for page in pages:
+            yield as_rows(page)
+
+
+def _record_params(
+    view: str | None, formula: str | None, max_records: int | None
+) -> dict[str, str | int]:
     params: dict[str, str | int] = {"pageSize": PAGE_SIZE}
     if view is not None:
         params["view"] = view
@@ -213,14 +271,7 @@ async def list_records(
         params["filterByFormula"] = formula
     if max_records is not None:
         params["maxRecords"] = max_records
-    records = await cursor_items(
-        partial(
-            _page, accessor, base_id, _table_path(base_id, table_id), params
-        ),
-        max_results=max_records,
-        shape=RECORDS,
-    )
-    return as_rows(records)
+    return params
 
 
 async def get_record(

@@ -13,15 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../io/cooperative.ts'
-import { dayChannelId, guardDay } from '../time_range.ts'
+import { dayChannelId, followedDay, guardDay } from '../time_range.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
-import { makeRead, makeReadRange } from '../hierarchy/read.ts'
+import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { getHistoryJsonl } from './history.ts'
+import { fetchMessagesForDay, getHistoryJsonl, type SlackMessage } from './history.ts'
 import { readdir } from './readdir.ts'
 import { getUserProfile, userJsonBytes } from './users.ts'
 import { detectScope } from './scope.ts'
@@ -126,3 +126,31 @@ export async function* readStream(
     yield* chunks(await read(accessor, path, index), signal)
   }
 }
+
+/**
+ * A channel or DM day's last `n` messages, then each one posted to it, asked for every
+ * `interval` seconds while the day lasts (`followedDay`). Mirrors Python's
+ * `_follow_chat`.
+ */
+async function followChat(
+  accessor: SlackAccessor,
+  match: ScopeMatch,
+  path: PathSpec,
+  n: number,
+  interval: number,
+  index?: IndexCacheStore,
+): Promise<AsyncIterable<Uint8Array>> {
+  await guardDay(accessor, match, path.virtual)
+  const channelId = await dayChannelId(readdir, accessor, path, index)
+  const day = match.slots.day ?? ''
+  const [, end] = accessor.timeRange.dayBounds(day)
+  return followedDay<SlackMessage>(
+    await fetchMessagesForDay(accessor, channelId, day),
+    n,
+    end,
+    interval,
+    (last) => fetchMessagesForDay(accessor, channelId, day, last === null ? undefined : last.ts),
+  )
+}
+
+export const follow = perKind(detectScope, { messages: followChat })

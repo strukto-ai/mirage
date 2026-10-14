@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { KeyLock } from '../../cache/lock.ts'
@@ -505,6 +505,12 @@ interface Call {
   stream: boolean
   /** Whether a read skips the file cache, neither served from it nor kept in it. */
   direct: boolean
+  /**
+   * Whether a stat asks the backend past the mount's index, through a
+   * throwaway store as a `read: fresh` probe does, with the index's rows only
+   * as hints.
+   */
+  fresh: boolean
 }
 
 /** The filetype a read is rendered as, null for none. */
@@ -658,15 +664,21 @@ export class Dispatcher {
     // each one is told whose op it judges.
     const [issuer, stripped] = takeIssuer(kwargs)
     kwargs = stripped
-    // The dispatcher's own keywords: a read answered as it is pulled, and a read
-    // of what the backend holds now, past the file cache.
+    // The dispatcher's own keywords: a read answered as it is pulled, a read of
+    // what the backend holds now, past the file cache, and a stat of what it
+    // holds now, past the mount's index.
     const admitOnly = (name === 'write' || name === 'stat') && kwargs?.admit_only === true
     if (admitOnly) {
       kwargs = { ...kwargs }
       delete kwargs.admit_only
     }
-    const { stream, direct, ...own } = (kwargs ?? {}) as { stream?: unknown; direct?: unknown }
+    const { stream, direct, fresh, ...own } = (kwargs ?? {}) as {
+      stream?: unknown
+      direct?: unknown
+      fresh?: unknown
+    }
     if (name === 'read' && (stream !== undefined || direct !== undefined)) kwargs = own
+    if (name === 'stat' && fresh !== undefined) kwargs = own
     await this.prepare()
     // With no scan guard on any mount, no path reaches one to ask.
     if (
@@ -685,6 +697,7 @@ export class Dispatcher {
     const call = await this.walk(name, path, args, kwargs, gate, report, issuer)
     call.stream = name === 'read' && stream === true
     call.direct = name === 'read' && direct === true
+    call.fresh = name === 'stat' && fresh === true
     await this.refuseRename(call)
     if (report) report.path = call.path.virtual
     if (admitOnly) {
@@ -922,6 +935,7 @@ export class Dispatcher {
       write: POLICY_WRITE_OPS.has(name),
       stream: false,
       direct: false,
+      fresh: false,
     }
   }
 
@@ -1388,6 +1402,7 @@ export class Dispatcher {
     const fullKwargs: OpKwargs = {
       ...Object.fromEntries(Object.entries(kwargs ?? {}).map(([key, v]) => [key, keyed(v)])),
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
+      ...(call.fresh ? { index: new ListingCheckStore({ hints: mount.index }) } : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
     if (name === 'before_full_scan') {

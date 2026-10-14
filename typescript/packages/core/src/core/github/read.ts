@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
+import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { record, recordStream, startOp } from '../../observe/context.ts'
 import { type PathSpec, VFSName } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
-import { fetchBlob } from './client.ts'
+import { fetchBlob, streamBlob } from './client.ts'
 import { locate, lookupRetrying } from './lookup.ts'
 
 /**
@@ -38,23 +39,49 @@ export async function read(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  const { prefix, rel, key } = locate(path)
-  if (rel === '') throw eisdir(path.virtual)
-  if (index === undefined) throw enoent(path)
-  const { entry } = await lookupRetrying(accessor, index, prefix, key)
-  if (entry === null) throw enoent(path)
-  if (entry.resourceType === 'folder') throw eisdir(path.virtual)
+  const entry = await blobEntry(accessor, path, index)
   const timer = startOp()
   const data = await fetchBlob(accessor.transport, accessor.owner, accessor.repo, entry.id)
   record('read', path.virtual, VFSName.GITHUB, data.length, timer, { fingerprint: entry.id })
   return data
 }
 
+/**
+ * Stream a file's blob as it downloads, recorded by its sha. The blob comes
+ * as GitHub's raw media type, the bytes themselves rather than base64 inside
+ * JSON. The sha is found as `read` finds it and recorded up front: the blob
+ * endpoint is content-addressed, so it names the bytes however far the stream
+ * is read. Mirrors Python's `read_stream`.
+ */
 export async function* readStream(
   accessor: GitHubAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
-): AsyncIterable<Uint8Array> {
-  const data = await read(accessor, path, index)
-  yield data
+): AsyncGenerator<Uint8Array, void> {
+  const entry = await blobEntry(accessor, path, index)
+  const rec = recordStream('read', path.virtual, VFSName.GITHUB, { fingerprint: entry.id })
+  for await (const chunk of streamBlob(
+    accessor.transport,
+    accessor.owner,
+    accessor.repo,
+    entry.id,
+  )) {
+    if (rec !== null) rec.bytes += chunk.byteLength
+    yield chunk
+  }
+}
+
+/** The listing entry of the file at `path`. Mirrors Python's `_blob_entry`. */
+async function blobEntry(
+  accessor: GitHubAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<IndexEntry> {
+  const { prefix, rel, key } = locate(path)
+  if (rel === '') throw eisdir(path.virtual)
+  if (index === undefined) throw enoent(path)
+  const { entry } = await lookupRetrying(accessor, index, prefix, key)
+  if (entry === null) throw enoent(path)
+  if (entry.resourceType === 'folder') throw eisdir(path.virtual)
+  return entry
 }

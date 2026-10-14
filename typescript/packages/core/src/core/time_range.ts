@@ -6,6 +6,8 @@ import type { Guard } from './hierarchy/readdir.ts'
 import type { ScopeMatch } from './hierarchy/scope.ts'
 import type { StatHook } from './hierarchy/stat.ts'
 import { enoent } from '../errors/fs.ts'
+import { sleep } from '../utils/abort.ts'
+import { jsonlBytes } from './render/json.ts'
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
 
@@ -128,5 +130,67 @@ export function dayStat<A extends Accessor>(readdir: ReaddirFn<A>, guard?: Guard
     if (entry !== null) return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
     if ((await ancestorEntry(readdir, accessor, path, index, 1)) === null) throw enoent(path)
     return new FileStat({ name: match.slots.day ?? '', type: FileType.DIRECTORY })
+  }
+}
+
+/**
+ * A chat day's last `n` messages, then each one posted to it after them, as
+ * its chat.jsonl lines.
+ *
+ * `messages` is the day as a read lists it, so its last `n` come first. Then
+ * every `interval` seconds `after` is asked for the messages posted since the
+ * last one seen (the whole day while none is), until a poll that starts once
+ * the day is over: nothing can land in it after that, and the stream waits to
+ * be closed, as `tail -f` waits on a file that stops growing. Each ask starts
+ * where the last answer ended, so none is lost or printed twice. An iterator
+ * rather than a generator: a generator queues `return` behind a pull waiting
+ * out its interval, so an idle `tail -f` could never close it. Mirrors
+ * Python's `followed_day`.
+ */
+export function followedDay<M>(
+  messages: readonly M[],
+  n: number,
+  end: number,
+  interval: number,
+  after: (last: M | null) => Promise<M[]>,
+): AsyncIterableIterator<Uint8Array> {
+  let last: M | null = messages[messages.length - 1] ?? null
+  let pending: Uint8Array | null =
+    n > 0 && messages.length > 0 ? jsonlBytes(messages.slice(-n)) : null
+  let over = false
+  const stop = new AbortController()
+  const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
+  return {
+    async next(): Promise<IteratorResult<Uint8Array>> {
+      if (pending !== null) {
+        const value = pending
+        pending = null
+        return { value, done: false }
+      }
+      try {
+        while (!over) {
+          await sleep(interval * 1000, stop.signal)
+          over = Date.now() / 1000 >= end
+          const added = await after(last)
+          if (added.length > 0) {
+            last = added[added.length - 1] ?? last
+            return { value: jsonlBytes(added), done: false }
+          }
+        }
+        await sleep(Number.POSITIVE_INFINITY, stop.signal)
+      } catch (err) {
+        if (stop.signal.aborted) return done
+        throw err
+      }
+      return done
+    },
+    return(): Promise<IteratorResult<Uint8Array>> {
+      stop.abort()
+      pending = null
+      return Promise.resolve(done)
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    },
   }
 }

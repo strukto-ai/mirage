@@ -14,7 +14,6 @@
 
 import os
 import uuid
-from unittest.mock import AsyncMock, MagicMock
 
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
@@ -23,6 +22,7 @@ from mirage.vfs.redis import RedisVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from tests.e2e.gdrive_mock import FakeGDrive
+from tests.fixtures.ssh_run import sftp_only_connection
 from tests.vfs.ssh.test_ssh_commands import MockSFTPClient
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
@@ -73,9 +73,7 @@ def _make_ssh_vfs(state: MountState) -> SSHVFS:
     state.sftp_files = {}
     state.sftp_dirs = {SSH_ROOT}
     vfs.accessor._sftp = MockSFTPClient(state.sftp_files, state.sftp_dirs)
-    vfs.accessor._conn = MagicMock(
-        wait_closed=AsyncMock(), is_closed=MagicMock(return_value=False)
-    )
+    vfs.accessor._conn = sftp_only_connection()
     return vfs
 
 

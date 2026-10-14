@@ -14,6 +14,7 @@
 
 import json
 import uuid
+from collections.abc import AsyncGenerator
 from enum import Enum
 from typing import Any
 
@@ -24,6 +25,7 @@ from mirage.core.google.client import (
     google_delete,
     google_get,
     google_get_bytes,
+    google_get_stream,
     google_patch,
     google_post,
     google_send_bytes,
@@ -340,11 +342,28 @@ async def download_file(
     Returns:
         bytes: file content.
     """
-    url = (
+    return await google_get_bytes(
+        token_manager, _media_url(token_manager, file_id), window
+    )
+
+
+def download_file_stream(
+    token_manager: TokenManager, file_id: str
+) -> AsyncGenerator[bytes, None]:
+    """Stream a regular file from Drive as it downloads.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        file_id (str): file ID.
+    """
+    return google_get_stream(token_manager, _media_url(token_manager, file_id))
+
+
+def _media_url(token_manager: TokenManager, file_id: str) -> str:
+    return (
         f"{drive_base(token_manager)}/files/{file_id}"
         "?alt=media&supportsAllDrives=true"
     )
-    return await google_get_bytes(token_manager, url, window)
 
 
 FOLDER_MIME = "application/vnd.google-apps.folder"

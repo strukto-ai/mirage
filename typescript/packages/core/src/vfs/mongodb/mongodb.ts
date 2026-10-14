@@ -74,6 +74,7 @@ export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
   override follow(
     path: PathSpec,
     n: number,
+    _interval: number,
     index?: IndexCacheStore,
   ): Promise<AsyncIterable<Uint8Array> | null> {
     return mongodbFollow(this.accessor, path, n, index)

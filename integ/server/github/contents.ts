@@ -491,6 +491,14 @@ export function contentRoutes(): KitRoute<C>[] {
           const want = param(ctx, 'sha')
           const data = await blobBySha(ctx.db, ctx.tenant, repo, want)
           if (data === null) return fail(404, 'Not Found')
+          // The raw media type answers the blob's bytes themselves.
+          if ((ctx.headers.accept ?? '').includes('raw')) {
+            return {
+              status: 200,
+              body: data,
+              headers: { 'Content-Type': 'application/vnd.github.raw+json' },
+            }
+          }
           return {
             status: 200,
             body: { sha: want, size: data.length, content: wrapped(data), encoding: 'base64' },

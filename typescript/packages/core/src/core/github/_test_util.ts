@@ -364,7 +364,7 @@ export class FakeGitHub {
     return this.listing('sha_dir', raw, named[0], named[1], null)
   }
 
-  private async blob(sha: string): Promise<Response> {
+  private async blob(sha: string, raw: boolean): Promise<Response> {
     this.log.push(['blob', sha])
     const refused = this.refused('blob')
     if (refused !== null) return refused
@@ -374,6 +374,7 @@ export class FakeGitHub {
     }
     const data = this.blobs.get(sha)
     if (data === undefined) return json(404, { message: 'Not Found' })
+    if (raw) return new Response(data.slice())
     let binary = ''
     for (const byte of data) binary += String.fromCharCode(byte)
     return json(200, { sha, size: data.length, encoding: 'base64', content: btoa(binary) })
@@ -425,7 +426,8 @@ export class FakeGitHub {
       return this.tree(raw, url.searchParams.get('recursive') === '1')
     }
     const blob = /^\/repos\/[^/]+\/[^/]+\/git\/blobs\/([^/]+)$/.exec(path)
-    if (blob !== null) return this.blob(blob[1] ?? '')
+    if (blob !== null)
+      return this.blob(blob[1] ?? '', (req.headers.get('accept') ?? '').includes('raw'))
     if (path === '/search/code') return this.searchCode(url)
     throw new Error(`FakeGitHub: unrouted ${req.method} ${req.url}`)
   }

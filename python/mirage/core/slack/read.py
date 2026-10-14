@@ -12,20 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
+from functools import partial
+from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.probe import resolve_entry
-from mirage.core.hierarchy.read import make_read, make_read_range
+from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.slack.client import download_file, download_file_stream
-from mirage.core.slack.history import get_history_jsonl
+from mirage.core.slack.history import fetch_messages_for_day, get_history_jsonl
 from mirage.core.slack.readdir import readdir
 from mirage.core.slack.scope import detect_scope
 from mirage.core.slack.users import get_user_profile, user_json_bytes
-from mirage.core.time_range import day_channel_id, guard_day
+from mirage.core.time_range import day_channel_id, followed_day, guard_day
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
 from mirage.types import PathSpec
@@ -144,3 +146,45 @@ async def read_stream(
     async with aclosing(source):
         async for chunk in source:
             yield chunk
+
+
+async def _follow_chat(
+    accessor: SlackAccessor,
+    match: ScopeMatch,
+    path: PathSpec,
+    n: int,
+    interval: float,
+    index: IndexCacheStore = NULL_INDEX,
+) -> AsyncIterator[bytes]:
+    """A channel or DM day's last ``n`` messages, then each one posted to it,
+    asked for every ``interval`` seconds while the day lasts
+    (``followed_day``).
+
+    Args:
+        accessor (SlackAccessor): backend accessor.
+        match (ScopeMatch): the chat.jsonl's match.
+        path (PathSpec): the chat.jsonl.
+        n (int): how many of its last lines come first, 0 for none.
+        interval (float): seconds between two asks.
+        index (IndexCacheStore): cached directory entries.
+    """
+    await guard_day(accessor, match, path.virtual)
+    channel_id = await day_channel_id(readdir, accessor, path, index)
+    day = match.slots["day"]
+    fetch = partial(
+        fetch_messages_for_day,
+        accessor.config,
+        channel_id,
+        day,
+        accessor.time_range,
+        session=accessor.pool,
+    )
+
+    async def after(last: dict[str, Any] | None) -> list[dict[str, Any]]:
+        return await fetch(after=None if last is None else last["ts"])
+
+    _, end = accessor.time_range.day_bounds(day)
+    return followed_day(await fetch(), n, end, interval, after)
+
+
+follow = per_kind(detect_scope, {"messages": _follow_chat})

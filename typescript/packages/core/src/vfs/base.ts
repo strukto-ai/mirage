@@ -422,18 +422,22 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * The last `n` lines of a file, then each line added to it, as it lands.
    *
    * `tail -f` on one file asks this for all it prints, so a backend that can
-   * be told about new data (a change stream) does not have to be polled, and
-   * the lines it prints first and the ones it follows meet at one point: none
-   * is lost or printed twice. The stream yields whole lines, each with its
-   * newline, in the order a read would show them, and ends only when the
-   * caller closes it; closing it ends a wait for the next line. Resolves null
-   * to have `tail` read the file and poll it every `-s` seconds; rejects with
-   * the file's read error otherwise.
+   * be told about new data (a change stream) does not have to be polled, one
+   * that can be asked for only what is new does not read the whole file again
+   * on each poll, and the lines it prints first and the ones it follows meet
+   * at one point: none is lost or printed twice. The stream yields whole
+   * lines, each with its newline, in the order a read would show them, and
+   * ends only when the caller closes it; closing it ends a wait for the next
+   * line. `interval` is `tail -s`, the seconds between two asks for what is
+   * new; a change stream has no use for it. Resolves null to have `tail` read
+   * the file and poll it every `-s` seconds; rejects with the file's read
+   * error otherwise.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
   follow(
     path: PathSpec,
     _n: number,
+    _interval: number,
     _index?: IndexCacheStore,
   ): Promise<AsyncIterable<Uint8Array> | null> {
     return Promise.reject(enotsup(this.name, 'follow', path))

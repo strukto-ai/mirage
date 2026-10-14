@@ -376,6 +376,19 @@
         "stdout": "deploy is green\nthanks alice, shipping the release notes\nbudget spreadsheet attached\nbudget spreadsheet attached\n3 /discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "dc_tail_follow_prints_the_last_lines_first",
+      "seq": 690029,
+      "targets": [
+        "discord"
+      ],
+      "command": "set -o pipefail; tail -n 2 -f '/discord/Mirage HQ__100000000000000001/channels/general__200000000000000001/2026-06-01/chat.jsonl' | head -n 2 | jq -r .content",
+      "expect": {
+        "exit": 0,
+        "stdout": "thanks alice, shipping the release notes\nbudget spreadsheet attached\n",
+        "stderr": ""
+      }
     }
   ]
 }

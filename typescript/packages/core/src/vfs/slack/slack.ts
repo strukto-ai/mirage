@@ -16,6 +16,7 @@ import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { DU_MAX_ENTRIES } from '../../core/slack/constants.ts'
 import {
+  follow as slackFollow,
   read as slackRead,
   readRange as slackReadRange,
   readStream as slackReadStream,
@@ -60,6 +61,15 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
     signal?: AbortSignal,
   ): AsyncIterable<Uint8Array> {
     return slackReadStream(this.accessor, path, index, signal)
+  }
+
+  override follow(
+    path: PathSpec,
+    n: number,
+    interval: number,
+    index?: IndexCacheStore,
+  ): Promise<AsyncIterable<Uint8Array> | null> {
+    return slackFollow(this.accessor, path, n, interval, index)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

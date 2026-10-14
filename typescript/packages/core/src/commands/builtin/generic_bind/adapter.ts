@@ -46,13 +46,7 @@ import { moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { SessionAccess, StatOverlay } from '../../../view/types.ts'
 
-import {
-  FileType,
-  PathSpec,
-  type FileStat,
-  type SetAttrFields,
-  type WalkProbe,
-} from '../../../types.ts'
+import { FileStat, FileType, PathSpec, type SetAttrFields, type WalkProbe } from '../../../types.ts'
 import {
   eacces,
   eisdir,
@@ -295,8 +289,9 @@ export function commandIo(vfs: BaseVFS): CommandIO {
       : {}),
     ...(has('follow')
       ? {
-          follow: withoutAccessor((path: PathSpec, n: number, index?: IndexCacheStore) =>
-            vfs.follow(path, n, index),
+          follow: withoutAccessor(
+            (path: PathSpec, n: number, interval: number, index?: IndexCacheStore) =>
+              vfs.follow(path, n, interval, index),
           ),
         }
       : {}),
@@ -451,8 +446,11 @@ const DISPATCHED_SLOTS = {
       (await dispatchedCall(dispatch, 'checksum', path, [algorithm])) as string | null,
   follow:
     (dispatch: DispatchFn): CommandIO['follow'] =>
-    async (_accessor, path, n) =>
-      (await dispatchedCall(dispatch, 'follow', path, [n])) as AsyncIterable<Uint8Array> | null,
+    async (_accessor, path, n, interval) =>
+      (await dispatchedCall(dispatch, 'follow', path, [
+        n,
+        interval,
+      ])) as AsyncIterable<Uint8Array> | null,
   readTree:
     (dispatch: DispatchFn): CommandIO['readTree'] =>
     async (_accessor, path) =>
@@ -693,7 +691,10 @@ export function dirAwareStat<A extends Accessor>(
  * store that keeps permission bits (a disk, SFTP), where a file the stat sees
  * may still refuse its read, and a disk's named pipe stats as a file. A store
  * without them grants the read with the stat. A directory fails with EISDIR
- * as `dirAwareStat` has it. Mirrors Python's `file_size`.
+ * as `dirAwareStat` has it. The size itself comes from a stat that asks the
+ * backend past the mount's index (`fresh`): a listing the index holds can be
+ * up to its TTL old, and a size read off it would count bytes a read would
+ * not. Mirrors Python's `file_size`.
  */
 export function fileSize<A extends Accessor>(
   ops: CommandIO<A>,
@@ -705,7 +706,10 @@ export function fileSize<A extends Accessor>(
     if (manager !== null && (await manager.isCached(p))) return null
     if (revisionFor(p.virtual) !== null) return null
     const st = await statRefusingDirs(ops, accessor, opts, p)
-    return st.type === FileType.FILE && st.mode === null ? st.size : null
+    if (st.type !== FileType.FILE || st.mode !== null) return null
+    if (opts.dispatch === undefined) return st.size
+    const [now] = await opts.dispatch('stat', p, [], { fresh: true })
+    return now instanceof FileStat && now.type === FileType.FILE ? now.size : null
   }
 }
 

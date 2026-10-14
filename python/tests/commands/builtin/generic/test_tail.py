@@ -988,8 +988,8 @@ async def test_follow_streams_what_the_mount_hands_over_first_print_included():
         while True:
             yield await landed.get()
 
-    async def follow(p: PathSpec, n: int):
-        asked.append(n)
+    async def follow(p: PathSpec, n: int, interval: float):
+        asked.append((n, interval))
         return added()
 
     stream, _ = await tail_generic(
@@ -1011,7 +1011,7 @@ async def test_follow_streams_what_the_mount_hands_over_first_print_included():
     chunks = await _drain_for(stream, 0.15)
     await lander
     assert b"".join(chunks) == b"c\nd\n"
-    assert asked == [1]
+    assert asked == [(1, 0.02)]
 
 
 @pytest.mark.asyncio
@@ -1032,7 +1032,7 @@ async def test_a_reader_that_stops_at_the_header_closes_the_follow():
     async def last_lines(p: PathSpec, n: int) -> bytes:
         return b"c\n"
 
-    async def follow(p: PathSpec, n: int):
+    async def follow(p: PathSpec, n: int, interval: float):
         return _Added()
 
     stream, _ = await tail_generic(
@@ -1059,7 +1059,7 @@ async def test_a_polled_follow_reads_its_first_print_whole():
     async def last_lines(p: PathSpec, n: int) -> bytes:
         raise AssertionError("a polled follow asked for the last lines")
 
-    async def follow(p: PathSpec, n: int) -> None:
+    async def follow(p: PathSpec, n: int, interval: float) -> None:
         return None
 
     stream, _ = await tail_generic(

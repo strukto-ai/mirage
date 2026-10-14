@@ -14,31 +14,10 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { SSHAccessor } from '../../accessor/ssh.ts'
+import { RunAccessor, type RunAnswer } from './_test_utils.ts'
 import { filesContaining, grepCommand } from './search.ts'
 
-type Answer = [number | null, Uint8Array, Uint8Array] | Error
-
 const ENC = new TextEncoder()
-
-// An accessor whose server answers every command with `answer`. Twin of
-// Python's _Accessor.
-class FakeAccessor extends SSHAccessor {
-  readonly sent: string[] = []
-
-  constructor(
-    root: string,
-    private readonly answer: Answer,
-  ) {
-    super({ host: 'example.test', root })
-  }
-
-  override run(command: string): Promise<[number | null, Uint8Array, Uint8Array]> {
-    this.sent.push(command)
-    if (this.answer instanceof Error) return Promise.reject(this.answer)
-    return Promise.resolve(this.answer)
-  }
-}
 
 function scope(vfsPath = ''): PathSpec {
   const virtual = vfsPath === '' ? '/s' : `/s/${vfsPath}`
@@ -64,7 +43,7 @@ describe('filesContaining', () => {
     ['/srv/data/', '', "'/srv/data'", '/srv/data/x\0', ['x']],
     ['data', '', "'data'", '', []],
   ])('names what grep lists under root %j', async (root, under, quoted, out, want) => {
-    const accessor = new FakeAccessor(root, [out === '' ? 1 : 0, bytes(out), new Uint8Array()])
+    const accessor = new RunAccessor(root, [out === '' ? 1 : 0, bytes(out), new Uint8Array()])
     const hits = await filesContaining(accessor, 'hello', [scope(under)], false)
     expect(hits?.map((p) => p.vfsPath)).toEqual(want)
     expect(accessor.sent).toEqual([`${grepCommand('hello', [], false)} ${quoted}`])
@@ -76,7 +55,7 @@ describe('filesContaining', () => {
   // short, a signal, a name outside the root or not UTF-8, and a server that
   // runs no command all leave every file to be read. Twin of
   // test_files_containing_leaves_an_unclean_run_to_the_scan.
-  it.each<[string, Answer]>([
+  it.each<[string, RunAnswer]>([
     ['exit 2', [2, bytes('/data/a.txt\0'), new Uint8Array()]],
     ['stderr', [1, new Uint8Array(), bytes('grep: unrecognized option\n')]],
     ['internal-sftp', [1, bytes('This service allows sftp connections only.\n'), new Uint8Array()]],
@@ -89,7 +68,7 @@ describe('filesContaining', () => {
     ],
     ['no exec', new Error('no exec')],
   ])('leaves an unclean run to the scan: %s', async (_label, answer) => {
-    const accessor = new FakeAccessor('/data', answer)
+    const accessor = new RunAccessor('/data', answer)
     expect(await filesContaining(accessor, 'hello', [scope()], false)).toBeNull()
   })
 })

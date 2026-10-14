@@ -12,10 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+from contextlib import aclosing
+
 from mirage.accessor.airtable import AirtableAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.airtable.client import list_bases, list_records, list_tables
+from mirage.core.airtable.client import (
+    list_bases,
+    list_records,
+    list_tables,
+    record_pages,
+)
 from mirage.core.airtable.errors import AirtableAPIError
 from mirage.core.airtable.normalize import (
     normalize_base,
@@ -26,7 +34,7 @@ from mirage.core.airtable.normalize import (
 from mirage.core.airtable.readdir import readdir, schema_table
 from mirage.core.airtable.scope import detect_scope
 from mirage.core.airtable.stat import stat
-from mirage.core.hierarchy.probe import resolve_entry
+from mirage.core.hierarchy.probe import assert_parent, resolve_entry
 from mirage.core.hierarchy.read import make_read, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.errors.fs import efbig, enoent
@@ -152,6 +160,58 @@ read = make_read(
     },
     stat=stat,
 )
+
+
+async def read_stream(
+    accessor: AirtableAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> AsyncIterator[bytes]:
+    """Stream a records or view file a page of records at a time, the
+    next page fetched only when the caller pulls it; any other file
+    comes whole, as :func:`read` gives it.
+
+    A table or view past ``max_read_records`` raises EFBIG once that
+    many records are out, rather than refusing them whole: a stream
+    cannot know a table's size before it has paged through it, and a
+    reader that stops first (``head -c``, ``grep -l``) never reaches it.
+
+    Args:
+        accessor (AirtableAccessor): the account and its scope.
+        path (PathSpec): the file.
+        index (IndexCacheStore): where the parent listing lands.
+    """
+    match = detect_scope(path)
+    if match.kind not in ("records", "view"):
+        yield await read(accessor, path, index)
+        return
+    await assert_parent(stat, accessor, path, index)
+    view = None
+    if match.kind == "view":
+        await ensure_listed(accessor, path, index)
+        view = match.slots["view_id"]
+    cap = accessor.config.max_read_records
+    sent = 0
+    pages = record_pages(
+        accessor,
+        match.slots["base_id"],
+        match.slots["table_id"],
+        view=view,
+        max_records=cap + 1,
+    )
+    try:
+        async with aclosing(pages):
+            async for page in pages:
+                kept = page[: cap - sent]
+                sent += len(kept)
+                if kept:
+                    yield records_jsonl(kept)
+                if len(kept) < len(page):
+                    raise efbig(path)
+    except AirtableAPIError as exc:
+        if exc.not_found:
+            raise enoent(path.virtual) from None
+        raise
 
 
 async def _first_records(

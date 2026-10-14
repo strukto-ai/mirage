@@ -1,7 +1,10 @@
+import asyncio
 import re
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore
@@ -13,6 +16,7 @@ from mirage.core.hierarchy.probe import (
 from mirage.core.hierarchy.readdir import Guard
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import StatHook
+from mirage.core.render.json import jsonl_bytes
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -188,3 +192,44 @@ def day_stat(
         return FileStat(name=match.slots["day"], type=FileType.DIRECTORY)
 
     return stat
+
+
+async def followed_day(
+    messages: list[dict[str, Any]],
+    n: int,
+    end: float,
+    interval: float,
+    after: Callable[[dict[str, Any] | None], Awaitable[list[dict[str, Any]]]],
+) -> AsyncIterator[bytes]:
+    """A chat day's last ``n`` messages, then each one posted to it after
+    them, as its chat.jsonl lines.
+
+    ``messages`` is the day as a read lists it, so its last ``n`` come
+    first. Then every ``interval`` seconds ``after`` is asked for the
+    messages posted since the last one seen (the whole day while none
+    is), until a poll that starts once the day is over: nothing can land
+    in it after that, and the stream waits to be closed, as ``tail -f``
+    waits on a file that stops growing. Each ask starts where the last
+    answer ended, so none is lost or printed twice.
+
+    Args:
+        messages (list[dict[str, Any]]): the day so far, oldest first.
+        n (int): how many of its last lines come first, 0 for none.
+        end (float): when the day, clipped to the mount's scope, ends.
+        interval (float): seconds between two asks.
+        after (Callable): the messages after the one given, oldest
+            first.
+    """
+    last = messages[-1] if messages else None
+    if n > 0 and messages:
+        yield jsonl_bytes(messages[-n:])
+    while True:
+        await asyncio.sleep(interval)
+        closed = time.time() >= end
+        added = await after(last)
+        if added:
+            last = added[-1]
+            yield jsonl_bytes(added)
+        if closed:
+            break
+    await asyncio.Event().wait()

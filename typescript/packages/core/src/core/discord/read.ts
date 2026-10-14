@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../io/cooperative.ts'
-import { dayChannelId, guardDay } from '../time_range.ts'
+import { dayChannelId, followedDay, guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
-import { makeRead, makeReadRange } from '../hierarchy/read.ts'
+import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { downloadFile, downloadFileStream } from './files.ts'
-import { getHistoryJsonl } from './history.ts'
+import { listMessagesForDay, getHistoryJsonl, type DiscordMessage } from './history.ts'
 import { listMembers } from './members.ts'
 import { readdir } from './readdir.ts'
 import { compactJsonBytes } from '../render/json.ts'
@@ -117,3 +117,32 @@ export async function* readStream(
     yield* chunks(await read(accessor, path, index), signal)
   }
 }
+
+/**
+ * A channel day's last `n` messages, then each one posted to it, asked for every
+ * `interval` seconds while the day lasts (`followedDay`). Mirrors Python's
+ * `_follow_chat`.
+ */
+async function followChat(
+  accessor: DiscordAccessor,
+  match: ScopeMatch,
+  path: PathSpec,
+  n: number,
+  interval: number,
+  index?: IndexCacheStore,
+): Promise<AsyncIterable<Uint8Array>> {
+  await guardDay(accessor, match, path.virtual)
+  const channelId = await dayChannelId(readdir, accessor, path, index)
+  const day = match.slots.day ?? ''
+  const [, end] = accessor.timeRange.dayBounds(day)
+  return followedDay<DiscordMessage>(
+    await listMessagesForDay(accessor, channelId, day),
+    n,
+    end,
+    interval,
+    (last) =>
+      listMessagesForDay(accessor, channelId, day, 100, last === null ? undefined : last.id),
+  )
+}
+
+export const follow = perKind(detectScope, { messages: followChat })

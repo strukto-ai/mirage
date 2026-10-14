@@ -17,10 +17,10 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { efbig, enoent, isEnoent } from '../../errors/fs.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
+import { assertParent, resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, perKind, type ReadWindow } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { listBases, listRecords, listTables } from './client.ts'
+import { listBases, listRecords, listTables, recordPages } from './client.ts'
 import { AirtableApiError } from './errors.ts'
 import { normalizeBase, normalizeTable, recordsJsonl, toJsonBytes } from './normalize.ts'
 import { readdir, schemaTable } from './readdir.ts'
@@ -140,6 +140,51 @@ export const read = makeRead<AirtableAccessor>(
     stat,
   },
 )
+
+/**
+ * Stream a records or view file a page of records at a time, the next page
+ * fetched only when the caller pulls it; any other file comes whole, as
+ * `read` gives it. A table or view past `maxReadRecords` throws EFBIG once
+ * that many records are out, rather than refusing them whole: a stream cannot
+ * know a table's size before it has paged through it, and a reader that stops
+ * first (`head -c`, `grep -l`) never reaches it. Mirrors Python's
+ * `read_stream`.
+ */
+export async function* readStream(
+  accessor: AirtableAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): AsyncGenerator<Uint8Array, void> {
+  const match = detectScope(path)
+  if (match.kind !== 'records' && match.kind !== 'view') {
+    yield await read(accessor, path, index)
+    return
+  }
+  await assertParent(stat, accessor, path, index)
+  let view: string | undefined
+  if (match.kind === 'view') {
+    await ensureListed(accessor, path, index)
+    view = match.slots.view_id ?? ''
+  }
+  const cap = accessor.maxReadRecords
+  let sent = 0
+  try {
+    for await (const page of recordPages(
+      accessor,
+      match.slots.base_id ?? '',
+      match.slots.table_id ?? '',
+      { ...(view !== undefined ? { view } : {}), maxRecords: cap + 1 },
+    )) {
+      const kept = page.slice(0, cap - sent)
+      sent += kept.length
+      if (kept.length > 0) yield recordsJsonl(kept)
+      if (kept.length < page.length) throw efbig(path)
+    }
+  } catch (err) {
+    if (err instanceof AirtableApiError && err.notFound) throw enoent(path)
+    throw err
+  }
+}
 
 /**
  * The first `n` records of a records or view file, by `maxRecords`, each on

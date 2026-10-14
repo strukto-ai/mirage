@@ -228,6 +228,7 @@ export type FollowOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   n: number,
+  interval: number,
   index?: IndexCacheStore,
 ) => Promise<AsyncIterable<Uint8Array> | null>
 

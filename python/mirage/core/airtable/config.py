@@ -25,9 +25,9 @@ class AirtableConfig(BaseModel):
             None shows every base the token can reach.
         base_url (str): the API root, overridden to point at a fake.
         max_read_records (int): the most records one file may render. A
-            table or view holding more is refused on a full read rather
-            than paged at 5 requests a second for minutes; ``head`` still
-            reads its first lines.
+            full read of a table or view holding more stops at the cap
+            rather than paging at 5 requests a second for minutes;
+            ``head`` still reads its first lines.
         requests_per_second (float): pacing per base. Airtable allows 5
             and answers a burst with a 30-second penalty.
     """

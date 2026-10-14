@@ -31,15 +31,7 @@ async function subtleHex(algo: AlgorithmIdentifier, bytes: Uint8Array): Promise<
 export async function sha1Hex(bytes: Uint8Array): Promise<string> {
   if (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined')
     return subtleHex('SHA-1', bytes)
-  const hash = new Sha1()
-  // Match md5HexAsync's yielding budget on hosts without native hashing.
-  const step = 1024 * 1024
-  for (let offset = 0; offset < bytes.byteLength; offset += step) {
-    hash.update(bytes.subarray(offset, offset + step))
-    if (offset + step < bytes.byteLength)
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-  }
-  return hash.digest()
+  return yieldingDigest(new Sha1(), bytes)
 }
 
 /**
@@ -177,35 +169,64 @@ function rotl(x: number, n: number): number {
   return ((x << n) | (x >>> (32 - n))) >>> 0
 }
 
-function* md5Blocks(bytes: Uint8Array): Generator<void, Uint8Array> {
-  const len = bytes.byteLength
-  const bitLen = len * 8
-  const padLen = (len % 64 < 56 ? 56 : 120) - (len % 64)
-  const total = len + padLen + 8
-  const fullLength = len - (len % 64)
-  const tail = new Uint8Array(total - fullLength)
-  tail.set(bytes.subarray(fullLength))
-  tail[len - fullLength] = 0x80
-  const tailView = new DataView(tail.buffer)
-  tailView.setUint32(tail.length - 8, bitLen >>> 0, true)
-  tailView.setUint32(tail.length - 4, Math.floor(bitLen / 0x100000000) >>> 0, true)
-  const inputView = new DataView(bytes.buffer, bytes.byteOffset, fullLength)
+/**
+ * Incremental MD5, for bytes that arrive in chunks, as `Sha1` is for SHA-1.
+ * Pure JS: WebCrypto has no MD5, and core cannot import node:crypto. The
+ * partial block a chunk leaves is carried into the next `update`; padding
+ * happens only in `digest`.
+ */
+export class Md5 {
+  private readonly state = new Uint32Array([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476])
+  private readonly block = new Uint8Array(64)
+  private readonly blockView = new DataView(this.block.buffer)
+  private readonly words = new Uint32Array(16)
+  private filled = 0
+  private length = 0
 
-  let a0 = 0x67452301
-  let b0 = 0xefcdab89
-  let c0 = 0x98badcfe
-  let d0 = 0x10325476
+  update(chunk: Uint8Array): void {
+    this.length += chunk.byteLength
+    let at = 0
+    if (this.filled > 0) {
+      const take = Math.min(64 - this.filled, chunk.byteLength)
+      this.block.set(chunk.subarray(0, take), this.filled)
+      this.filled += take
+      at = take
+      if (this.filled < 64) return
+      this.compress(this.blockView, 0)
+      this.filled = 0
+    }
+    const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+    for (; at + 64 <= chunk.byteLength; at += 64) this.compress(view, at)
+    if (at < chunk.byteLength) {
+      this.block.set(chunk.subarray(at))
+      this.filled = chunk.byteLength - at
+    }
+  }
 
-  const M = new Uint32Array(16)
-  for (let off = 0; off < total; off += 64) {
-    if (off > 0 && off % 16384 === 0) yield
-    const view = off < fullLength ? inputView : tailView
-    const base = off < fullLength ? off : off - fullLength
-    for (let j = 0; j < 16; j++) M[j] = view.getUint32(base + j * 4, true)
-    let A = a0
-    let B = b0
-    let C = c0
-    let D = d0
+  digest(): string {
+    const pad = (this.filled < 56 ? 56 : 120) - this.filled
+    const tail = new Uint8Array(this.filled + pad + 8)
+    tail.set(this.block.subarray(0, this.filled))
+    tail[this.filled] = 0x80
+    const view = new DataView(tail.buffer)
+    const bits = this.length * 8
+    view.setUint32(tail.length - 8, bits >>> 0, true)
+    view.setUint32(tail.length - 4, Math.floor(bits / 0x100000000) >>> 0, true)
+    const state = Uint32Array.from(this.state)
+    for (let off = 0; off < tail.length; off += 64) this.compress(view, off, state)
+    const out = new Uint8Array(16)
+    const outView = new DataView(out.buffer)
+    for (let i = 0; i < 4; i++) outView.setUint32(i * 4, state[i] ?? 0, true)
+    return toHex(out)
+  }
+
+  private compress(view: DataView, off: number, state: Uint32Array = this.state): void {
+    const M = this.words
+    for (let j = 0; j < 16; j++) M[j] = view.getUint32(off + j * 4, true)
+    let A = state[0] ?? 0
+    let B = state[1] ?? 0
+    let C = state[2] ?? 0
+    let D = state[3] ?? 0
     for (let i = 0; i < 64; i++) {
       let F: number
       let g: number
@@ -228,46 +249,32 @@ function* md5Blocks(bytes: Uint8Array): Generator<void, Uint8Array> {
       C = B
       B = (B + rotl(F, S[i] ?? 0)) >>> 0
     }
-    a0 = (a0 + A) >>> 0
-    b0 = (b0 + B) >>> 0
-    c0 = (c0 + C) >>> 0
-    d0 = (d0 + D) >>> 0
+    state[0] = ((state[0] ?? 0) + A) >>> 0
+    state[1] = ((state[1] ?? 0) + B) >>> 0
+    state[2] = ((state[2] ?? 0) + C) >>> 0
+    state[3] = ((state[3] ?? 0) + D) >>> 0
   }
-
-  const out = new Uint8Array(16)
-  const outView = new DataView(out.buffer)
-  outView.setUint32(0, a0, true)
-  outView.setUint32(4, b0, true)
-  outView.setUint32(8, c0, true)
-  outView.setUint32(12, d0, true)
-  return out
 }
 
 export function md5Hex(bytes: Uint8Array): string {
-  const blocks = md5Blocks(bytes)
-  let result = blocks.next()
-  while (!result.done) result = blocks.next()
-  return toHex(result.value)
+  const hash = new Md5()
+  hash.update(bytes)
+  return hash.digest()
 }
 
 // The yielding twin of md5Hex, for hashing bytes a caller just received.
-// This is pure-JS MD5 (WebCrypto has none, and core cannot import
-// node:crypto), so one long hash would block the loop a TypeScript FUSE mount
-// is served from. md5Blocks yields once per 16 KiB, so this hands the loop
-// back about every MiB.
-const MD5_SLICES_PER_YIELD = 64
-
+// One long pure-JS hash would block the loop a TypeScript FUSE mount is
+// served from, so this hands the loop back about every MiB.
 export async function md5HexAsync(bytes: Uint8Array): Promise<string> {
-  const blocks = md5Blocks(bytes)
-  let result = blocks.next()
-  let sinceYield = 0
-  while (!result.done) {
-    result = blocks.next()
-    sinceYield += 1
-    if (sinceYield >= MD5_SLICES_PER_YIELD) {
-      sinceYield = 0
+  return yieldingDigest(new Md5(), bytes)
+}
+
+async function yieldingDigest(hash: Md5 | Sha1, bytes: Uint8Array): Promise<string> {
+  const step = 1024 * 1024
+  for (let offset = 0; offset < bytes.byteLength; offset += step) {
+    hash.update(bytes.subarray(offset, offset + step))
+    if (offset + step < bytes.byteLength)
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
   }
-  return toHex(result.value)
+  return hash.digest()
 }

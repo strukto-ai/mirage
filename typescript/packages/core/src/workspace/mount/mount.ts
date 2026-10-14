@@ -738,7 +738,9 @@ export class MountEntry {
       case 'checksum':
         return [(scope, args, kw) => vfs.checksum(scope, args[0] as string, kw.index)]
       case 'follow':
-        return [(scope, args, kw) => vfs.follow(scope, args[0] as number, kw.index)]
+        return [
+          (scope, args, kw) => vfs.follow(scope, args[0] as number, args[1] as number, kw.index),
+        ]
       case 'read_tree':
         return [(scope, _args, kw) => vfs.readTree(scope, kw.index)]
       case 'search':

@@ -15,7 +15,6 @@
 import asyncio
 import io
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
 
 import asyncssh
 import pytest
@@ -23,6 +22,7 @@ import pytest
 from mirage.types import MountMode
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.workspace import Workspace
+from tests.fixtures.ssh_run import sftp_only_connection
 
 
 class MockSFTPAttrs:
@@ -212,9 +212,7 @@ class SSHTestEnv:
         self._dirs: set[str] = {"/data"}
         self._sftp = MockSFTPClient(self._files, self._dirs)
         self.vfs.accessor._sftp = self._sftp
-        self.vfs.accessor._conn = MagicMock(
-            wait_closed=AsyncMock(), is_closed=MagicMock(return_value=False)
-        )
+        self.vfs.accessor._conn = sftp_only_connection()
         self.ws = Workspace(
             {"/ssh": (self.vfs, MountMode.WRITE)},
             mode=MountMode.WRITE,

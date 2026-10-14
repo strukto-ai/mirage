@@ -528,7 +528,9 @@ async def _follow(
     unread: frozenset[str] = frozenset(),
     only_stdin: bool = False,
     follow_lines: int | None = None,
-    follow: Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes] | None]]
+    follow: Callable[
+        [PathSpec, int, float], Awaitable[AsyncIterator[bytes] | None]
+    ]
     | None = None,
 ) -> AsyncIterator[bytes]:
     """Print each operand's tail, then keep printing what it gains.
@@ -570,9 +572,10 @@ async def _follow(
 
     One file followed by descriptor, under a count of lines from the
     end, is asked of the mount's ``follow`` first: a mount that is told
-    about new lines (a change stream) hands over the last lines and then
-    each new one as it lands, so nothing is polled and the two meet at
-    one point.
+    about new lines (a change stream), or can be asked for only the new
+    ones every ``-s`` seconds, hands over the last lines and then each
+    new one as it lands, so the file is not read again on each poll and
+    the two meet at one point.
 
     State is per operand, not per path: ``tail -f f f`` prints what
     ``f`` gains twice, under a header each time, as GNU does.
@@ -601,9 +604,9 @@ async def _follow(
         follow_lines (int | None): the count of last lines ``follow`` is
             asked for; None when the count is not lines from the end, and
             the file is polled.
-        follow (Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes]
-            | None]] | None): the mount's ``follow``; None, or an answer
-            of None, polls.
+        follow (Callable[[PathSpec, int, float],
+            Awaitable[AsyncIterator[bytes] | None]] | None): the mount's
+            ``follow``; None, or an answer of None, polls.
     """
     positions: dict[int, int] = {}
     added: AsyncIterator[bytes] | None = None
@@ -633,7 +636,7 @@ async def _follow(
                     and not flags.follow_name
                     and not is_stdin(p)
                 ):
-                    added = await follow(p, follow_lines)
+                    added = await follow(p, follow_lines, flags.interval)
                 # A follow's stream holds the first print too.
                 chunks = (
                     []
@@ -826,7 +829,9 @@ async def tail_generic(
     read_range: ReadRangeFn | None = None,
     last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
     | None = None,
-    follow: Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes] | None]]
+    follow: Callable[
+        [PathSpec, int, float], Awaitable[AsyncIterator[bytes] | None]
+    ]
     | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run tail over resolved operands, GNU semantics; mirrors tailGeneric.
@@ -853,9 +858,10 @@ async def tail_generic(
             | None): the mount's ``last_lines`` called as
             ``last_lines(path, n)``; None, or an answer of None, reads
             the file.
-        follow (Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes]
-            | None]] | None): the mount's ``follow`` called as
-            ``follow(path, n)``; None, or an answer of None, polls.
+        follow (Callable[[PathSpec, int, float],
+            Awaitable[AsyncIterator[bytes] | None]] | None): the mount's
+            ``follow`` called as ``follow(path, n, interval)``; None, or
+            an answer of None, polls.
     """
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, opts.stdin)

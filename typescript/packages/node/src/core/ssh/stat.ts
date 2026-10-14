@@ -18,14 +18,21 @@ import { epochToIso } from '@struktoai/mirage-core/utils/dates'
 import { eacces, enoent } from '@struktoai/mirage-core/errors/fs'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import {
+  S_IFDIR,
+  S_IFREG,
   isDirectoryAttrs,
   isNoSuchFile,
   isPermissionDenied,
   joinRoot,
   stripPrefix,
 } from './utils.ts'
+
+export const FIND = 'env LC_ALL=C find -L'
+export const TREE_FORMAT = '%y %m %s %T@ %A@ %U %G %P\\0'
+const FIND_TYPES: Readonly<Record<string, number>> = { d: S_IFDIR, f: S_IFREG }
 
 export interface SshAttrs {
   size?: number
@@ -97,4 +104,81 @@ export async function stat(accessor: SSHAccessor, p: PathSpec): Promise<FileStat
   const cleaned = rstripSlash(virtual)
   const name = cleaned.length === 0 ? '/' : (cleaned.split('/').pop() ?? '/')
   return attrsToFileStat(name, attrs)
+}
+
+/**
+ * The remote find that lists `scope` and everything below it, links
+ * followed, one NUL-ended record per entry. Mirrors Python's `tree_command`.
+ */
+export function treeCommand(scope: string): string {
+  return `${FIND} ${singleQuote(scope)} -printf ${singleQuote(TREE_FORMAT)}`
+}
+
+/**
+ * Every file and directory under a directory, each as `stat` answers it, from
+ * one find on the server, where a walk sends a readdir per directory.
+ *
+ * Only an exit of 0 with nothing on stderr, a directory at `p`, and entries
+ * that are each a directory or a regular file answer: a server that runs no
+ * commands, a find without `-printf` (busybox, BSD), an entry it could not
+ * read, a link loop, a broken link or a special file leaves the walk to
+ * readdir, which reports each as it does today. Mirrors Python's `tree`.
+ */
+export async function tree(
+  accessor: SSHAccessor,
+  p: PathSpec,
+): Promise<Map<string, FileStat> | null> {
+  const scope = joinRoot(accessor.config.root ?? '/', stripPrefix(p))
+  let status: number | null
+  let out: Uint8Array
+  let err: Uint8Array
+  try {
+    ;[status, out, err] = await accessor.run(treeCommand(scope))
+  } catch (error) {
+    console.debug(`ssh tree left to the walk: ${String(error)}`)
+    return null
+  }
+  if (status !== 0 || err.length > 0 || out[out.length - 1] !== 0) return null
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const rows = new Map<string, FileStat>()
+  let top = false
+  let start = 0
+  for (let end = out.indexOf(0); end !== -1; end = out.indexOf(0, start)) {
+    let fields: string[]
+    try {
+      fields = decoder.decode(out.subarray(start, end)).split(' ')
+    } catch (error) {
+      console.debug(`ssh tree left to the walk: ${String(error)}`)
+      return null
+    }
+    start = end + 1
+    const attrs = findAttrs(fields)
+    if (attrs === null) return null
+    const rel = fields.slice(7).join(' ')
+    if (rel === '') {
+      top = isDirectoryAttrs(attrs)
+      continue
+    }
+    rows.set(rel, attrsToFileStat(rel.split('/').pop() ?? rel, attrs))
+  }
+  return top ? rows : null
+}
+
+// One find record's fields as SFTP attributes, or null for a record that is
+// not a directory or a regular file, or that does not parse.
+function findAttrs(fields: readonly string[]): SshAttrs | null {
+  const [kind = '', mode = '', size = '', mtime = '', atime = '', uid = '', gid = ''] = fields
+  const type = FIND_TYPES[kind]
+  if (type === undefined || fields.length < 8 || !/^[0-7]+$/.test(mode)) return null
+  if (![size, uid, gid].every((n) => /^\d+$/.test(n))) return null
+  if (![mtime, atime].every((t) => /^-?\d+(\.\d*)?$/.test(t))) return null
+  const whole = (t: string): number => Number(t.split('.')[0])
+  return {
+    mode: type | Number.parseInt(mode, 8),
+    size: Number(size),
+    mtime: whole(mtime),
+    atime: whole(atime),
+    uid: Number(uid),
+    gid: Number(gid),
+  }
 }

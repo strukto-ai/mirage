@@ -24,6 +24,7 @@ from mirage.core.ssh.create import create as _create
 from mirage.core.ssh.exists import exists as _exists
 from mirage.core.ssh.mkdir import mkdir as _mkdir
 from mirage.core.ssh.pwrite import pwrite as _pwrite
+from mirage.core.ssh.read import line_count as _line_count
 from mirage.core.ssh.read import read as _read
 from mirage.core.ssh.readdir import readdir as _readdir
 from mirage.core.ssh.rename import rename as _rename
@@ -32,6 +33,7 @@ from mirage.core.ssh.rmdir import rmdir as _rmdir
 from mirage.core.ssh.search import files_containing as _files_containing
 from mirage.core.ssh.set_attrs import set_attrs as _set_attrs
 from mirage.core.ssh.stat import stat as _stat
+from mirage.core.ssh.stat import tree as _tree
 from mirage.core.ssh.stream import read_stream as _read_stream
 from mirage.core.ssh.truncate import truncate as _truncate
 from mirage.core.ssh.unlink import unlink as _unlink
@@ -90,6 +92,16 @@ class SSHVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
         return _read_stream(self.accessor, path, index)
+
+    async def read_tree(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, index)
+
+    async def line_count(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> int | None:
+        return await _line_count(self.accessor, path, index)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)

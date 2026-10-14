@@ -25,7 +25,7 @@ import {
   TOKEN_BUFFER_SECONDS,
   TOKEN_URL,
 } from './constants.ts'
-import { apiRequest } from '../api/client.ts'
+import { apiRequest, apiStream } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 
@@ -220,4 +220,16 @@ export async function googleGetBytes(
     window,
   })
   return data as Uint8Array
+}
+
+/** GET a URL's raw bytes as they arrive. Mirrors Python's `google_get_stream`. */
+export async function* googleGetStream(
+  tm: TokenManager,
+  url: string,
+): AsyncGenerator<Uint8Array, void> {
+  yield* apiStream(url, {
+    errorOf: (r, text) =>
+      new GoogleApiError(`Google GET ${url} → ${String(r.status)} ${text}`, r.status),
+    headers: await googleHeaders(tm),
+  })
 }

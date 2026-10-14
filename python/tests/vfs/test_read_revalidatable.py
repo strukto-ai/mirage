@@ -58,7 +58,7 @@ from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdocs.doc_entry import make_filename as doc_filename
-from mirage.vfs.github import GitHubVFS
+from mirage.vfs.gdocs.gdocs import GDocsVFS
 from mirage.vfs.gsheets.sheet_entry import make_filename as sheet_filename
 from mirage.vfs.gslides.slide_entry import make_filename as slide_filename
 from mirage.vfs.loader import load_attr
@@ -159,17 +159,15 @@ GAPPS = {
 }
 
 # What each family can run, fixed at collection. github and gdrive have no
-# key_prefix, and their stream is their read handed over whole, one chunk,
-# so a partial row would read the whole file. The GAPPS mounts
-# also have one flat listing, so only one shape.
+# key_prefix. The GAPPS mounts have one flat listing, so only one shape,
+# and their stream is their render handed over whole, one chunk, so a
+# partial row would read the whole file.
 FAMILY_SHAPES = {
     "github": ("root", "nested"),
     "gdrive": ("root", "nested"),
     **{name: ("root",) for name in GAPPS},
 }
 FAMILY_ROWS = {
-    "github": ("bytes", "stream"),
-    "gdrive": ("bytes", "stream"),
     **{name: ("bytes", "stream") for name in GAPPS},
 }
 
@@ -504,7 +502,7 @@ def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
             rewrite=lambda new: drive.add_file(key, new),
             reach=[],
             read_mod=gdrive_read,
-            stream_mod=None,
+            stream_mod=gdrive_read,
             index=RAMIndexCacheStore(),
             stat_indexed=False,
         )
@@ -614,7 +612,7 @@ def _github_fake(
             rewrite=rewrite,
             reach=reach,
             read_mod=github_read,
-            stream_mod=None,
+            stream_mod=github_read,
             mount_index=True,
         )
 
@@ -845,7 +843,7 @@ def test_each_family_runs_exactly_its_rows():
             f"{family}-{shape}-{row}"
             for family in ("github", "gdrive")
             for shape in ("root", "nested")
-            for row in ("bytes", "stream")
+            for row in rows
         }
         | {
             f"{family}-root-{row}"
@@ -871,9 +869,7 @@ def test_each_family_runs_exactly_its_rows():
         for target in ("new", "seeded")
     }
     assert not any(
-        c.id.startswith(
-            ("github-", "gdrive-", "gdocs-", "gsheets-", "gslides-")
-        )
+        c.id.startswith(("gdocs-", "gsheets-", "gslides-"))
         for c in _cases(("partial",))
     )
 
@@ -1531,10 +1527,10 @@ def test_the_contract_goes_red_on_hf_buckets_stamping_another_kind(
 
 
 def test_a_synthesized_stream_is_the_read_it_records_through():
-    # github's stream slot is filled from its whole read, which is why its
+    # gdocs' stream slot is filled from its whole read, which is why its
     # expected slot is "bytes". A native stream that forgot to record would
     # otherwise hide behind stream_mod=None.
-    vfs = vfs_over(GitHubVFS, None)
+    vfs = vfs_over(GDocsVFS, None)
     assert not vfs.supports("read_stream")
     stream = command_io(vfs).read_stream
     assert isinstance(stream, functools.partial)
@@ -1543,7 +1539,8 @@ def test_a_synthesized_stream_is_the_read_it_records_through():
 
 def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
     # github forced to stamp an md5 of the bytes while stat reports the blob
-    # sha: both tokens exist and differ.
+    # sha: both tokens exist and differ. A bytes read, because the override
+    # replaces only what `record` stamps.
     record = github_read.record
 
     def md5_record(
@@ -1567,7 +1564,7 @@ def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
         async def run():
             ws = _fresh_workspace(fake.vfs)
             try:
-                await _line(ws, f"cat {virtual}")
+                await _line(ws, f"cp {virtual} /r/a.txt")
                 holds_read_token = await ws.cache.is_fresh(
                     virtual, hashlib.md5(SEED).hexdigest()
                 )

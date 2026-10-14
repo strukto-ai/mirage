@@ -431,6 +431,10 @@ class FakeGitHub:
         if sha not in self.blobs:
             return web.json_response({"message": "Not Found"}, status=404)
         data = self.blobs[sha]
+        if "raw" in request.headers.get("Accept", ""):
+            return web.Response(
+                body=data, content_type="application/vnd.github.raw+json"
+            )
         return web.json_response(
             {
                 "sha": sha,

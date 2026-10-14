@@ -19,6 +19,7 @@ import logging
 import os
 import posixpath
 import shlex
+import stat
 import tempfile
 from collections.abc import AsyncIterator, Iterator
 
@@ -43,6 +44,18 @@ BIND_HOST = os.environ.get("MIRAGE_BIND_HOST", "127.0.0.1")
 # SSH_FX_PERMISSION_DENIED. mirage's chmod keeps owner access on purpose,
 # so the battery cannot make one through the shell.
 UNLISTABLE = b"unlistable"
+
+FIND = ["env", "LC_ALL=C", "find", "-L"]
+TREE_FORMAT = "%y %m %s %T@ %A@ %U %G %P\\0"
+WC = ["env", "LC_ALL=C", "wc", "-l", "<"]
+FIND_KINDS = (
+    (stat.S_ISDIR, "d"),
+    (stat.S_ISREG, "f"),
+    (stat.S_ISFIFO, "p"),
+    (stat.S_ISSOCK, "s"),
+    (stat.S_ISCHR, "c"),
+    (stat.S_ISBLK, "b"),
+)
 
 # The one command the server answers: the remote grep an ssh mount's
 # search sends, `SEARCH [-i] -e TEXT -- SCOPE...`. A server that asks for no
@@ -155,27 +168,128 @@ def search_names(
     return status, b"".join(n.encode() + b"\0" for n in names), b""
 
 
-async def run_search(root: str, process: asyncssh.SSHServerProcess) -> None:
-    """Answer the ssh search's grep, and refuse any other command.
+def _find_kind(info: os.stat_result | None) -> str:
+    if info is None:
+        return "l"
+    for test, kind in FIND_KINDS:
+        if test(info.st_mode):
+            return kind
+    return "U"
+
+
+def tree_records(root: str, scope: str) -> tuple[int, bytes, bytes]:
+    """What GNU ``find -L SCOPE -printf TREE_FORMAT`` answers under the
+    chroot the SFTP server applies: one NUL-ended record per entry, the
+    scope first, links followed and a broken one typed ``l``. A link loop
+    or a directory the SFTP server will not list exits 1 with find's
+    message, as find does.
+
+    Args:
+        root (str): Local directory served as the SFTP root.
+        scope (str): The directory, as the client named it.
+    """
+    base = os.path.join(os.path.realpath(root), scope.lstrip("/"))
+    if not os.path.lexists(base):
+        return 1, b"", f"find: '{scope}': No such file or directory\n".encode()
+    records: list[bytes] = []
+    errors: list[str] = []
+
+    def visit(path: str, rel: str, ancestors: frozenset[str]) -> None:
+        try:
+            info = os.stat(path)
+        except OSError:
+            info = None
+        kind = _find_kind(info)
+        shown = info or os.lstat(path)
+        fields = [
+            kind,
+            format(stat.S_IMODE(shown.st_mode), "o"),
+            str(shown.st_size),
+            f"{shown.st_mtime:.10f}",
+            f"{shown.st_atime:.10f}",
+            str(shown.st_uid),
+            str(shown.st_gid),
+            rel,
+        ]
+        records.append(" ".join(fields).encode() + b"\0")
+        if kind != "d":
+            return
+        named = scope.rstrip("/") + (f"/{rel}" if rel else "")
+        real = os.path.realpath(path)
+        if real in ancestors:
+            errors.append(f"find: File system loop detected; '{named}'\n")
+            return
+        if os.path.basename(path).encode() == UNLISTABLE:
+            errors.append(f"find: '{named}': Permission denied\n")
+            return
+        for name in sorted(os.listdir(path)):
+            child = f"{rel}/{name}" if rel else name
+            visit(os.path.join(path, name), child, ancestors | {real})
+
+    visit(base, "", frozenset())
+    return (1 if errors else 0), b"".join(records), "".join(errors).encode()
+
+
+def line_total(root: str, target: str) -> tuple[int, bytes, bytes]:
+    """What ``wc -l < TARGET`` answers under the chroot: a regular file's
+    newline count, or wc's or the shell's complaint.
+
+    Args:
+        root (str): Local directory served as the SFTP root.
+        target (str): The file, as the client named it.
+    """
+    path = os.path.join(os.path.realpath(root), target.lstrip("/"))
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except IsADirectoryError:
+        return 1, b"", b"wc: 'standard input': Is a directory\n"
+    except OSError as exc:
+        return 1, b"", f"sh: {target}: {exc.strerror}\n".encode()
+    return 0, b"%d\n" % data.count(b"\n"), b""
+
+
+def _answer(root: str, argv: list[str]) -> tuple[int, bytes, bytes] | None:
+    """The answer to the commands the mount sends, or None for any other.
+
+    Args:
+        root (str): Local directory served as the SFTP root.
+        argv (list[str]): The command, split as the shell splits it.
+    """
+    fold = argv[len(SEARCH) : len(SEARCH) + 1] == ["-i"]
+    rest = argv[len(SEARCH) + fold :]
+    if (
+        argv[: len(SEARCH)] == SEARCH
+        and len(rest) >= 4
+        and rest[::2][:2] == ["-e", "--"]
+    ):
+        return search_names(root, rest[1].encode(), fold, rest[3:])
+    if argv[: len(FIND)] == FIND and argv[len(FIND) + 1 :] == [
+        "-printf",
+        TREE_FORMAT,
+    ]:
+        return tree_records(root, argv[len(FIND)])
+    if argv[: len(WC)] == WC and len(argv) == len(WC) + 1:
+        return line_total(root, argv[-1])
+    return None
+
+
+async def run_command(root: str, process: asyncssh.SSHServerProcess) -> None:
+    """Answer the ssh search's grep, the tree's find and the line
+    count's wc, and refuse any other command.
 
     Args:
         root (str): Local directory served as the SFTP root.
         process (asyncssh.SSHServerProcess): The exec request.
     """
-    argv = shlex.split(process.command or "")
-    fold = argv[len(SEARCH) : len(SEARCH) + 1] == ["-i"]
-    rest = argv[len(SEARCH) + fold :]
-    if (
-        argv[: len(SEARCH)] != SEARCH
-        or len(rest) < 4
-        or rest[::2][:2] != ["-e", "--"]
-    ):
-        process.stderr.write(b"only the ssh search runs here\n")
+    answer = await asyncio.to_thread(
+        _answer, root, shlex.split(process.command or "")
+    )
+    if answer is None:
+        process.stderr.write(b"only the mount's own commands run here\n")
         process.exit(127)
         return
-    status, out, err = await asyncio.to_thread(
-        search_names, root, rest[1].encode(), fold, rest[3:]
-    )
+    status, out, err = answer
     process.stdout.write(out)
     process.stderr.write(err)
     process.exit(status)
@@ -183,7 +297,7 @@ async def run_search(root: str, process: asyncssh.SSHServerProcess) -> None:
 
 async def start_server(root: str, port: int = 0) -> asyncssh.SSHAcceptor:
     """Start a no-auth SFTP server chrooted to root, which runs no command
-    but the ssh search's grep.
+    but the mount's grep, find and wc.
 
     Args:
         root (str): Local directory served as the SFTP root.
@@ -196,7 +310,7 @@ async def start_server(root: str, port: int = 0) -> asyncssh.SSHAcceptor:
         server_host_keys=[host_key],
         server_factory=NoAuthServer,
         sftp_factory=functools.partial(ChrootSFTPServer, root),
-        process_factory=functools.partial(run_search, root),
+        process_factory=functools.partial(run_command, root),
         encoding=None,
     )
 

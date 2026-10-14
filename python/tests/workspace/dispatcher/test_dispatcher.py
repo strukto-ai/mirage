@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.context import (
     Caller,
     current_caller,
@@ -1493,6 +1493,45 @@ async def test_a_direct_read_neither_serves_nor_keeps_the_cache():
     await ws.cache.remove("/data/f.count")
     await ws.dispatch("read", path, direct=True)
     assert not await ws.cache.exists("/data/f.count")
+
+
+class _ListedRAM(RAMVFS):
+    """A store whose stat answers from a listing row when the index has
+    one, as an object store's does."""
+
+    async def stat(self, path, index=NULL_INDEX):
+        row = (await index.get(path.virtual)).entry
+        if row is not None:
+            return FileStat(name=row.name, type=FileType.FILE, size=row.size)
+        return await super().stat(path, index)
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_stat_asks_past_a_stale_listing():
+    # The index holds a listing up to its TTL old: `wc -c` and `cmp -s`
+    # take the size from a stat that asks the backend now.
+    vfs = _ListedRAM()
+    vfs._store.dirs.add("/")
+    vfs._store.files["/f"] = b"grown\n"
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    try:
+        await ws.mount("/m").index.set_dir(
+            "/m",
+            [
+                (
+                    "f",
+                    IndexEntry(id="f", name="f", resource_type="file", size=3),
+                )
+            ],
+        )
+        path = PathSpec.from_str_path("/m/f")
+        listed, _ = await ws.dispatch("stat", path)
+        now, _ = await ws.dispatch("stat", path, fresh=True)
+        assert (listed.size, now.size) == (3, 6)
+        out = await ws.shell("wc -c /m/f")
+        assert await out.stdout_str() == "6 /m/f\n"
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

@@ -31,8 +31,9 @@ export const PROMPT = `{prefix}
   false included). A link field is a list of record ids; an attachment
   url expires two hours after it was read.
   records.jsonl lists in the API's own order; a view file applies the
-  view's filter and sort. A file over max_read_records records is
-  refused whole (File too large), while head -n N fetches just N records:
+  view's filter and sort. A file over max_read_records records stops
+  with File too large after that many, while head -n N fetches just N
+  records:
     head -n 20 {prefix}/bases/<base>/<table>/records.jsonl | jq .fields
   The airtable CLI, if installed, reaches what a file cannot: server-side
   filters (airtable record list --formula or --view), one record by id

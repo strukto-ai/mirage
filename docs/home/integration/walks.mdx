@@ -84,10 +84,14 @@ entries of a `read_tree` answer cost none and do not count toward the cap.
 | Nextcloud | one file search under the path, a page of a thousand entries per request |
 | GitHub | the repository tree the mount fetches once |
 | Redis | one key scan, with every stat in one pipeline |
+| SSH | one `find -L` on the server, when it runs commands and every entry is a file or a directory |
 | RAM | the store in memory |
 
 A walk on any other mount reads one directory at a time. The Hugging Face Hub
 already answers every `readdir` from the repository tree it fetches once.
 Nextcloud's file search needs a Nextcloud server; on another WebDAV server the
 walk lists each folder. GitHub answers `None` when GitHub truncated the tree of
-a large repository.
+a large repository. SSH answers `None` on a server limited to SFTP, with a
+`find` that has no `-printf` (BusyBox, BSD), and for a tree holding a link
+loop, a broken link or a special file, which the walk reports as it finds
+them.

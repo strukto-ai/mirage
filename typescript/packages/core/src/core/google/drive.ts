@@ -18,6 +18,7 @@ import {
   googleDelete,
   googleGet,
   googleGetBytes,
+  googleGetStream,
   googlePatch,
   googlePost,
   googleSendBytes,
@@ -274,8 +275,19 @@ export async function downloadFile(
   fileId: string,
   window?: ByteWindow,
 ): Promise<Uint8Array> {
-  const url = `${driveBase(tm)}/files/${fileId}?alt=media&supportsAllDrives=true`
-  return googleGetBytes(tm, url, window)
+  return googleGetBytes(tm, mediaUrl(tm, fileId), window)
+}
+
+/** Stream a regular file from Drive as it downloads. */
+export function downloadFileStream(
+  tm: TokenManager,
+  fileId: string,
+): AsyncGenerator<Uint8Array, void> {
+  return googleGetStream(tm, mediaUrl(tm, fileId))
+}
+
+function mediaUrl(tm: TokenManager, fileId: string): string {
+  return `${driveBase(tm)}/files/${fileId}?alt=media&supportsAllDrives=true`
 }
 
 export async function deleteFile(tm: TokenManager, fileId: string): Promise<void> {

@@ -41,6 +41,7 @@ async def stream_messages_for_day(
     scope: TimeRange,
     page_size: int = 100,
     session: SessionArg = None,
+    after: str | None = None,
 ) -> AsyncIterator[list[dict[str, Any]]]:
     """Stream message pages for a channel-day.
 
@@ -55,6 +56,7 @@ async def stream_messages_for_day(
         scope (TimeRange): the mount's time scope, clipping the day.
         page_size (int): per-page limit (Discord caps at 100).
         session (SessionArg): pool or live session to ride.
+        after (str | None): only the messages after this id.
 
     Yields:
         list[dict]: message dicts, filtered to within the date.
@@ -64,14 +66,14 @@ async def stream_messages_for_day(
         return
     first = snowflake_at(start)
     before_int = snowflake_at(end)
-    after = str(max(0, first - 1))
+    floor = max(0, first - 1, int(after) if after is not None else 0)
     async for page in after_id_pages(
         config,
         f"/channels/{channel_id}/messages",
         base_params={},
         last_id_fn=lambda m: m["id"],
         page_size=page_size,
-        start_after=after,
+        start_after=str(floor),
         newest_first=True,
         session=session,
     ):
@@ -89,6 +91,7 @@ async def list_messages_for_day(
     scope: TimeRange,
     page_size: int = 100,
     session: SessionArg = None,
+    after: str | None = None,
 ) -> list[dict[str, Any]]:
     """List all messages for a channel-day (eager).
 
@@ -99,13 +102,20 @@ async def list_messages_for_day(
         scope (TimeRange): the mount's time scope, clipping the day.
         page_size (int): per-page limit.
         session (SessionArg): pool or live session to ride.
+        after (str | None): only the messages after this id.
 
     Returns:
         list[dict]: messages within the date, sorted oldest-first.
     """
     out: list[dict[str, Any]] = []
     async for page in stream_messages_for_day(
-        config, channel_id, date_str, scope, page_size, session=session
+        config,
+        channel_id,
+        date_str,
+        scope,
+        page_size,
+        session=session,
+        after=after,
     ):
         out.extend(page)
     out.sort(key=lambda m: int(m["id"]))

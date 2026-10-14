@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.github import GitHubAccessor
@@ -19,6 +20,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.constants import COMMIT_SHA, SCOPE_ERROR
 from mirage.core.github.read import read as _read
+from mirage.core.github.read import read_stream as _read_stream
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.core.github.search import before_full_scan as _before_full_scan
 from mirage.core.github.search import files_containing as _files_containing
@@ -162,6 +164,11 @@ class GitHubVFS(BaseVFS):
     ) -> bytes:
         data = await _read(self.accessor, path, index)
         return slice_window(data, offset, size)
+
+    def read_stream(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

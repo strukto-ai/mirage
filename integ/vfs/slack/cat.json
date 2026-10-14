@@ -103,6 +103,19 @@
         "stdout": "{\"type\":\"message\",\"user\":\"U5\",\"text\":\"deploy #2064 succeeded on preview\",\"ts\":\"1768827382.000652\"}\nkudos to Frank for the customer save\ntoday we made the hard decision to reduce our team, thank you erin and frank for everything\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "slack_tail_follow_prints_the_last_lines_first",
+      "seq": 520036,
+      "targets": [
+        "slack"
+      ],
+      "command": "set -o pipefail; tail -n 2 -f /slack/channels/engineering__C3/2026-01-19/chat.jsonl | head -n 2 | jq -r .text",
+      "expect": {
+        "exit": 0,
+        "stdout": "approved, ship it\ndeploy #2064 succeeded on preview\n",
+        "stderr": ""
+      }
     }
   ]
 }

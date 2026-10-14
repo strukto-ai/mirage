@@ -248,8 +248,9 @@ async function window(
 // An unread operand (a directory) prints its header and is not followed.
 // One file followed by descriptor, under a count of lines from the end, is
 // asked of the mount's `follow` first: a mount that is told about new lines
-// (a change stream) hands over the last lines and then each new one as it
-// lands, so nothing is polled and the two meet at one point.
+// (a change stream), or can be asked for only the new ones every -s seconds,
+// hands over the last lines and then each new one as it lands, so the file is
+// not read again on each poll and the two meet at one point.
 async function* follow(
   paths: readonly PathSpec[],
   pending: readonly [PathSpec, string][],
@@ -265,7 +266,11 @@ async function* follow(
   unread: ReadonlySet<string>,
   onlyStdin: boolean,
   followLines: number | null = null,
-  followOp?: (p: PathSpec, n: number) => Promise<AsyncIterable<Uint8Array> | null>,
+  followOp?: (
+    p: PathSpec,
+    n: number,
+    interval: number,
+  ) => Promise<AsyncIterable<Uint8Array> | null>,
 ): AsyncGenerator<Uint8Array> {
   const positions = new Map<number, number>()
   let added: AsyncIterable<Uint8Array> | null = null
@@ -299,7 +304,7 @@ async function* follow(
           !flags.byName &&
           !isStdin(p)
         ) {
-          added = await followOp(p, followLines)
+          added = await followOp(p, followLines, flags.interval)
         }
         // A follow's stream holds the first print too.
         if (added === null) raw = await materialize(stream(p))
@@ -513,8 +518,8 @@ function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
  * Run tail over resolved operands, GNU semantics. A line count from the end
  * (`-n N`, or the default 10) is asked of `lastLines` first, so a mount that
  * can fetch the end of a file on its own does not send the rest; `-f` on one
- * file asks `followOp(p, n)` (see `follow`). Null, or no such op, reads or polls
- * the file. Mirrors Python's `tail_generic`.
+ * file asks `followOp(p, n, interval)` (see `follow`). Null, or no such op, reads
+ * or polls the file. Mirrors Python's `tail_generic`.
  */
 export async function tailGeneric(
   paths: PathSpec[],
@@ -524,7 +529,11 @@ export async function tailGeneric(
   stat: Stat,
   readRange: ReadRangeFn | null = null,
   lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
-  followOp?: (p: PathSpec, n: number) => Promise<AsyncIterable<Uint8Array> | null>,
+  followOp?: (
+    p: PathSpec,
+    n: number,
+    interval: number,
+  ) => Promise<AsyncIterable<Uint8Array> | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   const parsed = parseFlags(opts.flags)

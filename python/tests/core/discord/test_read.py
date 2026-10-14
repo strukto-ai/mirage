@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.core.discord.read import read, read_range, read_stream
+from mirage.core.discord.read import follow, read, read_range, read_stream
 from mirage.core.render.json import jsonl_bytes
 from mirage.types import PathSpec
 from tests.core.discord.conftest import DAY, MESSAGES, SEALED_DAY
@@ -132,3 +132,27 @@ async def test_attachment_stream_closes_before_fetching_tail(
         assert await anext(stream) == b"first\n"
         await stream.aclose()
     assert closed == [True]
+
+
+async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
+    api, accessor, index
+):
+    added = [{"id": "1196242344345600900", "content": "later"}]
+    with patch(
+        "mirage.core.discord.read.list_messages_for_day",
+        new_callable=AsyncMock,
+        side_effect=[[dict(m) for m in MESSAGES], added, []],
+    ) as fetch:
+        stream = await follow(accessor, spec(CHAT), 1, 0.001, index)
+        try:
+            assert await anext(stream) == jsonl_bytes(MESSAGES[-1:])
+            assert await anext(stream) == jsonl_bytes(added)
+        finally:
+            await stream.aclose()
+    assert "after" not in fetch.await_args_list[0].kwargs
+    assert fetch.await_args_list[1].kwargs["after"] == MESSAGES[-1]["id"]
+
+
+async def test_only_a_chat_day_is_followed(api, accessor, index):
+    member = f"/{GUILD_DIR}/members/alice__U001.json"
+    assert await follow(accessor, spec(member), 1, 1.0, index) is None

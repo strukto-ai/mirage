@@ -20,6 +20,10 @@ from unittest.mock import patch
 _FAKE_TOKEN = "fake-gdrive-token"
 _FAKE_EXPIRES_IN = 9999999999
 
+# A stream answers in pieces of this size, so a reader that stops after the
+# first one leaves the rest unpulled.
+_STREAM_CHUNK = 8192
+
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 _FILE_MIME = "application/octet-stream"
 _NATIVE_MIMES = frozenset(
@@ -60,6 +64,9 @@ _PATCH_TARGETS = {
     ],
     "download_file": [
         "mirage.core.gdrive.read.download_file",
+    ],
+    "download_file_stream": [
+        "mirage.core.gdrive.read.download_file_stream",
     ],
     "capture_file_metadata": [
         "mirage.core.gdrive.read.capture_file_metadata",
@@ -445,6 +452,15 @@ def _build_fakes(registry):
         fake.calls["download_file"] += 1
         return _sliced(_bytes_for(fake, registry, file_id), range_header)
 
+    async def fake_download_file_stream(token_manager, file_id: str):
+        fake = _resolve_fake(token_manager, registry)
+        if fake is None:
+            raise FileNotFoundError(file_id)
+        fake.calls["download_file"] += 1
+        data = _bytes_for(fake, registry, file_id)
+        for at in range(0, len(data), _STREAM_CHUNK):
+            yield data[at : at + _STREAM_CHUNK]
+
     async def fake_get_file(token_manager, file_id: str) -> dict:
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
@@ -515,6 +531,7 @@ def _build_fakes(registry):
         "list_shared_drives": fake_list_shared_drives,
         "list_all_files": fake_list_all_files,
         "download_file": fake_download_file,
+        "download_file_stream": fake_download_file_stream,
         "capture_file_metadata": fake_capture_file_metadata,
         "get_file": fake_get_file,
         "upload_file": fake_upload_file,

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.history import get_history_jsonl
+from mirage.core.slack.history import fetch_messages_for_day, get_history_jsonl
 from mirage.core.time_range import TimeRange
 
 
@@ -72,3 +72,29 @@ async def test_get_history_empty(config):
         )
 
     assert result == b""
+
+
+@pytest.mark.asyncio
+async def test_messages_after_a_ts_start_past_it(config):
+    page = {
+        "ok": True,
+        "messages": [
+            {"text": "c", "ts": "1700000003.000000"},
+            {"text": "b", "ts": "1700000002.000000"},
+        ],
+        "has_more": False,
+    }
+    with patch(
+        "mirage.core.slack.paginate.slack_get",
+        new_callable=AsyncMock,
+        return_value=page,
+    ) as get:
+        found = await fetch_messages_for_day(
+            config,
+            "C001",
+            "2023-11-14",
+            TimeRange(),
+            after="1700000002.000000",
+        )
+    assert [m["text"] for m in found] == ["c"]
+    assert get.await_args.kwargs["params"]["oldest"] == "1700000002.000000"

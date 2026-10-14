@@ -95,7 +95,11 @@ class MongoDBVFS(BaseVFS):
         return await _line_count(self.accessor, path, index)
 
     async def follow(
-        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        n: int,
+        interval: float,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> AsyncIterator[bytes] | None:
         return await _follow(self.accessor, path, n, index)
 

@@ -40,7 +40,7 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
-import { read as githubRead } from '../../core/github/read.ts'
+import { read as githubRead, readStream as githubStream } from '../../core/github/read.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
 import {
   beforeFullScan as githubBeforeFullScan,
@@ -138,6 +138,10 @@ export class GitHubVFS extends BaseVFS {
   ): Promise<Uint8Array> {
     const data = await githubRead(this.accessor, path, index)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return githubStream(this.accessor, path, index)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

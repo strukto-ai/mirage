@@ -19,7 +19,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
-import { read, readStream } from './read.ts'
+import { follow, read, readStream } from './read.ts'
 
 interface Call {
   endpoint: string
@@ -281,4 +281,69 @@ it('uses bounded buffered downloads when a custom transport has no stream method
   expect(received.map((chunk) => chunk.byteLength)).toEqual([16384, 16384, 7232])
   expect(received.reduce((total, chunk) => total + chunk.byteLength, 0)).toBe(bytes.byteLength)
   expect(downloadFile).toHaveBeenCalledWith('https://cdn.test/report', 0, null)
+})
+
+describe('follow', () => {
+  it('prints the last lines, then asks after the last one seen', async () => {
+    const idx = new RAMIndexCacheStore()
+    await idx.setDir('/mnt/slack/channels', [
+      [
+        'general__C1',
+        new IndexEntry({
+          id: 'C1',
+          name: 'general',
+          resourceType: 'slack/channel',
+          vfsName: 'general__C1',
+          remoteTime: '0',
+        }),
+      ],
+    ])
+    const t = new FakeTransport((endpoint, params) => {
+      if (endpoint !== 'conversations.history') return { ok: true }
+      if (params?.oldest === '1776989000.0') {
+        return { ok: true, messages: [{ ts: '1776989100.0', text: 'later' }] }
+      }
+      return {
+        ok: true,
+        messages: [
+          { ts: '1776988900.0', text: 'hello' },
+          { ts: '1776989000.0', text: 'world' },
+        ],
+      }
+    })
+    const stream = await follow(
+      new SlackAccessor(t),
+      spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
+      1,
+      0.001,
+      idx,
+    )
+    if (stream === null) throw new Error('the chat day was not followed')
+    const it = stream[Symbol.asyncIterator]()
+    const texts = async (): Promise<string[]> =>
+      decoder
+        .decode(((await it.next()).value as Uint8Array | undefined) ?? new Uint8Array())
+        .trimEnd()
+        .split('\n')
+        .map((line) => (JSON.parse(line) as { text: string }).text)
+    expect(await texts()).toEqual(['world'])
+    expect(await texts()).toEqual(['later'])
+    const idle = it.next()
+    await it.return?.()
+    expect((await idle).done).toBe(true)
+    const asked = t.calls.filter((c) => c.endpoint === 'conversations.history')
+    expect(asked.map((c) => c.params?.oldest)).toContain('1776989000.0')
+  })
+
+  it('follows only a chat day', async () => {
+    const t = new FakeTransport(() => ({ ok: true }))
+    expect(
+      await follow(
+        new SlackAccessor(t),
+        spec('/mnt/slack/users/alice__U1.json', '/mnt/slack'),
+        1,
+        1,
+      ),
+    ).toBeNull()
+  })
 })

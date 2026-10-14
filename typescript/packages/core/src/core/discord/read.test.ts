@@ -19,7 +19,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
-import { read, readStream } from './read.ts'
+import { follow, read, readStream } from './read.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -312,4 +312,56 @@ it('closes an attachment stream before fetching its tail', async () => {
   } finally {
     vi.unstubAllGlobals()
   }
+})
+
+describe('follow', () => {
+  it('prints the last lines, then asks after the last one seen', async () => {
+    const idx = new RAMIndexCacheStore()
+    await idx.setDir('/mnt/discord/My Server__G1/channels', [
+      [
+        'general__C1',
+        new IndexEntry({
+          id: 'C1',
+          name: 'general',
+          resourceType: 'discord/channel',
+          vfsName: 'general__C1',
+          remoteTime: '',
+        }),
+      ],
+    ])
+    const day = [
+      { id: '1196400000000000000', content: 'world' },
+      { id: '1196300000000000000', content: 'hello' },
+    ]
+    const later = { id: '1196450000000000000', content: 'later' }
+    const t: FakeDiscordTransport = new FakeDiscordTransport((_m, endpoint) => {
+      if (endpoint !== '/channels/C1/messages') return null
+      // `later` lands once the day has been read, so only a poll sees it.
+      const after = BigInt(t.calls[t.calls.length - 1]?.params?.after ?? 0)
+      const posted = after >= BigInt(day[0]?.id ?? 0) ? [later] : day
+      return posted.filter((m) => BigInt(m.id) > after) as DiscordResponse
+    })
+    const stream = await follow(
+      new DiscordAccessor(t),
+      spec('/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl', '/mnt/discord'),
+      1,
+      0.001,
+      idx,
+    )
+    if (stream === null) throw new Error('the chat day was not followed')
+    const it = stream[Symbol.asyncIterator]()
+    const contents = async (): Promise<string[]> =>
+      decoder
+        .decode(((await it.next()).value as Uint8Array | undefined) ?? new Uint8Array())
+        .trimEnd()
+        .split('\n')
+        .map((line) => (JSON.parse(line) as { content: string }).content)
+    expect(await contents()).toEqual(['world'])
+    expect(await contents()).toEqual(['later'])
+    const idle = it.next()
+    await it.return?.()
+    expect((await idle).done).toBe(true)
+    const asked = t.calls.filter((c) => c.endpoint === '/channels/C1/messages')
+    expect(asked.map((c) => c.params?.after)).toContain('1196400000000000000')
+  })
 })

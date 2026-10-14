@@ -25,6 +25,7 @@ from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.paths import (
@@ -644,6 +645,9 @@ class _Call:
         stream (bool): whether a read is answered as it is pulled.
         direct (bool): whether a read skips the file cache, neither
             served from it nor kept in it.
+        fresh (bool): whether a stat asks the backend past the mount's
+            index, through a throwaway store as a ``read: fresh`` probe
+            does, with the index's rows only as hints.
     """
 
     name: str
@@ -659,6 +663,7 @@ class _Call:
     write: bool
     stream: bool = False
     direct: bool = False
+    fresh: bool = False
 
     @property
     def window(self) -> tuple[int, int | None]:
@@ -859,8 +864,9 @@ class Dispatcher:
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        # The dispatcher's own keywords: a read answered as it is pulled, and a
-        # read of what the backend holds now, past the file cache.
+        # The dispatcher's own keywords: a read answered as it is pulled, a
+        # read of what the backend holds now, past the file cache, and a
+        # stat of what it holds now, past the mount's index.
         admit_only = name in {"write", "stat"} and bool(
             kwargs.pop("admit_only", False)
         )
@@ -875,6 +881,7 @@ class Dispatcher:
         )
         stream = name == "read" and bool(kwargs.pop("stream", False))
         direct = name == "read" and bool(kwargs.pop("direct", False))
+        fresh = name == "stat" and bool(kwargs.pop("fresh", False))
         await self._prepare(caller)
         # With no scan guard on any mount, no path reaches one to ask.
         if name == "before_full_scan" and not any(
@@ -884,6 +891,7 @@ class Dispatcher:
         call = await self._walk(name, path, kwargs, rule_gate, report, caller)
         call.stream = stream
         call.direct = direct
+        call.fresh = fresh
         await self._refuse_rename(call)
         if report is not None:
             report.path = call.path.virtual
@@ -1560,6 +1568,8 @@ class Dispatcher:
             else:
                 if call.name == "before_full_scan":
                     kwargs["files"] = await self._visible_files(mount, call)
+                if call.fresh:
+                    kwargs["index"] = ListingCheckStore(hints=mount.index)
                 result = await mount.call(
                     call.name, call.path.virtual, **kwargs
                 )

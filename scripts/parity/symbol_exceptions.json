@@ -1,6 +1,11 @@
 {
-  "baseline": 3735,
+  "baseline": 3734,
  "modules": {
+  "core/api/client": {
+   "typescript_only": {
+    "bodyChunks": "Reads a fetch ReadableStream, shared by apiStream and the GitHub transport's stream; Python's api_stream reads aiohttp's iter_chunked."
+   }
+  },
   "core/render/json": {
    "python_only": {
     "ecma_numbers": "orjson writes a float its own way; TypeScript's JSON.stringify already spells each number as ECMAScript does."

@@ -296,6 +296,10 @@ vi.mock('@struktoai/mirage-core/core/google/drive', async (importOriginal) => {
       H.gdriveDownloads += 1
       return Promise.resolve(item(id).content)
     },
+    downloadFileStream: async function* (_tm: unknown, id: string) {
+      H.gdriveDownloads += 1
+      yield* Readable.from(chunked(item(id).content)) as AsyncIterable<Uint8Array>
+    },
     // A write's reply is the uploaded file resource, rendered through
     // gdriveResource like a listing entry, so the token a write records and
     // the token a later probe lists cannot disagree.
@@ -595,9 +599,9 @@ const ALL_SHAPES: Shape[] = ['root', 'nested', 'prefixed']
 const ALL_ROWS: Row[] = ['bytes', 'stream', 'partial']
 
 // What each family can run, fixed when the rows are built. github and gdrive
-// have no key_prefix, and their stream is their read handed over whole, one
-// chunk, so a partial row would read the whole file. The GAPPS mounts also
-// have one flat listing, so only one shape.
+// have no key_prefix. The GAPPS mounts have one flat listing, so only one
+// shape, and their stream is their render handed over whole, one chunk, so a
+// partial row would read the whole file.
 const FAMILY_SHAPES: Partial<Record<Family, Shape[]>> = {
   github: ['root', 'nested'],
   gdrive: ['root', 'nested'],
@@ -606,8 +610,6 @@ const FAMILY_SHAPES: Partial<Record<Family, Shape[]>> = {
   gslides: ['root'],
 }
 const FAMILY_ROWS: Partial<Record<Family, Row[]>> = {
-  github: ['bytes', 'stream'],
-  gdrive: ['bytes', 'stream'],
   gdocs: ['bytes', 'stream'],
   gsheets: ['bytes', 'stream'],
   gslides: ['bytes', 'stream'],
@@ -634,8 +636,8 @@ interface Fake {
   readBytes: (path: PathSpec) => Promise<Uint8Array>
   readStream: (path: PathSpec) => AsyncIterable<Uint8Array>
   stat: (path: PathSpec) => Promise<FileStat>
-  // The slot a stream read records in: github's and gdrive's streams are
-  // their whole read handed over, which records through `record`.
+  // The slot a stream read records in: the Google apps' streams are their
+  // whole read handed over, which records through `record`.
   streamSlot: 'stream' | 'bytes'
 }
 
@@ -831,7 +833,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       readBytes: (p) => commandIo(vfs).readBytes(accessor, p, ownIndex(vfs)),
       readStream: (p) => commandIo(vfs).readStream(accessor, p, ownIndex(vfs)),
       stat: (p) => commandIo(vfs).stat(accessor, p, ownIndex(vfs)),
-      streamSlot: 'bytes',
+      streamSlot: 'stream',
     }
   }
   const key = KEYS[shape]
@@ -906,7 +908,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
       readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
       stat: (p) => commandIo(vfs).stat(accessor, p),
-      streamSlot: 'bytes',
+      streamSlot: 'stream',
     }
   }
   const gapp = GAPPS[name]
@@ -1321,7 +1323,7 @@ describe('the read-token contract', () => {
     expect(ids(B_CASES)).toEqual(
       new Set([...expectedA].filter((i) => !i.endsWith('-listed-stream'))),
     )
-    const whole = ['github', 'gdrive', 'gdocs', 'gsheets', 'gslides']
+    const whole = ['gdocs', 'gsheets', 'gslides']
     expect(cases(['partial']).some((c) => whole.includes(c.name))).toBe(false)
     const expectedWrite = new Set<string>()
     for (const family of [
@@ -1667,24 +1669,26 @@ describe('the read-token contract', () => {
     }
   })
 
-  it("github's stream is its read, so it records through record", async () => {
+  it("gdocs' stream is its read, so it records through record", async () => {
     // Its expected stream slot is "bytes" for that reason. A native stream
     // that forgot to record would otherwise hide behind that slot.
-    const fake = await makeFake('github', 'root', SEED)
+    const fake = await makeFake('gdocs', 'root', SEED)
     const chunks: Uint8Array[] = []
-    for await (const chunk of fake.readStream(specFor('/m/a.txt', fake.key))) chunks.push(chunk)
+    for await (const chunk of fake.readStream(specFor(`/m/${fake.key}`, fake.key)))
+      chunks.push(chunk)
     expect(chunks).toEqual([SEED])
   })
 
   it('the contract goes red on github stamping another kind', async () => {
     // github forced to stamp an md5 of the bytes while stat reports the blob
-    // sha: both tokens exist and differ.
+    // sha: both tokens exist and differ. A bytes read, because the override
+    // replaces only what `record` stamps.
     const fake = await makeFake('github', 'root', SEED)
     H.stampOverride = md5Hex(SEED)
     const virtual = '/m/a.txt'
     const ws = freshWorkspace(fake.vfs)
     try {
-      await line(ws, `cat ${virtual}`)
+      await line(ws, `cp ${virtual} /r/a.txt`)
       expect(await ws.cache.isFresh(virtual, md5Hex(SEED))).toBe(true)
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe(blobSha(SEED))

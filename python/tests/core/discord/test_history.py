@@ -18,7 +18,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.core.discord.config import DiscordConfig
-from mirage.core.discord.history import get_history_jsonl
+from mirage.core.discord.history import (
+    get_history_jsonl,
+    list_messages_for_day,
+    snowflake_at,
+)
 from mirage.core.time_range import TimeRange
 
 
@@ -63,3 +67,17 @@ async def test_get_history_empty(config):
         )
 
     assert result == b""
+
+
+@pytest.mark.asyncio
+async def test_messages_after_an_id_start_past_it(config):
+    later = str(snowflake_at(1705320000) + 5)
+    with patch(
+        "mirage.core.discord.paginate.discord_get",
+        new_callable=AsyncMock,
+        return_value=[],
+    ) as get:
+        await list_messages_for_day(
+            config, "C001", "2024-01-15", TimeRange(), after=later
+        )
+    assert get.await_args.kwargs["params"]["after"] == later

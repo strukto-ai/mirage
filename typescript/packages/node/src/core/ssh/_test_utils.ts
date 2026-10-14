@@ -571,3 +571,24 @@ export function makeFakeAccessor(state: FakeSftp, root = '/'): SSHAccessor {
   accessor.sftp = () => Promise.resolve(fake)
   return accessor
 }
+
+export type RunAnswer = [number | null, Uint8Array, Uint8Array] | Error
+
+// An accessor whose server answers every command with `answer`. Twin of
+// Python's RunAccessor.
+export class RunAccessor extends SSHAccessor {
+  readonly sent: string[] = []
+
+  constructor(
+    root: string,
+    private readonly answer: RunAnswer,
+  ) {
+    super({ host: 'example.test', root })
+  }
+
+  override run(command: string): Promise<[number | null, Uint8Array, Uint8Array]> {
+    this.sent.push(command)
+    if (this.answer instanceof Error) return Promise.reject(this.answer)
+    return Promise.resolve(this.answer)
+  }
+}
