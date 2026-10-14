@@ -654,6 +654,15 @@ function isJudged(expl: Judgment): boolean {
 }
 
 /**
+ * Whether the allow list refuses a command on its own words, which nothing
+ * that runs before it on the line can change. Mirrors the Python
+ * `_uncovered`.
+ */
+function uncovered(expl: Judgment): boolean {
+  return expl.outcome === Outcome.DENY && expl.source === 'commands.allow' && refuses(expl)
+}
+
+/**
  * Whether an explanation refuses the command outright, rather than
  * reporting a line that would run or a question the host has not
  * answered.
@@ -968,6 +977,7 @@ async function commandRefused(
     item.stdin,
   )
   for (const judged of explained) {
+    if (uncovered(judged.judgment)) return true
     // A question about a spelling the runtime completes is the gate's
     // (`asksFor`); the node is kept, and over-keeping only ever
     // over-fetches.

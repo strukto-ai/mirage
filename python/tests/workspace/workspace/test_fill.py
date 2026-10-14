@@ -1444,6 +1444,36 @@ async def test_cli_fetches_only_the_invoked_verb_path():
 
 
 @pytest.mark.asyncio
+async def test_a_cli_the_allow_list_refuses_never_fetches():
+    # The allow list refuses a command on its own words, whatever runs
+    # before it, so nothing is fetched for it: here a CLI that reaches a
+    # service, under hides, with no pattern naming it.
+    calls, fetch = counting_source({"CLI_ROOT": "r0", "CLI_ALPHA": "a0"})
+    register_secrets("fake", FakeConfig, fetch)
+    ws = _ws(
+        {
+            "CLI_ROOT": {"from": "fake", "ref": "root"},
+            "CLI_ALPHA": {"from": "fake", "ref": "alpha"},
+        },
+        profiles={
+            "p": {
+                "paths": {"hide": ["/secret"]},
+                "commands": {"allow": ["*"]},
+            }
+        },
+        profile="p",
+    )
+    try:
+        service = dataclasses.replace(_cli_spec(), config_model=FakeConfig)
+        ws.register_cli("mycli", service, config={})
+        io = await ws.shell("mycli alpha")
+        assert io.exit_code == 126
+        assert calls == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_supplied_cli_option_skips_its_env():
     calls, fetch = counting_source({"CLI_ROOT": "r0", "CLI_ALPHA": "a0"})
     register_secrets("fake", FakeConfig, fetch)

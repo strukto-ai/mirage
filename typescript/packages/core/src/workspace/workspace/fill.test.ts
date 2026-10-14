@@ -1461,6 +1461,34 @@ describe('fillEnv through execute', () => {
     }
   })
 
+  it('a cli the allow list refuses never fetches', async () => {
+    // The allow list refuses a command on its own words, whatever runs
+    // before it, so nothing is fetched for it: here a CLI that reaches a
+    // service, under hides, with no pattern naming it.
+    const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0' })
+    registerSecrets('fake-cli-refused', FakeConfig, fetch)
+    const ws = await makeWs(
+      {
+        CLI_ROOT: { from: 'fake-cli-refused', ref: 'root' },
+        CLI_ALPHA: { from: 'fake-cli-refused', ref: 'alpha' },
+      },
+      parseSessionProfile({ paths: { hide: ['/secret'] }, commands: { allow: ['*'] } }),
+    )
+    try {
+      const base = envCliSpec()
+      ws.registerCli(
+        'mycli',
+        new CLI({ spec: base.spec, handlers: base.handlers, configModel: FakeConfig }),
+        {},
+      )
+      const io = await ws.shell('mycli alpha')
+      expect(io.exitCode).toBe(126)
+      expect(calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a supplied cli option skips its env', async () => {
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0' })
     registerSecrets('fake-cli-supplied', FakeConfig, fetch)

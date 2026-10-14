@@ -506,6 +506,20 @@ def _is_verdict(expl: Judgment) -> bool:
     return expl.rule is not None or expl.outcome is Outcome.ALLOW
 
 
+def _uncovered(expl: Judgment) -> bool:
+    """Whether the allow list refuses a command on its own words, which
+    nothing that runs before it on the line can change.
+
+    Args:
+        expl (Judgment): one command's explanation.
+    """
+    return (
+        expl.outcome is Outcome.DENY
+        and expl.source == "commands.allow"
+        and _refuses(expl)
+    )
+
+
 def _refuses(expl: Judgment) -> bool:
     """Whether an explanation refuses the command outright, rather than
     reporting a line that would run or a question the host has not
@@ -1156,6 +1170,8 @@ async def _command_refused(
         lost=item.lost,
     )
     for judged in explained:
+        if _uncovered(judged.judgment):
+            return True
         # A question about a spelling the runtime completes is the
         # gate's (``_asks_for``); the node is kept, and over-keeping
         # only ever over-fetches.
