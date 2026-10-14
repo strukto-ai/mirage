@@ -534,16 +534,6 @@ async def settle_pending_prunes(
     settle_prunes(node, mtimes)
 
 
-def tree_has_type(node: PredNode) -> bool:
-    if isinstance(node, Type):
-        return True
-    if isinstance(node, Not):
-        return tree_has_type(node.kid)
-    if isinstance(node, (And, Or)):
-        return any(tree_has_type(kid) for kid in node.kids)
-    return False
-
-
 def tree_has_empty(node: PredNode) -> bool:
     if isinstance(node, Empty):
         return True
@@ -551,16 +541,6 @@ def tree_has_empty(node: PredNode) -> bool:
         return tree_has_empty(node.kid)
     if isinstance(node, (And, Or)):
         return any(tree_has_empty(kid) for kid in node.kids)
-    return False
-
-
-def tree_has_mtime(node: PredNode) -> bool:
-    if isinstance(node, Mtime):
-        return True
-    if isinstance(node, Not):
-        return tree_has_mtime(node.kid)
-    if isinstance(node, (And, Or)):
-        return any(tree_has_mtime(kid) for kid in node.kids)
     return False
 
 

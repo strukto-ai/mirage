@@ -183,8 +183,8 @@ def with_probe_answers(ops: CommandIO) -> CommandIO:
     Under fresh the freshness probe has already asked the backend about
     the operand (``CacheManager.probed_stat``). It is the backend's own
     op-table stat, so this goes only on an adapter whose ``stat`` is that
-    function: a per-command stat (dify's light ``ls``) keeps asking, so
-    what it prints never changes with the policy.
+    function: a per-command stat keeps asking, so what it prints never
+    changes with the policy.
 
     Applied to the raw adapter, below the path guards: a hidden or
     refused path is answered by its guard before any remembered answer,
@@ -235,8 +235,7 @@ async def _run_with_namespace_globs(
 
     A read-only builder's stat serves the freshness probe's answer
     (``with_probe_answers``), unless the command swaps in a stat of its
-    own (dify's light ``ls``), so what that prints never changes with
-    the policy.
+    own, so what that prints never changes with the policy.
 
     Args:
         finish (Callable): the builder tier's stat and slash wraps,
@@ -345,8 +344,8 @@ def generic(
     A VFS that replaces a command hands what the replacement does not
     support to this one: ``generic("grep").fn(accessor, paths, texts,
     opts)``. With ``vfs``, the same command registered for that backend,
-    over the mount's table changed by ``table`` (dify's light ``ls``,
-    disk's walks).
+    over the mount's table changed by ``table`` (``/dev``'s endless
+    ``cat``).
 
     Args:
         name (str): the command name.

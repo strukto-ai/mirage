@@ -60,6 +60,41 @@ export interface HierarchyReadOptions<A extends Accessor> {
   stat?: StatFn<[accessor: A, path: PathSpec, index?: IndexCacheStore]>
 }
 
+/** Proves the matched entity exists before its answer runs. */
+export type Guard<A extends Accessor> = (
+  accessor: A,
+  match: ScopeMatch,
+  virtual: string,
+) => Promise<void>
+
+/**
+ * Build a call only some file kinds answer: classify, guard, dispatch, null
+ * for the rest.
+ *
+ * The line calls (`firstLines`, `lastLines`, `lineCount`, `follow`) are
+ * answered for a backend's data files (a table's rows, a collection's
+ * documents) and not for its metadata files (a schema, a database.json),
+ * which the caller reads the usual way. The table names the data kinds once,
+ * so no answer repeats the check. Each answer is called as
+ * `answer(accessor, match, path, ...args)`, after `guard`. Mirrors
+ * `per_kind` in `mirage/core/hierarchy/read.py`.
+ */
+export function perKind<A extends Accessor, Args extends unknown[], T>(
+  detect: DetectFn,
+  answers: Readonly<
+    Record<string, (accessor: A, match: ScopeMatch, path: PathSpec, ...args: Args) => Promise<T>>
+  >,
+  options: { guard?: Guard<A> } = {},
+): (accessor: A, path: PathSpec, ...args: Args) => Promise<T | null> {
+  return async (accessor, path, ...args) => {
+    const match = detect(path)
+    const answer = answers[match.kind]
+    if (answer === undefined) return null
+    if (options.guard !== undefined) await options.guard(accessor, match, path.virtual)
+    return answer(accessor, match, path, ...args)
+  }
+}
+
 /**
  * Build a hierarchy read: classify, dispatch, refuse the rest.
  *

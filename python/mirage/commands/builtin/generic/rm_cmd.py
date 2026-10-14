@@ -13,22 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
-from typing import Any
 
-from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import (
-    Operation,
-    mount_io,
-    require_op,
-)
-from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.paths import descendant_path
-from mirage.commands.config import CommandOpts, command
 from mirage.commands.errors import UsageError
-from mirage.commands.spec import SPECS
-from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.hidden import path_visible
@@ -149,68 +137,3 @@ async def remove_tree(
 
     await remove(root, True)
     return removed, failures
-
-
-async def _file_rm(
-    accessor: Accessor,
-    paths: list[PathSpec],
-    texts: list[str],
-    opts: CommandOpts,
-) -> tuple[ByteSource | None, IOResult]:
-    """``rm`` over the mount's ``unlink``, for files only.
-
-    Args:
-        accessor (Accessor): Backend handle.
-        paths (list[PathSpec]): The operands.
-        texts (list[str]): Text arguments, unused.
-        opts (CommandOpts): The invocation's options.
-    """
-    fl = FlagView(opts.flags, spec=SPECS["rm"])
-    f = fl.as_bool("f")
-    v = fl.as_bool("v")
-    if not paths:
-        return rm_without_operands(f)
-    io = mount_io(opts)
-    unlink = require_op(io, Operation.UNLINK)
-    paths = await io.resolve_glob(accessor, paths, opts.index)
-    verbose_parts: list[str] = []
-    errors: list[str] = []
-    for p in paths:
-        try:
-            await unlink(accessor, p)
-        except FS_ERRORS as exc:
-            if f and isinstance(exc, (FileNotFoundError, NotADirectoryError)):
-                continue
-            # GNU rm reports the operand and keeps removing the rest.
-            errors.append(
-                f"rm: cannot remove '{p.raw_path}': {fs_strerror(exc)}"
-            )
-            continue
-        except ValueError:
-            if f:
-                continue
-            errors.append(
-                f"rm: cannot remove '{p.raw_path}': No such file or directory"
-            )
-            continue
-        if v:
-            verbose_parts.append(f"removed '{p.raw_path}'")
-    output = format_optional_records(verbose_parts) if v else None
-    stderr = ("\n".join(errors) + "\n").encode() if errors else None
-    return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
-
-
-def make_rm(*, vfs: str) -> Callable[..., Any]:
-    """Build a file-only ``rm`` over the mount's ``unlink``.
-
-    For backends with files and no directories of their own to remove.
-    The unlink goes through the dispatcher, which judges each path and
-    settles the removal.
-
-    Args:
-        vfs (str): VFS name the command registers under.
-    """
-    rm: Callable[..., Any] = command(
-        "rm", vfs=vfs, spec=SPECS["rm"], write=True, path_guarded=True
-    )(_file_rm)
-    return rm

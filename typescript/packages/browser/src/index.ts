@@ -34,7 +34,6 @@ export { PROMPT as OPFS_PROMPT } from './vfs/opfs/prompt.ts'
 export { OPFSAccessor } from './accessor/opfs.ts'
 export { S3VFS, type S3VFSState } from './vfs/s3/s3.ts'
 export { PROMPT as S3_BROWSER_PROMPT } from './vfs/s3/prompt.ts'
-export { S3_COMMANDS } from '@struktoai/mirage-core/commands/builtin/s3/index'
 export {
   normalizeS3Config,
   redactConfig as redactS3Config,

@@ -286,7 +286,7 @@ def test_an_alias_carries_its_own_name(name):
     assert vfs.name == name
     assert isinstance(vfs.config, S3Config)
     assert {"read", "readdir", "stat", "write"} <= served(vfs)
-    assert {rc.vfs for rc in commands_for(vfs)} == {name}
+    assert commands_for(vfs) == []
     assert vfs.storage_location() == f"s3:{vfs.config.endpoint_url}:b"
     state = vfs.get_state()
     assert state["type"] == name

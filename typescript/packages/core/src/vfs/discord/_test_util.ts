@@ -12,15 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DiscordAccessor, type DiscordResourceLike } from '../../../accessor/discord.ts'
-import { IndexEntry } from '../../../cache/index/config.ts'
-import type { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
-import type {
-  DiscordMethod,
-  DiscordResponse,
-  DiscordTransport,
-} from '../../../core/discord/client.ts'
-import { DiscordVFSBase } from '../../../vfs/discord/discord.ts'
+import { DiscordAccessor, type DiscordResourceLike } from '../../accessor/discord.ts'
+import { IndexEntry } from '../../cache/index/config.ts'
+import type { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import type { DiscordMethod, DiscordResponse, DiscordTransport } from '../../core/discord/client.ts'
+import { DiscordVFSBase } from '../../vfs/discord/discord.ts'
 
 export interface FakeCall {
   method: DiscordMethod

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DISCORD_COMMANDS } from '@struktoai/mirage-core/commands/builtin/discord/index'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
@@ -54,9 +53,9 @@ describe('DiscordVFS (browser)', () => {
     expect(r.config.getHeaders).toBe(headers)
   })
 
-  it('serves DISCORD_COMMANDS', () => {
+  it('serves only the generic commands', () => {
     const r = new DiscordVFS({ proxyUrl: '/api/discord' })
-    expect(commandsFor(r)).toEqual(DISCORD_COMMANDS)
+    expect(commandsFor(r)).toEqual([])
   })
 
   it('getState() redacts getHeaders but keeps proxyUrl visible', async () => {

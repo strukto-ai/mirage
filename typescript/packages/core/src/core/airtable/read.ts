@@ -18,7 +18,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { efbig, enoent, isEnoent } from '../../errors/fs.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
-import { makeRead, type ReadWindow } from '../hierarchy/read.ts'
+import { makeRead, perKind, type ReadWindow } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listBases, listRecords, listTables } from './client.ts'
 import { AirtableApiError } from './errors.ts'
@@ -144,16 +144,17 @@ export const read = makeRead<AirtableAccessor>(
 /**
  * The first `n` records of a records or view file, by `maxRecords`, each on
  * its own line. A count past `maxReadRecords` that the table fills throws
- * EFBIG, as a whole read of that table does. Null for any other file. Mirrors
- * `first_lines` in `mirage/core/airtable/read.py`.
+ * EFBIG, as a whole read of that table does. Mirrors `_first_records` in
+ * `mirage/core/airtable/read.py`.
  */
-export async function firstLines(
+function firstRecords(
   accessor: AirtableAccessor,
+  _match: ScopeMatch,
   path: PathSpec,
   n: number,
   index?: IndexCacheStore,
-): Promise<Uint8Array | null> {
-  const kind = detectScope(path).kind
-  if (kind !== 'records' && kind !== 'view') return null
+): Promise<Uint8Array> {
   return read(accessor, path, index, { limit: n })
 }
+
+export const firstLines = perKind(detectScope, { records: firstRecords, view: firstRecords })

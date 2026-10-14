@@ -14,10 +14,7 @@
 
 import { registerBackendCommands } from '@struktoai/mirage-core/commands/builtin/backends'
 import { EmailVFS } from '../../vfs/email/email.ts'
-import { GridFSVFS } from '../../vfs/gridfs/gridfs.ts'
 import { EMAIL_COMMANDS } from './email/index.ts'
-import { GRIDFS_COMMANDS } from './gridfs/index.ts'
 
 // The shell commands of the backends this package ships.
 registerBackendCommands(EmailVFS, () => EMAIL_COMMANDS)
-registerBackendCommands(GridFSVFS, () => GRIDFS_COMMANDS)

@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.cache.index import IndexCacheStore
-from mirage.core.hierarchy.read import make_read, make_read_range
+from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
@@ -155,3 +155,38 @@ def test_a_read_without_stat_trusts_the_path(accessor):
     out = asyncio.run(READ(accessor, spec("/rooms/green/a.json")))
     assert out == b"green:a"
     assert accessor.calls == []
+
+
+async def _note_lines(
+    accessor: FakeAccessor, match: ScopeMatch, path: PathSpec, n: int
+) -> bytes:
+    return f"{match.slots['note']}:{n}".encode()
+
+
+def test_per_kind_answers_its_kinds_after_the_guard(accessor):
+    guarded: list[str] = []
+
+    async def guard(accessor, match, virtual):
+        guarded.append(virtual)
+
+    first = per_kind(detect_scope, {"note": _note_lines}, guard=guard)
+    out = asyncio.run(first(accessor, spec("/rooms/red/a.json"), 3))
+    assert out == b"a:3"
+    assert guarded == ["/h/rooms/red/a.json"]
+
+
+def test_per_kind_is_none_for_any_other_kind_without_the_guard(accessor):
+    async def guard(accessor, match, virtual):
+        raise AssertionError("no guard for a kind with no answer")
+
+    first = per_kind(detect_scope, {"note": _note_lines}, guard=guard)
+    assert asyncio.run(first(accessor, spec("/rooms/red"), 3)) is None
+
+
+def test_per_kind_raises_what_the_guard_raises(accessor):
+    async def guard(accessor, match, virtual):
+        raise FileNotFoundError(virtual)
+
+    first = per_kind(detect_scope, {"note": _note_lines}, guard=guard)
+    with pytest.raises(FileNotFoundError):
+        asyncio.run(first(accessor, spec("/rooms/red/a.json"), 3))

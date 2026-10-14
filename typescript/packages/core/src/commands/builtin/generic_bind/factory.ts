@@ -64,8 +64,7 @@ export function withStatCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<
  * Under fresh the freshness probe has already asked the backend about the
  * operand (CacheManager.probedStat). It is the backend's own op-table stat,
  * so this goes only on an adapter whose stat is that function: a per-command
- * stat (dify's light ls) keeps asking, so what it prints never changes with
- * the policy.
+ * stat keeps asking, so what it prints never changes with the policy.
  *
  * Applied to the raw adapter, below the path guards: a hidden or refused path
  * is answered by its guard before any remembered answer, and every other slot
@@ -202,8 +201,8 @@ function bind(
   const fn: CommandFn = (accessor, paths, texts, opts) => {
     const io = mountIo(opts)
     const raw = table === undefined ? io : table(io)
-    // A per-command table with its own stat (dify's light ls) would
-    // otherwise print the probe's full stat under fresh only.
+    // A per-command table with its own stat would otherwise print the
+    // probe's full stat under fresh only.
     const answered = raw.stat === io.stat && b.write !== true ? withProbeAnswers(raw) : raw
     const guarded = withAbortGuard(
       withDirGuard(
@@ -257,8 +256,8 @@ export const GENERIC_COMMANDS = new CommandCatalog(
  * of that name. A VFS that replaces a command hands what the replacement does
  * not support to this one: `generic('grep').fn(accessor, paths, texts, opts)`.
  * With `vfs`, the same command registered for that backend, over the mount's
- * table changed by `table` (dify's light `ls`, disk's walks). Mirrors
- * Python's `generic`.
+ * table changed by `table` (`/dev`'s endless `cat`). Mirrors Python's
+ * `generic`.
  */
 export function generic(
   name: string,

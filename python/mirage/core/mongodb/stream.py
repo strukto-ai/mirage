@@ -21,6 +21,8 @@ from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.hierarchy.read import per_kind
+from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mongodb.client import (
     count_documents,
     find_documents,
@@ -65,30 +67,28 @@ def _elision_paths(config, database: str, name: str) -> set[str]:
     return set(config.elide_fields.get(key, []))
 
 
-async def last_lines(
+async def _last_documents(
     accessor: MongoDBAccessor,
+    scope: ScopeMatch,
     path: PathSpec,
     n: int,
     index: IndexCacheStore = NULL_INDEX,
-) -> bytes | None:
+) -> bytes:
     """The last ``n`` documents of a collection or view, as its
     documents.jsonl renders them.
 
     Sorts by primary key descending with a limit instead of streaming
     the whole collection. ``max_doc_limit`` is the most documents one
     such read returns: a count past it that the collection could fill
-    raises EFBIG. None for any other file.
+    raises EFBIG.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
+        scope (ScopeMatch): the documents file's match.
         path (PathSpec): the file.
         n (int): Number of trailing documents, at least 1.
         index (IndexCacheStore): Unused; kept for reader-signature parity.
     """
-    scope = detect_scope(path)
-    if scope.kind != "documents":
-        return None
-    await entity_guard(accessor, scope, path.virtual)
     database, name = scope.slots["database"], scope.slots["name"]
     docs = await find_documents(
         accessor.client,
@@ -152,23 +152,21 @@ def _render_lines(
     )
 
 
-async def line_count(
+async def _document_count(
     accessor: MongoDBAccessor,
+    scope: ScopeMatch,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
-) -> int | None:
+) -> int:
     """How many documents a collection or view holds, one line each in
-    its documents.jsonl, by ``count_documents``. None for any other file.
+    its documents.jsonl, by ``count_documents``.
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
+        scope (ScopeMatch): the documents file's match.
         path (PathSpec): the file.
         index (IndexCacheStore): Unused; kept for reader-signature parity.
     """
-    scope = detect_scope(path)
-    if scope.kind != "documents":
-        return None
-    await entity_guard(accessor, scope, path.virtual)
     return await count_documents(
         accessor.client, scope.slots["database"], scope.slots["name"]
     )
@@ -206,16 +204,17 @@ async def read_stream(
             yield (render_doc(doc) + "\n").encode()
 
 
-async def follow(
+async def _follow_documents(
     accessor: MongoDBAccessor,
+    scope: ScopeMatch,
     path: PathSpec,
     n: int,
     index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes] | None:
     """The last ``n`` documents of a collection, then each one inserted
     after them, one documents.jsonl line each. None for a view, which has
-    no change stream, for a server outside a replica set, which has none
-    either, and for any other file.
+    no change stream, and for a server outside a replica set, which has
+    none either.
 
     The last documents are read at one snapshot and the change stream
     holds each insert after it, so the two meet at one point: no insert
@@ -223,15 +222,12 @@ async def follow(
 
     Args:
         accessor (MongoDBAccessor): Backend accessor.
+        scope (ScopeMatch): the documents file's match.
         path (PathSpec): the file.
         n (int): Number of trailing documents first, 0 for none.
         index (IndexCacheStore): Unused; kept for reader-signature parity.
     """
-    scope = detect_scope(path)
-    if (
-        scope.kind != "documents"
-        or entity_kind(scope) is not EntityKind.COLLECTION
-    ):
+    if entity_kind(scope) is not EntityKind.COLLECTION:
         return None
     await entity_guard(accessor, scope, path.virtual)
     database, name = scope.slots["database"], scope.slots["name"]
@@ -274,3 +270,12 @@ async def _followed(
         yield first
     async for doc in iter_inserts(accessor.client, database, name, after):
         yield _render_lines(accessor, database, name, [doc])
+
+
+last_lines = per_kind(
+    detect_scope, {"documents": _last_documents}, guard=entity_guard
+)
+line_count = per_kind(
+    detect_scope, {"documents": _document_count}, guard=entity_guard
+)
+follow = per_kind(detect_scope, {"documents": _follow_documents})

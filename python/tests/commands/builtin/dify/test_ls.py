@@ -1,15 +1,15 @@
 import pytest
 
-from mirage.commands.builtin.dify import COMMANDS
-from mirage.commands.config import CommandCatalog, CommandOpts
-from mirage.core.dify import stat, tree
+from mirage.commands.builtin.generic_bind import generic
+from mirage.commands.config import CommandOpts
+from mirage.core.dify import tree
 from mirage.io.types import materialize
 from mirage.vfs.dify import DifyVFS
 from tests.fixtures.vfs_io import io_for
 
 from .conftest import document
 
-ls = CommandCatalog(COMMANDS).require("ls").fn
+ls = generic("ls").fn
 
 
 async def list_basic_documents(accessor):
@@ -19,17 +19,12 @@ async def list_basic_documents(accessor):
     ]
 
 
-async def fail_get_detail(accessor, document_id):
-    raise AssertionError("ls must not call get_document_detail")
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("flags", [{}, {"args_l": True}], ids=["ls", "ls -l"])
-async def test_ls_lists_virtual_tree_without_detail_calls(
+async def test_ls_lists_the_virtual_tree(
     monkeypatch, dify_accessor, dify_index, knowledge_root, flags
 ):
     monkeypatch.setattr(tree, "list_all_documents", list_basic_documents)
-    monkeypatch.setattr(stat, "get_document_detail", fail_get_detail)
 
     stdout, io = await ls(
         dify_accessor,

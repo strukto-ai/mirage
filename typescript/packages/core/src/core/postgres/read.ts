@@ -18,7 +18,13 @@ import { encodeBase64 } from '../../utils/base64.ts'
 import { efbig } from '../../errors/fs.ts'
 import { jsonBytes } from '../render/json.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
-import { makeRead, type Reader, type ReadWindow, type WindowedReader } from '../hierarchy/read.ts'
+import {
+  makeRead,
+  perKind,
+  type Reader,
+  type ReadWindow,
+  type WindowedReader,
+} from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { countRows, estimateSize, fetchBoundedRows, fetchRows } from './client.ts'
 import { entityGuard } from './readdir.ts'
@@ -163,18 +169,15 @@ export async function readRows(
  * is the most rows one read may return, so a count past it fetches one row
  * more than the ceiling and throws EFBIG when that row exists, as a whole read
  * of a relation that long does; a relation shorter than the ceiling comes back
- * whole. Null for any other file. Mirrors `first_lines` in
- * `mirage/core/postgres/read.py`.
+ * whole. Mirrors `_first_rows` in `mirage/core/postgres/read.py`.
  */
-export async function firstLines(
+async function firstRows(
   accessor: PostgresAccessor,
+  match: ScopeMatch,
   path: PathSpec,
   n: number,
   _index?: IndexCacheStore,
-): Promise<Uint8Array | null> {
-  const match = detectScope(path)
-  if (match.kind !== 'entity_rows') return null
-  await entityGuard(accessor, match, path.virtual)
+): Promise<Uint8Array> {
   const cap = accessor.config.maxReadRows
   const data = await readRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '', path, {
     limit: Math.min(n, cap + 1),
@@ -188,18 +191,16 @@ export async function firstLines(
 /**
  * The last `n` rows of a relation's rows.jsonl, by a `COUNT(*)` and an
  * `OFFSET`. A suffix longer than `maxReadRows` throws EFBIG, as a whole read
- * of a relation that long does. Null for any other file. Mirrors
- * `last_lines` in `mirage/core/postgres/read.py`.
+ * of a relation that long does. Mirrors `_last_rows` in
+ * `mirage/core/postgres/read.py`.
  */
-export async function lastLines(
+async function lastRows(
   accessor: PostgresAccessor,
+  match: ScopeMatch,
   path: PathSpec,
   n: number,
   _index?: IndexCacheStore,
-): Promise<Uint8Array | null> {
-  const match = detectScope(path)
-  if (match.kind !== 'entity_rows') return null
-  await entityGuard(accessor, match, path.virtual)
+): Promise<Uint8Array> {
   const schema = match.slots.schema ?? ''
   const entity = match.slots.entity ?? ''
   const total = await countRows(accessor, schema, entity)
@@ -211,19 +212,20 @@ export async function lastLines(
 
 /**
  * How many rows a relation holds, one line each in its rows.jsonl, by a
- * `COUNT(*)`. Null for any other file. Mirrors `line_count` in
- * `mirage/core/postgres/read.py`.
+ * `COUNT(*)`. Mirrors `_row_count` in `mirage/core/postgres/read.py`.
  */
-export async function lineCount(
+function rowCount(
   accessor: PostgresAccessor,
-  path: PathSpec,
+  match: ScopeMatch,
+  _path: PathSpec,
   _index?: IndexCacheStore,
-): Promise<number | null> {
-  const match = detectScope(path)
-  if (match.kind !== 'entity_rows') return null
-  await entityGuard(accessor, match, path.virtual)
+): Promise<number> {
   return countRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '')
 }
+
+export const firstLines = perKind(detectScope, { entity_rows: firstRows }, { guard: entityGuard })
+export const lastLines = perKind(detectScope, { entity_rows: lastRows }, { guard: entityGuard })
+export const lineCount = perKind(detectScope, { entity_rows: rowCount }, { guard: entityGuard })
 
 /** One row as rows.jsonl spells it. Mirrors `row_line` in `core/postgres/read.py`. */
 export function rowLine(row: Record<string, unknown>): string {

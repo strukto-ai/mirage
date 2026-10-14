@@ -161,9 +161,10 @@ describe('record paths name the virtual path (node backends)', () => {
         secretAccessKey: 'fake',
         forcePathStyle: true,
       })
-      // cat, the cp sources and every read of what the line just wrote are
-      // served from cache; tee -a and the dispatcher append are a read plus
-      // a write, since s3 has no native append.
+      // tee -a and the dispatcher append are a read plus a write, since s3
+      // has no native append; tee's append leaves no cached copy, so cat
+      // reads, and the cp sources and every read of what the line just
+      // wrote are served from cache.
       expect(await ledger(vfs, null)).toEqual([
         ['write', K],
         ['write', K],
@@ -173,6 +174,7 @@ describe('record paths name the virtual path (node backends)', () => {
         ['write', K],
         ['write', NEW],
         ['truncate', NEW],
+        ['read', K],
         ['copy', '/m/m/k2.txt'],
         ['rename', NEW],
         ['rename', '/m/m/moved.txt'],

@@ -73,15 +73,6 @@ async def list_all_documents(accessor: DifyAccessor) -> list[dict[str, Any]]:
         page += 1
 
 
-async def get_document_detail(
-    accessor: DifyAccessor, document_id: str
-) -> dict[str, Any]:
-    return await dify_get(
-        accessor,
-        f"/datasets/{accessor.config.dataset_id}/documents/{document_id}",
-    )
-
-
 async def get_document_segments(
     accessor: DifyAccessor, document_id: str
 ) -> list[dict[str, Any]]:

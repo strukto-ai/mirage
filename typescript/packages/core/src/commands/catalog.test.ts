@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { CommandCatalog, Command } from './config.ts'
 import { CommandSpec } from './spec/types.ts'
-import { S3_COMMANDS } from './builtin/s3/index.ts'
+import { GENERIC_COMMANDS } from './builtin/generic_bind/factory.ts'
 
 const SPEC = new CommandSpec()
 const FN = () => Promise.resolve([null, { exitCode: 0 } as never] as [null, never])
@@ -81,10 +81,11 @@ describe('Command.withOverrides', () => {
   })
 })
 
-it('S3 commands expose static lookup', () => {
-  const rm = S3_COMMANDS.require('rm')
+// Mirrors test_generic_commands_expose_static_lookup.
+it('generic commands expose static lookup', () => {
+  const rm = GENERIC_COMMANDS.require('rm')
 
   expect(rm.name).toBe('rm')
-  expect(rm.vfs).toBe('s3')
+  expect(rm.vfs).toBeNull()
   expect(rm.filetype).toBeNull()
 })

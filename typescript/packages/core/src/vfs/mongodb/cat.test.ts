@@ -12,21 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../../utils/key_prefix.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../../core/mongodb/stat.ts', () => ({
+vi.mock('../../core/mongodb/stat.ts', () => ({
   stat: vi.fn(),
 }))
 
-import { MongoDBAccessor } from '../../../accessor/mongodb.ts'
-import { stubMongoDriver } from '../../../core/mongodb/_test_util.ts'
-import * as statModule from '../../../core/mongodb/stat.ts'
-import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
-import { PathSpec } from '../../../types.ts'
-import { MONGODB_CAT } from './cat.ts'
-import { ioFor } from '../../../test-utils.ts'
-import { MongoDBVFSBase } from '../../../vfs/mongodb/mongodb.ts'
+import { MongoDBAccessor } from '../../accessor/mongodb.ts'
+import { stubMongoDriver } from '../../core/mongodb/_test_util.ts'
+import * as statModule from '../../core/mongodb/stat.ts'
+import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
+import { PathSpec } from '../../types.ts'
+import { generic } from '../../commands/builtin/generic_bind/factory.ts'
+import { ioFor } from '../../test-utils.ts'
+import { MongoDBVFSBase } from '../../vfs/mongodb/mongodb.ts'
 
 const STUB_DRIVER = stubMongoDriver()
 
@@ -51,8 +51,7 @@ describe('mongodb cat error surfacing', () => {
   it('rejects with the backend error when stat() throws', async () => {
     const message = 'simulated mongo failure'
     vi.mocked(statModule.stat).mockRejectedValue(new Error(message))
-    const cmd = MONGODB_CAT[0]
-    if (cmd === undefined) throw new Error('cat not registered')
+    const cmd = generic('cat')
     const accessor = makeAccessor()
     await expect(
       cmd.fn(accessor, [mk('users.jsonl')], [], {

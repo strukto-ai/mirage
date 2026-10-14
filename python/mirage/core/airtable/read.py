@@ -27,7 +27,7 @@ from mirage.core.airtable.readdir import readdir, schema_table
 from mirage.core.airtable.scope import detect_scope
 from mirage.core.airtable.stat import stat
 from mirage.core.hierarchy.probe import resolve_entry
-from mirage.core.hierarchy.read import make_read
+from mirage.core.hierarchy.read import make_read, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.errors.fs import efbig, enoent
 from mirage.types import PathSpec
@@ -154,24 +154,29 @@ read = make_read(
 )
 
 
-async def first_lines(
+async def _first_records(
     accessor: AirtableAccessor,
+    match: ScopeMatch,
     path: PathSpec,
     n: int,
     index: IndexCacheStore = NULL_INDEX,
-) -> bytes | None:
+) -> bytes:
     """The first ``n`` records of a records or view file, by
     ``maxRecords``, each on its own line.
 
     A count past ``max_read_records`` that the table fills raises EFBIG,
-    as a whole read of that table does. None for any other file.
+    as a whole read of that table does.
 
     Args:
         accessor (AirtableAccessor): the account and its scope.
+        match (ScopeMatch): the file's match.
         path (PathSpec): the file.
         n (int): how many records, at least 1.
         index (IndexCacheStore): where the parent listing lands.
     """
-    if detect_scope(path).kind not in ("records", "view"):
-        return None
     return await read(accessor, path, index, limit=n)
+
+
+first_lines = per_kind(
+    detect_scope, {"records": _first_records, "view": _first_records}
+)

@@ -438,7 +438,7 @@ already.
 
 ## 4. Commands
 
-The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend; `generic("<name>")` hands the replacement the default command for what it does not support, and `generic("<name>", vfs=..., table=...)` registers the default over a changed table (dify's light `ls`).
+The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each runs over the functions of the mount it runs on (`opts.io`), and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend; `generic("<name>")` hands the replacement the default command for what it does not support, and `generic("<name>", vfs=..., table=...)` registers the default over a changed table (`/dev`'s endless `cat`).
 
 - Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command.
 - A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(opts.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).

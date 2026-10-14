@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Accessor } from '../../../../accessor/base.ts'
 import { RAMIndexCacheStore } from '../../../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { eacces, enoent } from '../../../../errors/fs.ts'
+import { eacces, enoent, walkDeclined } from '../../../../errors/fs.ts'
 import type { CommandIO } from '../../../config.ts'
+import { generic } from '../factory.ts'
 import { BUILDER } from './rm.ts'
 
 const DEC = new TextDecoder()
@@ -120,4 +121,104 @@ describe('rm builder', () => {
     ])
     expect(removed).toEqual(['/m/a.txt'])
   })
+})
+
+// Mirrors test_rm_refused_operand_keeps_spelling_and_continues.
+it.each([
+  [
+    false,
+    'ELOOP',
+    'loop/child',
+    1,
+    "rm: cannot remove 'loop/child': Too many levels of symbolic links\n",
+  ],
+  [true, 'ENOENT', '', 0, ''],
+] as const)(
+  'rm handles a refused operand under -f=%s (%s) and continues',
+  async (force, refusal, raw, code, err) => {
+    const stat = vi.fn(() => Promise.resolve(new FileStat({ name: 'ok', type: FileType.FILE })))
+    const unlink = vi.fn(() => Promise.resolve())
+    const io: CommandIO = {
+      readdir: () => Promise.resolve([]),
+      readBytes: () => Promise.resolve(new Uint8Array()),
+      readStream: () => {
+        throw new Error('unexpected read')
+      },
+      stat,
+      unlink,
+      rmdir: unlink,
+      rmR: unlink,
+      isMounted: () => true,
+    }
+    const command = generic('rm')
+    const refused = new PathSpec({
+      virtual: '/data',
+      directory: '/',
+      vfsPath: 'data',
+      rawPath: raw,
+      walkError: refusal,
+    })
+    const valid = PathSpec.fromStrPath('/data/ok')
+    const result = await command.fn({} as Accessor, [refused, valid], [], {
+      flags: { f: force },
+      stdin: null,
+      cwd: '/',
+      io,
+    })
+    await materialize(result?.[0] ?? null)
+    expect(result?.[1].exitCode).toBe(code)
+    expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(err)
+    expect(stat).toHaveBeenCalledTimes(1)
+    expect(unlink.mock.calls).toHaveLength(1)
+  },
+)
+
+// Mirrors test_rm_r_names_a_mount_below_and_fails.
+it('rm -r names a mount below and fails', async () => {
+  const tree: Record<string, string[]> = { '/data': ['/data/a.txt', '/data/inner'] }
+  const unlink = vi.fn(() => Promise.resolve())
+  const rmdir = vi.fn(() => Promise.resolve())
+  const io: CommandIO = {
+    readdir: (_a, path) => Promise.resolve(tree[path.virtual] ?? []),
+    readBytes: () => Promise.resolve(new Uint8Array()),
+    readStream: () => {
+      throw new Error('unexpected read')
+    },
+    stat: (_a, path) =>
+      Promise.resolve(
+        new FileStat({
+          name: path.virtual,
+          type: path.virtual in tree ? FileType.DIRECTORY : FileType.FILE,
+        }),
+      ),
+    unlink,
+    rmdir,
+    rmR: (_a, path) => Promise.reject(walkDeclined('s3', 'rm_r', path)),
+    isMounted: () => true,
+  }
+  const roots = ['/data/inner']
+  const command = generic('rm')
+  const result = await command.fn({} as Accessor, [PathSpec.fromStrPath('/data')], [], {
+    flags: { r: true },
+    stdin: null,
+    cwd: '/',
+    io,
+    ns: {
+      mounts: {
+        descendants: () => roots,
+        visibleDescendants: () => roots,
+        isRoot: (path) => roots.includes(path),
+        rootOf: () => '/data',
+      },
+    },
+  })
+  await materialize(result?.[0] ?? null)
+  expect(result?.[1].exitCode).toBe(1)
+  expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(
+    "rm: skipping '/data/inner', since it's on a different device\n",
+  )
+  expect(unlink.mock.calls.map((call) => (call as unknown[])[1])).toEqual([
+    PathSpec.fromStrPath('/data/a.txt'),
+  ])
+  expect(rmdir).not.toHaveBeenCalled()
 })

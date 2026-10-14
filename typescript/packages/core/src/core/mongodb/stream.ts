@@ -24,6 +24,8 @@ import {
   iterDocuments,
   iterInserts,
 } from './client.ts'
+import { perKind } from '../hierarchy/read.ts'
+import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entityGuard } from './readdir.ts'
 import { detectScope, entityKind } from './scope.ts'
 import { EntityKind, PRIMARY_KEY } from './types.ts'
@@ -137,18 +139,15 @@ export async function* readStream(
  * renders them. Sorts by primary key descending with a limit instead of
  * streaming the whole collection. `maxDocLimit` is the most documents one such
  * read returns: a count past it that the collection could fill throws EFBIG.
- * Null for any other file. Mirrors `last_lines` in
- * `mirage/core/mongodb/stream.py`.
+ * Mirrors `_last_documents` in `mirage/core/mongodb/stream.py`.
  */
-export async function lastLines(
+async function lastDocuments(
   accessor: MongoDBAccessor,
+  scope: ScopeMatch,
   path: PathSpec,
   n: number,
   _index?: IndexCacheStore,
-): Promise<Uint8Array | null> {
-  const scope = detectScope(path)
-  if (scope.kind !== 'documents') return null
-  await entityGuard(accessor, scope, path.virtual)
+): Promise<Uint8Array> {
   const database = scope.slots.database ?? ''
   const name = scope.slots.name ?? ''
   const docs = await findDocuments(
@@ -193,37 +192,34 @@ function renderLines(
 
 /**
  * How many documents a collection or view holds, one line each in its
- * documents.jsonl, by `countDocuments`. Null for any other file. Mirrors
- * `line_count` in `mirage/core/mongodb/stream.py`.
+ * documents.jsonl, by `countDocuments`. Mirrors `_document_count` in
+ * `mirage/core/mongodb/stream.py`.
  */
-export async function lineCount(
+function documentCount(
   accessor: MongoDBAccessor,
-  path: PathSpec,
+  scope: ScopeMatch,
+  _path: PathSpec,
   _index?: IndexCacheStore,
-): Promise<number | null> {
-  const scope = detectScope(path)
-  if (scope.kind !== 'documents') return null
-  await entityGuard(accessor, scope, path.virtual)
+): Promise<number> {
   return countDocuments(accessor, scope.slots.database ?? '', scope.slots.name ?? '')
 }
 
 /**
  * The last `n` documents of a collection, then each one inserted after them,
  * one documents.jsonl line each. Null for a view, which has no change stream,
- * for a server outside a replica set, which has none either, and for any other
- * file. The last documents are read at one snapshot and the change stream holds
- * each insert after it, so the two meet at one point: no insert is lost or
- * printed twice.
- * Mirrors `follow` in `mirage/core/mongodb/stream.py`.
+ * and for a server outside a replica set, which has none either. The last
+ * documents are read at one snapshot and the change stream holds each insert
+ * after it, so the two meet at one point: no insert is lost or printed twice.
+ * Mirrors `_follow_documents` in `mirage/core/mongodb/stream.py`.
  */
-export async function follow(
+async function followDocuments(
   accessor: MongoDBAccessor,
+  scope: ScopeMatch,
   path: PathSpec,
   n: number,
   _index?: IndexCacheStore,
 ): Promise<AsyncIterableIterator<Uint8Array> | null> {
-  const scope = detectScope(path)
-  if (scope.kind !== 'documents' || entityKind(scope) !== EntityKind.COLLECTION) return null
+  if (entityKind(scope) !== EntityKind.COLLECTION) return null
   await entityGuard(accessor, scope, path.virtual)
   const database = scope.slots.database ?? ''
   const name = scope.slots.name ?? ''
@@ -277,3 +273,7 @@ function followed(
     },
   }
 }
+
+export const lastLines = perKind(detectScope, { documents: lastDocuments }, { guard: entityGuard })
+export const lineCount = perKind(detectScope, { documents: documentCount }, { guard: entityGuard })
+export const follow = perKind(detectScope, { documents: followDocuments })

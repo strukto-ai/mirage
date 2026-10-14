@@ -16,12 +16,9 @@ import type { DifyAccessor } from '../../accessor/dify.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { directoryStat } from '../slug_tree/stat.ts'
-import { getDocumentDetail } from './client.ts'
-import { DIFY_TREE, epochText, extractDocumentSize } from './tree.ts'
+import { DIFY_TREE } from './tree.ts'
 
-// Index-only stat: never fetches document detail, so `ls` and the plain
-// `find` walk stay cheap (one listing per mount, no per-entry API call).
-export async function statLight(
+export async function stat(
   accessor: DifyAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
@@ -38,42 +35,6 @@ export async function statLight(
     birthtime: created,
     fingerprint: null,
     revision: null,
-    extra: { ...resolved.entry.extra },
-  })
-}
-
-export async function stat(
-  accessor: DifyAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  const resolved = await DIFY_TREE.resolve(accessor, path, index)
-  if (resolved.isDir) return directoryStat(resolved)
-  const detail = await getDocumentDetail(accessor, resolved.entry.id)
-  const extra: Record<string, unknown> = { ...resolved.entry.extra }
-  extra.document_id = resolved.entry.id
-  const sourceSize = extractDocumentSize(detail)
-  if (sourceSize !== null) {
-    extra.source_size = sourceSize
-  }
-  if ('tokens' in detail) {
-    extra.tokens = detail.tokens
-  }
-  if ('indexing_status' in detail) {
-    extra.indexing_status = detail.indexing_status
-  }
-  const created =
-    epochText(detail.created_at) ??
-    (resolved.entry.remoteTime !== '' ? resolved.entry.remoteTime : null)
-  return new FileStat({
-    name: resolved.entry.name,
-    type: FileType.FILE,
-    content: ContentType.TEXT,
-    size: null,
-    modified: epochText(detail.updated_at) ?? created,
-    birthtime: created,
-    fingerprint: null,
-    revision: null,
-    extra,
+    extra: { ...resolved.entry.extra, document_id: resolved.entry.id },
   })
 }

@@ -12,21 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { FileType, type FileStat, type PathSpec, type VFSName } from '../../../types.ts'
-import type { Accessor } from '../../../accessor/base.ts'
-import { fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
-import { command, type CommandFnResult, type CommandOpts, type Command } from '../../config.ts'
+import { IOResult } from '../../../io/types.ts'
+import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import { isEnoent, isFsError } from '../../../errors/fs.ts'
+import type { CommandFnResult } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { FlagView } from '../../spec/flag_view.ts'
-import { mountIo, requireOp, resolveGlobOf } from '../generic_bind/adapter.ts'
-import { formatRecords } from '../utils/output.ts'
 import { descendantPath } from '../utils/paths.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import type { NamespaceView } from '../../../view/types.ts'
-
-const ENC = new TextEncoder()
 
 // rm's answer to a line with no operand, in GNU's words: nothing at all under
 // -f, and a missing-operand usage error otherwise (coreutils 9.7). Mirrors
@@ -119,61 +112,4 @@ export async function removeTree(
   }
   await remove(root, true)
   return { removed, failures }
-}
-
-/**
- * Build a file-only `rm` over the mount's `unlink`, resolving globs through
- * the mount's table.
- *
- * Every API-backed mount spells the same GNU behaviour: report the operand
- * it could not remove, keep removing the rest, and exit 1 if any failed.
- * The unlink goes through the dispatcher, which judges each path and settles
- * the removal. Mirrors Python's `make_rm`.
- */
-export function makeRm(vfs: VFSName): Command[] {
-  return command({
-    name: 'rm',
-    vfs,
-    spec: specOf('rm'),
-    write: true,
-    pathGuarded: true,
-    fn: async (
-      accessor: Accessor,
-      paths: PathSpec[],
-      _texts: string[],
-      opts: CommandOpts,
-    ): Promise<CommandFnResult> => {
-      const fl = new FlagView(opts.flags, specOf('rm'))
-      const force = fl.asBool('f')
-      const verbose = fl.asBool('v')
-      if (paths.length === 0) return rmWithoutOperands(force)
-      const io = mountIo(opts)
-      const unlink = requireOp(io.unlink, 'unlink')
-      const resolved = await resolveGlobOf(io)(accessor, paths, opts.index ?? undefined)
-      const verboseParts: string[] = []
-      const errors: string[] = []
-      for (const p of resolved) {
-        try {
-          await unlink(accessor, p)
-        } catch (err) {
-          const code = (err as { code?: string }).code
-          if (force && (code === 'ENOENT' || code === 'ENOTDIR')) continue
-          if (!isFsError(err)) throw err
-          // GNU rm reports the operand and keeps removing the rest.
-          errors.push(`rm: cannot remove '${p.rawPath}': ${String(fsStrerror(err))}`)
-          continue
-        }
-        if (verbose) verboseParts.push(`removed '${p.rawPath}'`)
-      }
-      const output: ByteSource | null = verbose ? formatRecords(verboseParts) : null
-      const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : undefined
-      return [
-        output,
-        new IOResult({
-          exitCode: errors.length > 0 ? 1 : 0,
-          ...(stderr !== undefined ? { stderr } : {}),
-        }),
-      ]
-    },
-  })
 }

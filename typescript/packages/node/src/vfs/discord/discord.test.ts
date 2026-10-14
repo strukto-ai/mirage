@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DISCORD_COMMANDS } from '@struktoai/mirage-core/commands/builtin/discord/index'
 import {
   normalizeDiscordConfig,
   redactDiscordConfig,
@@ -58,9 +57,9 @@ describe('DiscordVFS (node)', () => {
     expect(typeof r.writePrompt).toBe('string')
   })
 
-  it('serves DISCORD_COMMANDS', () => {
+  it('serves only the generic commands', () => {
     const r = new DiscordVFS({ token: 'bot-test' })
-    expect(commandsFor(r)).toEqual(DISCORD_COMMANDS)
+    expect(commandsFor(r)).toEqual([])
   })
 
   it('getState() redacts token', async () => {

@@ -12,14 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stat, statLight } from '../../../core/chroma/stat.ts'
-import { CHROMA_TREE } from '../../../core/chroma/tree.ts'
-import { VFSName } from '../../../types.ts'
 import type { Command } from '../../config.ts'
-import { makeFind, readsSizes } from '../slug_tree/find.ts'
 import { CHROMA_SEARCH } from './search.ts'
 
-export const CHROMA_COMMANDS: readonly Command[] = [
-  ...makeFind(VFSName.CHROMA, CHROMA_TREE, stat, statLight, readsSizes),
-  ...CHROMA_SEARCH,
-]
+export const CHROMA_COMMANDS: readonly Command[] = [...CHROMA_SEARCH]

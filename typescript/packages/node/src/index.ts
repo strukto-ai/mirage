@@ -67,7 +67,6 @@ export {
 } from './fuse/mount.ts'
 export { isMacosMetadata } from './mount/platform/macos.ts'
 export { S3VFS, type S3VFSState } from './vfs/s3/s3.ts'
-export { S3_COMMANDS } from '@struktoai/mirage-core/commands/builtin/s3/index'
 export { GridFSVFS, type GridFSVFSState } from './vfs/gridfs/gridfs.ts'
 export {
   normalizeGridFSConfig,
@@ -403,7 +402,6 @@ export {
   type VFSFactory,
 } from './vfs/registry.ts'
 export { MODULE_SUFFIXES, isModulePath, loadAttr, splitRef } from './vfs/loader.ts'
-export { GRIDFS_COMMANDS } from './commands/builtin/gridfs/index.ts'
 export {
   absolutizeScripts,
   checkWorkspaceConfig,

@@ -16,6 +16,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
+from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.commands.config import Command, CommandCatalog, command
 from mirage.commands.spec import CommandSpec
 
@@ -90,11 +91,9 @@ def test_with_overrides_returns_an_independent_definition():
     assert original.fn is _handler
 
 
-def test_s3_commands_expose_static_lookup():
-    from mirage.commands.builtin.s3 import COMMANDS
-
-    rm = COMMANDS.require("rm")
+def test_generic_commands_expose_static_lookup():
+    rm = GENERIC_COMMANDS.require("rm")
 
     assert rm.name == "rm"
-    assert rm.vfs == "s3"
+    assert rm.vfs is None
     assert rm.filetype is None

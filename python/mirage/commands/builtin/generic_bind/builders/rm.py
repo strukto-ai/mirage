@@ -37,7 +37,7 @@ from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import error_path, fs_strerror
+from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
@@ -170,12 +170,14 @@ async def rm(
                 await require_op(ops, Operation.UNLINK)(accessor, p)
                 entry_lines = [f"removed '{p.raw_path}'"]
         except FS_ERRORS as exc:
-            # GNU rm names the entry it could not remove (the guard
-            # blames a read-only region below the operand by its
-            # anchor) and keeps removing the rest.
+            # GNU rm names the entry below the operand it could not
+            # remove (the guard blames a read-only region by its
+            # anchor), and the operand as typed for a refusal that names
+            # no path below it (a store's refused key), and keeps
+            # removing the rest.
             errors.append(
                 "rm: cannot remove "
-                f"'{operand_spelling(error_path(exc), p)}': "
+                f"'{with_inner(p.raw_path, inner_suffix(p, exc))}': "
                 f"{fs_strerror(exc)}"
             )
             continue

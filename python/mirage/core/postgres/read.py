@@ -18,7 +18,7 @@ import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.hierarchy.read import make_read
+from mirage.core.hierarchy.read import make_read, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.postgres import client
 from mirage.core.postgres._schema_json import (
@@ -185,30 +185,27 @@ async def read_rows(
     return bytes(body)
 
 
-async def first_lines(
+async def _first_rows(
     accessor: PostgresAccessor,
+    match: ScopeMatch,
     path: PathSpec,
     n: int,
     index: IndexCacheStore = NULL_INDEX,
-) -> bytes | None:
+) -> bytes:
     """The first ``n`` rows of a relation's rows.jsonl, by a ``LIMIT``.
 
     ``max_read_rows`` is the most rows one read may return, so a count
     past it fetches one row more than the ceiling and raises EFBIG when
     that row exists, as a whole read of a relation that long does; a
-    relation shorter than the ceiling comes back whole. None for any
-    other file.
+    relation shorter than the ceiling comes back whole.
 
     Args:
         accessor (PostgresAccessor): backend handle.
+        match (ScopeMatch): the rows file's match.
         path (PathSpec): the file.
         n (int): how many rows, at least 1.
         index (IndexCacheStore): unused; the rows are queried by name.
     """
-    match = detect_scope(path)
-    if match.kind != "entity_rows":
-        return None
-    await entity_guard(accessor, match, path.virtual)
     cap = accessor.config.max_read_rows
     data = await read_rows(
         accessor,
@@ -222,28 +219,26 @@ async def first_lines(
     return data
 
 
-async def last_lines(
+async def _last_rows(
     accessor: PostgresAccessor,
+    match: ScopeMatch,
     path: PathSpec,
     n: int,
     index: IndexCacheStore = NULL_INDEX,
-) -> bytes | None:
+) -> bytes:
     """The last ``n`` rows of a relation's rows.jsonl, by a ``COUNT(*)``
     and an ``OFFSET``.
 
     A suffix longer than ``max_read_rows`` raises EFBIG, as a whole read
-    of a relation that long does. None for any other file.
+    of a relation that long does.
 
     Args:
         accessor (PostgresAccessor): backend handle.
+        match (ScopeMatch): the rows file's match.
         path (PathSpec): the file.
         n (int): how many rows, at least 1.
         index (IndexCacheStore): unused; the rows are queried by name.
     """
-    match = detect_scope(path)
-    if match.kind != "entity_rows":
-        return None
-    await entity_guard(accessor, match, path.virtual)
     schema, entity = match.slots["schema"], match.slots["entity"]
     pool = await accessor.pool()
     async with pool.acquire() as conn:
@@ -258,28 +253,37 @@ async def last_lines(
     )
 
 
-async def line_count(
+async def _row_count(
     accessor: PostgresAccessor,
+    match: ScopeMatch,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
-) -> int | None:
+) -> int:
     """How many rows a relation holds, one line each in its rows.jsonl,
-    by a ``COUNT(*)``. None for any other file.
+    by a ``COUNT(*)``.
 
     Args:
         accessor (PostgresAccessor): backend handle.
+        match (ScopeMatch): the rows file's match.
         path (PathSpec): the file.
         index (IndexCacheStore): unused; the rows are queried by name.
     """
-    match = detect_scope(path)
-    if match.kind != "entity_rows":
-        return None
-    await entity_guard(accessor, match, path.virtual)
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         return await client.count_rows(
             conn, match.slots["schema"], match.slots["entity"]
         )
+
+
+first_lines = per_kind(
+    detect_scope, {"entity_rows": _first_rows}, guard=entity_guard
+)
+last_lines = per_kind(
+    detect_scope, {"entity_rows": _last_rows}, guard=entity_guard
+)
+line_count = per_kind(
+    detect_scope, {"entity_rows": _row_count}, guard=entity_guard
+)
 
 
 read = make_read(

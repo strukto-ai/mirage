@@ -14,6 +14,7 @@
 
 from mirage.core.s3.client import _client_kwargs
 from mirage.vfs.s3 import S3VFS, S3Config
+from tests.fixtures.mount_commands import mount_commands
 
 
 def test_s3_client_kwargs_route_through_proxy():
@@ -43,8 +44,6 @@ def test_s3_state_redacts_proxy_credentials():
 
 
 def test_s3_write_commands_tagged():
-    from mirage.commands.builtin.s3 import COMMANDS
-
     write_names = {
         "rm",
         "rmdir",
@@ -67,7 +66,7 @@ def test_s3_write_commands_tagged():
         "iconv",
         "truncate",
     }
-    for registered in COMMANDS:
+    for registered in mount_commands(S3VFS(S3Config(bucket="b"))):
         if registered.name in write_names:
             assert registered.write is True, (
                 f"{registered.name} should be write=True"

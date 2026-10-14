@@ -17,7 +17,7 @@ import type * as ClientModule from './client.ts'
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
-  return { ...actual, listAllDocuments: vi.fn(), getDocumentDetail: vi.fn() }
+  return { ...actual, listAllDocuments: vi.fn() }
 })
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
@@ -25,7 +25,7 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { ContentType, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import * as clientMod from './client.ts'
-import { stat, statLight } from './stat.ts'
+import { stat } from './stat.ts'
 
 const ACCESSOR = { config: { slugMetadataName: 'slug' } } as DifyAccessor
 
@@ -57,34 +57,31 @@ function pathAt(virtual: string): PathSpec {
   })
 }
 
+// Mirrors test_stat.py.
 describe('dify stat', () => {
   beforeEach(() => {
     vi.mocked(clientMod.listAllDocuments).mockReset()
-    vi.mocked(clientMod.getDocumentDetail).mockReset()
     vi.mocked(clientMod.listAllDocuments).mockResolvedValue([
       document('doc-1', 'Quickstart', 'guides/quickstart'),
     ])
-    vi.mocked(clientMod.getDocumentDetail).mockRejectedValue(
-      new Error('unexpected document-detail call'),
-    )
   })
 
-  it('statLight uses the index entry without a detail call', async () => {
+  it('answers from the listing', async () => {
     const index = new RAMIndexCacheStore()
 
-    const item = await statLight(ACCESSOR, pathAt('/knowledge/guides/quickstart'), index)
+    const item = await stat(ACCESSOR, pathAt('/knowledge/guides/quickstart'), index)
 
     expect(item.name).toBe('quickstart')
     expect(item.content).toBe(ContentType.TEXT)
     expect(item.size).toBeNull()
+    expect(item.extra.document_id).toBe('doc-1')
     expect(item.extra.source_size).toBe(123)
     expect(item.modified).toBe('2024-05-21T09:00:00Z')
     expect(item.birthtime).toBe('2024-05-21T09:00:00Z')
     expect(item.extra.slug).toBe('guides/quickstart')
-    expect(clientMod.getDocumentDetail).not.toHaveBeenCalled()
   })
 
-  it('stat returns a directory without a detail call', async () => {
+  it('answers a directory', async () => {
     const index = new RAMIndexCacheStore()
 
     const item = await stat(ACCESSOR, pathAt('/knowledge/guides'), index)
@@ -92,42 +89,5 @@ describe('dify stat', () => {
     expect(item.name).toBe('guides')
     expect(item.type).toBe(FileType.DIRECTORY)
     expect(item.extra).toEqual({ children_count: 0 })
-    expect(clientMod.getDocumentDetail).not.toHaveBeenCalled()
-  })
-
-  it('stat fetches document detail and fills the refreshed fields', async () => {
-    const index = new RAMIndexCacheStore()
-    vi.mocked(clientMod.getDocumentDetail).mockResolvedValue({
-      updated_at: 1716285600,
-      tokens: 21,
-      indexing_status: 'completed',
-      data_source_detail_dict: { upload_file: { size: 456 } },
-    })
-
-    const item = await stat(ACCESSOR, pathAt('/knowledge/guides/quickstart'), index)
-
-    expect(clientMod.getDocumentDetail).toHaveBeenCalledWith(ACCESSOR, 'doc-1')
-    expect(item.name).toBe('quickstart')
-    expect(item.content).toBe(ContentType.TEXT)
-    expect(item.size).toBeNull()
-    expect(item.extra.document_id).toBe('doc-1')
-    expect(item.extra.source_size).toBe(456)
-    expect(item.extra.tokens).toBe(21)
-    expect(item.extra.indexing_status).toBe('completed')
-    expect(item.modified).toBe('2024-05-21T10:00:00Z')
-    expect(item.birthtime).toBe('2024-05-21T09:00:00Z')
-  })
-
-  it('stat keeps the listed source size when the detail has none', async () => {
-    const index = new RAMIndexCacheStore()
-    vi.mocked(clientMod.getDocumentDetail).mockResolvedValue({})
-
-    const item = await stat(ACCESSOR, pathAt('/knowledge/guides/quickstart'), index)
-
-    expect(item.extra.source_size).toBe(123)
-    expect(item.extra.tokens).toBe(9)
-    expect(item.extra.indexing_status).toBe('completed')
-    expect(item.modified).toBe('2024-05-21T09:00:00Z')
-    expect(item.birthtime).toBe('2024-05-21T09:00:00Z')
   })
 })

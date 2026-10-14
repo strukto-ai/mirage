@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.commands.builtin.object_store import make_object_store_commands
+from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.context import (
     reset_current_session,
@@ -89,15 +89,10 @@ def _io(writes: list[str]) -> CommandIO:
     )
 
 
-def _tee():
-    cmds = make_object_store_commands("s3")
-    return next(c for c in cmds if c._registered_commands[0].name == "tee")
-
-
 @pytest.mark.asyncio
 async def test_tee_writes_inside_the_granted_region():
     writes: list[str] = []
-    tee = _tee()
+    tee = generic("tee").fn
     sess = SessionState(
         session_id="agent",
         mount_modes={"/s3": MountMode.READ},

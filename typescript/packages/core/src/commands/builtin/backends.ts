@@ -16,33 +16,19 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { DifyVFS } from '../../vfs/dify/dify.ts'
-import { DiscordVFSBase } from '../../vfs/discord/discord.ts'
-import { GCalVFS } from '../../vfs/gcal/gcal.ts'
-import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
-import { GSheetsVFS } from '../../vfs/gsheets/gsheets.ts'
-import { GSlidesVFS } from '../../vfs/gslides/gslides.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { LanceDBVFSBase } from '../../vfs/lancedb/lancedb.ts'
 import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
-import { MongoDBVFSBase } from '../../vfs/mongodb/mongodb.ts'
 import { QdrantVFS } from '../../vfs/qdrant/qdrant.ts'
-import { S3VFSBase } from '../../vfs/s3/s3.ts'
 import { TrelloVFS } from '../../vfs/trello/trello.ts'
 import { Command } from '../config.ts'
 import { CHROMA_COMMANDS } from './chroma/index.ts'
 import { DEV_COMMANDS } from './dev/index.ts'
 import { DIFY_COMMANDS } from './dify/index.ts'
-import { DISCORD_COMMANDS } from './discord/index.ts'
-import { GCAL_COMMANDS } from './gcal/index.ts'
-import { GDOCS_COMMANDS } from './gdocs/index.ts'
-import { GSHEETS_COMMANDS } from './gsheets/index.ts'
-import { GSLIDES_COMMANDS } from './gslides/index.ts'
 import { HISTORY_COMMANDS } from './history/index.ts'
 import { LANCEDB_COMMANDS } from './lancedb/index.ts'
 import { MEM0_COMMANDS } from './mem0/index.ts'
-import { MONGODB_COMMANDS } from './mongodb/index.ts'
 import { QDRANT_COMMANDS } from './qdrant/index.ts'
-import { S3_COMMANDS } from './s3/index.ts'
 import { TRELLO_COMMANDS } from './trello/index.ts'
 
 // A VFS class, whatever its constructor's visibility (one may build
@@ -92,10 +78,10 @@ function renamed(cmd: Command, vfs: string): Command {
  *
  * A builtin's are the ones registered for the first class in its hierarchy
  * that has any; a command registered under that backend's one VFS name is
- * registered under the VFS's own instead, so an S3-compatible alias serves
- * S3's commands as itself. The commands the VFS was handed come last, so
- * they win. A name none of these has falls back to the generic command
- * every mount shares. Mirrors Python's `commands_for`.
+ * registered under the VFS's own instead, so a subclass under its own name
+ * serves its base's commands as itself. The commands the VFS was handed
+ * come last, so they win. A name none of these has falls back to the
+ * generic command every mount shares. Mirrors Python's `commands_for`.
  */
 export function commandsFor(vfs: BaseVFS): Command[] {
   let found: Command[] = []
@@ -120,15 +106,8 @@ export function commandsFor(vfs: BaseVFS): Command[] {
 registerBackendCommands(ChromaVFS, () => CHROMA_COMMANDS)
 registerBackendCommands(DevVFS, () => DEV_COMMANDS)
 registerBackendCommands(DifyVFS, () => DIFY_COMMANDS)
-registerBackendCommands(DiscordVFSBase, () => DISCORD_COMMANDS)
-registerBackendCommands(GCalVFS, () => GCAL_COMMANDS)
-registerBackendCommands(GDocsVFS, () => GDOCS_COMMANDS)
-registerBackendCommands(GSheetsVFS, () => GSHEETS_COMMANDS)
-registerBackendCommands(GSlidesVFS, () => GSLIDES_COMMANDS)
 registerBackendCommands(HistoryViewVFS, () => HISTORY_COMMANDS)
 registerBackendCommands(LanceDBVFSBase, () => LANCEDB_COMMANDS)
 registerBackendCommands(Mem0VFS, () => MEM0_COMMANDS)
-registerBackendCommands(MongoDBVFSBase, () => MONGODB_COMMANDS)
 registerBackendCommands(QdrantVFS, () => QDRANT_COMMANDS)
-registerBackendCommands(S3VFSBase, () => S3_COMMANDS.toArray())
 registerBackendCommands(TrelloVFS, () => TRELLO_COMMANDS)

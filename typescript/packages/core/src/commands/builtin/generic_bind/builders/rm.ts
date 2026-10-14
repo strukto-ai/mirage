@@ -23,11 +23,12 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { isSlashedLink, rmLinkRefusal } from '../../utils/slash_links.ts'
 import {
-  errorVirtualPath,
   fsStrerror,
+  innerSuffix,
   isEnoent,
   isEnotdir,
   isFsError,
+  withInner,
 } from '../../../../errors/fs.ts'
 import { operandSpelling } from '../../../../errors/render.ts'
 import type { WalkDeclinedError } from '../../../../errors/types.ts'
@@ -138,11 +139,12 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
       }
     } catch (err) {
       if (!isFsError(err)) throw err
-      // GNU rm names the entry it could not remove (the guard blames
-      // a read-only region below the operand by its anchor) and
-      // keeps removing the rest.
+      // GNU rm names the entry below the operand it could not remove
+      // (the guard blames a read-only region by its anchor), and the
+      // operand as typed for a refusal that names no path below it (a
+      // store's refused key), and keeps removing the rest.
       errors.push(
-        `rm: cannot remove '${operandSpelling(errorVirtualPath(err), p)}': ${fsStrerror(err) ?? String(err)}`,
+        `rm: cannot remove '${withInner(p.rawPath, innerSuffix(p, err))}': ${fsStrerror(err) ?? String(err)}`,
       )
       continue
     }

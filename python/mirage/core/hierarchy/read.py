@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, TypeVar
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.probe import A, assert_parent
@@ -34,6 +35,10 @@ RangedReader = Callable[
 ]
 
 ReadFn = Callable[..., Awaitable[bytes]]
+
+T = TypeVar("T")
+
+Guard = Callable[[A, ScopeMatch, str], Awaitable[None]]
 
 
 def make_read(
@@ -100,6 +105,44 @@ def make_read(
         return await reader(accessor, match, path, index)
 
     return read
+
+
+def per_kind(
+    detect: DetectFn,
+    answers: Mapping[str, Callable[..., Awaitable[T]]],
+    *,
+    guard: Guard[A] | None = None,
+) -> Callable[..., Awaitable[T | None]]:
+    """Build a call only some file kinds answer: classify, guard,
+    dispatch, None for the rest.
+
+    The line calls (``first_lines``, ``last_lines``, ``line_count``,
+    ``follow``) are answered for a backend's data files (a table's
+    rows, a collection's documents) and not for its metadata files (a
+    schema, a database.json), which the caller reads the usual way. The
+    table names the data kinds once, so no answer repeats the check.
+
+    Args:
+        detect (DetectFn): the backend's scope classifier.
+        answers (Mapping[str, Callable]): one answer per data kind,
+            called as ``answer(accessor, match, path, *args)``.
+        guard (Guard | None): proves the matched entity exists before
+            its answer runs, called as ``guard(accessor, match,
+            virtual)``.
+    """
+
+    async def call(
+        accessor: A, path: PathSpec, *args: Any, **kwargs: Any
+    ) -> T | None:
+        match = detect(path)
+        answer = answers.get(match.kind)
+        if answer is None:
+            return None
+        if guard is not None:
+            await guard(accessor, match, path.virtual)
+        return await answer(accessor, match, path, *args, **kwargs)
+
+    return call
 
 
 def make_read_range(

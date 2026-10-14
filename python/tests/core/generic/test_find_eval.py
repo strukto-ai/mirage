@@ -27,7 +27,6 @@ from mirage.core.generic.find_eval import (
     settle_prunes,
     tree_has_action,
     tree_has_prune,
-    tree_has_type,
     unrespell_raw,
     without_prune,
 )
@@ -185,15 +184,6 @@ def test_build_tree_file_directory_string_aliases():
     assert (
         eval_predicate(build_tree(type="directory"), _entry(kind="d")) is True
     )
-
-
-def test_tree_has_type():
-    assert tree_has_type(Type("f")) is True
-    assert tree_has_type(Name("x")) is False
-    assert tree_has_type(And([Name("x"), Type("d")])) is True
-    assert tree_has_type(Not(Type("f"))) is True
-    assert tree_has_type(Or([Name("a"), Name("b")])) is False
-    assert tree_has_type(TrueNode()) is False
 
 
 def test_path_matches_display_path():

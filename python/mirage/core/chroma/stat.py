@@ -7,27 +7,16 @@ from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.path import parent
 
 
-async def stat_light(
-    accessor: ChromaAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    # Never triggers the directory size scan: callers that only need the
-    # type must not pay for byte lengths.
-    return await stat(accessor, path, index, sizes=False)
-
-
 async def stat(
     accessor: ChromaAccessor,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
-    sizes: bool = True,
 ) -> FileStat:
     resolved = await CHROMA_TREE.resolve(accessor, path, index)
     if resolved.is_dir:
         return directory_stat(resolved)
     entry = resolved.entry
-    if sizes and entry.size is None:
+    if entry.size is None:
         # One scan for the whole directory, paid the first time anything in
         # it is stat'd; later stats of its siblings are already sized.
         await ensure_dir_sizes(accessor, parent(resolved.virtual_key), index)

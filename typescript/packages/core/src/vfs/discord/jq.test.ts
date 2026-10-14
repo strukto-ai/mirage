@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../../commands/builtin/generic_bind/adapter.ts'
-import { mountKey } from '../../../utils/key_prefix.ts'
+import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
-import { materialize } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { materialize } from '../../io/types.ts'
+import { PathSpec } from '../../types.ts'
 import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
-import { generic } from '../generic_bind/factory.ts'
+import { generic } from '../../commands/builtin/generic_bind/factory.ts'
 
 const DISCORD_JQ = [generic('jq')]
 

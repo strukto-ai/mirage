@@ -102,9 +102,9 @@ _NATIVE_APPEND = [
     ("append", C),
 ]
 
-# s3 has no native append (read + write), serves cat, the cp source and
-# gzip's read from cache, and records its own copy, rename, unlink, rmdir
-# and rm_r.
+# s3 has no native append (read + write), and tee's append leaves no
+# cached copy, so cat reads; it serves the cp source and gzip's read from
+# cache, and records its own copy, rename, unlink, rmdir and rm_r.
 _S3 = [
     ("write", K),
     ("write", K),
@@ -114,6 +114,7 @@ _S3 = [
     ("write", K),
     ("write", NEW),
     ("truncate", NEW),
+    ("read", K),
     ("copy", "/m/m/k2.txt"),
     ("rename", NEW),
     ("rename", "/m/m/moved.txt"),

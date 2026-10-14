@@ -354,24 +354,10 @@ export async function settlePendingPrunes(
   settlePrunes(node, mtimes)
 }
 
-export function treeHasType(node: PredNode): boolean {
-  if (node.op === 'type') return true
-  if (node.op === 'not') return treeHasType(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasType)
-  return false
-}
-
 export function treeHasEmpty(node: PredNode): boolean {
   if (node.op === 'empty') return true
   if (node.op === 'not') return treeHasEmpty(node.kid)
   if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasEmpty)
-  return false
-}
-
-export function treeHasMtime(node: PredNode): boolean {
-  if (node.op === 'mtime') return true
-  if (node.op === 'not') return treeHasMtime(node.kid)
-  if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasMtime)
   return false
 }
 

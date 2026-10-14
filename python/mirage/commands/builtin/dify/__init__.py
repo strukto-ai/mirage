@@ -12,22 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import replace
-
 from mirage.commands.builtin.dify.search import search
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.builtin.slug_tree.find import make_find, reads_times
-from mirage.commands.config import CommandIO
-from mirage.core.dify.stat import stat, stat_light
-from mirage.core.dify.tree import DIFY_TREE
-
-
-def _light_ls(io: CommandIO) -> CommandIO:
-    return replace(io, stat=stat_light)
-
 
 COMMANDS = [
-    generic("ls", vfs="dify", table=_light_ls),
-    make_find("dify", DIFY_TREE, stat, stat_light, reads_times),
     search,
 ]

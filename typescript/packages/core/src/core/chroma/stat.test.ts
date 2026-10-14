@@ -18,7 +18,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { stat, statLight } from './stat.ts'
+import { stat } from './stat.ts'
 
 const QUICKSTART = '/knowledge/guides/quickstart'
 
@@ -64,13 +64,6 @@ const path = new PathSpec({
 })
 
 describe('chroma stat', () => {
-  it('statLight skips the size scan', async () => {
-    const calls: unknown[] = []
-    const result = await statLight(accessorCounting(calls), path, await seededIndex())
-    expect(result.size).toBeNull()
-    expect(calls).toHaveLength(0)
-  })
-
   it('stat sizes the rendered page with one scan', async () => {
     const calls: unknown[] = []
     const result = await stat(accessorCounting(calls), path, await seededIndex())

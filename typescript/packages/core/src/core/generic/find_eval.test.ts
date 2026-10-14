@@ -28,7 +28,6 @@ import {
   settlePrunes,
   treeHasAction,
   treeHasPrune,
-  treeHasType,
   displayPath,
   emitStartPath,
   unrespellRaw,
@@ -157,22 +156,6 @@ describe('buildTree', () => {
   it('iname', () => {
     const tree = buildTree({ iname: '*.txt' })
     expect(evalPredicate(tree, entry({ name: 'A.TXT' }))).toBe(true)
-  })
-
-  it('treeHasType', () => {
-    expect(treeHasType({ op: 'type', kind: 'f' })).toBe(true)
-    expect(treeHasType({ op: 'name', pattern: 'x', icase: false })).toBe(false)
-    expect(
-      treeHasType({
-        op: 'and',
-        kids: [
-          { op: 'name', pattern: 'x', icase: false },
-          { op: 'type', kind: 'd' },
-        ],
-      }),
-    ).toBe(true)
-    expect(treeHasType({ op: 'not', kid: { op: 'type', kind: 'f' } })).toBe(true)
-    expect(treeHasType({ op: 'true' })).toBe(false)
   })
 })
 
