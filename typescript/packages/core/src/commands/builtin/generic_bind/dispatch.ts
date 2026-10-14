@@ -119,8 +119,9 @@ export async function runDispatch(
     else if (Array.isArray(value))
       rebased[key] = value.map((item) => (item instanceof PathSpec ? whole(item) : item))
   }
+  const io = dispatchIO(dispatch, ns?.links, bounded ? ns?.mounts : undefined)
   const result = await builder.fn(
-    dispatchIO(dispatch, ns?.links, bounded ? ns?.mounts : undefined),
+    ns?.followOperands === undefined ? io : { ...io, globFollow: ns.followOperands },
     new NOOPAccessor(),
     paths.map(whole),
     [...texts],

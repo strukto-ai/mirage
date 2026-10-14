@@ -52,6 +52,12 @@ export type MountRoot = (path: string) => string
 // so a listing command is handed the names from above, the same names
 // the dispatcher merges into its own readdir.
 export type ChildMounts = (parent: string) => string[]
+// The pathname resolution a command line gives its operands: every link
+// above an operand's final name followed, and the final name too where
+// the command follows it. A glob's matches take it as typed words would.
+export type FollowOperands = (
+  items: readonly (string | PathSpec)[],
+) => Promise<(string | PathSpec)[]>
 
 // Where the mount boundaries are, as one injected object.
 //
@@ -244,6 +250,8 @@ export interface NamespaceView {
   visibility?: Visibility
   // Whether anything at or under a path is judged; a native walk yields.
   scoped?: (virtual: string) => boolean
+  // The line's operand resolution, which a glob's matches take as well.
+  followOperands?: FollowOperands
 }
 
 /**

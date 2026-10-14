@@ -53,10 +53,9 @@ if TYPE_CHECKING:
     from mirage.workspace.executor.builtins.let import handle_let
     from mirage.workspace.executor.builtins.links import (
         accepts_line,
-        follow_directory_links,
-        follow_paths,
         handle_ln,
         handle_readlink,
+        operand_follow,
         prepare_mv,
         strip_link_operands,
     )
@@ -168,10 +167,9 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.executor.builtins.xargs": ("handle_xargs",),
     "mirage.workspace.executor.builtins.links": (
         "accepts_line",
-        "follow_directory_links",
-        "follow_paths",
         "handle_ln",
         "handle_readlink",
+        "operand_follow",
         "prepare_mv",
         "strip_link_operands",
     ),
@@ -222,8 +220,7 @@ __all__ = [
     "handle_local",
     "handle_readlink",
     "accepts_line",
-    "follow_directory_links",
-    "follow_paths",
+    "operand_follow",
     "handle_df",
     "handle_mount",
     "handle_chgrp",

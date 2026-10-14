@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "sym_glob_reads_each_link_it_names",
+      "seq": 17000001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw1/d/sub /data/syw1/o && printf 'hello\\n' > /data/syw1/o/f && cd /data/syw1 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { wc -c d/l*; echo rc=$?; }); rm -r /data/syw1",
+      "expect": {
+        "exit": 0,
+        "stdout": "      0 d/ld\n      6 d/lf\n      6 total\nrc=1\n",
+        "stderr": "wc: d/ld: Is a directory\n"
+      }
+    },
+    {
+      "id": "sym_glob_cats_through_a_link",
+      "seq": 17000002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw2/d/sub /data/syw2/o && printf 'hello\\n' > /data/syw2/o/f && cd /data/syw2 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { cat d/l?; echo rc=$?; }); rm -r /data/syw2",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nrc=1\n",
+        "stderr": "cat: d/ld: Is a directory\n"
+      }
+    },
+    {
+      "id": "sym_glob_heads_every_match",
+      "seq": 17000003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw3/d/sub /data/syw3/o && printf 'hello\\n' > /data/syw3/o/f && cd /data/syw3 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { head -c3 d/*; echo rc=$?; }); rm -r /data/syw3",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> d/a <==\nhel\n==> d/ld <==\n\n==> d/lf <==\nhel\n==> d/sub <==\nrc=1\n",
+        "stderr": "head: error reading 'd/ld': Is a directory\nhead: error reading 'd/sub': Is a directory\n"
+      }
+    },
+    {
+      "id": "sym_glob_ls_lists_a_linked_directory",
+      "seq": 17000004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw4/d/sub /data/syw4/o && printf 'hello\\n' > /data/syw4/o/f && cd /data/syw4 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { ls d/*; }); rm -r /data/syw4",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/a\nd/lf\n\nd/ld:\nf\n\nd/sub:\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

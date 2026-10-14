@@ -14,7 +14,13 @@
 
 import type { EntryGate } from '../../../policy/types.ts'
 import type { FileStat, Visibility } from '../../../types.ts'
-import type { LinkView, MountView, NamespaceView, StatOverlay } from '../../../view/types.ts'
+import type {
+  FollowOperands,
+  LinkView,
+  MountView,
+  NamespaceView,
+  StatOverlay,
+} from '../../../view/types.ts'
 import { namespaceNames } from '../../../view/namespace_view.ts'
 import { getAdmission } from '../../../context/session_context.ts'
 import { hiddenUnder, pathVisible } from '../../../utils/hidden.ts'
@@ -144,6 +150,8 @@ export function namespaceViewOf(
   dispatch: DispatchFn,
   session: SessionState | null,
   gate: EntryGate | null = getAdmission(),
+  // The command line's operand resolution, which its globs' matches take too.
+  follow?: FollowOperands,
 ): NamespaceView {
   const statOverlay =
     namespace !== null
@@ -160,5 +168,6 @@ export function namespaceViewOf(
       namespaceNames(vis, registry.mountPrefixes(), namespace, parent),
     ...(vis !== null ? { visibility: vis } : {}),
     scoped: (virtual: string) => hiddenUnder(vis, virtual) || (gate?.scopes(virtual) ?? false),
+    ...(follow !== undefined ? { followOperands: follow } : {}),
   }
 }

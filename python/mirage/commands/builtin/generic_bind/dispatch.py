@@ -179,10 +179,13 @@ async def run_dispatch(
         dispatch=dispatch,
         argv=argv,
     )
-    io_ops = dispatch_io(
-        dispatch,
-        ns.links if ns is not None else None,
-        ns.mounts if ns is not None and bounded else None,
+    io_ops = replace(
+        dispatch_io(
+            dispatch,
+            ns.links if ns is not None else None,
+            ns.mounts if ns is not None and bounded else None,
+        ),
+        glob_follow=ns.follow_operands if ns is not None else None,
     )
     result = await builder.fn(
         io_ops,

@@ -261,6 +261,7 @@ async def _run_with_namespace_globs(
         raw,
         glob_children=children,
         glob_target_stat=(links.target_stat if links is not None else None),
+        glob_follow=opts.ns.follow_operands if opts.ns is not None else None,
     )
     # The command's path checks speak outside the stat and slash wraps
     # (`finish`), for the slots that still reach the backend past the

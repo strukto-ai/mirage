@@ -17,6 +17,7 @@ from mirage.workspace.executor.builtins.links.links import (
     follow_directory_links,
     follow_parent,
     follow_paths,
+    operand_follow,
     prepare_mv,
     strip_link_operands,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "handle_ln",
     "handle_readlink",
     "operand_abs",
+    "operand_follow",
     "prepare_mv",
     "strip_link_operands",
 ]

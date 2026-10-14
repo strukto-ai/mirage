@@ -64,6 +64,7 @@ from mirage.vfs.types import (
 )
 from mirage.view.types import (
     ChildMounts,
+    FollowOperands,
     LinkTargetStat,
     NamespaceView,
     ReaddirPath,
@@ -127,7 +128,8 @@ class CommandIO:
     because they are session-scoped state and the adapter is built once
     per backend; the target stat lets a trailing-slash glob follow a link
     the way bash does instead of keeping every link it cannot see
-    through.
+    through. ``glob_follow`` is the line's operand resolution, which a
+    typed word's matches take as the names typed would.
     """
 
     readdir: ReaddirOp
@@ -166,6 +168,7 @@ class CommandIO:
     read_tree: ReadTreeOp | None = None
     glob_children: ChildMounts | None = None
     glob_target_stat: LinkTargetStat | None = None
+    glob_follow: FollowOperands | None = None
 
     @property
     def resolve_glob(self) -> ResolveGlobOp:
@@ -176,6 +179,7 @@ class CommandIO:
             self.stat,
             self.glob_target_stat,
             self.access,
+            self.glob_follow,
         )
 
 

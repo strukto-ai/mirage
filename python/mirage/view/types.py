@@ -55,6 +55,12 @@ LinkResolve = Callable[[str], str]
 LinkExists = Callable[[str], Awaitable[bool]]
 # The stat of what a link points at, None when it dangles or loops.
 LinkTargetStat = Callable[[str | PathSpec], Awaitable["FileStat | None"]]
+# The pathname resolution a command line gives its operands: every link
+# above an operand's final name followed, and the final name too where
+# the command follows it. A glob's matches take it as typed words would.
+FollowOperands = Callable[
+    [list["str | PathSpec"]], Awaitable[list["str | PathSpec"]]
+]
 # Child names the namespace owes a directory: nested mounts AND links,
 # session-filtered. A nested mount is invisible to the parent mount's
 # backend and a link is invisible to every backend, so a listing command
@@ -361,6 +367,8 @@ class NamespaceView:
     visibility: Visibility | None = None
     # Whether anything at or under a path is judged; a native walk yields.
     scoped: Callable[[str], bool] | None = None
+    # The line's operand resolution, which a glob's matches take as well.
+    follow_operands: FollowOperands | None = None
 
 
 # Run one facade op as a session: ``(session_id, run) -> result``, None

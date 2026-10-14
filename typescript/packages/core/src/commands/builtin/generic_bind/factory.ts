@@ -18,7 +18,7 @@ import { activeCacheManager } from '../../../cache/context.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { ChildMounts, LinkView, NamespaceView } from '../../../view/types.ts'
+import type { ChildMounts, FollowOperands, LinkView, NamespaceView } from '../../../view/types.ts'
 import {
   type CommandFn,
   type Command,
@@ -145,18 +145,25 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
 }
 
 // The namespace facts a glob resolver reads, stamped on the adapter per
-// invocation: the child names the namespace owes a directory, and the
-// stat of what such a name points at, so a trailing slash follows a link
-// the way bash does. Conditional spreads, not `undefined` values, because
+// invocation: the child names the namespace owes a directory, the stat of
+// what such a name points at, so a trailing slash follows a link the way
+// bash does, and the line's operand resolution, which a glob's matches
+// take. Conditional spreads, not `undefined` values, because
 // exactOptionalPropertyTypes refuses an explicit undefined on an optional
 // field; Python's fields are `| None` and take the uniform path.
-function stampNamespace(raw: CommandIO, children?: ChildMounts, links?: LinkView): CommandIO {
+function stampNamespace(
+  raw: CommandIO,
+  children?: ChildMounts,
+  links?: LinkView,
+  follow?: FollowOperands,
+): CommandIO {
   return {
     ...raw,
     ...(children === undefined ? {} : { globChildren: children }),
     ...(links === undefined
       ? {}
       : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
+    ...(follow === undefined ? {} : { globFollow: follow }),
   }
 }
 
@@ -207,7 +214,9 @@ function bind(
     const guarded = withAbortGuard(
       withDirGuard(
         withCommandGuards(
-          finish(stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links)),
+          finish(
+            stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links, opts.ns?.followOperands),
+          ),
           opts.mountPrefix,
         ),
       ),

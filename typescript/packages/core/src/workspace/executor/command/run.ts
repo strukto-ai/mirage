@@ -18,7 +18,7 @@ import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
-import type { ReaddirPath, StatPath } from '../../../view/types.ts'
+import type { FollowOperands, ReaddirPath, StatPath } from '../../../view/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { envSnapshot, sessionView } from '../../session/state.ts'
 import { pathReaddir, pathStat } from '../../mount/namespace/probe.ts'
@@ -53,6 +53,9 @@ export interface RunOnMountCtx {
   routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   executeFn?: ExecuteFn
+  // The line's operand resolution, which the command's globs give their
+  // matches.
+  follow?: FollowOperands
 }
 
 /**
@@ -237,7 +240,14 @@ export async function runOnMount(
   // namespace owes a directory. A command that does not read `ns` off
   // its context ignores it, so there is no list of aware commands to
   // keep in step.
-  const ns = namespaceViewOf(registry, namespace ?? null, dispatch, session, ctx.admission)
+  const ns = namespaceViewOf(
+    registry,
+    namespace ?? null,
+    dispatch,
+    session,
+    ctx.admission,
+    ctx.follow,
+  )
   const statOverlay = ns.statOverlay ?? null
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link

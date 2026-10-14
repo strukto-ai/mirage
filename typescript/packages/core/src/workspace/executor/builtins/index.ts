@@ -15,10 +15,9 @@
 export { handleCd, handlePwd, splitModeOptions } from './dirs/index.ts'
 export {
   acceptsLine,
-  followPaths,
   handleLn,
   handleReadlink,
-  followDirectoryLinks,
+  operandFollow,
   prepareMv,
   stripLinkOperands,
 } from './links/index.ts'

@@ -14,7 +14,7 @@
 
 import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
-import type { ChildMounts, SessionAccess } from '../view/types.ts'
+import type { ChildMounts, FollowOperands, SessionAccess } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
 import { EXTGLOB_RE, fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
@@ -396,6 +396,7 @@ export async function resolveGlobWith<A, I>(
   stat?: (accessor: A, path: PathSpec, index?: I) => Promise<FileStat>,
   targetStat?: TargetStat,
   access?: SessionAccess,
+  follow?: FollowOperands,
 ): Promise<PathSpec[]> {
   const result: PathSpec[] = []
   const vis = sessionVisibility(access)
@@ -468,7 +469,13 @@ export async function resolveGlobWith<A, I>(
         )
         continue
       }
-      result.push(...(cap !== undefined && matched.length > cap ? matched.slice(0, cap) : matched))
+      const capped = cap !== undefined && matched.length > cap ? matched.slice(0, cap) : matched
+      // A typed word's matches are the words bash would have put on the
+      // line, so a link one names resolves as the name typed would; an
+      // internal expansion's matches are left as listed.
+      result.push(
+        ...(follow !== undefined && isWordShaped(p) ? await followMatches(follow, capped) : capped),
+      )
     } else {
       result.push(p)
     }
@@ -590,6 +597,7 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
   stat?: StatOp<A>,
   targetStat?: TargetStat,
   access?: SessionAccess,
+  follow?: FollowOperands,
 ): ResolveGlobOp<A> {
   return async (accessor, paths, index) =>
     resolveGlobWith(
@@ -602,5 +610,33 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
       stat,
       targetStat,
       access,
+      follow,
     )
+}
+
+// The line's operand resolution over a word's matches. A followed name keeps
+// its spelling but takes the target's key, which the walk leaves for the
+// mount to stamp.
+async function followMatches(follow: FollowOperands, matched: PathSpec[]): Promise<PathSpec[]> {
+  const followed = await follow(matched)
+  const out: PathSpec[] = []
+  matched.forEach((m, i) => {
+    const f = followed[i]
+    if (!(f instanceof PathSpec)) return
+    out.push(
+      f.virtual === m.virtual
+        ? f
+        : new PathSpec({
+            virtual: f.virtual,
+            directory: f.directory,
+            vfsPath: rekey(m.virtual, m.vfsPath, f.virtual),
+            pattern: f.pattern,
+            resolved: f.resolved,
+            rawPath: f.rawPath,
+            dotted: f.dotted,
+            walkError: f.walkError,
+          }),
+    )
+  })
+  return out
 }

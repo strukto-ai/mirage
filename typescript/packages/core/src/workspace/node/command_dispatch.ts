@@ -73,7 +73,6 @@ import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
   acceptsLine,
-  followPaths,
   handleChgrp,
   handleChmod,
   handleChown,
@@ -85,7 +84,7 @@ import {
   handleReadlink,
   handleSetfattr,
   handleTouch,
-  followDirectoryLinks,
+  operandFollow,
   prepareMv,
   stripLinkOperands,
 } from '../executor/builtins/index.ts'
@@ -94,15 +93,7 @@ import { globPattern } from '../../utils/glob_walk.ts'
 import { CycleError } from '../../utils/path.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import {
-  Consumer,
-  lookup,
-  runtimeRefused,
-  SLASH_KEEPS_LAST,
-  UNSUPPORTED_BUILTINS,
-  followsLastComponent,
-  lsLinkMode,
-} from '../lookup/index.ts'
+import { Consumer, lookup, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
 import { Admitted, admit } from './admission.ts'
 
 import { ensureVarVisible, gateRendering, sessionView } from '../session/state.ts'
@@ -925,19 +916,13 @@ async function routeArgv(
   // (`walkError`) rather than failing the line: the command meets ELOOP at
   // its op and words it per operand.
   if (namespace.nodes.size > 0 && operands.length > 0) {
-    const lsMode = name === 'ls' ? lsLinkMode(argv.words) : null
-    operands = followPaths(
+    operands = await operandFollow(
       namespace,
-      operands,
-      lsMode !== null ? lsMode === 'all' : followsLastComponent(name, argv.words),
-      !SLASH_KEEPS_LAST.has(name),
+      dispatch,
+      name,
+      argv.words,
       session.visibility,
-    )
-    // ls resolves a command-line link only when it leads to a directory, and
-    // only a stat can tell where it leads.
-    if (lsMode === 'directory') {
-      operands = await followDirectoryLinks(namespace, dispatch, operands, session.visibility)
-    }
+    )(operands)
     argv = argv.withOperands(operands)
   }
 

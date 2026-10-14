@@ -21,6 +21,7 @@ from mirage.types import FileStat, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under, path_visible
 from mirage.view.namespace_view import namespace_names
 from mirage.view.types import (
+    FollowOperands,
     LinkView,
     MountView,
     NamespaceLinks,
@@ -225,6 +226,7 @@ def namespace_view_of(
     namespace: Namespace | None,
     dispatch: DispatchFn | None,
     session: "SessionState | None",
+    follow: FollowOperands | None = None,
 ) -> NamespaceView:
     """The name plane's facts on offer to one session, bundled as one
     view.
@@ -245,6 +247,8 @@ def namespace_view_of(
             existence across mounts rather than within one backend.
         session (SessionState | None): the session the command runs as,
             None for an unrestricted view.
+        follow (FollowOperands | None): the command line's operand
+            resolution, which its globs' matches take too.
     """
     vis = session.visibility if session is not None else None
     gate = get_admission()
@@ -267,6 +271,7 @@ def namespace_view_of(
         ),
         visibility=vis,
         scoped=scoped,
+        follow_operands=follow,
     )
 
 

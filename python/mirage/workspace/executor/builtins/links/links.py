@@ -14,6 +14,7 @@
 
 import dataclasses
 import posixpath
+from collections.abc import Sequence
 from functools import partial
 
 from mirage.commands.builtin.generic.cp import dest_kind
@@ -27,11 +28,17 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, LsLinkMode, PathSpec
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import CycleError
+from mirage.view.types import FollowOperands
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import Result
+from mirage.workspace.lookup.constants import (
+    SLASH_KEEPS_LAST,
+    follows_last_component,
+    ls_link_mode,
+)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import stat_or_none
 
@@ -173,6 +180,50 @@ async def follow_directory_links(
             )
         out.append(followed if leads_to_dir else item)
     return out
+
+
+def operand_follow(
+    namespace: Namespace,
+    dispatch: DispatchFn,
+    name: str,
+    words: Sequence[str | PathSpec],
+) -> FollowOperands:
+    """The pathname resolution a line gives its operands, as one call.
+
+    What the kernel does to a path before the syscall: every component but
+    the last resolves for every command, and the last for a command that
+    follows (open(2) rather than lstat(2)) or an operand typed with a
+    trailing slash; ls resolves a command-line link only once a stat has
+    shown that it leads to a directory. The router runs it over the typed
+    operands, and a command's glob over the names a pattern matched, which
+    bash would have put on the line as words, so a link a glob matched
+    resolves as the same name typed would.
+
+    Args:
+        namespace (Namespace): addressing authority holding the links.
+        dispatch (DispatchFn): op dispatcher, which stats where an ls
+            operand's link leads.
+        name (str): command name.
+        words (Sequence[str | PathSpec]): the command's raw words, name
+            first.
+    """
+    ls_mode = ls_link_mode(words) if name == "ls" else None
+    follow_last = (
+        ls_mode is LsLinkMode.ALL
+        if ls_mode is not None
+        else follows_last_component(name, list(words))
+    )
+    slash_follows = name not in SLASH_KEEPS_LAST
+
+    async def follow(items: list[str | PathSpec]) -> list[str | PathSpec]:
+        if not namespace.symlink_targets():
+            return items
+        out = follow_paths(namespace, items, follow_last, slash_follows)
+        if ls_mode is LsLinkMode.DIRECTORY:
+            out = await follow_directory_links(namespace, dispatch, out)
+        return out
+
+    return follow
 
 
 def accepts_line(

@@ -70,14 +70,12 @@ from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import TempEnv, VarAttr
 from mirage.shell.xtrace import trace_command
-from mirage.types import LsLinkMode, PathSpec, Producer, word_text
+from mirage.types import PathSpec, Producer, word_text
 from mirage.utils.glob_walk import glob_pattern
 from mirage.utils.path import CycleError
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     accepts_line,
-    follow_directory_links,
-    follow_paths,
     handle_chgrp,
     handle_chmod,
     handle_chown,
@@ -89,6 +87,7 @@ from mirage.workspace.executor.builtins import (
     handle_readlink,
     handle_setfattr,
     handle_touch,
+    operand_follow,
     prepare_mv,
     strip_link_operands,
 )
@@ -106,12 +105,9 @@ from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.lookup import (
-    SLASH_KEEPS_LAST,
     UNSUPPORTED_BUILTINS,
     Consumer,
-    follows_last_component,
     lookup,
-    ls_link_mode,
     runtime_refused,
 )
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
@@ -948,21 +944,9 @@ async def _route_argv(
     #    in comes back refused (`walk_error`) rather than failing the
     #    line: the command meets ELOOP at its op and words it per operand.
     if namespace.nodes and operands:
-        ls_mode = ls_link_mode(argv.words) if name == "ls" else None
-        operands = follow_paths(
-            namespace,
-            operands,
-            ls_mode is LsLinkMode.ALL
-            if ls_mode is not None
-            else follows_last_component(name, argv.words),
-            slash_follows=name not in SLASH_KEEPS_LAST,
+        operands = await operand_follow(namespace, dispatch, name, argv.words)(
+            operands
         )
-        if ls_mode is LsLinkMode.DIRECTORY:
-            # ls resolves a command-line link only when it leads to a
-            # directory, and only a stat can tell where it leads.
-            operands = await follow_directory_links(
-                namespace, dispatch, operands
-            )
         argv = argv.with_operands(operands)
 
     # ── symlinks (namespace-backed; not bash builtins, not mount

@@ -58,6 +58,7 @@ from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
 from mirage.view.types import NamespaceView, StatPath
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.builtins.links.links import operand_follow
 from mirage.workspace.executor.command.cli import (
     CLIContext,
     drops_mount_caches,
@@ -236,6 +237,11 @@ async def handle_command(
     cmd_str = " ".join(
         p.virtual if isinstance(p, PathSpec) else p for p in parts
     )
+    follow = (
+        operand_follow(namespace, dispatch, cmd_name, parts)
+        if namespace is not None
+        else None
+    )
 
     # Job builtins
     if cmd_name in JOB_BUILTINS and job_table is not None:
@@ -315,7 +321,9 @@ async def handle_command(
                     if dispatch is not None
                     else None
                 ),
-                ns=namespace_view_of(registry, namespace, dispatch, session),
+                ns=namespace_view_of(
+                    registry, namespace, dispatch, session, follow
+                ),
                 session_view=session_view(
                     session,
                     registry.policies,
@@ -588,8 +596,11 @@ async def handle_command(
             namespace,
             routing_decision=routing_decision,
             execute_fn=execute_fn,
+            follow=follow,
         )
-        cross_ns = namespace_view_of(registry, namespace, dispatch, session)
+        cross_ns = namespace_view_of(
+            registry, namespace, dispatch, session, follow
+        )
         # A per-operand native run is single-mount by construction, so a
         # traversal operand holding nested mounts has to fan out inside
         # it, exactly as the same operand would on a line of its own.
@@ -755,7 +766,9 @@ async def handle_command(
         else b""
     )
 
-    single_ns = namespace_view_of(registry, namespace, dispatch, session)
+    single_ns = namespace_view_of(
+        registry, namespace, dispatch, session, follow
+    )
     single_stat = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None
@@ -830,6 +843,7 @@ async def handle_command(
         routing_decision=routing_decision,
         argv=spelled_words(parts[1:]),
         execute_fn=execute_fn,
+        follow=follow,
     )
     if cmd_name == "find":
         stdout = await _finish_find(

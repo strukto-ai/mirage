@@ -31,6 +31,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
+from mirage.view.types import FollowOperands
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.flags import parse_flags
 from mirage.workspace.mount import (
@@ -223,6 +224,7 @@ async def run_on_mount(
     routing_decision: RouteDecision[Runtime] | None = None,
     argv: tuple[str, ...] = (),
     execute_fn: ExecuteLine | None = None,
+    follow: FollowOperands | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
@@ -253,6 +255,8 @@ async def run_on_mount(
             line spelled them; empty for a run split out of a line.
         execute_fn (ExecuteLine | None): Runs a nested line, which the
             handler reaches as ``opts.shell``; None outside a workspace.
+        follow (FollowOperands | None): the line's operand resolution,
+            which the command's globs give their matches.
     """
     session = context.session
     if mount is None:
@@ -282,7 +286,7 @@ async def run_on_mount(
     # A traversal command's start point is statted through the dispatcher
     # so a start point under another mount answers (`find -L` follows a
     # link across mounts before the command ever runs).
-    ns = namespace_view_of(registry, namespace, dispatch, session)
+    ns = namespace_view_of(registry, namespace, dispatch, session, follow)
     stat_path = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None

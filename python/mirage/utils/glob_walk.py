@@ -31,7 +31,12 @@ from mirage.utils.fnmatch import (
 )
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey
-from mirage.view.types import ChildMounts, LinkTargetStat, SessionAccess
+from mirage.view.types import (
+    ChildMounts,
+    FollowOperands,
+    LinkTargetStat,
+    SessionAccess,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -573,6 +578,7 @@ def make_resolve_glob(
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
     access: SessionAccess | None = None,
+    follow: FollowOperands | None = None,
 ) -> ResolveGlobFn:
     """Build a resolve_glob generic over a backend's readdir.
 
@@ -587,6 +593,8 @@ def make_resolve_glob(
         target_stat (LinkTargetStat | None): the namespace's stat of what
             an owed name points at, resolved through the workspace, so a
             trailing slash can follow a link the way bash does.
+        follow (FollowOperands | None): the line's operand resolution,
+            given to a typed word's matches.
     """
 
     async def resolve_glob(
@@ -605,9 +613,35 @@ def make_resolve_glob(
             stat,
             target_stat,
             access,
+            follow,
         )
 
     return resolve_glob
+
+
+async def _follow_matches(
+    follow: FollowOperands, matched: list[PathSpec]
+) -> list[PathSpec]:
+    """The line's operand resolution over a word's matches.
+
+    A followed name keeps its spelling but takes the target's key, which
+    the walk leaves for the mount to stamp.
+
+    Args:
+        follow (FollowOperands): the line's operand resolution.
+        matched (list[PathSpec]): the word's matches.
+    """
+    words: list[str | PathSpec] = [*matched]
+    followed = await follow(words)
+    return [
+        f
+        if f.virtual == m.virtual
+        else dataclasses.replace(
+            f, vfs_path=rekey(m.virtual, m.vfs_path, f.virtual)
+        )
+        for m, f in zip(matched, followed)
+        if isinstance(f, PathSpec)
+    ]
 
 
 async def _is_directory(
@@ -665,6 +699,7 @@ async def resolve_glob_with(
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
     access: SessionAccess | None = None,
+    follow: FollowOperands | None = None,
 ) -> list[PathSpec]:
     """Shared resolve_glob loop over a backend's readdir.
 
@@ -697,6 +732,10 @@ async def resolve_glob_with(
         target_stat (LinkTargetStat | None): the namespace's stat of what
             an owed name (a link, a nested mount root) points at; without
             it a trailing slash keeps every owed name.
+        follow (FollowOperands | None): the line's operand resolution. A
+            typed word's matches are the words bash would have put on the
+            line, so a link one names resolves as the name typed would;
+            an internal expansion's matches are left as listed.
     """
     result: list[PathSpec] = []
     vis = session_visibility(access)
@@ -761,6 +800,8 @@ async def resolve_glob_with(
                     cap,
                 )
                 matched = matched[:cap]
+            if follow is not None and is_word_shaped(p):
+                matched = await _follow_matches(follow, matched)
             result.extend(matched)
         else:
             result.append(p)

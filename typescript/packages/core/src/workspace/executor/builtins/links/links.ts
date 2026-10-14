@@ -30,6 +30,8 @@ import { dispatchStat, walkSpelling } from '../../../../commands/builtin/utils/p
 import { statOrNull } from '../../../mount/namespace/probe.ts'
 import type { Result } from '../types.ts'
 import type { FlagValue } from '../../../../commands/spec/types.ts'
+import type { FollowOperands } from '../../../../view/types.ts'
+import { SLASH_KEEPS_LAST, followsLastComponent, lsLinkMode } from '../../../lookup/constants.ts'
 
 export function posixRelative(target: string, startDir: string): string {
   const t = target.split('/').filter(Boolean)
@@ -301,6 +303,35 @@ export async function followDirectoryLinks(
     )
   }
   return out
+}
+
+/**
+ * The pathname resolution a line gives its operands, as one call.
+ *
+ * What the kernel does to a path before the syscall: every component but the
+ * last resolves for every command, and the last for a command that follows
+ * (open(2) rather than lstat(2)) or an operand typed with a trailing slash;
+ * ls resolves a command-line link only once a stat has shown that it leads to
+ * a directory. The router runs it over the typed operands, and a command's glob
+ * over the names a pattern matched, which bash would have put on the line as
+ * words, so a link a glob matched resolves as the same name typed would.
+ * Mirrors Python's operand_follow.
+ */
+export function operandFollow(
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  name: string,
+  words: readonly (string | PathSpec)[],
+  vis: Visibility | null,
+): FollowOperands {
+  const lsMode = name === 'ls' ? lsLinkMode(words) : null
+  const followLast = lsMode !== null ? lsMode === 'all' : followsLastComponent(name, words)
+  const slashFollows = !SLASH_KEEPS_LAST.has(name)
+  return async (items) => {
+    if (namespace.symlinkTargets().size === 0) return [...items]
+    const out = followPaths(namespace, [...items], followLast, slashFollows, vis)
+    return lsMode === 'directory' ? followDirectoryLinks(namespace, dispatch, out, vis) : out
+  }
 }
 
 export interface PreparedMv {

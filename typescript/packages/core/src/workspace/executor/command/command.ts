@@ -84,6 +84,7 @@ import { namespaceViewOf } from '../../mount/namespace/view.ts'
 import { dropMountCaches, findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
+import { operandFollow } from '../builtins/links/links.ts'
 import { sessionView } from '../../session/state.ts'
 import { optionError, parseFlags } from './flags.ts'
 import type { HandOff } from '../../../policy/types.ts'
@@ -319,9 +320,14 @@ export async function handleCommand(
     parts = [runs, option, ...parts.slice(1)]
   }
 
+  const follow =
+    namespace !== undefined
+      ? operandFollow(namespace, dispatch, cmdName, parts, session.visibility)
+      : undefined
   const runCtx: RunOnMountCtx = {
     admission,
     ...(signal !== undefined ? { signal } : {}),
+    ...(follow !== undefined ? { follow } : {}),
     registry,
     context,
     dispatch,
@@ -575,7 +581,7 @@ export async function handleCommand(
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
-    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session, admission)
+    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session, admission, follow)
     // A per-operand native run is single-mount by construction, so a
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
@@ -741,7 +747,14 @@ export async function handleCommand(
       ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       : null
 
-  const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch, session, admission)
+  const singleNs = namespaceViewOf(
+    registry,
+    namespace ?? null,
+    dispatch,
+    session,
+    admission,
+    follow,
+  )
   const singleStat: StatPath = (path) => pathStat(dispatch, path, null)
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
