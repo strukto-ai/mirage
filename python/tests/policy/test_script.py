@@ -44,7 +44,13 @@ from mirage.runtime.types import (
     ScriptSource,
 )
 from mirage.shell.variable import ShellValue, VarAttr
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import (
+    CapacityResult,
+    CapacityState,
+    FileStat,
+    FileType,
+    PathSpec,
+)
 from mirage.view.types import MountView, NamespaceView, SessionView
 from mirage.workspace.dispatcher.constants import CALLS
 
@@ -357,6 +363,21 @@ def test_what_a_backend_returned_keeps_its_keys():
     data = script_context(done)
     assert data["result"]["extra"] == extra
     assert data["session_id"] == "s"
+    capacity = CapacityResult(
+        CapacityState.QUOTA, inodes_used=1, inodes_free=2
+    )
+    df = script_context(
+        VfsResultContext(
+            call=CALLS["stat"],
+            path=_path("/scratch"),
+            write=False,
+            prefix="/scratch",
+            session_id="s",
+            result=("ram", capacity),
+        )
+    )
+    assert df["result"][1]["inodes_used"] == 1
+    assert df["result"][1]["inodes_free"] == 2
 
 
 @pytest.mark.asyncio

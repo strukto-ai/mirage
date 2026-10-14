@@ -20,7 +20,7 @@ import type { LanguageRuntime } from '../runtime/language.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
 import { scriptEngine } from '../runtime/script.ts'
 import type { BridgeDispatchFn, RunResult } from '../runtime/types.ts'
-import { PathSpec, type JsonValue } from '../types.ts'
+import { FileStat, PathSpec, type JsonValue } from '../types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import type { Policy } from './base.ts'
 import {
@@ -64,10 +64,10 @@ const LIVE = new Set(['session', 'ns', 'vfs'])
 /**
  * A value as a program reads it: JSON-shaped data, bytes as text, a path
  * as its virtual spelling, a record as its fields under the Python
- * names (the live handles left out). Under `data` (what a backend
- * returned) a plain object is a mapping whose keys stay as they are, as a
- * Python dict's do; a record in it still names its own fields. Mirrors
- * the Python `_plain`.
+ * names (the live handles left out). A stat's `extra` is the backend's own
+ * metadata: under `data` a plain object keeps its keys, as a Python dict
+ * does, and a record in it still names its own fields. Mirrors the Python
+ * `_plain`.
  */
 function plain(value: unknown, data = false): JsonValue {
   if (value === null || value === undefined) return null
@@ -101,7 +101,7 @@ function plain(value: unknown, data = false): JsonValue {
         // Under the field names the document and the Python host spell.
         .map(([key, item]) => [
           named ? key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`) : key,
-          plain(item, data),
+          plain(item, data || (value instanceof FileStat && key === 'extra')),
         ]),
     )
   }
@@ -119,7 +119,6 @@ export function scriptContext(
   ctx: CommandContext | RouteContext | VfsContext | SessionContext,
 ): Record<string, JsonValue> {
   const data = plain(ctx) as Record<string, JsonValue>
-  if ('result' in ctx) data.result = plain(ctx.result, true)
   const session = ctx.session
   if (session !== undefined) {
     data.cwd = session.cwd()

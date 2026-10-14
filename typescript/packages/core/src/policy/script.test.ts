@@ -12,7 +12,15 @@ import {
   type ExecutionRequest,
   type RunResult,
 } from '../runtime/types.ts'
-import { ContentType, FileStat, FileType, PathSpec } from '../types.ts'
+import {
+  type CapacityResult,
+  CapacityState,
+  ContentType,
+  FileStat,
+  FileType,
+  type JsonValue,
+  PathSpec,
+} from '../types.ts'
 import type { NamespaceView, SessionView } from '../view/types.ts'
 import { CALLS } from '../workspace/dispatcher/constants.ts'
 import type { VfsCall } from '../vfs/types.ts'
@@ -357,6 +365,17 @@ describe('scriptContext', () => {
     const data = scriptContext(done)
     expect((data.result as Record<string, unknown>).extra).toEqual(extra)
     expect(data.session_id).toBe('s')
+    const capacity: CapacityResult = { state: CapacityState.QUOTA, inodesUsed: 1, inodesFree: 2 }
+    const stated: VfsResultContext = {
+      ...opsCtx('stat', '/scratch', false),
+      result: ['ram', capacity],
+    }
+    const df = scriptContext(stated)
+    expect((df.result as JsonValue[])[1]).toEqual({
+      state: 'quota',
+      inodes_used: 1,
+      inodes_free: 2,
+    })
   })
 })
 
