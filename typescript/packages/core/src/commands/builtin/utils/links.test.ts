@@ -41,10 +41,6 @@ function links(table: Record<string, string>): LinkView {
       path in table
         ? new FileStat({ name: path.split('/').pop() ?? '', type: FileType.SYMLINK })
         : null,
-    children: (directory) =>
-      Object.keys(table)
-        .filter((link) => link.slice(0, link.lastIndexOf('/')) === directory.replace(/\/+$/, ''))
-        .map((link) => new FileStat({ name: link.split('/').pop() ?? '', type: FileType.SYMLINK })),
     subtree: () => [],
     resolve: (path) => {
       if (table[path] === path) throw new CycleError(path)

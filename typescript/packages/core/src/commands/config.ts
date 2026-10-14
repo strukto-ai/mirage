@@ -156,8 +156,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   // so a trailing-slash glob follows a link the way bash does instead of
   // keeping every link it cannot see through.
   globTargetStat?: TargetStat
-  // The line's operand resolution, which a typed word's matches take as
-  // the names typed would. Stamped beside globChildren from opts.ns.
+  // The line's operand resolution, stamped beside globChildren from opts.ns.
   globFollow?: FollowOperands
 }
 

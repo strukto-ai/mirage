@@ -619,24 +619,11 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
 // mount to stamp.
 async function followMatches(follow: FollowOperands, matched: PathSpec[]): Promise<PathSpec[]> {
   const followed = await follow(matched)
-  const out: PathSpec[] = []
-  matched.forEach((m, i) => {
+  return matched.flatMap((m, i) => {
     const f = followed[i]
-    if (!(f instanceof PathSpec)) return
-    out.push(
-      f.virtual === m.virtual
-        ? f
-        : new PathSpec({
-            virtual: f.virtual,
-            directory: f.directory,
-            vfsPath: rekey(m.virtual, m.vfsPath, f.virtual),
-            pattern: f.pattern,
-            resolved: f.resolved,
-            rawPath: f.rawPath,
-            dotted: f.dotted,
-            walkError: f.walkError,
-          }),
-    )
+    if (!(f instanceof PathSpec)) return []
+    return f.virtual === m.virtual
+      ? [f]
+      : [PathSpec.fromStrPath(f, rekey(m.virtual, m.vfsPath, f.virtual))]
   })
-  return out
 }

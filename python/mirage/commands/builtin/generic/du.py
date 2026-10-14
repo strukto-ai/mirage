@@ -188,10 +188,9 @@ async def du_operands(
     directory.
 
     A failed stat is not proof of absence, and du runs bound to one
-    backend, so its own stat cannot see two things that make a path a
-    real directory: a mount nested below it and a symlink below it are
-    both namespace state, held in another VFS or in no VFS at
-    all. ``stat_path`` is the channel that knows, because it resolves
+    backend, so its own stat cannot see a mount nested below a path,
+    which makes it a real directory from another VFS. ``stat_path`` is
+    the channel that knows, because it resolves
     through the dispatcher rather than one accessor, and it is the same
     probe ``find`` classifies its start point with. Session filtering
     rides along with it: a mount the session may not see contributes no
@@ -752,9 +751,12 @@ async def du_generic(
     unreadable, then render. Keeping them here means a backend wrapper is
     wiring only, and the three steps cannot drift apart per backend.
 
-    The walks meet links as entries of their own (their size is the
-    target string's length); under -L they follow them instead, which the
-    operand's own was already, at dispatch.
+    The walks meet links as entries of their own; under -L they follow
+    them instead, which the operand's own was already, at dispatch.
+    Deliberate divergence: a link counts as its target string's length,
+    the size ``ls -l`` prints, where GNU counts the disk blocks it holds
+    (0 for a target short enough to live in the inode); mirage counts
+    bytes throughout.
 
     Args:
         paths (list[PathSpec]): The operands as parsed, possibly empty.

@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { enoent } from '../../../errors/fs.ts'
-import { DEFAULT_VISIBILITY, FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { NamespaceView } from '../../../view/types.ts'
 import { removeTree } from './rm_cmd.ts'
 
@@ -78,32 +78,14 @@ function treeOps(calls: string[][], gone: string | null = null) {
   }
 }
 
-function ns(mounts: string[] = [], links: string[] = [], hidden: string[] = []): NamespaceView {
-  const rows = new Map<string, FileStat[]>()
-  for (const link of links) {
-    const cut = link.lastIndexOf('/')
-    const base = link.slice(0, cut)
-    rows.set(base, [
-      ...(rows.get(base) ?? []),
-      new FileStat({ name: link.slice(cut + 1), type: FileType.SYMLINK }),
-    ])
-  }
+function ns(mounts: string[]): NamespaceView {
   return {
-    links: {
-      statAt: () => null,
-      children: (base) => rows.get(base) ?? [],
-      subtree: () => [],
-      resolve: (path) => path,
-      exists: () => Promise.resolve(true),
-      targetStat: () => Promise.resolve(null),
-    },
     mounts: {
       descendants: () => mounts,
       visibleDescendants: () => mounts,
       isRoot: (path) => mounts.includes(path),
       rootOf: () => '/',
     },
-    visibility: { ...DEFAULT_VISIBILITY, paths: { paths: hidden } },
   }
 }
 
@@ -116,20 +98,6 @@ describe('removeTree', () => {
       force: false,
     })
     expect(calls).toEqual([['unlink', '/t/a.txt']])
-    expect(failures).toEqual([])
-  })
-
-  it('leaves a hidden link to the directory', async () => {
-    const calls: string[][] = []
-    const { failures } = await removeTree(PathSpec.fromStrPath('/t/inner'), {
-      ...treeOps(calls),
-      ns: ns([], ['/t/inner/secret'], ['/t/inner/secret']),
-      force: false,
-    })
-    expect(calls).toEqual([
-      ['unlink', '/t/inner/b.txt'],
-      ['rmdir', '/t/inner'],
-    ])
     expect(failures).toEqual([])
   })
 

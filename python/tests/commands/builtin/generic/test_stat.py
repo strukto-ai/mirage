@@ -349,7 +349,6 @@ async def _no_target(virtual: str) -> FileStat | None:
 
 _LINKS = LinkView(
     stat_at=_link_lookup,
-    children=lambda directory: [],
     subtree=lambda directory: [],
     resolve=lambda virtual: virtual,
     exists=_always_exists,

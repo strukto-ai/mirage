@@ -19,13 +19,12 @@ import pkgutil
 import mirage.commands.builtin as builtin
 from mirage.commands.config import Command
 
-# The families whose generics merge namespace symlinks (ls/stat/find/
-# du/file read `opts.ns.links`). Since CommandOpts carries the fact into
-# every handler, link awareness is inherited by delegating to the
-# family generic — so the invariant worth pinning is the delegation
-# itself: a bespoke wrapper that walks its own tree cannot see a link,
-# still runs, still exits 0, and nothing notices until someone makes a
-# link on that backend.
+# The families whose generics read `opts.ns.links` (ls/stat/find/file).
+# Since CommandOpts carries the fact into every handler, link awareness
+# is inherited by delegating to the family generic — so the invariant
+# worth pinning is the delegation itself: a bespoke wrapper that walks
+# its own tree cannot see a link, still runs, still exits 0, and nothing
+# notices until someone makes a link on that backend.
 LINK_AWARE = ("ls", "stat", "find", "file")
 
 # The two spellings of delegation: the family's full-command generic
@@ -66,15 +65,6 @@ def _registered() -> tuple[list[Command], list[str]]:
             seen.add(id(value))
             found.extend(cmds)
     return found, failed
-
-
-def test_every_bound_table_answers_for_the_links():
-    """A mount's table names and lstats the namespace's links once, for
-    every command bound to it; dropping the stamp is how every listing
-    and stat would lose them at once, so the stamp itself is pinned."""
-    import mirage.commands.builtin.generic_bind.factory as factory
-
-    assert "with_links(" in inspect.getsource(factory)
 
 
 def test_link_aware_generics_read_the_links_field():

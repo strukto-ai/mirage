@@ -432,13 +432,6 @@ export class Namespace {
     return out
   }
 
-  // Stat rows for the links living directly under a directory. Links
-  // are namespace state and invisible to a backend readdir, so listing
-  // commands merge these rows into the backend's entries.
-  linkStatsUnder(directory: string): FileStat[] {
-    return this.linksUnder(directory).map(([name, meta]) => linkStat(name, meta))
-  }
-
   // The names of the links living directly under a directory. What a
   // readdir row's link mark needs, which is a name question rather than
   // a stat one: the dispatcher already holds every entry's stat and has only
@@ -448,8 +441,7 @@ export class Namespace {
   // `/data/alias` is dispatched at `/data/real` and answers with that
   // directory's entries, so the marks have to come from there too or
   // every link inside an aliased directory reads as whatever its
-  // followed stat said. `linkStatsUnder` needs no such resolution: it is
-  // handed the path the router already rewrote.
+  // followed stat said.
   linkNamesUnder(directory: string): Set<string> {
     return new Set(this.linksUnder(this.follow(directory)).map(([name]) => name))
   }

@@ -365,7 +365,7 @@ export async function grepGeneric(
   // The walk meets links as entries: -r leaves them, -R reads what each one
   // leads to, and a directory it reaches again is a loop.
   const follow = f.recursive && f.dereference === true ? (opts.ns?.links ?? null) : null
-  const walkedSt = follow === null ? st : (p: string) => followedStat(st, follow, p)
+  const walkedSt = (p: string) => followedStat(st, follow, p)
   let failed = false
   const notices: Uint8Array[] = []
   let matched = false

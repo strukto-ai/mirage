@@ -221,11 +221,11 @@ async def _run_with_namespace_globs(
     namespace facts stamped on below every guard.
 
     The table is the mount's (``opts.io``), read per invocation, so one
-    registration serves every mount. A nested mount's keys live in
-    another VFS and no VFS stores a symlink, so a glob resolved by one
-    backend's readdir misses both, while the same names
-    are already merged into a listing. The names are session-scoped, so
-    the fact is stamped on here, per invocation, from ``opts.ns`` -- and
+    registration serves every mount. No VFS stores a symlink and a nested
+    mount's keys live in another VFS, so the table answers for the links
+    (``with_links``) and a glob takes the names the namespace owes a
+    directory (``glob_children``). Both are session-scoped, so they are
+    stamped on here, per invocation, from ``opts.ns`` -- and
     the whole guard chain is applied on top of the stamped copy, so every
     guard that consumes a namespace fact simply reads it off the table it
     wraps: glob resolution derives from ``glob_children``, the dir guard
@@ -269,10 +269,8 @@ async def _run_with_namespace_globs(
         ),
         links,
         opts.dispatch,
-        (
-            functools.partial(serves, ns.mounts, opts.mount_prefix)
-            if ns is not None and ns.mounts is not None
-            else None
+        functools.partial(
+            serves, ns.mounts if ns is not None else None, opts.mount_prefix
         ),
     )
     # The command's path checks speak outside the stat and slash wraps

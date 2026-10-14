@@ -57,8 +57,6 @@ export interface FlagSet {
   initialTab?: boolean
   groupSeparator?: string | null
   label?: string
-  // -R: the recursion follows every link it meets, not only the command
-  // line's.
   dereference?: boolean
 }
 

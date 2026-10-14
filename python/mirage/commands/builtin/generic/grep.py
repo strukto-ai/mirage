@@ -414,9 +414,7 @@ async def grep_generic(
     # The walk meets links as entries: -r leaves them, -R reads what each
     # one leads to, and a directory it reaches again is a loop.
     follow = links if f.recursive and f.dereference else None
-    walked_st = (
-        partial(followed_stat, st, follow) if follow is not None else st
-    )
+    walked_st = partial(followed_stat, st, follow)
     rb = partial(call_read_bytes, read_bytes, prefix=prefix)
     failed = False
     diagnostics: list[bytes] = []

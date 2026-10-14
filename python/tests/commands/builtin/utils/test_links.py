@@ -70,11 +70,6 @@ def _links(table: dict[str, str]) -> LinkView:
             if path in table
             else None
         ),
-        children=lambda directory: [
-            FileStat(name=link.rsplit("/", 1)[-1], type=FileType.SYMLINK)
-            for link in table
-            if link.rsplit("/", 1)[0] == directory.rstrip("/")
-        ],
         subtree=lambda directory: [],
         resolve=resolve,
         exists=exists,

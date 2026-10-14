@@ -90,8 +90,8 @@ interface WalkOpts {
   // The command line's links were resolved on request (-L, -H), so one that
   // loops is an error rather than a link to list.
   followArgs: boolean
-  // Session-filtered child-mount names: the other half of namespace
-  // structure beside links, merged as directory rows in every listing.
+  // Session-filtered child-mount names, merged as directory rows in every
+  // listing.
   // GNU lists a mountpoint as an ordinary entry of its parent, -R or
   // not, so the merge is unconditional: withholding it under -R dropped
   // the row whenever the parent's backend held no key of that name.
@@ -558,8 +558,7 @@ async function listDir(
     entries = []
     structureOnly = true
   }
-  const entryStat: Stat =
-    opts.deref && links !== null ? (p: PathSpec) => followedStat(stat, links, p) : stat
+  const entryStat: Stat = (p: PathSpec) => followedStat(stat, opts.deref ? links : null, p)
   const prefix = mountPrefixOf(dir.virtual, dir.vfsPath)
   const stats: FileStat[] = []
   for (const entry of entries) {
@@ -607,24 +606,15 @@ async function listDir(
   }
 }
 
-// The row for an operand that is itself a symlink, else null.
-//
-// A link has no backend inode, so readdir and stat both fail on one;
-// without this a link operand reads as a missing file, and a dangling
-// link fails the whole listing (GNU prints its row and exits 0). Named
-// with the operand's own spelling, like every other ls row. Renaming a
-// link row copies every field, not a hand-picked few: a link carries real
-// ownership (chown -h writes it), and listing the fields by hand silently
-// drops whatever the node grows next.
+// The row for an operand that is itself a symlink, else null, named with the
+// operand's own spelling like every other ls row. Renaming a link row copies
+// every field, not a hand-picked few: a link carries real ownership (chown -h
+// writes it), and listing the fields by hand silently drops whatever the node
+// grows next.
 function linkRow(path: PathSpec, links: LinkView | null): FileStat | null {
   const row = links?.statAt(path.virtual) ?? null
   if (row === null) return null
   return row.with({ name: path.rawPath })
-}
-
-// A path below an operand as the operand spelled it.
-function spelledBelow(operand: PathSpec, virtual: string): string {
-  return respellOne(virtual, operand.virtual, operand.rawPath)
 }
 
 // List one operand and report whether it turned out to be a directory.
@@ -641,10 +631,9 @@ async function probeOperand(
   chain: readonly string[] = [],
   spell: ((virtual: string) => string) | null = null,
 ): Promise<Operand> {
-  const spelled = spell ?? ((virtual: string) => spelledBelow(path, virtual))
+  const spelled = spell ?? ((virtual: string) => respellOne(virtual, path.virtual, path.rawPath))
   const links = opts.links
-  const ownStat: Stat =
-    opts.deref && links !== null ? (p: PathSpec) => followedStat(stat, links, p) : stat
+  const ownStat: Stat = (p: PathSpec) => followedStat(stat, opts.deref ? links : null, p)
   if (path.walkError === null && (commandLineArg || !opts.deref)) {
     // The table's readdir opens what a link leads to, as opendir(3) does,
     // so a link the line left unresolved is asked first: the router

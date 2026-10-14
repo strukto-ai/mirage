@@ -400,13 +400,6 @@ async def test_link_stat_carries_the_links_own_mtime(namespace):
 
 
 @pytest.mark.asyncio
-async def test_link_stats_under_is_one_level_only(namespace):
-    await namespace.symlink("/data/a", "/t1", 1.0)
-    await namespace.symlink("/data/sub/b", "/t2", 1.0)
-    assert [s.name for s in namespace.link_stats_under("/data")] == ["a"]
-
-
-@pytest.mark.asyncio
 async def test_link_names_under_is_one_level_of_names(namespace):
     # What a readdir row's mark needs: the names, one level, no stats.
     await namespace.symlink("/data/a", "/t1", 1.0)

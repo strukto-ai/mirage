@@ -243,7 +243,7 @@ def paths_scoped(
 
 async def followed_stat(
     stat: Callable[..., Awaitable[FileStat]],
-    links: LinkView,
+    links: LinkView | None,
     path: str | PathSpec,
     *args: Any,
     **kwargs: Any,
@@ -260,7 +260,8 @@ async def followed_stat(
     Args:
         stat (Callable[..., Awaitable[FileStat]]): the table's stat, which
             answers a link with its own row.
-        links (LinkView): the namespace's symlink facts.
+        links (LinkView | None): the namespace's symlink facts, None for
+            a walk that follows none (``stat`` answers alone).
         path (str | PathSpec): the entry, as ``stat`` takes it.
         *args (Any): passed through to ``stat``.
         **kwargs (Any): passed through to ``stat``.
@@ -269,7 +270,7 @@ async def followed_stat(
         DotWalkLoop: the link's chain loops (ELOOP).
     """
     row = await stat(path, *args, **kwargs)
-    if row.type is not FileType.SYMLINK:
+    if links is None or row.type is not FileType.SYMLINK:
         return row
     virtual = path.virtual if isinstance(path, PathSpec) else path
     try:

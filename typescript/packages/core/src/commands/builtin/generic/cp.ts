@@ -318,9 +318,9 @@ export async function renameLink(
  * one that leads nowhere is no destination at all (cp then refuses to write
  * through it). Mirrors Python's dest_stat.
  */
-export function destStat(stat: StatFn, links: LinkView): StatFn {
+export function destStat(stat: StatFn, copies: TransferLinks | undefined): StatFn {
   return async (path: PathSpec) => {
-    const row = await followedStat(stat, links, path)
+    const row = await followedStat(stat, copies?.links, path)
     if (row.type === FileType.SYMLINK) throw enoent(path)
     return row
   }
@@ -1079,11 +1079,7 @@ async function mirrorDirs(
     const entryDst = spelledFrom(mountedPath(target, dstMount), target)
     const entry = spelledFrom(mountedPath(src, entryMount), src)
     try {
-      const { exists, isDir } = await entryKind(
-        copies !== undefined ? destStat(stat, copies.links) : stat,
-        entryDst,
-        index,
-      )
+      const { exists, isDir } = await entryKind(destStat(stat, copies), entryDst, index)
       if (isDir) continue
       if (
         !exists ||
@@ -1207,11 +1203,7 @@ export async function copyEntries(
     const entryDstSpec = descendantPath(target, dstBase + entry.slice(srcBase.length))
     if (kind === FileType.DIRECTORY) {
       try {
-        const { exists, isDir } = await entryKind(
-          opts.copies !== undefined ? destStat(stat, opts.copies.links) : stat,
-          entryDstSpec,
-          index,
-        )
+        const { exists, isDir } = await entryKind(destStat(stat, opts.copies), entryDstSpec, index)
         if (isDir) continue
         const free =
           !exists ||
@@ -1390,8 +1382,7 @@ export async function cpGeneric(
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
   const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
-  // cp opens its destination through a link at the name.
-  const toDest = copies !== undefined ? destStat(stat, copies.links) : stat
+  const toDest = destStat(stat, copies)
   let dstIsDir: boolean
   let dstExists: boolean
   let dstErr: FsCondition | null = null
@@ -1754,27 +1745,26 @@ export async function cpGeneric(
       errors.push(refusal)
       continue
     }
-    const linked = copies !== undefined && policy.backup !== null ? linkName(copies, target) : null
     let copier: CopyStrategy = strategy
-    let made: Awaited<ReturnType<typeof makeBackup>>
-    if (copies !== undefined && linked !== null) {
-      // GNU's backup renames the link at the name, and the copy is then a new
-      // file there; what the link led to is untouched.
-      target = linked
-      copier = copies.relay
-      made = await makeBackup(
-        policy,
-        { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
-        stat,
-        undefined,
-        target,
-        errors,
-        index,
-        copies,
-      )
-    } else {
-      made = await makeBackup(policy, strategy, stat, versionReaddir, target, errors, index, copies)
+    let mover: CopyStrategy | NativeMove = strategy
+    if (copies !== undefined && policy.backup !== null) {
+      const linked = linkName(copies, target)
+      if (linked !== null) {
+        target = linked
+        copier = copies.relay
+        mover = { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
+      }
     }
+    const made = await makeBackup(
+      policy,
+      mover,
+      stat,
+      versionReaddir,
+      target,
+      errors,
+      index,
+      copies,
+    )
     if (!made.ok) continue
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))
     if (isPrimitiveCopy(copier)) {

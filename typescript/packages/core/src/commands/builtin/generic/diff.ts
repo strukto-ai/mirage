@@ -498,7 +498,7 @@ export async function diffGeneric(
       readdir,
       // diff compares what each link leads to (its default --dereference),
       // the operands' own taken there at dispatch.
-      stat: links === undefined ? stat : (p: PathSpec) => followedStat(stat, links, p),
+      stat: (p: PathSpec) => followedStat(stat, links, p),
       flags,
       excluded: await excludedPatterns(flags, stream),
       switches: switchWords(opts.argv ?? [])

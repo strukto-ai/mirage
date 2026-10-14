@@ -149,7 +149,6 @@ async def test_namespace_globs_stamp_the_link_target_stat():
 
     links = LinkView(
         stat_at=_no_links,
-        children=_no_links,
         subtree=_no_links,
         resolve=_same,
         exists=_nothing_there,

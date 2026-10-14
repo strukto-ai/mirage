@@ -21,7 +21,7 @@ from mirage.commands.config import CommandIO, CommandOpts
 from mirage.errors.fs import eloop
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.path import CycleError, resolve_path
+from mirage.utils.path import CycleError, gnu_basename, resolve_path
 from mirage.view.types import LinkView, MountView
 
 _MISSES = (FileNotFoundError, NotADirectoryError)
@@ -170,10 +170,7 @@ class LinkResolver:
             DotWalkLoop: the chain loops (ELOOP), an OSError a walker
                 reports as it reports any failed stat.
         """
-        try:
-            return self.links.resolve(link)
-        except CycleError:
-            raise eloop(link) from None
+        return _or_eloop(self.links.resolve, link)
 
     async def stat(self, virtual: str) -> FileStat:
         """What a name leads to, its stat through the dispatcher.
@@ -235,12 +232,15 @@ class LinkResolver:
         await self.dispatch("unlink", PathSpec.from_str_path(virtual))
 
 
-def _basename(virtual: str) -> str:
-    return virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+def _or_eloop(resolve: Callable[[str], str], virtual: str) -> str:
+    try:
+        return resolve(virtual)
+    except CycleError:
+        raise eloop(virtual) from None
 
 
 def _named(row: FileStat, virtual: str) -> FileStat:
-    name = _basename(virtual)
+    name = gnu_basename(virtual)
     return row if row.name == name else row.model_copy(update={"name": name})
 
 
@@ -253,30 +253,22 @@ def _rebased(entry: str, where: str, base: str) -> str:
         base (str): the directory the caller asked for, without a slash.
     """
     root = where.rstrip("/") + "/"
-    rest = entry[len(root) :] if entry.startswith(root) else _basename(entry)
+    rest = (
+        entry[len(root) :] if entry.startswith(root) else gnu_basename(entry)
+    )
     return f"{base}/{rest}"
 
 
-def serves(mounts: MountView, prefix: str, virtual: str) -> bool:
+def serves(mounts: MountView | None, prefix: str, virtual: str) -> bool:
     """Whether the mount at ``prefix`` is the one serving ``virtual``.
 
     Args:
-        mounts (MountView): the mount boundaries.
+        mounts (MountView | None): the mount boundaries, None where one
+            mount serves every path.
         prefix (str): the mount's prefix, without a trailing slash.
         virtual (str): an absolute virtual path.
     """
-    return mounts.root_of(virtual).rstrip("/") == prefix
-
-
-def _everywhere(virtual: str) -> bool:
-    return True
-
-
-def _located(links: LinkView, virtual: str) -> str:
-    try:
-        return link_location(links, virtual)
-    except CycleError:
-        raise eloop(virtual) from None
+    return mounts is None or mounts.root_of(virtual).rstrip("/") == prefix
 
 
 async def _linked_stat(
@@ -290,7 +282,7 @@ async def _linked_stat(
     **kwargs: Any,
 ) -> FileStat:
     here = path.virtual
-    where = _located(links, here)
+    where = _or_eloop(functools.partial(link_location, links), here)
     row = None if here.endswith("/") else links.stat_at(where)
     if row is not None:
         return row
@@ -304,7 +296,7 @@ async def _linked_stat(
     except _MISSES:
         if not owed_names(links, here):
             raise
-        return FileStat(name=_basename(here), type=FileType.DIRECTORY)
+        return FileStat(name=gnu_basename(here), type=FileType.DIRECTORY)
 
 
 async def _linked_readdir(
@@ -318,10 +310,7 @@ async def _linked_readdir(
     **kwargs: Any,
 ) -> list[str]:
     here = path.virtual.rstrip("/") or "/"
-    try:
-        where = links.resolve(here)
-    except CycleError:
-        raise eloop(path.virtual) from None
+    where = _or_eloop(links.resolve, here)
     base = here.rstrip("/")
     if where != here or not owns(where):
         listed, _ = await dispatch("readdir", PathSpec.from_str_path(where))
@@ -340,23 +329,6 @@ async def _linked_readdir(
         *entries,
         *(f"{base}/{n}" for n in owed if f"{base}/{n}" not in present),
     ]
-
-
-async def _linked_exists(
-    exists: Callable[..., Awaitable[bool]],
-    links: LinkView,
-    accessor: Any,
-    path: PathSpec,
-    *args: Any,
-    **kwargs: Any,
-) -> bool:
-    try:
-        where = link_location(links, path.virtual)
-    except CycleError:
-        return False
-    if links.stat_at(where) is not None:
-        return True
-    return await exists(accessor, path, *args, **kwargs)
 
 
 async def _linked_tree(
@@ -379,7 +351,7 @@ def with_links(
     ops: CommandIO,
     links: LinkView | None,
     dispatch: DispatchFn | None,
-    owns: Callable[[str], bool] | None = None,
+    owns: Callable[[str], bool],
 ) -> CommandIO:
     """``ops`` whose stat, readdir and subtree read see the namespace's
     links, the way the dispatcher's own do.
@@ -400,24 +372,16 @@ def with_links(
         links (LinkView | None): the namespace's symlink facts.
         dispatch (DispatchFn | None): the dispatcher, which reaches the
             mount a link leads to.
-        owns (Callable[[str], bool] | None): whether this mount serves a
-            path, every path when None; one a link led to on another mount
-            goes to the dispatcher.
+        owns (Callable[[str], bool]): whether this mount serves a path;
+            one a link led to on another mount goes to the dispatcher.
     """
     if links is None or dispatch is None:
         return ops
-    if owns is None:
-        owns = _everywhere
     return replace(
         ops,
         stat=functools.partial(_linked_stat, ops.stat, links, dispatch, owns),
         readdir=functools.partial(
             _linked_readdir, ops.readdir, links, dispatch, owns
-        ),
-        exists=(
-            functools.partial(_linked_exists, ops.exists, links)
-            if ops.exists is not None
-            else None
         ),
         read_tree=(
             functools.partial(_linked_tree, ops.read_tree, links)

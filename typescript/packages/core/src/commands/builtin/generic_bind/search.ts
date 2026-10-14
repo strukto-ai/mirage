@@ -236,8 +236,6 @@ async function directories<A extends Accessor>(
   return found
 }
 
-// Let each walked directory's mount refuse a walk that reads every file; the
-// dispatcher passes over a path that is not a directory.
 /**
  * Whether a link leads `virtual` elsewhere, at its name or above it. A mount's
  * search sees only what its backend holds, never a link, so it can judge no
@@ -253,6 +251,8 @@ function linked(links: LinkView | undefined, virtual: string): boolean {
   }
 }
 
+// Let each walked directory's mount refuse a walk that reads every file; the
+// dispatcher passes over a path that is not a directory.
 async function fullScan(
   dispatch: CommandOpts['dispatch'],
   dirs: PathSpec[],

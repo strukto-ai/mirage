@@ -170,7 +170,7 @@ function stampNamespace(raw: CommandIO, opts: CommandOpts): CommandIO {
     },
     links,
     opts.dispatch,
-    mounts === undefined ? undefined : (virtual: string) => serves(mounts, prefix, virtual),
+    (virtual: string) => serves(mounts, prefix, virtual),
   )
 }
 

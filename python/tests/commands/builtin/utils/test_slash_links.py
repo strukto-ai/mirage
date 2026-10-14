@@ -54,7 +54,6 @@ def _links(link_at: str | None, target: FileStat | None) -> LinkView:
             if path == link_at
             else None
         ),
-        children=lambda directory: [],
         subtree=lambda directory: [],
         resolve=lambda path: path,
         exists=exists,

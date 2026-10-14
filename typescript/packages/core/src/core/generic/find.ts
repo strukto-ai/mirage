@@ -41,13 +41,13 @@ export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
   stat: (spec: PathSpec, index?: IndexCacheStore) => Promise<FileStat>
   // The table's stat and readdir see the namespace's links, so a link is an
-  // entry like any other, kind `l`. Under -L (`follow`) an entry is what it
-  // leads to instead: a link to a directory is walked, a dangling one stays
-  // `l` (GNU reports the link when its target cannot be statted), one whose
-  // chain loops is an error, and a directory reached again lands in `loops`
-  // with the one above it that it repeats, neither a row nor entered.
-  links?: LinkView | null
-  follow?: boolean
+  // entry like any other, kind `l`. Under -L (`follow`, the links it follows)
+  // an entry is what it leads to instead: a link to a directory is walked, a
+  // dangling one stays `l` (GNU reports the link when its target cannot be
+  // statted), one whose chain loops is an error, and a directory reached
+  // again lands in `loops` with the one above it that it repeats, neither a
+  // row nor entered.
+  follow?: LinkView | null
   loops?: [string, string][]
   // Where a directory the walk could not open (a rule refused it at the
   // guarded readdir) is recorded, as its virtual path: GNU names it and
@@ -174,10 +174,10 @@ async function walk(
     }
     const isFolder = kind === 'd'
     let below = chain
-    if (isFolder && deps.follow === true && deps.links != null) {
+    if (isFolder && deps.follow != null) {
       // Under -L a directory is the one it resolves to, and one already open
       // above is GNU's file system loop: never a row, never entered.
-      const here = deps.links.resolve(trimmed)
+      const here = deps.follow.resolve(trimmed)
       const ancestor = chain.find(([, real]) => real === here)
       if (ancestor !== undefined) {
         deps.loops?.push([trimmed, ancestor[0]])
@@ -203,14 +203,11 @@ export async function walkFind(
   options: FindOptions = {},
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const links = found.links
-  const deps: WalkFindDeps =
-    found.follow === true && links != null
-      ? {
-          ...found,
-          stat: (spec, i) => followedStat((p: PathSpec) => found.stat(p, i), links, spec),
-        }
-      : found
+  const links = found.follow
+  const deps: WalkFindDeps = {
+    ...found,
+    stat: (spec, i) => followedStat((p: PathSpec) => found.stat(p, i), links, spec),
+  }
   const collected: WalkEntry[] = []
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   // GNU lists the search root itself at depth 0 (even for the mount
@@ -270,7 +267,7 @@ export async function walkFind(
       options.maxDepth ?? null,
       1,
       collected,
-      deps.follow === true && links != null ? [[rootPath, links.resolve(rootPath)]] : [],
+      links != null ? [[rootPath, links.resolve(rootPath)]] : [],
     )
   }
   const results: string[] = []

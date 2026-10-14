@@ -934,15 +934,11 @@ async def _route_argv(
             # (`bash: getopts: ?: syntax error: ...`).
             raise exc.signal(name, fatal=True) from exc
 
-    # ── pathname resolution (POSIX): every component of an operand but
-    #    the last resolves for every command, so `stat dlink/f2` reports
-    #    f2 the way GNU does. The last one resolves only for a command
-    #    that follows (open(2) rather than lstat(2)) or an operand typed
-    #    with a trailing slash, which POSIX reads as `dlink/.`. This runs
-    #    ahead of every handler below because the kernel resolves a path
-    #    before the syscall, not inside it. An operand a link loop stands
-    #    in comes back refused (`walk_error`) rather than failing the
-    #    line: the command meets ELOOP at its op and words it per operand.
+    # ── pathname resolution (POSIX, `operand_follow`), ahead of every
+    #    handler below because the kernel resolves a path before the
+    #    syscall, not inside it. An operand a link loop stands in comes
+    #    back refused (`walk_error`) rather than failing the line: the
+    #    command meets ELOOP at its op and words it per operand.
     if namespace.nodes and operands:
         operands = await operand_follow(namespace, dispatch, name, argv.words)(
             operands

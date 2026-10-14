@@ -43,8 +43,6 @@ MountDescendants = Callable[[str], list[str]]
 MountIsRoot = Callable[[str], bool]
 # lstat for one path: the link's own stat, None when not a link.
 LinkStat = Callable[[str], "FileStat | None"]
-# Stat rows for the links directly under a directory, for listings.
-LinkChildren = Callable[[str], list[FileStat]]
 # Links at any depth under a directory, as (absolute virtual path, the
 # link's own stat), for walkers.
 LinkSubtree = Callable[[str], list[tuple[str, FileStat]]]
@@ -320,9 +318,8 @@ class LinkView:
 
     # lstat one path (a link operand: `ls -l link`, `stat link`).
     stat_at: LinkStat
-    # One directory level (a listing: `ls`, `ls -R` per group).
-    children: LinkChildren
-    # The whole subtree (a walker: `find`, `du`).
+    # The links under a directory, which every bound table lists and
+    # reads with the backend's own (`with_links`).
     subtree: LinkSubtree
     # Where a path really points, and whether anything is there. Both
     # are needed to tell a live link from a broken one.

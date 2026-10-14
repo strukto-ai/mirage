@@ -336,7 +336,6 @@ async def du(
     budget = WalkBudget(
         ops.max_du_entries, mounts=opts.ns.mounts if opts.ns else None
     )
-    # The links -L follows by; the last of -L and -P decides, as in GNU.
     fl = FlagView(opts.flags, spec=SPECS["du"])
     links = (
         opts.ns.links

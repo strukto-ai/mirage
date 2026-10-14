@@ -64,9 +64,6 @@ class _FakeNamespace:
     def link_stat_at(self, path: str) -> None:
         return None
 
-    def link_stats_under(self, directory: str) -> list:
-        return []
-
     def link_stats_below(self, directory: str) -> list:
         return []
 
@@ -86,7 +83,7 @@ def test_empty_namespace_still_offers_a_live_view():
     """A captured view must remain usable when the first link appears."""
     view = link_view(_FakeNamespace(), _dispatch)
     assert view is not None
-    assert view.children("/") == []
+    assert view.subtree("/") == []
     assert view.stat_at("/missing") is None
 
 

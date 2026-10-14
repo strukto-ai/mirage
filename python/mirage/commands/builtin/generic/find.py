@@ -511,7 +511,6 @@ async def find(
     mindepth: str | None = None,
     empty: bool = False,
     links: LinkView | None = None,
-    follow: bool = False,
     visibility: Visibility | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     args = parse_find_args(
@@ -553,7 +552,6 @@ async def find(
                 stat=stat,
                 dir_empty=dir_empty,
                 links=links,
-                follow=follow,
                 visibility=visibility,
             )
             if rows is None:
@@ -641,7 +639,6 @@ async def _find_root(
     stat: Callable[[PathSpec], Awaitable[FileStat]] | None,
     dir_empty: Callable[[PathSpec], Awaitable[bool]] | None,
     links: LinkView | None,
-    follow: bool,
     visibility: Visibility | None = None,
 ) -> tuple[list[str] | None, str]:
     """One start point's rows on the native-op path, None when missing.
@@ -660,7 +657,6 @@ async def _find_root(
         dir_empty (Callable[[PathSpec], Awaitable[bool]] | None):
             emptiness probe for ``-empty``.
         links (LinkView | None): the namespace's symlink facts.
-        follow (bool): whether ``-L`` follows namespace links.
         visibility (Visibility | None): the session's visibility.
     """
     # A start point that is itself a symlink is the core's to report: the
@@ -770,15 +766,15 @@ async def _find_root(
     results = sorted(apply_mount_prefix(results, root_prefix))
     # What -prune reached is known only once every row has been judged:
     # a flat listing meets a child before its parent, so the ledger the
-    # tree kept is applied here, after the backend and the link merge.
+    # tree kept is applied here, after every row is in.
     if stat is not None:
         await find_eval.settle_pending_prunes(
             tree, partial(_row_mtime, stat, root_prefix)
         )
     results = find_eval.drop_pruned(results, tree, root_prefix)
-    # Hidden rows drop here, above the native-op/walk fork and after the
-    # link merge, so a mount's visibility behavior cannot depend on
-    # whether its backend ships a native find op.
+    # Hidden rows drop here, above the native-op/walk fork, so a mount's
+    # visibility behavior cannot depend on whether its backend ships a
+    # native find op.
     results = [r for r in results if path_visible(visibility, r)]
     return respell_raw(
         results, search_path.virtual, search_path.raw_path
@@ -860,7 +856,6 @@ async def find_generic(
         empty=parsed.empty,
         links=opts.ns.links if opts.ns is not None else None,
         visibility=opts.ns.visibility if opts.ns is not None else None,
-        follow=parsed.follow,
     )
 
 
@@ -973,8 +968,7 @@ async def find_walk_generic(
                     stat=stat,
                     index=opts.index,
                     args=args,
-                    links=links,
-                    follow=parsed.follow,
+                    follow=links if parsed.follow else None,
                     unreadable=unreadable,
                     unstatted=unstatted,
                     root=start.stat,

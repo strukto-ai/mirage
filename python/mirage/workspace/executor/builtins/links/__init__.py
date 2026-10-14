@@ -14,7 +14,6 @@
 
 from mirage.workspace.executor.builtins.links.links import (
     accepts_line,
-    follow_directory_links,
     follow_parent,
     follow_paths,
     operand_follow,
@@ -26,7 +25,6 @@ from mirage.workspace.executor.builtins.links.readlink import handle_readlink
 
 __all__ = [
     "accepts_line",
-    "follow_directory_links",
     "follow_parent",
     "follow_paths",
     "handle_ln",

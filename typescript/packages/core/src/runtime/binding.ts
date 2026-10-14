@@ -119,7 +119,6 @@ export function captureBinding(
       : {
           links: {
             statAt: scope.wrap(links.statAt.bind(links)),
-            children: scope.wrap(links.children.bind(links)),
             subtree: scope.wrap(links.subtree.bind(links)),
             resolve: scope.wrap(links.resolve.bind(links)),
             exists: scope.wrap(links.exists.bind(links)),

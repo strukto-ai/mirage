@@ -960,12 +960,8 @@ async def _file_entry(
 
 
 def _link_row(path: PathSpec, links: LinkView | None) -> FileStat | None:
-    """The row for an operand that is itself a symlink, else None.
-
-    A link has no backend inode, so readdir and stat both fail on one;
-    without this a link operand reads as a missing file, and a dangling
-    link fails the whole listing (GNU prints its row and exits 0).
-    Named with the operand's own spelling, like every other ls row.
+    """The row for an operand that is itself a symlink, else None, named
+    with the operand's own spelling like every other ls row.
 
     Args:
         path (PathSpec): the operand being listed.
@@ -977,10 +973,6 @@ def _link_row(path: PathSpec, links: LinkView | None) -> FileStat | None:
     if row is None:
         return None
     return row.model_copy(update={"name": path.raw_path})
-
-
-def _spelled_below(operand: PathSpec, virtual: str) -> str:
-    return respell_one(virtual, operand.virtual, operand.raw_path)
 
 
 def _child_spec(path: PathSpec, name: str) -> PathSpec:
@@ -1082,8 +1074,8 @@ async def _stat_entries(
             descend it.
         child_mounts (ChildMounts | None): session-filtered child-mount
             names under a directory. A nested mount is namespace
-            structure the backend readdir cannot name, merged here like
-            a link row. GNU lists a mountpoint as an ordinary entry of
+            structure the backend readdir cannot name, merged here. GNU
+            lists a mountpoint as an ordinary entry of
             its parent, so the merge is unconditional: withholding it
             under ``-R`` dropped the row whenever the parent's backend
             held no key of that name.
@@ -1098,10 +1090,8 @@ async def _stat_entries(
     """
     stats: list[FileStat] = []
     warnings: list[LsWarning] = []
-    entry_stat = (
-        functools.partial(followed_stat, stat, links)
-        if deref and links is not None
-        else stat
+    entry_stat = functools.partial(
+        followed_stat, stat, links if deref else None
     )
     for entry in names:
         entry_spec = PathSpec(
@@ -1222,12 +1212,10 @@ async def probe_operand(
             the operand spelled it; None at the operand itself.
     """
     if spell is None:
-        spell = functools.partial(_spelled_below, path)
-    own_stat = (
-        functools.partial(followed_stat, stat, links)
-        if deref and links is not None
-        else stat
-    )
+        spell = functools.partial(
+            respell_one, original=path.virtual, raw=path.raw_path
+        )
+    own_stat = functools.partial(followed_stat, stat, links if deref else None)
     warnings: list[LsWarning] = []
     structure_only = False
     if path.walk_error is None and (command_line_arg or not deref):

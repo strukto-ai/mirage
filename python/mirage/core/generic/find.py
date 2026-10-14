@@ -186,8 +186,7 @@ async def walk_find(
     stat: Callable[[PathSpec, IndexCacheStore | None], Awaitable[FileStat]],
     index: IndexCacheStore | None,
     args: find_eval.FindArgs,
-    links: LinkView | None = None,
-    follow: bool = False,
+    follow: LinkView | None = None,
     unreadable: list[str] | None = None,
     unstatted: dict[str, Exception] | None = None,
     root: FileStat | None = None,
@@ -216,8 +215,8 @@ async def walk_find(
         stat (Callable): bound stat, ``stat(p, index)``.
         index (IndexCacheStore | None): listing cache.
         args (find_eval.FindArgs): parsed find expression.
-        links (LinkView | None): the namespace's symlink facts.
-        follow (bool): ``-L``.
+        follow (LinkView | None): the namespace's links, where ``-L``
+            follows them.
         unreadable (list[str] | None): collects refused directories.
         unstatted (dict[str, Exception] | None): collects entries whose
             stat failed.
@@ -227,8 +226,7 @@ async def walk_find(
         loops (list[tuple[str, str]] | None): collects, under ``-L``, each
             directory reached again and the one above it it repeats.
     """
-    if follow and links is not None:
-        stat = partial(followed_stat, stat, links)
+    stat = partial(followed_stat, stat, follow)
     collected: list[tuple[str, str]] = []
     prefix = mount_prefix_of(search_path.virtual, search_path.vfs_path)
     search_key = search_path.mount_path.strip("/")
@@ -295,7 +293,7 @@ async def walk_find(
     # readdir on it is either an error the walk would have to swallow
     # (Box answers ENOTDIR) or a wasted round trip everywhere else.
     if root_stat is None or root_stat.type == FileType.DIRECTORY:
-        real = links.resolve if follow and links is not None else None
+        real = follow.resolve if follow is not None else None
         await _walk_collect(
             read_directory,
             stat,

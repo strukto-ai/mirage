@@ -790,7 +790,6 @@ async def test_failed_backup_restores_existing_link(native, failure, referent):
             if path in links
             else None
         ),
-        children=lambda path: [],
         subtree=lambda path: [],
         resolve=lambda path: links.get(path, path),
         exists=exists,

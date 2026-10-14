@@ -541,22 +541,6 @@ class Namespace:
             if path.startswith(base)
         ]
 
-    def link_stats_under(self, directory: str) -> list[FileStat]:
-        """Stat rows for the links living directly under a directory.
-
-        Links are namespace state and invisible to a backend readdir, so
-        listing commands merge these rows into the backend's entries
-        before sorting, the way the kernel returns them from one
-        readdir.
-
-        Args:
-            directory (str): absolute virtual directory path.
-        """
-        return [
-            link_stat(name, meta)
-            for name, meta in self._links_under(directory)
-        ]
-
     def link_names_under(self, directory: str) -> set[str]:
         """The names of the links living directly under a directory.
 
@@ -569,9 +553,7 @@ class Namespace:
         of ``/data/alias`` is dispatched at ``/data/real`` and answers
         with that directory's entries, so the marks have to come from
         there too or every link inside an aliased directory reads as
-        whatever its followed stat said. ``link_stats_under`` needs no
-        such resolution: it is handed the path the router already
-        rewrote.
+        whatever its followed stat said.
 
         Args:
             directory (str): absolute virtual directory path.

@@ -55,7 +55,6 @@ function linkView(entries: Record<string, string>, cycles = false): LinkView {
     })
   return {
     statAt: (p) => (p in entries ? statOf(p) : null),
-    children: () => [],
     subtree: (dir) =>
       Object.keys(entries)
         .sort()

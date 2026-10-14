@@ -19,7 +19,6 @@ from mirage.commands.errors import UsageError
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.hidden import path_visible
 from mirage.view.types import NamespaceView
 
 
@@ -77,8 +76,6 @@ async def remove_tree(
         tuple: the removed entries as ``(path, is_dir)``, children
         first, and each failure with its error.
     """
-    links = ns.links if ns is not None else None
-    vis = ns.visibility if ns is not None else None
     roots = (
         set(ns.mounts.descendants(root.virtual))
         if ns is not None and ns.mounts is not None
@@ -105,8 +102,6 @@ async def remove_tree(
             child = descendant_path(root, name.rstrip("/"))
             if child.virtual in roots:
                 continue
-            if links is not None and links.stat_at(child.virtual) is not None:
-                continue
             try:
                 info = await stat(child)
             except FileNotFoundError:
@@ -116,12 +111,6 @@ async def remove_tree(
                 cleared = False
                 continue
             gone = await remove(child, info.type == FileType.DIRECTORY)
-            cleared = cleared and gone
-        for row in links.children(base) if links is not None else []:
-            link = descendant_path(root, f"{base}/{row.name}")
-            if not path_visible(vis, link.virtual):
-                continue
-            gone = await remove(link, False)
             cleared = cleared and gone
         if not cleared or any(r.startswith(f"{base}/") for r in roots):
             return False

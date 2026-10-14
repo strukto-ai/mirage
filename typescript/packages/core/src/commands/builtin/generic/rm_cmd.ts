@@ -18,7 +18,6 @@ import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { CommandFnResult } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { descendantPath } from '../utils/paths.ts'
-import { pathVisible } from '../../../utils/hidden.ts'
 import type { NamespaceView } from '../../../view/types.ts'
 
 // rm's answer to a line with no operand, in GNU's words: nothing at all under
@@ -53,8 +52,6 @@ export async function removeTree(
     force: boolean
   },
 ): Promise<{ removed: { path: string; isDir: boolean }[]; failures: [PathSpec, unknown][] }> {
-  const links = ops.ns?.links
-  const vis = ops.ns?.visibility
   const roots = new Set(ops.ns?.mounts?.descendants(root.virtual) ?? [])
   const removed: { path: string; isDir: boolean }[] = []
   const failures: [PathSpec, unknown][] = []
@@ -78,7 +75,6 @@ export async function removeTree(
     for (const name of names) {
       const child = descendantPath(root, name.replace(/\/+$/, ''))
       if (roots.has(child.virtual)) continue
-      if (links?.statAt(child.virtual) != null) continue
       let info: FileStat
       try {
         info = await ops.stat(child)
@@ -90,12 +86,6 @@ export async function removeTree(
         continue
       }
       const gone = await remove(child, info.type === FileType.DIRECTORY)
-      cleared = cleared && gone
-    }
-    for (const row of links?.children(base) ?? []) {
-      const link = descendantPath(root, `${base}/${row.name}`)
-      if (!pathVisible(vis, link.virtual)) continue
-      const gone = await remove(link, false)
       cleared = cleared && gone
     }
     if (!cleared || [...roots].some((r) => r.startsWith(`${base}/`))) return false

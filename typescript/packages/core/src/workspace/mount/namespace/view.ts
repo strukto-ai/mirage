@@ -115,12 +115,6 @@ function linkView(
   if (namespace === null) return null
   return {
     statAt: (path: string) => (pathVisible(vis, path) ? namespace.linkStatAt(path) : null),
-    children: (directory: string) => {
-      const base = rstripSlash(directory)
-      return namespace
-        .linkStatsUnder(directory)
-        .filter((st) => pathVisible(vis, `${base}/${st.name}`))
-    },
     subtree: (directory: string) =>
       namespace.linkStatsBelow(directory).filter(([path]) => pathVisible(vis, path)),
     resolve: (path: string) => (pathVisible(vis, path) ? resolveLink(namespace, path) : path),

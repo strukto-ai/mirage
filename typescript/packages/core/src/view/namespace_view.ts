@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { normDir, rstripSlash } from '../utils/slash.ts'
-import type { PathSpec } from '../types.ts'
-import { FileStat, FileType, type Visibility } from '../types.ts'
+import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
 import { pathVisible } from '../utils/hidden.ts'
 import { eloop } from '../errors/fs.ts'
 import { CycleError } from '../utils/path.ts'
@@ -218,16 +217,17 @@ export function pathsScoped(
  * each entry: a link to a directory is a directory to walk and a link to a
  * file is that file, under the link's own name. A dangling link stays the
  * link, which is what GNU reports when the target cannot be statted, and a
- * chain that loops throws ELOOP. `path` is the entry as `stat` takes it.
- * Mirrors Python's followed_stat.
+ * chain that loops throws ELOOP. `path` is the entry as `stat` takes it;
+ * without `links` the walk follows none and `stat` answers alone. Mirrors
+ * Python's followed_stat.
  */
 export async function followedStat<P extends string | PathSpec>(
   stat: (path: P) => Promise<FileStat>,
-  links: LinkView,
+  links: LinkView | null | undefined,
   path: P,
 ): Promise<FileStat> {
   const row = await stat(path)
-  if (row.type !== FileType.SYMLINK) return row
+  if (links == null || row.type !== FileType.SYMLINK) return row
   const virtual: string = typeof path === 'string' ? path : path.virtual
   try {
     links.resolve(virtual)

@@ -53,8 +53,7 @@ export interface RunOnMountCtx {
   routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   executeFn?: ExecuteFn
-  // The line's operand resolution, which the command's globs give their
-  // matches.
+  // The line's operand resolution, for the command's globs.
   follow?: FollowOperands
 }
 

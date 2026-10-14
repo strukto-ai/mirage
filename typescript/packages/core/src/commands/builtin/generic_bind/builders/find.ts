@@ -88,8 +88,7 @@ export function findWalk<A extends Accessor>(
             const overlay = opts.ns?.statOverlay
             return overlay !== undefined ? overlay(spec.virtual, st) : st
           },
-          links: opts.ns?.links ?? null,
-          follow,
+          follow: follow ? (opts.ns?.links ?? null) : null,
           loops,
         },
         options,

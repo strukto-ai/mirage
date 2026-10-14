@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from mirage.commands.builtin.generic.rm_cmd import remove_tree
-from mirage.types import FileStat, FileType, HiddenPaths, PathSpec, Visibility
-from mirage.view.types import LinkView, MountView, NamespaceView
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import MountView, NamespaceView
 
 TREE = {"/t": ["/t/a.txt", "/t/inner"], "/t/inner": ["/t/inner/b.txt"]}
 
@@ -46,33 +44,14 @@ def _tree_ops(calls: list[tuple[str, str]], gone: str | None = None):
     return {"readdir": readdir, "stat": stat, "unlink": unlink, "rmdir": rmdir}
 
 
-def _ns(
-    mounts: list[str] = (),
-    links: list[str] = (),
-    hidden: tuple[str, ...] = (),
-) -> NamespaceView:
-    link_rows = {
-        name.rsplit("/", 1)[0]: [
-            FileStat(name=name.rsplit("/", 1)[1], type=FileType.SYMLINK)
-        ]
-        for name in links
-    }
+def _ns(mounts: list[str]) -> NamespaceView:
     return NamespaceView(
-        links=LinkView(
-            stat_at=lambda _v: None,
-            children=lambda base: link_rows.get(base, []),
-            subtree=lambda _v: [],
-            resolve=lambda v: v,
-            exists=AsyncMock(return_value=True),
-            target_stat=AsyncMock(),
-        ),
         mounts=MountView(
             descendants=lambda _v: list(mounts),
             visible_descendants=lambda _v: list(mounts),
             is_root=lambda v: v in mounts,
             root_of=lambda _v: "/",
         ),
-        visibility=Visibility(paths=HiddenPaths(paths=hidden)),
     )
 
 
@@ -86,19 +65,6 @@ async def test_remove_tree_never_enters_a_mount_below():
         force=False,
     )
     assert calls == [("unlink", "/t/a.txt")]
-    assert failures == []
-
-
-@pytest.mark.asyncio
-async def test_remove_tree_leaves_a_hidden_link_to_the_directory():
-    calls: list[tuple[str, str]] = []
-    _, failures = await remove_tree(
-        _spec("/t/inner"),
-        **_tree_ops(calls),
-        ns=_ns(links=["/t/inner/secret"], hidden=("/t/inner/secret",)),
-        force=False,
-    )
-    assert calls == [("unlink", "/t/inner/b.txt"), ("rmdir", "/t/inner")]
     assert failures == []
 
 

@@ -878,13 +878,6 @@ for (const native of [false, true]) {
                     extra: { [LINK_TARGET_KEY]: links.get(path) ?? '' },
                   })
                 : null,
-            children: (path) =>
-              [...links.keys()]
-                .filter((p) => p.startsWith(path))
-                .flatMap((p) => {
-                  const row = copies.links.statAt(p)
-                  return row === null ? [] : [row]
-                }),
             subtree: (path) =>
               [...links.keys()]
                 .filter((p) => p.startsWith(path))

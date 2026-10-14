@@ -150,7 +150,6 @@ def capture_binding(
         links = replace(
             links,
             stat_at=scope.wrap(links.stat_at),
-            children=scope.wrap(links.children),
             subtree=scope.wrap(links.subtree),
             resolve=scope.wrap(links.resolve),
             exists=scope.wrap_async(links.exists),

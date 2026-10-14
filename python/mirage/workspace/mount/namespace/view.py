@@ -95,14 +95,6 @@ def link_view(
             links.link_stat_at(virtual) if path_visible(vis, virtual) else None
         )
 
-    def children(directory: str) -> list[FileStat]:
-        base = directory.rstrip("/")
-        return [
-            st
-            for st in links.link_stats_under(directory)
-            if path_visible(vis, f"{base}/{st.name}")
-        ]
-
     def subtree(directory: str) -> list[tuple[str, FileStat]]:
         return [
             (path, st)
@@ -123,7 +115,6 @@ def link_view(
 
     return LinkView(
         stat_at=stat_at,
-        children=children,
         subtree=subtree,
         resolve=resolve,
         exists=functools.partial(path_exists, dispatch),

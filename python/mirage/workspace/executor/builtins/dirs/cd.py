@@ -285,11 +285,11 @@ async def cd_builtin(call: BuiltinCall) -> Result:
     session = call.context.session
     dispatch = call.dispatch
     registry = call.registry
-    namespace = call.namespace
     shell_physical = bool(session.shell_options.get("physical"))
     cd_operands, bad_opt, physical = split_mode_options(
         list(call.argv.operands), default=shell_physical
     )
+    follow = _session_follow(call.namespace, dispatch, session)
     if bad_opt is not None:
         err = encode_text(f"bash: cd: -{bad_opt}: invalid option\n{CD_USAGE}")
         return (
@@ -318,7 +318,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
             registry.is_mount_root,
             home,
             session,
-            follow=_session_follow(namespace, dispatch, session),
+            follow=follow,
             physical=physical,
         )
     raw = cd_operands[0]
@@ -338,7 +338,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
             old,
             session,
             print_path=True,
-            follow=_session_follow(namespace, dispatch, session),
+            follow=follow,
             physical=physical,
         )
     path: str | PathSpec
@@ -357,6 +357,6 @@ async def cd_builtin(call: BuiltinCall) -> Result:
         path,
         session,
         cdpath_target=cdpath_target,
-        follow=_session_follow(namespace, dispatch, session),
+        follow=follow,
         physical=physical,
     )

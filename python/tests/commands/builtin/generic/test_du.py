@@ -10,7 +10,7 @@ from mirage.commands.builtin.generic.du import (
 )
 from mirage.commands.config import CommandOpts
 from mirage.io.types import SizedRun
-from mirage.types import FileStat, PathSpec
+from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.view.types import MountView
 
@@ -155,12 +155,43 @@ def _mounts_view(descendants: tuple[str, ...]) -> MountView:
     )
 
 
-async def _no_target_stat(path: str) -> FileStat | None:
-    return None
-
-
-async def _never_exists(path: str) -> bool:
-    return False
+# The nested-mount behavior is pinned against GNU coreutils 9.7 on
+# debian:stable-slim (du --apparent-size -B1 over a tmpfs mounted inside
+# the operand): a file shadowed by a mount appears nowhere and counts
+# nowhere. The parent mount's own rows are GNU's `du -x` report; the
+# descendant mount's block is appended by the executor fan-out.
+@pytest.mark.parametrize(
+    "tree,flags,expected",
+    [
+        (
+            {"/top.txt": 10, "/inner/leftover.txt": 1000},
+            DuFlags(),
+            b"10\t/base\n",
+        ),
+        (
+            {"/top.txt": 10, "/inner/leftover.txt": 1000},
+            DuFlags(a=True),
+            b"10\t/base/top.txt\n10\t/base\n",
+        ),
+        (
+            {"/top.txt": 10, "/inner/leftover.txt": 1000},
+            DuFlags(s=True),
+            b"10\t/base\n",
+        ),
+        ({"/inner/leftover.txt": 1000}, DuFlags(), b"0\t/base\n"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_descendant_mount_is_excluded(tree, flags, expected):
+    compute_size, compute_entries = _make_backend(tree)
+    out = await du(
+        [_spec("/base", "")],
+        compute_size=compute_size,
+        compute_entries=compute_entries,
+        flags=flags,
+        mounts=_mounts_view(("/base/inner",)),
+    )
+    assert out.stdout == expected
 
 
 @pytest.mark.asyncio

@@ -391,7 +391,9 @@ async def rename_link(
     await copies.dispatch("rename", src, dst=target)
 
 
-async def dest_stat(stat: StatFn, links: LinkView, path: PathSpec) -> FileStat:
+async def dest_stat(
+    stat: StatFn, copies: TransferLinks | None, path: PathSpec
+) -> FileStat:
     """stat(2) of a destination, over a table whose stat is lstat(2).
 
     cp opens its destination the way open(2) does, through a link at the
@@ -401,9 +403,11 @@ async def dest_stat(stat: StatFn, links: LinkView, path: PathSpec) -> FileStat:
 
     Args:
         stat (StatFn): the table's stat, a link's own row for a link.
-        links (LinkView): the namespace's symlink facts.
+        copies (TransferLinks | None): Namespace facts, None outside a
+            workspace, where no link stands anywhere.
         path (PathSpec): the destination.
     """
+    links = copies.links if copies is not None else None
     row = await followed_stat(stat, links, path)
     if row.type == FileType.SYMLINK:
         raise enoent(path)
@@ -1494,10 +1498,7 @@ async def _mirror_dirs(
         entry = spelled_from(mounted_path(src, entry_mount), src)
         try:
             exists, is_dir = await entry_kind(
-                partial(dest_stat, stat, copies.links)
-                if copies is not None
-                else stat,
-                entry_dst,
+                partial(dest_stat, stat, copies), entry_dst
             )
             if is_dir:
                 continue
@@ -1664,10 +1665,7 @@ async def copy_entries(
         if kind == FileType.DIRECTORY:
             try:
                 exists, is_dir = await entry_kind(
-                    partial(dest_stat, stat, copies.links)
-                    if copies is not None
-                    else stat,
-                    entry_dst,
+                    partial(dest_stat, stat, copies), entry_dst
                 )
                 if is_dir:
                     continue
@@ -1822,10 +1820,7 @@ async def cp_generic(
     sources, dst = split_operands(
         "cp", paths, flags.target_dir, flags.no_target_dir
     )
-    # cp opens its destination through a link at the name.
-    to_dest = (
-        partial(dest_stat, stat, copies.links) if copies is not None else stat
-    )
+    to_dest = partial(dest_stat, stat, copies)
     if flags.target_dir is not None:
         err = await target_dir_error("cp", to_dest, dst)
         if err is not None:
@@ -2263,28 +2258,15 @@ async def cp_generic(
             errors.append(refusal)
             continue
         copier: CopyStrategy = strategy
-        linked = (
-            link_name(copies, target)
-            if copies is not None and policy.backup is not None
-            else None
+        mover: CopyStrategy | NativeMove = strategy
+        if copies is not None and policy.backup is not None:
+            linked = link_name(copies, target)
+            if linked is not None:
+                target, copier = linked, copies.relay
+                mover = NativeMove(rename=partial(rename_link, copies))
+        backup, ok = await make_backup(
+            policy, mover, stat, readdir, target, errors, copies
         )
-        if copies is not None and linked is not None:
-            # GNU's backup renames the link at the name, and the copy is
-            # then a new file there; what the link led to is untouched.
-            target, copier = linked, copies.relay
-            backup, ok = await make_backup(
-                policy,
-                NativeMove(rename=partial(rename_link, copies)),
-                stat,
-                None,
-                target,
-                errors,
-                copies,
-            )
-        else:
-            backup, ok = await make_backup(
-                policy, strategy, stat, readdir, target, errors, copies
-            )
         if not ok:
             continue
         if flags.verbose:

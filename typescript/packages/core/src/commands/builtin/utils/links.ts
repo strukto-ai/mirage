@@ -18,8 +18,8 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { eloop } from '../../../errors/fs.ts'
-import { CycleError, resolvePath } from '../../../utils/path.ts'
+import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
+import { CycleError, gnuBasename, resolvePath } from '../../../utils/path.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 /**
@@ -129,12 +129,7 @@ export class LinkResolver {
    * throws ELOOP, an error a walker reports as it reports any failed stat.
    */
   target(link: string): string {
-    try {
-      return this.links.resolve(link)
-    } catch (err) {
-      if (err instanceof CycleError) throw eloop(link)
-      throw err
-    }
+    return orEloop((path) => this.links.resolve(path), link)
   }
 
   /** What a name leads to, its stat through the dispatcher, on any mount. */
@@ -174,20 +169,21 @@ export class LinkResolver {
 
 // What a table miss is: the name is not there, or a component above it is
 // not a directory. Mirrors Python's _MISSES.
-const MISSES: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR'])
-
 function missed(err: unknown): boolean {
-  const code = (err as { code?: unknown } | null)?.code
-  return typeof code === 'string' && MISSES.has(code)
+  return isEnoent(err) || isEnotdir(err)
 }
 
-function basename(virtual: string): string {
-  const trimmed = virtual.replace(/\/+$/, '')
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || '/'
+function orEloop(resolve: (virtual: string) => string, virtual: string): string {
+  try {
+    return resolve(virtual)
+  } catch (err) {
+    if (err instanceof CycleError) throw eloop(virtual)
+    throw err
+  }
 }
 
 function named(row: FileStat, virtual: string): FileStat {
-  const name = basename(virtual)
+  const name = gnuBasename(virtual)
   return row.name === name ? row : row.with({ name })
 }
 
@@ -195,26 +191,13 @@ function named(row: FileStat, virtual: string): FileStat {
  * Python's _rebased. */
 function rebased(entry: string, where: string, base: string): string {
   const root = where.replace(/\/+$/, '') + '/'
-  return `${base}/${entry.startsWith(root) ? entry.slice(root.length) : basename(entry)}`
+  return `${base}/${entry.startsWith(root) ? entry.slice(root.length) : gnuBasename(entry)}`
 }
 
-/** Whether the mount at `prefix` is the one serving `virtual`. Mirrors
- * Python's serves. */
-export function serves(mounts: MountView, prefix: string, virtual: string): boolean {
-  return mounts.rootOf(virtual).replace(/\/+$/, '') === prefix
-}
-
-function everywhere(): boolean {
-  return true
-}
-
-function located(links: LinkView, virtual: string): string {
-  try {
-    return linkLocation(links, virtual)
-  } catch (err) {
-    if (err instanceof CycleError) throw eloop(virtual)
-    throw err
-  }
+/** Whether the mount at `prefix` is the one serving `virtual`; every path is
+ * where no mount table says otherwise. Mirrors Python's serves. */
+export function serves(mounts: MountView | undefined, prefix: string, virtual: string): boolean {
+  return mounts === undefined || mounts.rootOf(virtual).replace(/\/+$/, '') === prefix
 }
 
 async function linkedStat<A extends Accessor>(
@@ -227,7 +210,7 @@ async function linkedStat<A extends Accessor>(
   index?: IndexCacheStore,
 ): Promise<FileStat> {
   const here = path.virtual
-  const where = located(links, here)
+  const where = orEloop((virtual) => linkLocation(links, virtual), here)
   const row = here.endsWith('/') ? null : links.statAt(where)
   if (row !== null) return row
   if (where.replace(/\/+$/, '') !== here.replace(/\/+$/, '') || !owns(where)) {
@@ -238,7 +221,7 @@ async function linkedStat<A extends Accessor>(
     return await stat(accessor, path, index)
   } catch (err) {
     if (!missed(err) || owedNames(links, here).length === 0) throw err
-    return new FileStat({ name: basename(here), type: FileType.DIRECTORY })
+    return new FileStat({ name: gnuBasename(here), type: FileType.DIRECTORY })
   }
 }
 
@@ -252,13 +235,7 @@ async function linkedReaddir<A extends Accessor>(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const here = path.virtual.replace(/\/+$/, '') || '/'
-  let where: string
-  try {
-    where = links.resolve(here)
-  } catch (err) {
-    if (err instanceof CycleError) throw eloop(path.virtual)
-    throw err
-  }
+  const where = orEloop((virtual) => links.resolve(virtual), here)
   const base = here.replace(/\/+$/, '')
   if (where !== here || !owns(where)) {
     const [listed] = await dispatch('readdir', PathSpec.fromStrPath(where))
@@ -275,23 +252,6 @@ async function linkedReaddir<A extends Accessor>(
   if (owed.length === 0) return entries
   const present = new Set(entries.map((entry) => entry.replace(/\/+$/, '')))
   return [...entries, ...owed.map((n) => `${base}/${n}`).filter((entry) => !present.has(entry))]
-}
-
-async function linkedExists<A extends Accessor>(
-  exists: NonNullable<CommandIO<A>['exists']>,
-  links: LinkView,
-  accessor: A,
-  path: PathSpec,
-): Promise<boolean> {
-  let where: string
-  try {
-    where = linkLocation(links, path.virtual)
-  } catch (err) {
-    if (err instanceof CycleError) return false
-    throw err
-  }
-  if (links.statAt(where) !== null) return true
-  return exists(accessor, path)
 }
 
 async function linkedTree<A extends Accessor>(
@@ -330,18 +290,15 @@ export function withLinks<A extends Accessor>(
   ops: CommandIO<A>,
   links: LinkView | undefined,
   dispatch: DispatchFn | undefined,
-  owns: (virtual: string) => boolean = everywhere,
+  owns: (virtual: string) => boolean,
 ): CommandIO<A> {
   if (links === undefined || dispatch === undefined) return ops
-  const { stat, readdir, exists, readTree } = ops
+  const { stat, readdir, readTree } = ops
   return {
     ...ops,
     stat: (accessor, path, index) => linkedStat(stat, links, dispatch, owns, accessor, path, index),
     readdir: (accessor, path, index) =>
       linkedReaddir(readdir, links, dispatch, owns, accessor, path, index),
-    ...(exists !== undefined
-      ? { exists: (accessor: A, path: PathSpec) => linkedExists(exists, links, accessor, path) }
-      : {}),
     ...(readTree !== undefined
       ? {
           readTree: (accessor: A, path: PathSpec, index?: IndexCacheStore) =>

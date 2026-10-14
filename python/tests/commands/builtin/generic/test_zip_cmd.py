@@ -110,7 +110,6 @@ def _links(entries: dict[str, str]) -> LinkView:
 
     return LinkView(
         stat_at=lambda p: stat_of(p) if p in entries else None,
-        children=lambda p: [],
         subtree=lambda p: [
             (k, stat_of(k))
             for k in sorted(entries)

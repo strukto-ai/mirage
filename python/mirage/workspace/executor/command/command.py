@@ -321,9 +321,7 @@ async def handle_command(
                     if dispatch is not None
                     else None
                 ),
-                ns=namespace_view_of(
-                    registry, namespace, dispatch, session, follow
-                ),
+                ns=namespace_view_of(registry, namespace, dispatch, session),
                 session_view=session_view(
                     session,
                     registry.policies,

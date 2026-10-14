@@ -210,9 +210,8 @@ export interface NamespaceLinks {
 export interface LinkView {
   // lstat one path (a link operand: `ls -l link`, `stat link`).
   statAt(path: string): FileStat | null
-  // One directory level (a listing: `ls`, `ls -R` per group).
-  children(directory: string): FileStat[]
-  // The whole subtree (a walker: `find`, `du`).
+  // The links under a directory, which every bound table lists and reads
+  // with the backend's own (`withLinks`).
   subtree(directory: string): [string, FileStat][]
   // Where a path really points, for deciding whether a link is broken.
   resolve(path: string): string

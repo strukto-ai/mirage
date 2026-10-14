@@ -78,8 +78,8 @@ function sameMount(mounts: MountView | null, one: string, other: string): boolea
 //
 // Three sources have to be merged because no single one can see them
 // all: the backend walk (files and directories), the namespace (its
-// symlinks, which no backend readdir reports), and the mount table (a
-// nested mount, whose keys live in another VFS entirely).
+// symlinks, which a walk for either kind passes over), and the mount table
+// (a nested mount, whose keys live in another VFS entirely).
 //
 // `base` and `nameBase` differ only when a link is being followed: the
 // walk runs over the target while the members keep the link's own name.

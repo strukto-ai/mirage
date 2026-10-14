@@ -501,11 +501,7 @@ async def diff(
             readdir_fn=readdir_fn,
             # diff compares what each link leads to (its default
             # --dereference), the operands' own taken there at dispatch.
-            stat_fn=(
-                partial(followed_stat, stat_fn, links)
-                if links is not None
-                else stat_fn
-            ),
+            stat_fn=partial(followed_stat, stat_fn, links),
             real=links.resolve if links is not None else None,
             flags=flags,
             excluded=await _excluded_patterns(flags, read_bytes),

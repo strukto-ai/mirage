@@ -295,7 +295,6 @@ const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
     opts.ns?.mounts,
   )
-  // The links -L follows by; the last of -L and -P decides, as in GNU.
   const links =
     new FlagView(opts.flags, specOf('du')).typedOrder('L', 'P').at(-1) === 'L'
       ? (opts.ns?.links ?? null)
