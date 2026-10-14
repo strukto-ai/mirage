@@ -231,6 +231,38 @@
         "stdout": "rc=0\nrc=1\nrc=0\nt\nt/a\nt/sub\nu\nu/a\nu/la\nu/s\nu/s/a\nu/s/sub\n",
         "stderr": "cp: warning: source directory 's' specified more than once\ncp: will not create hard link 't/s' to directory 't/.'\n"
       }
+    },
+    {
+      "id": "cp_r_merge_gates_a_file_before_a_directory_refuses_it",
+      "seq": 16200009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "(cd /data && mkdir -p r16ord/s r16ord/t/a && printf a > r16ord/s/a && cd r16ord && cp -rn s/. t; echo rc=$?; cp -n s/a t; echo rc=$?; cp -r --update=none-fail s/. t; echo rc=$?; cp -rb s/. t; echo rc=$?; cp -r s/. t; echo rc=$?; find t | sort; cd /data && rm -r r16ord)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nrc=1\nrc=1\nrc=1\nt\nt/a\n",
+        "stderr": "cp: not replacing 't/./a'\ncp: cannot create regular file 't/./a': Is a directory\ncp: cannot overwrite directory 't/./a' with non-directory 's/./a'\n"
+      }
     }
   ]
 }

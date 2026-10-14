@@ -614,6 +614,23 @@ export function overwriteTypeError(
   return null
 }
 
+// GNU's line for a file a directory stands in the way of, met once the
+// overwrite gates let the file through (-n and -u skip it, -i asks first).
+// Under a backup cp tries the create, which the directory refuses; otherwise
+// it refuses the overwrite itself (coreutils 9.7). Mirrors Python's
+// _onto_directory.
+function ontoDirectory(
+  cmdName: string,
+  src: PathSpec,
+  target: PathSpec,
+  backup: string | null,
+): string {
+  if (backupDisplaces(backup)) {
+    return `${cmdName}: cannot create regular file '${target.rawPath}': ${posixPhrase('EISDIR')}`
+  }
+  return `${cmdName}: cannot overwrite directory '${target.rawPath}' with non-directory '${src.rawPath}'`
+}
+
 // Decide whether an existing target may be replaced. -n and --update=none
 // skip silently; --update=none-fail records GNU's `not replacing` error;
 // --update=older replaces only when the source is strictly newer. A source
@@ -1076,17 +1093,6 @@ export async function copyEntries(
       blocked.push(entry)
       continue
     }
-    if (
-      entry !== src.virtual &&
-      !made.has(parent(entryDstSpec.virtual)) &&
-      (await isDirectory(stat, entryDstSpec, index))
-    ) {
-      errors.push(
-        `${cmdName}: cannot overwrite directory '${entryDstSpec.rawPath}' with non-directory '${entrySpec.rawPath}'`,
-      )
-      copiedAll = false
-      continue
-    }
     const link = opts.copies?.links.statAt(entry)
     if (opts.copies !== undefined && link != null) {
       const errorCount = errors.length
@@ -1114,6 +1120,15 @@ export async function copyEntries(
       !(await overwriteGate(opts.policy, stat, entrySpec, entryDstSpec, errors))
     )
       continue
+    if (
+      entry !== src.virtual &&
+      !made.has(parent(entryDstSpec.virtual)) &&
+      (await isDirectory(stat, entryDstSpec, index))
+    ) {
+      errors.push(ontoDirectory(cmdName, entrySpec, entryDstSpec, opts.policy?.backup ?? null))
+      copiedAll = false
+      continue
+    }
     const refusal = specialFileError(cmdName, kind, entryDstSpec)
     if (refusal !== null) {
       opts.lines?.push(transferLine(entrySpec, entryDstSpec, null, cmdName))
@@ -1332,7 +1347,11 @@ export async function cpGeneric(
       errors.push(`cp: cannot create ${noun} '${target.rawPath}': ${posixPhrase(targetErr)}`)
       continue
     }
-    const mismatch = overwriteTypeError('cp', src, srcIsDir, target, targetExists, targetIsDir)
+    // A directory onto a non-directory is refused before any gate; a file a
+    // directory stands in the way of waits for them (below).
+    const mismatch = srcIsDir
+      ? overwriteTypeError('cp', src, srcIsDir, target, targetExists, targetIsDir)
+      : null
     if (mismatch !== null) {
       errors.push(mismatch)
       continue
@@ -1436,17 +1455,15 @@ export async function cpGeneric(
         const dstMount = dstBase + entryMount.slice(srcBase.length)
         const entry = spelledFrom(mountedPath(src, entryMount), src)
         const entryDst = spelledFrom(mountedPath(target, dstMount), target)
+        if (!(await overwriteGate(policy, stat, entry, entryDst, errors))) continue
         if (
           mirrored.made !== null &&
           !mirrored.made.has(parent(dstMount)) &&
           (await isDirectory(stat, entryDst, index))
         ) {
-          errors.push(
-            `cp: cannot overwrite directory '${entryDst.rawPath}' with non-directory '${entry.rawPath}'`,
-          )
+          errors.push(ontoDirectory('cp', entry, entryDst, flags.backup))
           continue
         }
-        if (!(await overwriteGate(policy, stat, entry, entryDst, errors))) continue
         const made = await makeBackup(
           policy,
           strategy,
@@ -1490,6 +1507,10 @@ export async function cpGeneric(
       continue
     }
     if (!(await overwriteGate(policy, stat, src, target, errors))) continue
+    if (targetIsDir) {
+      errors.push(ontoDirectory('cp', src, target, flags.backup))
+      continue
+    }
     const refusal = flags.recursive ? specialFileError('cp', srcKind, target) : null
     if (refusal !== null) {
       if (flags.verbose) lines.push(transferLine(src, target, null))

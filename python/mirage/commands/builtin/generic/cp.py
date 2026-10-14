@@ -808,6 +808,33 @@ def overwrite_type_error(
     return None
 
 
+def _onto_directory(
+    cmd_name: str, src: PathSpec, target: PathSpec, backup: str | None
+) -> str:
+    """GNU's line for a file a directory stands in the way of.
+
+    It is met once the overwrite gates let the file through (``-n`` and
+    ``-u`` skip it, ``-i`` asks first). Under a backup cp tries the
+    create, which the directory refuses; otherwise it refuses the
+    overwrite itself (coreutils 9.7).
+
+    Args:
+        cmd_name (str): the command the line names.
+        src (PathSpec): the file being copied.
+        target (PathSpec): the directory standing there.
+        backup (str | None): the canonical backup control.
+    """
+    if backup_displaces(backup):
+        return (
+            f"{cmd_name}: cannot create regular file '{target.raw_path}': "
+            f"{posix_phrase(FsCondition.EISDIR)}"
+        )
+    return (
+        f"{cmd_name}: cannot overwrite directory '{target.raw_path}' "
+        f"with non-directory '{src.raw_path}'"
+    )
+
+
 async def overwrite_gate(
     policy: TransferPolicy,
     stat: StatFn,
@@ -1436,18 +1463,6 @@ async def copy_entries(
             copied_all = False
             blocked.append(entry.virtual)
             continue
-        if (
-            entry is not src
-            and parent(entry_dst.virtual) not in made
-            and await is_directory(stat, entry_dst)
-        ):
-            errors.append(
-                f"{cmd_name}: cannot overwrite directory "
-                f"'{entry_dst.raw_path}' with non-directory "
-                f"'{entry.raw_path}'"
-            )
-            copied_all = False
-            continue
         link = (
             copies.links.stat_at(entry.virtual) if copies is not None else None
         )
@@ -1468,6 +1483,17 @@ async def copy_entries(
         if policy is not None and not await overwrite_gate(
             policy, stat, entry, entry_dst, errors
         ):
+            continue
+        if (
+            entry is not src
+            and parent(entry_dst.virtual) not in made
+            and await is_directory(stat, entry_dst)
+        ):
+            backup_control = policy.backup if policy is not None else None
+            errors.append(
+                _onto_directory(cmd_name, entry, entry_dst, backup_control)
+            )
+            copied_all = False
             continue
         refusal = _special_file_error(cmd_name, kind, entry_dst)
         if refusal is not None:
@@ -1734,8 +1760,14 @@ async def cp_generic(
                 f"{posix_phrase(target_err)}"
             )
             continue
-        mismatch = overwrite_type_error(
-            "cp", src, src_is_dir, target, target_exists, target_is_dir
+        # A directory onto a non-directory is refused before any gate; a
+        # file a directory stands in the way of waits for them (below).
+        mismatch = (
+            overwrite_type_error(
+                "cp", src, src_is_dir, target, target_exists, target_is_dir
+            )
+            if src_is_dir
+            else None
         )
         if mismatch is not None:
             errors.append(mismatch)
@@ -1870,20 +1902,18 @@ async def cp_generic(
                 entry_dst = spelled_from(
                     mounted_path(target, dst_mount), target
                 )
+                if not await overwrite_gate(
+                    policy, stat, entry, entry_dst, errors
+                ):
+                    continue
                 if (
                     made is not None
                     and parent(dst_mount) not in made
                     and await is_directory(stat, entry_dst)
                 ):
                     errors.append(
-                        f"cp: cannot overwrite directory "
-                        f"'{entry_dst.raw_path}' with non-directory "
-                        f"'{entry.raw_path}'"
+                        _onto_directory("cp", entry, entry_dst, flags.backup)
                     )
-                    continue
-                if not await overwrite_gate(
-                    policy, stat, entry, entry_dst, errors
-                ):
                     continue
                 backup, ok = await make_backup(
                     policy,
@@ -1928,6 +1958,9 @@ async def cp_generic(
             )
             continue
         if not await overwrite_gate(policy, stat, src, target, errors):
+            continue
+        if target_is_dir:
+            errors.append(_onto_directory("cp", src, target, flags.backup))
             continue
         refusal = (
             _special_file_error("cp", src_kind, target)
