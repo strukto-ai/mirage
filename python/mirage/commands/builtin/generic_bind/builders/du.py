@@ -30,8 +30,8 @@ from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.errors.posix import posix_phrase
-from mirage.errors.types import FsCondition
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import (
@@ -188,27 +188,27 @@ async def _counted(
         follow (Dereference): the operand's dereference state.
         path (PathSpec): the entry.
         info (FileStat): its own stat, a link's row for a link.
-        budget (WalkBudget): records a link that leads nowhere.
+        budget (WalkBudget): records a link it cannot follow.
     """
     try:
         real = follow.links.resolve(path.virtual)
-    except CycleError:
-        budget.inaccessible.append(
-            (path.virtual, posix_phrase(FsCondition.ELOOP))
+        target = (
+            await follow.links.target_stat(path.virtual)
+            if info.type == FileType.SYMLINK
+            else info
         )
+    except FS_ERRORS + (CycleError,) as exc:
+        budget.inaccessible.append((path.virtual, fs_strerror(exc)))
+        return None
+    if target is None:
+        budget.inaccessible.append((path.virtual, None))
         return None
     if under_path(real, follow.tree):
-        return info if info.type != FileType.SYMLINK else None
+        return None if info.type == FileType.SYMLINK else info
     if real in follow.seen:
         return None
-    if info.type == FileType.SYMLINK:
-        target = await follow.links.target_stat(path.virtual)
-        if target is None:
-            budget.inaccessible.append((path.virtual, None))
-            return None
-        info = target
     follow.seen.add(real)
-    return info
+    return target
 
 
 async def _du_walk(

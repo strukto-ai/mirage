@@ -140,13 +140,11 @@ async def _walk_collect(
             st = await _stat_entry(stat, trimmed, prefix, index, unstatted)
             is_dir = st is not None and st.type == FileType.DIRECTORY
             kind = printf_kind(st)
-        acc.append((trimmed, kind))
-        if not is_dir:
-            continue
         below = chain
-        if real is not None:
+        if is_dir and real is not None:
             # Under -L a directory is the one it resolves to, and one
-            # already open above is GNU's file system loop, never entered.
+            # already open above is GNU's file system loop: never a row,
+            # never entered.
             here = real(trimmed)
             ancestor = next((v for v, r in chain if r == here), None)
             if ancestor is not None:
@@ -154,6 +152,9 @@ async def _walk_collect(
                     loops.append((trimmed, ancestor))
                 continue
             below = (*chain, (trimmed, here))
+        acc.append((trimmed, kind))
+        if not is_dir:
+            continue
         child_spec = PathSpec(
             virtual=trimmed,
             directory=trimmed,
@@ -207,7 +208,7 @@ async def walk_find(
     leads to instead: a link to a directory is walked, a dangling one
     stays ``l`` (GNU reports the link when its target cannot be statted),
     one whose chain loops is an error, and a directory reached again
-    lands in ``loops`` with the one above it, never entered.
+    lands in ``loops`` with the one above it, neither a row nor entered.
 
     Args:
         search_path (PathSpec): the start point.

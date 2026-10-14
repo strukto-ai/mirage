@@ -12,10 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isEacces, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
-import { posixPhrase } from '../../../../errors/posix.ts'
+import { fsStrerror, isEacces, isEnotdir, isFsError, isMissingPath } from '../../../../errors/fs.ts'
 import { mountKey, mountPrefixOf, rekey, underPath } from '../../../../utils/key_prefix.ts'
-import { CycleError } from '../../../../utils/path.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
@@ -171,7 +169,7 @@ class Dereference {
 
 /**
  * What `du -L` counts an entry as, null when it counts nothing. `info` is the
- * entry's own stat, a link's row for a link; a link that leads nowhere is
+ * entry's own stat, a link's row for a link; a link it cannot follow is
  * recorded on `budget`.
  */
 async function counted(
@@ -181,26 +179,23 @@ async function counted(
   budget: WalkBudget,
 ): Promise<FileStat | null> {
   let real: string
+  let target: FileStat | null
   try {
     real = follow.links.resolve(path.virtual)
+    target = info.type === FileType.SYMLINK ? await follow.links.targetStat(path.virtual) : info
   } catch (err) {
-    if (!(err instanceof CycleError)) throw err
-    budget.inaccessible.push([path.virtual, posixPhrase('ELOOP')])
+    if (!isFsError(err)) throw err
+    budget.inaccessible.push([path.virtual, fsStrerror(err)])
     return null
   }
-  if (underPath(real, follow.tree)) return info.type !== FileType.SYMLINK ? info : null
-  if (follow.seen.has(real)) return null
-  let row = info
-  if (info.type === FileType.SYMLINK) {
-    const target = await follow.links.targetStat(path.virtual)
-    if (target === null) {
-      budget.inaccessible.push([path.virtual, null])
-      return null
-    }
-    row = target
+  if (target === null) {
+    budget.inaccessible.push([path.virtual, null])
+    return null
   }
+  if (underPath(real, follow.tree)) return info.type === FileType.SYMLINK ? null : info
+  if (follow.seen.has(real)) return null
   follow.seen.add(real)
-  return row
+  return target
 }
 
 async function duWalk(

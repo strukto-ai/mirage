@@ -1,3 +1,4 @@
+import logging
 import posixpath
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ from mirage.view.types import (
     ReaddirPath,
     StatPath,
 )
+
+logger = logging.getLogger(__name__)
 
 # GNU tree's ASCII (C-locale) drawing set, matching `tree` in the battery's
 # docker oracle; the vertical/indent continuations are 4 columns wide.
@@ -137,7 +140,9 @@ async def _walk_tree(
     its subtree (itself included) could not be opened.
 
     A link is drawn as ``name -> target`` and never walked; one leading
-    to a directory counts, and filters, as a directory (tree 2.2.1).
+    to a directory counts, and filters, as a directory, and one whose
+    target cannot be statted as a file, as a dangling one does (tree
+    2.2.1).
 
     A directory the walk could not open (a rule refused it below the
     operand) contributes no lines and counts itself, so the caller
@@ -198,7 +203,11 @@ async def _walk_tree(
             continue
         is_dir = s.type == FileType.DIRECTORY
         if s.type == FileType.SYMLINK and target_stat is not None:
-            leads = await target_stat(entry)
+            try:
+                leads = await target_stat(entry)
+            except WALK_ERRORS as exc:
+                logger.debug("tree: cannot stat through %s: %s", entry, exc)
+                leads = None
             is_dir = leads is not None and leads.type == FileType.DIRECTORY
         if dirs_only and not is_dir:
             continue

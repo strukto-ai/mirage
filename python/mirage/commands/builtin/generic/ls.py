@@ -1223,6 +1223,11 @@ async def probe_operand(
     """
     if spell is None:
         spell = functools.partial(_spelled_below, path)
+    own_stat = (
+        functools.partial(followed_stat, stat, links)
+        if deref and links is not None
+        else stat
+    )
     warnings: list[LsWarning] = []
     structure_only = False
     if path.walk_error is None and (command_line_arg or not deref):
@@ -1256,12 +1261,9 @@ async def probe_operand(
                 )
             )
             return Operand(path, None, []), warnings
-        row = await _file_entry(path, stat, index)
+        row = await _file_entry(path, own_stat, index)
         if row is not None:
             return Operand(path, row, []), warnings
-        link_row = _link_row(path, links)
-        if link_row is not None:
-            return Operand(path, link_row, []), warnings
         if child_mounts is None or not child_mounts(path.virtual):
             # GNU words a directory it may not read differently from
             # one it cannot stat: the entry is there, opening it is
@@ -1286,15 +1288,9 @@ async def probe_operand(
         structure_only = True
 
     if not names and not structure_only:
-        row = await _file_entry(path, stat, index)
+        row = await _file_entry(path, own_stat, index)
         if row is not None:
             return Operand(path, row, []), warnings
-        # Backends without real directories answer readdir on a link
-        # with an empty list instead of raising, so the link operand has
-        # to be caught here too or it renders as an empty directory.
-        link_row = _link_row(path, links)
-        if link_row is not None:
-            return Operand(path, link_row, []), warnings
 
     entries, entry_ws = await _stat_entries(
         path,

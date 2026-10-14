@@ -28,7 +28,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import format_fs_error
-from mirage.errors.types import DotWalkLoop, FsCondition
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
@@ -72,6 +72,8 @@ class _Walk:
     zone: tzinfo | None = None
     # An entry diff could not compare, reported as it goes on (exit 2).
     trouble: list[bytes] = field(default_factory=list)
+    # The directory a path resolves to, where diff follows links.
+    real: Callable[[str], str] | None = None
 
 
 Absent = tuple[bool, bool]
@@ -309,9 +311,10 @@ async def _entries(walk: _Walk, path: PathSpec, absent: bool) -> set[str]:
 
 async def _entry_kind(walk: _Walk, path: PathSpec) -> FileType | None:
     """What an entry is, as diff's stat follows it; None, and the entry
-    named in ``trouble``, for a link that leads nowhere or loops.
+    named in ``trouble``, for one it cannot stat or a link that leads
+    nowhere.
 
-    GNU names each such link on each side and goes on with the rest, the
+    GNU names each such entry on each side and goes on with the rest, the
     pair left uncompared (exit 2).
 
     Args:
@@ -320,7 +323,7 @@ async def _entry_kind(walk: _Walk, path: PathSpec) -> FileType | None:
     """
     try:
         row = await walk.stat_fn(path)
-    except DotWalkLoop as exc:
+    except FS_ERRORS as exc:
         walk.trouble.append(
             f"diff: {_name(path)}: {fs_strerror(exc)}\n".encode()
         )
@@ -338,19 +341,36 @@ async def _diff_dirs(
     dir_b: PathSpec,
     walk: _Walk,
     absent: Absent = PRESENT,
+    above: tuple[tuple[str, ...], tuple[str, ...]] = ((), ()),
 ) -> tuple[bytes, bool]:
     """Compare two directories, one of which -N may read as empty.
+
+    Where diff follows links, a pair whose every side is a directory
+    already open above it on that side is GNU's recursive directory
+    loop: named and left unread (exit 2).
 
     Args:
         dir_a (PathSpec): the first directory.
         dir_b (PathSpec): the second directory.
         walk (_Walk): the reads and the parsed line.
         absent (Absent): which side is missing.
+        above (tuple[tuple[str, ...], tuple[str, ...]]): each side's
+            directories open above this pair, as the paths they resolve
+            to.
 
     Returns:
         tuple[bytes, bool]: the report and whether any pair differed.
     """
     flags = walk.flags
+    real = walk.real
+    opened = (
+        above
+        if real is None
+        else (
+            above[0] if absent[0] else (*above[0], real(dir_a.virtual)),
+            above[1] if absent[1] else (*above[1], real(dir_b.virtual)),
+        )
+    )
     names_a = await _entries(walk, dir_a, absent[0])
     names_b = await _entries(walk, dir_b, absent[1])
     left = _name(dir_a).rstrip("/")
@@ -378,7 +398,20 @@ async def _diff_dirs(
         b_dir = kind_b == FileType.DIRECTORY
         gone = (not in_a, not in_b)
         if (a_dir or not in_a) and (b_dir or not in_b):
-            body, changed = await _diff_dirs(child_a, child_b, walk, gone)
+            if real is not None and all(
+                side_gone or real(child.virtual) in side_open
+                for side_gone, child, side_open in zip(
+                    gone, (child_a, child_b), opened
+                )
+            ):
+                named = _name(child_a if in_a else child_b)
+                walk.trouble.append(
+                    f"diff: {named}: recursive directory loop\n".encode()
+                )
+                continue
+            body, changed = await _diff_dirs(
+                child_a, child_b, walk, gone, opened
+            )
             parts.append(body)
             differ = differ or changed
         elif not a_dir and not b_dir:
@@ -473,6 +506,7 @@ async def diff(
                 if links is not None
                 else stat_fn
             ),
+            real=links.resolve if links is not None else None,
             flags=flags,
             excluded=await _excluded_patterns(flags, read_bytes),
             switches="".join(f" {shell_quote(w)}" for w in switch_words(argv)),

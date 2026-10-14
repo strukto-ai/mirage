@@ -170,7 +170,12 @@ async function walkTree(
         const target = s.extra[LINK_TARGET_KEY]
         link = typeof target === 'string' ? target : ''
         if (treeOpts.targetStat !== null) {
-          const leads = await treeOpts.targetStat(childPath)
+          // One whose target cannot be statted is drawn as a file, as a
+          // dangling one is (tree 2.2.1).
+          const leads = await treeOpts.targetStat(childPath).catch((err: unknown) => {
+            if (!isWalkError(err)) throw err
+            return null
+          })
           isDir = leads !== null && leads.type === FileType.DIRECTORY
         }
       }

@@ -16,6 +16,7 @@ import errno
 
 import pytest
 
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.policy import Deny
 from mirage.policy.base import Policy
 from mirage.types import FileStat, FileType, MountMode, PathSpec
@@ -1731,4 +1732,69 @@ async def test_dispatcher_follows_relative_parent_targets_and_chains():
     assert st.size == 6
     data, _ = await ws.dispatch("read", path, offset=1, size=3)
     assert data == b"ell"
+    await ws.close()
+
+
+class _SealedRAMVFS(RAMVFS):
+    async def stat(
+        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    ) -> FileStat:
+        raise PermissionError(errno.EACCES, "Permission denied", path.virtual)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "code", "stdout", "stderr"),
+    [
+        (
+            "tree /data/d",
+            0,
+            b"/data/d\n|-- a\n|-- ld -> /sec/q\n`-- lf -> /sec/k\n\n"
+            b"1 directory, 3 files\n",
+            b"",
+        ),
+        (
+            "du -aL /data/d",
+            1,
+            b"2\t/data/d/a\n2\t/data/d\n",
+            b"du: cannot access '/data/d/ld': Permission denied\n"
+            b"du: cannot access '/data/d/lf': Permission denied\n",
+        ),
+        (
+            "diff -r /data/d /data/e",
+            2,
+            b"",
+            b"diff: /data/d/ld: Permission denied\n"
+            b"diff: /data/d/lf: Permission denied\n",
+        ),
+    ],
+)
+async def test_a_link_whose_target_refuses_stat(line, code, stdout, stderr):
+    # GNU names such a link and walks on (coreutils 9.7, diffutils 3.10);
+    # tree draws it as a file, as a dangling one (tree 2.2.1).
+    ws = Workspace(
+        {
+            "/data": (RAMVFS(), MountMode.WRITE),
+            "/sec": (_SealedRAMVFS(), MountMode.READ),
+        },
+        mode=MountMode.WRITE,
+    )
+    await ws.shell(
+        "mkdir -p /data/d /data/e/ld && echo a > /data/d/a && "
+        "echo a > /data/e/a && echo k > /data/e/lf && "
+        "ln -s /sec/q /data/d/ld && ln -s /sec/k /data/d/lf"
+    )
+    r = await ws.shell(line)
+    assert (r.exit_code, r.stdout, r.stderr or b"") == (code, stdout, stderr)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_ls_rl_lists_a_link_to_an_empty_directory():
+    # GNU lists the link as the directory it leads to, an empty one
+    # included (coreutils 9.7).
+    ws = _ws()
+    await ws.shell("mkdir -p /data/t/e && ln -s e /data/t/l")
+    r = await ws.shell("cd /data && ls -RL t")
+    assert r.stdout == b"t:\ne\nl\n\nt/e:\n\nt/l:\n"
     await ws.close()

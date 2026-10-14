@@ -417,7 +417,9 @@ def link_name(copies: TransferLinks, target: PathSpec) -> PathSpec | None:
     The router follows a destination to what its link leads to, which is
     what a plain copy writes, through the link. GNU's backup renames the
     destination itself, a link included, and the copy then lands at the
-    name, so a backup is made of this and the copy goes here.
+    name, so a backup is made of this and the copy goes here, through
+    the dispatcher: the name may sit on another mount than the one the
+    link leads into.
 
     Args:
         copies (TransferLinks): Namespace facts and transfer calls.
@@ -2260,6 +2262,7 @@ async def cp_generic(
                 lines.append(transfer_line(src, target, None))
             errors.append(refusal)
             continue
+        copier: CopyStrategy = strategy
         linked = (
             link_name(copies, target)
             if copies is not None and policy.backup is not None
@@ -2268,7 +2271,7 @@ async def cp_generic(
         if copies is not None and linked is not None:
             # GNU's backup renames the link at the name, and the copy is
             # then a new file there; what the link led to is untouched.
-            target = linked
+            target, copier = linked, copies.relay
             backup, ok = await make_backup(
                 policy,
                 NativeMove(rename=partial(rename_link, copies)),
@@ -2286,12 +2289,12 @@ async def cp_generic(
             continue
         if flags.verbose:
             lines.append(transfer_line(src, target, backup))
-        if isinstance(strategy, PrimitiveCopy):
-            if not await transfer_file(strategy, src, target, "cp", errors):
+        if isinstance(copier, PrimitiveCopy):
+            if not await transfer_file(copier, src, target, "cp", errors):
                 continue
         else:
             try:
-                await strategy.copy(src, target)
+                await copier.copy(src, target)
             except FS_ERRORS as exc:
                 errors.append(
                     f"cp: cannot create regular file "

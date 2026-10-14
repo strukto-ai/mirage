@@ -33,6 +33,40 @@
         "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_cp_b_onto_a_link_into_another_mount",
+      "seq": 17000026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(printf old > /data/xmb_f && printf new > /data/xmb_s && ln -s /data/xmb_f /data2/xmb_l && cp -b /data/xmb_s /data2/xmb_l; echo rc=$?; cat /data/xmb_f; echo; readlink /data2/xmb_l~; cat /data2/xmb_l; echo); rm -f /data/xmb_f /data/xmb_s /data2/xmb_l /data2/xmb_l~",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nold\n/data/xmb_f\nnew\n",
+        "stderr": ""
+      }
     }
   ]
 }

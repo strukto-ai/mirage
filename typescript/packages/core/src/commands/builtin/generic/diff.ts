@@ -28,7 +28,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { StatPath } from '../../../view/types.ts'
 import { formatFsError } from '../../../errors/render.ts'
-import { fsStrerror, isDotWalkError, isEnoent, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { followedStat } from '../../../view/namespace_view.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
@@ -116,6 +116,8 @@ interface Walk {
   zone: Zone
   // An entry diff could not compare, reported as it goes on (exit 2).
   readonly trouble: Uint8Array[]
+  // The directory a path resolves to, where diff follows links.
+  real: ((virtual: string) => string) | null
 }
 
 type Absent = readonly [boolean, boolean]
@@ -321,15 +323,15 @@ async function entries(walk: Walk, path: PathSpec, absent: boolean): Promise<Set
 }
 
 // What an entry is, as diff's stat follows it; null, and the entry named in
-// `trouble`, for a link that leads nowhere or loops. GNU names each such link
-// on each side and goes on with the rest, the pair left uncompared (exit 2).
-// Mirrors Python's _kind.
+// `trouble`, for one it cannot stat or a link that leads nowhere. GNU names
+// each such entry on each side and goes on with the rest, the pair left
+// uncompared (exit 2). Mirrors Python's _entry_kind.
 async function entryKind(walk: Walk, path: PathSpec): Promise<FileType | null> {
   let row: FileStat
   try {
     row = await walk.stat(path)
   } catch (err) {
-    if (!isDotWalkError(err) || (err as { code?: string }).code !== 'ELOOP') throw err
+    if (!isFsError(err)) throw err
     walk.trouble.push(ENC.encode(`diff: ${path.rawPath}: ${String(fsStrerror(err))}\n`))
     return null
   }
@@ -342,15 +344,27 @@ async function entryKind(walk: Walk, path: PathSpec): Promise<FileType | null> {
 
 /**
  * Compare two directories, one of which -N may read as empty; returns the
- * report and whether any pair differed.
+ * report and whether any pair differed. Where diff follows links, a pair whose
+ * every side is a directory already open above it on that side (`above`, as
+ * the paths they resolve to) is GNU's recursive directory loop: named and left
+ * unread (exit 2).
  */
 async function diffDirs(
   walk: Walk,
   dirA: PathSpec,
   dirB: PathSpec,
   absent: Absent = PRESENT,
+  above: readonly [readonly string[], readonly string[]] = [[], []],
 ): Promise<[Uint8Array, boolean]> {
   const flags = walk.flags
+  const real = walk.real
+  const opened: readonly [readonly string[], readonly string[]] =
+    real === null
+      ? above
+      : [
+          absent[0] ? above[0] : [...above[0], real(dirA.virtual)],
+          absent[1] ? above[1] : [...above[1], real(dirB.virtual)],
+        ]
   const namesA = await entries(walk, dirA, absent[0])
   const namesB = await entries(walk, dirB, absent[1])
   const names = [...new Set([...namesA, ...namesB])].sort(compareCodePoints)
@@ -380,7 +394,17 @@ async function diffDirs(
     const bDir = kindB === FileType.DIRECTORY
     const gone: Absent = [!inA, !inB]
     if ((aDir || !inA) && (bDir || !inB)) {
-      const [body, changed] = await diffDirs(walk, childA, childB, gone)
+      if (
+        real !== null &&
+        [childA, childB].every(
+          (child, i) => gone[i] === true || opened[i]?.includes(real(child.virtual)) === true,
+        )
+      ) {
+        const named = inA ? childA : childB
+        walk.trouble.push(ENC.encode(`diff: ${named.rawPath}: recursive directory loop\n`))
+        continue
+      }
+      const [body, changed] = await diffDirs(walk, childA, childB, gone, opened)
       parts.push(body)
       differ ||= changed
     } else if (!aDir && !bDir) {
@@ -483,6 +507,7 @@ export async function diffGeneric(
       statPath: opts.statPath ?? null,
       zone: zoneFromEnv(opts.env) ?? UTC_ZONE,
       trouble,
+      real: links === undefined ? null : (virtual: string) => links.resolve(virtual),
     }
     if (dash0 !== dash1) {
       if ((await stat(dash0 ? p1 : p0)).type === FileType.DIRECTORY) {

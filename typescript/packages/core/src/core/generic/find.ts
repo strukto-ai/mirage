@@ -45,7 +45,7 @@ export interface WalkFindDeps {
   // leads to instead: a link to a directory is walked, a dangling one stays
   // `l` (GNU reports the link when its target cannot be statted), one whose
   // chain loops is an error, and a directory reached again lands in `loops`
-  // with the one above it that it repeats, never entered.
+  // with the one above it that it repeats, neither a row nor entered.
   links?: LinkView | null
   follow?: boolean
   loops?: [string, string][]
@@ -173,12 +173,10 @@ async function walk(
       kind = s === null ? 'f' : printfKind(s)
     }
     const isFolder = kind === 'd'
-    out.push({ path: trimmed, depth, file: !isFolder, kind })
-    if (!isFolder) continue
     let below = chain
-    if (deps.follow === true && deps.links != null) {
+    if (isFolder && deps.follow === true && deps.links != null) {
       // Under -L a directory is the one it resolves to, and one already open
-      // above is GNU's file system loop, never entered.
+      // above is GNU's file system loop: never a row, never entered.
       const here = deps.links.resolve(trimmed)
       const ancestor = chain.find(([, real]) => real === here)
       if (ancestor !== undefined) {
@@ -187,6 +185,8 @@ async function walk(
       }
       below = [...chain, [trimmed, here] as const]
     }
+    out.push({ path: trimmed, depth, file: !isFolder, kind })
+    if (!isFolder) continue
     const childSpec = new PathSpec({
       virtual: trimmed,
       directory: trimmed,

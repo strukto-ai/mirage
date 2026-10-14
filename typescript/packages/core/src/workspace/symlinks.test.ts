@@ -21,7 +21,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import { FileStat, FileType, MountMode } from '../types.ts'
+import { FileStat, FileType, MountMode, type PathSpec } from '../types.ts'
+import { eacces } from '../errors/fs.ts'
 import { applyStateDict, toStateDict } from './snapshot/state.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { dispatched } from '../test-utils.ts'
@@ -1396,5 +1397,57 @@ it('follows parent-relative link chains through the dispatcher', async () => {
   expect(st).toMatchObject({ type: FileType.FILE, size: 6 })
   const data = await ws.dispatch('read', path, [], { offset: 1, size: 3 })
   expect(data).toEqual(new TextEncoder().encode('ell'))
+  await ws.close()
+})
+
+class SealedRAMVFS extends RAMVFS {
+  override stat(path: PathSpec): Promise<FileStat> {
+    return Promise.reject(eacces(path))
+  }
+}
+
+// GNU names such a link and walks on (coreutils 9.7, diffutils 3.10); tree
+// draws it as a file, as a dangling one (tree 2.2.1).
+it.each([
+  [
+    'tree /data/d',
+    0,
+    '/data/d\n|-- a\n|-- ld -> /sec/q\n`-- lf -> /sec/k\n\n1 directory, 3 files\n',
+    '',
+  ],
+  [
+    'du -aL /data/d',
+    1,
+    '2\t/data/d/a\n2\t/data/d\n',
+    "du: cannot access '/data/d/ld': Permission denied\n" +
+      "du: cannot access '/data/d/lf': Permission denied\n",
+  ],
+  [
+    'diff -r /data/d /data/e',
+    2,
+    '',
+    'diff: /data/d/ld: Permission denied\ndiff: /data/d/lf: Permission denied\n',
+  ],
+])('%s names a link whose target refuses stat', async (line, code, stdout, stderr) => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS(), '/sec': [new SealedRAMVFS(), MountMode.READ] },
+    { mode: MountMode.WRITE, shellParser: parser },
+  )
+  await ws.shell(
+    'mkdir -p /data/d /data/e/ld && echo a > /data/d/a && echo a > /data/e/a && ' +
+      'echo k > /data/e/lf && ln -s /sec/q /data/d/ld && ln -s /sec/k /data/d/lf',
+  )
+  const r = await ws.shell(line)
+  expect([r.exitCode, dec(r.stdout), dec(r.stderr)]).toEqual([code, stdout, stderr])
+  await ws.close()
+})
+
+// GNU lists the link as the directory it leads to, an empty one included
+// (coreutils 9.7).
+it('ls -RL lists a link to an empty directory', async () => {
+  const ws = buildWorkspace()
+  await ws.shell('mkdir -p /data/t/e && ln -s e /data/t/l')
+  const r = await ws.shell('cd /data && ls -RL t')
+  expect(dec(r.stdout)).toBe('t:\ne\nl\n\nt/e:\n\nt/l:\n')
   await ws.close()
 })

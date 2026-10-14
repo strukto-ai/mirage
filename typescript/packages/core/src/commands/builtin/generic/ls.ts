@@ -642,6 +642,9 @@ async function probeOperand(
   spell: ((virtual: string) => string) | null = null,
 ): Promise<Operand> {
   const spelled = spell ?? ((virtual: string) => spelledBelow(path, virtual))
+  const links = opts.links
+  const ownStat: Stat =
+    opts.deref && links !== null ? (p: PathSpec) => followedStat(stat, links, p) : stat
   if (path.walkError === null && (commandLineArg || !opts.deref)) {
     // The table's readdir opens what a link leads to, as opendir(3) does,
     // so a link the line left unresolved is asked first: the router
@@ -664,12 +667,9 @@ async function probeOperand(
     // coreutils 9.7).
     const walkRefused = isDotWalkError(err)
     const looped = walkRefused && (err as { code?: string }).code === 'ELOOP'
-    const row = walkRefused ? null : await fileEntry(stat, path)
+    const row = walkRefused ? null : await fileEntry(ownStat, path)
     if (row !== null) return { path, row, groups: [] }
-    const link =
-      !walkRefused || (looped && commandLineArg && !opts.followArgs)
-        ? linkRow(path, opts.links)
-        : null
+    const link = looped && commandLineArg && !opts.followArgs ? linkRow(path, links) : null
     if (link !== null) return { path, row: link, groups: [] }
     // GNU words a directory it may not read differently from one it
     // cannot stat: the entry is there, opening it is what failed.
@@ -681,13 +681,8 @@ async function probeOperand(
     return { path, row: null, groups: [] }
   }
   if (stats.length === 0 && !structureOnly) {
-    const row = await fileEntry(stat, path)
+    const row = await fileEntry(ownStat, path)
     if (row !== null) return { path, row, groups: [] }
-    // Backends without real directories answer readdir on a link with
-    // an empty list instead of throwing, so the link operand has to be
-    // caught here too or it renders as an empty directory.
-    const link = linkRow(path, opts.links)
-    if (link !== null) return { path, row: link, groups: [] }
   }
   const entries = sortStats(
     stats,
@@ -699,7 +694,6 @@ async function probeOperand(
   )
   const groups: [PathSpec, FileStat[]][] = [[path, entries]]
   if (opts.recursive) {
-    const links = opts.links
     const real = opts.deref && links !== null ? (virtual: string) => links.resolve(virtual) : null
     const open = real !== null && chain.length === 0 ? [real(path.virtual)] : chain
     for (const s of entries) {
