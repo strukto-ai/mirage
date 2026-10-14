@@ -58,19 +58,20 @@ async def test_run_cli_returns_both_streams_and_the_status():
     assert (out, err, code) == (b"in", b"e\n", 3)
 
 
+async def _two_chunks():
+    yield b"a"
+    yield b"b"
+
+
 @pytest.mark.asyncio
 async def test_run_cli_streams_input_and_output_and_maps_a_signal():
-    async def source():
-        yield b"a"
-        yield b"b"
-
     seen: list[bytes] = []
 
     async def output(chunk: bytes) -> None:
         seen.append(chunk)
 
     out, _, code = await run_cli(
-        "sh", None, ["-c", "cat; kill -TERM $$"], source(), output=output
+        "sh", None, ["-c", "cat; kill -TERM $$"], _two_chunks(), output=output
     )
     assert (out, b"".join(seen), code) == (b"", b"ab", 128 + signal.SIGTERM)
 

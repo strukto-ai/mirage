@@ -312,6 +312,7 @@ export function installQuickJsFs(
       await land(file, place)
       return ctx.newNumber(0)
     } catch (err) {
+      failed.add(fd)
       return ctx.newNumber(-errnoFor(err))
     }
   })

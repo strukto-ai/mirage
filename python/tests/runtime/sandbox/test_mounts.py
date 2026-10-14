@@ -156,6 +156,20 @@ async def test_a_second_session_is_refused_rather_than_shown_the_first_view():
 
 
 @pytest.mark.asyncio
+async def test_a_session_made_again_under_its_id_is_served_afresh():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    await ws.close_session("agent")
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert sandbox.stopped == ["/data", "/my notes"]
+    assert len(sandbox.pipes) == 4
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_hidden_unserved_mounts_refuse_without_claiming_the_sandbox():
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox, hide=["/data", "/my notes"])

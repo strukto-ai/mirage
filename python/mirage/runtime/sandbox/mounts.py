@@ -138,8 +138,9 @@ class SandboxMounts:
     view, and a program a line starts may outlive it, so under ``ssh`` and
     ``both`` the sandbox belongs to the first session it serves or runs a
     line for, until it is closed: a line of another session is refused
-    rather than shown, or showing, the first one's view. Under ``fuse`` the
-    host serves nothing, and any session may run.
+    rather than shown, or showing, the first one's view; a session made
+    again under the same id is served afresh. Under ``fuse`` the host
+    serves nothing, and any session may run.
 
     Args:
         runtime (str): the runtime's name, for messages.
@@ -161,7 +162,7 @@ class SandboxMounts:
         self._mount_type = mount_type
         self._run = run
         self._open_pipe = open_pipe
-        self._session_id: str | None = None
+        self._session: SessionState | None = None
         self._served: dict[str, tuple[SandboxPipe, asyncio.Task[None]]] = {}
         self._seen: tuple[frozenset[str], frozenset[str]] | None = None
         self._lock = asyncio.Lock()
@@ -202,12 +203,16 @@ class SandboxMounts:
         ):
             return "this file transport cannot enforce program-specific path rules"
         async with self._lock:
-            if self._session_id not in (None, current.session_id):
+            served = self._session
+            if served is not None and served.session_id != current.session_id:
                 return (
-                    f"this sandbox shows session {self._session_id}'s view "
+                    f"this sandbox shows session {served.session_id}'s view "
                     f"of the workspace; give session {current.session_id} "
                     "a sandbox of its own"
                 )
+            session = binding.get_session(current.session_id)
+            if served is not None and served is not session:
+                await self._unmount()
             every = mount_paths(binding.mount_prefixes())
             ruled = frozenset(
                 p.rstrip("/") or "/"
@@ -216,24 +221,20 @@ class SandboxMounts:
                 )
             )
             await self._reconcile(
-                binding,
-                binding.files,
-                binding.get_session(current.session_id),
-                every,
-                ruled,
+                binding, binding.files, session, every, ruled
             )
             refusal = self._refusal(ruled)
             if self._mount_type != "fuse" and (
                 refusal is None or self._served
             ):
-                self._session_id = current.session_id
+                self._session = session
         return refusal
 
     async def close(self) -> None:
         """Unmount every served prefix and end its SFTP server."""
         async with self._lock:
             await self._unmount()
-            self._session_id = None
+            self._session = None
 
     def _refusal(self, ruled: frozenset[str]) -> str | None:
         for prefix in sorted(ruled):

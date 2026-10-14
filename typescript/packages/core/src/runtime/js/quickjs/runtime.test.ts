@@ -55,6 +55,32 @@ describe('QuickJS cwd', () => {
   })
 })
 
+it('marks a FILE whose flush failed as in error', async () => {
+  const full = (): Promise<void> =>
+    Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))
+  class FullVFS extends RAMVFS {
+    override append = full
+    override pwrite = full
+    override write = full
+  }
+  const rt = new QuickJsRuntime()
+  const ws = new Workspace(
+    { '/data': new FullVFS() },
+    { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
+  )
+  try {
+    const result = await rt.run({
+      code: "const f = std.open('/data/x', 'w'); f.puts('x'); print(String(f.flush()), f.error())",
+      args: [],
+      env: {},
+      stdin: null,
+    })
+    expect(new TextDecoder().decode(result.stdout)).toBe('undefined true\n')
+  } finally {
+    await ws.close()
+  }
+})
+
 describe('QuickJS compatibility', () => {
   it.each([
     [

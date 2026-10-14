@@ -156,11 +156,12 @@ interface Served {
  * given. What the host serves shows one session's view, and a program a line starts may outlive it, so under `ssh` and
  * `both` the sandbox belongs to the first session it serves or runs a line
  * for, until it is closed: a line of another session is refused rather
- * than shown, or showing, the first one's view. Under `fuse` the host
- * serves nothing, and any session may run.
+ * than shown, or showing, the first one's view; a session made again under
+ * the same id is served afresh. Under `fuse` the host serves nothing, and
+ * any session may run.
  */
 export class SandboxMounts {
-  private sessionId: string | null = null
+  private session: SessionState | null = null
   private readonly served = new Map<string, Served>()
   private seen: string | null = null
   private lock: Promise<unknown> = Promise.resolve()
@@ -206,20 +207,23 @@ export class SandboxMounts {
       )
     }
     return this.locked(async () => {
-      if (this.sessionId !== null && current.sessionId !== this.sessionId) {
+      const served = this.session
+      if (served !== null && current.sessionId !== served.sessionId) {
         return (
-          `this sandbox shows session ${this.sessionId}'s view of the workspace; ` +
+          `this sandbox shows session ${served.sessionId}'s view of the workspace; ` +
           `give session ${current.sessionId} a sandbox of its own`
         )
       }
+      const session = getSession(current.sessionId)
+      if (served !== null && served !== session) await this.unmount()
       const every = mountPaths(mountPrefixes())
       const ruled = new Set(
         restrictedMountsFor(current, mountPrefixes()).map((prefix) => rstripSlash(prefix) || '/'),
       )
-      await this.reconcile(binding, files, getSession(current.sessionId), every, ruled, signal)
+      await this.reconcile(binding, files, session, every, ruled, signal)
       const refusal = this.refusal(ruled)
       if (this.mountType !== 'fuse' && (refusal === null || this.served.size > 0)) {
-        this.sessionId = current.sessionId
+        this.session = session
       }
       return refusal
     })
@@ -229,7 +233,7 @@ export class SandboxMounts {
   close(): Promise<void> {
     return this.locked(async () => {
       await this.unmount()
-      this.sessionId = null
+      this.session = null
     })
   }
 
