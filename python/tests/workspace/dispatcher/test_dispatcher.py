@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 import errno
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
@@ -20,7 +21,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.context import reset_current_session, set_current_session
+from mirage.context import (
+    Caller,
+    current_caller,
+    reset_current_session,
+    set_current_session,
+)
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
 from mirage.errors.types import (
@@ -40,6 +46,7 @@ from mirage.policy import (
     VfsResultContext,
 )
 from mirage.policy.rule import RulePolicy
+from mirage.policy.types import EntryGate
 from mirage.types import (
     FileStat,
     FileType,
@@ -1622,11 +1629,21 @@ async def _text(ws: Workspace, virtual: str) -> bytes:
     return data
 
 
+def _by_command(gate: EntryGate) -> Caller:
+    """The caller of an op a command makes, with ``gate``: what its bound
+    dispatch passes.
+
+    Args:
+        gate (EntryGate): the command's gate.
+    """
+    return dataclasses.replace(current_caller(), rule_gate=gate)
+
+
 @pytest.mark.asyncio
-async def test_a_marked_op_is_judged_on_every_path_it_reaches():
+async def test_a_commands_own_op_is_judged_on_every_path_it_reaches():
     # Each spelling once, in the order the dispatcher meets it: as handed in,
-    # walked, then followed. A refused op leaves the bytes alone; an
-    # unmarked one is the dispatcher's alone.
+    # walked, then followed. A refused op leaves the bytes alone; one the
+    # command did not make is the dispatcher's alone.
     ws = await _linked_ws()
     await ws.shell(
         "echo new > /data/real/other && echo o > /data/other && "
@@ -1649,7 +1666,9 @@ async def test_a_marked_op_is_judged_on_every_path_it_reaches():
             ),
         ):
             with pytest.raises(PermissionError):
-                await ws.dispatch(op, _path(virtual), rule_gate=gate, **kwargs)
+                await ws.dispatch(
+                    op, _path(virtual), caller=_by_command(gate), **kwargs
+                )
         assert gate.asked == [
             "/data/alias/secret",
             "/data/real/secret",
@@ -1666,7 +1685,7 @@ async def test_a_marked_op_is_judged_on_every_path_it_reaches():
         walked = _RefusingGate("/data/real/flink2")
         with pytest.raises(PermissionError):
             await ws.dispatch(
-                "read", _path("/data/alias/flink2"), rule_gate=walked
+                "read", _path("/data/alias/flink2"), caller=_by_command(walked)
             )
         assert walked.asked == ["/data/alias/flink2", "/data/real/flink2"]
         await ws.dispatch("unlink", _path("/data/alias/secret"))
@@ -1677,7 +1696,7 @@ async def test_a_marked_op_is_judged_on_every_path_it_reaches():
 
 
 @pytest.mark.asyncio
-async def test_a_marked_unlink_of_a_link_is_judged_on_the_link_entry():
+async def test_a_commands_unlink_of_a_link_is_judged_on_the_link_entry():
     # The link table answers unlink of a link: a rule on the link name
     # holds before that answer, and one on the referent is never asked.
     ws = await _linked_ws()
@@ -1686,10 +1705,12 @@ async def test_a_marked_unlink_of_a_link_is_judged_on_the_link_entry():
             await ws.dispatch(
                 "unlink",
                 _path("/data/flink"),
-                rule_gate=_RefusingGate("/data/flink"),
+                caller=_by_command(_RefusingGate("/data/flink")),
             )
         referent = _RefusingGate("/data/real/secret")
-        await ws.dispatch("unlink", _path("/data/flink"), rule_gate=referent)
+        await ws.dispatch(
+            "unlink", _path("/data/flink"), caller=_by_command(referent)
+        )
         assert referent.asked == ["/data/flink"]
         assert await _text(ws, "/data/real/secret") == b"s\n"
     finally:
@@ -1697,7 +1718,7 @@ async def test_a_marked_unlink_of_a_link_is_judged_on_the_link_entry():
 
 
 @pytest.mark.asyncio
-async def test_hidden_space_answers_a_marked_op_before_any_rule():
+async def test_hidden_space_answers_a_commands_op_before_any_rule():
     # A write into hidden space, a link there, a hidden rename endpoint
     # and one behind a linked parent are missing, and the command's gate
     # is never asked.
@@ -1722,7 +1743,9 @@ async def test_hidden_space_answers_a_marked_op_before_any_rule():
             ("rename", "/data/real/secret", {"dst": _path("/data/halias/x")}),
         ):
             with pytest.raises(FileNotFoundError):
-                await ws.dispatch(op, _path(virtual), rule_gate=gate, **kwargs)
+                await ws.dispatch(
+                    op, _path(virtual), caller=_by_command(gate), **kwargs
+                )
         assert gate.asked == []
     finally:
         reset_current_session(token)
@@ -1730,9 +1753,8 @@ async def test_hidden_space_answers_a_marked_op_before_any_rule():
 
 
 @pytest.mark.asyncio
-async def test_the_mark_never_reaches_the_op(monkeypatch):
-    # The dispatcher lifts the mark at entry: the mount's op sees only its own
-    # arguments, whatever the command's dispatcher carried.
+async def test_the_caller_never_reaches_the_op(monkeypatch):
+    # The mount's op sees only its own arguments, whoever made the call.
     ws = await _linked_ws()
     seen: list[dict] = []
     real = MountEntry.call
@@ -1744,8 +1766,10 @@ async def test_the_mark_never_reaches_the_op(monkeypatch):
     monkeypatch.setattr(MountEntry, "call", spy)
     try:
         gate = _RefusingGate("/nothing")
-        await ws.dispatch("read", _path("/data/real/secret"), rule_gate=gate)
-        assert seen and all("rule_gate" not in kw for kw in seen)
+        await ws.dispatch(
+            "read", _path("/data/real/secret"), caller=_by_command(gate)
+        )
+        assert seen and all("caller" not in kw for kw in seen)
         assert gate.asked == ["/data/real/secret"]
     finally:
         await ws.close()

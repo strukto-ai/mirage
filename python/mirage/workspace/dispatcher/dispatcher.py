@@ -74,6 +74,7 @@ from mirage.observe.context import (
 )
 from mirage.observe.record import WRITE_FINGERPRINT_OPS, OpRecord
 from mirage.policy.boundary import Boundary
+from mirage.policy.constants import METADATA_OPS
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.types import EntryGate
 from mirage.shell.bytes import encode_text
@@ -830,7 +831,8 @@ class Dispatcher:
     ) -> tuple[Any, IOResult]:
         """Run one op with ``caller`` bound, so what runs below the
         dispatcher (a policy, a backend's record) reads the caller the
-        dispatcher judges by.
+        dispatcher judges by. Its rule gate stays here: a policy's own
+        read below is no call of the command's.
 
         Args:
             name (str): the op.
@@ -839,7 +841,7 @@ class Dispatcher:
             report (OpReport | None): the caller's report.
             kwargs (dict[str, Any]): the op's own arguments.
         """
-        token = bind_caller(caller)
+        token = bind_caller(dataclasses.replace(caller, rule_gate=None))
         try:
             return await self._dispatch(
                 name, path, caller, report=report, **kwargs
@@ -857,11 +859,14 @@ class Dispatcher:
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        # with_dispatch_rule_guard's mark, never forwarded to an op. A scan
-        # guard reads nothing: the rule judges each read it guards.
-        rule_gate: EntryGate | None = kwargs.pop("rule_gate", None)
-        if name == "before_full_scan":
-            rule_gate = None
+        # The command's gate judges its own calls; a metadata call passes,
+        # as its guards let stat pass, and a scan guard reads nothing: the
+        # rule judges each read it guards.
+        rule_gate = (
+            None
+            if name in METADATA_OPS or name == "before_full_scan"
+            else caller.rule_gate
+        )
         # The dispatcher's own keywords: a read answered as it is pulled, and a
         # read of what the backend holds now, past the file cache.
         stream = name == "read" and bool(kwargs.pop("stream", False))

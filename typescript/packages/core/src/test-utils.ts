@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Caller } from './context/session_context.ts'
 import type { Dispatcher } from './workspace/dispatcher/dispatcher.ts'
 import { RAMIndexCacheStore } from './cache/index/ram.ts'
 import type { IndexCacheStore } from './cache/index/store.ts'
@@ -241,17 +242,23 @@ export function dispatched(
 ): [string, string][] {
   const seen: [string, string][] = []
   const dispatcher = (ws as unknown as { dispatcher: Dispatcher }).dispatcher
-  const bind = dispatcher.forSession.bind(dispatcher)
-  dispatcher.forSession = (session) => {
-    const bound = bind(session)
-    const target = bound as unknown as { dispatchAdmitted: DispatchFn }
+  // Every view the dispatcher makes for a session or a caller is watched.
+  const watch = (bound: Dispatcher): Dispatcher => {
+    const target = bound as unknown as {
+      dispatchAdmitted: DispatchFn
+      forCaller: (caller: Caller) => Dispatcher
+    }
     const real = target.dispatchAdmitted
     target.dispatchAdmitted = async (name, path, args, kwargs, report) => {
       seen.push([name, path.virtual])
       if (before !== undefined) await before(name, path)
       return real(name, path, args, kwargs, report)
     }
+    const forCaller = target.forCaller.bind(bound)
+    target.forCaller = (caller) => watch(forCaller(caller))
     return bound
   }
+  const bind = dispatcher.forSession.bind(dispatcher)
+  dispatcher.forSession = (session) => watch(bind(session))
   return seen
 }

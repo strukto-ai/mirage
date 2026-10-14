@@ -36,7 +36,6 @@ import { Consumer } from '../lookup/types.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { lookup, program, programNote, programs } from '../lookup/lookup.ts'
 import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
-import { withDispatchRuleGuard } from '../../commands/builtin/generic_bind/adapter.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
@@ -808,7 +807,15 @@ export class Workspace {
     dispatcher: Dispatcher = this.dispatcher,
     gate: EntryGate | null = null,
   ): BridgeDispatchFn {
-    const dispatch = withDispatchRuleGuard(dispatcher.dispatch, gate)
+    const dispatch: DispatchFn = (op, path, args, kwargs, report, caller) =>
+      dispatcher.dispatch(
+        op,
+        path,
+        args,
+        kwargs,
+        report,
+        caller ?? (gate === null ? undefined : { ...currentCaller(), ruleGate: gate }),
+      )
     return workspaceBridge((name, path, args, kwargs = {}) =>
       this.dispatchInternal(
         name,

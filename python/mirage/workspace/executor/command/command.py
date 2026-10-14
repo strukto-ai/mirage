@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+from dataclasses import replace
 
 from mirage.commands.builtin.find_parse import (
     find_expr_tail,
@@ -32,9 +33,6 @@ from mirage.commands.builtin.generic.program import (
     program_files,
     value_refusal,
 )
-from mirage.commands.builtin.generic_bind.adapter import (
-    with_dispatch_rule_guard,
-)
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.errors import FindParseError
@@ -43,7 +41,7 @@ from mirage.commands.spec.builtins import is_builtin_grammar, registered_spec
 from mirage.commands.spec.constants import STANDARD_AFTER_SCAN
 from mirage.commands.spec.flag_view import spread_operands
 from mirage.commands.spec.standard import standard_request
-from mirage.context import get_admission
+from mirage.context import current_caller
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -271,11 +269,14 @@ async def handle_command(
             execute_fn,
         )
 
-    # Every op the command or CLI issues from here carries its gate to the
-    # dispatcher, so a rule scoped to a CLI reaches its own reads, those its
-    # output stream makes once it returned included.
+    # Every op the command or CLI issues from here is made by the command,
+    # its gate included, so a rule scoped to a CLI reaches its own reads,
+    # those its output stream makes once it returned included.
     if dispatch is not None:
-        dispatch = with_dispatch_rule_guard(dispatch, get_admission())
+        caller = current_caller()
+        dispatch = functools.partial(
+            dispatch, caller=replace(caller, rule_gate=caller.gate)
+        )
 
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)

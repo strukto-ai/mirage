@@ -52,6 +52,7 @@ import { type FsError } from '../../errors/types.ts'
 import { Policies, PolicyDenied } from '../../policy/index.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { Boundary } from '../../policy/boundary.ts'
+import { METADATA_OPS } from '../../policy/constants.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
@@ -584,8 +585,14 @@ export class Dispatcher {
       this.admitWrite ?? undefined,
       this.decisions ?? undefined,
     )
+    // Without task isolation a caller read off the async context may be
+    // another task's, so its session counts only where tasks are isolated;
+    // elsewhere the checks keep folding every live session.
     bound.access =
-      this.access ?? (caller.session === null ? undefined : sessionAccess(caller.session))
+      this.access ??
+      (caller.session === null || !asyncContextIsolatesTasks
+        ? undefined
+        : sessionAccess(caller.session))
     bound.caller = caller
     bound.state = this.state
     return bound
@@ -629,10 +636,11 @@ export class Dispatcher {
       const view = this.forCaller(caller)
       const run = (): ReturnType<DispatchFn> => view.dispatch(name, path, args, kwargs, report)
       // What runs below the dispatcher (a policy, a backend's record)
-      // reads the caller the dispatcher judges by. Without task isolation
-      // that binding would reach other tasks' ops, so there only the
-      // dispatcher's own checks read it.
-      return asyncContextIsolatesTasks ? runWithCaller(caller, run) : run()
+      // reads the caller the dispatcher judges by, all but its rule gate:
+      // a policy's own read below is no call of the command's. Without
+      // task isolation that binding would reach other tasks' ops, so there
+      // only the dispatcher's own checks read it.
+      return asyncContextIsolatesTasks ? runWithCaller({ ...caller, ruleGate: null }, run) : run()
     }
     // Only forSession and forCaller know the owner. An unbound browser
     // call must keep the conservative live-session checks rather than
@@ -648,9 +656,7 @@ export class Dispatcher {
     // The caller's own mark on the op, lifted before any gate fires so
     // each one is told whose op it judges.
     const [issuer, stripped] = takeIssuer(kwargs)
-    // withDispatchRuleGuard's mark, never forwarded to an op.
-    const { ruleGate, ...unmarked } = (stripped ?? {}) as { ruleGate?: EntryGate | null }
-    kwargs = ruleGate === undefined ? stripped : unmarked
+    kwargs = stripped
     // The dispatcher's own keywords: a read answered as it is pulled, and a read
     // of what the backend holds now, past the file cache.
     const { stream, direct, ...own } = (kwargs ?? {}) as { stream?: unknown; direct?: unknown }
@@ -663,8 +669,11 @@ export class Dispatcher {
     ) {
       return [null, new IOResult()]
     }
-    // A scan guard reads nothing: the rule judges each read it guards.
-    const gate = name === 'before_full_scan' ? null : (ruleGate ?? null)
+    // The command's gate judges its own calls; a metadata call passes, as
+    // its guards let stat pass, and a scan guard reads nothing: the rule
+    // judges each read it guards.
+    const gate =
+      METADATA_OPS.has(name) || name === 'before_full_scan' ? null : (this.caller?.ruleGate ?? null)
     const call = await this.walk(name, path, args, kwargs, gate, report, issuer)
     call.stream = name === 'read' && stream === true
     call.direct = name === 'read' && direct === true

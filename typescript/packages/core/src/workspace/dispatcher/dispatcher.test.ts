@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { currentCaller } from '../../context/session_context.ts'
+import type { EntryGate } from '../../policy/types.ts'
+import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
@@ -1318,6 +1321,7 @@ function refusing(refused: string) {
         if (virtual === refused) throw new Error(`sealed ${virtual}`)
       },
       refuses: (virtual: string): boolean => virtual === refused,
+      scopes: (): boolean => false,
     },
   }
 }
@@ -1341,10 +1345,29 @@ const text = async (ws: Workspace, virtual: string): Promise<string> =>
 
 const spec = (virtual: string): PathSpec => PathSpec.fromStrPath(virtual)
 
-describe('a marked op is judged on the paths the dispatcher reaches', () => {
+// An op a command makes, with its gate: what the command's bound dispatch
+// passes.
+const byCommand = (
+  ws: Workspace,
+  gate: EntryGate | null,
+  op: string,
+  virtual: string,
+  args: readonly unknown[] = [],
+  kwargs: Record<string, unknown> = {},
+): Promise<[unknown, IOResult]> =>
+  (ws as unknown as { dispatcher: { dispatch: DispatchFn } }).dispatcher.dispatch(
+    op,
+    spec(virtual),
+    args,
+    kwargs,
+    undefined,
+    { ...currentCaller(), ruleGate: gate },
+  )
+
+describe("a command's own op is judged on the paths the dispatcher reaches", () => {
   // Each spelling once, in the order the dispatcher meets it: as handed in,
-  // walked, then followed. A refused op leaves the bytes alone; an unmarked
-  // one is the dispatcher's alone.
+  // walked, then followed. A refused op leaves the bytes alone; one the
+  // command did not make is the dispatcher's alone.
   it('judges every spelling once', async () => {
     const ws = await linkedWs()
     try {
@@ -1359,9 +1382,7 @@ describe('a marked op is judged on the paths the dispatcher reaches', () => {
         ['read', '/data/flink', [], {}],
         ['write', '/data/alias/secret', [new TextEncoder().encode('x\n')], { nofollow: true }],
       ] as const) {
-        await expect(ws.dispatch(op, virtual, args, { ...kwargs, ruleGate: gate })).rejects.toThrow(
-          'sealed',
-        )
+        await expect(byCommand(ws, gate, op, virtual, args, kwargs)).rejects.toThrow('sealed')
       }
       expect(asked).toEqual([
         '/data/alias/secret',
@@ -1377,9 +1398,9 @@ describe('a marked op is judged on the paths the dispatcher reaches', () => {
       expect(await text(ws, '/data/real/secret')).toBe('s\n')
       expect(await text(ws, '/data/real/other')).toBe('new\n')
       const walked = refusing('/data/real/flink2')
-      await expect(
-        ws.dispatch('read', '/data/alias/flink2', [], { ruleGate: walked.gate }),
-      ).rejects.toThrow('sealed')
+      await expect(byCommand(ws, walked.gate, 'read', '/data/alias/flink2')).rejects.toThrow(
+        'sealed',
+      )
       expect(walked.asked).toEqual(['/data/alias/flink2', '/data/real/flink2'])
       await ws.dispatch('unlink', '/data/alias/secret')
       await expect(text(ws, '/data/real/secret')).rejects.toMatchObject({ code: 'ENOENT' })
@@ -1394,10 +1415,10 @@ describe('a marked op is judged on the paths the dispatcher reaches', () => {
     const ws = await linkedWs()
     try {
       await expect(
-        ws.dispatch('unlink', '/data/flink', [], { ruleGate: refusing('/data/flink').gate }),
+        byCommand(ws, refusing('/data/flink').gate, 'unlink', '/data/flink'),
       ).rejects.toThrow('sealed')
       const referent = refusing('/data/real/secret')
-      await ws.dispatch('unlink', '/data/flink', [], { ruleGate: referent.gate })
+      await byCommand(ws, referent.gate, 'unlink', '/data/flink')
       expect(referent.asked).toEqual(['/data/flink'])
       expect(await text(ws, '/data/real/secret')).toBe('s\n')
     } finally {
@@ -1427,7 +1448,7 @@ describe('a marked op is judged on the paths the dispatcher reaches', () => {
           ['rename', '/data/hid/h', [spec('/data/real/moved')]],
           ['rename', '/data/real/secret', [spec('/data/halias/x')]],
         ] as const) {
-          await expect(ws.dispatch(op, virtual, args, { ruleGate: gate })).rejects.toMatchObject({
+          await expect(byCommand(ws, gate, op, virtual, args)).rejects.toMatchObject({
             code: 'ENOENT',
           })
         }
@@ -1438,19 +1459,19 @@ describe('a marked op is judged on the paths the dispatcher reaches', () => {
     }
   })
 
-  // The dispatcher lifts the mark at entry: the mount's op sees only its own
-  // arguments. A null mark is no mark, as Python's rule_gate=None.
-  it('never forwards the mark to the op', async () => {
+  // The mount's op sees only its own arguments, whoever made the call. A
+  // call with no gate is the dispatcher's alone, as Python's rule_gate=None.
+  it('never forwards the caller to the op', async () => {
     const ws = await linkedWs()
     const spy = vi.spyOn(MountEntry.prototype, 'callKeyed')
     try {
       const { gate, asked } = refusing('/nothing')
-      await ws.dispatch('read', '/data/real/secret', [], { ruleGate: gate })
+      await byCommand(ws, gate, 'read', '/data/real/secret')
       const seen = spy.mock.calls.map((call) => call[3])
       expect(seen.length).toBeGreaterThan(0)
       expect(seen.every((kw) => kw === undefined || !('ruleGate' in kw))).toBe(true)
       expect(asked).toEqual(['/data/real/secret'])
-      const read = await ws.dispatch('read', '/data/real/secret', [], { ruleGate: null })
+      const [read] = await byCommand(ws, null, 'read', '/data/real/secret')
       expect(new TextDecoder().decode(read as Uint8Array)).toBe('s\n')
     } finally {
       spy.mockRestore()

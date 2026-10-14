@@ -19,12 +19,10 @@ import {
   runWithMountGate,
   runWithSession,
 } from '../../../context/session_context.ts'
-import { IOResult } from '../../../io/types.ts'
 import type { Policy } from '../../../policy/base.ts'
 import { Policies, runWithOpPolicies } from '../../../policy/policies.ts'
 import type { Action, VfsContext } from '../../../policy/types.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
-import { requireOp, withAbortGuard, withCommandGuards, withDispatchRuleGuard } from './adapter.ts'
+import { requireOp, withAbortGuard, withCommandGuards } from './adapter.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { eacces, eisdir, enoent } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
@@ -380,57 +378,6 @@ async function drain(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
   for await (const chunk of stream) out.push(chunk)
   return out
 }
-
-describe('withDispatchRuleGuard', () => {
-  const spec = (virtual: string): PathSpec =>
-    new PathSpec({
-      virtual,
-      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-      vfsPath: virtual,
-      resolved: true,
-    })
-
-  it('marks an op with its explicit gate despite another ambient gate', async () => {
-    const seen: [string, unknown][] = []
-    const inner: DispatchFn = (op, _path, _args, kwargs) => {
-      seen.push([op, kwargs?.ruleGate])
-      return Promise.resolve([null, new IOResult()])
-    }
-    const dispatch = withDispatchRuleGuard(inner)
-    // No gate bound: the op goes to the dispatcher unmarked.
-    await dispatch('read', spec('/data/f'))
-    const asked: string[] = []
-    const gate = {
-      scoped: true,
-      scopes: () => true,
-      granted: [],
-      check: (virtual: string) => {
-        asked.push(virtual)
-      },
-      refuses: () => false,
-    }
-    const bound = withDispatchRuleGuard(inner, gate)
-    await runWithAdmission({ ...gate, scopes: () => false }, async () => {
-      await bound('read', spec('/data/f'), [spec('/data/g')])
-      // A metadata op is never judged: deny is present and refused.
-      await bound('stat', spec('/data/f'))
-    })
-    await bound('read', spec('/data/after'))
-    const captured = await runWithAdmission(gate, () =>
-      Promise.resolve(withDispatchRuleGuard(inner)),
-    )
-    await captured('read', spec('/data/captured'))
-    expect(seen).toEqual([
-      ['read', undefined],
-      ['read', gate],
-      ['stat', undefined],
-      ['read', gate],
-      ['read', gate],
-    ])
-    // The wrapper judges nothing itself: the dispatcher does, on its own paths.
-    expect(asked).toEqual([])
-  })
-})
 
 const SEALED = { message: 'Permission denied', refusal: { reason: 'sealed' } }
 

@@ -76,6 +76,9 @@ export interface Caller {
   readonly owner: SessionOwner | null
   readonly evaluation: EvaluationContext | null
   readonly gate: EntryGate | null
+  // The gate the dispatcher judges the paths of this call by: the
+  // command's own calls carry it, the shell's own I/O around them does not.
+  readonly ruleGate: EntryGate | null
   readonly mount: readonly [string, MountMode] | null
   readonly refusals: RefusalSink | null
   readonly explaining: VfsExplanation[] | DryRun | null
@@ -97,6 +100,7 @@ const UNBOUND: Caller = {
   owner: null,
   evaluation: null,
   gate: null,
+  ruleGate: null,
   mount: null,
   refusals: null,
   explaining: null,

@@ -38,7 +38,6 @@ import {
   sessionVisibility,
   walkProbeFor,
 } from '../../../context/session_context.ts'
-import { METADATA_OPS } from '../../../policy/constants.ts'
 import type { EntryGate } from '../../../policy/types.ts'
 import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -1251,22 +1250,6 @@ export function withCommandGuards<A extends Accessor>(
         : Promise.resolve(false)
   }
   return guarded
-}
-
-/**
- * Return `dispatch` marking each op with the admitted command's gate as
- * `ruleGate`, which the dispatcher judges on the paths the op reaches: the
- * command's dispatcher skips its guarded slots, and the dispatcher cannot tell
- * which command issued an op. A metadata op passes unmarked, as
- * `withCommandGuards` lets `stat` pass.
- */
-export function withDispatchRuleGuard(dispatch: DispatchFn, gate = getAdmission()): DispatchFn {
-  return async (op, path, args, options, report, caller) => {
-    if (gate === null || METADATA_OPS.has(op)) {
-      return dispatch(op, path, args, options, report, caller)
-    }
-    return dispatch(op, path, args, { ...options, ruleGate: gate }, report, caller)
-  }
 }
 
 /** The policies to consult for one slot call, with the mount prefix

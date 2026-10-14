@@ -105,6 +105,9 @@ class Caller:
             the session, None outside one; a layer bound to another
             session never carries it.
         gate (EntryGate | None): the running command's admission gate.
+        rule_gate (EntryGate | None): the gate the dispatcher judges the
+            paths of this call by: the command's own calls carry it, the
+            shell's own I/O around them does not.
         mount (tuple[str, MountMode] | None): the prefix and configured
             mode of the mount a command runs on.
         refusals (RefusalSink | None): where the running line notes a
@@ -134,6 +137,7 @@ class Caller:
     owner: SessionOwner | None = None
     evaluation: EvaluationContext | None = None
     gate: EntryGate | None = None
+    rule_gate: EntryGate | None = None
     mount: tuple[str, MountMode] | None = None
     refusals: RefusalSink | None = None
     explaining: list[VfsExplanation] | DryRun | None = None

@@ -39,9 +39,6 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
-from mirage.commands.builtin.generic_bind.adapter import (
-    with_dispatch_rule_guard,
-)
 from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.concurrency.limiter import run_blocking
@@ -49,7 +46,6 @@ from mirage.context import (
     Caller,
     bind_caller,
     current_caller,
-    get_admission,
     get_current_session_for,
     get_current_session_unless_foreign,
     reset_caller,
@@ -2233,17 +2229,20 @@ class Workspace:
     async def _program_dispatch(
         self, name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
-        """Dispatch a program's own file call with the gate of the command
-        running it, so a rule scoped to ``python3`` reaches its ``open()``.
-        The binding's capture replays that command's context here.
+        """Dispatch a program's own file call as the command running it,
+        its gate included, so a rule scoped to ``python3`` reaches its
+        ``open()``. The binding's capture replays that command's context
+        here.
 
         Args:
             name (str): the op.
             path (PathSpec): the path it reaches.
             **kwargs (Any): the op's arguments.
         """
-        guarded = with_dispatch_rule_guard(self.dispatch, get_admission())
-        return await guarded(name, path, **kwargs)
+        caller = current_caller()
+        return await self.dispatch(
+            name, path, caller=replace(caller, rule_gate=caller.gate), **kwargs
+        )
 
     async def stat(self, path: str) -> FileStat:
         scope = PathSpec(

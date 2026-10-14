@@ -27,14 +27,11 @@ from mirage.commands.builtin.generic_bind.adapter import (
     resolve_or_empty,
     with_command_guards,
     with_dir_guard,
-    with_dispatch_rule_guard,
 )
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.context import (
-    reset_admission,
     reset_current_session,
     reset_mount_gate,
-    set_admission,
     set_current_session,
     set_mount_gate,
 )
@@ -344,36 +341,6 @@ def _spec(virtual: str) -> PathSpec:
         vfs_path=virtual,
         resolved=True,
     )
-
-
-@pytest.mark.asyncio
-async def test_dispatch_rule_guard_marks_an_op_with_its_explicit_gate():
-    seen: list[tuple[str, _Gate | None]] = []
-
-    async def inner(op, path, **kwargs):
-        seen.append((op, kwargs.get("rule_gate")))
-        return None, None
-
-    # No gate: the op goes to the dispatcher unmarked.
-    await with_dispatch_rule_guard(inner, None)("read", _spec("/data/f"))
-    gate = _Gate(refused="/data/locked/y")
-    bound = with_dispatch_rule_guard(inner, gate)
-    token = set_admission(_Gate(refused="/data/other"))
-    try:
-        await bound("read", _spec("/data/f"), dst=_spec("/data/g"))
-        # A metadata op is never judged: deny is present and refused.
-        await bound("stat", _spec("/data/f"))
-    finally:
-        reset_admission(token)
-    await bound("read", _spec("/data/after"))
-    assert seen == [
-        ("read", None),
-        ("read", gate),
-        ("stat", None),
-        ("read", gate),
-    ]
-    # The wrapper judges nothing itself: the dispatcher does, on its own paths.
-    assert gate.asked == []
 
 
 class _SealedRead(Policy):
