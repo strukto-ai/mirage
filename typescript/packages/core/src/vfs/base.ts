@@ -641,11 +641,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * @param path a directory about to be walked, as `filesContaining` gets it.
    * @param command grep or rg.
    * @param reason why the search cannot stand in: NO_SEARCH (no search on
-   *   this mount or this path), NO_TEXT (-f, or no plain text every match
-   *   holds), EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
-   *   --files-without-match, rg -c with --include-zero, without -q), LINKS
-   *   (rg -L), BINARY (grep -a, rg --binary: a binary file is read) or
-   *   UNANSWERED (a search resolved null).
+   *   this mount), NO_TEXT (-f, or no plain text every match holds),
+   *   EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg --files-without-match,
+   *   rg -c with --include-zero, without -q), LINKS (rg -L), BINARY (grep -a,
+   *   rg --binary: a binary file is read) or UNANSWERED (a search resolved
+   *   null or a path rule declined it).
    * @param files how many files the session sees under `path`, from the
    *   mount's `readTree` with every hidden file dropped; null when `readTree`
    *   cannot answer, and the guard counts them itself.

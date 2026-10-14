@@ -755,13 +755,13 @@ class BaseVFS:
                 ``files_containing`` gets it.
             command (str): grep or rg.
             reason (ScanReason): why the search cannot stand in:
-                NO_SEARCH (no search on this mount or this path),
+                NO_SEARCH (no search on this mount),
                 NO_TEXT (-f, or no plain text every match holds),
                 EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
                 --files-without-match, rg -c with --include-zero, without
                 -q), LINKS (rg -L), BINARY (grep -a, rg --binary: a
                 binary file is read) or UNANSWERED (a search returned
-                None).
+                None or a path rule declined it).
             files (int | None): how many files the session sees under
                 ``path``, from the mount's ``read_tree`` with every
                 hidden file dropped; None when ``read_tree`` cannot

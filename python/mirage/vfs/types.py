@@ -258,7 +258,7 @@ class ScanReason(StrEnum):
     """Why grep or rg reads every file instead of asking the mount.
 
     NO_SEARCH: no ``files_containing`` or ``lines_containing`` on the
-    mount, or a hide or path rule covers the walk. NO_TEXT: -f, or no
+    mount. NO_TEXT: -f, or no
     plain text of three characters that every match holds (under -i, a
     word with a non-ASCII letter, or with i, k or s when case folds by
     Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints
@@ -270,8 +270,8 @@ class ScanReason(StrEnum):
     --binary or -uuu reads every binary-extension file, which a search
     that answered does not rule out. TRANSFORMED: rg -z, --pre or -E
     naming an encoding searches bytes the mount does not store.
-    UNANSWERED: ``files_containing`` returned None, or
-    ``lines_containing`` returned None for a file.
+    UNANSWERED: ``files_containing`` returned None or was declined under
+    a path rule, or ``lines_containing`` returned None for a file.
     """
 
     NO_SEARCH = "the mount has no search"

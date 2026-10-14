@@ -167,8 +167,7 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
 /**
  * Why grep or rg reads every file instead of asking the mount. Mirrors
  * Python's `ScanReason`. NO_SEARCH: no `filesContaining` or
- * `linesContaining` on the mount, or a hide or path rule covers the walk.
- * NO_TEXT: -f, or no plain text of three characters that every match holds
+ * `linesContaining` on the mount. NO_TEXT: -f, or no plain text of three characters that every match holds
  * (under -i, a word with a non-ASCII letter, or with i, k or s when case folds by
  * Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints lines that
  * do not match. EVERY_FILE: rg --files-without-match, or rg -c or
@@ -179,8 +178,8 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
  * binary-extension file, which a search that answered does not rule out.
  * TRANSFORMED: rg -z, --pre or -E naming an encoding searches bytes the
  * mount does not store.
- * UNANSWERED: `filesContaining` resolved null, or `linesContaining` resolved
- * null for a file.
+ * UNANSWERED: `filesContaining` resolved null or was declined under a path
+ * rule, or `linesContaining` resolved null for a file.
  */
 export const ScanReason = Object.freeze({
   NO_SEARCH: 'the mount has no search',
