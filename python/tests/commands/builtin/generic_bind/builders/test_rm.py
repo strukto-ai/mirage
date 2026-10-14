@@ -169,6 +169,12 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
     assert unlink.await_args.args[1] == valid
 
 
+async def _declined_rm_r(
+    _accessor: None, path: PathSpec, index: None = None
+) -> None:
+    raise walk_declined("s3", "rm_r", path)
+
+
 @pytest.mark.asyncio
 async def test_rm_r_names_a_mount_below_and_fails():
     tree = {"/data": ["/data/a.txt", "/data/inner"]}
@@ -180,9 +186,6 @@ async def test_rm_r_names_a_mount_below_and_fails():
         kind = FileType.DIRECTORY if path.virtual in tree else FileType.FILE
         return FileStat(name=path.virtual, type=kind)
 
-    async def declined(_accessor, path, index=None):
-        raise walk_declined("s3", "rm_r", path)
-
     unlink = AsyncMock()
     rmdir = AsyncMock()
     io = CommandIO(
@@ -193,7 +196,7 @@ async def test_rm_r_names_a_mount_below_and_fails():
         is_mounted=lambda _: True,
         unlink=unlink,
         rmdir=rmdir,
-        rm_r=declined,
+        rm_r=_declined_rm_r,
     )
     roots = ["/data/inner"]
     ns = NamespaceView(
