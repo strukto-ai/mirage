@@ -156,9 +156,10 @@ interface Served {
  * given. What the host serves shows one session's view, and a program a line starts may outlive it, so under `ssh` and
  * `both` the sandbox belongs to the first session it serves or runs a line
  * for, until it is closed: a line of another session is refused rather
- * than shown, or showing, the first one's view; a session made again under
- * the same id is served afresh. Under `fuse` the host serves nothing, and
- * any session may run.
+ * than shown, or showing, the first one's view, and so is a session made
+ * again under the same id, which a program the first one started could
+ * otherwise read through. Under `fuse` the host serves nothing, and any
+ * session may run.
  */
 export class SandboxMounts {
   private session: SessionState | null = null
@@ -208,14 +209,14 @@ export class SandboxMounts {
     }
     return this.locked(async () => {
       const served = this.session
-      if (served !== null && current.sessionId !== served.sessionId) {
+      const session = getSession(current.sessionId)
+      if (served !== null && served !== session) {
+        const earlier = served.sessionId === current.sessionId ? 'an earlier ' : ''
         return (
-          `this sandbox shows session ${served.sessionId}'s view of the workspace; ` +
+          `this sandbox shows ${earlier}session ${served.sessionId}'s view of the workspace; ` +
           `give session ${current.sessionId} a sandbox of its own`
         )
       }
-      const session = getSession(current.sessionId)
-      if (served !== null && served !== session) await this.unmount()
       const every = mountPaths(mountPrefixes())
       const ruled = new Set(
         restrictedMountsFor(current, mountPrefixes()).map((prefix) => rstripSlash(prefix) || '/'),

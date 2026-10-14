@@ -138,9 +138,10 @@ class SandboxMounts:
     view, and a program a line starts may outlive it, so under ``ssh`` and
     ``both`` the sandbox belongs to the first session it serves or runs a
     line for, until it is closed: a line of another session is refused
-    rather than shown, or showing, the first one's view; a session made
-    again under the same id is served afresh. Under ``fuse`` the host
-    serves nothing, and any session may run.
+    rather than shown, or showing, the first one's view, and so is a
+    session made again under the same id, which a program the first one
+    started could otherwise read through. Under ``fuse`` the host serves
+    nothing, and any session may run.
 
     Args:
         runtime (str): the runtime's name, for messages.
@@ -204,15 +205,18 @@ class SandboxMounts:
             return "this file transport cannot enforce program-specific path rules"
         async with self._lock:
             served = self._session
-            if served is not None and served.session_id != current.session_id:
-                return (
-                    f"this sandbox shows session {served.session_id}'s view "
-                    f"of the workspace; give session {current.session_id} "
-                    "a sandbox of its own"
-                )
             session = binding.get_session(current.session_id)
             if served is not None and served is not session:
-                await self._unmount()
+                earlier = (
+                    "an earlier "
+                    if served.session_id == current.session_id
+                    else ""
+                )
+                return (
+                    f"this sandbox shows {earlier}session "
+                    f"{served.session_id}'s view of the workspace; give "
+                    f"session {current.session_id} a sandbox of its own"
+                )
             every = mount_paths(binding.mount_prefixes())
             ruled = frozenset(
                 p.rstrip("/") or "/"

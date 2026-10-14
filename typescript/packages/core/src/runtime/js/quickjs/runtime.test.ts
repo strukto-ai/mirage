@@ -55,9 +55,11 @@ describe('QuickJS cwd', () => {
   })
 })
 
+function full(): Promise<void> {
+  return Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))
+}
+
 it('marks a FILE whose flush failed as in error', async () => {
-  const full = (): Promise<void> =>
-    Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))
   class FullVFS extends RAMVFS {
     override append = full
     override pwrite = full

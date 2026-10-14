@@ -205,16 +205,20 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
-  it('serves a session made again under its id afresh', async () => {
+  it('refuses a session made again under its id', async () => {
     const sandbox = new FakeSandbox('ssh')
     const ws = await workspace(sandbox)
     let agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     await ws.closeSession('agent')
     agent = await ws.session('agent', { profile: 'agent' })
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
-    expect(sandbox.stopped).toEqual(['/data', '/my notes'])
-    expect(sandbox.pipes).toHaveLength(4)
+    const result = await agent.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(
+      "fake: this sandbox shows an earlier session agent's view of the workspace; " +
+        'give session agent a sandbox of its own\n',
+    )
+    expect(sandbox.pipes).toHaveLength(2)
     await ws.close()
   })
 

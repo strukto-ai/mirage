@@ -156,16 +156,20 @@ async def test_a_second_session_is_refused_rather_than_shown_the_first_view():
 
 
 @pytest.mark.asyncio
-async def test_a_session_made_again_under_its_id_is_served_afresh():
+async def test_a_session_made_again_under_its_id_is_refused():
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
     await ws.close_session("agent")
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
-    assert sandbox.stopped == ["/data", "/my notes"]
-    assert len(sandbox.pipes) == 4
+    result = await agent.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert await result.stderr_str() == (
+        "fake: this sandbox shows an earlier session agent's view of the "
+        "workspace; give session agent a sandbox of its own\n"
+    )
+    assert len(sandbox.pipes) == 2
     await ws.close()
 
 
