@@ -146,6 +146,63 @@ describe('MicrosandboxRuntime', () => {
 
 const SANDBOX = process.env.MIRAGE_INTEG_MICROSANDBOX_SANDBOX
 const STOPPED_SANDBOX = process.env.MIRAGE_INTEG_MICROSANDBOX_STOPPED_SANDBOX
+const MOUNT_SANDBOX = process.env.MIRAGE_INTEG_MICROSANDBOX_MOUNT_SANDBOX
+
+it('rejects an unknown mount type', () => {
+  expect(
+    () => new MicrosandboxRuntime({ config: { sandbox: 'box', mountType: 'unknown' } }),
+  ).toThrow('mountType must be one of')
+})
+
+describe.skipIf(!MOUNT_SANDBOX)('real guest workspace mounts', () => {
+  it.each(['ssh', 'both'] as const)(
+    'serves the host session with %s and unmounts',
+    async (mountType) => {
+      const prefix = `/mirage-typescript-${mountType}`
+      const runtime = new MicrosandboxRuntime({
+        captures: ['python3'],
+        config: { sandbox: MOUNT_SANDBOX, mountType },
+      })
+      const ws = new Workspace(
+        { [prefix]: new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          profiles: { agent: { paths: { hide: [`${prefix}/secret.txt`] } } },
+          runtimes: [runtime, 'workspace'],
+        },
+      )
+      try {
+        expect((await ws.shell(`echo host > ${prefix}/hello.txt`)).exitCode).toBe(0)
+        expect((await ws.shell(`echo hidden > ${prefix}/secret.txt`)).exitCode).toBe(0)
+        const agent = await ws.session('agent', { profile: 'agent' })
+        const result = await agent.shell(
+          `python3 -c 'from pathlib import Path; ` +
+            `assert Path("${prefix}/hello.txt").read_text() == "host\\n"; ` +
+            `assert not Path("${prefix}/secret.txt").exists(); ` +
+            `Path("${prefix}/new.txt").write_text("guest\\n"); print("host workspace served")'`,
+        )
+        expect(DEC.decode(result.stderr), 'guest stderr').toBe('')
+        expect(result.exitCode).toBe(0)
+        expect(DEC.decode(result.stdout)).toBe('host workspace served\n')
+        expect(DEC.decode((await ws.shell(`cat ${prefix}/new.txt`)).stdout)).toBe('guest\n')
+        const other = await ws.session('other')
+        const refused = await other.shell("python3 -c 'print(1)'")
+        expect(refused.exitCode).toBe(1)
+        expect(DEC.decode(refused.stderr)).toContain("session agent's view")
+      } finally {
+        await ws.close()
+      }
+      const check = await new MicrosandboxRuntime({ config: { sandbox: MOUNT_SANDBOX } }).execLine(
+        `mountpoint -q ${prefix}`,
+        null,
+        {},
+        '/',
+      )
+      expect(check.exitCode).not.toBe(0)
+    },
+    60_000,
+  )
+})
 
 it.skipIf(!STOPPED_SANDBOX)('does not start a real stopped guest', async () => {
   const runtime = new MicrosandboxRuntime({ config: { sandbox: STOPPED_SANDBOX } })

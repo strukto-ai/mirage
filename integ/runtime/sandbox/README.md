@@ -15,7 +15,7 @@ checks hides, a read-only mount and a host change through it, and that
 | `timeout.json`  | a mount limit's timeout ends the line with 124                | every box                                        |
 | `captures.json` | only captured commands go to the box; the rest stay in mirage | every box                                        |
 | `kernel.json`   | the box runs its own Linux kernel                             | apple_container, microsandbox, smolvm             |
-| `mounts.json`   | `mount_type` serves the session's view into the box           | docker, e2b                                      |
+| `mounts.json`   | `mount_type` serves the session's view into the box           | docker, e2b, microsandbox                         |
 
 The boxes are apple_container, docker, e2b, microsandbox, smolvm and ssh. CI runs docker
 and ssh in `integ-runtime` against containers it starts, and e2b in

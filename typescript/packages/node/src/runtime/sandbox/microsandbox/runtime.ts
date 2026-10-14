@@ -12,11 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { Readable } from 'node:stream'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
-import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
+import { checkMountType, requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { ProcessExecution, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { ProcessExecution, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { MICROSANDBOX_CONFIG_KEYS, type MicrosandboxConfig } from './config.ts'
 import { RUNNING_STATE, MICROSANDBOX_CLI_HINT, notRunningHint } from './constants.ts'
@@ -38,6 +41,7 @@ export class MicrosandboxRuntime
   constructor(options: RuntimeOptions<MicrosandboxConfig> | Record<string, unknown> = {}) {
     super(options, MICROSANDBOX_CONFIG_KEYS)
     requireId('microsandbox', 'sandbox', this.config.sandbox)
+    this.serveMounts(checkMountType('microsandbox', this.config.mountType))
   }
 
   // One msb CLI invocation.
@@ -82,6 +86,8 @@ export class MicrosandboxRuntime
 
   async runProcess(request: ProcessExecution): Promise<RunResult> {
     await this.ensureConnected(request.signal)
+    const refusal = await this.admitMounts(request.signal)
+    if (refusal !== null) return refusal
     return this.execArgv(
       request.argv,
       request.stdin,
@@ -105,6 +111,34 @@ export class MicrosandboxRuntime
     args.push('--', ...argv)
     const result = await this.microsandbox(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
+  }
+
+  override async openPipe(command: string): Promise<SandboxPipe> {
+    const child = spawn(
+      'msb',
+      ['exec', this.config.sandbox, '--quiet', '--no-tty', '--stream', '--', 'sh', '-c', command],
+      { stdio: ['pipe', 'pipe', 'ignore'] },
+    )
+    child.stdin.on('error', (err) => {
+      console.debug(`microsandbox: the pipe for ${command} closed`, err)
+    })
+    const exited = once(child, 'close').catch((err: unknown) => {
+      console.debug('microsandbox: the mount pipe did not start', err)
+    })
+    try {
+      await once(child, 'spawn')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(MICROSANDBOX_CLI_HINT)
+      throw err
+    }
+    return {
+      reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+      writer: child.stdin,
+      stop: async () => {
+        if (child.exitCode === null && child.signalCode === null) child.kill()
+        await exited
+      },
+    }
   }
 }
 

@@ -74,8 +74,47 @@ Add `python3` to run Python programs in the guest too.
 
 ## Connecting the workspace
 
-As with smolvm, serve the workspace with Mirage inside the guest at the
-same paths. Put a `sandbox.yaml` in the image or copy it into the sandbox:
+Choose how files reach the guest with `mount_type` in Python or YAML,
+or `mountType` in TypeScript:
+
+- `ssh` serves the host workspace's session view over SFTP to `sshfs`
+  inside the guest. Host RAM files, writes, hides and mount permissions
+  are shared through that session. Install `mirage-ai[ssh]` on a Python
+  host or the optional `ssh2` dependency on a Node host, and `sshfs` in
+  the guest. Guest Mirage is not needed for this mode.
+- `fuse` uses mounts served by Mirage inside the guest. The host refuses
+  commands while a session rule covers a guest-served mount whose file
+  operations it cannot enforce.
+- `both` uses existing guest mounts and serves the remaining prefixes
+  over SFTP, applying the same rule checks to guest-served mounts.
+- Leaving the option unset preserves the original behavior: arrange
+  file access yourself, as with smolvm.
+
+For a host workspace shared over SFTP:
+
+```python
+runtime = MicrosandboxRuntime(
+    captures=["python3", "@external"],
+    config={"sandbox": "mirage-box", "mount_type": "ssh"},
+)
+```
+
+```typescript
+const runtime = new MicrosandboxRuntime({
+  captures: ['python3', '@external'],
+  config: { sandbox: 'mirage-box', mountType: 'ssh' },
+})
+```
+
+Mirage holds an `msb exec --stream` pipe open for passive `sshfs`, which
+preserves SFTP bytes without a terminal. This serves files from the host
+to the guest; Microsandbox's separate native SSH/SFTP interfaces serve
+the guest's files to SSH clients. The mount mode needs no SSH listener,
+authorized key, or SSH daemon. `ssh` and `both` reserve the sandbox for
+the first session they serve until the runtime closes. Closing unmounts
+host-served prefixes and leaves the sandbox running.
+
+For `fuse`, put a `sandbox.yaml` in the image or copy it into the sandbox:
 
 ```yaml
 mounts:
@@ -127,6 +166,12 @@ MIRAGE_INTEG_MICROSANDBOX_SANDBOX=mirage-box \
 These checks exercise both execution interfaces, binary input, literal
 arguments, environment overrides, separate stderr, nonzero exit status,
 and reading and writing the guest's Mirage FUSE mount.
+
+To test host-served `ssh` and `both` mounts, set
+`MIRAGE_INTEG_MICROSANDBOX_MOUNT_SANDBOX` to a running guest with Python,
+`sshfs` and usable `/dev/fuse`, and run the same adapter test files.
+These checks read and write host RAM files, enforce a session hide,
+refuse another session, and confirm the mount disappears after close.
 
 To check that neither adapter starts a stopped sandbox, run the same test
 files with `MIRAGE_INTEG_MICROSANDBOX_STOPPED_SANDBOX` naming a stopped guest

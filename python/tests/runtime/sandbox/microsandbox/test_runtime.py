@@ -214,6 +214,61 @@ async def test_real_guest_process_shell_and_fuse():
 
 STOPPED_SANDBOX = os.environ.get("MIRAGE_INTEG_MICROSANDBOX_STOPPED_SANDBOX")
 
+MOUNT_SANDBOX = os.environ.get("MIRAGE_INTEG_MICROSANDBOX_MOUNT_SANDBOX")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not MOUNT_SANDBOX, reason="set a guest with sshfs for mounts"
+)
+@pytest.mark.parametrize("mount_type", ["ssh", "both"])
+async def test_real_ssh_mount_serves_the_host_session_and_unmounts(mount_type):
+    prefix = f"/mirage-python-{mount_type}"
+    runtime = MicrosandboxRuntime(
+        captures=["python3"],
+        config={"sandbox": MOUNT_SANDBOX, "mount_type": mount_type},
+    )
+    ws = Workspace(
+        {prefix: RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"agent": {"paths": {"hide": [f"{prefix}/secret.txt"]}}},
+        runtimes=[runtime, "workspace"],
+    )
+    try:
+        assert (
+            await ws.shell(f"echo host > {prefix}/hello.txt")
+        ).exit_code == 0
+        assert (
+            await ws.shell(f"echo hidden > {prefix}/secret.txt")
+        ).exit_code == 0
+        agent = await ws.session("agent", profile="agent")
+        result = await agent.shell(
+            "python3 -c 'from pathlib import Path; "
+            f'assert Path("{prefix}/hello.txt").read_text() == "host\\n"; '
+            f'assert not Path("{prefix}/secret.txt").exists(); '
+            f'Path("{prefix}/new.txt").write_text("guest\\n"); '
+            'print("host workspace served")\''
+        )
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout == b"host workspace served\n"
+        written = await ws.shell(f"cat {prefix}/new.txt")
+        assert written.stdout == b"guest\n"
+        other = await ws.session("other")
+        refused = await other.shell("python3 -c 'print(1)'")
+        assert refused.exit_code == 1
+        assert b"session agent's view" in refused.stderr
+    finally:
+        await ws.close()
+    check = await MicrosandboxRuntime(
+        config={"sandbox": MOUNT_SANDBOX}
+    ).exec_line(f"mountpoint -q {prefix}", None, {}, "/")
+    assert check.exit_code != 0
+
+
+def test_mount_type_rejects_an_unknown_value():
+    with pytest.raises(ValueError, match="mount_type must be one of"):
+        MicrosandboxRuntime(config={"sandbox": "box", "mount_type": "unknown"})
+
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(

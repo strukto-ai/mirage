@@ -4,7 +4,8 @@
       "id": "mount_type_ssh_serves_the_sessions_view",
       "runtimes": [
         "docker",
-        "e2b"
+        "e2b",
+        "microsandbox"
       ],
       "requires": [
         "env:MIRAGE_INTEG_BOX_MOUNTS"
@@ -106,7 +107,8 @@
       "id": "mount_type_both_leaves_the_boxs_own_mounts_and_refuses_rules_on_them",
       "runtimes": [
         "docker",
-        "e2b"
+        "e2b",
+        "microsandbox"
       ],
       "requires": [
         "env:MIRAGE_INTEG_BOX_MOUNTS"

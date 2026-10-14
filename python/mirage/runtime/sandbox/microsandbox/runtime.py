@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
+from collections.abc import Sequence
+from typing import Any
 
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.base import RemoteSandbox
@@ -23,7 +26,7 @@ from mirage.runtime.sandbox.microsandbox.constants import (
     RUNNING_STATE,
     not_running_hint,
 )
-from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.runtime.types import ProcessExecution, RunResult, SandboxPipe
 
 
 class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin):
@@ -41,6 +44,14 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin):
     name = "microsandbox"
     config_cls = MicrosandboxConfig
     config: MicrosandboxConfig
+
+    def __init__(
+        self,
+        captures: Sequence[str] | None = None,
+        config: MicrosandboxConfig | dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(captures, config)
+        self._serve_mounts(self.config.mount_type)
 
     async def _microsandbox(
         self, args: list[str], stdin: bytes | None = None
@@ -78,6 +89,9 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin):
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
         await self._ensure_connected()
+        refusal = await self._admit_mounts()
+        if refusal is not None:
+            return refusal
         return await self._exec_argv(
             request.argv,
             request.stdin,
@@ -100,3 +114,36 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin):
         args += ["--", *argv]
         stdout, stderr, code = await self._microsandbox(args, stdin=stdin)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
+
+    async def open_pipe(self, command: str) -> SandboxPipe:
+        """Hold a byte-preserving msb stream open for guest sshfs."""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "msb",
+                "exec",
+                self.config.sandbox,
+                "--quiet",
+                "--no-tty",
+                "--stream",
+                "--",
+                "sh",
+                "-c",
+                command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            raise RuntimeError(MICROSANDBOX_CLI_HINT) from None
+        assert process.stdin is not None and process.stdout is not None
+
+        async def stop() -> None:
+            if process.returncode is None:
+                process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+
+        return SandboxPipe(process.stdout, process.stdin, stop)
