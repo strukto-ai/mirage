@@ -629,8 +629,18 @@ class SessionCommandsQuery(Protocol):
         ...
 
 
-# A method a profile's policy names programs for: the pre_ four.
-ScriptMethod = Literal["pre_execute", "pre_command", "pre_vfs", "pre_session"]
+# A method a profile's policy names programs for: the pre_ four and the
+# post_ four.
+ScriptMethod = Literal[
+    "pre_execute",
+    "pre_command",
+    "pre_vfs",
+    "pre_session",
+    "post_execute",
+    "post_command",
+    "post_vfs",
+    "post_session",
+]
 
 # A session's policy programs, by method.
 ProfileScripts = Mapping[str, tuple[ProfileScript, ...]]

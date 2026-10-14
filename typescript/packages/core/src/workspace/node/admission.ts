@@ -789,7 +789,7 @@ export async function admitLine(
     if (words.length === 0) continue
     // The runtime runs the commands itself: no command's result comes back
     // for a postCommand policy to judge.
-    if (registry.policies.wants('postCommand')) {
+    if (await registry.policies.wantsFor('postCommand', session.sessionId)) {
       return refuse(
         words[0]?.raw ?? '',
         'a post_command policy cannot judge a line a runtime runs whole',

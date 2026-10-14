@@ -944,7 +944,9 @@ async def admit_line(
         words = [read_word(part, home) for part in parts]
         if not words:
             continue
-        if registry.policies.wants("post_command"):
+        if await registry.policies.wants_for(
+            "post_command", session.session_id
+        ):
             # The runtime runs the commands itself: no command's result
             # comes back for a post_command policy to judge.
             return _refuse(

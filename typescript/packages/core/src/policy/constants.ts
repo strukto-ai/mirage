@@ -84,14 +84,18 @@ export const METADATA_OPS: ReadonlySet<string> = new Set(['stat', 'exists'])
 
 /**
  * The methods a profile's policy names programs for, the pre_ four
- * answered before the action runs: the Policy interface's spelling to
- * the document's.
+ * answered before the action runs and the post_ four after it: the Policy
+ * interface's spelling to the document's.
  */
 export const METHODS = {
   preExecute: 'pre_execute',
   preCommand: 'pre_command',
   preVfs: 'pre_vfs',
   preSession: 'pre_session',
+  postExecute: 'post_execute',
+  postCommand: 'post_command',
+  postVfs: 'post_vfs',
+  postSession: 'post_session',
 } as const satisfies Record<ScriptMethod, string>
 
 /** The runtimes a policy program runs on: monty, and Python on wasm. */

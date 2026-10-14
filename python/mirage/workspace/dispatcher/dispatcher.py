@@ -1363,7 +1363,7 @@ class Dispatcher:
         try:
             if call.name == "setattr":
                 result = await self._apply_setattr(mount, call.path, kwargs)
-            elif self._streams(call, mount):
+            elif await self._streams(call, mount):
                 return await self._open_stream(call, mount, filler)
             elif filler is not None:
                 offset, size = call.window
@@ -1445,7 +1445,7 @@ class Dispatcher:
         visible = _visible_answer("read_tree", call.vis, call.path, found)
         return sum(st.type is FileType.FILE for st in visible.values())
 
-    def _streams(self, call: _Call, mount: MountEntry) -> bool:
+    async def _streams(self, call: _Call, mount: MountEntry) -> bool:
         """Whether a read is answered as it is pulled.
 
         A whole read of stored bytes streams through the VFS's own
@@ -1458,14 +1458,16 @@ class Dispatcher:
             call (_Call): the admitted read.
             mount (MountEntry): the mount serving its path.
         """
-        return (
+        if not (
             call.stream
             and call.window == (0, None)
             and mount.vfs.supports("read_stream")
             and not call.renders_read(mount)
-            and (
-                line_running()
-                or not self._namespace.registry.policies.wants("post_vfs")
+        ):
+            return False
+        return line_running() or not (
+            await self._namespace.registry.policies.wants_for(
+                "post_vfs", _session_id()
             )
         )
 

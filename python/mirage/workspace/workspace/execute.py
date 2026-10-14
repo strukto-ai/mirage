@@ -302,7 +302,9 @@ async def recurse(
                             inner if inner is not None else HandOff(),
                         ),
                     )
-                    if ws.registry.policies.wants("post_execute")
+                    if await ws.registry.policies.wants_for(
+                        "post_execute", session.session_id
+                    )
                     else None,
                 )
                 record_status(session, io.exit_code, transparent=True)
@@ -518,7 +520,7 @@ async def execute_line(
     execution_scope = execution_scope or ExecutionScope()
     await execution_scope.start()
     # Whole-invocation policies must approve the result before bytes escape.
-    if ws.registry.policies.wants("post_execute"):
+    if await ws.registry.policies.wants_for("post_execute", session_id):
         sink = None
     run_line = partial(
         run_prepared_line,
@@ -877,7 +879,9 @@ async def run_prepared_line(
                     ws.router.context(
                         command, effective_session, await judged()
                     )
-                    if ws.registry.policies.wants("post_execute")
+                    if await ws.registry.policies.wants_for(
+                        "post_execute", effective_session.session_id
+                    )
                     else None,
                 )
                 if io.refusal is None:
@@ -1007,7 +1011,9 @@ async def run_prepared_line(
                 route=ws.router.context(
                     command, effective_session, await judged()
                 )
-                if ws.registry.policies.wants("post_execute")
+                if await ws.registry.policies.wants_for(
+                    "post_execute", effective_session.session_id
+                )
                 else None,
             )
             # A record a nested line earned is the line's to report when

@@ -22,11 +22,14 @@ import { ScriptPolicy, scriptAction, scriptContext } from './script.ts'
 import {
   CommandWord,
   type CommandContext,
+  type CommandResultContext,
+  type ExecuteResultContext,
   type ProfileScript,
   type ProfileScripts,
   type RouteContext,
   type SessionContext,
   type VfsContext,
+  type VfsResultContext,
 } from './types.ts'
 
 // Mirrors python/tests/policy/test_script.py.
@@ -381,6 +384,47 @@ describe('ScriptPolicy', () => {
     const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('pyodide')] })))
     await policy.preCommand(ctx('cat', { session: sessionView('/data') }))
     expect(engine.requests[0]?.flags).toEqual({ P: true })
+  })
+
+  it('answers after the action too', async () => {
+    const engine = new FakeProgram(answer({ kind: 'deny', reason: 'after' }))
+    const policy = policyWith('postCommand', engine)
+    const done: CommandResultContext = { ...ctx(), exitCode: 3, stderr: '', records: [] }
+    expect(await policy.postCommand(done)).toEqual([{ kind: 'deny', reason: 'after' }])
+    const payload = JSON.parse(engine.requests[0]?.env[CTX_ENV] ?? '{}') as Record<string, unknown>
+    expect(payload.exit_code).toBe(3)
+  })
+
+  it('cannot route after the action', async () => {
+    const policy = policyWith(
+      'postExecute',
+      new FakeProgram(answer({ kind: 'route', runtime: 'x' })),
+    )
+    const done = { ...line(), exitCode: 0, output: bytes('out') } as ExecuteResultContext
+    expect(await policy.postExecute(done)).toEqual([
+      { kind: 'deny', reason: "profile 'release' policy cannot answer route at post_execute" },
+    ])
+  })
+
+  it("lets the policy's own read through after it, too", async () => {
+    const engine = new FakeProgram(answer({ kind: 'deny', reason: 'frozen' }))
+    built.factory = () => engine
+    const stamped: symbol[] = []
+    const policy = track(
+      new ScriptPolicy(scripts({ preVfs: [entry()], postVfs: [entry()] }), {
+        bridge: (issuer) => {
+          stamped.push(issuer)
+          return () => Promise.resolve(null)
+        },
+        resolver: new PrefixResolver(() => ['/repo/']),
+      }),
+    )
+    await policy.preVfs(opsCtx('read', '/repo/a', false))
+    const [token] = stamped
+    if (token === undefined) throw new Error('the bridge was never built')
+    const done: VfsResultContext = { ...opsCtx('read', '/repo/a', false), result: bytes('x') }
+    expect(await policy.postVfs({ ...done, issuer: token })).toBeNull()
+    expect(await policy.postVfs(done)).toEqual([{ kind: 'deny', reason: 'frozen' }])
   })
 
   it('returns each answer in order, up to the first deny', async () => {

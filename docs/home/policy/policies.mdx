@@ -167,6 +167,25 @@ For `tar -cf a.tar -C /mnt /data`:
 A method only reads. A write it makes through Mirage is refused (`EROFS`
 for a file, `EACCES` for a variable), and its reads are not judged again.
 
+### What the agent controls
+
+Most of a `ctx` comes from what the agent did, so a policy reads it as a
+claim to check, not as a credential:
+
+| The agent sets | Through |
+| --- | --- |
+| `line`, `command`, `words`, `argv`, `paths`, `walks` | the line it types, after expansion |
+| `cwd`, `session.cwd()` | `cd` |
+| `env`, `session.get()`, `session.snapshot()` | `export` and assignments, except a name `session.is_readonly()` reports |
+| `key`, `value` at `pre_session` | the write it asked for |
+| `call`, `path`, `write` at `pre_vfs` | the file call it made |
+| `exit_code`, `stderr`, `output`, `records`, `result`, `old` | what its own command or call produced |
+
+The host sets `session_id`, `profile`, `mounts`, `prefix` and `mode`, and
+what `ns` and `vfs` show: the agent cannot change them from inside the
+session. Decide who may do what from those, and from a variable only
+when the profile marks it read-only.
+
 A policy written as a program, on monty or Python on wasm, gets the same
 `ctx` as JSON: see [Scripts](/home/policy/scripts).
 

@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import json
 
 import pytest
@@ -20,13 +21,16 @@ from mirage.policy.script import (
 from mirage.policy.types import (
     Ask,
     CommandContext,
+    CommandResultContext,
     CommandWord,
     Deny,
+    ExecuteResultContext,
     ProfileScript,
     Route,
     RouteContext,
     SessionContext,
     VfsContext,
+    VfsResultContext,
 )
 from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
 from mirage.runtime.language import LanguageRuntime
@@ -388,6 +392,55 @@ def _programs(method: str, *printed: bytes) -> ScriptPolicy:
 
 def _line() -> RouteContext:
     return RouteContext(line="python3 job.py", commands=(), session_id="s")
+
+
+def _done(ctx: CommandContext, exit_code: int = 0) -> CommandResultContext:
+    facts = {f.name: getattr(ctx, f.name) for f in dataclasses.fields(ctx)}
+    return CommandResultContext(**facts, exit_code=exit_code)
+
+
+@pytest.mark.asyncio
+async def test_a_program_answers_after_the_action_too():
+    engine = FakeProgram(_answer(kind="deny", reason="after"))
+    policy = _policy("post_command", engine)
+    assert await policy.post_command(_done(_ctx(), exit_code=3)) == (
+        Deny("after"),
+    )
+    assert json.loads(engine.requests[0].env[CTX_ENV])["exit_code"] == 3
+
+
+@pytest.mark.asyncio
+async def test_a_program_after_the_action_cannot_route():
+    policy = _policy(
+        "post_execute", FakeProgram(_answer(kind="route", runtime="x"))
+    )
+    done = ExecuteResultContext(
+        line="python3 job.py", commands=(), session_id="s", output=b"out"
+    )
+    assert await policy.post_execute(done) == (
+        Deny("profile 'release' policy cannot answer route at post_execute"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_policys_own_read_is_not_judged_after_it_either():
+    engine = FakeProgram(_answer(kind="deny", reason="frozen"))
+    policy = _policy("post_vfs", engine)
+    done = VfsResultContext(
+        call=CALLS["read"],
+        path=_path("/scratch/f"),
+        write=False,
+        prefix="/scratch",
+        session_id="s",
+        result=b"x",
+    )
+    token = _POLICY_READ.set(True)
+    try:
+        assert await policy.post_vfs(done) is None
+    finally:
+        _POLICY_READ.reset(token)
+    assert engine.requests == []
+    assert await policy.post_vfs(done) == (Deny("frozen"),)
 
 
 @pytest.mark.asyncio

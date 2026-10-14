@@ -1077,16 +1077,18 @@ export class Dispatcher {
    * line makes reaches no postVfs policy, so it streams either way. Mirrors
    * Python's Dispatcher._streams.
    */
-  private streams(call: Call, mount: MountEntry, vfs: BaseVFS): boolean {
+  private async streams(call: Call, mount: MountEntry, vfs: BaseVFS): Promise<boolean> {
     const [offset, size] = readWindow(call.kwargs)
-    return (
-      call.stream &&
-      offset === 0 &&
-      size === null &&
-      vfs.supports('readStream') &&
-      !this.rendersRead(call, mount) &&
-      (lineRunning() || !this.policies.wants('postVfs'))
-    )
+    if (
+      !call.stream ||
+      offset !== 0 ||
+      size !== null ||
+      !vfs.supports('readStream') ||
+      this.rendersRead(call, mount)
+    ) {
+      return false
+    }
+    return lineRunning() || !(await this.policies.wantsFor('postVfs', this.sessionId()))
   }
 
   /**
@@ -1271,7 +1273,7 @@ export class Dispatcher {
         : fill()
     let result
     try {
-      if (this.streams(call, mount, vfs)) {
+      if (await this.streams(call, mount, vfs)) {
         return [await recorded(() => this.openStream(call, mount, scope, filler)), dst, fullArgs]
       }
       const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>

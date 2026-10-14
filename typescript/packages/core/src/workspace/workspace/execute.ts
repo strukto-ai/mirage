@@ -289,11 +289,6 @@ async function runLine(
   // Loads nothing the shell observes, so a stalled state store loses to
   // the signal at once rather than holding the caller.
   await abortable(preflight(env), options.signal)
-  // Whole-invocation policies must approve the result before bytes escape.
-  if (env.registry.policies.wants('postExecute')) {
-    options = { ...options }
-    delete options.sink
-  }
   // Evaluator calls carry their exact session, including ephemeral forks.
   // Ambient re-entry is safe only with task-local storage: the browser
   // fallback's newest frame may belong to an unrelated shell call.
@@ -304,6 +299,11 @@ async function runLine(
     options.session ??
     (inPlace ? ambient : env.sessions.get(options.sessionId ?? env.sessions.defaultId))
   frame.session = targetSession
+  // Whole-invocation policies must approve the result before bytes escape.
+  if (await env.registry.policies.wantsFor('postExecute', targetSession.sessionId)) {
+    options = { ...options }
+    delete options.sink
+  }
   const executionScope = options.executionScope ?? new ExecutionScope()
   await executionScope.start()
   // A typed line writes to its session's terminal, and so do the jobs it
@@ -642,7 +642,7 @@ async function runPreparedLine(
                     null,
                     true,
                     null,
-                    env.registry.policies.wants('postExecute')
+                    (await env.registry.policies.wantsFor('postExecute', session.sessionId))
                       ? env.router.context(
                           cmd,
                           session,
@@ -975,7 +975,10 @@ async function runParsedLine(
         const filled = await fillManaged([rootNode], true, new Set(), false)
         if (filled !== null) return filled
       }
-      const route = env.registry.policies.wants('postExecute')
+      const route = (await env.registry.policies.wantsFor(
+        'postExecute',
+        effectiveSession.sessionId,
+      ))
         ? env.router.context(command, effectiveSession, await judged())
         : null
       const result = await abortable(
@@ -1086,7 +1089,7 @@ async function runParsedLine(
           stdin,
           false,
           options.callStack ?? null,
-          env.registry.policies.wants('postExecute')
+          (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
             ? env.router.context(command, context.session, await judged())
             : null,
         ).finally(release)

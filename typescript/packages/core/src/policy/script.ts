@@ -38,15 +38,19 @@ import {
   VALIDITY,
   type Ask,
   type CommandContext,
+  type CommandResultContext,
   type Deny,
+  type ExecuteResultContext,
   type PolicyMethod,
   type ProfileScript,
   type Route,
   type RouteContext,
   type ScriptMethod,
   type SessionContext,
+  type SessionResultContext,
   type SessionScriptsQuery,
   type VfsContext,
+  type VfsResultContext,
 } from './types.ts'
 
 const DECODER = new TextDecoder()
@@ -247,6 +251,23 @@ export class ScriptPolicy implements Policy, SessionScoped {
 
   async preSession(ctx: SessionContext): Promise<(Deny | Ask | Route)[] | null> {
     return this.judge('preSession', ctx)
+  }
+
+  async postExecute(ctx: ExecuteResultContext): Promise<(Deny | Ask | Route)[] | null> {
+    return this.judge('postExecute', ctx)
+  }
+
+  async postCommand(ctx: CommandResultContext): Promise<(Deny | Ask | Route)[] | null> {
+    return this.judge('postCommand', ctx)
+  }
+
+  async postVfs(ctx: VfsResultContext): Promise<(Deny | Ask | Route)[] | null> {
+    if (ctx.issuer === this.issuer) return null
+    return this.judge('postVfs', ctx)
+  }
+
+  async postSession(ctx: SessionResultContext): Promise<(Deny | Ask | Route)[] | null> {
+    return this.judge('postSession', ctx)
   }
 
   /** Whether this session's profile names a program at `method`. */

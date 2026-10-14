@@ -446,7 +446,15 @@ export interface SessionCommandsQuery {
 }
 
 /** A method a profile's policy names programs for, as the Policy interface spells it. */
-export type ScriptMethod = 'preExecute' | 'preCommand' | 'preVfs' | 'preSession'
+export type ScriptMethod =
+  | 'preExecute'
+  | 'preCommand'
+  | 'preVfs'
+  | 'preSession'
+  | 'postExecute'
+  | 'postCommand'
+  | 'postVfs'
+  | 'postSession'
 
 /**
  * One program of a profile's policy, as a session carries it: the

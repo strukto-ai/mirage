@@ -441,6 +441,16 @@
     {"op": "exec", "session": "named", "command": "probe", "expect": {"value": {"exit_code": 0, "stdout": "ran\n", "stderr": "", "refusal": null}}},
     {"op": "exec", "command": "probe", "expect": {"value": {"exit_code": 0, "stdout": "ran\n", "stderr": "", "refusal": null}}}
    ]
+  },
+  {
+   "id": "a_post_command_program_refuses_a_command_after_it_ran",
+   "settings": {"mode": "write", "runtimes": ["monty", "workspace"], "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"policy": {"post_command": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'echo':\n    print(json.dumps({'kind': 'deny', 'reason': 'no echo after ' + str(ctx['exit_code'])}))\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "exec", "session": "agent", "command": "echo hi", "expect": {"value": {"exit_code": 126, "stdout": "hi\n", "stderr": "echo: Permission denied\n", "refusal": "no echo after 0"}}},
+    {"op": "exec", "session": "agent", "command": "printf x", "expect": {"value": {"exit_code": 0, "stdout": "x", "stderr": "", "refusal": null}}},
+    {"op": "exec", "command": "echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "refusal": null}}}
+   ]
   }
  ]
 }

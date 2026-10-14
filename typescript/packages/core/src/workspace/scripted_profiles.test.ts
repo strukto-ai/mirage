@@ -284,19 +284,18 @@ describe('profile policies', () => {
     ).rejects.toThrow(/now a policy block/)
   })
 
-  it('names its programs per pre method', async () => {
+  it('names its programs per method', async () => {
     await expect(
       build({
         release: { policy: { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' } },
       }),
     ).rejects.toThrow(/per method/)
-    await expect(
-      build({
-        release: {
-          policy: { postVfs: [{ script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' }] },
-        },
-      }),
-    ).rejects.toThrow(/postVfs/)
+    const program = { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' }
+    await expect(build({ release: { policy: { onRead: [program] } } })).rejects.toThrow(
+      /names onRead/,
+    )
+    const ws = await build({ release: { policy: { postVfs: [program], preVfs: [program] } } })
+    await ws.close()
     await expect(
       build({
         release: {

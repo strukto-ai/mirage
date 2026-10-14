@@ -39,13 +39,17 @@ from mirage.policy.types import (
     Answer,
     Ask,
     CommandContext,
+    CommandResultContext,
     Deny,
+    ExecuteResultContext,
     ProfileScript,
     Route,
     RouteContext,
     SessionContext,
+    SessionResultContext,
     SessionScriptsQuery,
     VfsContext,
+    VfsResultContext,
 )
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
@@ -176,7 +180,9 @@ def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
 
 
 class ScriptPolicy(Policy, SessionScopedMixin):
-    """Each profile's policy programs, run at the ``pre_`` methods.
+    """Each profile's policy programs, run at every method a profile
+    names them for: the ``pre_`` four before an action, the ``post_``
+    four after it, where a program may deny or ask, never route.
 
     The scripted twin of ``PermissionsPolicy``, registered right after
     it: where that policy evaluates the document's declarative rules,
@@ -269,6 +275,28 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self, ctx: SessionContext
     ) -> tuple[Deny | Ask | Route, ...] | None:
         return await self._judge("pre_session", ctx)
+
+    async def post_execute(
+        self, ctx: ExecuteResultContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
+        return await self._judge("post_execute", ctx)
+
+    async def post_command(
+        self, ctx: CommandResultContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
+        return await self._judge("post_command", ctx)
+
+    async def post_vfs(
+        self, ctx: VfsResultContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
+        if _POLICY_READ.get():
+            return None
+        return await self._judge("post_vfs", ctx)
+
+    async def post_session(
+        self, ctx: SessionResultContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
+        return await self._judge("post_session", ctx)
 
     async def wants_for(self, method: str, session_id: str) -> bool:
         """Whether this session's profile names a program at ``method``.

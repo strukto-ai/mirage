@@ -708,8 +708,11 @@ async def _run_argv(
         # gathered as it runs and as its output drains, and its result
         # node, settled once the output has drained.
         policies = registry.policies
-        judging = admitted is not None and policies.wants("post_command")
-        watched = judging or policies.wants("post_execute")
+        sid = context.session.session_id
+        judging = admitted is not None and (
+            await policies.wants_for("post_command", sid)
+        )
+        watched = judging or await policies.wants_for("post_execute", sid)
         ptoken = set_op_policies(policies)
         token = set_admission(admitted) if admitted is not None else None
         try:

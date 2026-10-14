@@ -370,9 +370,9 @@ async def post_vfs_gate(
             entry point that cannot ask.
     """
     if (
-        not policies.wants("post_vfs")
-        or line_running()
+        line_running()
         or explaining() is DryRun.DECIDING
+        or not await policies.wants_for("post_vfs", session_id)
     ):
         return None
     ctx = VfsResultContext(
@@ -440,7 +440,7 @@ async def post_execute_gate(
     Raises:
         MirageAbortError: the run was killed while the host decided.
     """
-    if not policies.wants("post_execute"):
+    if not await policies.wants_for("post_execute", ctx.session_id):
         return None, None
     answer, bound = await policies.post_execute(ctx)
     if not isinstance(answer, Ask):
@@ -475,7 +475,7 @@ async def post_command_gate(
     Raises:
         MirageAbortError: the run was killed while the host decided.
     """
-    if not policies.wants("post_command"):
+    if not await policies.wants_for("post_command", ctx.session_id):
         return None
     answer = await policies.post_command(ctx)
     if not isinstance(answer, Ask):
@@ -500,7 +500,9 @@ async def post_session_gate(
         old (str | None): the value it replaced, rendered as ``value``
             is; None when the name was unset.
     """
-    if policies is None or not policies.wants("post_session"):
+    if policies is None or not await policies.wants_for(
+        "post_session", ctx.session_id
+    ):
         return
     facts = {f.name: getattr(ctx, f.name) for f in fields(ctx)}
     landed = SessionResultContext(**facts, old=old)

@@ -320,7 +320,11 @@ export async function postVfsGate(
     decisions?: Decisions | null
   } = {},
 ): Promise<void> {
-  if (!policies.wants('postVfs') || lineRunning() || explaining() === DryRun.DECIDING) {
+  if (
+    lineRunning() ||
+    explaining() === DryRun.DECIDING ||
+    !(await policies.wantsFor('postVfs', sessionId))
+  ) {
     return
   }
   const { decisions = null, ...context } = access
@@ -340,7 +344,7 @@ export async function postExecuteGate(
   claimant: Claimant | null = null,
   signal?: AbortSignal,
 ): Promise<[Deny | Pending | null, Limit | null]> {
-  if (!policies.wants('postExecute')) return [null, null]
+  if (!(await policies.wantsFor('postExecute', ctx.sessionId))) return [null, null]
   const [answer, bound] = await policies.postExecute(ctx)
   if (answer?.kind !== 'ask') return [answer, bound]
   const [asked, keyed] = opQuestion(ctx, answer)
@@ -362,7 +366,7 @@ export async function postCommandGate(
   claimant: Claimant | null = null,
   signal?: AbortSignal,
 ): Promise<Deny | Pending | null> {
-  if (!policies.wants('postCommand')) return null
+  if (!(await policies.wantsFor('postCommand', ctx.sessionId ?? ''))) return null
   const answer = await policies.postCommand(ctx)
   if (answer?.kind !== 'ask') return answer
   const said = await policies.decisions.resolve(ctx, answer, signal, claimant)
@@ -381,7 +385,8 @@ export async function postSessionGate(
   ctx: SessionContext,
   old: string | null,
 ): Promise<void> {
-  if (!policies?.wants('postSession')) return
+  if (policies === null) return
+  if (!(await policies.wantsFor('postSession', ctx.sessionId))) return
   const landed: SessionResultContext = { ...ctx, old }
   await sessionRefused(policies, landed, await policies.postSession(landed))
 }

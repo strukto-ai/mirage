@@ -708,8 +708,9 @@ async function runArgv(
     // once the output has drained.
     const gated = admitted
     const policies = registry.policies
-    const judging = gated !== null && policies.wants('postCommand')
-    const watched = judging || policies.wants('postExecute')
+    const sessionId = context.session.sessionId
+    const judging = gated !== null && (await policies.wantsFor('postCommand', sessionId))
+    const watched = judging || (await policies.wantsFor('postExecute', sessionId))
     let mine: OpRecord[] = []
     const result = await runWithOpPolicies(policies, () =>
       commandRecords((records) => {

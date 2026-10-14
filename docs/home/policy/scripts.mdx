@@ -11,7 +11,7 @@ reads, as JSON, and prints its answer. Two places take a program:
 
 | Where | Asked | Answers |
 | --- | --- | --- |
-| a profile's `policy:` | at `pre_execute`, `pre_command`, `pre_vfs` and `pre_session`, for the sessions under that profile | deny or ask; a route at `pre_execute` |
+| a profile's `policy:` | at `pre_execute`, `pre_command`, `pre_vfs` and `pre_session` before the action, and at their `post_` four after it, for the sessions under that profile | deny or ask; a route at `pre_execute` |
 | [`route_policy:`](/home/policy/route-policy) | at `pre_execute`, for every session | a route, or a deny or ask |
 
 ## A profile's policy
@@ -147,8 +147,19 @@ it:
 | `pre_vfs` | `call` (`name`, `effect`, `target`, `creates`, `subtree`), `path`, `write` |
 | `pre_session` | `verb`, `key`, `value` |
 
+A `post_` method gets its `pre_` method's `ctx` plus what came back:
+
+| Method | adds |
+| --- | --- |
+| `post_execute` | `exit_code`, `output`, `results` |
+| `post_command` | `exit_code`, `stderr`, `records` |
+| `post_vfs` | `result` |
+| `post_session` | `old` |
+
 Every `ctx` also has `session_id`, `cwd`, `env`, `profile` and `mounts`,
-the mount roots the session can see.
+the mount roots the session can see. The agent sets most of these fields;
+[what the agent controls](/home/policy/policies#what-the-agent-controls)
+says which ones a program can trust.
 
 ## Files and the session
 
@@ -157,7 +168,7 @@ A program reads the workspace as the session it judges for:
 - `open()`, `os.listdir()` and `os.stat()` go through the workspace. A
   hidden path does not exist, path rules apply, and a write is refused
   (`EROFS`).
-- Its own reads are not judged again by its profile's `pre_vfs`.
+- Its own reads are not judged again by its profile's `pre_vfs` or `post_vfs`.
 - Monty has no `os.path`, `os.walk` or `Path.glob`; use `Path.exists()`,
   `Path.is_dir()` and `Path.iterdir()`, which run on every runtime.
 

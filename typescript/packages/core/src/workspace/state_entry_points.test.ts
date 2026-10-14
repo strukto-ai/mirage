@@ -32,7 +32,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { dispatched, ops } from '../test-utils.ts'
 import { Runtime } from '../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
-import type { RunResult } from '../runtime/types.ts'
+import { ScriptSource, type RunResult } from '../runtime/types.ts'
 import { MountMode, PathSpec, VFSName } from '../types.ts'
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
@@ -1788,6 +1788,45 @@ describe('command permissions end to end', () => {
     expect(box.lines).toEqual(['cat /repo/a | wc -l', 'git status'])
   })
 
+  it("a postCommand program holds only its own session's lines", async () => {
+    // A profile's postCommand program speaks for its own sessions alone,
+    // so a runtime still takes another session's line whole.
+    const parser = await getTestParser()
+    const box = new Box()
+    const ws = new Workspace(
+      { '/repo': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: { after: afterEcho() } as never,
+        runtimes: [box, 'workspace'],
+      },
+    )
+    open.push(ws)
+    expect(await line(ws, 'cat /repo/a')).toEqual([0, 'box:cat /repo/a', ''])
+    ws.createSession('w', { profile: 'after' })
+    expect(await line(ws, 'cat /repo/a', 'w')).toEqual([
+      126,
+      '',
+      'cat: Permission denied\npolicy denied: a post_command policy cannot judge a line a runtime runs whole\n',
+    ])
+    expect(box.lines).toEqual(['cat /repo/a'])
+  })
+
+  it('a postCommand program refuses a command after it ran', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/repo': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: parser, profiles: { after: afterEcho() } as never },
+    )
+    open.push(ws)
+    ws.createSession('w', { profile: 'after' })
+    const io = await ws.shell('echo hi; echo $?', { sessionId: 'w' })
+    expect(stdoutStr(io)).toBe('hi\n126\n')
+    expect(io.refusal?.reason).toBe('no echo after 0')
+    expect(await line(ws, 'echo hi')).toEqual([0, 'hi\n', ''])
+  })
+
   it('a whole-line runtime reads only literal words', async () => {
     // The runtime expands the line, so the gate reads it as typed and
     // refuses what only the runtime could read where a rule in force
@@ -2007,6 +2046,22 @@ describe('command permissions end to end', () => {
 })
 
 /** A runtime that takes every line raw, recording what reached it. */
+const AFTER_ECHO = `import json
+import os
+
+ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
+if ctx['command'] == 'echo':
+    reason = 'no echo after ' + str(ctx['exit_code'])
+    print(json.dumps({'kind': 'deny', 'reason': reason}))
+`
+
+/** A profile whose postCommand program refuses every echo once it ran. */
+function afterEcho(): Record<string, unknown> {
+  return {
+    policy: { postCommand: [{ script: new ScriptSource(AFTER_ECHO, 'python'), runtime: 'monty' }] },
+  }
+}
+
 class Box extends Runtime implements LineExecutor {
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'box'

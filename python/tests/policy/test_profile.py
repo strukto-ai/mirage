@@ -1378,6 +1378,64 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
         await ws.close()
 
 
+AFTER_ECHO = """import json
+import os
+
+ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
+if ctx['command'] == 'echo':
+    reason = 'no echo after ' + str(ctx['exit_code'])
+    print(json.dumps({'kind': 'deny', 'reason': reason}))
+"""
+
+
+def _after_echo() -> dict:
+    program = {"script": ScriptSource(AFTER_ECHO), "runtime": "monty"}
+    return {"policy": {"post_command": [program]}}
+
+
+@pytest.mark.asyncio
+async def test_a_post_command_program_holds_only_its_own_sessions_lines():
+    # A profile's post_command program speaks for its own sessions alone,
+    # so a runtime still takes another session's line whole.
+    box = _Box()
+    ws = Workspace(
+        {"/repo/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"after": _after_echo()},
+        runtimes=[box, "workspace"],
+    )
+    try:
+        assert await _line(ws, "cat /repo/a") == (0, "box:cat /repo/a", "")
+        ws.create_session("w", profile="after")
+        assert await _line(ws, "cat /repo/a", "w") == (
+            126,
+            "",
+            "cat: Permission denied\npolicy denied: a post_command policy "
+            "cannot judge a line a runtime runs whole\n",
+        )
+        assert box.lines == ["cat /repo/a"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_post_command_program_refuses_a_command_after_it_ran():
+    ws = Workspace(
+        {"/repo/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"after": _after_echo()},
+    )
+    try:
+        ws.create_session("w", profile="after")
+        io = await ws.shell("echo hi; echo $?", session_id="w")
+        assert await io.stdout_str() == "hi\n126\n"
+        assert io.refusal is not None
+        assert io.refusal.reason == "no echo after 0"
+        assert await _line(ws, "echo hi") == (0, "hi\n", "")
+    finally:
+        await ws.close()
+
+
 LITERAL_DOC = {
     "commands": {
         "deny": [
@@ -2889,21 +2947,19 @@ def test_a_policy_is_a_block_not_a_path():
         SessionProfile.model_validate({"policy": "roles/x.py"})
 
 
-def test_a_policy_names_its_programs_per_pre_method():
+def test_a_policy_names_its_programs_per_method():
     with pytest.raises(ValidationError, match="per method"):
         SessionProfile.model_validate(
             {"policy": {"script": ScriptSource("pass"), "runtime": "monty"}}
         )
-    with pytest.raises(ValidationError, match="post_vfs"):
-        SessionProfile.model_validate(
-            {
-                "policy": {
-                    "post_vfs": [
-                        {"script": ScriptSource("pass"), "runtime": "monty"}
-                    ]
-                }
-            }
-        )
+    program = {"script": ScriptSource("pass"), "runtime": "monty"}
+    with pytest.raises(ValidationError, match="on_read"):
+        SessionProfile.model_validate({"policy": {"on_read": [program]}})
+    profile = SessionProfile.model_validate(
+        {"policy": {"post_vfs": [program], "pre_vfs": [program]}}
+    )
+    assert profile.policy is not None
+    assert sorted(profile.policy) == ["post_vfs", "pre_vfs"]
 
 
 def test_the_old_script_and_runtime_keys_are_told_where_they_went():
