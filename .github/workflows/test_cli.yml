@@ -277,7 +277,6 @@ jobs:
               vfs: ram
               mode: WRITE
           default_session_id: mysess
-          default_agent_id: myagent
           cache:
             type: ram
             limit: 256MB
@@ -587,7 +586,6 @@ jobs:
               vfs: ram
               mode: WRITE
           default_session_id: mysess
-          default_agent_id: myagent
           cache:
             type: ram
             limit: 256MB
