@@ -228,10 +228,16 @@ describe('cpGeneric guards', () => {
 interface PrimitiveFails {
   readFails?: Map<string, Error>
   writeFails?: Map<string, Error>
+  statFails?: Map<string, Error>
 }
 
 function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails: PrimitiveFails) {
-  const { stat } = makeBackend(files, dirs)
+  const backend = makeBackend(files, dirs)
+  const statErr = fails.statFails ?? new Map<string, Error>()
+  const stat: StatFn = (p, index) => {
+    const err = statErr.get(key(p))
+    return err === undefined ? backend.stat(p, index) : Promise.reject(err)
+  }
   const readErr = fails.readFails ?? new Map<string, Error>()
   const writeErr = fails.writeFails ?? new Map<string, Error>()
   const readBytes = (p: PathSpec): Promise<Uint8Array> => {
@@ -275,6 +281,27 @@ async function runPrimitive(
 }
 
 describe('cpGeneric primitive transfer errors', () => {
+  it('a refused destination probe skips only its own tree', async () => {
+    // A merge stats each destination it may find taken; one the backend
+    // refuses is that directory's error, and the next source still copies.
+    // Mirrors test_primitive_refused_destination_probe_skips_only_its_tree.
+    const files = new Map([
+      ['/src/t/sub/x', new Uint8Array([1])],
+      ['/src/u/y', new Uint8Array([2])],
+    ])
+    const [, io] = await runPrimitive(
+      files,
+      new Set(['/src', '/src/t', '/src/t/sub', '/src/u', '/d', '/d/t']),
+      ['/src/t', '/src/u', '/d'],
+      { statFails: new Map([['/d/t/sub', eacces('/d/t/sub')]]) },
+      cpFlags({ recursive: true }),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot create directory '/d/t/sub': Permission denied\n")
+    expect(files.has('/d/t/sub/x')).toBe(false)
+    expect(files.get('/d/u/y')).toEqual(new Uint8Array([2]))
+  })
+
   it('read failure reports cannot open and continues remaining sources', async () => {
     const files = new Map([
       ['/src/a.txt', new Uint8Array([1])],

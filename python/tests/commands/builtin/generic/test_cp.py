@@ -149,8 +149,16 @@ def _make_primitive(
     read_fails: dict | None = None,
     write_fails: dict | None = None,
     readdir_fails: dict | None = None,
+    stat_fails: dict | None = None,
 ):
-    stat, _, _ = _make_backend(files, dirs)
+    backend_stat, _, _ = _make_backend(files, dirs)
+    stat_err = stat_fails or {}
+
+    async def stat(p) -> FileStat:
+        if _key(p) in stat_err:
+            raise stat_err[_key(p)]
+        return await backend_stat(p)
+
     read_err = read_fails or {}
     write_err = write_fails or {}
     readdir_err = readdir_fails or {}
@@ -247,6 +255,27 @@ async def test_primitive_recursive_read_failure_copies_rest():
     )
     assert files["/d/t/a.txt"] == b"A"
     assert "/d/t/nr.txt" not in files
+
+
+@pytest.mark.asyncio
+async def test_primitive_refused_destination_probe_skips_only_its_tree():
+    # A merge stats each destination it may find taken; one the backend
+    # refuses is that directory's error, and the next source still copies.
+    files = {"/src/t/sub/x": b"X", "/src/u/y": b"Y"}
+    dirs = {"/src", "/src/t", "/src/t/sub", "/src/u", "/d", "/d/t"}
+    _, io = await _run_primitive(
+        files,
+        dirs,
+        ["/src/t", "/src/u", "/d"],
+        recursive=True,
+        stat_fails={"/d/t/sub": PermissionError("/d/t/sub")},
+    )
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"cp: cannot create directory '/d/t/sub': Permission denied\n"
+    )
+    assert "/d/t/sub/x" not in files
+    assert files["/d/u/y"] == b"Y"
 
 
 _OLD = "2020-01-01T00:00:00+00:00"

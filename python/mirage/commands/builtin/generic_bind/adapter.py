@@ -191,11 +191,7 @@ class GenericCommand:
     write: bool = False
     aggregate: AggregateFn | None = None
     read: bool = False
-    # The command hands on what it reads (cat, head -c), so its input
-    # keeps the producer's chunks instead of the pieces a scan reads: it
-    # then writes a pipe in the writes the producer made, and a write the
-    # reader's close cuts short is its SIGPIPE. A scan inside such a
-    # command splits its own input.
+    # Hands on what it reads (cat, head), so its input is not split.
     pass_through: bool = False
 
 

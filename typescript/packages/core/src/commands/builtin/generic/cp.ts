@@ -370,6 +370,7 @@ export async function copyTreeLinks(
   lines: string[] | undefined,
   policy: TransferPolicy,
   seen: readonly string[] = [],
+  blocked: readonly string[] = [],
 ): Promise<void> {
   const base = rstripSlash(src.virtual) || '/'
   const dstBase = rstripSlash(target.virtual)
@@ -378,6 +379,8 @@ export async function copyTreeLinks(
   const below = [...copies.links.subtree(base)].sort((a, b) => compareCodePoints(a[0], b[0]))
   for (const [virtual, row] of below) {
     if (!pathVisible(copies.visibility, virtual)) continue
+    // A source directory whose tree the copy left out keeps its links out too.
+    if (blocked.some((root) => within(virtual, root))) continue
     const rel = virtual.slice(rstripSlash(base).length + 1)
     const landing = `${dstBase}/${rel}`
     const shown = `${shownSrc}/${rel}`
@@ -439,6 +442,7 @@ export async function copyTreeLinks(
       errors,
       copies.links,
     )
+    const roots: string[] = []
     await copyEntries(
       'cp',
       copies.relay,
@@ -452,9 +456,20 @@ export async function copyTreeLinks(
         policy,
         ...(lines !== undefined ? { lines } : {}),
         copies,
+        blocked: roots,
       },
     )
-    await copyTreeLinks(copies, deref, followed, placed, errors, lines, policy, [...seen, base])
+    await copyTreeLinks(
+      copies,
+      deref,
+      followed,
+      placed,
+      errors,
+      lines,
+      policy,
+      [...seen, base],
+      roots,
+    )
   }
 }
 
@@ -612,6 +627,23 @@ export function overwriteTypeError(
     return `${cmdName}: cannot overwrite directory '${target.rawPath}' with non-directory '${src.rawPath}'`
   }
   return null
+}
+
+// Whether a directory stands where a file is about to be copied. A probe the
+// backend refuses answers false, so the create that follows reports the
+// refusal in its own words, as it did before the probe. Mirrors Python's
+// _holds_directory.
+async function holdsDirectory(
+  stat: StatFn,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<boolean> {
+  try {
+    return await isDirectory(stat, path, index)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    return false
+  }
 }
 
 // GNU's line for a file a directory stands in the way of, met once the
@@ -949,25 +981,23 @@ async function mirrorDirs(
     const dstMount = dstBase + entryMount.slice(srcBase.length)
     const entryDst = spelledFrom(mountedPath(target, dstMount), target)
     const entry = spelledFrom(mountedPath(src, entryMount), src)
-    const { exists, isDir } = await entryKind(stat, entryDst, index)
-    if (isDir) continue
-    if (exists) {
+    try {
+      const { exists, isDir } = await entryKind(stat, entryDst, index)
+      if (isDir) continue
+      if (!exists) {
+        await strategy.mkdir(entryDst)
+        made.add(dstMount)
+        if (lines !== undefined) lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+        continue
+      }
       errors.push(
         `cp: cannot overwrite non-directory '${entryDst.rawPath}' with directory '${entry.rawPath}'`,
       )
-      blocked.push(entryMount)
-      continue
-    }
-    try {
-      await strategy.mkdir(entryDst)
     } catch (err) {
       if (!isFsError(err)) throw err
       errors.push(`cp: cannot create directory '${entryDst.rawPath}': ${String(fsStrerror(err))}`)
-      blocked.push(entryMount)
-      continue
     }
-    made.add(dstMount)
-    if (lines !== undefined) lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
+    blocked.push(entryMount)
   }
   return { blocked, made }
 }
@@ -1054,26 +1084,27 @@ export async function copyEntries(
     lines?: string[] | undefined
     copies?: TransferLinks | undefined
     rootBackup?: PathSpec | null
+    blocked?: string[]
   } = {},
 ): Promise<boolean> {
   const srcBase = rstripSlash(src.virtual)
   const dstBase = rstripSlash(target.virtual)
   let copiedAll = true
-  const blocked: string[] = []
+  const blocked = opts.blocked ?? []
   const made = new Set<string>()
   for (const { path: entry, kind } of entries) {
     if (blocked.some((root) => within(entry, root))) continue
     const entrySpec = descendantPath(src, entry)
     const entryDstSpec = descendantPath(target, dstBase + entry.slice(srcBase.length))
     if (kind === FileType.DIRECTORY) {
-      const { exists, isDir } = await entryKind(stat, entryDstSpec, index)
-      if (isDir) continue
-      if (exists) {
-        errors.push(
-          `${cmdName}: cannot overwrite non-directory '${entryDstSpec.rawPath}' with directory '${entrySpec.rawPath}'`,
-        )
-      } else {
-        try {
+      try {
+        const { exists, isDir } = await entryKind(stat, entryDstSpec, index)
+        if (isDir) continue
+        if (exists) {
+          errors.push(
+            `${cmdName}: cannot overwrite non-directory '${entryDstSpec.rawPath}' with directory '${entrySpec.rawPath}'`,
+          )
+        } else {
           await strategy.mkdir(entryDstSpec)
           made.add(entryDstSpec.virtual)
           opts.lines?.push(
@@ -1082,12 +1113,12 @@ export async function copyEntries(
               : `'${entrySpec.rawPath}' -> '${entryDstSpec.rawPath}'`,
           )
           continue
-        } catch (err) {
-          if (!isFsError(err)) throw err
-          errors.push(
-            `${cmdName}: cannot create directory '${entryDstSpec.rawPath}': ${String(fsStrerror(err))}`,
-          )
         }
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(
+          `${cmdName}: cannot create directory '${entryDstSpec.rawPath}': ${String(fsStrerror(err))}`,
+        )
       }
       copiedAll = false
       blocked.push(entry)
@@ -1123,7 +1154,7 @@ export async function copyEntries(
     if (
       entry !== src.virtual &&
       !made.has(parent(entryDstSpec.virtual)) &&
-      (await isDirectory(stat, entryDstSpec, index))
+      (await holdsDirectory(stat, entryDstSpec, index))
     ) {
       errors.push(ontoDirectory(cmdName, entrySpec, entryDstSpec, opts.policy?.backup ?? null))
       copiedAll = false
@@ -1388,10 +1419,12 @@ export async function cpGeneric(
         const entries = intoItself
           ? walked.filter((entry) => !within(entry.path, target.virtual))
           : walked
+        const leftOut: string[] = []
         await copyEntries('cp', strategy, stat, src, target, entries, errors, index, {
           policy,
           lines: flags.verbose ? lines : undefined,
           copies,
+          blocked: leftOut,
         })
         if (copies !== undefined) {
           await copyTreeLinks(
@@ -1402,6 +1435,8 @@ export async function cpGeneric(
             errors,
             flags.verbose ? lines : undefined,
             policy,
+            [],
+            leftOut,
           )
         }
         continue
@@ -1462,7 +1497,7 @@ export async function cpGeneric(
         if (
           mirrored.made !== null &&
           !mirrored.made.has(parent(dstMount)) &&
-          (await isDirectory(stat, entryDst, index))
+          (await holdsDirectory(stat, entryDst, index))
         ) {
           errors.push(ontoDirectory('cp', entry, entryDst, flags.backup))
           continue
@@ -1498,6 +1533,8 @@ export async function cpGeneric(
           errors,
           flags.verbose ? lines : undefined,
           policy,
+          [],
+          mirrored.blocked.map((root) => mountedPath(src, root).virtual),
         )
       }
       continue

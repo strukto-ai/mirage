@@ -276,7 +276,11 @@ async def _run_with_namespace_globs(
         # A RAM or cache read arrives as one whole chunk, over which a
         # scan that splits its buffer per line is quadratic and cannot be
         # cancelled until it ends; each operand read and stdin is cut into
-        # pieces with a yield between them, as TypeScript's guardInput.
+        # pieces with a yield between them, as TypeScript's guardInput. A
+        # pass-through builder (cat, head) keeps the producer's chunks: it
+        # writes a pipe in the writes the producer made, so a write the
+        # reader's close cuts short is its SIGPIPE, and a scan inside it
+        # splits its own input.
         read = bound.read_stream
         bound = replace(
             bound,

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Callable
@@ -457,6 +457,7 @@ async def copy_tree_links(
     lines: list[str] | None,
     policy: TransferPolicy,
     seen: tuple[str, ...] = (),
+    blocked: Sequence[str] = (),
 ) -> None:
     """Recreate the links below a copied directory, which its copy could
     not see.
@@ -479,6 +480,8 @@ async def copy_tree_links(
         policy (TransferPolicy): Per-entry overwrite and backup policy.
         seen (tuple[str, ...]): the directories being copied above this
             one, which a followed link must not lead back into.
+        blocked (Sequence[str]): source directories whose trees the copy
+            left out, so their links are left out too.
     """
     base = src.virtual.rstrip("/") or "/"
     dst_base = target.virtual.rstrip("/")
@@ -487,6 +490,8 @@ async def copy_tree_links(
     below = sorted(copies.links.subtree(base), key=lambda row: row[0])
     for virtual, row in below:
         if not path_visible(copies.visibility, virtual):
+            continue
+        if any(within(virtual, root) for root in blocked):
             continue
         rel = virtual[len(base.rstrip("/")) + 1 :]
         landing = f"{dst_base}/{rel}"
@@ -553,6 +558,7 @@ async def copy_tree_links(
             errors,
             copies.links,
         )
+        roots: list[str] = []
         await copy_entries(
             "cp",
             copies.relay,
@@ -564,6 +570,7 @@ async def copy_tree_links(
             policy=policy,
             lines=lines,
             copies=copies,
+            blocked=roots,
         )
         await copy_tree_links(
             copies,
@@ -574,6 +581,7 @@ async def copy_tree_links(
             lines,
             policy,
             (*seen, base),
+            roots,
         )
 
 
@@ -806,6 +814,22 @@ def overwrite_type_error(
             f"'{target.raw_path}' with non-directory '{src.raw_path}'"
         )
     return None
+
+
+async def _holds_directory(stat: StatFn, path: PathSpec) -> bool:
+    """Whether a directory stands where a file is about to be copied.
+
+    A probe the backend refuses answers False, so the create that follows
+    reports the refusal in its own words, as it did before the probe.
+
+    Args:
+        stat (StatFn): Stats a path; raises when missing.
+        path (PathSpec): The file's destination.
+    """
+    try:
+        return await is_directory(stat, path)
+    except FS_ERRORS:
+        return False
 
 
 def _onto_directory(
@@ -1278,28 +1302,30 @@ async def _mirror_dirs(
         dst_mount = dst_base + entry_mount[len(src_base) :]
         entry_dst = spelled_from(mounted_path(target, dst_mount), target)
         entry = spelled_from(mounted_path(src, entry_mount), src)
-        exists, is_dir = await entry_kind(stat, entry_dst)
-        if is_dir:
-            continue
-        if exists:
-            errors.append(
-                f"cp: cannot overwrite non-directory "
-                f"'{entry_dst.raw_path}' with directory '{entry.raw_path}'"
-            )
-            blocked.append(entry_mount)
-            continue
         try:
-            await strategy.mkdir(entry_dst)
+            exists, is_dir = await entry_kind(stat, entry_dst)
+            if is_dir:
+                continue
+            if not exists:
+                await strategy.mkdir(entry_dst)
         except FS_ERRORS as exc:
             errors.append(
                 f"cp: cannot create directory "
                 f"'{entry_dst.raw_path}': {fs_strerror(exc)}"
             )
-            blocked.append(entry_mount)
-            continue
-        made.add(dst_mount)
-        if lines is not None:
-            lines.append(f"'{entry.raw_path}' -> '{entry_dst.raw_path}'")
+        else:
+            if not exists:
+                made.add(dst_mount)
+                if lines is not None:
+                    lines.append(
+                        f"'{entry.raw_path}' -> '{entry_dst.raw_path}'"
+                    )
+                continue
+            errors.append(
+                f"cp: cannot overwrite non-directory "
+                f"'{entry_dst.raw_path}' with directory '{entry.raw_path}'"
+            )
+        blocked.append(entry_mount)
     return blocked, made
 
 
@@ -1385,6 +1411,7 @@ async def copy_entries(
     lines: list[str] | None = None,
     copies: TransferLinks | None = None,
     root_backup: PathSpec | None = None,
+    blocked: list[str] | None = None,
 ) -> bool:
     """Copy a walked source tree entry by entry with GNU per-entry errors.
 
@@ -1417,12 +1444,15 @@ async def copy_entries(
         copies (TransferLinks | None): Namespace links to preserve verbatim.
         root_backup (PathSpec | None): the backup the caller made of the
             target, which the source's own line notes.
+        blocked (list[str] | None): filled with the source directories
+            whose trees were left out, for a caller that copies their
+            links next.
 
     Returns:
         bool: Whether every entry landed.
     """
     copied_all = True
-    blocked: list[str] = []
+    blocked = [] if blocked is None else blocked
     made: set[str] = set()
     for entry, kind in entries:
         if any(within(entry.virtual, root) for root in blocked):
@@ -1433,24 +1463,19 @@ async def copy_entries(
             + entry.virtual[len(src.virtual.rstrip("/")) :],
         )
         if kind == FileType.DIRECTORY:
-            exists, is_dir = await entry_kind(stat, entry_dst)
-            if is_dir:
-                continue
-            if exists:
+            try:
+                exists, is_dir = await entry_kind(stat, entry_dst)
+                if is_dir:
+                    continue
+                if not exists:
+                    await strategy.mkdir(entry_dst)
+            except FS_ERRORS as exc:
                 errors.append(
-                    f"{cmd_name}: cannot overwrite non-directory "
-                    f"'{entry_dst.raw_path}' with directory "
-                    f"'{entry.raw_path}'"
+                    f"{cmd_name}: cannot create directory "
+                    f"'{entry_dst.raw_path}': {fs_strerror(exc)}"
                 )
             else:
-                try:
-                    await strategy.mkdir(entry_dst)
-                except FS_ERRORS as exc:
-                    errors.append(
-                        f"{cmd_name}: cannot create directory "
-                        f"'{entry_dst.raw_path}': {fs_strerror(exc)}"
-                    )
-                else:
+                if not exists:
                     made.add(entry_dst.virtual)
                     if lines is not None:
                         lines.append(
@@ -1460,6 +1485,11 @@ async def copy_entries(
                             f"'{entry_dst.raw_path}'"
                         )
                     continue
+                errors.append(
+                    f"{cmd_name}: cannot overwrite non-directory "
+                    f"'{entry_dst.raw_path}' with directory "
+                    f"'{entry.raw_path}'"
+                )
             copied_all = False
             blocked.append(entry.virtual)
             continue
@@ -1487,7 +1517,7 @@ async def copy_entries(
         if (
             entry is not src
             and parent(entry_dst.virtual) not in made
-            and await is_directory(stat, entry_dst)
+            and await _holds_directory(stat, entry_dst)
         ):
             backup_control = policy.backup if policy is not None else None
             errors.append(
@@ -1824,6 +1854,7 @@ async def cp_generic(
                         for path, kind in entries
                         if not within(path.virtual, target.virtual)
                     ]
+                left_out: list[str] = []
                 await copy_entries(
                     "cp",
                     strategy,
@@ -1835,6 +1866,7 @@ async def cp_generic(
                     policy=policy,
                     lines=lines if flags.verbose else None,
                     copies=copies,
+                    blocked=left_out,
                 )
                 if copies is not None:
                     await copy_tree_links(
@@ -1845,6 +1877,7 @@ async def cp_generic(
                         errors,
                         lines if flags.verbose else None,
                         policy,
+                        blocked=left_out,
                     )
                 continue
             # A whole-tree copy cannot honor a merge's per-entry rules (a
@@ -1913,7 +1946,7 @@ async def cp_generic(
                 if (
                     made is not None
                     and parent(dst_mount) not in made
-                    and await is_directory(stat, entry_dst)
+                    and await _holds_directory(stat, entry_dst)
                 ):
                     errors.append(
                         _onto_directory("cp", entry, entry_dst, flags.backup)
@@ -1949,6 +1982,9 @@ async def cp_generic(
                     errors,
                     lines if flags.verbose else None,
                     policy,
+                    blocked=[
+                        mounted_path(src, root).virtual for root in blocked
+                    ],
                 )
             continue
         if guards_created and key_of(target) in created:
