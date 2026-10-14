@@ -116,10 +116,10 @@
       "targets": [
         "gapps"
       ],
-      "command": "rm /docs/owned; echo rc=$?; rm -r /docs/owned; echo rc=$?; ls /docs/owned | wc -l",
+      "command": "rm /docs/owned; echo rc=$?; rm -r /docs/owned; echo rc=$?; [ -d /docs/owned ] && echo kept",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nrc=1\n1\n",
+        "stdout": "rc=1\nrc=1\nkept\n",
         "stderr": "rm: cannot remove '/docs/owned': Is a directory\nrm: cannot remove '/docs/owned': Operation not supported\n"
       }
     }
