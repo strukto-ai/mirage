@@ -1462,7 +1462,7 @@ async def test_a_killed_job_spends_the_nods_it_held():
     ws = Workspace({"/data/": RAMVFS()}, policies=[AskAB()])
     try:
         await ws.shell("{ export A=1; export B=2; } & wait")
-        (nod,) = [r for r in ws.decisions.pending() if r.argv[0] == "A"]
+        (nod,) = (r for r in ws.decisions.pending() if r.argv[0] == "A")
         await ws.decisions.answer(nod.id, Outcome.ALLOW)
         killed = await ws.shell(
             "{ export A=1; export B=2; sleep 30; } & sleep 0.5; kill %1; wait"
