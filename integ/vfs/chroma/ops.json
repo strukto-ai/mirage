@@ -61,7 +61,7 @@
       "command": "find /knowledge/ -maxdepth 0",
       "expect": {
         "exit": 0,
-        "stdout": "/knowledge\n",
+        "stdout": "/knowledge/\n",
         "stderr": ""
       }
     },
@@ -74,7 +74,7 @@
       "command": "find /knowledge/ -name knowledge",
       "expect": {
         "exit": 0,
-        "stdout": "/knowledge\n",
+        "stdout": "/knowledge/\n",
         "stderr": ""
       }
     },
