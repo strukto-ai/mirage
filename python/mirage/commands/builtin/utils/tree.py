@@ -44,6 +44,17 @@ def _listings(found: dict[str, FileStat]) -> dict[str, list[str]]:
     return {rel: sorted(names) for rel, names in children.items()}
 
 
+def _answerable(path: PathSpec) -> bool:
+    """Whether an earlier answer may stand for ``path``. A spelling with
+    dots or a trailing slash (``dotted``) or one the walk refused
+    (``walk_error``) goes to the call, so the dispatcher checks it.
+
+    Args:
+        path (PathSpec): the path the walk asks about.
+    """
+    return path.dotted is None and path.walk_error is None
+
+
 def tree_walk(
     read_tree: ReadTree | None,
     readdir: WalkCall,
@@ -86,7 +97,7 @@ def tree_walk(
 
     async def tree_readdir(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
         virtual = path.virtual.rstrip("/") or "/"
-        hit = covering(virtual)
+        hit = covering(virtual) if _answerable(path) else None
         if hit is None and virtual not in asked and not path.pattern:
             asked.add(virtual)
             try:
@@ -109,7 +120,7 @@ def tree_walk(
 
     async def tree_stat(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
         virtual = path.virtual.rstrip("/") or "/"
-        hit = covering(virtual)
+        hit = covering(virtual) if _answerable(path) else None
         if hit is not None and hit[1]:
             found = roots[hit[0]][0].get(hit[1])
             if found is not None:

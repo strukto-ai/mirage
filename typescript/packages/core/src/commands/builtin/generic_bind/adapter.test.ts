@@ -715,6 +715,42 @@ describe('withAbortGuard', () => {
     expect(calls).toEqual([])
   })
 
+  // A pushed-down `wc -l` over two tables would otherwise start the
+  // second count after the caller was released.
+  it('refuses the line answers too', async () => {
+    const calls: string[] = []
+    const controller = new AbortController()
+    const guarded = withAbortGuard(
+      {
+        ...recording(calls),
+        firstLines: (_a, path) => {
+          calls.push(`firstLines ${path.virtual}`)
+          return Promise.resolve(null)
+        },
+        lastLines: (_a, path) => {
+          calls.push(`lastLines ${path.virtual}`)
+          return Promise.resolve(null)
+        },
+        lineCount: (_a, path) => {
+          calls.push(`lineCount ${path.virtual}`)
+          return Promise.resolve(null)
+        },
+        follow: (_a, path) => {
+          calls.push(`follow ${path.virtual}`)
+          return Promise.resolve(null)
+        },
+      },
+      controller.signal,
+    )
+    controller.abort(new Error('released'))
+    const aborted = { name: 'AbortError' }
+    await expect(guarded.firstLines?.(accessor, spec('/t'), 1)).rejects.toMatchObject(aborted)
+    await expect(guarded.lastLines?.(accessor, spec('/t'), 1)).rejects.toMatchObject(aborted)
+    await expect(guarded.lineCount?.(accessor, spec('/t'))).rejects.toMatchObject(aborted)
+    await expect(guarded.follow?.(accessor, spec('/t'), 1)).rejects.toMatchObject(aborted)
+    expect(calls).toEqual([])
+  })
+
   it('is the ops themselves without a signal', () => {
     const ops = recording([])
     expect(withAbortGuard(ops, undefined)).toBe(ops)

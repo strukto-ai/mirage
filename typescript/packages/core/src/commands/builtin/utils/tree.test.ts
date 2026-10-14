@@ -72,6 +72,26 @@ describe('treeWalk', () => {
     expect([...answered].sort()).toEqual(['/m', '/m/a', '/m/e'])
   })
 
+  // Mirrors test_a_dotted_or_refused_operand_is_never_answered_from_an_earlier_answer.
+  it('never answers a dotted or refused operand from an earlier answer', async () => {
+    const mount = new Mount(found())
+    const [readdir, stat] = mount.walk()
+    await readdir(at('/m'))
+    const dotted = PathSpec.fromStrPath('/m/x/../a', undefined, '/')
+    await stat(dotted)
+    await readdir(dotted)
+    const refused = new PathSpec({
+      virtual: '/m/e',
+      directory: '/m/',
+      vfsPath: 'm/e',
+      walkError: 'ENOENT',
+    })
+    await stat(refused)
+    await readdir(refused)
+    expect(mount.asked).toEqual(['/m', '/m/a', '/m/e'])
+    expect(mount.calls).toEqual(['stat /m/a', 'stat /m/e'])
+  })
+
   it('lists in code point order', async () => {
     const names = ['\u{1f600}.txt', '\ue000.txt']
     const mount = new Mount(

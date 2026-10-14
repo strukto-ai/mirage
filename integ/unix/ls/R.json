@@ -104,6 +104,40 @@
         "stdout": "/data/sub/deep:\ndeeper.txt\nrc=2\n/data/sub/deep:\ndeeper.txt\nrc=2\n",
         "stderr": "ls: cannot access '/data/never_here.txt': No such file or directory\nls: cannot access '/data/never_here.txt': No such file or directory\n"
       }
+    },
+    {
+      "id": "ls_R_checks_a_dotted_operand_inside_a_listed_tree",
+      "seq": 353,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -R /data/sub /data/sub/missing/../deep; echo rc=$?; ls -R /data/sub /data/sub/nested.txt/../deep; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/sub:\ndeep\nnested.txt\n\n/data/sub/deep:\ndeeper.txt\nrc=2\n/data/sub:\ndeep\nnested.txt\n\n/data/sub/deep:\ndeeper.txt\nrc=2\n",
+        "stderr": "ls: cannot access '/data/sub/missing/../deep': No such file or directory\nls: cannot access '/data/sub/nested.txt/../deep': Not a directory\n"
+      }
     }
   ]
 }

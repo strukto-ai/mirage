@@ -43,7 +43,7 @@ interface MongoCollectionLike {
   watch: (
     pipeline?: unknown[],
     options?: { startAtOperationTime?: unknown },
-  ) => AsyncIterableIterator<Record<string, unknown>> & { close: () => Promise<void> }
+  ) => { next: () => Promise<Record<string, unknown>>; close: () => Promise<void> }
 }
 
 interface MongoCursorLike {
@@ -249,15 +249,14 @@ export class MongoDBStore implements MongoDriver {
         const current = stream ?? (await open())
         if (current === null) return done
         for (;;) {
-          let change: IteratorResult<Record<string, unknown>>
+          let change: Record<string, unknown>
           try {
             change = await current.next()
           } catch (err) {
             if (isClosed()) return done
             throw err
           }
-          if (change.done === true) return done
-          const doc = change.value.fullDocument
+          const doc = change.fullDocument
           if (doc !== undefined && doc !== null) return { value: doc as T, done: false }
         }
       },

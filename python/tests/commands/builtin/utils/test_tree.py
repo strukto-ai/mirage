@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 import pytest
 
 from mirage.commands.builtin.utils.tree import tree_walk
@@ -124,3 +126,18 @@ def test_no_read_tree_hands_back_the_walk():
         mount.readdir,
         mount.stat,
     )
+
+
+@pytest.mark.asyncio
+async def test_a_dotted_or_refused_operand_is_never_answered_from_an_earlier_answer():
+    mount = _Mount(_found())
+    readdir, stat = _walk(mount)
+    await readdir(PathSpec.from_str_path("/m"))
+    dotted = PathSpec.from_str_path("/m/x/../a", cwd="/")
+    await stat(dotted)
+    await readdir(dotted)
+    refused = replace(PathSpec.from_str_path("/m/e"), walk_error="ENOENT")
+    await stat(refused)
+    await readdir(refused)
+    assert mount.asked == ["/m", "/m/a", "/m/e"]
+    assert mount.calls == ["stat /m/a", "stat /m/e"]

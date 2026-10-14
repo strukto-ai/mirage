@@ -65,6 +65,15 @@ function listings(found: Map<string, FileStat>): Map<string, string[]> {
  * from an answer, for a walk that charges a budget per request. Mirrors
  * Python's `tree_walk`.
  */
+/**
+ * Whether an earlier answer may stand for `path`. A spelling with dots or a
+ * trailing slash (`dotted`) or one the walk refused (`walkError`) goes to the
+ * call, so the dispatcher checks it. Mirrors Python's `_answerable`.
+ */
+function answerable(path: PathSpec): boolean {
+  return path.dotted === null && path.walkError === null
+}
+
 export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
   readdir: WalkCall<D>,
@@ -84,7 +93,7 @@ export function treeWalk<D, S>(
   }
   const treeReaddir: WalkCall<D> = async (path, index) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
-    let hit = covering(virtual)
+    let hit = answerable(path) ? covering(virtual) : null
     if (hit === null && !asked.has(virtual) && path.pattern === null) {
       asked.add(virtual)
       let found: Map<string, FileStat> | null
@@ -113,7 +122,7 @@ export function treeWalk<D, S>(
   }
   const treeStat: WalkCall<S> = async (path, index) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
-    const hit = covering(virtual)
+    const hit = answerable(path) ? covering(virtual) : null
     if (hit !== null && hit[1] !== '') {
       const found = roots.get(hit[0])?.[0].get(hit[1])
       if (found !== undefined) return found as S

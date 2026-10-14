@@ -40,8 +40,12 @@ const ClientCtor = vi.fn(function (_uri: string) {
     listIndexes: vi.fn(() => ({ toArray: () => Promise.resolve([{ name: '_id_' }]) })),
     watch: vi.fn((...args: unknown[]) => {
       watched.push(args)
+      const changes = [
+        { operationType: 'insert' },
+        { operationType: 'insert', fullDocument: { _id: 'n1' } },
+      ]
       return {
-        next: () => Promise.resolve({ value: undefined, done: true }),
+        next: () => Promise.resolve(changes.shift() ?? {}),
         close: () => Promise.resolve(),
       }
     }),
@@ -103,9 +107,12 @@ describe('MongoDBStore', () => {
     expect(clients[0]?.connect).toHaveBeenCalledTimes(1)
   })
 
-  it('iterInserts starts after the time it is given', async () => {
+  // The driver's ChangeStream.next() answers the change document itself.
+  it('iterInserts starts after the time it is given and yields each inserted document', async () => {
     const store = new MongoDBStore('mongodb://h')
     const inserts = store.iterInserts('app', 'profiles', 't1')
+    expect(await inserts.next()).toEqual({ value: { _id: 'n1' }, done: false })
+    expect(await inserts.return?.()).toEqual({ value: undefined, done: true })
     expect((await inserts.next()).done).toBe(true)
     expect(watched).toEqual([
       [

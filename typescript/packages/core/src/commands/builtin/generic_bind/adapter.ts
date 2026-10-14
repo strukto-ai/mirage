@@ -1054,7 +1054,8 @@ function refusedAfterAbort<T extends unknown[], R>(
  * there without each handler reading the signal. A slot already in
  * flight settles on its own, and `readStream` is left alone because the
  * reader it returns is guarded as it is drained (`guardInput`). The
- * presence facts (stat, exists, readTree) are refused too. They cost no
+ * presence facts (stat, exists, readTree) and the line answers
+ * (firstLines, lastLines, lineCount, follow) are refused too. They cost no
  * write, which is why the policy guard leaves them, but each one is a
  * request on an API-backed mount: `stat a b` whose first call outlives
  * the grace would start the second after the caller was released. The
@@ -1077,6 +1078,10 @@ export function withAbortGuard<A extends Accessor = Accessor>(
   if (ops.readRange !== undefined) guarded.readRange = refusedAfterAbort(signal, ops.readRange)
   if (ops.exists !== undefined) guarded.exists = refusedAfterAbort(signal, ops.exists)
   if (ops.readTree !== undefined) guarded.readTree = refusedAfterAbort(signal, ops.readTree)
+  if (ops.firstLines !== undefined) guarded.firstLines = refusedAfterAbort(signal, ops.firstLines)
+  if (ops.lastLines !== undefined) guarded.lastLines = refusedAfterAbort(signal, ops.lastLines)
+  if (ops.lineCount !== undefined) guarded.lineCount = refusedAfterAbort(signal, ops.lineCount)
+  if (ops.follow !== undefined) guarded.follow = refusedAfterAbort(signal, ops.follow)
   if (ops.write !== undefined) guarded.write = refusedAfterAbort(signal, ops.write)
   if (ops.mkdir !== undefined) guarded.mkdir = refusedAfterAbort(signal, ops.mkdir)
   if (ops.append !== undefined) guarded.append = refusedAfterAbort(signal, ops.append)
