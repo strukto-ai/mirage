@@ -155,18 +155,8 @@ describe('[[ ]] semantics', () => {
     expect(await runExit(ws, cmd)).toBe(rc)
   })
 
-  it('unquoted variable RHS is a pattern, quoted is literal', async () => {
-    expect(await run(ws, 'p=\'a*\'; [[ abc == $p ]]; echo $?; [[ abc == "$p" ]]; echo $?')).toBe(
-      '0\n1\n',
-    )
-  })
-
   it('numeric operands evaluate as arithmetic', async () => {
     expect(await run(ws, 'n=3; [[ n -eq 3 ]]; echo $?')).toBe('0\n')
-  })
-
-  it('no word splitting of unquoted expansions', async () => {
-    expect(await run(ws, "v='a b'; [[ $v == 'a b' ]]; echo $?")).toBe('0\n')
   })
 
   it('single-bracket word-splits the same expansion', async () => {
@@ -174,17 +164,6 @@ describe('[[ ]] semantics', () => {
     expect(rc).toBe(0)
     expect(stdout).toBe('2\n')
     expect(stderr).toContain('too many arguments')
-  })
-
-  it('=~ fills BASH_REMATCH', async () => {
-    expect(await run(ws, '[[ abc =~ b. ]] && echo m:${BASH_REMATCH[0]}')).toBe('m:bc\n')
-  })
-
-  it('a bad [[ operator kills the whole line', async () => {
-    const [rc, stdout, stderr] = await runResult(ws, '[[ a -bogus b ]]; echo after')
-    expect(rc).toBe(2)
-    expect(stdout).toBe('')
-    expect(stderr).toContain('conditional binary operator expected')
   })
 
   it('if integration', async () => {

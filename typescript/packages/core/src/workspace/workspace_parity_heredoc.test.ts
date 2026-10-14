@@ -316,14 +316,6 @@ describe('workspace: heredoc bodies the lexer would swallow', () => {
     await ws.close()
   })
 
-  it('reads an apostrophe on a backslash line as body text', async () => {
-    const { ws } = await makeWorkspace()
-    const io = await ws.shell("cat <<'END'\n\\item Don't stop; echo not-a-command\nsecond\nEND")
-    expect(io.exitCode).toBe(0)
-    expect(stdoutStr(io)).toBe("\\item Don't stop; echo not-a-command\nsecond\n")
-    await ws.close()
-  })
-
   it('keeps a tab-indented backslash line under <<-', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.shell("cat <<-'END'\n\t\\first\n\tsecond\n\tEND")

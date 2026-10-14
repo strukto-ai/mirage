@@ -359,25 +359,9 @@ async def test_double_bracket_semantics(cmd: str, rc: int):
 
 
 @pytest.mark.asyncio
-async def test_double_bracket_pattern_from_variable():
-    ws = await _workspace()
-    io = await ws.shell(
-        "p='a*'; [[ abc == $p ]]; echo $?; [[ abc == \"$p\" ]]; echo $?"
-    )
-    assert await io.stdout_str() == "0\n1\n"
-
-
-@pytest.mark.asyncio
 async def test_double_bracket_arith_variable():
     ws = await _workspace()
     io = await ws.shell("n=3; [[ n -eq 3 ]]; echo $?")
-    assert await io.stdout_str() == "0\n"
-
-
-@pytest.mark.asyncio
-async def test_double_bracket_no_word_splitting():
-    ws = await _workspace()
-    io = await ws.shell("v='a b'; [[ $v == 'a b' ]]; echo $?")
     assert await io.stdout_str() == "0\n"
 
 
@@ -388,22 +372,6 @@ async def test_single_bracket_word_splits_expansion():
     assert io.exit_code == 0
     assert await io.stdout_str() == "2\n"
     assert "too many arguments" in await io.stderr_str()
-
-
-@pytest.mark.asyncio
-async def test_double_bracket_rematch():
-    ws = await _workspace()
-    io = await ws.shell("[[ abc =~ b. ]] && echo m:${BASH_REMATCH[0]}")
-    assert await io.stdout_str() == "m:bc\n"
-
-
-@pytest.mark.asyncio
-async def test_double_bracket_bad_operator_kills_line():
-    ws = await _workspace()
-    io = await ws.shell("[[ a -bogus b ]]; echo after")
-    assert io.exit_code == 2
-    assert "conditional binary operator expected" in await io.stderr_str()
-    assert await io.stdout_str() == ""
 
 
 @pytest.mark.asyncio

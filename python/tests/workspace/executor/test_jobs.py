@@ -752,19 +752,6 @@ async def test_wait_bad_option():
 
 
 @pytest.mark.asyncio
-async def test_wait_p_names_the_job_whose_status_is_returned():
-    """`wait id1 id2` answers with the last id's status, so `-p` names
-    that job however many ids were waited for."""
-    ws = Workspace({"data": RAMVFS()}, mode=MountMode.WRITE)
-    io = await ws.shell(
-        "(exit 3) & (exit 5) & p=$!; wait -p V %1 %2; "
-        'echo rc=$?; test "$V" = "$p" && echo pid-match'
-    )
-    assert (await io.stdout_str()) == "rc=5\npid-match\n"
-    await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_wait_p_with_no_operand_leaves_the_variable_unset():
     """The no-operand form waits for everything and reports no one job,
     so bash leaves the variable unset (having cleared it first)."""

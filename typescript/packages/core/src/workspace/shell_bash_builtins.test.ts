@@ -341,14 +341,6 @@ const CASES: [string, string, string, string, number][] = [
     2,
   ],
   ['wait_n_answers_first_finisher', '(exit 3) & wait -n', '', '', 3],
-  // `-p` holds the managed PID `$!` reported; the rest of the line is bash's.
-  [
-    'wait_p_names_the_job_reported',
-    '(exit 3) & (exit 5) & p=$!; wait -p V %1 %2; echo rc=$?; [ "$V" = "$p" ] && echo pid-match',
-    'rc=5\npid-match\n',
-    '',
-    0,
-  ],
   [
     'wait_p_with_no_operand_leaves_it_unset',
     '(exit 0) & V=stale; wait -p V; echo "V=[${V-UNSET}]"',

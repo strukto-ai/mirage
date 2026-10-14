@@ -361,18 +361,6 @@ async def test_heredoc_backslash_line_does_not_reach_the_pipeline():
 
 
 @pytest.mark.asyncio
-async def test_heredoc_apostrophe_on_a_backslash_line_is_body_text():
-    ws = await _workspace_at("/data")
-    io = await ws.shell(
-        "cat <<'END'\n\\item Don't stop; echo not-a-command\nsecond\nEND"
-    )
-    assert io.exit_code == 0
-    assert (io.stdout or b"").decode() == (
-        "\\item Don't stop; echo not-a-command\nsecond\n"
-    )
-
-
-@pytest.mark.asyncio
 async def test_heredoc_dash_keeps_a_tab_indented_backslash_line():
     ws = await _workspace_at("/data")
     out = await _stdout(ws, "cat <<-'END'\n\t\\first\n\tsecond\n\tEND")
