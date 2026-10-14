@@ -389,7 +389,6 @@ def command_io(vfs: BaseVFS) -> CommandIO:
         files_containing=slot("files_containing"),
         searchable=vfs.searchable,
         lines_containing=slot("lines_containing"),
-        before_full_scan=slot("before_full_scan"),
         first_lines=slot("first_lines"),
         last_lines=slot("last_lines"),
         line_count=slot("line_count"),
@@ -489,7 +488,6 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "follow": ("follow", ("n", "index")),
     "files_containing": ("files_containing", ("text",)),
     "lines_containing": ("lines_containing", ("text",)),
-    "before_full_scan": ("before_full_scan", ("command", "reason")),
 }
 
 # The slots that change the mount: with no dispatcher there is nowhere to
@@ -501,7 +499,6 @@ _DISPATCHED_WRITES = frozenset(_DISPATCHED_SLOTS) - {
     "follow",
     "files_containing",
     "lines_containing",
-    "before_full_scan",
 }
 
 

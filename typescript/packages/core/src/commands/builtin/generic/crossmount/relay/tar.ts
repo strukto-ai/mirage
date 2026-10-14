@@ -55,7 +55,7 @@ export async function runTar(
         await dispatch('mkdir', p)
       },
       stat: statOp(dispatch),
-      walk: relayWalkOf(dispatch, ns?.childMounts),
+      walk: relayWalkOf(dispatch, ns?.childMounts, 'tar'),
       isDir: relayIsDirOf(dispatch),
     },
     true,

@@ -92,7 +92,7 @@ Every other function is optional, and each stands alone:
 | `read_stream`, `exists`, `read_tree`, `first_lines`, `last_lines`, `line_count`, `follow` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r`, `rename`, `copy`, `dir_copy`, `truncate`, `setattr` | Individually supported mutations. |
 | `search`, `search_many` | Optional resource search. |
-| `files_containing`, `lines_containing`, `before_full_scan` | Optional: let grep and rg skip what your search rules out. |
+| `files_containing`, `lines_containing`, `before_full_scan` | Optional: let grep and rg skip what your search rules out, and refuse a scan of every file. |
 
 `pwrite` receives `(path, data, offset)` and keeps every byte outside the
 window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
@@ -188,7 +188,7 @@ class JiraVFS(BaseVFS):
         path: PathSpec,
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         # Interpret query.query and validate the options your resource supports.
         ...
 ```
@@ -198,8 +198,9 @@ search text and backend-specific arguments. The options can hold filters, limits
 or other JSON values. Neither regex support nor grep compatibility is
 required. Leaving `search` undefined also works.
 
-`search` returns text records: `[]` means no matches and `None` declines the
-request. Errors propagate, and a truncated result is never a complete answer.
+`search` returns one `(path, record)` pair per hit: the hit's virtual path,
+which a session's hides are checked against, and the text record the `search`
+command prints. `[]` means no matches and `None` declines the request. Errors propagate, and a truncated result is never a complete answer.
 Expose semantic or service-specific queries through a custom command that calls
 the same function with its own options. grep and rg never ask `search`; they
 use the functions below.
@@ -213,7 +214,7 @@ search only tells them what they can skip, so their output never changes.
 | --- | --- | --- |
 | `files_containing(path, text, *, whole_word, ignore_case, index)` | which files under a walked directory may hold `text` | a list of `PathSpec`, or `None` |
 | `lines_containing(path, text, *, ignore_case, index)` | which lines of one file may hold `text` | those lines in file order, as bytes or a stream, or `None` |
-| `before_full_scan(path, command, reason, *, files, index)` | nothing can narrow, so every file under a walked directory is about to be read | return to scan, raise to refuse |
+| `before_full_scan(path, *, files, index)` | a command is about to read every file under a directory it walks | return to scan, raise to refuse |
 
 The arguments come from the command line:
 
@@ -255,10 +256,9 @@ class WikiVFS(BaseVFS):
             return None
         return [mounted_path(path, "/" + hit.key) for hit in hits]
 
-    async def before_full_scan(
-        self, path, command, reason, *, files=None, index=NULL_INDEX
-    ):
-        raise ValueError(f"{reason}; narrow the path")
+    async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
+        if files is not None and files > 5000:
+            raise ValueError(f"{files} files in scope, narrow the path")
 ```
 
 `lines_containing` suits row stores, and may stream its rows. Its lines replace
@@ -269,23 +269,16 @@ NUL byte: grep and rg call such a file binary from bytes outside its matching
 lines. A file named on the line and a binary-extension file read under `-a`
 are always read.
 
-`before_full_scan` is called once per walked directory, before the first file no
-search answered is read, with `files`, the number of files the session sees
-under `path` when your VFS answers `read_tree` (`None` otherwise), and with why:
+`before_full_scan` is called once per directory a command walks, before it reads
+a file there: by `tar -c`, `zip -r`, `cp -r`, `mv` across mounts and `diff -r`
+always, and by grep and rg where no search answered (a flag such as `-v` needs
+every line, the pattern has no plain text, or the search returned `None`).
+`files` is the number of files the session sees under `path` when your VFS
+answers `read_tree`, `None` otherwise.
 
-| `ScanReason` | When |
-| --- | --- |
-| `NO_SEARCH` | the mount defines neither search function |
-| `NO_TEXT` | `-f`, or no plain text of three characters every match holds (under `-i`, a word with a non-ASCII letter, or with i, k or s, counts as none) |
-| `EVERY_LINE` | `-v`, or rg `--passthru` |
-| `EVERY_FILE` | rg `--files-without-match`, or rg `-c` with `--include-zero`, without `-q`: rg leaves a binary file out of these |
-| `LINKS` | rg `-L` |
-| `BINARY` | `-a`, `--binary-files=text`, rg `-a`, `--binary` or `-uuu` after a search answered: every binary-extension file is read |
-| `UNANSWERED` | `files_containing` returned `None` or was not asked under a path rule, or `lines_containing` returned `None` for a file |
-
-Raise from it (or from `files_containing`) to refuse: the error's message is
-what the command prints (an `OSError` raised at a file is that file's read error), and each reason's value is a sentence
-to put in it.
+Raise a `ValueError` from it (or from `files_containing`) to refuse: the command
+prints `<command>: <message>` and exits 1. From grep or rg, an `OSError` raised
+at a file is that file's read error.
 `examples/python/other/custom_vfs.py` defines `files_containing` for its wiki.
 
 To make the backend constructible by name (workspace YAML, snapshots, the daemon), register it:

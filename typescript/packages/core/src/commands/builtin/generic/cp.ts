@@ -33,6 +33,7 @@ import {
   type Visibility,
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
+import { beforeFullScan } from '../utils/tree.ts'
 import { argmatchError, extraOperandError } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import type { FlagView } from '../../spec/flag_view.ts'
@@ -1306,6 +1307,9 @@ export async function cpGeneric(
   copies?: TransferLinks,
   // Where -i reads its answers.
   stdin?: ByteSource | null,
+  // The command's dispatcher, which lets a source's mount refuse a tree
+  // copied file by file; undefined outside a workspace.
+  dispatch?: DispatchFn,
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
   const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
@@ -1508,6 +1512,7 @@ export async function cpGeneric(
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
       if (isPrimitiveCopy(strategy)) {
+        await beforeFullScan(dispatch, src, 'cp')
         const walked = await cpWalk(strategy.readdir, stat, src, index, 'cp', errors, copies?.links)
         const entries = intoItself
           ? walked.filter((entry) => !within(entry.path, target.virtual))
@@ -1568,6 +1573,7 @@ export async function cpGeneric(
       // dispatcher declines, so the tree's directories are recreated here: a
       // files-only pass would drop every directory that holds no files (GNU
       // keeps them).
+      await beforeFullScan(dispatch, src, 'cp')
       const mirrored = await mirrorDirs(
         strategy,
         stat,

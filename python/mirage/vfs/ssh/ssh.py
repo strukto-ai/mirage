@@ -179,11 +179,14 @@ class SSHVFS(BaseVFS):
         return build_delta_hook(self.accessor)
 
     def storage_location(self) -> str:
-        # The host, its port and the root pin the files two mounts would
-        # share; the user does not, since two logins see one disk.
+        # The host, its port and an absolute root pin the files two mounts
+        # share, whoever logs in; a relative root starts at the login's
+        # own directory, so the login is part of it.
         cfg = self.config
         root = cfg.root.rstrip("/")
-        return f"{self.name}:{cfg.hostname or cfg.host}:{cfg.port or 22}{root}"
+        login = "" if cfg.root.startswith("/") else f"{cfg.username or ''}@"
+        host = cfg.hostname or cfg.host
+        return f"{self.name}:{login}{host}:{cfg.port or 22}{root}"
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

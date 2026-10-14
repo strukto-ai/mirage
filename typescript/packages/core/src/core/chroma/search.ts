@@ -34,7 +34,7 @@ export async function searchSegments(
   index?: IndexCacheStore,
   topK = 10,
   mountPrefix = '',
-): Promise<string[]> {
+): Promise<[string, string][]> {
   validateQuery(query, topK)
   if (mountPrefix === '' && paths.length > 0) {
     mountPrefix =
@@ -70,11 +70,11 @@ function renderRecords(
   slugField: string,
   mountPrefix: string,
   scopedSlugs: ReadonlySet<string> | null = null,
-): string[] {
+): [string, string][] {
   const documents = firstResultList(response.documents)
   const metadatas = firstResultList(response.metadatas)
   const distances = firstResultList(response.distances)
-  const contents: string[] = []
+  const contents: [string, string][] = []
   for (let i = 0; i < documents.length; i++) {
     const document = documents[i]
     const metadata = metadatas[i]
@@ -88,7 +88,7 @@ function renderRecords(
     const prefix = rstripSlash(mountPrefix)
     if (prefix !== '') path = prefix + path
     const content = typeof document === 'string' ? document : ''
-    contents.push(`${path}:${score}\n${content}`)
+    contents.push([path, `${path}:${score}\n${content}`])
   }
   return contents
 }
@@ -104,7 +104,7 @@ export async function searchMany(
   paths: PathSpec[],
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<[string, string][]> {
   validateOptions(query, ['top_k'])
   const topK = intOption(query, 'top_k', 10)
   const [targets, prefix] = await searchScope(CHROMA_TREE, accessor, paths, index)
@@ -116,7 +116,7 @@ export function searchResource(
   path: PathSpec,
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<[string, string][]> {
   return searchMany(accessor, [path], query, index)
 }
 

@@ -588,28 +588,33 @@ async def test_a_scope_cheaper_to_read_is_not_searched():
 @pytest.mark.parametrize(
     "line, stderr",
     [
-        (
-            "grep -r import /gh",
-            "grep: 5 files in scope and code search could not narrow them; "
-            "narrow the path, or search a whole word with -w\n",
-        ),
+        ("grep -r import /gh", "grep: 5 files in scope, narrow the path\n"),
         ("grep -rwv import /gh", "grep: 5 files in scope, narrow the path\n"),
         ("grep -rwa import /gh", "grep: 5 files in scope, narrow the path\n"),
         (
             "rg -w --binary import /gh",
             "rg: 5 files in scope, narrow the path\n",
         ),
-        (
-            "rg 'imp.rt' /gh",
-            "rg: 5 files in scope and code search could not narrow them; "
-            "narrow the path, or search a whole word with -w\n",
-        ),
+        ("rg 'imp.rt' /gh", "rg: 5 files in scope, narrow the path\n"),
+        ("diff -r /gh /gh", "diff: 5 files in scope, narrow the path\n"),
     ],
 )
 async def test_a_scan_past_the_scope_cap_is_refused(line, stderr, monkeypatch):
     monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 4)
     (out, err, code), hub = await _on_github(line, monkeypatch)
     assert (out, err.decode(), code) == (b"", stderr, 1)
+    assert hub.count("blob") == 0
+
+
+@pytest.mark.asyncio
+async def test_an_archive_past_the_scope_cap_is_refused(monkeypatch):
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 1)
+    (out, err, code), hub = await _on_github("tar -cf - /gh/src", monkeypatch)
+    assert (out, err, code) == (
+        b"",
+        b"tar: 2 files in scope, narrow the path\n",
+        1,
+    )
     assert hub.count("blob") == 0
 
 

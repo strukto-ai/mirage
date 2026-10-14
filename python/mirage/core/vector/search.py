@@ -45,7 +45,7 @@ async def search_rows_output(
     top_k: int,
     threshold: float,
     mount_prefix: str,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """Rank a table's rows and render each hit under its canonical path.
 
     Args:
@@ -65,7 +65,7 @@ async def search_rows_output(
     table = _target_table(pinned, paths)
     if table is None:
         raise ValueError("search: no table to search")
-    blocks: list[str] = []
+    blocks: list[tuple[str, str]] = []
     for row in await tree.search_rows(accessor, table, query, top_k):
         rank = row.get(tree.rank_key)
         if (
@@ -80,7 +80,7 @@ async def search_rows_output(
         )
         header = path if rank is None else f"{path}:{float(rank):.4f}"
         content = body.decode().rstrip("\n")
-        blocks.append(f"{header}\n{content}")
+        blocks.append((path, f"{header}\n{content}"))
     return blocks
 
 
@@ -96,7 +96,7 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
         paths: list[PathSpec],
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str]:
+    ) -> list[tuple[str, str]]:
         validate_options(query, {"top_k", "method", "threshold"})
         top_k = int_option(query, "top_k", tree.search_limit(accessor))
         if not paths:
@@ -120,7 +120,7 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
         path: PathSpec,
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str]:
+    ) -> list[tuple[str, str]]:
         return await search_many(accessor, [path], query, index)
 
     return SearchOps(search=search, search_many=search_many)

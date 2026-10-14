@@ -116,7 +116,7 @@ describe('Mem0 filesystem', () => {
       new Set(['keep']),
     )
 
-    expect(output).toEqual(['/memories/keep.json:0.88\nremember me'])
+    expect(output).toEqual([['/memories/keep.json', '/memories/keep.json:0.88\nremember me']])
   })
 })
 

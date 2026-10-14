@@ -23,7 +23,12 @@ async def test_search_segments_scopes_folder_to_candidate_slugs(
         top_k=3,
     )
 
-    assert result == ["/knowledge/guides/quickstart:0.90\nquickstart chunk"]
+    assert result == [
+        (
+            "/knowledge/guides/quickstart",
+            "/knowledge/guides/quickstart:0.90\nquickstart chunk",
+        )
+    ]
     assert chroma_accessor.collection.queries[0]["where"] == {
         "page_slug": {"$in": ["guides/quickstart"]}
     }
@@ -40,8 +45,14 @@ async def test_search_segments_empty_paths_searches_collection(
     )
 
     assert result == [
-        "/knowledge/guides/quickstart:0.90\nquickstart chunk",
-        "/knowledge/api/reference:0.75\napi chunk",
+        (
+            "/knowledge/guides/quickstart",
+            "/knowledge/guides/quickstart:0.90\nquickstart chunk",
+        ),
+        (
+            "/knowledge/api/reference",
+            "/knowledge/api/reference:0.75\napi chunk",
+        ),
     ]
     assert "where" not in chroma_accessor.collection.queries[0]
 

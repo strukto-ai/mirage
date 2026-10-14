@@ -38,7 +38,7 @@ async def test_search_renders_ranked():
     out = await search_memories_rendered(
         acc, "morning", mount_prefix="/mem", top_k=5, threshold=0.0
     )
-    text = "\n".join(out)
+    text = "\n".join(record for _, record in out)
     assert "/mem/aaa.json:0.91" in text
     assert "eats banana" in text
     assert acc._client.calls[0][1]["filters"] == {"agent_id": "routine_agent"}
@@ -66,7 +66,9 @@ async def test_search_filters_memory_ids():
         threshold=0.0,
         memory_ids={"bbb"},
     )
-    assert [record.split("\n")[0] for record in out] == ["/mem/bbb.json:0.70"]
+    assert [record.split("\n")[0] for _, record in out] == [
+        "/mem/bbb.json:0.70"
+    ]
 
 
 @pytest.mark.asyncio

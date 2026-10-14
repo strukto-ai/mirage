@@ -7,7 +7,12 @@ const path = new PathSpec({ virtual: '/data', directory: '/', vfsPath: '' })
 
 it('ranks a batch once and preserves options', async () => {
   const search = vi.fn(() => Promise.reject(new Error('must use batch ranking')))
-  const searchMany = vi.fn(() => Promise.resolve(['highest', 'second']))
+  const searchMany = vi.fn(() =>
+    Promise.resolve<[string, string][]>([
+      ['/data/a', 'highest'],
+      ['/data/b', 'second'],
+    ]),
+  )
   const accessor = new Accessor()
   const query = { query: 'question', options: { top_k: 2 } }
   const out = await searchResources({ search, searchMany }, accessor, [path, path], query)

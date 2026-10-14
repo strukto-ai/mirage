@@ -46,7 +46,6 @@ import {
   beforeFullScan as githubBeforeFullScan,
   filesContaining as githubFilesContaining,
 } from '../../core/github/search.ts'
-import type { ScanReason } from '../types.ts'
 import { SCOPE_ERROR } from '../../core/github/constants.ts'
 
 export interface GitHubVFSState {
@@ -164,12 +163,10 @@ export class GitHubVFS extends BaseVFS {
 
   override beforeFullScan(
     path: PathSpec,
-    _command: string,
-    reason: ScanReason,
     files: number | null,
     index?: IndexCacheStore,
   ): Promise<void> {
-    return githubBeforeFullScan(this.accessor, path, reason, files, index)
+    return githubBeforeFullScan(this.accessor, path, files, index)
   }
 
   override deltaHook(): DeltaHook {

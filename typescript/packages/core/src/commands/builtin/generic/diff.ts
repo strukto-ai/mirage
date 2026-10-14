@@ -33,6 +33,7 @@ import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitLinesKeepends } from '../utils/lines.ts'
 import { UsageError } from '../../errors.ts'
+import { beforeFullScan } from '../utils/tree.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
@@ -483,7 +484,10 @@ export async function diffGeneric(
     if (flags.recursive && !absent[0] && !absent[1]) {
       const bothDirs =
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
-      if (bothDirs) [output, differ] = await diffDirs(walk, p0, p1)
+      if (bothDirs) {
+        for (const path of [p0, p1]) await beforeFullScan(opts.dispatch, path, 'diff')
+        ;[output, differ] = await diffDirs(walk, p0, p1)
+      }
     }
     if (output === undefined) {
       output = await diffPair(walk, p0, p1, absent)

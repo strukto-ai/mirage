@@ -254,36 +254,6 @@ class ResolveGlobOp(Protocol):
     ) -> Awaitable[list[PathSpec]]: ...
 
 
-class ScanReason(StrEnum):
-    """Why grep or rg reads every file instead of asking the mount.
-
-    NO_SEARCH: no ``files_containing`` or ``lines_containing`` on the
-    mount. NO_TEXT: -f, or no
-    plain text of three characters that every match holds (under -i, a
-    word with a non-ASCII letter, or with i, k or s when case folds by
-    Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints
-    lines that do not match. EVERY_FILE: rg --files-without-match, or
-    rg -c or --count-matches with --include-zero, without -q, lists
-    files that do not match, and rg leaves a binary one out; rg --stats
-    and --json count them. LINKS: rg -L follows
-    links out of the walk. BINARY: -a, --binary-files=text, rg -a,
-    --binary or -uuu reads every binary-extension file, which a search
-    that answered does not rule out. TRANSFORMED: rg -z, --pre or -E
-    naming an encoding searches bytes the mount does not store.
-    UNANSWERED: ``files_containing`` returned None or was declined under
-    a path rule, or ``lines_containing`` returned None for a file.
-    """
-
-    NO_SEARCH = "the mount has no search"
-    NO_TEXT = "the pattern has no plain text to search for"
-    EVERY_LINE = "the output needs lines that do not match"
-    EVERY_FILE = "the output lists files that do not match"
-    LINKS = "links are followed"
-    BINARY = "binary files are read"
-    TRANSFORMED = "the bytes searched are not the bytes stored"
-    UNANSWERED = "the search could not answer"
-
-
 class FilesContainingOp(Protocol):
     """Files under ``path`` whose content may contain ``text``; None
     when the search cannot answer for every file."""
@@ -316,23 +286,6 @@ class LinesContainingOp(Protocol):
         ignore_case: bool,
         index: IndexCacheStore = ...,
     ) -> Awaitable[ByteSource | None]: ...
-
-
-class BeforeFullScanOp(Protocol):
-    """Called before grep or rg reads a file no search answered; raise
-    to refuse."""
-
-    def __call__(
-        self,
-        accessor: Any,
-        path: PathSpec,
-        command: str,
-        reason: ScanReason,
-        /,
-        *,
-        files: int | None = ...,
-        index: IndexCacheStore = ...,
-    ) -> Awaitable[None]: ...
 
 
 class FirstLinesOp(Protocol):
@@ -419,9 +372,9 @@ class SearchQuery:
 class SearchOp(Protocol):
     """Search a resource; None declines, [] means no results.
 
-    Results are text records in the backend's declared format. Integrations
-    such as grep require an explicit compatibility declaration in metadata.
-    Errors and incomplete results must be reported, never treated as misses.
+    One ``(path, record)`` pair per hit: the hit's virtual path and the
+    text record the ``search`` command prints. Errors and incomplete
+    results must be reported, never treated as misses.
     """
 
     def __call__(
@@ -431,7 +384,7 @@ class SearchOp(Protocol):
         query: SearchQuery,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[list[str] | None]: ...
+    ) -> Awaitable[list[tuple[str, str]] | None]: ...
 
 
 class SearchManyOp(Protocol):
@@ -444,7 +397,7 @@ class SearchManyOp(Protocol):
         query: SearchQuery,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[list[str] | None]: ...
+    ) -> Awaitable[list[tuple[str, str]] | None]: ...
 
 
 @dataclass(frozen=True, kw_only=True)

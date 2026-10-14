@@ -16,7 +16,6 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
-import { ScanReason } from '../../../vfs/types.ts'
 import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { byteView, utf8Locale } from '../../../shell/bytes.ts'
@@ -37,24 +36,27 @@ import { encodingFlag, foldsCase, parseFlags as parseRgFlags, rgMatcher } from '
 import { searchTerms } from '../grep_pushdown.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
+import { beforeFullScan } from '../utils/tree.ts'
 
 type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 /**
- * What a grep line asks the mount's search, or why it cannot ask. Throws the
- * refusal grep itself would print for a bad flag or pattern. Mirrors Python's
- * `grep_terms`.
+ * What a grep line asks the mount's search; null when it must read every
+ * file: -v, -f, or no plain text of three characters every match holds (under
+ * -i, a word with a non-ASCII letter, or with i, k or s when case folds by
+ * Unicode, counts as none). Throws the refusal grep itself would print for a
+ * bad flag or pattern. Mirrors Python's `grep_terms`.
  */
 export function grepTerms(
   bag: Record<string, FlagValue>,
   texts: string[],
   utf8: boolean,
-): SearchTerms | ScanReason {
+): SearchTerms | null {
   const fl = new FlagView(bag, specOf('grep'))
   const f = parseGrepFlags(fl)
   const pattern = patternArg(texts, bag)
-  if (f.invert) return ScanReason.EVERY_LINE
-  if (pattern === null || fl.raw('file') !== undefined) return ScanReason.NO_TEXT
+  if (f.invert) return null
+  if (pattern === null || fl.raw('file') !== undefined) return null
   const matcher = compilePattern(
     byteView(pattern, utf8),
     f.ignoreCase,
@@ -72,7 +74,7 @@ export function grepTerms(
     f.lineRegexp,
     f.ignoreCase,
   )
-  if (found === null) return ScanReason.NO_TEXT
+  if (found === null) return null
   return {
     texts: found[0],
     wholeWord: found[1],
@@ -89,32 +91,31 @@ export function grepTerms(
 }
 
 /**
- * What an rg line asks the mount's search, or why it cannot ask; null when the
- * line reads no file content (--files, --type-list). Throws the refusal rg
- * itself would print for a bad flag or pattern. Mirrors Python's `rg_terms`.
+ * What an rg line asks the mount's search; null when it must read every file:
+ * -v or --passthru, a listing of files that do not match
+ * (--files-without-match, -c or --count-matches with --include-zero, without
+ * -q; --stats, --json), -L, -z, --pre, -E naming an encoding, -f, or no plain
+ * text every match holds. Throws the refusal rg itself would print for a bad
+ * flag or pattern. Mirrors Python's `rg_terms`.
  */
-export function rgTerms(
-  bag: Record<string, FlagValue>,
-  texts: string[],
-): SearchTerms | ScanReason | null {
+export function rgTerms(bag: Record<string, FlagValue>, texts: string[]): SearchTerms | null {
   const fl = new FlagView(bag, specOf('rg'))
   const f = parseRgFlags(fl)
-  if (f.listFiles || f.typeList) return null
   const pattern = patternArg(texts, bag)
-  if (f.invert || f.passthru) return ScanReason.EVERY_LINE
+  if (f.invert || f.passthru) return null
   if (!f.quiet && (f.filesWithoutMatch || (f.includeZero && (f.countOnly || f.countMatches)))) {
-    return ScanReason.EVERY_FILE
+    return null
   }
-  if (f.stats === true || f.json === true) return ScanReason.EVERY_FILE
-  if (f.follow) return ScanReason.LINKS
+  if (f.stats === true || f.json === true) return null
+  if (f.follow) return null
   if (
     f.searchZip === true ||
     (f.pre ?? null) !== null ||
     !['auto', 'none'].includes(f.encoding ?? 'auto')
   ) {
-    return ScanReason.TRANSFORMED
+    return null
   }
-  if (pattern === null || fl.raw('file') !== undefined) return ScanReason.NO_TEXT
+  if (pattern === null || fl.raw('file') !== undefined) return null
   const ignoreCase = foldsCase(pattern, f.fixedString, f)
   const found = searchTerms(
     pattern,
@@ -127,7 +128,7 @@ export function rgTerms(
   // -U matches across lines, so a text with a line break in it is no line's
   // to find.
   if (found === null || (f.multiline === true && found[0].some((text) => text.includes('\n'))))
-    return ScanReason.NO_TEXT
+    return null
   return {
     texts: found[0],
     wholeWord: found[1],
@@ -234,17 +235,14 @@ async function directories<A extends Accessor>(
   return found
 }
 
-// Let the mount refuse a walk that will read every file.
-async function fullScan<A extends Accessor>(
-  io: CommandIO<A>,
-  name: string,
-  accessor: A,
+// Let each walked directory's mount refuse a walk that reads every file; the
+// dispatcher passes over a path that is not a directory.
+async function fullScan(
+  dispatch: CommandOpts['dispatch'],
   dirs: PathSpec[],
-  reason: ScanReason,
-  index: IndexCacheStore | undefined,
+  name: string,
 ): Promise<void> {
-  if (io.beforeFullScan === undefined) return
-  for (const scope of dirs) await io.beforeFullScan(accessor, scope, name, reason, null, index)
+  for (const scope of dirs) await beforeFullScan(dispatch, scope, name)
 }
 
 /**
@@ -260,7 +258,8 @@ async function fullScan<A extends Accessor>(
  * from a `filesContaining` answer, judges `linesContaining` as a read of its
  * file, and answers null where a path rule or a preVfs policy reaches below a
  * directory, so every file is read and judged.
- * When neither can stand in for a walk, `beforeFullScan` may refuse it.
+ * When neither can stand in for a walk, the mount's `beforeFullScan` may
+ * refuse it.
  * Mirrors Python's `search_reads`.
  */
 export async function searchReads<A extends Accessor>(
@@ -276,13 +275,16 @@ export async function searchReads<A extends Accessor>(
   const files = io.filesContaining
   const searchable = io.searchable ?? null
   const lines = io.linesContaining
-  if (
-    paths.length === 0 ||
-    (files === undefined && lines === undefined && io.beforeFullScan === undefined)
-  ) {
+  const fl = new FlagView(opts.flags, specOf(name))
+  if (paths.length === 0 || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
     return stream
   }
-  let terms: SearchTerms | ScanReason | null
+  const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
+  if (files === undefined && lines === undefined) {
+    if (walked) await fullScan(opts.dispatch, paths, name)
+    return stream
+  }
+  let terms: SearchTerms | null
   try {
     terms =
       name === 'rg'
@@ -293,12 +295,9 @@ export async function searchReads<A extends Accessor>(
     console.debug(`${name} search left to the scan: ${err.message}`)
     return stream
   }
-  if (terms === null) return stream
-  const fl = new FlagView(opts.flags, specOf(name))
-  const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
   const dirs = walked ? await directories(io, accessor, paths, index) : []
-  if (typeof terms === 'string') {
-    await fullScan(io, name, accessor, dirs, terms, index)
+  if (terms === null) {
+    await fullScan(opts.dispatch, dirs, name)
     return stream
   }
   const asked = terms
@@ -323,12 +322,11 @@ export async function searchReads<A extends Accessor>(
     }
   }
   if (hits === null && lines === undefined) {
-    const reason = files === undefined ? ScanReason.NO_SEARCH : ScanReason.UNANSWERED
-    await fullScan(io, name, accessor, dirs, reason, index)
+    await fullScan(opts.dispatch, dirs, name)
     return stream
   }
   if (hits !== null && asked.readsBinary) {
-    await fullScan(io, name, accessor, dirs, ScanReason.BINARY, index)
+    await fullScan(opts.dispatch, dirs, name)
   }
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
@@ -337,7 +335,7 @@ export async function searchReads<A extends Accessor>(
   let scan: Promise<void> | null = null
   const readUnanswered = (): Promise<void> => {
     if (found !== null) return Promise.resolve()
-    scan ??= fullScan(io, name, accessor, dirs, ScanReason.UNANSWERED, index)
+    scan ??= fullScan(opts.dispatch, dirs, name)
     return scan
   }
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {

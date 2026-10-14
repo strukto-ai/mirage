@@ -148,13 +148,16 @@ export interface SearchQuery {
   readonly options?: Readonly<Record<string, JsonValue>>
 }
 
-/** Text records the `search` command prints. null declines; [] means no results. */
+/**
+ * One `[path, record]` pair per hit: the hit's virtual path and the text
+ * record the `search` command prints. null declines; [] means no results.
+ */
 export type SearchOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   query: SearchQuery,
   index?: IndexCacheStore,
-) => Promise<string[] | null>
+) => Promise<[string, string][] | null>
 
 /** Optional batch callback preserves ranking and limits across scopes. */
 export type SearchManyOp<A extends Accessor = Accessor> = (
@@ -162,37 +165,7 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
   paths: PathSpec[],
   query: SearchQuery,
   index?: IndexCacheStore,
-) => Promise<string[] | null>
-
-/**
- * Why grep or rg reads every file instead of asking the mount. Mirrors
- * Python's `ScanReason`. NO_SEARCH: no `filesContaining` or
- * `linesContaining` on the mount. NO_TEXT: -f, or no plain text of three characters that every match holds
- * (under -i, a word with a non-ASCII letter, or with i, k or s when case folds by
- * Unicode, counts as none). EVERY_LINE: -v or rg --passthru prints lines that
- * do not match. EVERY_FILE: rg --files-without-match, or rg -c or
- * --count-matches with --include-zero, without -q, lists files that do not
- * match, and rg leaves a binary one out; rg --stats and --json count them.
- * LINKS: rg -L follows links out of the walk. BINARY:
- * -a, --binary-files=text, rg -a, --binary or -uuu reads every
- * binary-extension file, which a search that answered does not rule out.
- * TRANSFORMED: rg -z, --pre or -E naming an encoding searches bytes the
- * mount does not store.
- * UNANSWERED: `filesContaining` resolved null or was declined under a path
- * rule, or `linesContaining` resolved null for a file.
- */
-export const ScanReason = Object.freeze({
-  NO_SEARCH: 'the mount has no search',
-  NO_TEXT: 'the pattern has no plain text to search for',
-  EVERY_LINE: 'the output needs lines that do not match',
-  EVERY_FILE: 'the output lists files that do not match',
-  LINKS: 'links are followed',
-  BINARY: 'binary files are read',
-  TRANSFORMED: 'the bytes searched are not the bytes stored',
-  UNANSWERED: 'the search could not answer',
-} as const)
-
-export type ScanReason = (typeof ScanReason)[keyof typeof ScanReason]
+) => Promise<[string, string][] | null>
 
 /** Files under `path` whose content may contain `text`; null when the search cannot answer for every file. */
 export type FilesContainingOp<A extends Accessor = Accessor> = (
@@ -211,16 +184,6 @@ export type LinesContainingOp<A extends Accessor = Accessor> = (
   opts: { ignoreCase: boolean },
   index?: IndexCacheStore,
 ) => Promise<ByteSource | null>
-
-/** Called before grep or rg reads a file no search answered; reject to refuse. */
-export type BeforeFullScanOp<A extends Accessor = Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  command: string,
-  reason: ScanReason,
-  files: number | null,
-  index?: IndexCacheStore,
-) => Promise<void>
 
 /** The first `n` lines of `path`; null when the file is to be read. */
 export type FirstLinesOp<A extends Accessor = Accessor> = (

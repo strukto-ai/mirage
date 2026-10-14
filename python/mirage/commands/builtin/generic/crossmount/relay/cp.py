@@ -145,4 +145,5 @@ async def run_cp(
             else None
         ),
         stdin=stdin,
+        dispatch=dispatch,
     )

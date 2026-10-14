@@ -23,13 +23,17 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
 import type { DirProbe, StatFn, WalkFn } from '../generic/archive/walk.ts'
 import type { CommandIO } from '../../config.ts'
+import { beforeFullScan } from '../utils/tree.ts'
 
 function walkWith(
   readdir: WalkFindDeps['readdir'],
   stat: WalkFindDeps['stat'],
   index: IndexCacheStore | undefined,
+  dispatch: DispatchFn | undefined,
+  command: string,
 ): WalkFn {
   return async (p, findType) => {
+    if (findType === 'f') await beforeFullScan(dispatch, p, command)
     const prefix = mountPrefixOf(p.virtual, p.vfsPath)
     const unreadable: string[] = []
     const keys = await walkFind(p, { unreadable, readdir, stat }, { type: findType }, index)
@@ -51,17 +55,22 @@ function walkWith(
  * are lifted back here the way findGeneric lifts them. A directory the walk
  * could not open rides along (as the virtual path the walk recorded), so the
  * archiver can report it the way GNU does instead of silently leaving its
- * contents out.
+ * contents out. The files listed are every file the archiver reads, so the
+ * mount that owns the operand may refuse the scan before they are listed.
  */
 export function walkOf(
   ops: CommandIO,
   accessor: Accessor,
   index: IndexCacheStore | undefined,
+  dispatch: DispatchFn | undefined,
+  command: string,
 ): WalkFn {
   return walkWith(
     (spec, i) => ops.readdir(accessor, spec, i),
     (spec, i) => ops.stat(accessor, spec, i),
     index,
+    dispatch,
+    command,
   )
 }
 
@@ -130,8 +139,12 @@ function ownListing(
  * several mounts go into one archive, and find's walk classifies what it
  * lists exactly as it does on one backend.
  */
-export function relayWalkOf(dispatch: DispatchFn, owed: ChildMounts | undefined): WalkFn {
-  return walkWith(ownListing(dispatch, owed), statOp(dispatch), undefined)
+export function relayWalkOf(
+  dispatch: DispatchFn,
+  owed: ChildMounts | undefined,
+  command: string,
+): WalkFn {
+  return walkWith(ownListing(dispatch, owed), statOp(dispatch), undefined, dispatch, command)
 }
 
 // The directory probe tar's `-C` check uses when a line spans mounts.

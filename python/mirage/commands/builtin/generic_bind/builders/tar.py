@@ -62,7 +62,7 @@ async def tar(
             prim["write"],
             prim["mkdir"],
             prim["stat"],
-            walk_of(ops, accessor, opts.index),
+            walk_of(ops, accessor, opts.index, opts.dispatch, "tar"),
             relay_is_dir_of(opts.dispatch),
             relay=True,
         )
@@ -80,7 +80,7 @@ async def tar(
         archive_write,
         partial(require_op(ops, Operation.MKDIR), accessor),
         bound_op(ops.stat, accessor, opts.index),
-        walk_of(ops, accessor, opts.index),
+        walk_of(ops, accessor, opts.index, opts.dispatch, "tar"),
         is_dir_of(ops, accessor, opts.index),
     )
 

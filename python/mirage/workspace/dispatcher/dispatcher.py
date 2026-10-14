@@ -15,6 +15,7 @@
 import dataclasses
 import errno
 import functools
+import logging
 import posixpath
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection
@@ -94,7 +95,6 @@ from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
 from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
-from mirage.vfs.search import record_path
 from mirage.vfs.types import Effect, Target, VfsCall
 from mirage.view.namespace_view import (
     merge_readdir,
@@ -126,6 +126,8 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.snapshot.drift import DriftQueue
+
+logger = logging.getLogger(__name__)
 
 
 def _memory_answered(
@@ -373,9 +375,23 @@ def _visible_answer(
         }
     if name == "files_containing":
         return [hit for hit in result if path_visible(vis, hit.virtual)]
-    return [
-        record for record in result if path_visible(vis, record_path(record))
-    ]
+    return [hit for hit in result if path_visible(vis, hit[0])]
+
+
+async def _is_directory(mount: MountEntry, path: PathSpec) -> bool:
+    """Whether a scan guard's path is a directory: a file or a missing
+    name has nothing below it to scan.
+
+    Args:
+        mount (MountEntry): the mount serving the path.
+        path (PathSpec): the guard's path.
+    """
+    try:
+        found = await mount.call("stat", path.virtual)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        logger.debug("scan guard at %s: %s", path.virtual, exc)
+        return False
+    return found is not None and found.type is FileType.DIRECTORY
 
 
 def _record_of(
@@ -779,8 +795,11 @@ class Dispatcher:
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        # with_dispatch_rule_guard's mark, never forwarded to an op.
+        # with_dispatch_rule_guard's mark, never forwarded to an op. A scan
+        # guard reads nothing: the rule judges each read it guards.
         rule_gate: EntryGate | None = kwargs.pop("rule_gate", None)
+        if name == "before_full_scan":
+            rule_gate = None
         # The dispatcher's own keywords: a read answered as it is pulled, and a
         # read of what the backend holds now, past the file cache.
         stream = name == "read" and bool(kwargs.pop("stream", False))
@@ -809,6 +828,12 @@ class Dispatcher:
         if name == "statfs":
             return await self._statfs(call.path), IOResult()
         mount = self._namespace.try_mount_for(call.path.virtual)
+        # A mount with no scan guard has nothing to refuse, so a command
+        # asks every mount it walks and only a guard costs a call.
+        if name == "before_full_scan" and (
+            mount is None or not mount.vfs.supports(name)
+        ):
+            return None, IOResult()
         if mount is None:
             return await self._answer_unmounted(call), IOResult()
         await self._refuse_cross_mount(call, mount)
@@ -1354,6 +1379,10 @@ class Dispatcher:
                 )
             elif call.name in SERIAL_WRITE_OPS:
                 result = await self._serial_write(call, mount)
+            elif call.name == "before_full_scan" and not await _is_directory(
+                mount, call.path
+            ):
+                result = None
             else:
                 if call.name == "before_full_scan":
                     kwargs["files"] = await self._visible_files(mount, call)
@@ -1543,10 +1572,12 @@ class Dispatcher:
         does a name another mount took while the write ran, read under the
         cache's lock. An append extends the cached copy only where the
         file is proven to have been that copy: the backend rewrote it
-        whole, its write moved the copy's length plus the appended bytes,
-        and its read saw the copy's token where both have one. An append
-        the backend makes itself records no length, so the copy stays
-        dropped; an append of nothing keeps the copy as it was.
+        whole, its read saw the copy's token, and its write moved the
+        copy's length plus the appended bytes. A store with no tokens, or
+        one that appends by itself, proves nothing, so the copy stays
+        dropped. An append of nothing that wrote nothing (``cmd >> f``
+        opening ``f``) leaves the copy as it was; one that made the file
+        anew drops it.
 
         Args:
             call (_Call): the write that ran.
@@ -1571,17 +1602,14 @@ class Dispatcher:
                 return
             kept, token = before
             read = _record_of(records, {"read"}, call.path.virtual)
-            if not data:
+            if not data and record is None:
                 data, fingerprint = kept, token
             elif (
                 record is None
+                or read is None
+                or not read.fingerprint
+                or read.fingerprint != token
                 or record.bytes != len(kept) + len(data)
-                or (
-                    read is not None
-                    and read.fingerprint
-                    and token is not None
-                    and read.fingerprint != token
-                )
             ):
                 return
             else:

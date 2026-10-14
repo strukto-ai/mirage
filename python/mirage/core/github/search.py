@@ -36,7 +36,6 @@ from mirage.core.github.tree import ensure_tree
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.vfs.types import ScanReason
 
 logger = logging.getLogger(__name__)
 
@@ -246,21 +245,17 @@ async def before_full_scan(
     accessor: GitHubAccessor,
     index: IndexCacheStore,
     path: PathSpec,
-    reason: ScanReason,
     files: int | None,
 ) -> None:
     """Refuse a scan of more than ``SCOPE_ERROR`` files.
 
     Each file is one blob request, so a scope that large is refused
-    rather than read. The remedy names ``-w`` when no search answered or
-    the pattern held no plain text on the default branch, the only one
-    code search indexes: there a whole word lets it narrow the scope.
+    rather than read.
 
     Args:
         accessor (GitHubAccessor): backend handle.
         index (IndexCacheStore): the mount's index.
         path (PathSpec): the directory about to be walked.
-        reason (ScanReason): why no search answered.
         files (int | None): the files the session sees under ``path``,
             counted by the dispatcher; None counts the tree.
 
@@ -272,17 +267,8 @@ async def before_full_scan(
         if files is not None
         else await _scope_files(accessor, index, [path])
     )
-    if count <= SCOPE_ERROR:
-        return
-    if reason in (
-        ScanReason.UNANSWERED,
-        ScanReason.NO_TEXT,
-    ) and await ensure_ref(accessor) == await ensure_default_branch(accessor):
-        raise ValueError(
-            f"{count} files in scope and code search could not narrow "
-            "them; narrow the path, or search a whole word with -w"
-        )
-    raise ValueError(f"{count} files in scope, narrow the path")
+    if count > SCOPE_ERROR:
+        raise ValueError(f"{count} files in scope, narrow the path")
 
 
 async def search(

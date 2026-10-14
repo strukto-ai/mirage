@@ -42,7 +42,7 @@ async def search_segments(
     top_k: int = 10,
     threshold: float = 0.0,
     mount_prefix: str = "",
-) -> list[str]:
+) -> list[tuple[str, str]]:
     search_method = validate_args(query, method, top_k, threshold)
     if not mount_prefix and paths:
         mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
@@ -143,32 +143,19 @@ def render_records(
     records: list[dict[str, Any]],
     slug_metadata_name: str,
     mount_prefix: str,
-) -> list[str]:
-    contents: list[str] = []
+) -> list[tuple[str, str]]:
+    contents: list[tuple[str, str]] = []
     for record in records:
         segment = record.get("segment")
         if not isinstance(segment, dict):
             continue
-        header = format_record_header(record, slug_metadata_name, mount_prefix)
-        if header is None:
+        path = record_path(record, slug_metadata_name, mount_prefix)
+        if path is None:
             continue
-        content = segment_text(segment)
-        contents.append(f"{header}\n{content}")
+        score = format_score(record.get("score"))
+        header = path if score is None else f"{path}:{score}"
+        contents.append((path, f"{header}\n{segment_text(segment)}"))
     return contents
-
-
-def format_record_header(
-    record: dict[str, Any],
-    slug_metadata_name: str,
-    mount_prefix: str,
-) -> str | None:
-    path = record_path(record, slug_metadata_name, mount_prefix)
-    if path is None:
-        return None
-    score = format_score(record.get("score"))
-    if score is None:
-        return path
-    return f"{path}:{score}"
 
 
 def record_path(
@@ -227,7 +214,7 @@ async def search_many(
     paths: list[PathSpec],
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     validate_options(query, {"top_k", "method", "threshold"})
     top_k = int_option(query, "top_k", 10)
     method = text_option(query, "method", "semantic")
@@ -250,5 +237,5 @@ async def search_resource(
     path: PathSpec,
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     return await search_many(accessor, [path], query, index)

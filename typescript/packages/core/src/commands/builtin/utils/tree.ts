@@ -13,13 +13,38 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import { isFsError } from '../../../errors/fs.ts'
 import type { WalkDeclinedError } from '../../../errors/types.ts'
-import { FileStat, FileType, type PathSpec } from '../../../types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
+import { UsageError } from '../../errors.ts'
 
 export type ReadTree = (path: PathSpec) => Promise<Map<string, FileStat> | null>
 
 export type WalkCall<R> = (path: PathSpec, index?: IndexCacheStore) => Promise<R>
+
+/**
+ * Let the mount that owns `path` refuse a command about to read every file
+ * under it. The mount is asked at the resolved path: the command already
+ * judged the spelling it was typed in. It refuses by rejecting, which becomes
+ * the command's own error, `command: message` and exit 1, on one mount or
+ * across several; a filesystem error stays one. Mirrors Python's
+ * `before_full_scan`.
+ */
+export async function beforeFullScan(
+  dispatch: DispatchFn | undefined,
+  path: PathSpec,
+  command: string,
+): Promise<void> {
+  if (dispatch === undefined) return
+  try {
+    await dispatch('before_full_scan', PathSpec.fromStrPath(path.virtual))
+  } catch (err) {
+    if (err instanceof UsageError || isFsError(err) || !(err instanceof Error)) throw err
+    throw new UsageError(`${command}: ${err.message}`, 1)
+  }
+}
 
 // Each directory's children in name order, keyed by its path below the walk's
 // root ('' for the root itself). A directory a deeper key implies is added to

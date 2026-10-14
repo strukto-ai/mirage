@@ -54,7 +54,7 @@ async def run_zip(
         write_bytes=prim["write"],
         stat=prim["stat"],
         walk=relay_walk_of(
-            dispatch, ns.child_mounts if ns is not None else None
+            dispatch, ns.child_mounts if ns is not None else None, "zip"
         ),
         r=parsed.recursive,
         j=parsed.junk_paths,

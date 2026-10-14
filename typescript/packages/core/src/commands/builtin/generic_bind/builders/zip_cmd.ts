@@ -25,7 +25,7 @@ const zipCmd: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     stream: (p) => ops.readStream(accessor, p, idx),
     write: (p, data) => write(accessor, p, data),
     stat: async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx),
-    walk: walkOf(ops, accessor, idx),
+    walk: walkOf(ops, accessor, idx, opts.dispatch, 'zip'),
   })
 }
 

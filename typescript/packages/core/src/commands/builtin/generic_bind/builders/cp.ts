@@ -116,6 +116,7 @@ export const BUILDER: GenericCommand = {
         ? undefined
         : transferLinksOf(links, opts.dispatch, cwd, opts.ns?.visibility),
       opts.stdin,
+      opts.dispatch,
     )
   },
 }

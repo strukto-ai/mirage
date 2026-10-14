@@ -21,7 +21,9 @@ PATH = PathSpec(virtual="/data", directory="/", vfs_path="")
 @pytest.mark.asyncio
 async def test_batch_query_is_ranked_once_and_receives_options():
     one = AsyncMock(side_effect=AssertionError("must use batch ranking"))
-    batch = AsyncMock(return_value=["highest", "second"])
+    batch = AsyncMock(
+        return_value=[("/data/a", "highest"), ("/data/b", "second")]
+    )
     capability = SearchOps(search=one, search_many=batch)
     accessor = Accessor()
     query = SearchQuery("question", options={"top_k": 2})
@@ -75,7 +77,7 @@ async def test_builtin_semantic_adapters_delegate_one_batch(
     monkeypatch, backend, core, operation
 ):
     module = importlib.import_module(f"mirage.core.{core}.search")
-    raw = AsyncMock(return_value=["ranked record"])
+    raw = AsyncMock(return_value=[("/data/a", "ranked record")])
     monkeypatch.setattr(module, operation, raw)
     options = {"top_k": 2}
     if backend != "chroma":

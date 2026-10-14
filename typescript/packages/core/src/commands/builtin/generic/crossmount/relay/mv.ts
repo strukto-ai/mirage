@@ -78,5 +78,6 @@ export async function runMv(
     ns?.links == null ? undefined : transferLinksOf(ns.links, dispatch, '/', ns.visibility),
     stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
+    dispatch,
   )
 }

@@ -62,7 +62,7 @@ export class Mem0VFS extends BaseVFS {
     path: PathSpec,
     query: SearchQuery,
     index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return searchResource(this.accessor, path, query, index)
   }
 
@@ -70,7 +70,7 @@ export class Mem0VFS extends BaseVFS {
     paths: PathSpec[],
     query: SearchQuery,
     index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return searchMany(this.accessor, paths, query, index)
   }
 

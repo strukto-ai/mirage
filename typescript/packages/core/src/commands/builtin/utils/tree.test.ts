@@ -13,8 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { enotsup, walkDeclined } from '../../../errors/fs.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { treeWalk } from './tree.ts'
 
 const FILE = FileType.FILE
@@ -128,5 +132,87 @@ describe('treeWalk', () => {
   it('hands back the walk without a readTree', () => {
     const mount = new Mount()
     expect(treeWalk(undefined, mount.readdir, mount.stat)).toEqual([mount.readdir, mount.stat])
+  })
+})
+
+// A RAM mount that refuses every full scan, keeping its reads. Twin of
+// Python's GuardedRAM.
+class GuardedRAM extends RAMVFS {
+  readonly scans: string[] = []
+  readonly reads: string[] = []
+
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset?: number,
+    size?: number | null,
+  ): Promise<Uint8Array> {
+    this.reads.push(path.virtual)
+    return super.read(path, index, offset, size)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    this.reads.push(path.virtual)
+    return super.readStream(path, index)
+  }
+
+  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {
+    this.scans.push(path.virtual)
+    return Promise.reject(new Error(`${String(files)} files in scope, narrow the path`))
+  }
+}
+
+async function guarded(line: string): Promise<[GuardedRAM, string, number]> {
+  const vfs = new GuardedRAM()
+  for (const dir of ['/d', '/d/sub', '/e']) vfs.store.dirs.add(dir)
+  const enc = new TextEncoder()
+  vfs.store.files.set('/d/a.txt', enc.encode('ada\n'))
+  vfs.store.files.set('/d/sub/b.txt', enc.encode('bob\n'))
+  vfs.store.files.set('/e/a.txt', enc.encode('x\n'))
+  const ws = new Workspace(
+    { '/g': vfs, '/out': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    const out = await ws.shell(line)
+    return [vfs, new TextDecoder().decode(out.stderr), out.exitCode]
+  } finally {
+    await ws.close()
+  }
+}
+
+describe('a whole-directory read asks the mount first', () => {
+  // Twin of test_a_command_reading_a_whole_directory_asks_first.
+  it.each([
+    'grep -r ada /g/d',
+    'rg ada /g/d',
+    'rg --sort modified ada /g/d /out',
+    'tar -cf /out/a.tar /g/d',
+    'tar -cf - /g/d',
+    'zip -qr /out/a.zip /g/d',
+    'cp -r /g/d /out/c',
+    'cp -r /g/d /g/c',
+    'mv /g/d /out/m',
+    'diff -r /g/d /g/e',
+  ])('%s is refused before it reads', async (line) => {
+    const [vfs, stderr, code] = await guarded(line)
+    expect(vfs.scans.length).toBeGreaterThan(0)
+    expect(vfs.reads).toEqual([])
+    expect(stderr).toBe(`${line.split(' ')[0] ?? ''}: 2 files in scope, narrow the path\n`)
+    expect(code).not.toBe(0)
+  })
+
+  // Twin of test_a_command_reading_named_files_asks_nothing.
+  it.each([
+    'cat /g/d/a.txt',
+    'find /g/d',
+    'ls -R /g/d',
+    'du -a /g/d',
+    'cp /g/d/a.txt /out/a.txt',
+    'zip -q /out/a.zip /g/d/a.txt',
+    'grep ada /g/d/a.txt',
+  ])('%s asks nothing', async (line) => {
+    const [vfs, stderr, code] = await guarded(line)
+    expect([vfs.scans, stderr, code]).toEqual([[], '', 0])
   })
 })

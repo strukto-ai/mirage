@@ -126,7 +126,6 @@ import {
   sessionAccess,
 } from '../../context/session_context.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../utils/hidden.ts'
-import { recordPath } from '../../vfs/search.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -157,11 +156,26 @@ function visibleEntries(entries: string[], parent: string, vis = sessionVisibili
 }
 
 /**
+ * Whether a scan guard's path is a directory: a file or a missing name has
+ * nothing below it to scan. Mirrors Python's `_is_directory`.
+ */
+async function isDirectory(mount: MountEntry, path: PathSpec): Promise<boolean> {
+  try {
+    const found = (await mount.call('stat', path.virtual)) as FileStat | null
+    return found?.type === FileType.DIRECTORY
+  } catch (err) {
+    if (!isMissingPath(err) && !isEnotdir(err)) throw err
+    console.debug(`scan guard at ${path.virtual}: ${String(err)}`)
+    return false
+  }
+}
+
+/**
  * A one-call read's answer without the entries the session hides: what the
  * walk the read stands in for would see, since every call it makes reads a
  * hidden path as absent. A `read_tree` answer keeps the entries left visible,
  * keyed below `path`; `files_containing` keeps the files left visible;
- * `search` keeps the records whose path is visible. Mirrors Python's
+ * `search` keeps the hits whose path is visible. Mirrors Python's
  * `_visible_answer`.
  */
 function visibleAnswer(
@@ -179,7 +193,7 @@ function visibleAnswer(
   if (name === 'files_containing') {
     return (result as PathSpec[]).filter((hit) => pathVisible(vis, hit.virtual))
   }
-  return (result as string[]).filter((record) => pathVisible(vis, recordPath(record)))
+  return (result as [string, string][]).filter(([hit]) => pathVisible(vis, hit))
 }
 
 /**
@@ -593,7 +607,9 @@ export class Dispatcher {
     const { stream, direct, ...own } = (kwargs ?? {}) as { stream?: unknown; direct?: unknown }
     if (name === 'read' && (stream !== undefined || direct !== undefined)) kwargs = own
     await this.prepare()
-    const call = await this.walk(name, path, args, kwargs, ruleGate ?? null, report, issuer)
+    // A scan guard reads nothing: the rule judges each read it guards.
+    const gate = name === 'before_full_scan' ? null : (ruleGate ?? null)
+    const call = await this.walk(name, path, args, kwargs, gate, report, issuer)
     call.stream = name === 'read' && stream === true
     call.direct = name === 'read' && direct === true
     await this.refuseRename(call)
@@ -615,6 +631,11 @@ export class Dispatcher {
     }
     if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
     const owner = this.namespace.tryMountFor(call.path.virtual)
+    // A mount with no scan guard has nothing to refuse, so a command asks
+    // every mount it walks and only a guard costs a call.
+    if (name === 'before_full_scan' && !owner?.vfs.supports(name)) {
+      return [null, new IOResult()]
+    }
     // mkdir(2) looks its name up first, so on a read-only region that lookup
     // answers for the mode, after every other policy has spoken. A dry run
     // never looks, so it explains the mode's refusal.
@@ -1222,7 +1243,10 @@ export class Dispatcher {
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
-    if (name === 'before_full_scan') fullKwargs.files = await this.visibleFiles(mount, vfs, call)
+    if (name === 'before_full_scan') {
+      if (!(await isDirectory(mount, p))) return [null, null, []]
+      fullKwargs.files = await this.visibleFiles(mount, vfs, call)
+    }
     const dst =
       DESTINATION_OPS.has(name) && call.args?.[0] instanceof PathSpec ? call.args[0] : null
     const fullArgs = (call.args ?? []).map(keyed)
@@ -1370,10 +1394,11 @@ export class Dispatcher {
    * a `fresh` mount does not refetch what it just wrote; a record moving
    * another length than was sent keeps nothing. An append extends the cached
    * copy only where the file is proven to have been that copy: the backend
-   * rewrote it whole, its write moved the copy's length plus the appended
-   * bytes, and its read saw the copy's token where both have one. An append
-   * the backend makes itself records no length, so the copy stays dropped;
-   * an append of nothing keeps the copy as it was. Mirrors Python's
+   * rewrote it whole, its read saw the copy's token, and its write moved the
+   * copy's length plus the appended bytes. A store with no tokens, or one
+   * that appends by itself, proves nothing, so the copy stays dropped. An
+   * append of nothing that wrote nothing (`cmd >> f` opening `f`) leaves the
+   * copy as it was; one that made the file anew drops it. Mirrors Python's
    * Dispatcher._keep_written.
    */
   private async keepWritten(
@@ -1397,17 +1422,14 @@ export class Dispatcher {
     if (call.name === 'append') {
       if (before === null) return
       const [kept, token] = before
-      const read = recordOf(records, new Set(['read']), call.path.virtual)
-      if (sent.byteLength === 0) {
+      const seen = recordOf(records, new Set(['read']), call.path.virtual)?.fingerprint ?? ''
+      if (sent.byteLength === 0 && record === undefined) {
         data = kept
         fingerprint = token
       } else if (
         record?.bytes !== kept.byteLength + sent.byteLength ||
-        (read !== undefined &&
-          read.fingerprint !== null &&
-          read.fingerprint !== '' &&
-          token !== null &&
-          read.fingerprint !== token)
+        seen === '' ||
+        seen !== token
       ) {
         return
       } else {

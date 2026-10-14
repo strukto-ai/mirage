@@ -602,3 +602,25 @@ def test_an_append_drops_a_copy_the_object_moved_away_from():
 
     assert cached is None
     assert served == b"z\nb\n"
+
+
+def test_an_empty_append_that_makes_the_file_drops_the_copy():
+    # The object was deleted behind the copy, so opening it for an append
+    # makes it anew and empty; the copy is dropped, not put back.
+    store: dict[str, bytes] = {}
+    with _workspace(store, ReadSpec(policy=ReadPolicy.BOUNDED)) as (ws, _):
+
+        async def run() -> tuple[bytes | None, bytes]:
+            try:
+                await ws.shell("printf 'a\\n' > /s3/x.txt")
+                del store["x.txt"]
+                await ws.shell("true >> /s3/x.txt")
+                cached = await ws.cache.get("/s3/x.txt")
+                return cached, (await ws.shell("cat /s3/x.txt")).stdout
+            finally:
+                await ws.close()
+
+        cached, served = asyncio.run(run())
+
+    assert cached is None
+    assert served == b""

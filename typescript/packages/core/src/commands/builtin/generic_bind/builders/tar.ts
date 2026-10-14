@@ -50,7 +50,7 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
           await dispatch('mkdir', p)
         },
         stat: statOp(dispatch),
-        walk: walkOf(ops, accessor, idx),
+        walk: walkOf(ops, accessor, idx, opts.dispatch, 'tar'),
         isDir: relayIsDirOf(dispatch),
       },
       true,
@@ -65,7 +65,7 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     },
     mkdir: (p, parents) => mkdir(accessor, p, parents),
     stat,
-    walk: walkOf(ops, accessor, idx),
+    walk: walkOf(ops, accessor, idx, opts.dispatch, 'tar'),
     isDir: isDirOf(ops, accessor, idx),
   })
 }

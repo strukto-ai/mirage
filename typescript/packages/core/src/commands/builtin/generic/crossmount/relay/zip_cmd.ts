@@ -45,7 +45,7 @@ export async function runZip(
         await dispatch('write', p, [data])
       },
       stat: statOp(dispatch),
-      walk: relayWalkOf(dispatch, ns?.childMounts),
+      walk: relayWalkOf(dispatch, ns?.childMounts, 'zip'),
     },
   )
   return result ?? [null, new IOResult()]

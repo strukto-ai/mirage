@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import { ScanReason } from '../../../vfs/types.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
@@ -52,7 +51,7 @@ interface Mount {
 class SearchRAM extends RAMVFS {
   reads: string[] = []
   asked: [string, boolean][] = []
-  scans: ScanReason[] = []
+  scans: string[] = []
   pulled: string[] = []
   open = 0
   streams: AsyncIterable<Uint8Array>[] = []
@@ -120,12 +119,12 @@ class SearchRAM extends RAMVFS {
     }
   }
 
-  override beforeFullScan(_path: PathSpec, _command: string, reason: ScanReason): Promise<void> {
-    this.scans.push(reason)
+  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {
+    this.scans.push(path.virtual)
     const refuse = this.mount.refuse
     return refuse === undefined
       ? Promise.resolve()
-      : Promise.reject(refuse(`${reason}; narrow the path`))
+      : Promise.reject(refuse(`${String(files)} files in scope, narrow the path`))
   }
 }
 
@@ -225,7 +224,7 @@ it.each(['bytes', 'stream'] as const)(
     const searched = await run(marked(vfs), 'rg -x ada /m')
     expect(searched).toEqual(await run(marked(new RAMVFS()), 'rg -x ada /m'))
     expect(searched[0]).toBe('/m/top.txt:ada\n')
-    expect(vfs.scans).toEqual([ScanReason.UNANSWERED])
+    expect(vfs.scans).toEqual(['/m'])
   },
 )
 
@@ -244,37 +243,37 @@ it.each(['bytes', 'stream'] as const)(
 const EVERY = 'a.txt b.txt c.txt sub/d.txt z.txt'
 
 // Twin of test_what_a_search_reads_asks_and_scans.
-it.each<[string, string, string | null, string, ScanReason | null]>([
-  ['grep -rc ada /d', 'files', 'a.txt sub/d.txt', 'ada', null],
-  ['rg -lw ada /d', 'files', 'a.txt sub/d.txt', 'ada -w', null],
-  ["grep -rE 'conn.*refused' /d", 'files', 'b.txt', 'refused', null],
-  ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada', ScanReason.BINARY],
-  ['grep -r ada /d /d/c.txt', 'files', 'a.txt c.txt c.txt sub/d.txt', 'ada', null],
-  ['grep -r ada /d', 'upper', 'a.txt sub/d.txt', 'ada', null],
-  ['grep -r ada /d', 'resource', 'a.txt sub/d.txt', 'ada', null],
-  ['grep -r ada /d', 'lines', '', '', null],
-  ['grep -rn ada /d', 'lines', 'a.txt sub/d.txt', '', null],
-  ['grep -rn ada /d', 'stream', 'a.txt sub/d.txt', '', null],
-  ['grep -r ada /d', 'decline', EVERY, '', ScanReason.UNANSWERED],
-  ['grep -rn ada /d', 'decline', EVERY, '', ScanReason.UNANSWERED],
-  ['grep -rv ada /d', 'both', null, '', ScanReason.EVERY_LINE],
-  ['rg --passthru ada /d', 'both', null, '', ScanReason.EVERY_LINE],
-  ["grep -r 'a.b' /d", 'both', null, '', ScanReason.NO_TEXT],
-  ['rg -L ada /d', 'both', null, '', ScanReason.LINKS],
-  ['rg --files-without-match ada /d', 'both', null, '', ScanReason.EVERY_FILE],
-  ['rg -c --include-zero ada /d', 'both', null, '', ScanReason.EVERY_FILE],
-  ['rg --stats ada /d | head -2', 'both', EVERY, '', ScanReason.EVERY_FILE],
-  ['rg -z ada /d', 'both', EVERY, '', ScanReason.TRANSFORMED],
-  ["rg -U 'ada here\\nnothing' /d", 'both', EVERY, '', ScanReason.NO_TEXT],
-  ['rg -U ada /d', 'lines', 'a.txt sub/d.txt', '', null],
-  ['rg -q --files-without-match ada /d', 'files', null, 'ada', null],
-  ['rg --files /d', 'both', '', '', null],
+it.each<[string, string, string | null, string, boolean]>([
+  ['grep -rc ada /d', 'files', 'a.txt sub/d.txt', 'ada', false],
+  ['rg -lw ada /d', 'files', 'a.txt sub/d.txt', 'ada -w', false],
+  ["grep -rE 'conn.*refused' /d", 'files', 'b.txt', 'refused', false],
+  ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada', true],
+  ['grep -r ada /d /d/c.txt', 'files', 'a.txt c.txt c.txt sub/d.txt', 'ada', false],
+  ['grep -r ada /d', 'upper', 'a.txt sub/d.txt', 'ada', false],
+  ['grep -r ada /d', 'resource', 'a.txt sub/d.txt', 'ada', false],
+  ['grep -r ada /d', 'lines', '', '', false],
+  ['grep -rn ada /d', 'lines', 'a.txt sub/d.txt', '', false],
+  ['grep -rn ada /d', 'stream', 'a.txt sub/d.txt', '', false],
+  ['grep -r ada /d', 'decline', EVERY, '', true],
+  ['grep -rn ada /d', 'decline', EVERY, '', true],
+  ['grep -rv ada /d', 'both', null, '', true],
+  ['rg --passthru ada /d', 'both', null, '', true],
+  ["grep -r 'a.b' /d", 'both', null, '', true],
+  ['rg -L ada /d', 'both', null, '', true],
+  ['rg --files-without-match ada /d', 'both', null, '', true],
+  ['rg -c --include-zero ada /d', 'both', null, '', true],
+  ['rg --stats ada /d | head -2', 'both', EVERY, '', true],
+  ['rg -z ada /d', 'both', EVERY, '', true],
+  ["rg -U 'ada here\\nnothing' /d", 'both', EVERY, '', true],
+  ['rg -U ada /d', 'lines', 'a.txt sub/d.txt', '', false],
+  ['rg -q --files-without-match ada /d', 'files', null, 'ada', false],
+  ['rg --files /d', 'both', '', '', false],
 ])('%s (%s) reads, asks and scans what it should', async (line, mount, reads, asked, scan) => {
   const vfs = new SearchRAM(MOUNTS[mount])
   expect(await run(vfs, line)).toEqual(await run(new RAMVFS(), line))
   const [text = '', word] = asked.split(' ')
   expect(vfs.asked).toEqual(text === '' ? [] : [[text, word !== undefined]])
-  expect(vfs.scans).toEqual(scan === null ? [] : [scan])
+  expect(vfs.scans).toEqual(scan ? ['/d'] : [])
   if (reads !== null) {
     const keys = reads === '' ? [] : reads.split(' ')
     expect([...vfs.reads].sort()).toEqual(keys.map((key) => `d/${key}`))
@@ -386,7 +385,7 @@ it('closes a streamed answer rg stops inside', async () => {
   expect([vfs.pulled.length, vfs.open]).toEqual([1, 0])
 })
 
-const refused = (reason: ScanReason): string => `grep: ${reason}; narrow the path\n`
+const REFUSED = 'grep: 6 files in scope, narrow the path\n'
 const DENIED = EVERY.split(' ')
   .map((key) => `grep: /d/${key}: Permission denied\n`)
   .join('')
@@ -395,8 +394,8 @@ const fsError = (message: string): Error => eacces('/d', message)
 
 // Twin of test_a_mount_may_refuse_a_full_scan.
 it.each<[string, string, (message: string) => Error, [string, number] | null]>([
-  ['grep -rv ada /d', 'both', plainError, [refused(ScanReason.EVERY_LINE), 1]],
-  ['grep -r ada /d', 'decline', plainError, [refused(ScanReason.UNANSWERED), 1]],
+  ['grep -rv ada /d', 'both', plainError, [REFUSED, 1]],
+  ['grep -r ada /d', 'decline', plainError, [REFUSED, 1]],
   ['grep -r ada /d', 'decline', fsError, [DENIED, 2]],
   ['grep -r ada /d', 'decline-resource', fsError, [DENIED, 2]],
   ['grep -r ada /d', 'both', plainError, null],

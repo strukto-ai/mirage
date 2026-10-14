@@ -119,7 +119,6 @@ if TYPE_CHECKING:
     )
     from mirage.vfs.types import (
         Effect,
-        ScanReason,
         SearchQuery,
         Target,
     )
@@ -212,7 +211,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.vfs.call": ("vfs_call",),
     "mirage.vfs.types": (
         "Effect",
-        "ScanReason",
         "SearchQuery",
         "Target",
     ),
@@ -301,7 +299,6 @@ __all__ = [
     "FileType",
     "FlagView",
     "SearchQuery",
-    "ScanReason",
     "Effect",
     "Target",
     "vfs_call",

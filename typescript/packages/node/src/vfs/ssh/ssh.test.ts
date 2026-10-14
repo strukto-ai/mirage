@@ -79,12 +79,19 @@ describe('SSHVFS — getState / loadState', () => {
   })
 })
 
-// Twin of test_two_logins_to_one_root_are_one_store.
+const location = (username: string, root: string): string =>
+  new SSHVFS({ host: 'box', username, root }).storageLocation()
+
+// Twin of test_two_logins_to_one_root_are_one_store and
+// test_a_relative_root_is_each_logins_own.
 describe('SSHVFS storageLocation', () => {
   it('is one store for two logins to one root', () => {
-    const location = (username: string, root: string): string =>
-      new SSHVFS({ host: 'box', username, root }).storageLocation()
     expect(location('ada', '/srv/data')).toBe(location('bob', '/srv/data/'))
     expect(location('ada', '/srv/data')).not.toBe(location('ada', '/srv'))
+  })
+
+  it("is each login's own under a relative root", () => {
+    expect(location('ada', 'data')).not.toBe(location('bob', 'data'))
+    expect(location('ada', 'data')).toBe(location('ada', 'data/'))
   })
 })

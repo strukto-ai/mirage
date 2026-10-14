@@ -67,7 +67,7 @@ async def run_tar(
         mkdir_fn=prim["mkdir"],
         stat=prim["stat"],
         walk=relay_walk_of(
-            dispatch, ns.child_mounts if ns is not None else None
+            dispatch, ns.child_mounts if ns is not None else None, "tar"
         ),
         is_dir=relay_is_dir_of(dispatch),
         selectors=list(text_args),

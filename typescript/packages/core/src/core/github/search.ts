@@ -18,7 +18,6 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
 import { lstripSlash, stripSlash } from '../../utils/slash.ts'
-import { ScanReason } from '../../vfs/types.ts'
 import { type GitHubTransport, type GitHubCodeSearch, searchCode } from './client.ts'
 import { SCOPE_ERROR, SCOPE_WARN } from './constants.ts'
 import { countScopeFiles, scopeRelativeKey, searchSafe, unsearchableKeys } from './pushdown.ts'
@@ -132,31 +131,17 @@ export async function filesContaining(
  * Refuse a scan of more than `SCOPE_ERROR` files.
  *
  * Each file is one blob request, so a scope that large is refused rather
- * than read. The remedy names `-w` when no search answered or the pattern
- * held no plain text on the default branch, the only one code search
- * indexes: there a whole word lets it narrow the scope. `files` is the files
- * the session sees under `path`, counted by the dispatcher; null counts the
- * tree.
+ * than read. `files` is the files the session sees under `path`, counted by
+ * the dispatcher; null counts the tree.
  */
 export async function beforeFullScan(
   accessor: GitHubAccessor,
   path: PathSpec,
-  reason: ScanReason,
   files: number | null,
   index?: IndexCacheStore,
 ): Promise<void> {
   const count = files ?? (await scopeFiles(accessor, [path], index))
-  if (count <= SCOPE_ERROR) return
-  if (
-    (reason === ScanReason.UNANSWERED || reason === ScanReason.NO_TEXT) &&
-    accessor.isDefaultBranch
-  ) {
-    throw new Error(
-      `${String(count)} files in scope and code search could not narrow them; ` +
-        'narrow the path, or search a whole word with -w',
-    )
-  }
-  throw new Error(`${String(count)} files in scope, narrow the path`)
+  if (count > SCOPE_ERROR) throw new Error(`${String(count)} files in scope, narrow the path`)
 }
 
 /** Fetch a bounded REST search, following the server's pagination. */

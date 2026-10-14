@@ -20,7 +20,6 @@ import pytest
 from mirage.cache.index import NULL_INDEX
 from mirage.utils.key_prefix import mounted_path
 from mirage.vfs.ram import RAMVFS
-from mirage.vfs.types import ScanReason
 from mirage.workspace import Workspace
 
 TREE = {
@@ -59,7 +58,7 @@ class SearchRAM(RAMVFS):
         self.lines, self.upper, self.refuse = lines, upper, refuse
         self.reads: list[str] = []
         self.asked: list[tuple[str, bool]] = []
-        self.scans: list[ScanReason] = []
+        self.scans: list[str] = []
         self.pulled: list[bytes] = []
         self.open = 0
         self.streams: list[AsyncIterator[bytes]] = []
@@ -113,12 +112,10 @@ class SearchRAM(RAMVFS):
         finally:
             self.open -= 1
 
-    async def before_full_scan(
-        self, path, command, reason, *, files=None, index=NULL_INDEX
-    ):
-        self.scans.append(reason)
+    async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
+        self.scans.append(path.virtual)
         if self.refuse is not None:
-            raise self.refuse(f"{reason}; narrow the path")
+            raise self.refuse(f"{files} files in scope, narrow the path")
 
 
 def _holds(data: bytes, text: str, ignore_case: bool) -> bool:
@@ -228,7 +225,7 @@ def test_rg_reads_a_file_whose_line_answer_starts_with_a_mark(lines):
     searched = _run(_marked(vfs), line)
     assert searched == _run(_marked(RAMVFS()), line)
     assert searched[0] == b"/m/top.txt:ada\n"
-    assert vfs.scans == [ScanReason.UNANSWERED]
+    assert vfs.scans == ["/m"]
 
 
 # Under -E none rg keeps the mark, so the answer stands and nothing is read.
@@ -260,7 +257,7 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
             "files",
             "a.txt sub/d.txt w.bin",
             "ada",
-            ScanReason.BINARY,
+            True,
         ),
         (
             "grep -r ada /d /d/c.txt",
@@ -275,25 +272,25 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
         ("grep -r ada /d", "lines", "", "", None),
         ("grep -rn ada /d", "lines", "a.txt sub/d.txt", "", None),
         ("grep -rn ada /d", "stream", "a.txt sub/d.txt", "", None),
-        ("grep -r ada /d", "decline", EVERY, "", ScanReason.UNANSWERED),
-        ("grep -rn ada /d", "decline", EVERY, "", ScanReason.UNANSWERED),
-        ("grep -rv ada /d", "both", None, "", ScanReason.EVERY_LINE),
-        ("rg --passthru ada /d", "both", None, "", ScanReason.EVERY_LINE),
-        ("grep -r 'a.b' /d", "both", None, "", ScanReason.NO_TEXT),
-        ("rg -L ada /d", "both", None, "", ScanReason.LINKS),
+        ("grep -r ada /d", "decline", EVERY, "", True),
+        ("grep -rn ada /d", "decline", EVERY, "", True),
+        ("grep -rv ada /d", "both", None, "", True),
+        ("rg --passthru ada /d", "both", None, "", True),
+        ("grep -r 'a.b' /d", "both", None, "", True),
+        ("rg -L ada /d", "both", None, "", True),
         (
             "rg --files-without-match ada /d",
             "both",
             None,
             "",
-            ScanReason.EVERY_FILE,
+            True,
         ),
         (
             "rg -c --include-zero ada /d",
             "both",
             None,
             "",
-            ScanReason.EVERY_FILE,
+            True,
         ),
         ("rg -q --files-without-match ada /d", "files", None, "ada", None),
         (
@@ -301,15 +298,15 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
             "both",
             EVERY,
             "",
-            ScanReason.EVERY_FILE,
+            True,
         ),
-        ("rg -z ada /d", "both", EVERY, "", ScanReason.TRANSFORMED),
+        ("rg -z ada /d", "both", EVERY, "", True),
         (
             "rg -U 'ada here\\nnothing' /d",
             "both",
             EVERY,
             "",
-            ScanReason.NO_TEXT,
+            True,
         ),
         ("rg -U ada /d", "lines", "a.txt sub/d.txt", "", None),
         ("rg --files /d", "both", "", "", None),
@@ -320,7 +317,7 @@ def test_what_a_search_reads_asks_and_scans(line, mount, reads, asked, scan):
     assert _run(vfs, line) == _run(RAMVFS(), line)
     text, _, word = asked.partition(" ")
     assert vfs.asked == ([(text, bool(word))] if text else [])
-    assert vfs.scans == ([scan] if scan else [])
+    assert vfs.scans == (["/d"] if scan else [])
     if reads is not None:
         assert sorted(vfs.reads) == [f"d/{key}" for key in reads.split()]
 
@@ -449,8 +446,7 @@ def test_rg_closes_a_streamed_answer_it_stops_inside():
     assert asyncio.run(run()) == (1, 0)
 
 
-def _refused(reason: ScanReason) -> bytes:
-    return f"grep: {reason}; narrow the path\n".encode()
+REFUSED = b"grep: 6 files in scope, narrow the path\n"
 
 
 DENIED = b"".join(
@@ -465,13 +461,13 @@ DENIED = b"".join(
             "grep -rv ada /d",
             "both",
             ValueError,
-            (_refused(ScanReason.EVERY_LINE), 1),
+            (REFUSED, 1),
         ),
         (
             "grep -r ada /d",
             "decline",
             ValueError,
-            (_refused(ScanReason.UNANSWERED), 1),
+            (REFUSED, 1),
         ),
         # An OSError is a per-file read error to grep, which goes on to the
         # next file; that file is refused too, not read.

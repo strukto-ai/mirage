@@ -16,9 +16,12 @@ from dataclasses import replace
 
 import pytest
 
+from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.errors.fs import enotsup, walk_declined
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 FILE = FileType.FILE
 DIR = FileType.DIRECTORY
@@ -141,3 +144,80 @@ async def test_a_dotted_or_refused_operand_is_never_answered_from_an_earlier_ans
     await readdir(refused)
     assert mount.asked == ["/m", "/m/a", "/m/e"]
     assert mount.calls == ["stat /m/a", "stat /m/e"]
+
+
+class GuardedRAM(RAMVFS):
+    """A RAM mount that refuses every full scan, keeping its reads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scans: list[str] = []
+        self.reads: list[str] = []
+
+    async def read(self, path, index=NULL_INDEX, offset=0, size=None):
+        self.reads.append(path.virtual)
+        return await super().read(path, index, offset, size)
+
+    def read_stream(self, path, index=NULL_INDEX):
+        self.reads.append(path.virtual)
+        return super().read_stream(path, index)
+
+    async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
+        self.scans.append(path.virtual)
+        raise ValueError(f"{files} files in scope, narrow the path")
+
+
+async def _guarded(line: str) -> tuple[GuardedRAM, bytes, int]:
+    vfs = GuardedRAM()
+    vfs._store.dirs.update({"/d", "/d/sub", "/e"})
+    vfs._store.files.update(
+        {"/d/a.txt": b"ada\n", "/d/sub/b.txt": b"bob\n", "/e/a.txt": b"x\n"}
+    )
+    ws = Workspace({"/g/": vfs, "/out/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(line)
+        return vfs, result.stderr or b"", result.exit_code
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "grep -r ada /g/d",
+        "rg ada /g/d",
+        "rg --sort modified ada /g/d /out",
+        "tar -cf /out/a.tar /g/d",
+        "tar -cf - /g/d",
+        "zip -qr /out/a.zip /g/d",
+        "cp -r /g/d /out/c",
+        "cp -r /g/d /g/c",
+        "mv /g/d /out/m",
+        "diff -r /g/d /g/e",
+    ],
+)
+async def test_a_command_reading_a_whole_directory_asks_first(line):
+    vfs, stderr, code = await _guarded(line)
+    name = line.split()[0]
+    assert vfs.scans and vfs.reads == []
+    assert stderr == f"{name}: 2 files in scope, narrow the path\n".encode()
+    assert code != 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cat /g/d/a.txt",
+        "find /g/d",
+        "ls -R /g/d",
+        "du -a /g/d",
+        "cp /g/d/a.txt /out/a.txt",
+        "zip -q /out/a.zip /g/d/a.txt",
+        "grep ada /g/d/a.txt",
+    ],
+)
+async def test_a_command_reading_named_files_asks_nothing(line):
+    vfs, stderr, code = await _guarded(line)
+    assert (vfs.scans, stderr, code) == ([], b"", 0)

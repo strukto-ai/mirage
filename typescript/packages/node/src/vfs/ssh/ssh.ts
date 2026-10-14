@@ -75,11 +75,13 @@ export class SSHVFS extends BaseVFS {
   }
 
   override storageLocation(): string {
-    // The host, its port and the root pin the files two mounts would share;
-    // the user does not, since two logins see one disk.
+    // The host, its port and an absolute root pin the files two mounts
+    // share, whoever logs in; a relative root starts at the login's own
+    // directory, so the login is part of it.
     const cfg = this.config
-    const root = rstripSlash(cfg.root ?? '/')
-    return `${this.name}:${cfg.hostname ?? cfg.host}:${String(cfg.port ?? 22)}${root}`
+    const raw = cfg.root ?? '/'
+    const login = raw.startsWith('/') ? '' : `${cfg.username ?? ''}@`
+    return `${this.name}:${login}${cfg.hostname ?? cfg.host}:${String(cfg.port ?? 22)}${rstripSlash(raw)}`
   }
 
   override readonly readsRanges: boolean = true

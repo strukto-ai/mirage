@@ -55,7 +55,7 @@ from mirage.utils.ranges import slice_window, splice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
-from mirage.vfs.types import ScanReason, SearchQuery, VfsCall
+from mirage.vfs.types import SearchQuery, VfsCall
 from mirage.workspace import Workspace
 from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
 from mirage.workspace.dispatcher.dispatcher import Dispatcher, _MountChannel
@@ -2061,13 +2061,12 @@ class SearchedRAM(RAMVFS):
 
     async def search(self, path, query, index=NULL_INDEX):
         return [
-            f"{mounted_path(path, key).virtual}:0.5\nabout {key}"
+            (hit, f"{hit}\nabout {key}")
             for key in self._store.files
+            for hit in [mounted_path(path, key).virtual]
         ]
 
-    async def before_full_scan(
-        self, path, command, reason, *, files=None, index=NULL_INDEX
-    ):
+    async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
         self.counted.append(files)
 
 
@@ -2111,7 +2110,26 @@ async def test_a_hide_drops_its_files_from_a_search(secret_hidden):
         records, _ = await ws.dispatch(
             "search", _path("/ram/d"), query=SearchQuery("a")
         )
-        assert records == ["/ram/d/a.txt:0.5\nabout /d/a.txt"]
+        assert records == [("/ram/d/a.txt", "/ram/d/a.txt\nabout /d/a.txt")]
+
+
+@pytest.mark.asyncio
+async def test_a_hide_drops_a_hit_whose_name_reads_like_a_score():
+    vfs = _searched()
+    vfs._store.files["/d/n:12"] = b"n\n"
+    session = SessionState(
+        session_id="agent",
+        visibility=Visibility(paths=HiddenPaths(paths=("/ram/d/n:12",))),
+    )
+    token = set_current_session(session)
+    try:
+        with Workspace({"/ram/": vfs}) as ws:
+            records, _ = await ws.dispatch(
+                "search", _path("/ram/d"), query=SearchQuery("n")
+            )
+    finally:
+        reset_current_session(token)
+    assert "/ram/d/n:12" not in [hit for hit, _ in records]
 
 
 @pytest.mark.asyncio
@@ -2127,10 +2145,26 @@ async def test_a_scan_guard_counts_only_the_files_the_session_sees(
 ):
     vfs = _searched()
     with Workspace({"/ram/": vfs}) as ws:
-        await ws.dispatch(
-            "before_full_scan",
-            _path("/ram/d"),
-            command="grep",
-            reason=ScanReason.NO_SEARCH,
-        )
+        await ws.dispatch("before_full_scan", _path("/ram/d"))
         assert vfs.counted == [1]
+
+
+class TreeCountingRAM(RAMVFS):
+    """A RAM mount with no scan guard that counts its tree reads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.trees = 0
+
+    async def read_tree(self, path, index=NULL_INDEX):
+        self.trees += 1
+        return await super().read_tree(path, index)
+
+
+@pytest.mark.asyncio
+async def test_a_mount_with_no_scan_guard_is_not_counted():
+    vfs = TreeCountingRAM()
+    vfs._store.dirs.add("/d")
+    with Workspace({"/ram/": vfs}) as ws:
+        answer, _ = await ws.dispatch("before_full_scan", _path("/ram/d"))
+    assert (answer, vfs.trees) == (None, 0)

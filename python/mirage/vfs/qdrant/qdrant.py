@@ -79,7 +79,7 @@ class QdrantVFS(BaseVFS):
         path: PathSpec,
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         return await SEARCH.search(self.accessor, path, query, index)
 
     async def search_many(
@@ -87,7 +87,7 @@ class QdrantVFS(BaseVFS):
         paths: list[PathSpec],
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         many = SEARCH.search_many
         if many is None:
             raise enotsup(self.name, "search", paths[0])

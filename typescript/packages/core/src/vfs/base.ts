@@ -23,7 +23,7 @@ import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
 import { methodName, vfsCall } from './call.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
-import { Effect, type ScanReason, type SearchQuery, Target } from './types.ts'
+import { Effect, type SearchQuery, Target } from './types.ts'
 
 /**
  * The two keys the snapshot machinery reads out of a VFS's state.
@@ -548,14 +548,19 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * Search the resource under `path`; null declines, [] is none. One record
-   * per hit, which the `search` command prints in turn: a header line naming
-   * the hit's path (`path:score` where the store ranks), then the hit's text.
-   * The dispatcher drops each record whose path the session hides. Errors and
-   * incomplete results reject, never answered as a miss.
+   * Search the resource under `path`; null declines, [] is none. One
+   * `[path, record]` pair per hit: the hit's virtual path, which the
+   * dispatcher drops the hit for when the session hides it, and the record
+   * the `search` command prints, a header line naming the path (`path:score`
+   * where the store ranks) and then the hit's text. Errors and incomplete
+   * results reject, never answered as a miss.
    */
   @vfsCall({ effect: Effect.READ, subtree: true })
-  search(path: PathSpec, _query: SearchQuery, _index?: IndexCacheStore): Promise<string[] | null> {
+  search(
+    path: PathSpec,
+    _query: SearchQuery,
+    _index?: IndexCacheStore,
+  ): Promise<[string, string][] | null> {
     return Promise.reject(enotsup(this.name, 'search', path))
   }
 
@@ -564,7 +569,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     paths: PathSpec[],
     _query: SearchQuery,
     _index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return Promise.reject(enotsup(this.name, 'search', paths[0] ?? ''))
   }
 
@@ -631,34 +636,20 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * Called before grep or rg reads a file no search answered, once per command
-   * and directory: before the walk when neither search can be asked, else at
-   * the first file `linesContaining` declines after `filesContaining` did not
-   * narrow, and a refusal then stands for every such file. Resolve to let the
-   * scan run; reject to refuse it, and the error's message is what the command
-   * prints (a filesystem error rejected at a file is that file's read error).
+   * Called before a command reads every file under `path`, once per directory
+   * a command walks, before the first file it reads there: grep -r and rg
+   * where no search narrowed the walk, and tar -c, zip -r, cp -r, mv across
+   * mounts and diff -r always. Resolve to let the scan run; reject to refuse
+   * it, and the error's message is what the command prints.
    *
-   * @param path a directory about to be walked, as `filesContaining` gets it.
-   * @param command grep or rg.
-   * @param reason why the search cannot stand in: NO_SEARCH (no search on
-   *   this mount), NO_TEXT (-f, or no plain text every match holds),
-   *   EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg --files-without-match,
-   *   rg -c with --include-zero, without -q), LINKS (rg -L), BINARY (grep -a,
-   *   rg --binary: a binary file is read) or UNANSWERED (a search resolved
-   *   null or a path rule declined it).
+   * @param path the directory about to be walked.
    * @param files how many files the session sees under `path`, from the
    *   mount's `readTree` with every hidden file dropped; null when `readTree`
    *   cannot answer, and the guard counts them itself.
    * @param index the mount's index.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
-  beforeFullScan(
-    _path: PathSpec,
-    _command: string,
-    _reason: ScanReason,
-    _files: number | null,
-    _index?: IndexCacheStore,
-  ): Promise<void> {
+  beforeFullScan(_path: PathSpec, _files: number | null, _index?: IndexCacheStore): Promise<void> {
     return Promise.resolve()
   }
 

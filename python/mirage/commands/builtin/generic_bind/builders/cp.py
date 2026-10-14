@@ -174,6 +174,7 @@ async def cp(
             else None
         ),
         stdin=opts.stdin,
+        dispatch=opts.dispatch,
     )
 
 

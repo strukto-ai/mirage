@@ -40,13 +40,13 @@ export async function searchRowsOutput<A extends Accessor>(
   topK: number,
   threshold: number,
   mountPrefix: string,
-): Promise<string[]> {
+): Promise<[string, string][]> {
   if (query === '') throw new Error('search: query is required')
   if (topK <= 0) throw new Error('search: top-k must be positive')
   const pinned = tree.pinned(accessor)
   const table = targetTable(pinned, paths)
   if (table === null) throw new Error('search: no table to search')
-  const blocks: string[] = []
+  const blocks: [string, string][] = []
   for (const row of await tree.searchRows(accessor, table, query, topK)) {
     const rank = row[tree.rankKey]
     const ranked = rank !== null && rank !== undefined
@@ -56,7 +56,7 @@ export async function searchRowsOutput<A extends Accessor>(
       '/',
     )
     const header = ranked ? `${path}:${Number(rank).toFixed(4)}` : path
-    blocks.push(`${header}\n${DEC.decode(body).replace(/\n+$/, '')}`)
+    blocks.push([path, `${header}\n${DEC.decode(body).replace(/\n+$/, '')}`])
   }
   return blocks
 }
@@ -65,7 +65,11 @@ export async function searchRowsOutput<A extends Accessor>(
 export function makeSearch<A extends Accessor>(
   tree: VectorTree<A>,
 ): Required<Pick<SearchOps<A>, 'search' | 'searchMany'>> {
-  async function searchMany(accessor: A, paths: PathSpec[], query: SearchQuery): Promise<string[]> {
+  async function searchMany(
+    accessor: A,
+    paths: PathSpec[],
+    query: SearchQuery,
+  ): Promise<[string, string][]> {
     validateOptions(query, ['top_k', 'threshold', 'method'])
     const topK = intOption(query, 'top_k', tree.searchLimit(accessor))
     const first = paths[0]

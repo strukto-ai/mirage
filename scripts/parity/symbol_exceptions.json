@@ -1,5 +1,5 @@
 {
-  "baseline": 3766,
+  "baseline": 3764,
  "modules": {
   "core/render/json": {
    "python_only": {

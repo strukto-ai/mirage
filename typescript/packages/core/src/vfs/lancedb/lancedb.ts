@@ -57,7 +57,7 @@ export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
     path: PathSpec,
     query: SearchQuery,
     index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return SEARCH.search(this.accessor, path, query, index)
   }
 
@@ -65,7 +65,7 @@ export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
     paths: PathSpec[],
     query: SearchQuery,
     index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return SEARCH.searchMany(this.accessor, paths, query, index)
   }
 }

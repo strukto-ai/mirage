@@ -45,7 +45,7 @@ async def zip_cmd(
         bound_op(ops.read_bytes, accessor, opts.index),
         partial(require_op(ops, Operation.WRITE), accessor),
         partial(ops.stat, accessor, index=opts.index),
-        walk_of(ops, accessor, opts.index),
+        walk_of(ops, accessor, opts.index, opts.dispatch, "zip"),
     )
 
 

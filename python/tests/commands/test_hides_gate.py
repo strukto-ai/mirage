@@ -60,19 +60,15 @@ def test_the_chokepoints_read_the_gate():
     """The shared fast-path forks consume the per-operand gate;
     deleting a read is how the guard silently dies, so each is pinned
     the way test_links_optin pins ``opts.ns.links``. find and the other
-    walks ask ``read_tree``, and grep and rg ask ``files_containing``,
-    ``lines_containing`` and ``before_full_scan``, all at the dispatcher,
-    which judges them for the session itself."""
+    walks ask ``read_tree``, and grep and rg ask ``files_containing``
+    and ``lines_containing``, all at the dispatcher, which judges them
+    for the session itself."""
     module = importlib.import_module("mirage.commands.builtin.generic.du")
     assert GATE in inspect.getsource(module), (
         f"du no longer consults {GATE}; its one-total fast path would "
         "answer for entries the session hides"
     )
-    assert {
-        "files_containing",
-        "lines_containing",
-        "before_full_scan",
-    } <= set(_DISPATCHED_SLOTS)
+    assert {"files_containing", "lines_containing"} <= set(_DISPATCHED_SLOTS)
 
 
 def test_every_wired_find_core_forks_to_the_guarded_walk():

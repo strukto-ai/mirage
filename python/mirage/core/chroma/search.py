@@ -23,7 +23,7 @@ async def search_segments(
     index: IndexCacheStore = NULL_INDEX,
     top_k: int = 10,
     mount_prefix: str = "",
-) -> list[str]:
+) -> list[tuple[str, str]]:
     validate_query(query, top_k)
     if not mount_prefix and paths:
         mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
@@ -54,11 +54,11 @@ def render_records(
     slug_field: str,
     mount_prefix: str,
     scoped_slugs: set[str] | None = None,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     documents = first_result_list(response.get("documents"))
     metadatas = first_result_list(response.get("metadatas"))
     distances = first_result_list(response.get("distances"))
-    contents: list[str] = []
+    contents: list[tuple[str, str]] = []
     for index, document in enumerate(documents):
         metadata = metadatas[index] if index < len(metadatas) else {}
         if not isinstance(metadata, dict):
@@ -77,7 +77,7 @@ def render_records(
         if prefix:
             path = prefix + path
         content = "" if document is None else str(document)
-        contents.append(f"{path}:{score}\n{content}")
+        contents.append((path, f"{path}:{score}\n{content}"))
     return contents
 
 
@@ -94,7 +94,7 @@ async def search_many(
     paths: list[PathSpec],
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     validate_options(query, {"top_k"})
     top_k = int_option(query, "top_k", 10)
     targets, prefix = await search_scope(CHROMA_TREE, accessor, paths, index)
@@ -113,7 +113,7 @@ async def search_resource(
     path: PathSpec,
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     return await search_many(accessor, [path], query, index)
 
 

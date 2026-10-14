@@ -26,6 +26,8 @@ import {
 } from '../../../types.ts'
 import { isFifo } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { beforeFullScan } from '../utils/tree.ts'
 import { backupControl, siblingPath } from '../utils/backup.ts'
 import { DEFAULT_BACKUP_SUFFIX } from '../utils/constants.ts'
 import {
@@ -348,6 +350,9 @@ export async function mvGeneric(
   // Whether a path is a mount root, which a move can neither replace nor
   // rename aside; undefined outside a workspace.
   mountRoot?: (path: string) => boolean,
+  // The command's dispatcher, which lets a source's mount refuse a tree
+  // copied across mounts; undefined outside a workspace.
+  dispatch?: DispatchFn,
 ): Promise<[ByteSource | null, IOResult]> {
   if (copies !== undefined) stat = (path) => linkStat(copies, path)
   const keyOf = backendKey ?? backendKeyDefault
@@ -622,6 +627,7 @@ export async function mvGeneric(
       // Across mounts GNU copies and then removes, and -v says so entry by
       // entry instead of `renamed` (coreutils 9.7).
       const verbose = flags.verbose ? lines : undefined
+      if (srcIsDir) await beforeFullScan(dispatch, src, 'mv')
       const entries = await cpWalk(strategy.readdir, stat, src, index)
       const copiedAll = await copyEntries(
         'mv',

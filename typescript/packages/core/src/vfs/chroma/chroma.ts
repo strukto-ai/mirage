@@ -110,7 +110,7 @@ export class ChromaVFS extends BaseVFS {
     path: PathSpec,
     query: SearchQuery,
     index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return searchResource(this.accessor, path, query, index)
   }
 
@@ -118,7 +118,7 @@ export class ChromaVFS extends BaseVFS {
     paths: PathSpec[],
     query: SearchQuery,
     index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return searchMany(this.accessor, paths, query, index)
   }
 }

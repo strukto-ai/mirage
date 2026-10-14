@@ -1,19 +1,20 @@
 ---
 title: Search
-description: The VFS methods grep and rg ask, and which commands and flags use each.
+description: The VFS methods grep and rg ask, the scan guard every whole-directory read asks, and which commands and flags use each.
 icon: magnifying-glass
 ---
 
 A VFS that defines these methods lets `grep` and `rg` skip files and lines. The
 commands still walk, filter, order and label every file, so output is the same
-as a full scan.
+as a full scan. `before_full_scan` lets the VFS refuse any command that is about
+to read every file under a directory.
 
 ## Interface
 
 <CodeGroup>
 
 ```python Python
-from mirage import NULL_INDEX, BaseVFS, PathSpec, ScanReason
+from mirage import NULL_INDEX, BaseVFS, PathSpec
 from mirage.io.types import ByteSource
 
 
@@ -42,8 +43,6 @@ class MyVFS(BaseVFS):
     async def before_full_scan(
         self,
         path: PathSpec,
-        command: str,
-        reason: ScanReason,
         *,
         files: int | None = None,
         index=NULL_INDEX,
@@ -51,7 +50,7 @@ class MyVFS(BaseVFS):
 ```
 
 ```ts TypeScript
-import { BaseVFS, type PathSpec, type ScanReason } from '@struktoai/mirage-core'
+import { BaseVFS, type PathSpec } from '@struktoai/mirage-core'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 
 class MyVFS extends BaseVFS {
@@ -69,12 +68,7 @@ class MyVFS extends BaseVFS {
     opts: { ignoreCase: boolean },
   ): Promise<ByteSource | null> { /* ... */ }
 
-  override beforeFullScan(
-    path: PathSpec,
-    command: string,
-    reason: ScanReason,
-    files: number | null,
-  ): Promise<void> { /* ... */ }
+  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> { /* ... */ }
 }
 ```
 
@@ -105,7 +99,7 @@ always read; `None` (`null`), the default, covers every file.
 | --- | --- | --- |
 | `files_containing` | `grep -r`, `-R` or `-d recurse`, `rg` | once per directory operand and pattern, when the walk reads any file, unless a flag below scans |
 | `lines_containing` | `grep`, `rg` | in place of the file with no `-n`, `-b`, `-A`, `-B`, `-C` (grep also no `-NUM` or `-z`; rg also no `--column`, `--vimgrep`, `--stop-on-nonmatch`, `--null-data`, `-U`) and one pattern; otherwise to decide whether the file is read |
-| `before_full_scan` | `grep -r`, `-R` or `-d recurse`, `rg` | once per directory operand, before the first file no search answered is read |
+| `before_full_scan` | `grep -r`, `-R` or `-d recurse`, `rg`, `tar -c`, `zip -r`, `cp -r`, `mv` across mounts, `diff -r` | once per directory a command walks, before it reads a file there; for `grep` and `rg`, only where no search answered |
 
 | Argument | Set by |
 | --- | --- |
@@ -115,18 +109,21 @@ always read; `None` (`null`), the default, covers every file.
 | `whole_word` | `-w` or `-x` with a plain-text pattern |
 | `ignore_case` | `-i`; for `rg`, also `-S` with a lowercase pattern |
 
-These flags scan every file and call `before_full_scan` with the reason:
+`grep` and `rg` read every file, and ask `before_full_scan` instead of the
+search, when:
 
-| Flags | `ScanReason` |
-| --- | --- |
-| `-v`; `rg --passthru` | `EVERY_LINE` |
-| `rg --files-without-match`; `rg -c` or `--count-matches` with `--include-zero`; not under `-q`; `rg --stats`, `--json` | `EVERY_FILE` |
-| `-f`; no plain text of three characters in the pattern; under `-i`, a word with a non-ASCII letter, or with i, k or s under Unicode folding; under `rg -U`, a text with a line break | `NO_TEXT` |
-| `rg -L` | `LINKS` |
-| `grep -a`, `--binary-files=text`, `rg -a`, `--binary` or `-uuu`, after a search answered | `BINARY` |
-| `rg -z`, `--pre`, `-E` naming an encoding | `TRANSFORMED` |
-| no search method | `NO_SEARCH` |
-| a search answered `None`, or a path rule reaches below the directory | `UNANSWERED` |
+- the mount has no search method, a search answered `None`, or a path rule
+  reaches below the directory;
+- the line has `-v` or `rg --passthru`;
+- the output lists files that do not match: `rg --files-without-match`, `rg -c`
+  or `--count-matches` with `--include-zero` and no `-q`, `rg --stats`,
+  `--json`;
+- the pattern has no plain text of three characters (`-f`; under `-i`, a word
+  with a non-ASCII letter, or with i, k or s under Unicode folding; under
+  `rg -U`, a text with a line break);
+- `rg -L`, `rg -z`, `--pre`, or `-E` naming an encoding;
+- `grep -a`, `--binary-files=text`, `rg -a`, `--binary` or `-uuu`, after a
+  search answered, since every binary-extension file is then read.
 
 Every other flag is applied by the walk as usual. `rg --files` and
 `rg --type-list` read no content and ask nothing. `files_containing` never
@@ -136,9 +133,10 @@ decodes a file that starts with a UTF-16 byte-order mark before searching it,
 so a `files_containing` that searches the stored bytes can rule out a file
 `rg` would match.
 
-Raise from `before_full_scan` to refuse: the command prints `grep: <message>`
-and exits 1. A filesystem error raised at a file is that file's read error
-instead, and grep exits 2.
+Raise from `before_full_scan` to refuse: the command prints
+`<command>: <message>` and exits 1, whether it runs on one mount or across
+several. From `grep` or `rg`, a filesystem error raised at a file is that file's
+read error instead, and the command exits 2.
 
 ## Backends
 

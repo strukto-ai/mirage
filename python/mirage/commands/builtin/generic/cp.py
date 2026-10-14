@@ -37,6 +37,7 @@ from mirage.commands.builtin.utils.paths import (
     nearest_ancestor,
     spelled_from,
 )
+from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
@@ -1664,6 +1665,7 @@ async def cp_generic(
     link_at: Callable[[PathSpec], FileStat | None] | None = None,
     copies: TransferLinks | None = None,
     stdin: ByteSource | None = None,
+    dispatch: DispatchFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Copy sources to a destination, fanning out into a directory.
 
@@ -1694,6 +1696,9 @@ async def cp_generic(
             policy says to; None outside a workspace, where no link can
             stand.
         stdin (ByteSource | None): where ``-i`` reads its answers.
+        dispatch (DispatchFn | None): the command's dispatcher, which
+            lets a source's mount refuse a tree copied file by file;
+            None outside a workspace.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Verbose output, with
@@ -1946,6 +1951,7 @@ async def cp_generic(
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
             if isinstance(strategy, PrimitiveCopy):
+                await before_full_scan(dispatch, src, "cp")
                 entries = await walk(
                     strategy.readdir,
                     stat,
@@ -2024,6 +2030,7 @@ async def cp_generic(
             # dispatcher declines, so the tree's directories are recreated
             # here: a files-only pass would drop every directory that
             # holds no files (GNU keeps them).
+            await before_full_scan(dispatch, src, "cp")
             blocked, made = await _mirror_dirs(
                 strategy,
                 stat,

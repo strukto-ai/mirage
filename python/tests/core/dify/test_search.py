@@ -122,8 +122,11 @@ async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
     )
 
     assert result == [
-        "/knowledge/guides/api:0.92\napi segment",
-        "/knowledge/guides/auth:0.81\nauth segment",
+        ("/knowledge/guides/api", "/knowledge/guides/api:0.92\napi segment"),
+        (
+            "/knowledge/guides/auth",
+            "/knowledge/guides/auth:0.81\nauth segment",
+        ),
     ]
     retrieval = bodies[0]["retrieval_model"]
     assert retrieval["search_method"] == "hybrid_search"
@@ -267,7 +270,9 @@ async def test_search_segments_empty_paths_searches_whole_dataset(monkeypatch):
         mount_prefix="/knowledge/",
     )
 
-    assert result == ["/knowledge/README.md:0.77\ndataset match"]
+    assert result == [
+        ("/knowledge/README.md", "/knowledge/README.md:0.77\ndataset match")
+    ]
     assert "metadata_filtering_conditions" not in bodies[0]["retrieval_model"]
 
 
@@ -303,8 +308,8 @@ def test_render_records_formats_absolute_paths_and_scores():
     )
 
     assert result == [
-        "/knowledge/guides/api:0.92\napi segment",
-        "/knowledge/README.md\nauth segment",
+        ("/knowledge/guides/api", "/knowledge/guides/api:0.92\napi segment"),
+        ("/knowledge/README.md", "/knowledge/README.md\nauth segment"),
     ]
 
 
@@ -351,8 +356,14 @@ def test_render_records_keeps_multiple_chunks_for_same_document():
     )
 
     assert result == [
-        "/knowledge/policies/refunds:0.82\nfirst chunk",
-        "/knowledge/policies/refunds:0.79\nsecond chunk",
+        (
+            "/knowledge/policies/refunds",
+            "/knowledge/policies/refunds:0.82\nfirst chunk",
+        ),
+        (
+            "/knowledge/policies/refunds",
+            "/knowledge/policies/refunds:0.79\nsecond chunk",
+        ),
     ]
 
 
@@ -388,7 +399,12 @@ def test_render_records_skips_records_with_invalid_slug():
         "/knowledge/",
     )
 
-    assert result == ["/knowledge/policies/refunds:0.79\ngood chunk"]
+    assert result == [
+        (
+            "/knowledge/policies/refunds",
+            "/knowledge/policies/refunds:0.79\ngood chunk",
+        )
+    ]
 
 
 def test_render_records_omits_score_for_non_numeric_values():
@@ -413,7 +429,9 @@ def test_render_records_omits_score_for_non_numeric_values():
         "/knowledge/",
     )
 
-    assert result == ["/knowledge/policies/refunds\nchunk"]
+    assert result == [
+        ("/knowledge/policies/refunds", "/knowledge/policies/refunds\nchunk")
+    ]
 
 
 @pytest.mark.asyncio

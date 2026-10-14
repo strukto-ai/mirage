@@ -40,6 +40,7 @@ from mirage.commands.builtin.grep_pushdown import (
     search_terms,
 )
 from mirage.commands.builtin.types import SearchTerms
+from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -47,20 +48,23 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import revision_for
+from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileType, PathSpec
 from mirage.utils.encoding import bom_of
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import glob_prefix_match
-from mirage.vfs.types import ScanReason
 
 logger = logging.getLogger(__name__)
 
 
 def grep_terms(
     fl: FlagView, texts: list[str], utf8: bool
-) -> SearchTerms | ScanReason:
-    """What a grep line asks the mount's search, or why it cannot ask.
+) -> SearchTerms | None:
+    """What a grep line asks the mount's search; None when it must read
+    every file: -v, -f, or no plain text of three characters every match
+    holds (under -i, a word with a non-ASCII letter, or with i, k or s
+    when case folds by Unicode, counts as none).
 
     Args:
         fl (FlagView): the line's grep flags.
@@ -73,9 +77,9 @@ def grep_terms(
     f = parse_grep_flags(fl, False)
     pattern = pattern_arg(texts, fl)
     if f.invert:
-        return ScanReason.EVERY_LINE
+        return None
     if pattern is None or fl.raw("file"):
-        return ScanReason.NO_TEXT
+        return None
     matcher = compile_pattern(
         byte_view(pattern, utf8),
         f.ignore_case,
@@ -94,7 +98,7 @@ def grep_terms(
         f.ignore_case,
     )
     if found is None:
-        return ScanReason.NO_TEXT
+        return None
     return SearchTerms(
         texts=found[0],
         whole_word=found[1],
@@ -110,12 +114,12 @@ def grep_terms(
     )
 
 
-def rg_terms(
-    fl: FlagView, texts: list[str]
-) -> SearchTerms | ScanReason | None:
-    """What an rg line asks the mount's search, or why it cannot ask.
-
-    None when the line reads no file content (--files, --type-list).
+def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | None:
+    """What an rg line asks the mount's search; None when it must read
+    every file: -v or --passthru, a listing of files that do not match
+    (--files-without-match, -c or --count-matches with --include-zero,
+    without -q; --stats, --json), -L, -z, --pre, -E naming an encoding,
+    -f, or no plain text every match holds.
 
     Args:
         fl (FlagView): the line's rg flags.
@@ -125,24 +129,22 @@ def rg_terms(
         UsageError: a flag or pattern rg refuses.
     """
     f = parse_rg_flags(fl)
-    if f.list_files or f.type_list:
-        return None
     pattern = pattern_arg(texts, fl)
     if f.invert or f.passthru:
-        return ScanReason.EVERY_LINE
+        return None
     if not f.quiet and (
         f.files_without_match
         or (f.include_zero and (f.count_only or f.count_matches))
     ):
-        return ScanReason.EVERY_FILE
+        return None
     if f.stats or f.json:
-        return ScanReason.EVERY_FILE
+        return None
     if f.follow:
-        return ScanReason.LINKS
+        return None
     if f.search_zip or f.pre is not None or f.encoding not in ("auto", "none"):
-        return ScanReason.TRANSFORMED
+        return None
     if pattern is None or fl.raw("file"):
-        return ScanReason.NO_TEXT
+        return None
     ignore_case = folds_case(pattern, f.fixed_string, f)
     found = search_terms(
         pattern,
@@ -157,7 +159,7 @@ def rg_terms(
     if found is None or (
         f.multiline and any("\n" in text for text in found[0])
     ):
-        return ScanReason.NO_TEXT
+        return None
     return SearchTerms(
         texts=found[0],
         whole_word=found[1],
@@ -329,7 +331,8 @@ async def search_reads(
     ``files_containing`` answer, judges ``lines_containing`` as a read of
     its file, and answers None where a path rule or a pre_vfs policy
     reaches below a directory, so every file is read and judged. When
-    neither can stand in for a walk, ``before_full_scan`` may refuse it.
+    neither can stand in for a walk, the mount's ``before_full_scan`` may
+    refuse it.
 
     Args:
         io (CommandIO): the backend table.
@@ -343,11 +346,16 @@ async def search_reads(
     read_bytes = bound_op(io.read_bytes, accessor, index)
     read_stream = bound_op(io.read_stream, accessor, index)
     files, lines = io.files_containing, io.lines_containing
+    fl = FlagView(opts.flags, spec=SPECS[name])
     if not paths or (
-        files is None and lines is None and io.before_full_scan is None
+        name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
     ):
         return read_bytes, read_stream
-    fl = FlagView(opts.flags, spec=SPECS[name])
+    walked = name == "rg" or directories_action(fl) == "recurse"
+    if files is None and lines is None:
+        if walked:
+            await _full_scan(opts.dispatch, paths, name)
+        return read_bytes, read_stream
     try:
         terms = (
             rg_terms(fl, texts)
@@ -357,12 +365,9 @@ async def search_reads(
     except UsageError as exc:
         logger.debug("%s search left to the scan: %s", name, exc)
         return read_bytes, read_stream
-    if terms is None:
-        return read_bytes, read_stream
-    walked = name == "rg" or directories_action(fl) == "recurse"
     dirs = await _directories(io, accessor, index, paths) if walked else []
-    if isinstance(terms, ScanReason):
-        await _full_scan(io, name, accessor, dirs, terms, index)
+    if terms is None:
+        await _full_scan(opts.dispatch, dirs, name)
         return read_bytes, read_stream
     drops_mark = name == "rg" and encoding_flag(fl) != "none"
     hits: set[str] | None = None
@@ -389,17 +394,10 @@ async def search_reads(
                 for hit in answer
             }
     if hits is None and lines is None:
-        await _full_scan(
-            io,
-            name,
-            accessor,
-            dirs,
-            ScanReason.NO_SEARCH if files is None else ScanReason.UNANSWERED,
-            index,
-        )
+        await _full_scan(opts.dispatch, dirs, name)
         return read_bytes, read_stream
     if hits is not None and terms.reads_binary:
-        await _full_scan(io, name, accessor, dirs, ScanReason.BINARY, index)
+        await _full_scan(opts.dispatch, dirs, name)
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
     scan_asked = False
     refusal: Exception | None = None
@@ -411,9 +409,7 @@ async def search_reads(
         if hits is None and not scan_asked:
             scan_asked = True
             try:
-                await _full_scan(
-                    io, name, accessor, dirs, ScanReason.UNANSWERED, index
-                )
+                await _full_scan(opts.dispatch, dirs, name)
             except Exception as exc:
                 refusal = exc
                 raise
@@ -473,25 +469,15 @@ async def search_reads(
 
 
 async def _full_scan(
-    io: CommandIO,
-    name: str,
-    accessor: Accessor,
-    dirs: list[PathSpec],
-    reason: ScanReason,
-    index: IndexCacheStore,
+    dispatch: DispatchFn | None, dirs: list[PathSpec], name: str
 ) -> None:
-    """Let the mount refuse a walk that will read every file.
+    """Let each walked directory's mount refuse a walk that reads every
+    file; the dispatcher passes over a path that is not a directory.
 
     Args:
-        io (CommandIO): the backend table.
+        dispatch (DispatchFn | None): the command's dispatcher.
+        dirs (list[PathSpec]): the operands about to be walked.
         name (str): grep or rg.
-        accessor (Accessor): backend handle.
-        dirs (list[PathSpec]): the directories about to be walked.
-        reason (ScanReason): why the search cannot stand in.
-        index (IndexCacheStore): the mount's index.
     """
-    if io.before_full_scan is not None:
-        for scope in dirs:
-            await io.before_full_scan(
-                accessor, scope, name, reason, index=index
-            )
+    for scope in dirs:
+        await before_full_scan(dispatch, scope, name)

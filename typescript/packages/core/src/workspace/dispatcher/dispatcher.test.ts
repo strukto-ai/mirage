@@ -29,7 +29,6 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
-import { ScanReason } from '../../vfs/types.ts'
 import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
@@ -1989,22 +1988,32 @@ class SearchedRAM extends RAMVFS {
     return Promise.resolve([...this.store.files.keys()].map((key) => mountedPath(path, key)))
   }
 
-  override search(path: PathSpec): Promise<string[] | null> {
+  override search(path: PathSpec): Promise<[string, string][] | null> {
     return Promise.resolve(
-      [...this.store.files.keys()].map(
-        (key) => `${mountedPath(path, key).virtual}:0.5\nabout ${key}`,
-      ),
+      [...this.store.files.keys()].map((key): [string, string] => {
+        const hit = mountedPath(path, key).virtual
+        return [hit, `${hit}\nabout ${key}`]
+      }),
     )
   }
 
-  override beforeFullScan(
-    _path: PathSpec,
-    _command: string,
-    _reason: ScanReason,
-    files: number | null,
-  ): Promise<void> {
+  override beforeFullScan(_path: PathSpec, files: number | null): Promise<void> {
     this.counted.push(files)
     return Promise.resolve()
+  }
+}
+
+// A RAM mount with no scan guard that counts its tree reads. Twin of
+// Python's TreeCountingRAM.
+class TreeCountingRAM extends RAMVFS {
+  trees = 0
+
+  override readTree(
+    path: PathSpec,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, FileStat> | null> {
+    this.trees += 1
+    return super.readTree(path, index)
   }
 }
 
@@ -2047,7 +2056,7 @@ describe('a hide filters a one-call read', () => {
         })) as PathSpec[]
         expect(hits.map((hit) => hit.virtual)).toEqual(['/ram/d/a.txt'])
         const records = await ws.dispatch('search', '/ram/d', [{ query: 'a', options: {} }])
-        expect(records).toEqual(['/ram/d/a.txt:0.5\nabout /d/a.txt'])
+        expect(records).toEqual([['/ram/d/a.txt', '/ram/d/a.txt\nabout /d/a.txt']])
       })
     } finally {
       await ws.close()
@@ -2071,10 +2080,40 @@ describe('a hide filters a one-call read', () => {
     const vfs = searched()
     const ws = new Workspace({ '/ram': vfs })
     try {
-      await runWithSession(secretHidden(), () =>
-        ws.dispatch('before_full_scan', '/ram/d', ['grep', ScanReason.NO_SEARCH]),
-      )
+      await runWithSession(secretHidden(), () => ws.dispatch('before_full_scan', '/ram/d'))
       expect(vfs.counted).toEqual([1])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_hide_drops_a_hit_whose_name_reads_like_a_score.
+  it('drops a hit whose name reads like a score', async () => {
+    const vfs = searched()
+    vfs.store.files.set('/d/n:12', new TextEncoder().encode('n\n'))
+    const ws = new Workspace({ '/ram': vfs })
+    const session = new SessionState({
+      sessionId: 'agent',
+      visibility: { paths: { paths: ['/ram/d/n:12'] } },
+    })
+    try {
+      const records = (await runWithSession(session, () =>
+        ws.dispatch('search', '/ram/d', [{ query: 'n', options: {} }]),
+      )) as [string, string][]
+      expect(records.map(([hit]) => hit)).not.toContain('/ram/d/n:12')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_mount_with_no_scan_guard_is_not_counted.
+  it('counts nothing for a mount with no scan guard', async () => {
+    const vfs = new TreeCountingRAM()
+    vfs.store.dirs.add('/d')
+    const ws = new Workspace({ '/ram': vfs })
+    try {
+      const answer = await ws.dispatch('before_full_scan', '/ram/d')
+      expect([answer, vfs.trees]).toEqual([null, 0])
     } finally {
       await ws.close()
     }

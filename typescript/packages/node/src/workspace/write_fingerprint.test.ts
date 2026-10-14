@@ -166,6 +166,20 @@ describe('object-store write fingerprint (mocked S3)', () => {
     }
   })
 
+  // Twin of test_an_empty_append_that_makes_the_file_drops_the_copy.
+  it('an empty append that makes the file drops the copy', async () => {
+    const ws = makeWorkspace(BOUNDED)
+    try {
+      await ws.shell("printf 'a\n' > /s3/x.txt")
+      mock.store.objects(BUCKET).delete('x.txt')
+      await ws.shell('true >> /s3/x.txt')
+      expect(await ws.cache.get('/s3/x.txt')).toBeNull()
+      expect(DEC.decode((await ws.shell('cat /s3/x.txt')).stdout)).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a write after a guarded cp keeps its own bytes', async () => {
     // Under a hide `cp` reads and writes entry by entry at the dispatcher;
     // a later write keeps its own bytes and token, which the old read's

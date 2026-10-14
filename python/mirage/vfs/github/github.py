@@ -30,7 +30,6 @@ from mirage.types import FileStat, ListingVersion, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.github.prompt import PROMPT
-from mirage.vfs.types import ScanReason
 from mirage.watch.base import DeltaHook
 
 
@@ -190,13 +189,11 @@ class GitHubVFS(BaseVFS):
     async def before_full_scan(
         self,
         path: PathSpec,
-        command: str,
-        reason: ScanReason,
         *,
         files: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
-        await _before_full_scan(self.accessor, index, path, reason, files)
+        await _before_full_scan(self.accessor, index, path, files)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

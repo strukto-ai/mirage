@@ -111,5 +111,6 @@ export async function runCp(
           ...(ns?.visibility !== undefined ? { visibility: ns.visibility } : {}),
         },
     stdin,
+    dispatch,
   )
 }

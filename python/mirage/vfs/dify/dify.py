@@ -62,7 +62,7 @@ class DifyVFS(BaseVFS):
         path: PathSpec,
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         return await search_resource(self.accessor, path, query, index)
 
     async def search_many(
@@ -70,7 +70,7 @@ class DifyVFS(BaseVFS):
         paths: list[PathSpec],
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         return await search_many(self.accessor, paths, query, index)
 
     def get_state(self) -> dict[str, Any]:

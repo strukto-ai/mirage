@@ -50,6 +50,7 @@ from mirage.commands.builtin.utils.copy import (
     path_exists,
     typed_name,
 )
+from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
@@ -57,6 +58,7 @@ from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.types import (
     FileType,
     MoveStrategy,
@@ -398,6 +400,7 @@ async def mv_generic(
     copies: TransferLinks | None = None,
     stdin: ByteSource | None = None,
     mount_root: MountIsRoot | None = None,
+    dispatch: DispatchFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Move sources to a destination, fanning out into a directory.
 
@@ -435,6 +438,9 @@ async def mv_generic(
         mount_root (MountIsRoot | None): Whether a path is a mount root,
             which a move can neither replace nor rename aside; None
             outside a workspace.
+        dispatch (DispatchFn | None): the command's dispatcher, which
+            lets a source's mount refuse a tree copied across mounts;
+            None outside a workspace.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Verbose output, with
@@ -748,6 +754,8 @@ async def mv_generic(
             # Across mounts GNU copies and then removes, and -v says so
             # entry by entry instead of `renamed` (coreutils 9.7).
             verbose = lines if flags.verbose else None
+            if src_is_dir:
+                await before_full_scan(dispatch, src, "mv")
             entries = await walk(strategy.readdir, stat, src)
             copied_all = await copy_entries(
                 "mv",

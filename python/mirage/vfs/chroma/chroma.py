@@ -65,7 +65,7 @@ class ChromaVFS(BaseVFS):
         path: PathSpec,
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         return await search_resource(self.accessor, path, query, index)
 
     async def files_containing(
@@ -86,7 +86,7 @@ class ChromaVFS(BaseVFS):
         paths: list[PathSpec],
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         return await search_many(self.accessor, paths, query, index)
 
     def get_state(self) -> dict[str, Any]:

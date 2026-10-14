@@ -31,19 +31,6 @@ export function textOption(query: SearchQuery, key: string, fallback: string): s
   return value
 }
 
-/**
- * The path a search record names: its first line, without the `:score` a
- * ranked store appends. Mirrors Python's `record_path`.
- */
-export function recordPath(record: string): string {
-  const newline = record.indexOf('\n')
-  const head = newline === -1 ? record : record.slice(0, newline)
-  const colon = head.lastIndexOf(':')
-  if (colon === -1) return head
-  const score = head.slice(colon + 1)
-  return score.trim() !== '' && Number.isFinite(Number(score)) ? head.slice(0, colon) : head
-}
-
 /** Batch when supported; single-scope callbacks otherwise concatenate records. */
 export async function searchResources<A extends Accessor>(
   capability: SearchOps<A> | undefined,
@@ -54,7 +41,7 @@ export async function searchResources<A extends Accessor>(
 ): Promise<Uint8Array> {
   if (capability === undefined) throw new Error('search: backend does not support resource search')
   if (paths.length === 0) throw new Error('search: at least one scope is required')
-  const records: string[] = []
+  const records: [string, string][] = []
   if (capability.searchMany !== undefined) {
     const answer = await capability.searchMany(accessor, paths, query, index)
     if (answer === null) throw new Error('search: backend declined the query')
@@ -66,5 +53,7 @@ export async function searchResources<A extends Accessor>(
       records.push(...answer)
     }
   }
-  return new TextEncoder().encode(records.length === 0 ? '' : records.join('\n') + '\n')
+  return new TextEncoder().encode(
+    records.length === 0 ? '' : records.map(([, record]) => record).join('\n') + '\n',
+  )
 }

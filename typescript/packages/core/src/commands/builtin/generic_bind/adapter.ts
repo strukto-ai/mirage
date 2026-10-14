@@ -17,7 +17,6 @@ import {
   Target,
   type ReadBytesOp,
   type ResolveGlobOp,
-  type ScanReason,
   type SearchQuery,
 } from '../../../vfs/types.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
@@ -266,19 +265,6 @@ export function commandIo(vfs: BaseVFS): CommandIO {
           ),
         }
       : {}),
-    ...(has('beforeFullScan')
-      ? {
-          beforeFullScan: withoutAccessor(
-            (
-              path: PathSpec,
-              command: string,
-              reason: ScanReason,
-              files: number | null,
-              index?: IndexCacheStore,
-            ) => vfs.beforeFullScan(path, command, reason, files, index),
-          ),
-        }
-      : {}),
     ...(has('firstLines')
       ? {
           firstLines: withoutAccessor((path: PathSpec, n: number, index?: IndexCacheStore) =>
@@ -478,11 +464,6 @@ const DISPATCHED_SLOTS = {
       (await dispatchedCall(dispatch, 'lines_containing', path, [text], {
         ignore_case: opts.ignoreCase,
       })) as ByteSource | null,
-  beforeFullScan:
-    (dispatch: DispatchFn): CommandIO['beforeFullScan'] =>
-    async (_accessor, path, command, reason) => {
-      await dispatchedCall(dispatch, 'before_full_scan', path, [command, reason])
-    },
 } satisfies Partial<Record<keyof CommandIO, (dispatch: DispatchFn) => unknown>>
 
 // The slots that change the mount: with no dispatcher there is nowhere to
@@ -498,7 +479,6 @@ const DISPATCHED_WRITES: ReadonlySet<string> = new Set(
         'readTree',
         'filesContaining',
         'linesContaining',
-        'beforeFullScan',
       ].includes(slot),
   ),
 )
@@ -552,7 +532,9 @@ export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): 
           search: {
             ...ops.search,
             search: async (_accessor: Accessor, path: PathSpec, query: SearchQuery) =>
-              (await dispatchedCall(dispatch, 'search', path, [query])) as string[] | null,
+              (await dispatchedCall(dispatch, 'search', path, [query])) as
+                | [string, string][]
+                | null,
           },
         }),
     readBytes: (_accessor, path) => dispatchedBytes(dispatch, path),

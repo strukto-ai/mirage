@@ -12,6 +12,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_bytes,
     stdin_stat,
 )
+from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -25,6 +26,7 @@ from mirage.commands.spec.usage import (
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import format_fs_error
 from mirage.io.types import ByteSource, IOResult
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
@@ -412,6 +414,7 @@ async def diff(
     argv: Sequence[str] = (),
     stat_path: StatPath | None = None,
     zone: tzinfo | None = None,
+    dispatch: DispatchFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
@@ -465,6 +468,8 @@ async def diff(
                 await stat_fn(paths[1])
             ).type == FileType.DIRECTORY
         if both_dirs:
+            for path in paths:
+                await before_full_scan(dispatch, path, "diff")
             output, differ = await _diff_dirs(paths[0], paths[1], walk)
         else:
             output = await _diff_pair(paths[0], paths[1], walk, absent)
@@ -540,4 +545,5 @@ async def diff_generic(
         argv=opts.argv,
         stat_path=opts.stat_path,
         zone=zone_from_env(opts.env),
+        dispatch=opts.dispatch,
     )

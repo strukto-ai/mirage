@@ -60,7 +60,7 @@ import {
 } from '../../core/generic/rewrite.ts'
 import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
-import { Effect, type ScanReason, type SearchQuery } from '../../vfs/types.ts'
+import { Effect, type SearchQuery } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
@@ -773,14 +773,8 @@ export class MountEntry {
         ]
       case 'before_full_scan':
         return [
-          (scope, args, kw) =>
-            vfs.beforeFullScan(
-              scope,
-              args[0] as string,
-              args[1] as ScanReason,
-              typeof kw.files === 'number' ? kw.files : null,
-              kw.index,
-            ),
+          (scope, _args, kw) =>
+            vfs.beforeFullScan(scope, typeof kw.files === 'number' ? kw.files : null, kw.index),
         ]
       case 'truncate':
         return [(scope, args, kw) => vfs.truncate(scope, lengthArg(args[0]), kw.no_create === true)]

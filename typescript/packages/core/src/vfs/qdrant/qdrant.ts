@@ -102,7 +102,7 @@ export class QdrantVFS extends BaseVFS {
     path: PathSpec,
     query: SearchQuery,
     index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return SEARCH.search(this.accessor, path, query, index)
   }
 
@@ -110,7 +110,7 @@ export class QdrantVFS extends BaseVFS {
     paths: PathSpec[],
     query: SearchQuery,
     index?: IndexCacheStore,
-  ): Promise<string[] | null> {
+  ): Promise<[string, string][] | null> {
     return SEARCH.searchMany(this.accessor, paths, query, index)
   }
 }

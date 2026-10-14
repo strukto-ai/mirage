@@ -6,6 +6,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
 from mirage.commands.builtin.generic.find import parse_find_args
+from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.config import CommandIO
 from mirage.core.generic.find import walk_find
 from mirage.runtime.types import DispatchFn
@@ -20,6 +21,8 @@ async def _walk(
     readdir: OperationFn,
     stat: OperationFn,
     index: IndexCacheStore | None,
+    dispatch: DispatchFn | None,
+    command: str,
     path: PathSpec,
     find_type: str,
 ) -> Walked:
@@ -30,15 +33,22 @@ async def _walk(
     directory operand makes share one readdir cache, so the second is
     answered from the index instead of the backend. A directory the
     walk could not open rides along, so the archiver can report it the
-    way GNU does instead of silently leaving its contents out.
+    way GNU does instead of silently leaving its contents out. The
+    files listed are every file the archiver reads, so the mount that
+    owns ``path`` may refuse the scan before they are listed.
 
     Args:
         readdir (OperationFn): backend readdir.
         stat (OperationFn): backend stat.
         index (IndexCacheStore | None): the per-call cache index.
+        dispatch (DispatchFn | None): the command's dispatcher, which
+            asks the mount's ``before_full_scan``.
+        command (str): tar or zip.
         path (PathSpec): the operand to walk.
         find_type (str): "d" or "f".
     """
+    if find_type == "f":
+        await before_full_scan(dispatch, path, command)
     unreadable: list[str] = []
     paths = await walk_find(
         path,
@@ -86,7 +96,11 @@ async def _is_dir(
 
 
 def walk_of(
-    ops: CommandIO, accessor: Accessor, index: IndexCacheStore
+    ops: CommandIO,
+    accessor: Accessor,
+    index: IndexCacheStore,
+    dispatch: DispatchFn | None,
+    command: str,
 ) -> WalkFn:
     """The subtree listing tar and zip both walk with.
 
@@ -94,12 +108,16 @@ def walk_of(
         ops (CommandIO): the bound backend operations.
         accessor (Accessor): the mount's accessor.
         index (IndexCacheStore): the per-call cache index.
+        dispatch (DispatchFn | None): the command's dispatcher.
+        command (str): tar or zip.
     """
     return partial(
         _walk,
         partial(ops.readdir, accessor),
         partial(ops.stat, accessor),
         index,
+        dispatch,
+        command,
     )
 
 
@@ -169,7 +187,9 @@ async def _own_listing(
     ]
 
 
-def relay_walk_of(dispatch: DispatchFn, owed: ChildMounts | None) -> WalkFn:
+def relay_walk_of(
+    dispatch: DispatchFn, owed: ChildMounts | None, command: str
+) -> WalkFn:
     """The subtree listing tar and zip walk with when a line spans mounts.
 
     Every directory is listed on the mount that owns it, so operands
@@ -180,12 +200,15 @@ def relay_walk_of(dispatch: DispatchFn, owed: ChildMounts | None) -> WalkFn:
         dispatch (DispatchFn): the workspace op dispatcher.
         owed (ChildMounts | None): the names the namespace owes a
             directory, which the scan merges itself.
+        command (str): tar or zip.
     """
     return partial(
         _walk,
         partial(_own_listing, dispatch, owed),
         partial(_relayed_stat, dispatch),
         None,
+        dispatch,
+        command,
     )
 
 

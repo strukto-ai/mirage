@@ -58,7 +58,10 @@ it('returns the canonical nested document lineage path', async () => {
   const path = new PathSpec({ virtual: '/db', directory: '/db', vfsPath: '' })
   const output = await searchRowsOutput(TREE, accessor, 'refund', [path], 1, 0, '/db')
   expect(output).toEqual([
-    '/db/refund.pdf/004__17.txt:0.8100\nRefunds are processed within 14 days',
+    [
+      '/db/refund.pdf/004__17.txt',
+      '/db/refund.pdf/004__17.txt:0.8100\nRefunds are processed within 14 days',
+    ],
   ])
 })
 

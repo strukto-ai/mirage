@@ -42,7 +42,9 @@ it('spells a group value in the canonical path the way the listing does', async 
   } as unknown as LanceDriver
   const accessor = new LanceDBAccessor(driver, config)
   const path = new PathSpec({ virtual: '/db/docs', directory: '/db/docs', vfsPath: 'docs' })
-  const output = (await searchRowsOutput(TREE, accessor, 'one', [path], 3, 0, '/db')).join('\n')
+  const output = (await searchRowsOutput(TREE, accessor, 'one', [path], 3, 0, '/db'))
+    .map(([, record]) => record)
+    .join('\n')
   const headers = output.split('\n').filter((line) => line.startsWith('/db/'))
   expect(headers).toEqual([
     '/db/docs/a∕b/1.md:0.1000',

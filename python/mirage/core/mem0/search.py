@@ -50,7 +50,7 @@ async def search_memories_rendered(
     top_k: int,
     threshold: float,
     memory_ids: set[str] | None = None,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """Run a semantic search in the scope and render ranked results.
 
     Args:
@@ -69,7 +69,7 @@ async def search_memories_rendered(
         top_k=top_k,
         threshold=threshold,
     )
-    lines: list[str] = []
+    lines: list[tuple[str, str]] = []
     for r in results:
         memory_id = str(r["id"])
         if memory_ids is not None and memory_id not in memory_ids:
@@ -77,7 +77,7 @@ async def search_memories_rendered(
         path = f"{mount_prefix.rstrip('/')}/{memory_id}.json"
         score = format_score(r.get("score"))
         header = path if score is None else f"{path}:{score}"
-        lines.append(f"{header}\n{r.get('memory', '')}")
+        lines.append((path, f"{header}\n{r.get('memory', '')}"))
     return lines
 
 
@@ -86,7 +86,7 @@ async def search_many(
     paths: list[PathSpec],
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     validate_options(query, {"top_k", "method", "threshold"})
     top_k = int_option(query, "top_k", accessor.config.default_search_limit)
     if not paths:
@@ -125,5 +125,5 @@ async def search_resource(
     path: PathSpec,
     query: SearchQuery,
     index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     return await search_many(accessor, [path], query, index)

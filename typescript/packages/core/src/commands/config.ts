@@ -31,7 +31,6 @@ import type {
 } from '../view/types.ts'
 import type { TargetStat } from '../utils/glob_walk.ts'
 import type {
-  BeforeFullScanOp,
   CopyOp,
   ExistsOp,
   FilesContainingOp,
@@ -139,7 +138,6 @@ export interface CommandIO<A extends Accessor = Accessor> {
   filesContaining?: FilesContainingOp<A>
   searchable?: readonly string[] | null
   linesContaining?: LinesContainingOp<A>
-  beforeFullScan?: BeforeFullScanOp<A>
   firstLines?: FirstLinesOp<A>
   lastLines?: LastLinesOp<A>
   lineCount?: LineCountOp<A>

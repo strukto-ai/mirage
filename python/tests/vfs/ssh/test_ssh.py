@@ -16,10 +16,16 @@ from mirage.vfs.ssh.config import SSHConfig
 from mirage.vfs.ssh.ssh import SSHVFS
 
 
-def test_two_logins_to_one_root_are_one_store():
-    def location(username: str, root: str) -> str | None:
-        config = SSHConfig(host="box", username=username, root=root)
-        return SSHVFS(config).storage_location()
+def _location(username: str, root: str) -> str | None:
+    config = SSHConfig(host="box", username=username, root=root)
+    return SSHVFS(config).storage_location()
 
-    assert location("ada", "/srv/data") == location("bob", "/srv/data/")
-    assert location("ada", "/srv/data") != location("ada", "/srv")
+
+def test_two_logins_to_one_root_are_one_store():
+    assert _location("ada", "/srv/data") == _location("bob", "/srv/data/")
+    assert _location("ada", "/srv/data") != _location("ada", "/srv")
+
+
+def test_a_relative_root_is_each_logins_own():
+    assert _location("ada", "data") != _location("bob", "data")
+    assert _location("ada", "data") == _location("ada", "data/")

@@ -47,7 +47,7 @@ export async function searchSegments(
   paths: readonly PathSpec[],
   index?: IndexCacheStore,
   options: SearchOptions = {},
-): Promise<string[]> {
+): Promise<[string, string][]> {
   const method = options.method ?? 'semantic'
   const topK = options.topK ?? 10
   const threshold = options.threshold ?? 0
@@ -140,28 +140,18 @@ function renderRecords(
   records: Record<string, unknown>[],
   slugMetadataName: string,
   mountPrefix: string,
-): string[] {
-  const contents: string[] = []
+): [string, string][] {
+  const contents: [string, string][] = []
   for (const record of records) {
     const segment = record.segment
     if (segment === null || typeof segment !== 'object' || Array.isArray(segment)) continue
-    const header = formatRecordHeader(record, slugMetadataName, mountPrefix)
-    if (header === null) continue
-    contents.push(`${header}\n${segmentText(segment as Record<string, unknown>)}`)
+    const path = recordPath(record, slugMetadataName, mountPrefix)
+    if (path === null) continue
+    const score = formatScore(record.score)
+    const header = score === null ? path : `${path}:${score}`
+    contents.push([path, `${header}\n${segmentText(segment as Record<string, unknown>)}`])
   }
   return contents
-}
-
-function formatRecordHeader(
-  record: Record<string, unknown>,
-  slugMetadataName: string,
-  mountPrefix: string,
-): string | null {
-  const path = recordPath(record, slugMetadataName, mountPrefix)
-  if (path === null) return null
-  const score = formatScore(record.score)
-  if (score === null) return path
-  return `${path}:${score}`
 }
 
 function recordPath(
@@ -211,7 +201,7 @@ export async function searchMany(
   paths: PathSpec[],
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<[string, string][]> {
   validateOptions(query, ['top_k', 'threshold', 'method'])
   const topK = intOption(query, 'top_k', 10)
   const method = textOption(query, 'method', 'semantic')
@@ -230,6 +220,6 @@ export function searchResource(
   path: PathSpec,
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<[string, string][]> {
   return searchMany(accessor, [path], query, index)
 }

@@ -35,7 +35,6 @@ from mirage.types import Limit, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.types import (
-    BeforeFullScanOp,
     ExistsOp,
     FilesContainingOp,
     FirstLinesOp,
@@ -158,7 +157,6 @@ class CommandIO:
     files_containing: FilesContainingOp | None = None
     searchable: tuple[str, ...] | None = None
     lines_containing: LinesContainingOp | None = None
-    before_full_scan: BeforeFullScanOp | None = None
     first_lines: FirstLinesOp | None = None
     last_lines: LastLinesOp | None = None
     line_count: LineCountOp | None = None

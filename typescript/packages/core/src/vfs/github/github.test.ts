@@ -277,21 +277,24 @@ describe('grep and rg over code search', () => {
   })
 
   it.each([
-    [
-      'grep -r import /gh',
-      'grep: 5 files in scope and code search could not narrow them; narrow the path, or search a whole word with -w\n',
-    ],
+    ['grep -r import /gh', 'grep: 5 files in scope, narrow the path\n'],
     ['grep -rwv import /gh', 'grep: 5 files in scope, narrow the path\n'],
     ['grep -rwa import /gh', 'grep: 5 files in scope, narrow the path\n'],
     ['rg -w --binary import /gh', 'rg: 5 files in scope, narrow the path\n'],
-    [
-      "rg 'imp.rt' /gh",
-      'rg: 5 files in scope and code search could not narrow them; narrow the path, or search a whole word with -w\n',
-    ],
+    ['diff -r /gh /gh', 'diff: 5 files in scope, narrow the path\n'],
+    ["rg 'imp.rt' /gh", 'rg: 5 files in scope, narrow the path\n'],
   ])('refuses %s past the scope cap', async (line, stderr) => {
     scope.error = 4
     const [got, hub] = await onGithub(line)
     expect(got).toEqual(['', stderr, 1])
+    expect(hub.count('blob')).toBe(0)
+  })
+
+  // Twin of test_an_archive_past_the_scope_cap_is_refused.
+  it('refuses an archive past the scope cap', async () => {
+    scope.error = 1
+    const [got, hub] = await onGithub('tar -cf - /gh/src')
+    expect(got).toEqual(['', 'tar: 2 files in scope, narrow the path\n', 1])
     expect(hub.count('blob')).toBe(0)
   })
 

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -64,9 +65,11 @@ from mirage.commands.builtin.rg_search import RgFlags, Totals, split_footer
 from mirage.commands.builtin.utils.links import LinkResolver
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
@@ -75,6 +78,8 @@ from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.view.types import NamespaceView
+
+logger = logging.getLogger(__name__)
 
 
 def _admit_grep(flags: GrepFlags, path: PathSpec, info: FileStat) -> bool:
@@ -220,6 +225,16 @@ async def run_search(
     async def scopes() -> AsyncIterator[OwnedScope]:
         if planned:
             assert rg is not None and walk is not None
+            # The plan hands each file over alone, which no search
+            # narrows, so every directory walked is read whole.
+            for path in paths:
+                try:
+                    info = await stat(path.virtual)
+                except FS_ERRORS as exc:
+                    logger.debug("rg plan %s: %s", path.virtual, exc)
+                    continue
+                if info.type == FileType.DIRECTORY:
+                    await before_full_scan(dispatch, path, name)
             warnings: list[str] = []
             resolver = (
                 LinkResolver(ns.links, dispatch, cwd)

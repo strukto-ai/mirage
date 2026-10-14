@@ -15,11 +15,45 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.commands.errors import UsageError
 from mirage.errors.types import WalkDeclinedError
+from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 
 ReadTree = Callable[..., Awaitable[dict[str, FileStat] | None]]
 WalkCall = Callable[..., Awaitable[Any]]
+
+
+async def before_full_scan(
+    dispatch: DispatchFn | None, path: PathSpec, command: str
+) -> None:
+    """Let the mount that owns ``path`` refuse a command about to read
+    every file under it.
+
+    The mount is asked at the resolved path: the command already judged
+    the spelling it was typed in. It refuses with a ValueError, which
+    becomes the command's own error, ``command: message`` and exit 1, on
+    one mount or across several.
+
+    Args:
+        dispatch (DispatchFn | None): the command's dispatcher; None
+            leaves no mount to ask.
+        path (PathSpec): the directory about to be walked.
+        command (str): the command that walks it.
+
+    Raises:
+        UsageError: the mount refused the scan.
+    """
+    if dispatch is None:
+        return
+    try:
+        await dispatch(
+            "before_full_scan", PathSpec.from_str_path(path.virtual)
+        )
+    except UsageError:
+        raise
+    except ValueError as exc:
+        raise UsageError(f"{command}: {exc}", exit_code=1) from exc
 
 
 def _listings(found: dict[str, FileStat]) -> dict[str, list[str]]:

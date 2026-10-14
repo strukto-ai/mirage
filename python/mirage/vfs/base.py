@@ -35,7 +35,6 @@ from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import (
     Effect,
-    ScanReason,
     SearchQuery,
     Target,
 )
@@ -627,14 +626,15 @@ class BaseVFS:
         path: PathSpec,
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         """Search the resource under ``path``; None declines, [] is none.
 
-        One record per hit, which the ``search`` command prints in turn:
-        a header line naming the hit's path (``path:score`` where the
-        store ranks), then the hit's text. The dispatcher drops each
-        record whose path the session hides. Errors and incomplete
-        results are raised, never answered as a miss.
+        One ``(path, record)`` pair per hit: the hit's virtual path, which
+        the dispatcher drops the hit for when the session hides it, and
+        the record the ``search`` command prints, a header line naming
+        the path (``path:score`` where the store ranks) and then the
+        hit's text. Errors and incomplete results are raised, never
+        answered as a miss.
 
         Args:
             path (PathSpec): the scope.
@@ -648,7 +648,7 @@ class BaseVFS:
         paths: list[PathSpec],
         query: SearchQuery,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str] | None:
+    ) -> list[tuple[str, str]] | None:
         """Search several scopes as one ranked query.
 
         Args:
@@ -735,33 +735,20 @@ class BaseVFS:
     async def before_full_scan(
         self,
         path: PathSpec,
-        command: str,
-        reason: ScanReason,
         *,
         files: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
-        """Called before grep or rg reads a file no search answered.
+        """Called before a command reads every file under ``path``.
 
-        Once per command and directory: before the walk when neither
-        search can be asked, else at the first file ``lines_containing``
-        declines after ``files_containing`` did not narrow, and a refusal
-        then stands for every such file. Return to let the scan run;
-        raise to refuse it, and the error's message is what the command
-        prints (an OSError raised at a file is that file's read error).
+        Once per directory a command walks, before the first file it
+        reads there: grep -r and rg where no search narrowed the walk,
+        and tar -c, zip -r, cp -r, mv across mounts and diff -r always.
+        Return to let the scan run; raise to refuse it, and the error's
+        message is what the command prints.
 
         Args:
-            path (PathSpec): a directory about to be walked, as
-                ``files_containing`` gets it.
-            command (str): grep or rg.
-            reason (ScanReason): why the search cannot stand in:
-                NO_SEARCH (no search on this mount),
-                NO_TEXT (-f, or no plain text every match holds),
-                EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
-                --files-without-match, rg -c with --include-zero, without
-                -q), LINKS (rg -L), BINARY (grep -a, rg --binary: a
-                binary file is read) or UNANSWERED (a search returned
-                None or a path rule declined it).
+            path (PathSpec): the directory about to be walked.
             files (int | None): how many files the session sees under
                 ``path``, from the mount's ``read_tree`` with every
                 hidden file dropped; None when ``read_tree`` cannot

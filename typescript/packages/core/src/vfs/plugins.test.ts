@@ -72,7 +72,7 @@ class Streaming extends Minimal {
 }
 
 class Searchable extends Minimal {
-  override search(): Promise<string[] | null> {
+  override search(): Promise<[string, string][] | null> {
     return Promise.resolve(null)
   }
 }
@@ -199,12 +199,16 @@ it('propagates a search failure without falling back to reads', async () => {
 it('passes resource options through, and grep and rg never ask the search', async () => {
   const accessor = await makeAccessor()
   const vfs = new Searchable({ name: 'custom', accessor })
-  const search = vi.spyOn(vfs, 'search').mockResolvedValue(['deployment 42'])
+  const search = vi
+    .spyOn(vfs, 'search')
+    .mockResolvedValue([[`${PATH.virtual}/42`, 'deployment 42']])
   const query: SearchQuery = {
     query: 'recent deployments',
     options: { limit: 20, filters: { project: 'backend' } },
   }
-  expect(await commandIo(vfs).search?.search(accessor, PATH, query)).toEqual(['deployment 42'])
+  expect(await commandIo(vfs).search?.search(accessor, PATH, query)).toEqual([
+    [`${PATH.virtual}/42`, 'deployment 42'],
+  ])
   expect(search).toHaveBeenCalledWith(PATH, query, undefined)
   search.mockClear()
   const ws = new Workspace({ '/nested/data': vfs }, { shellParser: await getTestParser() })

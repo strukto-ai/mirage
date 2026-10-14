@@ -46,16 +46,16 @@ export async function searchMemoriesRendered(
   topK: number,
   threshold: number,
   memoryIds?: ReadonlySet<string>,
-): Promise<string[]> {
+): Promise<[string, string][]> {
   validate(query, topK, threshold)
-  const lines: string[] = []
+  const lines: [string, string][] = []
   for (const result of await searchMemories(accessor, query, topK, threshold)) {
     const id = String(result.id)
     if (memoryIds !== undefined && !memoryIds.has(id)) continue
     const path = `${rstripSlash(mountPrefix)}/${id}.json`
     const score = formatScore(result.score)
     const memory = typeof result.memory === 'string' ? result.memory : ''
-    lines.push(`${score === null ? path : `${path}:${score}`}\n${memory}`)
+    lines.push([path, `${score === null ? path : `${path}:${score}`}\n${memory}`])
   }
   return lines
 }
@@ -65,7 +65,7 @@ export async function searchMany(
   paths: PathSpec[],
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<[string, string][]> {
   validateOptions(query, ['top_k', 'threshold', 'method'])
   const topK = intOption(query, 'top_k', accessor.config.defaultSearchLimit)
   const first = paths[0]
@@ -90,6 +90,6 @@ export function searchResource(
   path: PathSpec,
   query: SearchQuery,
   index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<[string, string][]> {
   return searchMany(accessor, [path], query, index)
 }

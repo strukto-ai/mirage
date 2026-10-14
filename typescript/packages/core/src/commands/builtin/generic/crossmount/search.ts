@@ -43,7 +43,9 @@ import type { FlagValue } from '../../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import type { NamespaceView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { isFsError } from '../../../../errors/fs.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
+import { beforeFullScan } from '../../utils/tree.ts'
 import { walkErrorLine } from '../../rg_scan.ts'
 import { Totals, splitFooter, type RgFlags } from '../../rg_search.ts'
 import { formatRecords } from '../../utils/output.ts'
@@ -141,6 +143,19 @@ export async function runSearch(
   const root = paths[0] ?? PathSpec.fromStrPath(cwd)
   async function* scopes(): AsyncIterable<OwnedScope> {
     if (planned && walk !== null) {
+      // The plan hands each file over alone, which no search narrows, so
+      // every directory walked is read whole.
+      for (const path of paths) {
+        let info: FileStat
+        try {
+          info = await stat(path.virtual)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          console.debug(`rg plan ${path.virtual}: ${String(err)}`)
+          continue
+        }
+        if (info.type === FileType.DIRECTORY) await beforeFullScan(dispatch, path, name)
+      }
       const warnings: string[] = []
       const resolver = ns?.links === undefined ? null : new LinkResolver(ns.links, dispatch, cwd)
       const found = haystacks(
