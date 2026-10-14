@@ -989,7 +989,6 @@ async def execute_node(
     namespace: Namespace,
     job_table: JobTable,
     execute_fn: ExecuteFn,
-    agent_id: str,
     node: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -1024,7 +1023,6 @@ async def execute_node(
                 namespace,
                 job_table,
                 execute_fn,
-                agent_id,
                 node,
                 context,
                 stdin,
@@ -1044,7 +1042,6 @@ async def execute_node(
         namespace,
         job_table,
         execute_fn,
-        agent_id,
         node,
         context,
         stdin,
@@ -1114,7 +1111,6 @@ async def _execute_node(
     namespace: Namespace,
     job_table: JobTable,
     execute_fn: ExecuteFn,
-    agent_id: str,
     node: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None = None,
@@ -1138,7 +1134,6 @@ async def _execute_node(
         namespace (Namespace): addressing authority for symlink ops.
         job_table (JobTable): background job management.
         execute_fn (Callable): recursive execute (for source/eval).
-        agent_id (str): current agent ID for jobs.
         node (Any): tree-sitter node to execute.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
@@ -1186,7 +1181,6 @@ async def _execute_node(
         namespace,
         job_table,
         execute_fn,
-        agent_id,
         cancel=cancel,
         routing_decision=routing_decision,
         handed=handed,
@@ -1291,7 +1285,6 @@ async def _execute_node(
             stdin,
             cs,
             job_table,
-            agent_id,
             dispatch,
             handed,
             registry.decisions,
@@ -1317,7 +1310,6 @@ async def _execute_node(
                     job_table,
                     cancel=cancel,
                     routing_decision=routing_decision,
-                    agent_id=agent_id,
                     handed=handed,
                     sink=sink,
                     expanded=expanded,
@@ -1412,7 +1404,6 @@ async def _execute_node(
             namespace,
             sub_table,
             execute_fn,
-            agent_id,
             cancel=cancel,
             routing_decision=routing_decision,
             handed=handed,
@@ -1434,7 +1425,6 @@ async def _execute_node(
                     stdin,
                     cs,
                     sub_table,
-                    agent_id,
                     dispatch,
                     handed,
                     registry.decisions,
@@ -1484,7 +1474,6 @@ async def _execute_node(
         stdin=stdin,
         call_stack=cs,
         job_table=job_table,
-        agent_id=agent_id,
         handed=handed,
         decisions=registry.decisions,
         execute_fn=execute_fn,

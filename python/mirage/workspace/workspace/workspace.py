@@ -253,7 +253,6 @@ class Workspace:
         write: WritePolicy | str | None = None,
         command_limits: Mapping[str, Limit] | None = None,
         session_id: str | None = None,
-        agent_id: str | None = None,
         workspace_id: str | None = None,
         store: WorkspaceStateStore | None = None,
         owns_store: bool = False,
@@ -336,7 +335,6 @@ class Workspace:
         self._writes = 0
         self._writes_idle = asyncio.Event()
         self._writes_idle.set()
-        self._default_agent_id = agent_id
         # The env block, translated once: a literal entry becomes an
         # exported var, a managed one becomes a pointer the fill step
         # resolves at command time. Each managed entry's source is
@@ -465,11 +463,7 @@ class Workspace:
         self._write_default = coerce_write_policy(write)
         self._registry.set_default_write(self._write_default)
         self._registry.attach_file_cache(self._cache)
-        # Only an explicit agent_id claims the workspace user; a bare
-        # launch adopts whatever identity the namespace store holds.
-        self._namespace = Namespace(
-            self._registry, store=stores.namespace, user=agent_id
-        )
+        self._namespace = Namespace(self._registry, store=stores.namespace)
         self._dispatcher = Dispatcher(
             self._namespace,
             self._cache,
@@ -539,7 +533,6 @@ class Workspace:
         self._files = Files(
             self._registry.mount_rows(),
             observer=self.observer,
-            agent_id=agent_id or "",
             links=self._namespace,
             dispatch=self._dispatcher.dispatch,
             bind=self._bind_session,
@@ -1234,7 +1227,6 @@ class Workspace:
                     shell_join(argv),
                     child.session_id,
                     input_stream.stream(),
-                    agent_id=None,
                     cwd=None,
                     env=None,
                     cancel=None,
@@ -1779,7 +1771,6 @@ class Workspace:
             mode=args.anchor_mode or MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,
-            agent_id=args.default_agent_id,
             clis=args.clis,
             secrets=secrets,
             command_limits=command_limits,
@@ -2328,7 +2319,6 @@ class Workspace:
             observer=self.observer,
             records=self._files.records,
             job_table=self.job_table,
-            agent_id=self._default_agent_id,
             runtimes=self._runtimes,
             router=self._router,
             processes=self.processes,
@@ -2386,7 +2376,6 @@ class Workspace:
         command: str,
         session_id: str | None = None,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2408,7 +2397,6 @@ class Workspace:
         command: str,
         session_id: str | None = None,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2430,7 +2418,6 @@ class Workspace:
         command: str,
         session_id: str | None = None,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2451,7 +2438,6 @@ class Workspace:
         command: str,
         session_id: str | None = None,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2475,7 +2461,6 @@ class Workspace:
             command: The shell command string to execute.
             session_id: Session whose persistent state hosts the command.
             stdin: Optional stdin payload (bytes or async byte iterator).
-            agent_id: Agent identifier for observability and history.
             cwd: Per-call working directory override. When provided, the
                 command runs in an ephemeral session clone (bash subshell
                 semantics): the persistent session's cwd is unchanged and
@@ -2543,7 +2528,6 @@ class Workspace:
                 command,
                 session_id,
                 stdin,
-                agent_id,
                 cwd,
                 env,
                 cancel,
@@ -2566,7 +2550,6 @@ class Workspace:
                 command,
                 session_id,
                 stdin,
-                agent_id,
                 cwd,
                 env,
                 stop,
@@ -2604,7 +2587,6 @@ class Workspace:
         command: str,
         session_id: str | None = None,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2644,7 +2626,6 @@ class Workspace:
                     command,
                     session_id,
                     stdin,
-                    agent_id,
                     cwd,
                     env,
                     cancel,
@@ -2760,7 +2741,6 @@ class Session:
         self,
         command: str,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2775,7 +2755,6 @@ class Session:
         self,
         command: str,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2790,7 +2769,6 @@ class Session:
         self,
         command: str,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2804,7 +2782,6 @@ class Session:
         self,
         command: str,
         stdin: ByteSource | None = None,
-        agent_id: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         cancel: asyncio.Event | None = None,
@@ -2819,7 +2796,6 @@ class Session:
         Args:
             command (str): the shell line.
             stdin (ByteSource | None): stdin payload.
-            agent_id (str | None): agent identifier for observability.
             cwd (str | None): per-call working directory, run in an
                 ephemeral clone of the session.
             env (dict[str, str] | None): per-call env overrides, run in
@@ -2833,7 +2809,6 @@ class Session:
             command,
             session_id=self._id,
             stdin=stdin,
-            agent_id=agent_id,
             cwd=cwd,
             env=env,
             cancel=cancel,

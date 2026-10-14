@@ -525,15 +525,13 @@ describe('configToWorkspaceArgs', () => {
     ).toThrow(/on_exceed must be truncate or error/)
   })
 
-  it('reads snake_case default_session_id / default_agent_id (Python YAML)', async () => {
+  it('reads snake_case default_session_id (Python YAML)', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
       default_session_id: 'sess-1',
-      default_agent_id: 'agent-1',
     })
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.sessionId).toBe('sess-1')
-    expect(args.options.agentId).toBe('agent-1')
   })
 
   it('reads snake_case index key_prefix into the index config', async () => {

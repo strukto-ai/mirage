@@ -95,7 +95,6 @@ class Files:
         mounts: list[MountRow],
         dispatch: DispatchFn,
         observer: Any | None = None,
-        agent_id: str = "default",
         session_id: str | None = None,
         links: NamespaceLinks | None = None,
         bind: SessionBind | None = None,
@@ -104,7 +103,6 @@ class Files:
         self._mounts: list[MountRow] = []
         self.set_mounts(mounts)
         self._observer = observer
-        self._agent_id = agent_id
         self._session_id = session_id
         self._links = links
         self._dispatch = dispatch
@@ -135,7 +133,6 @@ class Files:
             [],
             self._dispatch,
             observer=self._observer,
-            agent_id=self._agent_id,
             session_id=session_id,
             links=self._links,
             bind=self._bind,
@@ -245,9 +242,7 @@ class Files:
         )
         self.records.append(rec)
         if self._observer is not None:
-            asyncio.ensure_future(
-                self._observer.log_op(rec, self._agent_id, session)
-            )
+            asyncio.ensure_future(self._observer.log_op(rec, session))
 
     def _owner(self, path: str) -> MountRow | None:
         """The mount owning ``path`` by longest prefix, or None."""

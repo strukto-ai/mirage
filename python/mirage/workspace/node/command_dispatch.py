@@ -160,7 +160,6 @@ async def execute_command(
     job_table,
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision[Runtime] | None = None,
-    agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     expanded: ExpandedWords | None = None,
@@ -415,7 +414,6 @@ async def execute_command(
             seed_prefix,
             cancel,
             routing_decision,
-            agent_id,
             handed,
             sink,
             expanded,
@@ -463,7 +461,6 @@ async def _dispatch_command_body(
     seed_prefix: Callable[[str], Awaitable[None]],
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision[Runtime] | None = None,
-    agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     expanded: ExpandedWords | None = None,
@@ -529,7 +526,6 @@ async def _dispatch_command_body(
         cancel,
         routing_decision,
         row=read_row(node),
-        agent_id=agent_id,
         redirects=redirect_paths_for(node.id),
         runner=redirect_runner_for(node.id),
         seed_prefix=seed_prefix,
@@ -588,7 +584,6 @@ async def _run_argv(
     cancel: asyncio.Event | None = None,
     routing_decision: RouteDecision[Runtime] | None = None,
     row: int = 0,
-    agent_id: str = "",
     redirects: tuple[PathSpec, ...] = (),
     runner: RedirectRunner | None = None,
     seed_prefix: Callable[[str], Awaitable[None]] | None = None,
@@ -600,8 +595,7 @@ async def _run_argv(
     ``row`` is the row the shell began reading the command on within its
     parse (``read_row``), which only ``alias``, ``unalias`` and ``shopt``
     read: the commands of one read keep the aliases it began with.
-    ``agent_id`` is the agent the line is attributed to, which an
-    approval request names. ``redirects`` are the statement's expanded
+    ``redirects`` are the statement's expanded
     redirect targets, judged with the line because their I/O runs on
     the shell's own fds outside the admitted command's gate window, and
     ``runner`` applies redirects after word expansion, gating each open.
@@ -666,7 +660,6 @@ async def _run_argv(
                 session,
                 registry,
                 namespace,
-                agent_id,
                 given,
                 redirects=paths,
                 cancel=cancel,
@@ -735,7 +728,6 @@ async def _run_argv(
                     cancel,
                     routing_decision,
                     row,
-                    agent_id,
                     claimant.line if claimant is not None else None,
                     output,
                 )
@@ -776,7 +768,6 @@ async def _run_argv(
                 ),
                 claimant,
                 cancel,
-                agent_id,
             )
             if action is None:
                 return
@@ -859,7 +850,6 @@ async def _route_argv(
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision[Runtime] | None,
     row: int,
-    agent_id: str = "",
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -1058,7 +1048,6 @@ async def _route_argv(
         job_table=job_table,
         namespace=namespace,
         routing_decision=routing_decision,
-        agent_id=agent_id,
         execute_fn=execute_fn,
         handed=handed,
         sink=sink,

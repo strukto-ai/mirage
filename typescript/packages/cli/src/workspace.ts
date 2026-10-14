@@ -136,7 +136,6 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
 interface AskRecord {
   id: string
   session_id: string
-  agent_id: string
   command: string
   argv: string[]
   cwd: string

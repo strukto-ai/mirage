@@ -2097,42 +2097,15 @@ describe('ask end to end', () => {
     expect(request.sessionId).toBe(ws.sessionManager.defaultId)
     expect(await line(ws, 'rm /scratch/z')).toEqual([126, '', err])
     expect(ws.decisions.pending()).toHaveLength(1)
-    // The request names the agent of the call that asked, not the
-    // workspace's constructor agent, so a shared workspace attributes
-    // an approval to whoever raised it.
-    expect(request.agentId).toBe('')
-    const byBob = await ws.shell('rm /scratch/z2', { agentId: 'bob' })
-    expect(byBob.exitCode).toBe(126)
-    expect(ws.decisions.pending().map((r) => r.agentId)).toEqual(['', 'bob'])
-    // The agent rides with the execution, not the workspace: a line
-    // asked through a nested eval keeps its caller's, and two lines in
-    // flight at once keep their own.
     // The substitution's own command is a command of the line, so the
     // line is refused whole rather than running `echo` over an empty
     // substitution and exiting 0, which used to leave the agent reading
     // success for a removal that never happened.
-    const nested = await ws.shell('echo $(rm /scratch/z3)', { agentId: 'carol' })
+    const nested = await ws.shell('echo $(rm /scratch/z3)')
     expect(nested.exitCode).toBe(126)
-    await Promise.all([
-      ws.shell('rm /scratch/z4', { agentId: 'dan' }),
-      ws.shell("eval 'rm /scratch/z5'", { agentId: 'eve' }),
-    ])
-    const byAgent = Object.fromEntries(
-      ws.decisions.pending().map((r) => [[r.command, ...r.argv].join(' '), r.agentId]),
-    )
-    expect(byAgent).toEqual({
-      'rm /scratch/z': '',
-      'rm /scratch/z2': 'bob',
-      'rm /scratch/z3': 'carol',
-      'rm /scratch/z4': 'dan',
-      'rm /scratch/z5': 'eve',
-    })
     for (const r of ws.decisions.pending()) {
-      if (r.agentId !== '' && r.agentId !== 'bob') await ws.decisions.answer(r.id, Outcome.DENY)
+      if (r.id !== request.id) await ws.decisions.answer(r.id, Outcome.DENY)
     }
-    const bobs = ws.decisions.pending().find((r) => r.agentId === 'bob')
-    if (bobs === undefined) throw new Error('no request from bob')
-    await ws.decisions.answer(bobs.id, Outcome.DENY)
     // Granted once: the exact retry passes, and the next one asks.
     await ws.decisions.answer(request.id, Outcome.ALLOW)
     expect(ws.decisions.pending()).toEqual([])

@@ -9,7 +9,7 @@
       "command": "id; id -u; id -un; id -G; id -uz | od -An -c",
       "expect": {
         "exit": 0,
-        "stdout": "uid=mirage-agent gid=ops groups=ops\nmirage-agent\nmirage-agent\nops\n   m   i   r   a   g   e   -   a   g   e   n   t  \\0\n",
+        "stdout": "uid=ops gid=ops groups=ops\nops\nops\nops\n   o   p   s  \\0\n",
         "stderr": ""
       }
     },
@@ -23,7 +23,7 @@
       "command": "id; id -gn",
       "expect": {
         "exit": 0,
-        "stdout": "uid=mirage-agent gid=auditor groups=auditor\nauditor\n",
+        "stdout": "uid=auditor gid=auditor groups=auditor\nauditor\n",
         "stderr": ""
       }
     },
@@ -33,10 +33,10 @@
       "targets": [
         "statvfs"
       ],
-      "command": "id mirage-agent; id -u nobody mirage-agent; id ''",
+      "command": "id ops; id -u nobody ops; id ''",
       "expect": {
         "exit": 1,
-        "stdout": "uid=mirage-agent gid=ops groups=ops\nmirage-agent\n",
+        "stdout": "uid=ops gid=ops groups=ops\nops\n",
         "stderr": "id: 'nobody': no such user\nid: '': no such user: No such file or directory\n"
       }
     },

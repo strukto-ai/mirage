@@ -208,7 +208,6 @@ class JobTable:
         command: str,
         run: JobRunner,
         cwd: str,
-        agent: str = "unknown",
         session_id: str = "",
         parent_pid: int | None = None,
         limit: int | None = None,
@@ -224,7 +223,6 @@ class JobTable:
             command (str): the command line being run.
             run (JobRunner): produces the job's output and its result.
             cwd (str): working directory the job was started from.
-            agent (str): agent that started the job.
             session_id (str): session whose job list the job joins.
             parent_pid (int | None): the runner that started the job.
             limit (int | None): the session's process cap
@@ -269,7 +267,6 @@ class JobTable:
                 command=command,
                 task=None,
                 cwd=cwd,
-                agent=agent,
                 session_id=session_id,
                 console=console,
             )

@@ -59,7 +59,6 @@ def runner(execute, sess: SessionState):
         stdin=None,
         call_stack=None,
         job_table=None,
-        agent_id=None,
         handed=None,
         decisions=None,
     )

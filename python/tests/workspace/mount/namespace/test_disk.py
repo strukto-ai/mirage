@@ -42,13 +42,9 @@ async def test_delete_and_replace_all(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_user_roundtrip_and_clear(tmp_path):
+async def test_clear_empties_the_table(tmp_path):
     store = DiskNamespaceStore(str(tmp_path))
-    assert await store.load_user() is None
-    await store.set_user("agent_a")
-    assert await store.load_user() == "agent_a"
     await store.set("/a", {"mode": 1})
     await store.clear()
     assert await store.load() == {}
-    assert await store.load_user() is None
     await store.close()

@@ -385,7 +385,6 @@ async def main():
     r = await ws.shell(
         "grep -q mirage /gdrive/mirage/example.jsonl &"
         " grep -q queue-operation /gdrive/mirage/example.jsonl &",
-        agent_id="demo-agent",
     )
     print(f"  Output: {(await r.stdout_str()).strip()}")
 

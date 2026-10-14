@@ -123,7 +123,6 @@ describe('admission', () => {
         session,
         w.registry,
         w.namespace,
-        '',
         stdin,
       )
       return refusal instanceof Admitted ? null : [refusal.exitCode, voicedStderr(refusal)]
@@ -197,14 +196,7 @@ describe('admission', () => {
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const reparse = (text: string) => parser.parse(text)
     const line = async (text: string) => {
-      const refusal = await admitLine(
-        parser.parse(text),
-        session,
-        w.registry,
-        w.namespace,
-        '',
-        reparse,
-      )
+      const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, reparse)
       return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
     const unread = (raw: string) =>
@@ -265,7 +257,7 @@ describe('admission', () => {
     const reparse = (text: string) => parser.parse(text)
     for (const text of ['$cmd /data/x', 'eval "$p"', 'source /data/env.sh', 'ls | xargs cat']) {
       expect(
-        await admitLine(parser.parse(text), session, w.registry, w.namespace, '', reparse),
+        await admitLine(parser.parse(text), session, w.registry, w.namespace, reparse),
       ).toBeNull()
     }
   })
@@ -275,7 +267,7 @@ describe('admission', () => {
     const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = (text: string) =>
-      admitLine(parser.parse(text), session, w.registry, w.namespace, '', (t) => parser.parse(t))
+      admitLine(parser.parse(text), session, w.registry, w.namespace, (t) => parser.parse(t))
     expect(await line('cat /data/a | head -n 1')).toBeNull()
     // An unlisted word anywhere in the line is the allow list's Deny.
     const unlisted = await line('cat /data/a | sort')
@@ -305,7 +297,7 @@ describe('admission', () => {
     const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = (text: string) =>
-      admitLine(parser.parse(text), session, w.registry, w.namespace, '', (t) => parser.parse(t))
+      admitLine(parser.parse(text), session, w.registry, w.namespace, (t) => parser.parse(t))
     const sealed = await line('cat secret')
     expect([sealed?.exitCode, DEC.decode(sealed?.stderr)]).toEqual([
       1,
@@ -329,7 +321,7 @@ describe('admission', () => {
     const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = (text: string) =>
-      admitLine(parser.parse(text), session, w.registry, w.namespace, '', (t) => parser.parse(t))
+      admitLine(parser.parse(text), session, w.registry, w.namespace, (t) => parser.parse(t))
     const sealed = await line('python3 secret.py')
     expect([sealed?.exitCode, DEC.decode(sealed?.stderr)]).toEqual([
       1,
@@ -354,13 +346,8 @@ describe('admission', () => {
     const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = async (text: string) => {
-      const refusal = await admitLine(
-        parser.parse(text),
-        session,
-        w.registry,
-        w.namespace,
-        '',
-        (t) => parser.parse(t),
+      const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, (t) =>
+        parser.parse(t),
       )
       return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
@@ -392,13 +379,8 @@ describe('admission', () => {
     const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = async (text: string) => {
-      const refusal = await admitLine(
-        parser.parse(text),
-        session,
-        w.registry,
-        w.namespace,
-        '',
-        (t) => parser.parse(t),
+      const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, (t) =>
+        parser.parse(t),
       )
       return refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]
     }
@@ -437,7 +419,7 @@ describe('admission', () => {
     const w = await ws()
     const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
-    const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, '', (t) =>
+    const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, (t) =>
       parser.parse(t),
     )
     expect(refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]).toEqual([

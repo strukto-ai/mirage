@@ -126,10 +126,9 @@ describe('JobTable.submit', () => {
     expect(j2.id).toBe(2)
   })
 
-  it('defaults agent and sessionId', () => {
+  it('defaults sessionId', () => {
     const jt = new JobTable()
     const j = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
-    expect(j.agent).toBe('unknown')
     expect(j.sessionId).toBe('')
     expect(j.status).toBe(JobStatus.RUNNING)
   })

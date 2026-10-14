@@ -179,7 +179,6 @@ def test_finished_jobs_survive(tmp_path):
         exit_code=0,
         console=_finished_console(b"done\n"),
         created_at=time.time(),
-        agent="test",
         session_id="default",
     )
     src.job_table.load(finished)

@@ -519,7 +519,6 @@ async def run_process(
         line,
         session_id=session_id,
         stdin=stdin,
-        agent_id=constants.CODEX_AGENT_ID,
         cwd=cwd,
         env=env or None,
         stream=True,

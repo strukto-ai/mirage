@@ -415,7 +415,6 @@ export async function handleSubshell(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
-  agentId: string | null = null,
   // The dispatcher, so a subshell honors an `exec` redirect the way the
   // program loop does. A subshell is a child shell, so the redirect it
   // installs belongs to the child and is discarded when the body
@@ -470,7 +469,6 @@ export async function handleSubshell(
           null,
           context,
           jobTable,
-          agentId ?? '',
           stdin,
           callStack,
           handed,

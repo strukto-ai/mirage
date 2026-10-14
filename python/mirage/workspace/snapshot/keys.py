@@ -22,8 +22,6 @@ class StateKey(StrEnum):
     SESSIONS = "sessions"
     ENV = "env"
     DEFAULT_SESSION_ID = "default_session_id"
-    DEFAULT_AGENT_ID = "default_agent_id"
-    CURRENT_AGENT_ID = "current_agent_id"
     IO = "io"
     CACHE = "cache"
     HISTORY = "history"
@@ -71,7 +69,6 @@ class JobKey(StrEnum):
     STDERR = "stderr"
     EXIT_CODE = "exit_code"
     CREATED_AT = "created_at"
-    AGENT = "agent"
     SESSION_ID = "session_id"
 
 

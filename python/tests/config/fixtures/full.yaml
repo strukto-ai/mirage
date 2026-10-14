@@ -1,6 +1,5 @@
 mode: WRITE
 default_session_id: default
-default_agent_id: default
 
 cache:
   type: ram

@@ -43,7 +43,6 @@ class ShellRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     command: str
-    agent_id: str | None = None
     cwd: str | None = None
     runtime: str | None = None
     record: bool = True
@@ -62,8 +61,6 @@ def _build_shell_kwargs(
         "command": req.command,
         "record": req.record,
     }
-    if req.agent_id is not None:
-        kwargs["agent_id"] = req.agent_id
     if req.cwd is not None:
         kwargs["cwd"] = req.cwd
     if req.runtime is not None:

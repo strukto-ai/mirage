@@ -49,7 +49,6 @@ async def run_shell_function(
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     job_table: JobTable | None = None,
-    agent_id: str | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     sink: JobConsole | None = None,
@@ -76,7 +75,6 @@ async def run_shell_function(
             one for a top-level call.
         job_table (JobTable | None): the job plane for a body statement
             ending in ``&``.
-        agent_id (str | None): agent identity for job bookkeeping.
         handed (HandOff | None): approval claims inherited by a job.
         decisions (Decisions | None): ledger that holds those claims.
         sink (JobConsole | None): where each statement writes as it
@@ -159,7 +157,6 @@ async def run_shell_function(
                 stdin,
                 cs,
                 job_table,
-                agent_id,
                 body_handed,
                 decisions,
                 execute_fn,

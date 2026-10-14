@@ -19,7 +19,6 @@ import { OpRecord } from './record.ts'
 function commandEntry(cwd?: string): LogEntry {
   return new LogEntry({
     type: EVENT_COMMAND,
-    agent: 'a',
     session: 's',
     timestamp: 1000,
     ...(cwd !== undefined ? { cwd } : {}),
@@ -30,7 +29,7 @@ function commandEntry(cwd?: string): LogEntry {
 }
 
 describe('LogEntry.fromOpRecord', () => {
-  it('copies fields from an OpRecord with agent + session', () => {
+  it('copies fields from an OpRecord with session', () => {
     const rec = new OpRecord({
       op: 'read',
       path: '/data/file.csv',
@@ -39,9 +38,8 @@ describe('LogEntry.fromOpRecord', () => {
       timestamp: 1712145600000,
       durationMs: 45,
     })
-    const entry = LogEntry.fromOpRecord(rec, 'agent-1', 'sess-1')
+    const entry = LogEntry.fromOpRecord(rec, 'sess-1')
     expect(entry.type).toBe('op')
-    expect(entry.agent).toBe('agent-1')
     expect(entry.session).toBe('sess-1')
     expect(entry.op).toBe('read')
     expect(entry.path).toBe('/data/file.csv')
@@ -61,10 +59,9 @@ describe('LogEntry.toJsonLine', () => {
       timestamp: 1000,
       durationMs: 5,
     })
-    const entry = LogEntry.fromOpRecord(rec, 'a', 's')
+    const entry = LogEntry.fromOpRecord(rec, 's')
     const parsed = JSON.parse(entry.toJsonLine()) as Record<string, unknown>
     expect(parsed.type).toBe('op')
-    expect(parsed.agent).toBe('a')
     expect(parsed.op).toBe('read')
     expect(parsed).not.toHaveProperty('command')
   })
@@ -86,7 +83,7 @@ describe('LogEntry.toJsonLine', () => {
       timestamp: 1000,
       durationMs: 5,
     })
-    const entry = LogEntry.fromOpRecord(rec, 'a', 's', '/data')
+    const entry = LogEntry.fromOpRecord(rec, 's', '/data')
     const parsed = JSON.parse(entry.toJsonLine()) as Record<string, unknown>
     expect(parsed.cwd).toBe('/data')
   })
@@ -105,7 +102,7 @@ describe('LogEntry.toJsonLine', () => {
       timestamp: 1000,
       durationMs: 5,
     })
-    const entry = LogEntry.fromOpRecord(rec, 'a', 's')
+    const entry = LogEntry.fromOpRecord(rec, 's')
     const parsed = JSON.parse(entry.toJsonLine()) as Record<string, unknown>
     expect(parsed).not.toHaveProperty('cwd')
   })

@@ -60,7 +60,7 @@ async def test_clear_empties_namespace(store):
 @pytest.mark.asyncio
 async def test_observer_over_redis_round_trip(store):
     obs = Observer(store=store)
-    await obs.log_clear(session="s1", agent="a")
+    await obs.log_clear(session="s1")
     events = await obs.events()
     assert events[-1]["type"] == "clear"
     assert events[-1]["session"] == "s1"

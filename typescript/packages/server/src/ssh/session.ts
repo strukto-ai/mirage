@@ -20,7 +20,6 @@ import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { ACCOUNT_OPTION, PROFILE_OPTION } from './constants.ts'
 import { ChannelInput, ChannelOutput, Mark, channelStdin, deliver } from './stream.ts'
 
-const AGENT_ID = 'ssh'
 const INTERRUPTED = 130
 const FALLBACK_PROMPT = 'mirage$ '
 const LOGIN_HOME = '/'
@@ -263,7 +262,6 @@ export class ShellChannel {
       const execution = await ws.shell(line, {
         sessionId: this.sessionId,
         stdin: channelStdin(this.input),
-        agentId: AGENT_ID,
         signal: controller.signal,
         stream: true,
       })

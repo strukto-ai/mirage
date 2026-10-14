@@ -265,7 +265,6 @@ def namespace_view_of(
         child_mounts=functools.partial(
             registry_child_mounts, registry, namespace, vis
         ),
-        user=namespace.user if namespace is not None else None,
         visibility=vis,
         scoped=scoped,
     )

@@ -51,7 +51,6 @@ KEEPALIVE_COUNT_MAX = 3
 # a workspace. It speaks Codex's exec-server protocol: one JSON-RPC
 # message per line, without the `jsonrpc` member.
 CODEX_SUBSYSTEM = "codex-exec"
-CODEX_AGENT_ID = "codex"
 CODEX_SHELL_NAME = "bash"
 CODEX_SHELL_PATH = "/bin/bash"
 CODEX_SHELLS = frozenset({"bash", "sh", "zsh", "dash"})

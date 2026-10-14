@@ -419,7 +419,6 @@ def test_session_decisions_round_trip_through_the_record():
         Decision(
             id="d1",
             session_id="s1",
-            agent_id="a",
             command="git",
             argv=("push",),
             cwd="/repo",
@@ -432,7 +431,6 @@ def test_session_decisions_round_trip_through_the_record():
         Decision(
             id="d2",
             session_id="s1",
-            agent_id="a",
             command="git",
             argv=("push", "--force"),
             cwd="/repo",

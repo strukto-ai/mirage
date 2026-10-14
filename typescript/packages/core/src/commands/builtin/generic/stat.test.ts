@@ -29,6 +29,7 @@ import {
   PathSpec,
 } from '../../../types.ts'
 import { DIR_SIZE } from '../../../utils/stat_view.ts'
+import { parseSessionProfile } from '../../../policy/profile.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { statGeneric } from './stat.ts'
@@ -281,19 +282,23 @@ describe('stat -c workspace integration', () => {
     expect(out).toBe('600 501 staff\n')
   })
 
-  it('defaults owner to the workspace agent', async () => {
+  it('defaults owner to the profile', async () => {
     const parser = await getTestParser()
     const vfs = new RAMVFS()
     vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
     const ws = new Workspace(
       { '/data': vfs },
-      { mode: MountMode.WRITE, shellParser: parser, agentId: 'agent7' },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: { agent7: parseSessionProfile({}) },
+        profile: 'agent7',
+      },
     )
     const [code, out] = await run(ws, 'stat -c "%U:%G" /data/f.txt')
     expect(code).toBe(0)
-    // The owner is the workspace user; the group is the session's
-    // profile, and this session runs under none.
-    expect(out).toBe('agent7:-\n')
+    // The session's profile is both its user and its group.
+    expect(out).toBe('agent7:agent7\n')
   })
 
   it('falls back to "-" when the workspace is unclaimed', async () => {

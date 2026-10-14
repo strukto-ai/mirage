@@ -34,11 +34,10 @@ def test_log_op_writes_jsonl():
         timestamp=1000,
         duration_ms=5,
     )
-    asyncio.run(obs.log_op(rec, agent="agent-1", session="sess-1"))
+    asyncio.run(obs.log_op(rec, session="sess-1"))
     data = store.files[f"/{utc_date_folder()}/sess-1.jsonl"]
     parsed = json.loads(data.decode().strip())
     assert parsed["type"] == "op"
-    assert parsed["agent"] == "agent-1"
     assert parsed["session"] == "sess-1"
     assert parsed["op"] == "read"
 
@@ -47,11 +46,7 @@ def test_log_execution_writes_jsonl():
     store = RAMObserverStore()
     obs = Observer(store=store)
     io = IOResult(stdout=b"file.csv\n")
-    asyncio.run(
-        obs.log_execution(
-            "ls /data", io, [], agent="agent-1", session="sess-1"
-        )
-    )
+    asyncio.run(obs.log_execution("ls /data", io, [], session="sess-1"))
     data = store.files[f"/{utc_date_folder()}/sess-1.jsonl"]
     parsed = json.loads(data.decode().strip())
     assert parsed["type"] == "command"
@@ -73,7 +68,7 @@ def test_multiple_entries_appended():
             timestamp=1000 + i,
             duration_ms=1,
         )
-        asyncio.run(obs.log_op(rec, agent="a", session="s"))
+        asyncio.run(obs.log_op(rec, session="s"))
     data = store.files[f"/{utc_date_folder()}/s.jsonl"]
     lines = data.decode().strip().split("\n")
     assert len(lines) == 3
@@ -82,7 +77,6 @@ def test_multiple_entries_appended():
 def _log_command(obs: Observer, command: str, session: str, ts: float) -> None:
     entry = LogEntry(
         type=EVENT_COMMAND,
-        agent="a",
         session=session,
         timestamp=int(ts * 1000),
         command=command,
@@ -98,7 +92,7 @@ def test_default_store_is_ram():
 
 def test_log_clear_appends_tombstone():
     obs = Observer()
-    asyncio.run(obs.log_clear(session="s1", agent="a1"))
+    asyncio.run(obs.log_clear(session="s1"))
     events = asyncio.run(obs.events())
     assert events[-1]["type"] == "clear"
     assert events[-1]["session"] == "s1"
@@ -116,7 +110,7 @@ def test_command_events_all_sessions_timestamp_order():
         timestamp=1500,
         duration_ms=1,
     )
-    asyncio.run(obs.log_op(op, agent="a", session="s1"))
+    asyncio.run(obs.log_op(op, session="s1"))
     events = asyncio.run(obs.command_events())
     assert [e["command"] for e in events] == ["ls /a", "ls /b"]
     assert all(e["type"] == "command" for e in events)
@@ -134,7 +128,7 @@ def test_session_same_timestamp_keeps_append_order():
 def test_session_command_events_respects_last_clear():
     obs = Observer()
     _log_command(obs, "cmd A", "s1", 1.0)
-    asyncio.run(obs.log_clear(session="s1", agent="a"))
+    asyncio.run(obs.log_clear(session="s1"))
     _log_command(obs, "cmd B", "s1", 2.0)
     _log_command(obs, "cmd C", "s2", 3.0)
     s1 = asyncio.run(obs.session_command_events("s1"))
@@ -222,7 +216,6 @@ def test_load_events_empty_snapshot_still_clears():
 def test_load_events_skips_foreign_format_entries():
     obs = Observer()
     foreign = {
-        "agent": "default",
         "command": "cat /a | wc -l",
         "stdout": b"5\n",
         "tree": {"command": "cat /a | wc -l", "children": []},

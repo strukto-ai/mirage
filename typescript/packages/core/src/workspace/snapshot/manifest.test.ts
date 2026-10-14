@@ -28,8 +28,6 @@ function makeState(): AnyDict {
     [StateKey.VERSION]: 2,
     [StateKey.MIRAGE_VERSION]: '0.0.0',
     [StateKey.DEFAULT_SESSION_ID]: 's1',
-    [StateKey.DEFAULT_AGENT_ID]: null,
-    [StateKey.CURRENT_AGENT_ID]: null,
     [StateKey.SESSIONS]: [],
     [StateKey.MOUNTS]: [],
     [StateKey.CACHE]: {

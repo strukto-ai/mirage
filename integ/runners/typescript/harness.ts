@@ -111,7 +111,6 @@ export interface Target {
   // Docs API cannot create a tab.
   docs?: string
   dataset?: string
-  agentId?: string
   facet?: string
   // Where background-job consoles live: { type: 'redis' } puts each
   // job's console on its own Redis stream (REDIS_URL). Only the ram

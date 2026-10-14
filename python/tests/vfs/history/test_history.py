@@ -29,7 +29,6 @@ def _observer_with(commands: list[tuple[str, str]]) -> Observer:
     for i, (cmd, session) in enumerate(commands):
         entry = LogEntry(
             type=EVENT_COMMAND,
-            agent="a",
             session=session,
             timestamp=(i + 1) * 1000,
             command=cmd,
@@ -59,7 +58,6 @@ def test_read_reflects_new_events_without_invalidation():
         obs._log(
             LogEntry(
                 type=EVENT_COMMAND,
-                agent="a",
                 session="s1",
                 timestamp=2000,
                 command="pwd",

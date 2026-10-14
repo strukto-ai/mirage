@@ -154,10 +154,7 @@ async function finishFind(
       ns: ns ?? null,
       statPath,
       dispatch,
-      identity: identityFrom(
-        ns,
-        sessionView(session, registry.policies, context.frame.diagnostics),
-      ),
+      identity: identityFrom(sessionView(session, registry.policies, context.frame.diagnostics)),
       stdin,
       starts,
       ...(signal !== undefined ? { signal } : {}),
@@ -189,7 +186,6 @@ export async function handleCommand(
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision<Runtime>,
-  agentId: string | null = null,
   executeFn?: ExecuteFn,
   handed: HandOff | null = null,
   signal?: AbortSignal,
@@ -213,14 +209,7 @@ export async function handleCommand(
   if (JOB_BUILTINS.has(cmdName) && jobTable !== null) {
     const textParts = parts.map((p) => (typeof p === 'string' ? p : p.virtual))
     if (cmdName === 'ps') {
-      // The one job builtin that names an owner: the workspace user.
-      return handlePs(
-        jobTable,
-        textParts,
-        session,
-        sessionView(session, registry.policies),
-        namespace?.user ?? null,
-      )
+      return handlePs(jobTable, textParts, session, sessionView(session, registry.policies))
     }
     const handler = JOB_HANDLERS[cmdName]
     if (handler !== undefined) {
@@ -249,7 +238,6 @@ export async function handleCommand(
       stdin,
       callStack,
       jobTable,
-      agentId,
       handed,
       registry.decisions,
       sink,

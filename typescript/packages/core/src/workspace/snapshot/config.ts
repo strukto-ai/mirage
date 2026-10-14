@@ -22,7 +22,6 @@ export interface MountArgs {
   clis?: Record<string, [string | CLI, Record<string, unknown> | null]>
   mountArgs: Record<string, Mount>
   defaultSessionId: string | undefined
-  defaultAgentId: string | null
   writeDefault: WritePolicy
   // The saved scratch root's mode, for the one the new workspace adds.
   anchorMode?: MountMode

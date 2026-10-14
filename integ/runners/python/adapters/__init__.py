@@ -3305,7 +3305,6 @@ async def open_target(
     if target.get("secrets") is not None:
         env_block, secrets_cleanup = build_secrets_env(target["secrets"])
         cleanups.append(secrets_cleanup)
-    agent_id = target.get("agentId")
     factory = console_factory(target, run_id)
     cache = cache_config(target, run_id)
     # The target's profiles, and which one shapes a session that names
@@ -3319,7 +3318,6 @@ async def open_target(
             mounts,
             mode=MountMode.WRITE,
             read=read,
-            agent_id=agent_id,
             console_factory=factory,
             cache=cache,
             profiles=profiles,
@@ -3330,7 +3328,6 @@ async def open_target(
         ws = Workspace(
             mounts,
             mode=MountMode.WRITE,
-            agent_id=agent_id,
             console_factory=factory,
             cache=cache,
             profiles=profiles,

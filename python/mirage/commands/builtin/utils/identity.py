@@ -15,48 +15,40 @@
 from dataclasses import dataclass
 
 from mirage.commands.config import CommandOpts
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import SessionView
 
-# What an owner or group column prints when nothing names one: no uid
-# on the entry and no workspace user, or no gid and no profile.
+# What an owner or group column prints when nothing names one: no uid or
+# gid on the entry and no profile.
 UNKNOWN_NAME = "-"
 
 
 @dataclass(frozen=True, slots=True)
 class Identity:
-    """Who a session is, in the two words POSIX renders as owner and group.
+    """Who a session is: its profile, the one name POSIX renders as both
+    owner and group.
 
-    The user is the workspace user (what ``whoami`` prints, the launch
-    ``agent_id``); the profile is the permission set the session acts
-    with, which is what a group is. A backend that reports a uid or gid
-    on an entry (disk, or a ``chown`` held in the attr overlay) wins
-    over both, so ``ls -l``, ``stat %U %G`` and ``find -printf %u %g``
-    all agree on one rule.
+    The profile is the permission set the session acts with, so it is
+    the user ``whoami`` prints and the group ``id`` names. A backend
+    that reports a uid or gid on an entry (disk, or a ``chown`` held in
+    the attr overlay) wins over it, so ``ls -l``, ``stat %U %G`` and
+    ``find -printf %u %g`` all agree on one rule.
 
     Args:
-        user (str | None): the workspace user, None when no agent ever
-            claimed the workspace.
         profile (str | None): the session's profile name, None for an
             unrestricted session.
     """
 
-    user: str | None = None
     profile: str | None = None
 
 
-def identity_from(
-    ns: NamespaceView | None, session_view: SessionView | None
-) -> Identity:
-    """The identity two planes' views describe.
+def identity_from(session_view: SessionView | None) -> Identity:
+    """The identity the session plane describes.
 
     Args:
-        ns (NamespaceView | None): the name plane, which carries the
-            workspace user; None outside a workspace.
         session_view (SessionView | None): the session plane, which
             carries the profile; None outside a workspace.
     """
     return Identity(
-        user=ns.user if ns is not None else None,
         profile=session_view.profile() if session_view is not None else None,
     )
 
@@ -67,11 +59,11 @@ def identity_of(opts: CommandOpts) -> Identity:
     Args:
         opts (CommandOpts): the dispatcher context of the invocation.
     """
-    return identity_from(opts.ns, opts.session_view)
+    return identity_from(opts.session_view)
 
 
 def owner_name(uid: int | str | None, identity: Identity | None) -> str:
-    """The owner column: the entry's own uid, else the workspace user.
+    """The owner column: the entry's own uid, else the session's profile.
 
     Args:
         uid (int | str | None): what the backend or overlay reported.
@@ -80,8 +72,8 @@ def owner_name(uid: int | str | None, identity: Identity | None) -> str:
     """
     if uid is not None:
         return str(uid)
-    if identity is not None and identity.user is not None:
-        return identity.user
+    if identity is not None and identity.profile is not None:
+        return identity.profile
     return UNKNOWN_NAME
 
 

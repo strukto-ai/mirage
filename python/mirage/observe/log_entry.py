@@ -31,7 +31,6 @@ class LogEntry:
     Args:
         type (str): One of EVENT_OP, EVENT_COMMAND, EVENT_CLEAR,
             EVENT_DELETE.
-        agent (str): Agent ID.
         session (str): Session ID.
         timestamp (int): UTC epoch milliseconds.
         op (str | None): Operation name (for type="op").
@@ -47,7 +46,6 @@ class LogEntry:
     """
 
     type: str
-    agent: str
     session: str
     timestamp: int
     cwd: str | None = None
@@ -65,7 +63,6 @@ class LogEntry:
     @staticmethod
     def from_op_record(
         rec: OpRecord,
-        agent: str,
         session: str,
         cwd: str | None = None,
     ) -> "LogEntry":
@@ -73,8 +70,7 @@ class LogEntry:
 
         Args:
             rec (OpRecord): The operation record.
-            agent (str): Agent ID.
-            session (str): Session ID.
+                session (str): Session ID.
             cwd (str | None): Session cwd at log time.
 
         Returns:
@@ -82,7 +78,6 @@ class LogEntry:
         """
         return LogEntry(
             type=EVENT_OP,
-            agent=agent,
             session=session,
             timestamp=rec.timestamp,
             cwd=cwd,

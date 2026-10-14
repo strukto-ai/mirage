@@ -2521,7 +2521,6 @@
         "python",
         "typescript-node"
       ],
-      "agentId": "mirage-agent",
       "mounts": [
         {
           "path": "/vfs",

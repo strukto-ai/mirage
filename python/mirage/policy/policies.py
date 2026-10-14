@@ -458,7 +458,6 @@ async def post_command_gate(
     ctx: CommandResultContext,
     claimant: Claimant | None = None,
     cancel: asyncio.Event | None = None,
-    agent_id: str = "",
 ) -> Deny | Pending | None:
     """Fire post_command once a command or CLI ran and its output drained.
 
@@ -472,8 +471,6 @@ async def post_command_gate(
         claimant (Claimant | None): the command and its line, None
             outside a line.
         cancel (asyncio.Event | None): the run's kill channel.
-        agent_id (str): the agent the line is attributed to, which a
-            question raised here names for the host.
 
     Raises:
         MirageAbortError: the run was killed while the host decided.
@@ -483,9 +480,7 @@ async def post_command_gate(
     answer = await policies.post_command(ctx)
     if not isinstance(answer, Ask):
         return answer
-    said = await policies.decisions.resolve(
-        ctx, answer, cancel, claimant, agent_id
-    )
+    said = await policies.decisions.resolve(ctx, answer, cancel, claimant)
     if isinstance(said, Abandoned):
         raise MirageAbortError()
     return said

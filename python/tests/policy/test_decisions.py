@@ -74,7 +74,6 @@ def _record(**over: object) -> Decision:
     base = Decision(
         id="d1",
         session_id="s",
-        agent_id="",
         command="git",
         argv=("push",),
         cwd="/repo",

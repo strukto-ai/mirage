@@ -152,7 +152,6 @@ export async function executeCommand(
   // alias is stored and printed but never expanded.
   parser?: ParseScope,
   // The agent the line is attributed to, which an approval request names.
-  agentId = '',
   // The line's hand-off, which its gate claims on and runs on.
   handed?: HandOff,
   // Where a command that runs statements of its own (a function body, a
@@ -391,7 +390,6 @@ export async function executeCommand(
       runtimeBindings,
       routingDecision,
       signal,
-      agentId,
       handed,
       seedPrefix,
       sink,
@@ -438,7 +436,6 @@ async function runCommandBody(
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision<Runtime>,
   signalIn?: AbortSignal,
-  agentId = '',
   handed?: HandOff,
   seedPrefix?: (command: string) => Promise<void>,
   sink?: JobConsole,
@@ -512,7 +509,6 @@ async function runCommandBody(
       routingDecision,
       signal,
       readRow(node),
-      agentId,
       redirectPathsFor(node),
       claimant,
       sink,
@@ -579,7 +575,6 @@ async function runArgv(
   // commands of one read keep the aliases it began with.
   row = 0,
   // The agent the line is attributed to, which an approval request names.
-  agentId = '',
   // The statement's expanded redirect targets, judged with the line
   // because their I/O runs on the shell's own fds outside the admitted
   // command's gate window.
@@ -643,7 +638,6 @@ async function runArgv(
         context.session,
         registry,
         namespace,
-        agentId,
         given,
         paths,
         signal,
@@ -704,7 +698,6 @@ async function runArgv(
         routingDecision,
         signal,
         row,
-        agentId,
         claimant?.line ?? null,
         output,
         parser,
@@ -750,7 +743,6 @@ async function runArgv(
         },
         claimant,
         signal,
-        agentId,
       )
       if (action === null) return
       const [err, code] = renderDeny(ctx.command, action)
@@ -834,7 +826,6 @@ async function routeArgv(
   routingDecision: RouteDecision<Runtime> | undefined,
   signal: AbortSignal | undefined,
   row: number,
-  agentId: string,
   handed: HandOff | null,
   sink?: JobConsole,
   parser?: ParseScope,
@@ -1065,7 +1056,6 @@ async function routeArgv(
     runtimeBindings,
     namespace,
     routingDecision,
-    agentId,
     executeFn,
     handed ?? null,
     signal,

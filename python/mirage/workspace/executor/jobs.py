@@ -201,7 +201,6 @@ async def handle_background(
     right: TSNodeLike | None,
     context: EvaluationContext,
     job_table: JobTable,
-    agent_id: str | None,
     stdin: ByteSource | None = None,
     call_stack=None,
     handed: HandOff | None = None,
@@ -345,7 +344,6 @@ async def handle_background(
             command=cmd_str,
             run=_run_bg,
             cwd=bg_session.cwd,
-            agent=agent_id or "",
             session_id=session.session_id,
             parent_pid=session.process_id,
             limit=session.processes.max,
@@ -408,7 +406,6 @@ async def run_statement(
     bound: tuple[SharedInput | None, bool],
     call_stack: CallStack | None,
     job_table: JobTable | None,
-    agent_id: str | None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -433,7 +430,6 @@ async def run_statement(
         job_table (JobTable | None): where the job lives. None means
             the caller wired no job plane, which is a programming
             error once a ``&`` shows up, not a reason to run inline.
-        agent_id (str | None): agent identity for job bookkeeping.
         handed (HandOff | None): approval claims inherited by a job.
         decisions (Decisions | None): ledger that holds those claims.
     """
@@ -452,7 +448,6 @@ async def run_statement(
         None,
         context,
         job_table,
-        agent_id,
         stdin,
         call_stack,
         handed,
@@ -1369,15 +1364,14 @@ class _PsContext:
     Args:
         now (float): the moment ps runs, epoch seconds.
         zone (tzinfo | None): the zone times print in, the session's TZ.
-        user (str | None): the workspace user, every runner's owner.
-        group (str | None): the session's profile, the runners' group.
+        group (str | None): the session's profile, its runners' owner
+            and group.
         session_id (str): the calling session.
         shell_pid (int | None): the calling session's ``$$``.
     """
 
     now: float
     zone: tzinfo | None
-    user: str | None
     group: str | None
     session_id: str
     shell_pid: int | None
@@ -1460,9 +1454,7 @@ def _ps_cell(key: str, info: ProcessInfo, ctx: _PsContext) -> str:
     if fact == "comm":
         head = info.command.split()[0] if info.command.split() else ""
         return head.rsplit("/", 1)[-1][:15]
-    if fact == "user":
-        return ctx.user or UNKNOWN_NAME
-    if fact == "group":
+    if fact in ("user", "group"):
         own = info.session_id == ctx.session_id
         return (ctx.group if own else None) or UNKNOWN_NAME
     elapsed = max(0, int(ctx.now - info.started_at))
@@ -1480,7 +1472,6 @@ async def handle_ps(
     parts: list[str],
     session: SessionState | None = None,
     view: SessionView | None = None,
-    user: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """List managed runners with procps's selection and ``-o`` columns.
 
@@ -1497,7 +1488,6 @@ async def handle_ps(
         parts (list[str]): the command words, `ps` first.
         session (SessionState | None): the shell session, if any.
         view (SessionView | None): the gated session view.
-        user (str | None): the workspace user, who owns every runner.
     """
     cmd_str = " ".join(parts)
     try:
@@ -1514,7 +1504,6 @@ async def handle_ps(
         ctx = _PsContext(
             now=time.time(),
             zone=zone_from_env(session.env) if session is not None else None,
-            user=user,
             group=session.profile if session is not None else None,
             session_id=_session_of(session),
             shell_pid=session.shell_pid if session is not None else None,

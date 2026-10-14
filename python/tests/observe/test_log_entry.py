@@ -27,9 +27,8 @@ def test_from_op_record():
         timestamp=1712145600000,
         duration_ms=45,
     )
-    entry = LogEntry.from_op_record(rec, agent="agent-1", session="sess-1")
+    entry = LogEntry.from_op_record(rec, session="sess-1")
     assert entry.type == "op"
-    assert entry.agent == "agent-1"
     assert entry.session == "sess-1"
     assert entry.op == "read"
     assert entry.path == "/data/file.csv"
@@ -41,7 +40,6 @@ def test_from_op_record():
 def _command_entry(cwd: str | None = None) -> LogEntry:
     return LogEntry(
         type=EVENT_COMMAND,
-        agent="a",
         session="s",
         timestamp=1000,
         cwd=cwd,
@@ -60,11 +58,10 @@ def test_to_json_line_op():
         timestamp=1000,
         duration_ms=5,
     )
-    entry = LogEntry.from_op_record(rec, agent="a", session="s")
+    entry = LogEntry.from_op_record(rec, session="s")
     line = entry.to_json_line()
     parsed = json.loads(line)
     assert parsed["type"] == "op"
-    assert parsed["agent"] == "a"
     assert parsed["op"] == "read"
     assert "command" not in parsed
 
@@ -87,7 +84,7 @@ def test_log_entry_includes_cwd_for_op():
         timestamp=1000,
         duration_ms=5,
     )
-    entry = LogEntry.from_op_record(rec, agent="a", session="s", cwd="/data")
+    entry = LogEntry.from_op_record(rec, session="s", cwd="/data")
     parsed = json.loads(entry.to_json_line())
     assert parsed["cwd"] == "/data"
 
@@ -107,6 +104,6 @@ def test_log_entry_omits_cwd_when_not_provided():
         timestamp=1000,
         duration_ms=5,
     )
-    entry = LogEntry.from_op_record(rec, agent="a", session="s")
+    entry = LogEntry.from_op_record(rec, session="s")
     parsed = json.loads(entry.to_json_line())
     assert "cwd" not in parsed

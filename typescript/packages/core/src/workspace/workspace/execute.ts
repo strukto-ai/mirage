@@ -119,7 +119,6 @@ export interface ExecuteEnv {
   observer: Observer
   records: OpRecord[]
   jobTable: JobTable
-  agentId: string | null
   workspaceId: string
   runtimes: Runtimes
   router: Router
@@ -187,7 +186,6 @@ async function answerLine(
           options.sink,
         ),
         [],
-        options.agentId ?? env.agentId ?? '',
         session.sessionId,
         options.cwd ?? session.cwd,
       ),
@@ -509,7 +507,6 @@ async function runPreparedLine(
                   env.registry,
                   handed,
                   mergeSignals(options.signal, context.frame.abortSignal),
-                  options.agentId ?? env.agentId ?? '',
                 ),
             )
           // A line placement refuses ends here, so what admission claimed
@@ -590,7 +587,6 @@ async function runPreparedLine(
             if (opts.executionScope !== undefined) innerOpts.executionScope = opts.executionScope
             // The agent rides with the execution: an approval a nested line
             // raises is the typed line's agent's, not the workspace default's.
-            if (options.agentId !== undefined) innerOpts.agentId = options.agentId
             // Nested lines never re-route: the evaluator's inner lines keep
             // the typed line's decision (runtime argument, policy, or scripts).
             if (routingDecision !== null) innerOpts.routingDecision = routingDecision
@@ -750,7 +746,6 @@ async function runPreparedLine(
             namespace: env.namespace,
             jobTable: options.jobTable ?? env.jobTable,
             executeFn,
-            agentId: options.agentId ?? env.agentId ?? '',
             workspaceId: env.workspaceId,
             executionScope: options.executionScope ?? new ExecutionScope(),
             registerCloser: (fn: () => Promise<void>) => {
@@ -835,7 +830,6 @@ async function runParsedLine(
 ): Promise<ExecuteResult> {
   const effectiveSession = context.session
   const cacheFacts = env.dispatcher.captureCacheFacts()
-  const callAgentId = options.agentId ?? env.agentId ?? ''
   // An op a policy refuses inside a command prints the command's own GNU
   // line, so the dispatcher notes the record here, for the line to carry on its
   // result.
@@ -885,7 +879,6 @@ async function runParsedLine(
           effectiveSession,
           env.registry,
           env.namespace,
-          callAgentId,
           handed,
           reparse,
           killed,
@@ -943,7 +936,6 @@ async function runParsedLine(
         context.session,
         env.registry,
         env.namespace,
-        callAgentId,
         reparse,
         killed,
         handed,
@@ -964,7 +956,6 @@ async function runParsedLine(
                 options.sink,
               ),
               [],
-              callAgentId,
               targetSession.sessionId,
               effectiveSession.cwd,
             ),
@@ -1022,7 +1013,6 @@ async function runParsedLine(
             command,
             await shown(lineIo, options.sink),
             [],
-            callAgentId,
             targetSession.sessionId,
             effectiveSession.cwd,
           ),
@@ -1050,7 +1040,6 @@ async function runParsedLine(
       effectiveSession,
       env.registry,
       env.namespace,
-      callAgentId,
       handed,
       reparse,
       killed,
@@ -1217,7 +1206,6 @@ async function runParsedLine(
         command,
         await shown(io, options.sink),
         opRecords,
-        callAgentId,
         targetSession.sessionId,
         effectiveSession.cwd,
       ),

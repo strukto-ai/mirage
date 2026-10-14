@@ -371,7 +371,6 @@ async function openRam(target: Target): Promise<Open> {
   const cache = cacheFor(target)
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
-    ...(target.agentId !== undefined ? { agentId: target.agentId } : {}),
     ...(consoleFactory !== undefined ? { consoleFactory } : {}),
     ...(cache !== undefined ? { cache } : {}),
     ...(secretsEnv !== null ? { env: secretsEnv.env } : {}),

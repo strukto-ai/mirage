@@ -28,10 +28,10 @@ const ONE_CHOICE = 'id: cannot print "only" of more than one choice\n'
 const NAMES_NEED = 'id: printing only names or real IDs requires -u, -g, or -G\n'
 const ZERO_DEFAULT = 'id: option --zero not permitted in default format\n'
 
-// GNU `id` over mirage's identity: the workspace user, and the session's
-// profile as its group. Mirage has names but no numbers, so every id slot holds
-// the name, `-` for a part nobody claimed; errors and their order are coreutils
-// 9.7's.
+// GNU `id` over mirage's identity: the session's profile, as both its user
+// and its group. Mirage has names but no numbers, so every id slot holds the
+// name, `-` for a session with no profile; errors and their order are
+// coreutils 9.7's.
 function idCmd(
   _accessor: Accessor,
   _paths: PathSpec[],
@@ -50,14 +50,14 @@ function idCmd(
   if (only.length === 0 && zero)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(ZERO_DEFAULT) })]
   const identity = identityOf(opts)
-  const user = identity.user ?? UNKNOWN_NAME
-  const group = identity.profile ?? UNKNOWN_NAME
+  const user = identity.profile ?? UNKNOWN_NAME
+  const group = user
   const end = zero ? '\0' : '\n'
   const out: string[] = []
   const err: string[] = []
   const names: (string | null)[] = texts.length > 0 ? texts : [null]
   for (const name of names) {
-    if (name !== null && name !== identity.user) {
+    if (name !== null && name !== identity.profile) {
       const why = name === '' ? ': No such file or directory' : ''
       err.push(`id: '${quoteText(name)}': no such user${why}\n`)
       continue
@@ -68,7 +68,7 @@ function idCmd(
       continue
     }
     const kind = choice === 'user' ? 'user' : 'group'
-    const known = kind === 'user' ? identity.user : identity.profile
+    const known = identity.profile
     if (useName && known === null) err.push(`id: cannot find name for ${kind} ID\n`)
     const many = zero && choice === 'groups' && texts.length > 1
     out.push((kind === 'user' ? user : group) + (many ? '\0\0' : end))

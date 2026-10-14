@@ -14,7 +14,14 @@
 
 import { CreateBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import type { FileStat } from '@struktoai/mirage-node'
-import { MountMode, RAMVFS, RedisVFS, S3VFS, Workspace } from '@struktoai/mirage-node'
+import {
+  MountMode,
+  parseSessionProfile,
+  RAMVFS,
+  RedisVFS,
+  S3VFS,
+  Workspace,
+} from '@struktoai/mirage-node'
 
 const S3_BUCKET = 'mirage-integ-cross'
 const ENDPOINT = process.env.S3_ENDPOINT ?? 'http://localhost:9000'
@@ -516,7 +523,7 @@ async function checkGlobCache(ws: Workspace, client: S3Client, label: string): P
 async function checkWhoami(ws: Workspace): Promise<void> {
   const [first, , code] = await run(ws, 'whoami')
   let out = first
-  check('whoami: prints the launch agentId', out === 'integ-agent\n' && code === 0)
+  check('whoami: prints the profile name', out === 'integ-agent\n' && code === 0)
   ;[out] = await run(ws, 'export USER=bob; whoami')
   check('whoami: ignores $USER (GNU effective user)', out === 'integ-agent\n')
 }
@@ -594,7 +601,8 @@ async function main(): Promise<void> {
 
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
-    agentId: 'integ-agent',
+    profiles: { 'integ-agent': parseSessionProfile({}) },
+    profile: 'integ-agent',
   })
   try {
     await seedTree(ws, '/ram')

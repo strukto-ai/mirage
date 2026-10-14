@@ -71,7 +71,6 @@ async def execute_body(
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     job_table: JobTable | None,
-    agent_id: str | None,
     handed: HandOff | None,
     decisions: Decisions | None,
     execute_fn: Callable[..., Any] | None = None,
@@ -82,8 +81,8 @@ async def execute_body(
     body, a ``case`` arm, a function body.
 
     A statement ending in ``&`` is launched as a job through
-    ``run_statement`` rather than run inline; ``job_table`` and
-    ``agent_id`` are the job plane it needs. The ERR action answers a
+    ``run_statement`` rather than run inline; ``job_table`` is the
+    job plane it needs. The ERR action answers a
     failing statement, its output landed through ``sink`` when the body
     writes to one, and ``set -e`` stops the list. ``bound`` is
     ``fd0_binding`` as the construct running the list started, so an
@@ -110,7 +109,6 @@ async def execute_body(
                 bound,
                 call_stack,
                 job_table,
-                agent_id,
                 handed,
                 decisions,
             )

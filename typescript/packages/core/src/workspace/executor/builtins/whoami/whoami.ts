@@ -13,17 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
-export function handleWhoami(namespace: Namespace): Result {
+export function handleWhoami(profile: string | null): Result {
   // GNU whoami reports the effective user and never consults $USER; the
-  // workspace user (launch agentId, shared via the namespace store) is
-  // the effective identity here. With no claimed identity it fails like
-  // GNU does for a uid with no passwd entry.
-  if (namespace.user === null) {
+  // session's profile is the effective identity here. With no profile it
+  // fails like GNU does for a uid with no passwd entry.
+  if (profile === null) {
     const err = encodeText('whoami: cannot find name for user ID\n')
     return [
       null,
@@ -31,11 +29,11 @@ export function handleWhoami(namespace: Namespace): Result {
       new ExecutionNode({ command: 'whoami', exitCode: 1, stderr: err }),
     ]
   }
-  const out = encodeText(`${namespace.user}\n`)
+  const out = encodeText(`${profile}\n`)
   return [out, new IOResult(), new ExecutionNode({ command: 'whoami', exitCode: 0 })]
 }
 
 /** The `whoami` arm. */
 export function whoamiBuiltin(call: BuiltinCall): Promise<Result> {
-  return Promise.resolve(handleWhoami(call.namespace))
+  return Promise.resolve(handleWhoami(call.context.session.profile ?? null))
 }

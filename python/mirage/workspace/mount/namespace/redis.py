@@ -40,7 +40,6 @@ class RedisNamespaceStore(NamespaceStore):
     ) -> None:
         self._client = aioredis.from_url(url)
         self._key = f"{key_prefix}nodes"
-        self._user_key = f"{key_prefix}user"
 
     async def load(self) -> dict[str, NodeFields]:
         raw = await cast(
@@ -72,17 +71,8 @@ class RedisNamespaceStore(NamespaceStore):
             )
         await pipe.execute()
 
-    async def load_user(self) -> str | None:
-        raw = await cast(
-            "Awaitable[bytes | None]", self._client.get(self._user_key)
-        )
-        return raw.decode() if raw is not None else None
-
-    async def set_user(self, user: str) -> None:
-        await cast("Awaitable[bool]", self._client.set(self._user_key, user))
-
     async def clear(self) -> None:
-        await self._client.delete(self._key, self._user_key)
+        await self._client.delete(self._key)
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -25,7 +25,7 @@ class DiskNamespaceStore(NamespaceStore):
     """NamespaceStore backed by one ``namespace.json`` per workspace.
 
     The whole plane is one human-readable record
-    ``{"nodes": {path: fields}, "user": ...}``: the namespace is bound
+    ``{"nodes": {path: fields}}``: the namespace is bound
     to the workspace, so it serializes as one JSON file, not per-node
     files. Read-modify-writes take the record's lockfile so concurrent
     local processes never lose a node upsert; the write itself stays
@@ -37,7 +37,7 @@ class DiskNamespaceStore(NamespaceStore):
 
     async def _state(self) -> dict[str, Any]:
         fields, _ = await self._records.get(NAMESPACE_RECORD)
-        return fields if fields is not None else {"nodes": {}, "user": None}
+        return fields if fields is not None else {"nodes": {}}
 
     async def load(self) -> dict[str, NodeFields]:
         return dict((await self._state()).get("nodes", {}))
@@ -73,25 +73,10 @@ class DiskNamespaceStore(NamespaceStore):
         finally:
             await self._records.unlock(NAMESPACE_RECORD, fd)
 
-    async def load_user(self) -> str | None:
-        user = (await self._state()).get("user")
-        return user if isinstance(user, str) else None
-
-    async def set_user(self, user: str) -> None:
-        fd = await self._records.lock(NAMESPACE_RECORD)
-        try:
-            state = await self._state()
-            state["user"] = user
-            await self._records.put(NAMESPACE_RECORD, state)
-        finally:
-            await self._records.unlock(NAMESPACE_RECORD, fd)
-
     async def clear(self) -> None:
         fd = await self._records.lock(NAMESPACE_RECORD)
         try:
-            await self._records.put(
-                NAMESPACE_RECORD, {"nodes": {}, "user": None}
-            )
+            await self._records.put(NAMESPACE_RECORD, {"nodes": {}})
         finally:
             await self._records.unlock(NAMESPACE_RECORD, fd)
 

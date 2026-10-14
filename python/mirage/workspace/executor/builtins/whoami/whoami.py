@@ -16,25 +16,23 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_whoami(
-    namespace: Namespace,
+    profile: str | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     # GNU whoami reports the effective user and never consults $USER;
-    # the workspace user (launch agent_id, shared via the namespace
-    # store) is the effective identity here. With no claimed identity
-    # it fails like GNU does for a uid with no passwd entry.
-    if namespace.user is None:
+    # the session's profile is the effective identity here. With no
+    # profile it fails like GNU does for a uid with no passwd entry.
+    if profile is None:
         err = b"whoami: cannot find name for user ID\n"
         return (
             None,
             IOResult(exit_code=1, stderr=err),
             ExecutionNode(command="whoami", exit_code=1, stderr=err),
         )
-    out = encode_text(f"{namespace.user}\n")
+    out = encode_text(f"{profile}\n")
     return out, IOResult(), ExecutionNode(command="whoami", exit_code=0)
 
 
@@ -44,4 +42,4 @@ async def whoami_builtin(call: BuiltinCall) -> Result:
     Args:
         call (BuiltinCall): the invocation.
     """
-    return await handle_whoami(call.namespace)
+    return await handle_whoami(call.context.session.profile)

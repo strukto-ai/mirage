@@ -348,7 +348,6 @@ class Decision:
     Args:
         id (str): names this record, for a host to answer it by.
         session_id (str): the session running the line.
-        agent_id (str): the agent the workspace attributes the line to.
         command (str): the command name.
         argv (tuple[str, ...]): the words after the name, as expanded.
         cwd (str): the session working directory.
@@ -365,7 +364,6 @@ class Decision:
 
     id: str
     session_id: str
-    agent_id: str
     command: str
     argv: tuple[str, ...]
     cwd: str

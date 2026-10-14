@@ -408,7 +408,6 @@ async def handle_subshell(
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
-    agent_id: str | None = None,
     dispatch: DispatchFn | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
@@ -428,7 +427,6 @@ async def handle_subshell(
         call_stack (CallStack | None): function-call scope, if any.
         job_table (JobTable | None): the subshell's private job table
             (bash forks: the parent's table never sees these jobs).
-        agent_id (str | None): agent identity for job bookkeeping.
         dispatch (DispatchFn | None): the dispatcher, so a subshell honors
             an `exec` redirect the way the program loop does. A subshell
             is a child shell, so its redirects leave the parent unchanged.
@@ -475,7 +473,6 @@ async def handle_subshell(
                     None,
                     context,
                     job_table,
-                    agent_id or "",
                     stdin,
                     call_stack,
                     handed,

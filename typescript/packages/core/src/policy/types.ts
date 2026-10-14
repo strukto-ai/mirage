@@ -269,7 +269,6 @@ export enum Scope {
 export interface Decision {
   id: string
   sessionId: string
-  agentId: string
   command: string
   argv: readonly string[]
   cwd: string

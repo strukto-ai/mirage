@@ -84,7 +84,6 @@ def test_decision_round_trips_with_defaults():
     record = Decision(
         id="d1",
         session_id="agent",
-        agent_id="a",
         command="git",
         argv=("push",),
         cwd="/repo",
@@ -101,7 +100,6 @@ def test_decision_round_trips_with_defaults():
     waiting = Decision(
         id="d2",
         session_id="agent",
-        agent_id="",
         command="git",
         argv=(),
         cwd="/",

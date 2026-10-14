@@ -25,7 +25,6 @@ export type EventType = 'op' | 'command' | 'clear' | 'delete'
 export interface LogEntryInit {
   executionId?: string
   type: EventType
-  agent: string
   session: string
   timestamp: number
   cwd?: string
@@ -43,7 +42,6 @@ export interface LogEntryInit {
 export class LogEntry {
   readonly executionId: string | undefined
   readonly type: EventType
-  readonly agent: string
   readonly session: string
   readonly timestamp: number
   readonly cwd: string | undefined
@@ -60,7 +58,6 @@ export class LogEntry {
   constructor(init: LogEntryInit) {
     this.executionId = init.executionId
     this.type = init.type
-    this.agent = init.agent
     this.session = init.session
     this.timestamp = init.timestamp
     this.cwd = init.cwd
@@ -75,10 +72,9 @@ export class LogEntry {
     this.offset = init.offset
   }
 
-  static fromOpRecord(rec: OpRecord, agent: string, session: string, cwd?: string): LogEntry {
+  static fromOpRecord(rec: OpRecord, session: string, cwd?: string): LogEntry {
     const init: LogEntryInit = {
       type: EVENT_OP,
-      agent,
       session,
       timestamp: rec.timestamp,
       op: rec.op,
@@ -95,7 +91,6 @@ export class LogEntry {
   toJsonLine(): string {
     const obj: Record<string, unknown> = {
       type: this.type,
-      agent: this.agent,
       session: this.session,
       timestamp: this.timestamp,
     }

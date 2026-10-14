@@ -58,7 +58,6 @@ async def run_command_tree(
     namespace: Namespace,
     job_table: JobTable,
     execute_fn: Callable[..., Any],
-    agent_id: str,
     ast: Any,
     context: EvaluationContext,
     stdin: Any,
@@ -88,7 +87,6 @@ async def run_command_tree(
         namespace (Namespace): addressing authority for symlink ops.
         job_table (JobTable): background job management.
         execute_fn (Callable): recursive execute (for source/eval).
-        agent_id (str): current agent ID for jobs.
         ast (Any): parsed tree-sitter root node.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
@@ -119,7 +117,6 @@ async def run_command_tree(
         namespace,
         job_table,
         execute_fn,
-        agent_id,
         cancel=cancel,
         routing_decision=routing_decision,
         handed=handed,
@@ -161,7 +158,6 @@ async def run_command_tree(
             session,
             registry,
             namespace,
-            agent_id,
             redirects=paths,
             cancel=cancel,
             claimant=claimant_for(ast, handed),

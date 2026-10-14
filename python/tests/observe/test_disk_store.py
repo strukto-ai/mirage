@@ -45,7 +45,7 @@ def test_read_all_empty_root(tmp_path):
 
 def test_observer_over_disk_round_trip(tmp_path):
     obs = Observer(store=DiskObserverStore(str(tmp_path / "obs")))
-    asyncio.run(obs.log_clear(session="s1", agent="a"))
+    asyncio.run(obs.log_clear(session="s1"))
     events = asyncio.run(obs.events())
     assert events[-1]["type"] == "clear"
     assert events[-1]["session"] == "s1"

@@ -46,7 +46,6 @@ function crossingNs(ns: NamespaceView): NamespaceView {
     ...(ns.links !== undefined ? { links: ns.links } : {}),
     ...(ns.statOverlay !== undefined ? { statOverlay: ns.statOverlay } : {}),
     ...(ns.childMounts !== undefined ? { childMounts: ns.childMounts } : {}),
-    ...(ns.user !== undefined ? { user: ns.user } : {}),
   }
 }
 

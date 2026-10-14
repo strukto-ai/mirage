@@ -41,7 +41,6 @@ from mirage.workspace.executor.statement import record_status
 
 logger = logging.getLogger(__name__)
 
-AGENT_ID = "ssh"
 INTERRUPTED = 130
 FALLBACK_PROMPT = "mirage$ "
 LOGIN_HOME = "/"
@@ -266,7 +265,6 @@ async def run_line(
             line,
             session_id=session_id,
             stdin=stdin,
-            agent_id=AGENT_ID,
             stream=True,
         ) as execution:
             io = await deliver(execution, send)

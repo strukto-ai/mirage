@@ -33,7 +33,7 @@ function bg(text: string): TSNodeLike {
 function runner(execute: ExecuteNodeFn, session: SessionState): BodyRun {
   const context = new EvaluationContext(session)
   return (nodes, bound) =>
-    executeBody(execute, nodes, context, null, null, null, null, null, null, null, null, bound)
+    executeBody(execute, nodes, context, null, null, null, null, null, null, null, bound)
 }
 
 describe('handleWhile', () => {

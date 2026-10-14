@@ -673,15 +673,14 @@ it('ps lays columns out as procps does', async () => {
 })
 
 // The issue's line: `$$` is the session's first line, which ps lists while it
-// runs as the session leader procps marks with `s`; the owner is the workspace
-// user and the group the session's profile.
+// runs as the session leader procps marks with `s`; the session's profile is
+// both its owner and its group.
 it('ps lists the session leader with its owner', async () => {
   const ws = new Workspace(
     { '/m': [new RAMVFS(), MountMode.WRITE] },
     {
       mode: MountMode.WRITE,
       shellParser: parser,
-      agentId: 'alice',
       profiles: { admin: parseSessionProfile({}) },
       profile: 'admin',
     },
@@ -690,7 +689,7 @@ it('ps lists the session leader with its owner', async () => {
     const line = 'ps -o pid,ppid,pgid,sid,stat,user,uid,group,gid,cmd -p $$'
     expect(stdoutStr(await ws.shell(line))).toBe(
       '    PID    PPID    PGID     SID STAT USER       UID GROUP      GID CMD\n' +
-        `      1       0       1       1 Rs   alice    alice admin    admin ${line}\n`,
+        `      1       0       1       1 Rs   admin    admin admin    admin ${line}\n`,
     )
   } finally {
     await ws.close()

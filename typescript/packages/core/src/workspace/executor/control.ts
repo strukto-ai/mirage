@@ -79,8 +79,8 @@ export class ContinueSignal extends LoopSignal {}
  * `case` arm, a function body.
  *
  * A statement ending in `&` is launched as a job through `runStatement`
- * rather than run inline; `jobTable` and `agentId` are the job plane it
- * needs. The ERR action answers a failing statement, its output landed
+ * rather than run inline; `jobTable` is the job plane it needs. The ERR
+ * action answers a failing statement, its output landed
  * through `sink` when the body writes to one, and `set -e` stops the list.
  * `bound` is `fd0Binding` as the construct running the list started, so an
  * `exec <&-` in a loop body reaches the next test. A comment leaves `$?` as
@@ -94,7 +94,6 @@ export async function executeBody(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  agentId: string | null,
   handed: HandOff | null,
   decisions: Decisions | null,
   executeFn: ExecuteStringFn | null = null,
@@ -117,7 +116,6 @@ export async function executeBody(
         bound,
         callStack,
         jobTable,
-        agentId,
         handed,
         decisions,
       )

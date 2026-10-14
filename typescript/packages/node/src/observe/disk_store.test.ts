@@ -78,7 +78,7 @@ describe('DiskObserverStore', () => {
 
   it('backs an Observer round-trip', async () => {
     const obs = new Observer(new DiskObserverStore(join(root, 'obs')))
-    await obs.logClear('s1', 'a')
+    await obs.logClear('s1')
     const events = await obs.events()
     const last = events[events.length - 1]
     expect(last?.type).toBe('clear')

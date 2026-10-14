@@ -125,7 +125,6 @@ export function scriptsFromJSON(data: Record<string, ScriptJSON[]>): ProfileScri
 export interface DecisionJSON {
   id: string
   session_id: string
-  agent_id: string
   command: string
   argv: string[]
   cwd: string
@@ -141,7 +140,6 @@ export function decisionToJSON(record: Decision): DecisionJSON {
   return {
     id: record.id,
     session_id: record.sessionId,
-    agent_id: record.agentId,
     command: record.command,
     argv: [...record.argv],
     cwd: record.cwd,
@@ -158,7 +156,6 @@ export function decisionFromJSON(data: DecisionJSON): Decision {
   return {
     id: data.id,
     sessionId: data.session_id,
-    agentId: data.agent_id,
     command: data.command,
     argv: data.argv,
     cwd: data.cwd,

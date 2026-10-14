@@ -2,7 +2,6 @@ mode: WRITE
 
 # Snake_case top-level keys must parse + apply identically in both CLIs.
 default_session_id: crosssess
-default_agent_id: crossagent
 cache:
   type: ram
   limit: 256MB

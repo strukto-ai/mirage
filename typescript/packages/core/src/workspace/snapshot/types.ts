@@ -70,7 +70,6 @@ export interface JobSnapshot {
   stderr: Uint8Array
   exit_code: number
   created_at: number
-  agent: string
   session_id: string
 }
 
@@ -117,8 +116,6 @@ export interface WorkspaceStateDict {
   // Undefined when the state came from an older commit meta that
   // predates the pointer; the live default is kept in that case.
   default_session_id: string | undefined
-  default_agent_id: string | null
-  current_agent_id: string | null
   sessions: SessionSnapshot[]
   mounts: MountSnapshot[]
   cache: CacheSnapshot

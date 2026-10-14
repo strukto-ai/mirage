@@ -129,7 +129,6 @@ class ExecuteEnv:
         observer (Observer): records each typed line.
         records (list[OpRecord]): the workspace's op log.
         job_table (JobTable): the workspace's jobs.
-        agent_id (str | None): the workspace's default agent.
         runtimes (Runtimes): the runtimes a whole line may run in.
         router (Router): places a line.
         processes (ProcessSupervisor): starts a session's process.
@@ -151,7 +150,6 @@ class ExecuteEnv:
     observer: Observer
     records: list[OpRecord]
     job_table: JobTable
-    agent_id: str | None
     runtimes: Runtimes
     router: Router
     processes: ProcessSupervisor
@@ -188,7 +186,6 @@ async def recurse(
     *,
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision[Runtime] | None,
-    agent_id: str | None,
     nested: NestedRefusal,
     execution_scope: ExecutionScope,
     substitution: bool = False,
@@ -199,8 +196,7 @@ async def recurse(
     Never a typed line, so it must not record a history entry or open
     its own recording context (GNU: history is appended by the line
     reader, the evaluator can't touch it). It inherits the typed
-    line's routing decision and agent: nested lines never re-route,
-    and an approval they raise is the outer line's agent's. It runs on
+    line's routing decision: nested lines never re-route. It runs on
     a hand-off of its own under the one the node that runs it runs on,
     standing at that node: the outer pass reads into the words a
     command runs and claims for them at that place, so the grants are
@@ -217,7 +213,6 @@ async def recurse(
             node, so a background job's evaluations carry none.
         routing_decision (RouteDecision | None): the typed line's
             decision, inherited verbatim.
-        agent_id (str | None): the typed line's agent, inherited.
         nested (NestedRefusal): where the record a nested line earned
             is kept for the typed line.
         substitution (bool): isolate a substitution's child shell, except
@@ -278,7 +273,6 @@ async def recurse(
                     ws,
                     cancel=cancel,
                     routing_decision=routing_decision,
-                    agent_id=agent_id,
                     nested=nested,
                     execution_scope=execution_scope,
                     handed=inner,
@@ -289,7 +283,6 @@ async def recurse(
                     ws.namespace,
                     ws.job_table,
                     evaluate,
-                    agent_id or "",
                     tree,
                     context,
                     None,
@@ -354,7 +347,6 @@ async def recurse(
                 record=False,
                 execution_scope=execution_scope,
                 routing_decision=routing_decision,
-                agent_id=agent_id,
                 handed=inner,
                 **opts,
             )
@@ -374,7 +366,6 @@ async def recurse(
                     handed=handed,
                     cancel=cancel,
                     routing_decision=routing_decision,
-                    agent_id=agent_id,
                     nested=nested,
                     execution_scope=execution_scope,
                     job_table=opts["job_table"],
@@ -460,7 +451,6 @@ async def execute_line(
     command: str,
     session_id: str | None,
     stdin: ByteSource | None,
-    agent_id: str | None,
     cwd: str | None,
     env: dict[str, str] | None,
     cancel: asyncio.Event | None,
@@ -536,7 +526,6 @@ async def execute_line(
         command,
         session,
         stdin=stdin,
-        agent_id=agent_id,
         cwd=cwd,
         env=env,
         cancel=cancel,
@@ -653,7 +642,6 @@ async def run_prepared_line(
     session: SessionState,
     *,
     stdin: ByteSource | None,
-    agent_id: str | None,
     cwd: str | None,
     env: dict[str, str] | None,
     cancel: asyncio.Event | None,
@@ -689,10 +677,6 @@ async def run_prepared_line(
         if parent is not None and parent.session is effective_session
         else EvaluationContext(effective_session, parent=parent)
     )
-    # The agent of this line, carried with the execution rather than
-    # held on the workspace: a nested line inherits it through
-    # `recurse`, a concurrent line keeps its own.
-    agent = agent_id if agent_id is not None else ws.agent_id
     io = IOResult()
     # The line-reader decision (GNU: history is appended where the
     # typed line is read, never inside the evaluator). Internal
@@ -794,7 +778,7 @@ async def run_prepared_line(
 
         async def admission_holds() -> bool:
             return await line_held(
-                await judged(), ws.registry, line_handed, cancel, agent or ""
+                await judged(), ws.registry, line_handed, cancel
             )
 
         held = False
@@ -825,7 +809,6 @@ async def run_prepared_line(
                 ws,
                 cancel=cancel,
                 routing_decision=decision,
-                agent_id=agent,
                 nested=nested,
                 execution_scope=execution_scope,
                 job_table=job_table,
@@ -843,7 +826,6 @@ async def run_prepared_line(
                     effective_session,
                     ws.registry,
                     ws.namespace,
-                    agent or "",
                     cancel,
                     handed,
                 )
@@ -919,7 +901,6 @@ async def run_prepared_line(
                 ws.registry,
                 ws.namespace,
                 handed,
-                agent or "",
                 cancel,
                 await judged(),
             )
@@ -979,7 +960,6 @@ async def run_prepared_line(
                         ws.registry,
                         ws.namespace,
                         handed,
-                        agent or "",
                         cancel,
                     )
                     if len(served) != len(nodes):
@@ -1015,7 +995,6 @@ async def run_prepared_line(
                 ws.namespace,
                 job_table or ws.job_table,
                 exec_recursion,
-                agent or "",
                 ast,
                 context,
                 stdin,
@@ -1127,7 +1106,6 @@ async def run_prepared_line(
                 command,
                 await _shown(io, sink),
                 scope.records,
-                agent or "",
                 session_id,
                 session_cwd(ws.sessions, session_id),
             )

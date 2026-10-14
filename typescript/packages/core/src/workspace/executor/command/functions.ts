@@ -49,7 +49,6 @@ export async function executeShellFunction(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null = null,
-  agentId: string | null = null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
   // Where each statement writes as it finishes, undefined to return the
@@ -136,7 +135,6 @@ export async function executeShellFunction(
           bodyStdin,
           cs,
           jobTable,
-          agentId,
           bodyHanded,
           decisions,
           executeFn,

@@ -28,11 +28,11 @@ describe('expandPrintf', () => {
 
   it('expands the owner family from the identity', () => {
     const warnings: string[] = []
-    const identity = { user: 'alice', profile: 'admin' }
-    // No uid/gid on the entry: the owner is the workspace user and the
-    // group the session's profile, the rule ls -l draws its columns by.
+    const identity = { profile: 'admin' }
+    // No uid/gid on the entry: the owner and the group are the session's
+    // profile, the rule ls -l draws its columns by.
     expect(expandPrintf('%u %U %g %G\n', '/data/a.txt', '/data', stat, warnings, identity)).toBe(
-      'alice alice admin admin\n',
+      'admin admin admin admin\n',
     )
     // A reported owner wins; `-` when nothing names one.
     const owned = { ...stat, uid: 501, gid: 'staff' }

@@ -47,7 +47,6 @@ export class Job {
   process: ProcessHandle | null = null
   readonly abort: AbortController | null
   readonly cwd: string
-  readonly agent: string
   readonly sessionId: string
   readonly createdAt: number
   readonly console: JobConsole
@@ -61,7 +60,6 @@ export class Job {
     task?: Promise<void> | null
     abort?: AbortController | null
     cwd: string
-    agent?: string
     sessionId?: string
     createdAt?: number
     status?: JobStatus
@@ -73,7 +71,6 @@ export class Job {
     this.task = init.task ?? null
     this.abort = init.abort ?? null
     this.cwd = init.cwd
-    this.agent = init.agent ?? 'unknown'
     this.sessionId = init.sessionId ?? ''
     this.createdAt = init.createdAt ?? Date.now() / 1000
     this.console = init.console ?? new JobConsole()

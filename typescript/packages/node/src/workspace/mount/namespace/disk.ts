@@ -20,14 +20,13 @@ const NAMESPACE_RECORD = 'namespace'
 
 interface NamespaceState {
   nodes: Record<string, NodeFields>
-  user: string | null
 }
 
 /**
  * NamespaceStore backed by one `namespace.json` per workspace.
  *
  * The whole plane is one human-readable record
- * `{"nodes": {path: fields}, "user": ...}`: the namespace is bound to
+ * `{"nodes": {path: fields}}`: the namespace is bound to
  * the workspace, so it serializes as one JSON file, not per-node
  * files. Read-modify-writes take the record's lockfile so concurrent
  * local processes never lose a node upsert; the write itself stays
@@ -44,15 +43,12 @@ export class DiskNamespaceStore extends NamespaceStore {
 
   private async state(): Promise<NamespaceState> {
     const [fields] = await this.records.get(NAMESPACE_RECORD)
-    if (fields === null) return { nodes: {}, user: null }
-    return {
-      nodes: (fields.nodes as Record<string, NodeFields> | undefined) ?? {},
-      user: typeof fields.user === 'string' ? fields.user : null,
-    }
+    if (fields === null) return { nodes: {} }
+    return { nodes: (fields.nodes as Record<string, NodeFields> | undefined) ?? {} }
   }
 
   private async write(state: NamespaceState): Promise<void> {
-    await this.records.put(NAMESPACE_RECORD, { nodes: state.nodes, user: state.user })
+    await this.records.put(NAMESPACE_RECORD, { nodes: state.nodes })
   }
 
   async load(): Promise<Map<string, NodeFields>> {
@@ -95,25 +91,10 @@ export class DiskNamespaceStore extends NamespaceStore {
     }
   }
 
-  async loadUser(): Promise<string | null> {
-    return (await this.state()).user
-  }
-
-  async setUser(user: string): Promise<void> {
-    const fh = await this.records.lock(NAMESPACE_RECORD)
-    try {
-      const state = await this.state()
-      state.user = user
-      await this.write(state)
-    } finally {
-      await this.records.unlock(NAMESPACE_RECORD, fh)
-    }
-  }
-
   async clear(): Promise<void> {
     const fh = await this.records.lock(NAMESPACE_RECORD)
     try {
-      await this.write({ nodes: {}, user: null })
+      await this.write({ nodes: {} })
     } finally {
       await this.records.unlock(NAMESPACE_RECORD, fh)
     }

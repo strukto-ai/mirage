@@ -129,6 +129,6 @@ async def run_ls(
         stat=stat_fn,
         links=links,
         child_mounts=(ns.child_mounts if ns is not None else None),
-        identity=identity_from(ns, session_view),
+        identity=identity_from(session_view),
         **ls_options(flag_kwargs),
     )

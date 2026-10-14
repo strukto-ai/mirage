@@ -173,16 +173,12 @@ class Namespace:
         self,
         registry: MountRegistry,
         store: NamespaceStore | None = None,
-        user: str | None = None,
     ) -> None:
         self._registry = registry
         self._store = store if store is not None else RAMNamespaceStore()
         self._nodes: dict[str, NodeMeta] = {}
         self._loaded = False
         self._load_lock = asyncio.Lock()
-        self._claim = user
-        self._user: str | None = None
-        self._user_resolved = False
 
     @property
     def registry(self) -> MountRegistry:
@@ -192,43 +188,13 @@ class Namespace:
     def nodes(self) -> dict[str, NodeMeta]:
         return self._nodes
 
-    @property
-    def user(self) -> str | None:
-        """The workspace user (whoami identity).
-
-        Before store resolution the launch claim answers; after it, the
-        resolved identity. None when no agent ever claimed the
-        workspace, mirroring a uid with no passwd entry.
-        """
-        if self._user is not None:
-            return self._user
-        return self._claim
-
-    async def _resolve_user(self) -> None:
-        """Resolve the workspace user against the store, once.
-
-        An explicit launch claim wins and writes through; without one the
-        stored identity is adopted, so a runtime attaching to a shared
-        store (e.g. Redis) inherits the workspace's whoami.
-        """
-        if self._user_resolved:
-            return
-        stored = await self._store.load_user()
-        if self._claim is not None:
-            self._user = self._claim
-            if stored != self._claim:
-                await self._store.set_user(self._claim)
-        else:
-            self._user = stored
-        self._user_resolved = True
-
     async def ensure_loaded(self) -> None:
         """Hydrate the working copy from the store, once.
 
         A snapshot restore (``replace_nodes``) marks the table loaded, so
         snapshot state wins over whatever the store held before it.
         """
-        if self._loaded and self._user_resolved:
+        if self._loaded:
             return
         async with self._load_lock:
             if not self._loaded:
@@ -238,12 +204,10 @@ class Namespace:
                     for path, entry in entries.items()
                 }
                 self._loaded = True
-            await self._resolve_user()
 
     async def replace_nodes(self, entries: dict[str, NodeMeta]) -> None:
         self._nodes = dict(entries)
         self._loaded = True
-        await self._resolve_user()
         await self._store.replace_all(
             {path: meta.to_fields() for path, meta in entries.items()}
         )

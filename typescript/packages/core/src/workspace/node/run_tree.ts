@@ -82,7 +82,6 @@ export async function runCommandTree(
       context.session,
       deps.registry,
       deps.namespace,
-      deps.agentId,
       null,
       paths,
       deps.signal,

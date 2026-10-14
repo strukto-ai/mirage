@@ -300,19 +300,19 @@ async def test_stat_reflects_overlay_chmod_chown():
 
 
 @pytest.mark.asyncio
-async def test_owner_defaults_to_workspace_agent():
+async def test_owner_defaults_to_the_profile():
     vfs = RAMVFS()
     vfs._store.files["/f.txt"] = b"hello"
     ws = Workspace(
         {"/data/": (vfs, MountMode.WRITE)},
         mode=MountMode.WRITE,
-        agent_id="agent7",
+        profiles={"agent7": {}},
+        profile="agent7",
     )
     code, out, _ = await _run(ws, 'stat -c "%U:%G" /data/f.txt')
     assert code == 0
-    # The owner is the workspace user; the group is the session's
-    # profile, and this session runs under none.
-    assert out == "agent7:-\n"
+    # The session's profile is both its user and its group.
+    assert out == "agent7:agent7\n"
 
 
 @pytest.mark.asyncio

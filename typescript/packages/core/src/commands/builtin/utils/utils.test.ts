@@ -77,7 +77,7 @@ describe('formatLsLong', () => {
     expect(line).toBe('-rw-r--r-- 1 - - 5 Jan  1  2026 file.txt')
   })
 
-  it('renders the owner as the user and the group as the profile', () => {
+  it('renders the profile as both the owner and the group', () => {
     const stat = new FileStat({
       name: 'file.txt',
       size: 5,
@@ -85,18 +85,14 @@ describe('formatLsLong', () => {
       content: ContentType.TEXT,
       modified: '2026-01-01T00:00:00Z',
     })
-    const identity = { user: 'alice', profile: 'admin' }
+    const identity = { profile: 'admin' }
     expect(formatLsLong([stat], { identity })[0]).toBe(
-      '-rw-r--r-- 1 alice admin 5 Jan  1  2026 file.txt',
+      '-rw-r--r-- 1 admin admin 5 Jan  1  2026 file.txt',
     )
     // A reported uid/gid (disk, or a chown in the overlay) wins over both.
     const owned = stat.with({ uid: 501, gid: 'staff' })
     expect(formatLsLong([owned], { identity })[0]).toBe(
       '-rw-r--r-- 1 501 staff 5 Jan  1  2026 file.txt',
-    )
-    // Half an identity fills half the columns.
-    expect(formatLsLong([stat], { identity: { user: null, profile: 'admin' } })[0]).toBe(
-      '-rw-r--r-- 1 - admin 5 Jan  1  2026 file.txt',
     )
   })
 
@@ -106,8 +102,8 @@ describe('formatLsLong', () => {
     // names who the session is; a file with neither shows `-` for both.
     const stat = new FileStat({ name: 'dev', type: FileType.DIRECTORY })
     expect(formatLsLong([stat])[0]).toBe('drwxr-xr-x 1 - - 4096 - dev')
-    expect(formatLsLong([stat], { identity: { user: null, profile: 'admin' } })[0]).toBe(
-      'drwxr-xr-x 1 - admin 4096 - dev',
+    expect(formatLsLong([stat], { identity: { profile: 'admin' } })[0]).toBe(
+      'drwxr-xr-x 1 admin admin 4096 - dev',
     )
     expect(formatLsLong([stat], { human: true })[0]).toBe('drwxr-xr-x 1 - - 4.0K - dev')
     const page = new FileStat({ name: 'page', type: FileType.FILE })
@@ -120,8 +116,8 @@ describe('formatLsLong', () => {
       type: FileType.CHAR_DEVICE,
       extra: { [DEVICE_NUMBERS_KEY]: [1, 3] },
     })
-    expect(formatLsLong([nul], { identity: { user: 'alice', profile: null } })[0]).toBe(
-      'crw-rw-rw- 1 alice - 1, 3 - null',
+    expect(formatLsLong([nul], { identity: { profile: 'admin' } })[0]).toBe(
+      'crw-rw-rw- 1 admin admin 1, 3 - null',
     )
   })
 

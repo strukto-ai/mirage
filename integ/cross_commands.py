@@ -610,7 +610,7 @@ async def check_symlink_cache(ws: Workspace, s3_client, label: str) -> None:
 async def check_whoami(ws: Workspace) -> None:
     out, _, code = await run(ws, "whoami")
     check(
-        "whoami: prints the launch agent_id",
+        "whoami: prints the profile name",
         out == "integ-agent\n" and code == 0,
     )
     out, _, _ = await run(ws, "export USER=bob; whoami")
@@ -688,7 +688,12 @@ async def main() -> None:
         prefix = f"mirage-integ-cross-{uuid.uuid4().hex[:8]}/"
         mounts["/redis"] = RedisVFS(url=redis_url, key_prefix=prefix)
 
-    ws = Workspace(mounts, mode=MountMode.WRITE, agent_id="integ-agent")
+    ws = Workspace(
+        mounts,
+        mode=MountMode.WRITE,
+        profiles={"integ-agent": {}},
+        profile="integ-agent",
+    )
     try:
         await seed_tree(ws, "/ram")
         await check_whoami(ws)

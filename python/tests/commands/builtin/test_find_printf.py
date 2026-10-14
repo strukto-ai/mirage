@@ -70,9 +70,9 @@ def test_expand_stat_directives():
 def test_expand_owner_directives():
     warnings: list[str] = []
     search = _spec("/data")
-    identity = Identity(user="alice", profile="admin")
-    # No uid/gid on the entry: the owner is the workspace user and the
-    # group the session's profile, the rule ls -l draws its columns by.
+    identity = Identity(profile="admin")
+    # No uid/gid on the entry: the owner and the group are the session's
+    # profile, the rule ls -l draws its columns by.
     assert (
         expand_printf(
             "%u %U %g %G\n",
@@ -82,7 +82,7 @@ def test_expand_owner_directives():
             warnings,
             identity=identity,
         )
-        == "alice alice admin admin\n"
+        == "admin admin admin admin\n"
     )
     # A reported owner wins; `-` when nothing names one.
     owned = _stat().model_copy(update={"uid": 501, "gid": "staff"})

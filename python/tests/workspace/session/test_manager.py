@@ -619,7 +619,6 @@ async def test_manager_decisions_live_on_the_registered_session_and_persist():
     grant = Decision(
         id="d1",
         session_id="agent",
-        agent_id="",
         command="git",
         argv=("push",),
         cwd="/repo",
@@ -657,7 +656,6 @@ async def test_manager_default_session_hydrates_its_decisions():
     grant = Decision(
         id="d1",
         session_id="agent",
-        agent_id="",
         command="git",
         argv=("push",),
         cwd="/repo",

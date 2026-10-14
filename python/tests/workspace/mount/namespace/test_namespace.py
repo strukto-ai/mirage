@@ -348,49 +348,6 @@ async def test_drop_overlay_missing_node_is_noop(namespace):
     assert await namespace.drop_overlay("/data/nope.txt") is False
 
 
-def test_user_none_before_resolution(namespace):
-    assert namespace.user is None
-
-
-@pytest.mark.asyncio
-async def test_explicit_claim_wins_and_writes_through(registry):
-    store = RAMNamespaceStore()
-    await store.set_user("bob")
-    namespace = Namespace(registry, store=store, user="alice")
-    assert namespace.user == "alice"
-    await namespace.ensure_loaded()
-    assert namespace.user == "alice"
-    assert await store.load_user() == "alice"
-
-
-@pytest.mark.asyncio
-async def test_bare_launch_adopts_stored_user(registry):
-    store = RAMNamespaceStore()
-    await store.set_user("alice")
-    namespace = Namespace(registry, store=store)
-    await namespace.ensure_loaded()
-    assert namespace.user == "alice"
-
-
-@pytest.mark.asyncio
-async def test_bare_launch_empty_store_has_no_user(registry):
-    store = RAMNamespaceStore()
-    namespace = Namespace(registry, store=store)
-    await namespace.ensure_loaded()
-    assert namespace.user is None
-    assert await store.load_user() is None
-
-
-@pytest.mark.asyncio
-async def test_replace_nodes_still_resolves_user(registry):
-    store = RAMNamespaceStore()
-    await store.set_user("bob")
-    namespace = Namespace(registry, store=store, user="alice")
-    await namespace.replace_nodes({"/data/fresh": NodeMeta(mode=0o601)})
-    assert namespace.user == "alice"
-    assert await store.load_user() == "alice"
-
-
 def test_node_meta_fields_roundtrip():
     meta = NodeMeta(target="/t1", mtime=2.0, mode=0o640, uid=500, gid="dev")
     fields = meta.to_fields()

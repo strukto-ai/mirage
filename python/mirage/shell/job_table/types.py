@@ -47,7 +47,6 @@ class Job:
     exit_code: int = 0
     console: JobConsole = field(default_factory=JobConsole)
     created_at: float = field(default_factory=time.time)
-    agent: str = "unknown"
     session_id: str = ""
     process: ProcessHandle | None = None
 

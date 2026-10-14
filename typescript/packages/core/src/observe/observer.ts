@@ -78,8 +78,8 @@ export class Observer {
     await this._store.append(`/${utcDateFolder()}/${entry.session}.jsonl`, line)
   }
 
-  async logOp(rec: OpRecord, agent: string, session: string, cwd?: string): Promise<void> {
-    await this.log(LogEntry.fromOpRecord(rec, agent, session, cwd))
+  async logOp(rec: OpRecord, session: string, cwd?: string): Promise<void> {
+    await this.log(LogEntry.fromOpRecord(rec, session, cwd))
   }
 
   /**
@@ -91,7 +91,6 @@ export class Observer {
     command: string,
     io: IOResult,
     opRecords: OpRecord[],
-    agent: string,
     session: string,
     cwd?: string,
   ): Promise<void> {
@@ -99,13 +98,12 @@ export class Observer {
     // store.append so one typed line costs one roundtrip and lands
     // atomically in the store.
     for (const rec of opRecords) {
-      await this.logOp(rec, agent, session, cwd)
+      await this.logOp(rec, session, cwd)
     }
     const stdout = await io.materializeStdout()
     const text = new TextDecoder('utf-8', { fatal: false }).decode(stdout).slice(0, STDOUT_TRUNCATE)
     const init: LogEntryInit = {
       type: EVENT_COMMAND,
-      agent,
       session,
       timestamp: nowMs(),
       command,
@@ -119,10 +117,9 @@ export class Observer {
   }
 
   /** Append a command entry without an execution (history -s). */
-  async logCommandText(command: string, session: string, agent = '', cwd?: string): Promise<void> {
+  async logCommandText(command: string, session: string, cwd?: string): Promise<void> {
     const init: LogEntryInit = {
       type: EVENT_COMMAND,
-      agent,
       session,
       timestamp: nowMs(),
       command,
@@ -133,13 +130,13 @@ export class Observer {
   }
 
   /** Append a clear tombstone for a session (history -c). */
-  async logClear(session: string, agent = ''): Promise<void> {
-    await this.log(new LogEntry({ type: EVENT_CLEAR, agent, session, timestamp: nowMs() }))
+  async logClear(session: string): Promise<void> {
+    await this.log(new LogEntry({ type: EVENT_CLEAR, session, timestamp: nowMs() }))
   }
 
   /** Append a delete event for one listing entry (history -d). */
-  async logDelete(session: string, offset: number, agent = ''): Promise<void> {
-    await this.log(new LogEntry({ type: EVENT_DELETE, agent, session, timestamp: nowMs(), offset }))
+  async logDelete(session: string, offset: number): Promise<void> {
+    await this.log(new LogEntry({ type: EVENT_DELETE, session, timestamp: nowMs(), offset }))
   }
 
   /**

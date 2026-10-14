@@ -446,7 +446,6 @@ describe('ledger records round-trip through the record', () => {
     const rule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
     const base = {
       sessionId: 's1',
-      agentId: 'a',
       command: 'git',
       cwd: '/repo',
       paths: [],

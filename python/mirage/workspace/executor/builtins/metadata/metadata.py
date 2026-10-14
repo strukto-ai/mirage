@@ -523,7 +523,7 @@ async def change_owner(
     if refused is not None:
         return refused
     report = verbosity(fl)
-    identity = Identity(user=namespace.user, profile=session.profile)
+    identity = Identity(profile=session.profile)
     user = None if uid is None else str(uid)
     group = None if gid is None else str(gid)
     errors: list[str] = []

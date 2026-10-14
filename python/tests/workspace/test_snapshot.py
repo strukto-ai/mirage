@@ -309,8 +309,6 @@ def test_load_rejects_path_traversal_in_blob_ref(tmp_path):
         "version": 1,
         "mirage_version": "0.1.0",
         "default_session_id": "default",
-        "default_agent_id": "default",
-        "current_agent_id": "default",
         "sessions": [],
         "history": None,
         "mounts": [

@@ -348,10 +348,6 @@ class NamespaceView:
     stat_overlay: StatOverlay | None = None
     # Child names the namespace owes a directory (mounts and links).
     child_mounts: ChildMounts | None = None
-    # The workspace user (what whoami prints), None when no agent ever
-    # claimed the workspace. What an owner-rendering command prints in
-    # the owner column for an entry whose backend reports no uid.
-    user: str | None = None
     # The running session's hides and shows; None when unrestricted.
     visibility: Visibility | None = None
     # Whether anything at or under a path is judged; a native walk yields.

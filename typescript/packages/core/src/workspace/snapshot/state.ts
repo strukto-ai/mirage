@@ -105,7 +105,6 @@ export interface WorkspaceLike {
   readonly syntheticRoot: boolean
   readonly sessionManager: SessionManager
   readonly jobTable: JobTable
-  readonly agentId: string | null
   readonly writeDefault: WritePolicy
   readonly cache: FileCache & BaseVFS
   readonly namespace: Namespace
@@ -187,7 +186,6 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
         stderr: await j.console.snapshot(Channel.STDERR),
         exit_code: j.exitCode,
         created_at: j.createdAt,
-        agent: j.agent,
         session_id: j.sessionId,
         execution_id: j.executionId,
       })),
@@ -229,8 +227,6 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     mirage_version: VERSION,
     write: ws.writeDefault,
     default_session_id: ws.sessionManager.defaultId,
-    default_agent_id: ws.agentId,
-    current_agent_id: ws.agentId,
     sessions,
     env: varsToFields(ws.sessionManager.seedVars),
     mounts: mountSnapshots,
@@ -462,7 +458,6 @@ export function buildMountArgs(
   return {
     mountArgs,
     defaultSessionId: state.default_session_id,
-    defaultAgentId: state.default_agent_id,
     writeDefault: coerceWritePolicy(savedName(savedDefault)),
     ...(cliEntries.length > 0 ? { clis: cliArgs } : {}),
     ...(anchorMode !== undefined ? { anchorMode } : {}),
@@ -621,8 +616,6 @@ export async function applyStateDict(
   // never given: without it a session created after the load starts
   // bare while restored ones carry every workspace env entry.
   if (seed !== null) ws.sessionManager.restoreSeed(seed)
-  // current_agent_id is not restored separately: TS models a single
-  // readonly agentId, set to default_agent_id at construction (== current).
   restoreCache(ws, state)
   await restoreHistory(ws, state)
   restoreJobs(ws, state)
@@ -776,7 +769,6 @@ function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): void {
         id: j.id,
         command: j.command,
         cwd: j.cwd,
-        agent: j.agent,
         sessionId: j.session_id,
         createdAt: j.created_at,
         status: j.status as JobStatus,

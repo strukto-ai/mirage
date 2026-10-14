@@ -108,7 +108,6 @@ class WorkspaceLike(Protocol):
     observer: Observer
     job_table: JobTable
     _session_mgr: SessionManager
-    _default_agent_id: str | None
     _implicit_root: bool
     _write_default: WritePolicy
     _documents: Documents
@@ -337,8 +336,6 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         StateKey.SESSIONS: [s.to_dict() for s in ws._session_mgr.list()],
         StateKey.ENV: vars_to_fields(ws._session_mgr.seed_vars),
         StateKey.DEFAULT_SESSION_ID: ws._session_mgr.default_id,
-        StateKey.DEFAULT_AGENT_ID: ws._default_agent_id,
-        StateKey.CURRENT_AGENT_ID: ws._default_agent_id,
         StateKey.CACHE: {
             CacheKey.LIMIT: cache.cache_limit,
             CacheKey.MAX_DRAIN_BYTES: cache.max_drain_bytes,
@@ -545,7 +542,6 @@ def build_mount_args(
     return MountArgs(
         mount_args=mount_args,
         default_session_id=state[StateKey.DEFAULT_SESSION_ID],
-        default_agent_id=state.get(StateKey.DEFAULT_AGENT_ID),
         clis=cli_args or None,
         write_default=coerce_write_policy(str(saved_default)),
         anchor_mode=anchor_mode,
@@ -633,9 +629,6 @@ async def apply_state_dict(
     # bare while restored ones carry every workspace env entry.
     if seed_vars is not None:
         ws._session_mgr.restore_seed(seed_vars)
-    # current_agent_id is not restored: the agent of a line is carried
-    # per execution (the call's agent_id, else the default), never held
-    # on the workspace, so the key only mirrors default_agent_id.
     _restore_cache(ws, state)
     await _restore_history(ws, state)
     _restore_jobs(ws, state)
@@ -833,7 +826,6 @@ async def _job_to_dict(job) -> dict[str, Any]:
         JobKey.STDERR: await job.console.snapshot(Channel.STDERR),
         JobKey.EXIT_CODE: job.exit_code,
         JobKey.CREATED_AT: job.created_at,
-        JobKey.AGENT: job.agent,
         JobKey.SESSION_ID: job.session_id,
         JobKey.EXECUTION_ID: job.execution_id,
     }
@@ -893,7 +885,6 @@ def _job_from_dict(d: dict[str, Any]):
         exit_code=exit_code,
         console=_restored_console(d, exit_code, status),
         created_at=d.get(JobKey.CREATED_AT, 0.0),
-        agent=d.get(JobKey.AGENT, "unknown"),
         session_id=d.get(JobKey.SESSION_ID, "default"),
     )
 

@@ -76,7 +76,6 @@ class Observer:
     async def log_op(
         self,
         rec: OpRecord,
-        agent: str,
         session: str,
         cwd: str | None = None,
     ) -> None:
@@ -84,18 +83,16 @@ class Observer:
 
         Args:
             rec (OpRecord): The operation record.
-            agent (str): Agent ID.
             session (str): Session ID.
             cwd (str | None): Session cwd at log time.
         """
-        await self._log(LogEntry.from_op_record(rec, agent, session, cwd))
+        await self._log(LogEntry.from_op_record(rec, session, cwd))
 
     async def log_execution(
         self,
         command: str,
         io: IOResult,
         op_records: list[OpRecord],
-        agent: str,
         session: str,
         cwd: str | None = None,
     ) -> None:
@@ -108,7 +105,6 @@ class Observer:
             command (str): The typed line, verbatim and unexpanded.
             io (IOResult): Final result of the line.
             op_records (list[OpRecord]): Ops collected while it ran.
-            agent (str): Agent that issued the line.
             session (str): Session the line ran in.
             cwd (str | None): Session cwd at completion.
         """
@@ -116,12 +112,11 @@ class Observer:
         # store.append so one typed line costs one roundtrip and lands
         # atomically in the store.
         for rec in op_records:
-            await self.log_op(rec, agent, session, cwd)
+            await self.log_op(rec, session, cwd)
         stdout = await io.materialize_stdout()
         await self._log(
             LogEntry(
                 type=EVENT_COMMAND,
-                agent=agent,
                 session=session,
                 timestamp=_now_ms(),
                 cwd=cwd,
@@ -136,7 +131,6 @@ class Observer:
         self,
         command: str,
         session: str,
-        agent: str = "",
         cwd: str | None = None,
     ) -> None:
         """Append a command entry without an execution (history -s).
@@ -144,13 +138,11 @@ class Observer:
         Args:
             command (str): Command text to record as a single entry.
             session (str): Session ID the entry belongs to.
-            agent (str): Agent ID issuing the append.
             cwd (str | None): Session cwd at append time.
         """
         await self._log(
             LogEntry(
                 type=EVENT_COMMAND,
-                agent=agent,
                 session=session,
                 timestamp=_now_ms(),
                 cwd=cwd,
@@ -159,37 +151,31 @@ class Observer:
             )
         )
 
-    async def log_clear(self, session: str, agent: str = "") -> None:
+    async def log_clear(self, session: str) -> None:
         """Append a clear tombstone for a session (history -c).
 
         Args:
             session (str): Session ID whose history view is cleared.
-            agent (str): Agent ID issuing the clear.
         """
         await self._log(
             LogEntry(
                 type=EVENT_CLEAR,
-                agent=agent,
                 session=session,
                 timestamp=_now_ms(),
             )
         )
 
-    async def log_delete(
-        self, session: str, offset: int, agent: str = ""
-    ) -> None:
+    async def log_delete(self, session: str, offset: int) -> None:
         """Append a delete event for one listing entry (history -d).
 
         Args:
             session (str): Session ID whose entry is deleted.
             offset (int): 1-based listing position; negative counts
                 back from the end at the time of the delete.
-            agent (str): Agent ID issuing the delete.
         """
         await self._log(
             LogEntry(
                 type=EVENT_DELETE,
-                agent=agent,
                 session=session,
                 timestamp=_now_ms(),
                 offset=offset,

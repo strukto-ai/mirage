@@ -37,10 +37,10 @@ async def id_cmd(
     texts: list[str],
     opts: CommandOpts,
 ) -> tuple[ByteSource | None, IOResult]:
-    """GNU ``id`` over mirage's identity: the workspace user, and the session's
-    profile as its group. Mirage has names but no numbers, so every id slot
-    holds the name, ``-`` for a part nobody claimed; errors and their order are
-    coreutils 9.7's.
+    """GNU ``id`` over mirage's identity: the session's profile, as both its
+    user and its group. Mirage has names but no numbers, so every id slot
+    holds the name, ``-`` for a session with no profile; errors and their
+    order are coreutils 9.7's.
     """
     fl = FlagView(opts.flags, spec=SPECS["id"])
     if fl.as_bool("context"):
@@ -55,14 +55,13 @@ async def id_cmd(
     if not only and zero:
         return None, IOResult(exit_code=1, stderr=ZERO_DEFAULT.encode())
     identity = identity_of(opts)
-    user = identity.user or UNKNOWN_NAME
-    group = identity.profile or UNKNOWN_NAME
+    user = group = identity.profile or UNKNOWN_NAME
     end = "\0" if zero else "\n"
     out: list[str] = []
     err: list[str] = []
     names: list[str | None] = [*texts] if texts else [None]
     for name in names:
-        if name is not None and name != identity.user:
+        if name is not None and name != identity.profile:
             why = ": No such file or directory" if name == "" else ""
             err.append(f"id: '{quote_text(name)}': no such user{why}\n")
             continue
@@ -70,7 +69,7 @@ async def id_cmd(
             out.append(f"uid={user} gid={group} groups={group}{end}")
             continue
         kind = "user" if only[0] == "user" else "group"
-        known = identity.user if kind == "user" else identity.profile
+        known = identity.profile
         if use_name and known is None:
             err.append(f"id: cannot find name for {kind} ID\n")
         many = zero and only[0] == "groups" and len(texts) > 1

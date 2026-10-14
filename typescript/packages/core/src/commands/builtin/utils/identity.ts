@@ -11,50 +11,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import type { NamespaceView, SessionView } from '../../../view/types.ts'
+import type { SessionView } from '../../../view/types.ts'
 import type { CommandOpts } from '../../config.ts'
 
-// What an owner or group column prints when nothing names one: no uid on
-// the entry and no workspace user, or no gid and no profile.
+// What an owner or group column prints when nothing names one: no uid or
+// gid on the entry and no profile.
 export const UNKNOWN_NAME = '-'
 
 /**
- * Who a session is, in the two words POSIX renders as owner and group.
+ * Who a session is: its profile, the one name POSIX renders as both owner
+ * and group.
  *
- * The user is the workspace user (what `whoami` prints, the launch
- * `agentId`); the profile is the permission set the session acts with,
- * which is what a group is. A backend that reports a uid or gid on an
- * entry (disk, or a `chown` held in the attr overlay) wins over both, so
- * `ls -l`, `stat %U %G` and `find -printf %u %g` all agree on one rule.
+ * The profile is the permission set the session acts with, so it is the
+ * user `whoami` prints and the group `id` names. A backend that reports a
+ * uid or gid on an entry (disk, or a `chown` held in the attr overlay) wins
+ * over it, so `ls -l`, `stat %U %G` and `find -printf %u %g` all agree on
+ * one rule.
  */
 export interface Identity {
-  readonly user: string | null
   readonly profile: string | null
 }
 
-/** The identity two planes' views describe; either view may be absent outside a workspace. */
-export function identityFrom(
-  ns: NamespaceView | undefined,
-  sessionView: SessionView | undefined,
-): Identity {
-  return {
-    user: ns?.user ?? null,
-    profile: sessionView?.profile() ?? null,
-  }
+/** The identity the session plane describes; absent outside a workspace. */
+export function identityFrom(sessionView: SessionView | undefined): Identity {
+  return { profile: sessionView?.profile() ?? null }
 }
 
 /** The identity a command invocation runs as, read off its opts. */
 export function identityOf(opts: CommandOpts): Identity {
-  return identityFrom(opts.ns, opts.sessionView)
+  return identityFrom(opts.sessionView)
 }
 
-/** The owner column: the entry's own uid, else the workspace user, else `-`. */
+/** The owner column: the entry's own uid, else the session's profile, else `-`. */
 export function ownerName(
   uid: number | string | null | undefined,
   identity: Identity | null,
 ): string {
   if (uid !== null && uid !== undefined) return String(uid)
-  return identity?.user ?? UNKNOWN_NAME
+  return identity?.profile ?? UNKNOWN_NAME
 }
 
 /** The group column: the entry's own gid, else the session's profile, else `-`. */

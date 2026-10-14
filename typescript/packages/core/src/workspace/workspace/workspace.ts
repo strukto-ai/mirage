@@ -200,7 +200,6 @@ export class Workspace {
   private shellParserPromise: Promise<ShellParser> | null = null
   readonly processes = new ProcessSupervisor()
   readonly jobTable: JobTable
-  readonly agentId: string | null
   readonly cache: FileCache & BaseVFS
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
@@ -359,7 +358,6 @@ export class Workspace {
     )
     this.shellParser = options.shellParser ?? null
     this.shellParserFactory = options.shellParserFactory ?? null
-    this.agentId = options.agentId ?? null
     this.watchManager = new WatchManager(this.registry)
     const sandboxResolver = new PrefixResolver(
       () => this.sandboxVisibleMounts(),
@@ -469,14 +467,7 @@ export class Workspace {
       { write: WritePolicy.UNCONDITIONAL },
     )
     this.registry.attachFileCache(this.cache)
-    // Only an explicit agentId claims the workspace user; a bare launch
-    // adopts whatever identity the namespace store holds.
-    this.namespace = new Namespace(
-      this.registry,
-      (p) => this.resolveInternal(p),
-      stores.namespace,
-      options.agentId ?? null,
-    )
+    this.namespace = new Namespace(this.registry, (p) => this.resolveInternal(p), stores.namespace)
     this.dispatcher = new Dispatcher(
       this.namespace,
       this.cache,
@@ -527,7 +518,7 @@ export class Workspace {
         return this.dispatcher.dispatch(op, path, args, kwargs, report)
       },
       async (rec, sessionId) => {
-        await this.observer.logOp(rec, this.agentId ?? '', sessionId)
+        await this.observer.logOp(rec, sessionId)
       },
       this.namespace,
       (path) => {
@@ -1624,7 +1615,6 @@ export class Workspace {
       observer: this.observer,
       records: this.records,
       jobTable: this.jobTable,
-      agentId: this.agentId,
       workspaceId: this.wsId,
       runtimes: this.runtimeWorld,
       router: this.router,
@@ -2023,7 +2013,6 @@ export class Workspace {
           ? new IOConfig()
           : new IOConfig({ bufferBytes: state.io.buffer_bytes }),
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
-      ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       // Each restored Mount carries its own mode, so this reaches only the
       // scratch root the workspace adds again.
@@ -2073,8 +2062,6 @@ export class Workspace {
       profiles: options.profiles ?? this.profiles,
       profile: options.profile ?? (options.profiles == null ? this.defaultProfileName : null),
     }
-    const copyAgentId = options.agentId ?? this.agentId
-    if (copyAgentId !== null) opts.agentId = copyAgentId
     const parser = options.shellParser ?? this.shellParser
     if (parser !== null) opts.shellParser = parser
     const overrides: Record<string, Mount> = {}

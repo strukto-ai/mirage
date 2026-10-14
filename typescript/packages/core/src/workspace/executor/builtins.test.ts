@@ -331,20 +331,15 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 })
 
 describe('handleWhoami', () => {
-  const unusedResolve: ResolveFn = () => Promise.reject(new Error('unused'))
-  const emptyRegistry = () => new MountRegistry({}, MountMode.READ)
-
-  it('prints the workspace user + newline, exit 0, no stderr', () => {
-    const ns = new Namespace(emptyRegistry(), unusedResolve, undefined, 'alice')
-    const [out, io] = handleWhoami(ns)
-    expect(decode(out as Uint8Array)).toBe('alice\n')
+  it('prints the profile + newline, exit 0, no stderr', () => {
+    const [out, io] = handleWhoami('reviewer')
+    expect(decode(out as Uint8Array)).toBe('reviewer\n')
     expect(io.exitCode).toBe(0)
     expect(io.stderr).toBeNull()
   })
 
-  it('errors without an identity', () => {
-    const ns = new Namespace(emptyRegistry(), unusedResolve)
-    const [out, io] = handleWhoami(ns)
+  it('errors without a profile', () => {
+    const [out, io] = handleWhoami(null)
     expect(out).toBeNull()
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toBe('whoami: cannot find name for user ID\n')

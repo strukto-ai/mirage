@@ -20,6 +20,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
 import { type CacheFacts, MountMode, type Refusal } from '../../types.ts'
 import type { RuntimeEntry } from '../../runtime/base.ts'
+import type { SessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { describeRefusal } from '../../policy/index.ts'
 
@@ -85,7 +86,11 @@ function putDir(res: RAMVFS, path: string): void {
 }
 
 export async function makeWorkspace(
-  extra: { agentId?: string; runtimes?: RuntimeEntry[] } = {},
+  extra: {
+    runtimes?: RuntimeEntry[]
+    profiles?: Record<string, SessionProfile>
+    profile?: string
+  } = {},
 ): Promise<TestWorkspace> {
   const parser = await getTestParser()
   const s3 = new RAMVFS()

@@ -12,32 +12,29 @@ from mirage.io.types import materialize
 from mirage.policy.profile import SessionProfile
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
-from mirage.view.types import NamespaceView
 from mirage.workspace import Workspace
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import session_view
 
 
-def test_owner_and_group_prefer_the_entry_then_the_identity_then_dash():
-    identity = Identity(user="alice", profile="admin")
+def test_owner_and_group_prefer_the_entry_then_the_profile_then_dash():
+    identity = Identity(profile="admin")
     assert owner_name(501, identity) == "501"
-    assert owner_name(None, identity) == "alice"
-    assert owner_name(None, Identity(profile="admin")) == "-"
+    assert owner_name(None, identity) == "admin"
+    assert owner_name(None, Identity()) == "-"
     assert owner_name(None, None) == "-"
     assert group_name("staff", identity) == "staff"
     assert group_name(None, identity) == "admin"
-    assert group_name(None, Identity(user="alice")) == "-"
     assert group_name(None, Identity()) == "-"
 
 
-def test_identity_reads_the_name_plane_and_the_session_plane():
+def test_identity_reads_the_session_plane():
     session = SessionState(session_id="s", profile="admin")
     view = session_view(session)
-    ns = NamespaceView(user="alice")
-    assert identity_from(ns, view) == Identity(user="alice", profile="admin")
-    assert identity_from(None, None) == Identity()
-    assert identity_of(CommandOpts(ns=ns, session_view=view)) == Identity(
-        user="alice", profile="admin"
+    assert identity_from(view) == Identity(profile="admin")
+    assert identity_from(None) == Identity()
+    assert identity_of(CommandOpts(session_view=view)) == Identity(
+        profile="admin"
     )
     assert identity_of(CommandOpts()) == Identity()
 
@@ -57,22 +54,20 @@ def _ws(**kwargs) -> Workspace:
 
 
 @pytest.mark.asyncio
-async def test_ls_stat_and_find_render_user_and_profile():
-    ws = _ws(
-        agent_id="alice", profiles={"admin": SessionProfile()}, profile="admin"
-    )
+async def test_ls_stat_find_and_whoami_render_the_profile():
+    ws = _ws(profiles={"admin": SessionProfile()}, profile="admin")
     _, ls_out = await _run(ws, "ls -l /data/f.txt")
-    assert ls_out == "-rw-r--r-- 1 alice admin 5 - /data/f.txt\n"
+    assert ls_out == "-rw-r--r-- 1 admin admin 5 - /data/f.txt\n"
     _, stat_out = await _run(ws, 'stat -c "%U %G" /data/f.txt')
-    assert stat_out == "alice admin\n"
+    assert stat_out == "admin admin\n"
     _, find_out = await _run(ws, "find /data -type f -printf '%u %g %p\\n'")
-    assert find_out == "alice admin /data/f.txt\n"
+    assert find_out == "admin admin /data/f.txt\n"
     _, who = await _run(ws, "whoami")
-    assert who == "alice\n"
+    assert who == "admin\n"
 
 
 @pytest.mark.asyncio
-async def test_missing_user_or_profile_renders_as_dash():
+async def test_a_session_with_no_profile_renders_as_dash():
     ws = _ws()
     _, ls_out = await _run(ws, "ls -l /data/f.txt")
     assert ls_out == "-rw-r--r-- 1 - - 5 - /data/f.txt\n"
@@ -83,7 +78,6 @@ async def test_missing_user_or_profile_renders_as_dash():
 @pytest.mark.asyncio
 async def test_a_named_session_reports_its_own_profile():
     ws = _ws(
-        agent_id="alice",
         profiles={"default": SessionProfile(), "reviewer": SessionProfile()},
     )
     _, own = await _run(ws, 'stat -c "%G" /data/f.txt')

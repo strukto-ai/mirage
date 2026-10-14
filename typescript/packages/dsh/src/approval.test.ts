@@ -116,7 +116,6 @@ function said(argv: string[]): string {
   return approvalReason({
     id: 'abc',
     sessionId: 'agent',
-    agentId: '',
     command: 'rm',
     argv,
     cwd: '/',
@@ -134,7 +133,6 @@ describe('approvalReason', () => {
     const reason = approvalReason({
       id: 'abc',
       sessionId: 'agent',
-      agentId: '',
       command: 'rm',
       argv: ['-rf', '/data/notes.txt'],
       cwd: '/',

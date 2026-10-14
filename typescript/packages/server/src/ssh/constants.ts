@@ -46,7 +46,6 @@ export const KEEPALIVE_COUNT_MAX = 3
  * message per line, without the `jsonrpc` member.
  */
 export const CODEX_SUBSYSTEM = 'codex-exec'
-export const CODEX_AGENT_ID = 'codex'
 export const CODEX_SHELL_NAME = 'bash'
 export const CODEX_SHELL_PATH = '/bin/bash'
 export const CODEX_SHELLS: ReadonlySet<string> = new Set(['bash', 'sh', 'zsh', 'dash'])

@@ -32,7 +32,6 @@ class MountArgs:
 
     mount_args: dict[str, Any]
     default_session_id: str
-    default_agent_id: str | None
     clis: dict[str, tuple[str | CLI, dict[str, Any] | None]] | None = None
     write_default: WritePolicy = WritePolicy.UNCONDITIONAL
     # The saved scratch root's mode, for the one the new workspace adds.

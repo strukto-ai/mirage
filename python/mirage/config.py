@@ -709,7 +709,6 @@ class WorkspaceConfig(BaseModel):
     # The write policy a mount inherits when it declares none.
     write: WritePolicy | None = None
     default_session_id: str | None = None
-    default_agent_id: str | None = None
     workspace_id: str | None = None
     cache: CacheBlock | None = None
     index: IndexBlock | None = None
@@ -807,7 +806,6 @@ class WorkspaceConfig(BaseModel):
             "read": default_read,
             "write": self.write,
             "session_id": self.default_session_id,
-            "agent_id": self.default_agent_id,
         }
         if self.cache is not None:
             kwargs["cache"] = _build_cache_config(self.cache)

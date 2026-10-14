@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { parseSessionProfile } from '../policy/profile.ts'
 import {
   countOccurrences,
   makeWorkspace,
@@ -62,18 +63,20 @@ describe('workspace: env set / unset / printenv', () => {
   })
 })
 
+const ALICE = { profiles: { alice: parseSessionProfile({}) }, profile: 'alice' }
+
 describe('workspace: whoami', () => {
-  it('prints the launch agentId', async () => {
-    const { ws } = await makeWorkspace({ agentId: 'alice' })
+  it('prints the profile name', async () => {
+    const { ws } = await makeWorkspace(ALICE)
     const io = await ws.shell('whoami')
     expect(stdoutStr(io)).toBe('alice\n')
     expect(io.exitCode).toBe(0)
     await ws.close()
   })
 
-  it('errors without an agentId', async () => {
-    // No agent ever claimed this workspace: GNU errors for a uid with
-    // no passwd entry, and so do we.
+  it('errors without a profile', async () => {
+    // A session with no profile: GNU errors for a uid with no passwd
+    // entry, and so do we.
     const { ws } = await makeWorkspace()
     const io = await ws.shell('whoami')
     expect(io.exitCode).toBe(1)
@@ -82,7 +85,7 @@ describe('workspace: whoami', () => {
   })
 
   it('ignores $USER (GNU: effective user, not env)', async () => {
-    const { ws } = await makeWorkspace({ agentId: 'alice' })
+    const { ws } = await makeWorkspace(ALICE)
     await ws.shell('export USER=bob')
     const io = await ws.shell('whoami')
     expect(stdoutStr(io)).toBe('alice\n')

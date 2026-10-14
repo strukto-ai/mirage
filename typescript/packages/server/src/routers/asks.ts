@@ -43,7 +43,6 @@ interface AnswerAskBody {
 interface AskResponse {
   id: string
   session_id: string
-  agent_id: string
   command: string
   argv: string[]
   cwd: string
@@ -58,7 +57,6 @@ function toResponse(record: Decision): AskResponse {
   return {
     id: record.id,
     session_id: record.sessionId,
-    agent_id: record.agentId,
     command: record.command,
     argv: [...record.argv],
     cwd: record.cwd,

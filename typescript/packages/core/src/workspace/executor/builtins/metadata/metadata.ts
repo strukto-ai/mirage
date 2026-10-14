@@ -329,7 +329,7 @@ export async function changeOwner(
   const [follow, refused] = followsLinks(cmd, fl)
   if (refused !== null) return refused
   const report = verbosity(fl)
-  const identity = { user: namespace.user, profile: session.profile ?? null }
+  const identity = { profile: session.profile ?? null }
   const user = uid === null ? null : String(uid)
   const group = gid === null ? null : String(gid)
   const fields: SetAttrFields = {

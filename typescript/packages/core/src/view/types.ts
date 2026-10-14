@@ -237,10 +237,6 @@ export interface NamespaceView {
   statOverlay?: StatOverlay
   // Child names the namespace owes a directory (mounts and links).
   childMounts?: ChildMounts
-  // The workspace user (what whoami prints), absent when no agent ever
-  // claimed the workspace. What an owner-rendering command prints in the
-  // owner column for an entry whose backend reports no uid.
-  user?: string
   // The running session's hides and shows; absent when unrestricted.
   visibility?: Visibility
   // Whether anything at or under a path is judged; a native walk yields.

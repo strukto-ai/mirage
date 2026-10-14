@@ -26,8 +26,6 @@ def _state() -> dict[str, Any]:
         StateKey.VERSION: 2,
         StateKey.MIRAGE_VERSION: "0.0.0",
         StateKey.DEFAULT_SESSION_ID: "s1",
-        StateKey.DEFAULT_AGENT_ID: None,
-        StateKey.CURRENT_AGENT_ID: None,
         StateKey.SESSIONS: [],
         StateKey.MOUNTS: [],
         StateKey.CACHE: {

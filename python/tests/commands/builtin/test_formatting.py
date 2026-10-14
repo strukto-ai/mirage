@@ -69,23 +69,20 @@ def test_format_ls_long_regular_file():
     assert line == "-rw-r--r-- 1 - - 5 Jan  1  2026 file.txt"
 
 
-def test_format_ls_long_owner_is_user_and_group_is_profile():
+def test_format_ls_long_owner_and_group_are_the_profile():
     stat = FileStat(
         name="file.txt",
         size=5,
         type=FileType.FILE,
         modified="2026-01-01T00:00:00Z",
     )
-    identity = Identity(user="alice", profile="admin")
+    identity = Identity(profile="admin")
     [line] = format_ls_long([stat], identity=identity)
-    assert line == "-rw-r--r-- 1 alice admin 5 Jan  1  2026 file.txt"
+    assert line == "-rw-r--r-- 1 admin admin 5 Jan  1  2026 file.txt"
     # A reported uid/gid (disk, or a chown in the overlay) wins over both.
     owned = stat.model_copy(update={"uid": 501, "gid": "staff"})
     [line] = format_ls_long([owned], identity=identity)
     assert line == "-rw-r--r-- 1 501 staff 5 Jan  1  2026 file.txt"
-    # Half an identity fills half the columns.
-    [line] = format_ls_long([stat], identity=Identity(profile="admin"))
-    assert line == "-rw-r--r-- 1 - admin 5 Jan  1  2026 file.txt"
 
 
 def test_format_ls_long_metadata_less_row_keeps_the_owner_columns():
@@ -96,7 +93,7 @@ def test_format_ls_long_metadata_less_row_keeps_the_owner_columns():
     [line] = format_ls_long([stat])
     assert line == "drwxr-xr-x 1 - - 4096 - dev"
     [line] = format_ls_long([stat], identity=Identity(profile="admin"))
-    assert line == "drwxr-xr-x 1 - admin 4096 - dev"
+    assert line == "drwxr-xr-x 1 admin admin 4096 - dev"
     [line] = format_ls_long([stat], human=True)
     assert line == "drwxr-xr-x 1 - - 4.0K - dev"
     [line] = format_ls_long([FileStat(name="page", type=FileType.FILE)])
@@ -109,8 +106,8 @@ def test_format_ls_long_device_row():
         type=FileType.CHAR_DEVICE,
         extra={DEVICE_NUMBERS_KEY: (1, 3)},
     )
-    [line] = format_ls_long([null], identity=Identity(user="alice"))
-    assert line == "crw-rw-rw- 1 alice - 1, 3 - null"
+    [line] = format_ls_long([null], identity=Identity(profile="admin"))
+    assert line == "crw-rw-rw- 1 admin admin 1, 3 - null"
 
 
 def test_format_ls_long_directory():

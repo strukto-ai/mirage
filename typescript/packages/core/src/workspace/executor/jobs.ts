@@ -172,7 +172,6 @@ export async function handleBackground(
   right: TSNodeLike | null,
   context: EvaluationContext,
   jobTable: JobTable,
-  agentId: string | null,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   // The line's hand-off and the ledger it lives in. The claims the
@@ -301,7 +300,6 @@ export async function handleBackground(
       run: runBg,
       abort,
       cwd: bgSession.cwd,
-      agent: agentId ?? '',
       sessionId: session.sessionId,
       parentPid: session.processId,
       limit: session.processes.max,
@@ -366,7 +364,6 @@ export function runStatement(
   bound: readonly [SharedInput | null, boolean],
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  agentId: string | null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
 ): Promise<JobHandlerResult> {
@@ -383,7 +380,6 @@ export function runStatement(
     null,
     context,
     jobTable,
-    agentId,
     stdin,
     callStack,
     handed,
@@ -1152,14 +1148,13 @@ function psRow(keys: readonly string[], cells: readonly string[]): string {
 
 /**
  * What every row of one ps line reads besides its runner: the moment ps runs
- * (epoch seconds), the zone times print in (the session's TZ), the workspace
- * user who owns every runner, the session's profile as their group, and the
- * calling session with its `$$`.
+ * (epoch seconds), the zone times print in (the session's TZ), the session's
+ * profile as its runners' owner and group, and the calling session with its
+ * `$$`.
  */
 interface PsContext {
   now: number
   zone: Zone
-  user: string | null
   group: string | null
   sessionId: string
   shellPid: number | null
@@ -1222,8 +1217,9 @@ function psCell(key: string, info: ProcessInfo, ctx: PsContext): string {
     const head = info.command.split(/\s+/).find((w) => w !== '') ?? ''
     return (head.split('/').pop() ?? '').slice(0, 15)
   }
-  if (fact === 'user') return ctx.user ?? UNKNOWN_NAME
-  if (fact === 'group') return (info.sessionId === ctx.sessionId ? ctx.group : null) ?? UNKNOWN_NAME
+  if (fact === 'user' || fact === 'group') {
+    return (info.sessionId === ctx.sessionId ? ctx.group : null) ?? UNKNOWN_NAME
+  }
   const age = Math.max(0, Math.floor(ctx.now - info.startedAt))
   if (fact === 'etime') return elapsed(age)
   if (fact === 'etimes') return String(age)
@@ -1245,7 +1241,6 @@ export function handlePs(
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
-  user: string | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')
   let options: PsOptions
@@ -1263,7 +1258,6 @@ export function handlePs(
     const ctx: PsContext = {
       now: Date.now() / 1000,
       zone: (session !== null ? zoneFromEnv(session.env) : null) ?? LOCAL_ZONE,
-      user,
       group: session?.profile ?? null,
       sessionId: sessionOf(session),
       shellPid: session?.shellPid ?? null,

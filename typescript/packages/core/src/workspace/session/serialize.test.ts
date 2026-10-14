@@ -70,7 +70,6 @@ describe('session record codecs', () => {
     const record: Decision = {
       id: 'd1',
       sessionId: 'agent',
-      agentId: 'a',
       command: 'git',
       argv: ['push'],
       cwd: '/repo',

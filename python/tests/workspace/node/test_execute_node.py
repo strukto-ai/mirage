@@ -136,7 +136,6 @@ async def _aexec(cmd, session=None, dispatch=None, registry=None, env=None):
         reg,
         job_table,
         execute_fn,
-        "agent-1",
         node,
         EvaluationContext(session),
     )
@@ -467,7 +466,7 @@ def test_printenv_all():
 
 
 def test_whoami_errors_without_identity():
-    # No agent ever claimed this workspace: GNU errors for a uid with
+    # A session with no profile: GNU errors for a uid with
     # no passwd entry, and so do we.
     stdout, io, _, _, _, _ = _exec("whoami", env={})
     assert io.exit_code == 1
@@ -501,7 +500,6 @@ def test_unsupported_node_raises():
             reg,
             job_table,
             execute_fn,
-            "agent-1",
             fake_node,
             EvaluationContext(session),
         )
@@ -531,7 +529,6 @@ def test_read_from_bytes():
             reg,
             job_table,
             execute_fn,
-            "agent-1",
             node,
             EvaluationContext(session),
             stdin=b"hello world\n",
@@ -581,7 +578,6 @@ def test_return_raises_inside_function_frame():
                 reg,
                 job_table,
                 execute_fn,
-                "agent-1",
                 node,
                 EvaluationContext(session),
                 None,
@@ -607,7 +603,6 @@ def test_return_top_level_fails_and_continues():
             reg,
             job_table,
             execute_fn,
-            "agent-1",
             node,
             EvaluationContext(session),
         )
@@ -635,7 +630,6 @@ def test_break_outside_loop_absorbed():
             reg,
             job_table,
             execute_fn,
-            "agent-1",
             node,
             EvaluationContext(session),
         )
@@ -657,7 +651,6 @@ def test_continue_outside_loop_absorbed():
             reg,
             job_table,
             execute_fn,
-            "agent-1",
             node,
             EvaluationContext(session),
         )
@@ -682,7 +675,6 @@ def test_eval():
             reg,
             job_table,
             execute_fn,
-            "agent-1",
             node,
             EvaluationContext(session),
         )
@@ -708,7 +700,6 @@ def test_source():
             reg,
             job_table,
             execute_fn,
-            "agent-1",
             node,
             EvaluationContext(session),
         )
@@ -1396,7 +1387,6 @@ def test_source_var_expansion():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
         )
@@ -1560,7 +1550,6 @@ def test_for_cmd_sub_expanded():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
         )
@@ -1670,7 +1659,6 @@ def test_cmd_cmd_sub_as_arg():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
         )
@@ -1715,7 +1703,6 @@ def test_assign_cmd_sub():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
         )
@@ -1768,7 +1755,6 @@ def test_redirect_cmd_sub_target():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
         )
@@ -1980,7 +1966,6 @@ def test_read_from_bytes_stdin():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=b"hello world\n",
@@ -2006,7 +1991,6 @@ def test_read_from_async_iterator_stdin():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=stdin_stream,
@@ -2031,7 +2015,6 @@ def test_read_from_none_stdin():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=None,
@@ -2056,7 +2039,6 @@ def test_read_multivar_from_bytes():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=b"x y z",
@@ -2083,7 +2065,6 @@ def test_read_multivar_from_stream():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=stdin_stream,
@@ -2108,7 +2089,6 @@ def test_read_multiline_takes_first():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=b"line1\nline2\nline3",
@@ -2141,7 +2121,6 @@ def test_redirect_stdin_from_file():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
         )
@@ -2173,7 +2152,6 @@ def _exec_with_stdin(cmd, stdin, env=None):
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=stdin,
@@ -2366,7 +2344,6 @@ def test_redirect_stdin_with_async_iterator():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=_stream(),
@@ -2473,7 +2450,6 @@ def test_buffer_reset_after_loop():
             reg,
             job_table,
             execute_fn,
-            "a",
             node,
             EvaluationContext(session),
             stdin=b"inner\n",

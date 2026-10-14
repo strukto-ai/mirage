@@ -80,7 +80,6 @@ export interface WorkspaceOptions {
   driftPolicy?: DriftPolicy
   shellParser?: ShellParser
   shellParserFactory?: () => Promise<ShellParser>
-  agentId?: string
   sessionId?: string
   cacheLimit?: string | number
   /**
@@ -225,7 +224,6 @@ export interface ExecuteOptions {
   evaluation?: EvaluationContext
   /** @internal The exact session carried by an evaluator, including an unregistered fork. */
   session?: SessionState
-  agentId?: string
   /**
    * Abort the in-progress execution. Observed cooperatively at recursion
    * boundaries between LIST/PIPELINE/loop iterations and inside `sleep`.

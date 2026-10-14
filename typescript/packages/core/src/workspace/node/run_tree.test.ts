@@ -49,7 +49,6 @@ function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
     namespace: new Namespace(registry, (p) => Promise.resolve(registry.resolve(p))),
     jobTable,
     executeFn,
-    agentId: 'test-agent',
     workspaceId: 'test-ws',
     registerCloser: (): void => undefined,
   }

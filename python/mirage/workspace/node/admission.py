@@ -516,7 +516,6 @@ async def admit(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
-    agent_id: str = "",
     stdin: ByteSource | None = None,
     redirects: Sequence[PathSpec] = (),
     cancel: asyncio.Event | None = None,
@@ -547,8 +546,6 @@ async def admit(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to, for a
-            ledger record.
         stdin (ByteSource | None): the line's stdin, which decides
             whether a bare ``rg`` reads the working directory.
         redirects (Sequence[PathSpec]): the statement's expanded
@@ -593,9 +590,7 @@ async def admit(
     # the ledger answers it from the session's records or the host, so
     # an answer never re-opens a deny.
     action: Deny | Pending | Abandoned | None = (
-        await registry.decisions.resolve(
-            ctx, asked, cancel, claimant, agent_id
-        )
+        await registry.decisions.resolve(ctx, asked, cancel, claimant)
         if isinstance(asked, Ask)
         else asked
     )
@@ -760,7 +755,6 @@ async def _admit_words(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
-    agent_id: str,
     rules: AdmissionRules | None,
     redirect_words: tuple[Word, ...] = (),
     cancel: asyncio.Event | None = None,
@@ -778,7 +772,6 @@ async def _admit_words(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to.
         rules (AdmissionRules | None): the session's admission rules.
         redirect_words (tuple[Word, ...]): the statement's redirect
             targets, as the gate reads them.
@@ -802,7 +795,6 @@ async def _admit_words(
         session,
         registry,
         namespace,
-        agent_id,
         stdin=stdin,
         redirects=redirects,
         cancel=cancel,
@@ -848,7 +840,6 @@ async def _admit_words(
                 session,
                 registry,
                 namespace,
-                agent_id,
                 cancel,
                 claimant.line if claimant else None,
                 frame,
@@ -874,7 +865,6 @@ async def _admit_words(
                 session,
                 registry,
                 namespace,
-                agent_id,
                 rules,
                 cancel=cancel,
                 claimant=within,
@@ -889,7 +879,6 @@ async def admit_line(
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
-    agent_id: str = "",
     cancel: asyncio.Event | None = None,
     handed: HandOff | None = None,
     frame: Frame | None = None,
@@ -936,7 +925,6 @@ async def admit_line(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to.
         cancel (asyncio.Event | None): the run's kill channel.
         handed (HandOff | None): the line's hand-off, None outside a
             line (a bare admission with no run behind it).
@@ -969,7 +957,6 @@ async def admit_line(
             session,
             registry,
             namespace,
-            agent_id,
             rules,
             redirect_words=statement_redirects(node, home),
             stdin=statement_stdin(node),

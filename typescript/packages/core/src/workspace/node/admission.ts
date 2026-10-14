@@ -336,9 +336,7 @@ function seenWords(
  * dropped before any method, so a rule never names it and the dispatcher
  * answers ENOENT; a Deny renders in the outcome table's voice; an Ask
  * is answered by the entry point from the session's grants or the host.
- * `agentId` is the agent the line is attributed to, for an approval
- * request; `stdin` decides whether a bare `rg` reads the working
- * directory.
+ * `stdin` decides whether a bare `rg` reads the working directory.
  */
 /**
  * One command's literal words, classified the way the runtime would
@@ -496,7 +494,6 @@ export async function admit(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId = '',
   stdin: ByteSource | null = null,
   redirects: readonly PathSpec[] = [],
   // The run's abort signal, carried only so a question put to a host
@@ -540,7 +537,7 @@ export async function admit(
   // never re-opens a deny.
   const action =
     asked !== null && asked.kind === 'ask'
-      ? await registry.decisions.resolve(ctx, asked, signal, claimant, agentId)
+      ? await registry.decisions.resolve(ctx, asked, signal, claimant)
       : asked
   // The ledger stopped waiting on a host because this run was killed
   // while it was deciding. That is the kill landing late, not a ruling,
@@ -637,7 +634,6 @@ async function admitWords(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   rules: AdmissionRules | null,
   reparse: (line: string) => TSNodeLike,
   redirectWords: readonly Word[] = [],
@@ -662,7 +658,6 @@ async function admitWords(
     session,
     registry,
     namespace,
-    agentId,
     stdin,
     redirects,
     signal,
@@ -700,7 +695,6 @@ async function admitWords(
         session,
         registry,
         namespace,
-        agentId,
         reparse,
         signal,
         claimant?.line ?? null,
@@ -723,7 +717,6 @@ async function admitWords(
         session,
         registry,
         namespace,
-        agentId,
         rules,
         reparse,
         [],
@@ -781,7 +774,6 @@ export async function admitLine(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
   handed: HandOff | null = null,
@@ -809,7 +801,6 @@ export async function admitLine(
       session,
       registry,
       namespace,
-      agentId,
       rules,
       reparse,
       statementRedirects(node, home),

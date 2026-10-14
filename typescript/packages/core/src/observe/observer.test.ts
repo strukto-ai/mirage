@@ -29,7 +29,6 @@ function logCommand(o: Observer, command: string, session: string, ts: number): 
     o,
     new LogEntry({
       type: EVENT_COMMAND,
-      agent: 'a',
       session,
       timestamp: Math.round(ts * 1000),
       command,
@@ -54,12 +53,11 @@ describe('Observer', () => {
       timestamp: 1000,
       durationMs: 5,
     })
-    await o.logOp(rec, 'agent-1', 'sess-1')
+    await o.logOp(rec, 'sess-1')
     const parsed = JSON.parse(
       decode(store.files.get(`/${utcDateFolder()}/sess-1.jsonl`)).trim(),
     ) as Record<string, unknown>
     expect(parsed.type).toBe('op')
-    expect(parsed.agent).toBe('agent-1')
     expect(parsed.session).toBe('sess-1')
     expect(parsed.op).toBe('read')
   })
@@ -68,7 +66,7 @@ describe('Observer', () => {
     const store = new RAMObserverStore()
     const o = new Observer(store)
     const io = new IOResult({ stdout: new TextEncoder().encode('file.csv\n') })
-    await o.logExecution('ls /data', io, [], 'agent-1', 'sess-1')
+    await o.logExecution('ls /data', io, [], 'sess-1')
     const parsed = JSON.parse(
       decode(store.files.get(`/${utcDateFolder()}/sess-1.jsonl`)).trim(),
     ) as Record<string, unknown>
@@ -91,7 +89,7 @@ describe('Observer', () => {
         timestamp: 1000 + i,
         durationMs: 1,
       })
-      await o.logOp(rec, 'a', 's')
+      await o.logOp(rec, 's')
     }
     const lines = decode(store.files.get(`/${utcDateFolder()}/s.jsonl`))
       .trim()
@@ -106,7 +104,7 @@ describe('Observer', () => {
 
   it('logClear appends a tombstone', async () => {
     const o = new Observer()
-    await o.logClear('s1', 'a1')
+    await o.logClear('s1')
     const events = await o.events()
     const last = events[events.length - 1]
     expect(last?.type).toBe('clear')
@@ -125,7 +123,7 @@ describe('Observer', () => {
       timestamp: 1500,
       durationMs: 1,
     })
-    await o.logOp(op, 'a', 's1')
+    await o.logOp(op, 's1')
     const events = await o.commandEvents()
     expect(events.map((e) => e.command)).toEqual(['ls /a', 'ls /b'])
     expect(events.every((e) => e.type === 'command')).toBe(true)
@@ -143,7 +141,7 @@ describe('Observer', () => {
   it('sessionCommandEvents respects the last clear', async () => {
     const o = new Observer()
     await logCommand(o, 'cmd A', 's1', 1.0)
-    await o.logClear('s1', 'a')
+    await o.logClear('s1')
     await logCommand(o, 'cmd B', 's1', 2.0)
     await logCommand(o, 'cmd C', 's2', 3.0)
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['cmd B'])
@@ -223,7 +221,6 @@ describe('Observer', () => {
   it('loadEvents skips foreign-format entries', async () => {
     const o = new Observer()
     const foreign = {
-      agent: 'default',
       command: 'cat /a | wc -l',
       stdout: '5\n',
       tree: { command: 'cat /a | wc -l', children: [] },

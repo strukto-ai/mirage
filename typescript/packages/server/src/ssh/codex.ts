@@ -31,7 +31,6 @@ import {
   RPC_PARSE_ERROR,
 } from '../rpc/constants.ts'
 import {
-  CODEX_AGENT_ID,
   CODEX_CTRL_C,
   CODEX_CTRL_D,
   CODEX_INTERRUPTED,
@@ -672,7 +671,6 @@ class CodexChannel {
       const execution = await this.entry.runner.ws.shell(line, {
         sessionId: this.sessionId,
         stdin: proc.stdin ?? new Uint8Array(0),
-        agentId: CODEX_AGENT_ID,
         signal: controller.signal,
         cwd,
         ...(Object.keys(env).length > 0 ? { env } : {}),

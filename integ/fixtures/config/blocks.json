@@ -119,7 +119,6 @@
         "mode": "write",
         "read": "fresh",
         "default_session_id": "s1",
-        "default_agent_id": "a1",
         "workspace_id": "w1",
         "cache": {
           "type": "ram"

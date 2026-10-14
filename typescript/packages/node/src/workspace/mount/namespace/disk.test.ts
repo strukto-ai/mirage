@@ -48,13 +48,9 @@ describe('DiskNamespaceStore', () => {
     expect([...(await store.load()).keys()]).toEqual(['/c'])
   })
 
-  it('round-trips the user and clears everything', async () => {
-    expect(await store.loadUser()).toBeNull()
-    await store.setUser('agent_a')
-    expect(await store.loadUser()).toBe('agent_a')
+  it('clears everything', async () => {
     await store.set('/a', { mode: 1 })
     await store.clear()
     expect((await store.load()).size).toBe(0)
-    expect(await store.loadUser()).toBeNull()
   })
 })

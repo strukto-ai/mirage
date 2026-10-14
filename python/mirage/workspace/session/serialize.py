@@ -149,7 +149,6 @@ def decision_to_dict(record: Decision) -> dict[str, Any]:
     return {
         "id": record.id,
         "session_id": record.session_id,
-        "agent_id": record.agent_id,
         "command": record.command,
         "argv": list(record.argv),
         "cwd": record.cwd,
@@ -172,7 +171,6 @@ def decision_from_dict(data: Mapping[str, Any]) -> Decision:
     return Decision(
         id=data["id"],
         session_id=data.get("session_id", ""),
-        agent_id=data.get("agent_id", ""),
         command=data.get("command", ""),
         argv=tuple(data.get("argv", ())),
         cwd=data.get("cwd", "/"),

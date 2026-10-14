@@ -157,7 +157,6 @@ export class JobTable {
     run: JobRunner
     abort: AbortController
     cwd: string
-    agent?: string
     sessionId?: string
     parentPid?: number | null
     limit?: number | null
@@ -199,7 +198,6 @@ export class JobTable {
         command: init.command,
         abort: init.abort,
         cwd: init.cwd,
-        agent: init.agent ?? 'unknown',
         sessionId,
         console: jobConsole,
       })

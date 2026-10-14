@@ -872,7 +872,6 @@ async def prejudge_line(
     registry: MountRegistry,
     namespace: Namespace | None,
     handed: HandOff,
-    agent_id: str = "",
     cancel: asyncio.Event | None = None,
     judged: "list[tuple[Walked, list[Judged]]] | None" = None,
 ) -> Refused | None:
@@ -971,7 +970,6 @@ async def prejudge_line(
         namespace (Namespace | None): the link table.
         handed (HandOff): the line's hand-off, on which every grant
             claimed here rides to the executor's sweep.
-        agent_id (str): the agent the line is attributed to.
         cancel (asyncio.Event | None): the run's kill channel. This
             pass puts real questions to a host, so it carries it
             exactly as the per-command gate does; without it a compound
@@ -1006,7 +1004,6 @@ async def prejudge_line(
                 walked,
                 registry,
                 namespace,
-                agent_id,
                 # _judge_words lists the statement's own command first
                 # and the lines it runs after it, so only the first
                 # explanation is the command the redirects belong to.
@@ -1036,7 +1033,6 @@ async def _verdict_refuses(
     registry: MountRegistry,
     handed: HandOff,
     cancel: asyncio.Event | None,
-    agent_id: str = "",
 ) -> bool:
     """Whether a verdict's answer refuses the command, putting an
     unanswered ask's question to the host.
@@ -1056,7 +1052,6 @@ async def _verdict_refuses(
         handed (HandOff): the line's hand-off, on which an answer given
             here is claimed for the gate.
         cancel (asyncio.Event | None): the run's kill channel.
-        agent_id (str): the agent the line is attributed to.
     """
     ctx = judged.ctx
     if ctx is None:
@@ -1075,9 +1070,7 @@ async def _verdict_refuses(
     # hand_off: this pass exists to decide whether a secret is fetched, and
     # the gate behind it still has to admit the line. An answer given here is
     # claimed for that gate, which runs on it -- so the host is asked once.
-    action = await registry.decisions.resolve(
-        ctx, asked, cancel, claimant, agent_id
-    )
+    action = await registry.decisions.resolve(ctx, asked, cancel, claimant)
     if isinstance(action, Abandoned):
         raise MirageAbortError()
     return action is not None
@@ -1141,7 +1134,6 @@ async def _command_refused(
     item: Walked,
     registry: MountRegistry,
     namespace: Namespace | None,
-    agent_id: str,
     handed: HandOff,
     cancel: asyncio.Event | None,
     line: bool = False,
@@ -1155,7 +1147,6 @@ async def _command_refused(
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
-        agent_id (str): the agent the line is attributed to.
         handed (HandOff): the line's hand-off.
         cancel (asyncio.Event | None): the run's kill channel.
         line (bool): whether the command is the whole line, which runs
@@ -1189,7 +1180,7 @@ async def _command_refused(
         # only ever over-fetches.
         if not _is_verdict(judged.judgment) or not _asks_for(judged):
             continue
-        if await _verdict_refuses(judged, registry, handed, cancel, agent_id):
+        if await _verdict_refuses(judged, registry, handed, cancel):
             return True
     return False
 
@@ -1200,7 +1191,6 @@ async def unrefused_nodes(
     registry: MountRegistry,
     namespace: Namespace | None,
     handed: HandOff,
-    agent_id: str = "",
     cancel: asyncio.Event | None = None,
 ) -> list[Any]:
     """The walked nodes whose reads an env-plane fetch still serves.
@@ -1237,7 +1227,6 @@ async def unrefused_nodes(
         namespace (Namespace | None): the link table.
         handed (HandOff): the line's hand-off, on which an approval
             given here is claimed for the gate.
-        agent_id (str): the agent the line is attributed to.
         cancel (asyncio.Event | None): the run's kill channel, carried
             because an unanswered ask is put to the host here.
     """
@@ -1256,7 +1245,7 @@ async def unrefused_nodes(
             out.append(node)
             continue
         if await _command_refused(
-            item, registry, namespace, agent_id, handed, cancel, position == 0
+            item, registry, namespace, handed, cancel, position == 0
         ):
             if position == 0:
                 return []
@@ -1320,7 +1309,6 @@ async def line_held(
     registry: MountRegistry,
     handed: HandOff,
     cancel: asyncio.Event | None = None,
-    agent_id: str = "",
 ) -> bool:
     """Whether the line's admission holds it back, which is what
     placement waits on: admission comes first, so a line the rules
@@ -1342,7 +1330,6 @@ async def line_held(
         handed (HandOff): the line's hand-off, on which an answer given
             here is claimed for the gate.
         cancel (asyncio.Event | None): the run's kill channel.
-        agent_id (str): the agent the line is attributed to.
     """
     for _, explained in judged:
         for one in explained:
@@ -1359,7 +1346,6 @@ async def line_held(
                 asked,
                 cancel,
                 Claimant(handed, one.occurrence),
-                agent_id,
             )
             if isinstance(action, Abandoned):
                 raise MirageAbortError()

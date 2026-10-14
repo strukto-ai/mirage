@@ -27,7 +27,6 @@ router = APIRouter(prefix="/v1/workspaces/{workspace_id}/asks")
 class AskResponse(BaseModel):
     id: str
     session_id: str
-    agent_id: str
     command: str
     argv: list[str]
     cwd: str
@@ -48,7 +47,6 @@ def _to_response(record: Decision) -> AskResponse:
     return AskResponse(
         id=record.id,
         session_id=record.session_id,
-        agent_id=record.agent_id,
         command=record.command,
         argv=list(record.argv),
         cwd=record.cwd,

@@ -38,7 +38,6 @@ interface ShellParams {
 const ShellBodySchema = z
   .object({
     command: z.string(),
-    agent_id: z.string().optional(),
     cwd: z.string().optional(),
     runtime: z.string().optional(),
     record: z.boolean().optional(),
@@ -302,7 +301,6 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
           const options = {
             sessionId,
             executionScope,
-            ...(body.agent_id !== undefined ? { agentId: body.agent_id } : {}),
             ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
             ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
             ...(body.record !== undefined ? { record: body.record } : {}),

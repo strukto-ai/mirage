@@ -190,7 +190,6 @@ async def _finish_find(
         stat_path=stat_path,
         dispatch=dispatch,
         identity=identity_from(
-            ns,
             session_view(
                 session,
                 registry.policies,
@@ -219,7 +218,6 @@ async def handle_command(
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
     routing_decision: RouteDecision[Runtime] | None = None,
-    agent_id: str | None = None,
     execute_fn: ExecuteLine | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -252,9 +250,7 @@ async def handle_command(
             # The one job builtin that writes before it blocks.
             return await handle_fg(job_table, text_parts, session, view, sink)
         if cmd_name == "ps":
-            # The one job builtin that names an owner: the workspace user.
-            user = namespace.user if namespace is not None else None
-            return await handle_ps(job_table, text_parts, session, view, user)
+            return await handle_ps(job_table, text_parts, session, view)
         return await JOB_HANDLERS[cmd_name](
             job_table, text_parts, session, view
         )
@@ -269,7 +265,6 @@ async def handle_command(
             stdin,
             call_stack,
             job_table,
-            agent_id,
             handed,
             registry.decisions,
             sink,

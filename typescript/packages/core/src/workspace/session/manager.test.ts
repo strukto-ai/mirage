@@ -478,7 +478,6 @@ describe('SessionManager decision ledger', () => {
     return {
       id,
       sessionId,
-      agentId: 'a',
       command: 'git',
       argv: ['push'],
       cwd: '/repo',

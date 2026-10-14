@@ -352,51 +352,6 @@ describe('Namespace + NamespaceStore', () => {
     expect((await store.load()).get('/data/stale')).toBeUndefined()
     await ws.close()
   })
-
-  it('user is null before resolution', async () => {
-    const ws = new Workspace({ '/data': new RAMVFS() })
-    expect(ws.namespace.user).toBeNull()
-    await ws.close()
-  })
-
-  it('explicit agentId claims the user and writes through', async () => {
-    const store = new RAMNamespaceStore()
-    await store.setUser('bob')
-    const ws = new Workspace({ '/data': new RAMVFS() }, { agentId: 'alice', namespaceStore: store })
-    expect(ws.namespace.user).toBe('alice')
-    await ws.namespace.ensureLoaded()
-    expect(ws.namespace.user).toBe('alice')
-    expect(await store.loadUser()).toBe('alice')
-    await ws.close()
-  })
-
-  it('bare launch adopts the stored user', async () => {
-    const store = new RAMNamespaceStore()
-    await store.setUser('alice')
-    const ws = new Workspace({ '/data': new RAMVFS() }, { namespaceStore: store })
-    await ws.namespace.ensureLoaded()
-    expect(ws.namespace.user).toBe('alice')
-    await ws.close()
-  })
-
-  it('bare launch with an empty store has no user', async () => {
-    const store = new RAMNamespaceStore()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { namespaceStore: store })
-    await ws.namespace.ensureLoaded()
-    expect(ws.namespace.user).toBeNull()
-    expect(await store.loadUser()).toBeNull()
-    await ws.close()
-  })
-
-  it('replaceNodes still resolves the user', async () => {
-    const store = new RAMNamespaceStore()
-    await store.setUser('bob')
-    const ws = new Workspace({ '/data': new RAMVFS() }, { agentId: 'alice', namespaceStore: store })
-    await ws.namespace.replaceNodes(new Map([['/data/fresh', { mode: 0o601 }]]))
-    expect(ws.namespace.user).toBe('alice')
-    expect(await store.loadUser()).toBe('alice')
-    await ws.close()
-  })
 })
 
 describe('Namespace extended attributes', () => {

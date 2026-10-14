@@ -76,7 +76,7 @@ async function historyFn(
     await observer.logDelete(session, offset)
   }
   if (s && texts.length > 0) {
-    await observer.logCommandText(texts.join(' '), session, '', opts.cwd)
+    await observer.logCommandText(texts.join(' '), session, opts.cwd)
   }
   if (p && !s) {
     const out = texts.length > 0 ? texts.join('\n') + '\n' : ''

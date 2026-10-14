@@ -193,7 +193,6 @@ const TOP_LEVEL_KEYS = [
   'read',
   'write',
   'default_session_id',
-  'default_agent_id',
   'workspace_id',
   'cache',
   'index',
@@ -819,7 +818,6 @@ export interface WorkspaceConfigRaw {
   /** The write policy a mount inherits when it declares none. */
   write?: string | null
   defaultSessionId?: string
-  defaultAgentId?: string
   workspaceId?: string
   /**
    * The normalized block IS a `CacheConfig` — so it is handed to the
@@ -1181,7 +1179,6 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       read: defaultRead,
       write: defaultWrite,
       ...(cfg.defaultSessionId !== undefined ? { sessionId: cfg.defaultSessionId } : {}),
-      ...(cfg.defaultAgentId !== undefined ? { agentId: cfg.defaultAgentId } : {}),
       ...(cfg.workspaceId !== undefined ? { workspaceId: cfg.workspaceId } : {}),
       ...(cfg.cache !== undefined && cfg.cache !== null ? { cache: cfg.cache } : {}),
       ...(index !== undefined ? { index } : {}),

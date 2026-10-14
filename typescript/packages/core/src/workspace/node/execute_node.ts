@@ -824,7 +824,6 @@ export interface ExecuteNodeDeps {
   namespace: Namespace
   jobTable: JobTable
   executeFn: ExecuteFn
-  agentId: string
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
   runtimeBindings?: Record<string, Runtime>
@@ -1057,7 +1056,7 @@ async function executeNodeBody(
             opts?.endsShell === true,
           )
 
-  const { dispatch, registry, jobTable, agentId } = deps
+  const { dispatch, registry, jobTable } = deps
   // Capture the walker's session before any await; a concurrent line's
   // ambient frame cannot identify this node's nested evaluations.
   const executeFn: ExecuteFn = (cmd, opts) => deps.executeFn(cmd, { context, ...opts })
@@ -1177,7 +1176,6 @@ async function executeNodeBody(
       stdin,
       callStack,
       jobTable,
-      agentId,
       dispatch,
       deps.handed ?? null,
       registry.decisions,
@@ -1206,7 +1204,6 @@ async function executeNodeBody(
           deps.routingDecision,
           deps.signal,
           deps.parser,
-          agentId,
           deps.handed,
           sink,
           expanded,
@@ -1352,7 +1349,6 @@ async function executeNodeBody(
               stdin,
               callStack,
               subTable,
-              agentId,
               dispatch,
               deps.handed ?? null,
               registry.decisions,
@@ -1400,7 +1396,6 @@ async function executeNodeBody(
       stdin,
       callStack,
       jobTable,
-      agentId,
       deps.handed ?? null,
       registry.decisions,
       executeFn,

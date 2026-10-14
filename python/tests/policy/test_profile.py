@@ -1704,43 +1704,15 @@ async def test_an_asked_line_is_refused_until_the_host_answers():
         assert request.session_id == ws._session_mgr.default_id
         assert await _line(ws, "rm /scratch/z") == (126, "", err)
         assert len(ws.decisions.pending()) == 1
-        # The request names the agent of the call that asked, not the
-        # workspace's default agent, so a shared workspace attributes an
-        # approval to whoever raised it.
-        assert request.agent_id == ""
-        by_bob = await ws.shell("rm /scratch/z2", agent_id="bob")
-        assert by_bob.exit_code == 126
-        assert [r.agent_id for r in ws.decisions.pending()] == ["", "bob"]
-        # The agent rides with the execution, not the workspace: a line
-        # asked through a nested eval keeps its caller's, and two lines
-        # in flight at once keep their own.
-        #
         # The substitution's own command is a command of the line, so
         # the line is refused whole rather than running `echo` over an
         # empty substitution and exiting 0, which used to leave the
         # agent reading success for a removal that never happened.
-        nested = await ws.shell("echo $(rm /scratch/z3)", agent_id="carol")
+        nested = await ws.shell("echo $(rm /scratch/z3)")
         assert nested.exit_code == 126
-        await asyncio.gather(
-            ws.shell("rm /scratch/z4", agent_id="dan"),
-            ws.shell("eval 'rm /scratch/z5'", agent_id="eve"),
-        )
-        by_agent = {
-            r.command + " " + " ".join(r.argv): r.agent_id
-            for r in ws.decisions.pending()
-        }
-        assert by_agent == {
-            "rm /scratch/z": "",
-            "rm /scratch/z2": "bob",
-            "rm /scratch/z3": "carol",
-            "rm /scratch/z4": "dan",
-            "rm /scratch/z5": "eve",
-        }
         for r in ws.decisions.pending():
-            if r.agent_id not in ("", "bob"):
+            if r.id != request.id:
                 await ws.decisions.answer(r.id, Outcome.DENY)
-        (bobs,) = (r for r in ws.decisions.pending() if r.agent_id == "bob")
-        await ws.decisions.answer(bobs.id, Outcome.DENY)
         # Granted once: the exact retry passes, and the next one asks.
         await ws.decisions.answer(request.id, Outcome.ALLOW)
         assert ws.decisions.pending() == ()

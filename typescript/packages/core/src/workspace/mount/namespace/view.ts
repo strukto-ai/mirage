@@ -158,7 +158,6 @@ export function namespaceViewOf(
     ...(statOverlay !== null ? { statOverlay } : {}),
     childMounts: (parent: string) =>
       namespaceNames(vis, registry.mountPrefixes(), namespace, parent),
-    ...(namespace !== null && namespace.user !== null ? { user: namespace.user } : {}),
     ...(vis !== null ? { visibility: vis } : {}),
     scoped: (virtual: string) => hiddenUnder(vis, virtual) || (gate?.scopes(virtual) ?? false),
   }

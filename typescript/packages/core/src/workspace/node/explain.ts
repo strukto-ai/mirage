@@ -806,7 +806,6 @@ export async function prejudgeLine(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   // The line's hand-off, on which every grant claimed here rides to the
   // executor's sweep.
   handed: HandOff,
@@ -837,7 +836,6 @@ export async function prejudgeLine(
         walked,
         registry,
         namespace,
-        agentId,
         index === 0 ? (item.stdin ?? null) : null,
         // judgeWords lists the statement's own command first and the
         // lines it runs after it, so only the first explanation is the
@@ -883,7 +881,6 @@ async function verdictRefuses(
   signal?: AbortSignal,
   // The agent the line is attributed to, which a question raised here
   // names for the host.
-  agentId = '',
 ): Promise<boolean> {
   const ctx = judged.ctx
   if (ctx === undefined) return true
@@ -897,7 +894,7 @@ async function verdictRefuses(
   // handOff: this pass exists to decide whether a secret is fetched, and the
   // gate behind it still has to admit the line. An answer given here is
   // claimed for that gate, which runs on it, so the host is asked once.
-  const action = await registry.decisions.resolve(ctx, asked, signal, claimant, agentId)
+  const action = await registry.decisions.resolve(ctx, asked, signal, claimant)
   if (action !== null && action.kind === 'abandoned') throw makeAbortError()
   return action !== null
 }
@@ -957,7 +954,6 @@ async function commandRefused(
   item: Walked,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   handed: HandOff,
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
@@ -990,7 +986,7 @@ async function commandRefused(
     // (`asksFor`); the node is kept, and over-keeping only ever
     // over-fetches.
     if (!isVerdict(judged.judgment) || !asksFor(judged)) continue
-    if (await verdictRefuses(judged, registry, handed, signal, agentId)) return true
+    if (await verdictRefuses(judged, registry, handed, signal)) return true
   }
   return false
 }
@@ -1026,7 +1022,6 @@ export async function unrefusedNodes(
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
-  agentId: string,
   // The line's hand-off, on which an approval given here is claimed
   // for the gate.
   handed: HandOff,
@@ -1051,18 +1046,7 @@ export async function unrefusedNodes(
       out.push(node)
       continue
     }
-    if (
-      await commandRefused(
-        item,
-        registry,
-        namespace,
-        agentId,
-        handed,
-        reparse,
-        signal,
-        position === 0,
-      )
-    ) {
+    if (await commandRefused(item, registry, namespace, handed, reparse, signal, position === 0)) {
       if (position === 0) return []
       continue
     }
@@ -1090,7 +1074,6 @@ export async function lineHeld(
   signal?: AbortSignal,
   // The agent the line is attributed to, which a question raised here
   // names for the host.
-  agentId = '',
 ): Promise<boolean> {
   for (const [, explained] of judged) {
     for (const one of explained) {
@@ -1099,13 +1082,10 @@ export async function lineHeld(
       if (refuses(expl)) return true
       const asked = expl.answers.find((a): a is Ask => a.kind === 'ask')
       if (one.ctx === undefined || asked === undefined || !one.stated) continue
-      const action = await registry.decisions.resolve(
-        one.ctx,
-        asked,
-        signal,
-        { line: handed, occurrence: one.occurrence },
-        agentId,
-      )
+      const action = await registry.decisions.resolve(one.ctx, asked, signal, {
+        line: handed,
+        occurrence: one.occurrence,
+      })
       if (action !== null) {
         if (action.kind === 'abandoned') throw makeAbortError()
         return true

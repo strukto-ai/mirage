@@ -58,7 +58,6 @@ function record(over: Partial<Decision> = {}): Decision {
   return {
     id: 'd1',
     sessionId: 's',
-    agentId: '',
     command: 'git',
     argv: ['push'],
     cwd: '/repo',

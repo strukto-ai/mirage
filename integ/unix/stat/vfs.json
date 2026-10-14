@@ -48,7 +48,7 @@
       "command": "stat -c \"%U:%G\" /vfs/settings.json",
       "expect": {
         "exit": 0,
-        "stdout": "mirage-agent:ops\n",
+        "stdout": "ops:ops\n",
         "stderr": ""
       }
     },
@@ -87,7 +87,7 @@
       "command": "stat -c \"%F %a %U\" /vfs/records",
       "expect": {
         "exit": 0,
-        "stdout": "directory 755 mirage-agent\n",
+        "stdout": "directory 755 ops\n",
         "stderr": ""
       }
     },
@@ -140,7 +140,7 @@
       "command": "stat -c \"%U:%G\" /vfs/settings.json",
       "expect": {
         "exit": 0,
-        "stdout": "mirage-agent:auditor\n",
+        "stdout": "auditor:auditor\n",
         "stderr": ""
       }
     },
@@ -153,7 +153,7 @@
       "command": "whoami",
       "expect": {
         "exit": 0,
-        "stdout": "mirage-agent\n",
+        "stdout": "ops\n",
         "stderr": ""
       }
     },
@@ -166,7 +166,7 @@
       "command": "ls -l /vfs/settings.json",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r----- 1 mirage-agent ops 49 Jan  2  2026 /vfs/settings.json\n",
+        "stdout": "-rw-r----- 1 ops ops 49 Jan  2  2026 /vfs/settings.json\n",
         "stderr": ""
       }
     },
@@ -180,7 +180,7 @@
       "command": "ls -l /vfs/settings.json",
       "expect": {
         "exit": 0,
-        "stdout": "-rw-r----- 1 mirage-agent auditor 49 Jan  2  2026 /vfs/settings.json\n",
+        "stdout": "-rw-r----- 1 auditor auditor 49 Jan  2  2026 /vfs/settings.json\n",
         "stderr": ""
       }
     },
@@ -193,7 +193,7 @@
       "command": "find /vfs -name settings.json -printf \"%u %g %U %G\\n\"",
       "expect": {
         "exit": 0,
-        "stdout": "mirage-agent ops mirage-agent ops\n",
+        "stdout": "ops ops ops ops\n",
         "stderr": ""
       }
     },
@@ -207,7 +207,7 @@
       "command": "find /vfs -name settings.json -printf \"%u %g\\n\"",
       "expect": {
         "exit": 0,
-        "stdout": "mirage-agent auditor\n",
+        "stdout": "auditor auditor\n",
         "stderr": ""
       }
     }

@@ -1198,7 +1198,6 @@ async def test_ps_lists_the_session_leader_with_its_owner():
     ws = Workspace(
         {"/": RAMVFS()},
         mode="exec",
-        agent_id="alice",
         profiles={"admin": SessionProfile()},
         profile="admin",
     )
@@ -1208,7 +1207,7 @@ async def test_ps_lists_the_session_leader_with_its_owner():
         assert result.stdout.decode() == (
             "    PID    PPID    PGID     SID STAT USER       UID GROUP      "
             "GID CMD\n"
-            f"      1       0       1       1 Rs   alice    alice admin    "
+            f"      1       0       1       1 Rs   admin    admin admin    "
             f"admin {line}\n"
         )
     finally:

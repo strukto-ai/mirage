@@ -437,18 +437,17 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     await ws2.close()
   })
 
-  it('preserves a non-default default session id and agent id', async () => {
+  it('preserves a non-default default session id', async () => {
     const ram = new RAMVFS()
     const ws = new Workspace(
       { '/data': ram },
-      { mode: MountMode.WRITE, shellParser: parser, sessionId: 'main', agentId: 'agent-7' },
+      { mode: MountMode.WRITE, shellParser: parser, sessionId: 'main' },
     )
     await ws.shell('cd /data')
     await ws.shell('export FOO=bar')
 
     const state = await toStateDict(ws)
     expect(state.default_session_id).toBe('main')
-    expect(state.default_agent_id).toBe('agent-7')
 
     const ws2 = await Workspace.fromState(state, {
       mode: MountMode.WRITE,
@@ -458,7 +457,6 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     const def = ws2.sessionManager.get('main')
     expect(def.cwd).toBe('/data')
     expect(def.env.FOO).toBe('bar')
-    expect(ws2.agentId).toBe('agent-7')
 
     await ws.close()
     await ws2.close()
