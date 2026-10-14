@@ -233,7 +233,7 @@ def _policy(
     programs = entries if entries is not None else (_entry(),) * len(engines)
     policy = ScriptPolicy(Programs({method: programs}))
     for entry, engine in zip(programs, engines, strict=False):
-        policy._engines.setdefault(_key(entry), engine)
+        policy._engines.setdefault(_key(entry), (engine, asyncio.Lock()))
     return policy
 
 
@@ -382,7 +382,7 @@ def _programs(method: str, *printed: bytes) -> ScriptPolicy:
     )
     policy = ScriptPolicy(Programs({method: entries}))
     for entry, out in zip(entries, printed, strict=True):
-        policy._engines[_key(entry)] = FakeProgram(out)
+        policy._engines[_key(entry)] = (FakeProgram(out), asyncio.Lock())
     return policy
 
 
@@ -400,7 +400,8 @@ async def test_each_answer_is_returned_in_order_up_to_the_first_deny():
         _answer(kind="ask", reason="late"),
     )
     assert await policy.pre_command(_ctx()) == (Ask("nod"), Deny("no"))
-    assert [len(e.requests) for e in policy._engines.values()] == [1, 1, 1, 0]
+    counts = [len(e.requests) for e, _ in policy._engines.values()]
+    assert counts == [1, 1, 1, 0]
 
 
 @pytest.mark.asyncio
@@ -563,6 +564,90 @@ async def test_a_runtime_is_built_once_per_name_and_settings(monkeypatch):
     assert [len(e.requests) for e in FakeProgram.built] == [4, 2]
     await policy.close()
     assert all(e.closed for e in FakeProgram.built)
+
+
+class Waiting(FakeProgram):
+    """A run that waits until a run on another runtime has started."""
+
+    def __init__(self, started: asyncio.Event) -> None:
+        super().__init__()
+        self.started = started
+
+    async def execute(
+        self, request: ExecutionRequest, context: RuntimeContext | None = None
+    ) -> RunResult:
+        self.requests.append(request)
+        await asyncio.wait_for(self.started.wait(), 5)
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class Starting(FakeProgram):
+    """A run that says it started."""
+
+    def __init__(self, started: asyncio.Event) -> None:
+        super().__init__()
+        self.started = started
+
+    async def execute(
+        self, request: ExecutionRequest, context: RuntimeContext | None = None
+    ) -> RunResult:
+        self.requests.append(request)
+        self.started.set()
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class Overlapping(FakeProgram):
+    """Records the most runs it was handed at once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.running = 0
+        self.most = 0
+
+    async def execute(
+        self, request: ExecutionRequest, context: RuntimeContext | None = None
+    ) -> RunResult:
+        self.requests.append(request)
+        self.running += 1
+        self.most = max(self.most, self.running)
+        await asyncio.sleep(0.01)
+        self.running -= 1
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_runs_on_two_runtimes_go_at_once(monkeypatch):
+    started = asyncio.Event()
+    engines = {"monty": Waiting(started), "wasi": Starting(started)}
+    monkeypatch.setattr(
+        "mirage.policy.script.script_engine",
+        lambda script, runtime, config: engines[runtime],
+    )
+    policy = ScriptPolicy(
+        ProgramsBySession(
+            {
+                "s": {"pre_command": (_entry("monty"),)},
+                "t": {"pre_command": (_entry("wasi"),)},
+            }
+        )
+    )
+    answers = await asyncio.gather(
+        policy.pre_command(_ctx(session_id="s")),
+        policy.pre_command(_ctx(session_id="t")),
+    )
+    assert answers == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_runs_on_one_runtime_never_overlap(monkeypatch):
+    engine = Overlapping()
+    monkeypatch.setattr(
+        "mirage.policy.script.script_engine",
+        lambda script, runtime, config: engine,
+    )
+    policy = ScriptPolicy(Programs({"pre_command": (_entry(),)}))
+    await asyncio.gather(*(policy.pre_command(_ctx()) for _ in range(3)))
+    assert (len(engine.requests), engine.most) == (3, 1)
 
 
 @pytest.mark.asyncio

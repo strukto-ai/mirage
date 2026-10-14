@@ -92,6 +92,44 @@ class FakeProgram extends LanguageRuntime {
   }
 }
 
+/** A run that waits until a run on another runtime has started. */
+class Waiting extends FakeProgram {
+  constructor(private readonly started: Promise<void>) {
+    super()
+  }
+
+  override async execute(request: ExecutionRequest): Promise<RunResult> {
+    await this.started
+    return super.execute(request)
+  }
+}
+
+/** A run that says it started. */
+class Starting extends FakeProgram {
+  constructor(private readonly start: () => void) {
+    super()
+  }
+
+  override async execute(request: ExecutionRequest): Promise<RunResult> {
+    this.start()
+    return super.execute(request)
+  }
+}
+
+/** Records the most runs it was handed at once. */
+class Overlapping extends FakeProgram {
+  running = 0
+  most = 0
+
+  override async execute(request: ExecutionRequest): Promise<RunResult> {
+    this.running++
+    this.most = Math.max(this.most, this.running)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    this.running--
+    return super.execute(request)
+  }
+}
+
 const ENCODE = new TextEncoder()
 
 function answer(fields: Record<string, string>): string {
@@ -542,6 +580,42 @@ describe('ScriptPolicy', () => {
     expect(engines.map((engine) => engine.requests.length)).toEqual([4, 2])
     await policy.close()
     expect(engines.every((engine) => engine.closed)).toBe(true)
+  })
+
+  it('runs programs on two runtimes at once', async () => {
+    let start!: () => void
+    const started = new Promise<void>((resolve) => {
+      start = resolve
+    })
+    const engines: Record<string, FakeProgram> = {
+      monty: new Waiting(started),
+      pyodide: new Starting(start),
+    }
+    built.factory = (runtime) => engines[runtime]
+    const policy = track(
+      new ScriptPolicy({
+        scriptsOf: (sessionId: string) => ({
+          preCommand: [entry(sessionId === 's' ? 'monty' : 'pyodide')],
+        }),
+      }),
+    )
+    const answers = await Promise.all([
+      policy.preCommand(ctx('cat', {}, 's')),
+      policy.preCommand(ctx('cat', {}, 't')),
+    ])
+    expect(answers).toEqual([null, null])
+  })
+
+  it('never overlaps two runs on one runtime', async () => {
+    const engine = new Overlapping()
+    built.factory = () => engine
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry()] })))
+    await Promise.all([
+      policy.preCommand(ctx()),
+      policy.preCommand(ctx()),
+      policy.preCommand(ctx()),
+    ])
+    expect([engine.requests.length, engine.most]).toEqual([3, 1])
   })
 
   it('attaches the entry points it is wired to, and a bare policy none', async () => {

@@ -213,8 +213,8 @@ export interface ScriptWiring {
  * It knows its own read by `issuer`, a token only its bridge stamps and
  * that rides each op as an argument: a mark kept in ambient context would
  * be whatever op another task dispatched while a read was in flight on a
- * runtime with no task isolation. Runs are serialized. Mirrors the Python
- * `ScriptPolicy`.
+ * runtime with no task isolation. Runs on one runtime are serialized; runs
+ * on two runtimes go at once. Mirrors the Python `ScriptPolicy`.
  */
 export class ScriptPolicy implements Policy, SessionScoped {
   readonly [SESSION_SCOPED] = true as const
@@ -224,7 +224,8 @@ export class ScriptPolicy implements Policy, SessionScoped {
   // The mark on every op this policy's own runtimes dispatch, and nothing
   // else's: unexported, so only the bridge built for it can stamp it.
   private readonly issuer = Symbol('policy read')
-  private queue: Promise<unknown> = Promise.resolve()
+  // Each runtime's last run, which its next waits on.
+  private readonly queues = new Map<LanguageRuntime, Promise<unknown>>()
 
   constructor(sessions: SessionScriptsQuery, wiring: ScriptWiring | null = null) {
     this.sessions = sessions
@@ -282,6 +283,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
   async close(): Promise<void> {
     const engines = [...this.engines.values()]
     this.engines.clear()
+    this.queues.clear()
     for (const engine of engines) await engine.close()
   }
 
@@ -333,8 +335,8 @@ export class ScriptPolicy implements Policy, SessionScoped {
   ): Promise<Deny | Ask | Route | null> {
     let result: RunResult
     try {
-      result = await this.serialized(async () => {
-        const engine = this.engine(entry)
+      const engine = this.engine(entry)
+      result = await this.serialized(engine, async () => {
         // The runtime stops itself at the deadline; the signal stops it
         // when the wait gives up first, before the next run takes the
         // runtime.
@@ -405,10 +407,13 @@ export class ScriptPolicy implements Policy, SessionScoped {
     return engine
   }
 
-  /** `work` after every run before it: the runtimes are workers, and two runs on one would interleave. */
-  private serialized<T>(work: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(work)
-    this.queue = run.catch(() => undefined)
+  /** `work` after every run on `engine` before it: two runs on one runtime would interleave. */
+  private serialized<T>(engine: LanguageRuntime, work: () => Promise<T>): Promise<T> {
+    const run = (this.queues.get(engine) ?? Promise.resolve()).then(work)
+    this.queues.set(
+      engine,
+      run.catch(() => undefined),
+    )
     return run
   }
 }

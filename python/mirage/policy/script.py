@@ -212,8 +212,8 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     session reads it: a hidden path is absent and a write is refused. A
     read from a program clears the dispatcher like any other, except this
     policy's own ``pre_vfs``: the policy is the one asking, and judging
-    its own read would re-enter the run waiting on it. Runs are
-    serialized.
+    its own read would re-enter the run waiting on it. Runs on one
+    runtime are serialized; runs on two runtimes go at once.
 
     Args:
         sessions (SessionScriptsQuery): the session manager, answering
@@ -244,8 +244,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         self._sessions = sessions
         self._dispatch = dispatch
         self._resolver = resolver
-        self._engines: dict[tuple[str, str], LanguageRuntime] = {}
-        self._lock = asyncio.Lock()
+        self._engines: dict[
+            tuple[str, str], tuple[LanguageRuntime, asyncio.Lock]
+        ] = {}
 
     async def pre_execute(
         self, ctx: RouteContext
@@ -311,7 +312,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         """Close every runtime a program ran on."""
         engines = list(self._engines.values())
         self._engines.clear()
-        for engine in engines:
+        for engine, _ in engines:
             await engine.close()
 
     async def _judge(
@@ -382,9 +383,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         Raises:
             ValueError: the program failed, as a clause about "script".
         """
+        engine, lock = self._engine(entry)
         try:
-            async with self._lock:
-                engine = self._engine(entry)
+            async with lock:
                 result = await asyncio.wait_for(
                     engine.execute(
                         CodeExecution(
@@ -414,10 +415,13 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             raise ValueError(f"script exited {result.exit_code}")
         return script_action(result.stdout, method)
 
-    def _engine(self, entry: ProfileScript) -> LanguageRuntime:
-        """The policy's own runtime for one program, built on first use
-        and shared by every program naming the same runtime and
-        settings.
+    def _engine(
+        self, entry: ProfileScript
+    ) -> tuple[LanguageRuntime, asyncio.Lock]:
+        """The policy's own runtime for one program and the lock its runs
+        take, built on first use and shared by every program naming the
+        same runtime and settings: two runs on one runtime would
+        interleave.
 
         Args:
             entry (ProfileScript): the program.
@@ -433,13 +437,14 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             )
         config = {"max_memory": PROGRAM_MEMORY[entry.runtime], **entry.config}
         key = (entry.runtime, json.dumps(config, sort_keys=True))
-        engine = self._engines.get(key)
-        if engine is None:
+        built = self._engines.get(key)
+        if built is None:
             engine = script_engine(entry.script, entry.runtime, config)
             if self._dispatch is not None and self._resolver is not None:
                 engine.bind(WorkspaceBinding(self._reading, self._resolver))
-            self._engines[key] = engine
-        return engine
+            built = (engine, asyncio.Lock())
+            self._engines[key] = built
+        return built
 
     async def _reading(
         self,
