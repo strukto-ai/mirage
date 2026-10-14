@@ -43,6 +43,8 @@ from mirage.policy.match import (
     has_rules,
     io_reach,
     io_refusal,
+    line_tokens,
+    pattern_matches,
     reads_args,
     scopes_paths,
     split_pattern,
@@ -351,6 +353,36 @@ def _seen_words(
     )
 
 
+def unlisted_service(
+    ctx: CommandContext, registry: MountRegistry, session: SessionState
+) -> bool:
+    """Whether the allow list refuses a CLI that reaches a service.
+
+    Such a CLI (an account or script CLI) reaches its service by id, past
+    every hide, so under a profile that hides paths it runs only where a
+    pattern starting with its own name matches the line. ``*`` and a
+    pattern for another of its verbs do not count.
+
+    Args:
+        ctx (CommandContext): the classified command.
+        registry (MountRegistry): the registry holding the CLIs.
+        session (SessionState): the session running the line.
+    """
+    install = registry.clis.get(ctx.command)
+    if (
+        not ctx.tool
+        or install is None
+        or not drops_mount_caches(install.cli)
+        or session.visibility.paths is None
+    ):
+        return False
+    tokens = line_tokens(ctx)
+    return not any(
+        split_pattern(p)[:1] == (ctx.command,) and pattern_matches(p, tokens)
+        for p in session.visibility.commands or ()
+    )
+
+
 async def gate(
     name: str,
     args: list[str],
@@ -409,7 +441,6 @@ async def gate(
     """
     tool = intrinsic or is_tool(name, session)
     tokens, program = program_tokens(registry, name, args, session.cwd)
-    install = registry.clis.get(name)
     implied = (
         default_cwd_operand(
             [name, *operands], name, registry, session.cwd, stdin
@@ -464,19 +495,7 @@ async def gate(
         "pre_command", ctx, every, rules_only
     )
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
-    # An account CLI reaches its service by id, past every hide, so a
-    # profile that hides paths runs one only where its allow list names
-    # it; the wildcard does not.
-    if (
-        tool
-        and install is not None
-        and drops_mount_caches(install.cli)
-        and session.visibility.paths is not None
-        and not any(
-            split_pattern(p)[:1] == (name,)
-            for p in session.visibility.commands or ()
-        )
-    ):
+    if unlisted_service(ctx, registry, session):
         refused = Deny(
             f"{' '.join(program)} is not allowed",
             policy=PermissionsPolicy.__name__,

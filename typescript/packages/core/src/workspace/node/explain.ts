@@ -59,6 +59,7 @@ import {
   statementStdin,
   type Refused,
   UNREADABLE_LINES,
+  unlistedService,
   unreadable,
 } from './admission.ts'
 import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
@@ -275,7 +276,16 @@ async function explained(
   asked: Deny | Ask | null,
   answers: readonly (Deny | Ask)[],
 ): Promise<Judgment> {
-  const decision = decide(ctx, session.commands)
+  let decision = decide(ctx, session.commands)
+  if (decision.outcome === Outcome.ALLOW && unlistedService(ctx, registry, session)) {
+    decision = {
+      outcome: Outcome.DENY,
+      rule: null,
+      matchedPath: null,
+      source: 'commands.allow',
+      asks: [],
+    }
+  }
   const base: Judgment = {
     command: ctx.command,
     argv: ctx.argv,

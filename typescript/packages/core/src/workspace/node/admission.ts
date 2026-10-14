@@ -34,7 +34,8 @@ import type {
 } from '../../policy/index.ts'
 import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
-import { splitPattern } from '../../policy/match/pattern.ts'
+import { lineTokens } from '../../policy/match/allow.ts'
+import { patternMatches, splitPattern } from '../../policy/match/pattern.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { commandNodes } from '../../runtime/routing/index.ts'
 import { getParts, getRedirects, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
@@ -394,6 +395,33 @@ export function redirectPaths(
  * that runs the command. `line` is the line the command was parsed from,
  * empty outside a line.
  */
+/**
+ * Whether the allow list refuses a CLI that reaches a service. Such a CLI
+ * (an account or script CLI) reaches its service by id, past every hide, so
+ * under a profile that hides paths it runs only where a pattern starting
+ * with its own name matches the line. `*` and a pattern for another of its
+ * verbs do not count. Mirrors the Python `unlisted_service`.
+ */
+export function unlistedService(
+  ctx: CommandContext,
+  registry: MountRegistry,
+  session: SessionState,
+): boolean {
+  const install = registry.clis.get(ctx.command)
+  if (
+    ctx.tool === false ||
+    install === null ||
+    !dropsMountCaches(install.cli) ||
+    session.visibility.paths === null
+  ) {
+    return false
+  }
+  const tokens = lineTokens(ctx)
+  return !(session.visibility.commands ?? []).some(
+    (p) => splitPattern(p)[0] === ctx.command && patternMatches(p, tokens),
+  )
+}
+
 export async function gate(
   name: string,
   args: readonly string[],
@@ -411,7 +439,6 @@ export async function gate(
 ): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask)[]]> {
   const tool = intrinsic || isTool(name, session)
   const [tokens, program] = programTokens(registry, name, [...args], session.cwd)
-  const install = registry.clis.get(name)
   const implied =
     name in CWD_DEFAULT_RAW
       ? defaultCwdOperand([name, ...operands], name, registry, session.cwd, stdin)
@@ -452,16 +479,7 @@ export async function gate(
   const answers = (await registry.policies.answers('preCommand', ctx, every, rulesOnly)).filter(
     (a): a is Deny | Ask => a.kind !== 'route',
   )
-  // An account CLI reaches its service by id, past every hide, so a
-  // profile that hides paths runs one only where its allow list names it;
-  // the wildcard does not.
-  if (
-    tool &&
-    install !== null &&
-    dropsMountCaches(install.cli) &&
-    session.visibility.paths !== null &&
-    !(session.visibility.commands ?? []).some((p) => splitPattern(p)[0] === name)
-  ) {
+  if (unlistedService(ctx, registry, session)) {
     answers.unshift({
       kind: 'deny',
       reason: `${program.join(' ')} is not allowed`,

@@ -35,7 +35,7 @@ from mirage.policy import (
     refusal_of,
     render_deny,
 )
-from mirage.policy.match import Outcome, decide, has_rules
+from mirage.policy.match import Outcome, Ruling, decide, has_rules
 from mirage.policy.match.decide import source_of
 from mirage.shell import parse
 from mirage.shell.bytes import decode_text
@@ -65,6 +65,7 @@ from mirage.workspace.node.admission import (
     redirect_paths,
     statement_redirects,
     statement_stdin,
+    unlisted_service,
     unreadable,
 )
 from mirage.workspace.node.inner_lines import Word, inner_lines, read_word
@@ -205,6 +206,10 @@ def _explained(
         answers (tuple[Deny | Ask, ...]): the answers it came from.
     """
     decision = decide(ctx, session.commands)
+    if decision.outcome is Outcome.ALLOW and unlisted_service(
+        ctx, registry, session
+    ):
+        decision = Ruling(Outcome.DENY, source="commands.allow")
     base = Judgment(
         command=ctx.command,
         argv=ctx.argv,

@@ -47,6 +47,7 @@ from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.concurrency.limiter import run_blocking
 from mirage.context import (
+    get_admission,
     get_current_session_for,
     get_current_session_unless_foreign,
     reset_current_session,
@@ -563,10 +564,8 @@ class Workspace:
         self._patched: list[Patched] = []
         self._vfs_loop: asyncio.AbstractEventLoop | None = None
 
-        # A program's own file calls carry the gate of the command that
-        # runs it, so a rule scoped to `python3` reaches its `open()`.
         self._runtime_binding = WorkspaceBinding(
-            with_dispatch_rule_guard(self.dispatch),
+            self._program_dispatch,
             self._sandbox_resolver,
             lambda _binding: self.runtime_context(),
             self._files,
@@ -2243,6 +2242,21 @@ class Workspace:
         return await self._bind_session(
             None, partial(self._dispatcher.dispatch, name, path, **kwargs)
         )
+
+    async def _program_dispatch(
+        self, name: str, path: PathSpec, /, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        """Dispatch a program's own file call with the gate of the command
+        running it, so a rule scoped to ``python3`` reaches its ``open()``.
+        The binding's capture replays that command's context here.
+
+        Args:
+            name (str): the op.
+            path (PathSpec): the path it reaches.
+            **kwargs (Any): the op's arguments.
+        """
+        guarded = with_dispatch_rule_guard(self.dispatch, get_admission())
+        return await guarded(name, path, **kwargs)
 
     async def stat(self, path: str) -> FileStat:
         scope = PathSpec(

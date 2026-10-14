@@ -424,6 +424,7 @@ describe('policy cli fact', () => {
         profiles: {
           hides: { paths: hidden },
           wildcard: { paths: hidden, commands: { allow: ['*'] } },
+          other: { paths: hidden, commands: { allow: ['*', 'sl message read'] } },
           named: { paths: hidden, commands: { allow: ['*', 'sl'] } },
         },
       },
@@ -431,12 +432,19 @@ describe('policy cli fact', () => {
     ws.registerCli('sl', makeTree(), { token: 'tok' })
     ws.registerCli('peek', PEEK)
     await ws.shell('echo top > /data/secret.txt')
-    for (const name of ['hides', 'wildcard', 'named']) ws.createSession(name, { profile: name })
+    for (const name of ['hides', 'wildcard', 'other', 'named']) {
+      ws.createSession(name, { profile: name })
+    }
     try {
-      for (const name of ['hides', 'wildcard']) {
+      for (const name of ['hides', 'wildcard', 'other']) {
         const refused = await ws.shell('sl message send -t x hi', { sessionId: name })
         expect([refused.exitCode, refused.stderrText]).toEqual([126, 'sl: Permission denied\n'])
         expect(refused.refusal?.reason).toBe('sl message send is not allowed')
+        const agent = await ws.session(name)
+        const said = await agent.explain.shell('sl message send -t x hi')
+        expect(said.node.children).toMatchObject([
+          { outcome: Outcome.DENY, source: 'commands.allow' },
+        ])
       }
       const named = await ws.shell('sl message send -t x hi', { sessionId: 'named' })
       expect([named.exitCode, dec.decode(named.stdout)]).toEqual([0, 'sent[tok] to=x: hi\n'])
@@ -458,23 +466,33 @@ describe('policy cli fact', () => {
         profiles: {
           sealed: parseSessionProfile({
             commands: {
-              deny: [{ reason: 'sealed', commands: { peek: ['/data/secret.txt'] } }],
+              deny: [
+                {
+                  reason: 'sealed',
+                  commands: { peek: ['/data/secret.txt'], later: ['/data/secret.txt'] },
+                },
+              ],
             },
           }),
         },
       },
     )
     ws.registerCli('peek', PEEK)
+    ws.registerCli('later', LATER)
     await ws.shell('echo top > /data/secret.txt')
     ws.createSession('s', { profile: 'sealed' })
     try {
-      const refused = await ws.shell('peek', { sessionId: 's' })
-      expect([refused.exitCode, dec.decode(refused.stdout)]).toEqual([1, ''])
-      expect(refused.refusal?.reason).toBe('sealed')
+      for (const name of ['peek', 'later']) {
+        const refused = await ws.shell(name, { sessionId: 's' })
+        expect([refused.exitCode, dec.decode(refused.stdout)]).toEqual([1, ''])
+        expect(refused.refusal?.reason).toBe('sealed')
+      }
       const cat = await ws.shell('cat /data/secret.txt', { sessionId: 's' })
       expect([cat.exitCode, dec.decode(cat.stdout)]).toEqual([0, 'top\n'])
-      const open = await ws.shell('peek')
-      expect([open.exitCode, dec.decode(open.stdout)]).toEqual([0, 'top\n'])
+      for (const name of ['peek', 'later']) {
+        const open = await ws.shell(name)
+        expect([open.exitCode, dec.decode(open.stdout)]).toEqual([0, 'top\n'])
+      }
     } finally {
       await ws.close()
     }
@@ -491,6 +509,22 @@ async function peek(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
 const PEEK = new CLI({
   spec: new CommandSpec({ name: 'peek' }),
   handlers: { '': new CLIHandler({ fn: peek }) },
+})
+
+function later(inv: CLIInvocation): [AsyncIterable<Uint8Array>, IOResult] {
+  const found = inv.view?.dispatch
+  if (found === undefined) throw new Error('no dispatch')
+  const dispatch = found
+  async function* pulled(): AsyncIterable<Uint8Array> {
+    const [data] = await dispatch('read', PathSpec.fromStrPath('/data/secret.txt'))
+    yield data as Uint8Array
+  }
+  return [pulled(), new IOResult()]
+}
+
+const LATER = new CLI({
+  spec: new CommandSpec({ name: 'later' }),
+  handlers: { '': new CLIHandler({ fn: later }) },
 })
 
 async function put(inv: CLIInvocation): Promise<[null, IOResult]> {

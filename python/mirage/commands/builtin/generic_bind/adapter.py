@@ -51,6 +51,7 @@ from mirage.io import IOResult
 from mirage.io.stream import close_quietly, ensure_stream, materialize
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
+from mirage.policy.types import EntryGate
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec, WalkProbe
 from mirage.utils.filetype import get_extension
@@ -1313,21 +1314,26 @@ def with_command_guards(ops: CommandIO) -> CommandIO:
     return replace(ops, **changes)
 
 
-def with_dispatch_rule_guard(dispatch: DispatchFn) -> DispatchFn:
-    """Return ``dispatch`` marking each op with the admitted command's
-    gate as ``rule_gate``, which the dispatcher judges on the paths the op
-    reaches: the command's dispatcher skips its guarded slots, and the
-    dispatcher cannot tell which command issued an op. A metadata op passes
-    unmarked, as ``with_command_guards`` lets ``stat`` pass.
+def with_dispatch_rule_guard(
+    dispatch: DispatchFn, gate: EntryGate | None
+) -> DispatchFn:
+    """Return ``dispatch`` marking each op with ``gate``, the admitted
+    command's, as ``rule_gate``, which the dispatcher judges on the paths
+    the op reaches: the command's dispatcher skips its guarded slots, and
+    the dispatcher cannot tell which command issued an op. A metadata op
+    passes unmarked, as ``with_command_guards`` lets ``stat`` pass. The
+    gate is the one given, not the one live at the call, so an op the
+    command's output stream makes after the command returned is its own.
 
     Args:
         dispatch (DispatchFn): the workspace op dispatcher.
+        gate (EntryGate | None): the command's gate; None passes every op
+            unmarked.
     """
 
     async def guarded(
         name: str, path: PathSpec, /, **options: Any
     ) -> tuple[Any, IOResult]:
-        gate = get_admission()
         if gate is not None and name not in METADATA_OPS:
             options = {**options, "rule_gate": gate}
         return await dispatch(name, path, **options)

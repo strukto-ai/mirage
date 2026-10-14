@@ -345,25 +345,31 @@ def _spec(virtual: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_rule_guard_marks_an_op_with_the_bound_gate():
+async def test_dispatch_rule_guard_marks_an_op_with_its_explicit_gate():
     seen: list[tuple[str, _Gate | None]] = []
 
     async def inner(op, path, **kwargs):
         seen.append((op, kwargs.get("rule_gate")))
         return None, None
 
-    dispatch = with_dispatch_rule_guard(inner)
-    # No gate bound: the op goes to the dispatcher unmarked.
-    await dispatch("read", _spec("/data/f"))
+    # No gate: the op goes to the dispatcher unmarked.
+    await with_dispatch_rule_guard(inner, None)("read", _spec("/data/f"))
     gate = _Gate(refused="/data/locked/y")
-    token = set_admission(gate)
+    bound = with_dispatch_rule_guard(inner, gate)
+    token = set_admission(_Gate(refused="/data/other"))
     try:
-        await dispatch("read", _spec("/data/f"), dst=_spec("/data/g"))
+        await bound("read", _spec("/data/f"), dst=_spec("/data/g"))
         # A metadata op is never judged: deny is present and refused.
-        await dispatch("stat", _spec("/data/f"))
+        await bound("stat", _spec("/data/f"))
     finally:
         reset_admission(token)
-    assert seen == [("read", None), ("read", gate), ("stat", None)]
+    await bound("read", _spec("/data/after"))
+    assert seen == [
+        ("read", None),
+        ("read", gate),
+        ("stat", None),
+        ("read", gate),
+    ]
     # The wrapper judges nothing itself: the dispatcher does, on its own paths.
     assert gate.asked == []
 

@@ -356,6 +356,24 @@ async def peek(inv: CLIInvocation[None]):
 PEEK = CLI(spec=CommandSpec(name="peek"), handlers={"": CLIHandler(fn=peek)})
 
 
+async def later(inv: CLIInvocation[None]):
+    assert inv.view is not None and inv.view.dispatch is not None
+    dispatch = inv.view.dispatch
+
+    async def pulled():
+        data, _ = await dispatch(
+            "read", PathSpec.from_str_path("/data/secret.txt")
+        )
+        yield data
+
+    return pulled(), IOResult()
+
+
+LATER = CLI(
+    spec=CommandSpec(name="later"), handlers={"": CLIHandler(fn=later)}
+)
+
+
 @pytest.mark.asyncio
 async def test_an_account_cli_under_hides_runs_where_the_allow_list_names_it():
     hidden = {"hide": ["/data/secret.txt"]}
@@ -365,16 +383,20 @@ async def test_an_account_cli_under_hides_runs_where_the_allow_list_names_it():
         profiles={
             "hides": {"paths": hidden},
             "wildcard": {"paths": hidden, "commands": {"allow": ["*"]}},
+            "other": {
+                "paths": hidden,
+                "commands": {"allow": ["*", "sl message read"]},
+            },
             "named": {"paths": hidden, "commands": {"allow": ["*", "sl"]}},
         },
     )
     workspace.register_cli("sl", make_tree(), config={"token": "tok"})
     workspace.register_cli("peek", PEEK)
     await workspace.shell("echo top > /data/secret.txt")
-    for name in ("hides", "wildcard", "named"):
+    for name in ("hides", "wildcard", "other", "named"):
         workspace.create_session(name, profile=name)
     try:
-        for name in ("hides", "wildcard"):
+        for name in ("hides", "wildcard", "other"):
             io = await workspace.shell(
                 "sl message send -t x hi", session_id=name
             )
@@ -382,6 +404,13 @@ async def test_an_account_cli_under_hides_runs_where_the_allow_list_names_it():
             assert (io.exit_code, err) == (126, b"sl: Permission denied\n")
             assert io.refusal is not None
             assert io.refusal.reason == "sl message send is not allowed"
+            agent = await workspace.session(name)
+            said = await agent.explain.shell("sl message send -t x hi")
+            (command,) = said.node.children
+            assert (command.outcome, command.source) == (
+                Outcome.DENY,
+                "commands.allow",
+            )
         io = await workspace.shell(
             "sl message send -t x hi", session_id="named"
         )
@@ -406,7 +435,10 @@ async def test_a_rule_scoped_to_a_cli_reaches_its_own_reads():
                     "deny": [
                         {
                             "reason": "sealed",
-                            "commands": {"peek": ["/data/secret.txt"]},
+                            "commands": {
+                                "peek": ["/data/secret.txt"],
+                                "later": ["/data/secret.txt"],
+                            },
                         }
                     ]
                 }
@@ -414,18 +446,21 @@ async def test_a_rule_scoped_to_a_cli_reaches_its_own_reads():
         },
     )
     workspace.register_cli("peek", PEEK)
+    workspace.register_cli("later", LATER)
     await workspace.shell("echo top > /data/secret.txt")
     workspace.create_session("s", profile="sealed")
     try:
-        io = await workspace.shell("peek", session_id="s")
-        out = await materialize(io.stdout) if io.stdout else b""
-        assert (io.exit_code, out) == (1, b"")
-        assert io.refusal is not None and io.refusal.reason == "sealed"
+        for name in ("peek", "later"):
+            io = await workspace.shell(name, session_id="s")
+            out = await materialize(io.stdout) if io.stdout else b""
+            assert (io.exit_code, out) == (1, b"")
+            assert io.refusal is not None and io.refusal.reason == "sealed"
         io = await workspace.shell("cat /data/secret.txt", session_id="s")
         out = await materialize(io.stdout) if io.stdout else b""
         assert (io.exit_code, out) == (0, b"top\n")
-        code, out, _ = await run(workspace, "peek")
-        assert (code, out) == (0, b"top\n")
+        for name in ("peek", "later"):
+            code, out, _ = await run(workspace, name)
+            assert (code, out) == (0, b"top\n")
     finally:
         await workspace.close()
 
