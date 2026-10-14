@@ -57,6 +57,7 @@ export async function runMv(
   const rmdir = async (p: PathSpec): Promise<void> => {
     await dispatch('rmdir', p)
   }
+  const mounts = ns?.mounts
   return mvGeneric(
     flat,
     stat,
@@ -76,5 +77,6 @@ export async function runMv(
     refuseReveal,
     ns?.links == null ? undefined : transferLinksOf(ns.links, dispatch, '/', ns.visibility),
     stdin,
+    mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
   )
 }

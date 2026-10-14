@@ -93,6 +93,37 @@
         "stdout": "copied 'a' -> '/data2/r17xb/a' (backup: '/data2/r17xb/a~')\nremoved 'a'\ncreated directory '/data2/r17xb/sub'\ncopied 'sub/b' -> '/data2/r17xb/sub/b'\nremoved 'sub/b'\nremoved directory 'sub'\nrc=0\nrc=1\n/data2/r17xb\n/data2/r17xb/a\n/data2/r17xb/a~\n/data2/r17xb/a~/w\n/data2/r17xb/c~\n/data2/r17xb/sub\n/data2/r17xb/sub/b\n/data2/r17xb/sub~\n",
         "stderr": "mv: cannot move 'c' to '/data2/r17xb/c': Invalid cross-device link\n"
       }
+    },
+    {
+      "id": "xm_mv_refuses_a_mount_root_target",
+      "seq": 16900010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/r17xm/src && printf a > /data/r17xm/src/a && printf f > /data/r17xm/f && (cd /data/r17xm && mv -T src /data2; echo rc=$?; mv -nT src /data2; echo rc=$?; mv -bT f /data2; echo rc=$?; mv -T f /data2; echo rc=$?); ls /data/r17xm /data/r17xm/src; rm -r /data/r17xm",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=0\nrc=1\nrc=1\n/data/r17xm:\nf\nsrc\n\n/data/r17xm/src:\na\n",
+        "stderr": "mv: inter-device move failed: 'src' to '/data2'; unable to remove target: Device or resource busy\nmv: cannot backup '/data2': Device or resource busy\nmv: cannot overwrite directory '/data2' with non-directory 'f'\n"
+      }
     }
   ]
 }

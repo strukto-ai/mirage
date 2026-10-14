@@ -681,6 +681,28 @@ async def test_a_link_reached_through_a_linked_directory_copies_as_a_link():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["s/.", "s/sub"])
+async def test_backup_leaves_a_linked_destination_alone(source):
+    # The router followed `dst` to `f`, so moving it aside or removing it
+    # would act on `f`; GNU moves the link itself.
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    await ws.shell(
+        "cd /data && mkdir -p s/sub && printf b > s/sub/b && "
+        "printf x > f && ln -s f dst"
+    )
+    r = await ws.shell(f"cd /data && cp -rb {source} dst")
+    assert r.exit_code == 1
+    assert await r.materialize_stderr() == (
+        f"cp: cannot overwrite non-directory 'dst' with directory "
+        f"'{source}'\n".encode()
+    )
+    after = await ws.shell("cd /data && cat f && readlink dst && ls")
+    assert await after.materialize_stdout() == b"xf\ndst\nf\ns\n"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("native", [False, True])
 @pytest.mark.parametrize("failure", ["read", "write", "partial-write"])
 @pytest.mark.parametrize("referent", ["/safe", "/missing", "/dst~"])

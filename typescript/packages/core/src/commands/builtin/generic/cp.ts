@@ -670,7 +670,9 @@ function ontoDirectory(
 // backup name. A source typed as `.` or `..` is never backed up, so the entry
 // is removed instead, which -v reports. No gate or -i question applies to a
 // directory source (coreutils 9.7). Outside a workspace nothing can rename
-// the entry, so the overwrite is refused as it is without a backup. Returns
+// the entry, so the overwrite is refused as it is without a backup. So is a
+// name a link stands at: the router has followed the destination to what the
+// link leads to, which GNU leaves alone while it moves the link. Returns
 // whether the name is free. Mirrors Python's _clear_for_directory.
 async function clearForDirectory(
   policy: TransferPolicy,
@@ -682,7 +684,11 @@ async function clearForDirectory(
   lines: string[] | undefined,
   index?: IndexCacheStore,
 ): Promise<boolean> {
-  if (copies === undefined || !backupDisplaces(policy.backup)) {
+  if (
+    copies === undefined ||
+    !backupDisplaces(policy.backup) ||
+    typedLink(copies.links, target, copies.cwd) !== null
+  ) {
     errors.push(
       `${policy.cmdName}: cannot overwrite non-directory '${target.rawPath}' with directory '${src.rawPath}'`,
     )
@@ -1478,6 +1484,11 @@ export async function cpGeneric(
       errors.push(`cp: cannot copy a directory, '${src.rawPath}', into itself, '${target.rawPath}'`)
     }
     if (flags.recursive && srcIsDir) {
+      if (guardsCreated && created.has(keyOf(target))) {
+        // As a file would be, but a directory is asked nothing.
+        errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
+        continue
+      }
       if (
         targetExists &&
         !targetIsDir &&

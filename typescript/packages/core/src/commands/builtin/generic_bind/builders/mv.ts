@@ -25,6 +25,7 @@ const mv: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const rename = requireOp(ops.rename, 'rename')
   const idx = opts.index ?? undefined
   const parsed = parseFlags(new FlagView(opts.flags, specOf('mv')))
+  const mounts = opts.ns?.mounts
   return mvGeneric(
     await resolveGlobOf(ops)(accessor, paths, idx),
     overlayableStat(ops, accessor, idx, opts.ns?.statOverlay),
@@ -40,6 +41,7 @@ const mv: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
       ? undefined
       : transferLinksOf(opts.ns.links, opts.dispatch, opts.cwd, opts.ns.visibility),
     opts.stdin,
+    mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
   )
 }
 

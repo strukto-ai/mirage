@@ -68,6 +68,7 @@ from mirage.types import (
 )
 from mirage.utils.key_prefix import under_path
 from mirage.utils.stat_view import is_fifo
+from mirage.view.types import MountIsRoot
 
 _logger = logging.getLogger(__name__)
 
@@ -396,6 +397,7 @@ async def mv_generic(
     guard: Callable[[PathSpec, PathSpec], None] | None = None,
     copies: TransferLinks | None = None,
     stdin: ByteSource | None = None,
+    mount_root: MountIsRoot | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Move sources to a destination, fanning out into a directory.
 
@@ -430,6 +432,9 @@ async def mv_generic(
             renamed aside by ``-b``). Consulted only for a directory
             source, since a file carries nothing below it to reveal.
         stdin (ByteSource | None): where ``-i`` reads its answers.
+        mount_root (MountIsRoot | None): Whether a path is a mount root,
+            which a move can neither replace nor rename aside; None
+            outside a workspace.
 
     Returns:
         tuple[ByteSource | None, IOResult]: Verbose output, with
@@ -584,6 +589,23 @@ async def mv_generic(
                 f"mv: cannot move '{src.raw_path}' to "
                 f"'{target.raw_path}': {posix_phrase(FsCondition.EBUSY)}"
             )
+            continue
+        if mount_root is not None and mount_root(target.virtual):
+            # A mount root stands on another filesystem than the directory
+            # holding it, so the rename crosses devices, and the root can
+            # be neither renamed aside nor removed (coreutils 9.7).
+            busy_phrase = posix_phrase(FsCondition.EBUSY)
+            if backup_displaces(flags.backup):
+                errors.append(
+                    f"mv: cannot backup '{target.raw_path}': {busy_phrase}"
+                )
+            elif flags.no_copy:
+                errors.append(
+                    f"mv: cannot move '{src.raw_path}' to "
+                    f"'{target.raw_path}': Invalid cross-device link"
+                )
+            else:
+                errors.append(_replace_error(src, target, busy_phrase, True))
             continue
         across = isinstance(strategy, PrimitiveMove)
         # GNU refuses to replace a non-empty directory whether the target

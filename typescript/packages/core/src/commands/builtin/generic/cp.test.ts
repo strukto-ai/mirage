@@ -770,6 +770,29 @@ describe('a link reached through a linked directory', () => {
   })
 })
 
+describe('a backup onto a linked destination', () => {
+  // The router followed `dst` to `f`, so moving it aside or removing it would
+  // act on `f`; GNU moves the link itself. Mirrors python's
+  // test_backup_leaves_a_linked_destination_alone.
+  it.each(['s/.', 's/sub'])('cp -rb %s leaves the link and its file alone', async (source) => {
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    await ws.shell(
+      'cd /data && mkdir -p s/sub && printf b > s/sub/b && printf x > f && ln -s f dst',
+    )
+    const r = await ws.shell(`cd /data && cp -rb ${source} dst`)
+    expect([r.exitCode, DEC.decode(r.stderr)]).toEqual([
+      1,
+      `cp: cannot overwrite non-directory 'dst' with directory '${source}'\n`,
+    ])
+    const after = await ws.shell('cd /data && cat f && readlink dst && ls')
+    expect(DEC.decode(after.stdout)).toBe('xf\ndst\nf\ns\n')
+    await ws.close()
+  })
+})
+
 for (const native of [false, true]) {
   for (const failure of ['read', 'write', 'partial-write']) {
     it.each(['/safe', '/missing', '/dst~'])(

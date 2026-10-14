@@ -68,6 +68,11 @@ async def mv(
             else None
         ),
         stdin=opts.stdin,
+        mount_root=(
+            opts.ns.mounts.is_root
+            if opts.ns is not None and opts.ns.mounts is not None
+            else None
+        ),
     )
 
 

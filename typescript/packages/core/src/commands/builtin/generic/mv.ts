@@ -345,6 +345,9 @@ export async function mvGeneric(
   copies?: TransferLinks,
   // Where -i reads its answers.
   stdin?: ByteSource | null,
+  // Whether a path is a mount root, which a move can neither replace nor
+  // rename aside; undefined outside a workspace.
+  mountRoot?: (path: string) => boolean,
 ): Promise<[ByteSource | null, IOResult]> {
   if (copies !== undefined) stat = (path) => linkStat(copies, path)
   const keyOf = backendKey ?? backendKeyDefault
@@ -464,6 +467,22 @@ export async function mvGeneric(
       errors.push(
         `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase('EBUSY')}`,
       )
+      continue
+    }
+    if (mountRoot?.(target.virtual) === true) {
+      // A mount root stands on another filesystem than the directory holding
+      // it, so the rename crosses devices, and the root can be neither renamed
+      // aside nor removed (coreutils 9.7).
+      const busyPhrase = posixPhrase('EBUSY')
+      if (backupDisplaces(flags.backup)) {
+        errors.push(`mv: cannot backup '${target.rawPath}': ${busyPhrase}`)
+      } else if (flags.noCopy) {
+        errors.push(
+          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': Invalid cross-device link`,
+        )
+      } else {
+        errors.push(replaceError(src, target, busyPhrase, true))
+      }
       continue
     }
     const across = isPrimitiveMove(strategy)

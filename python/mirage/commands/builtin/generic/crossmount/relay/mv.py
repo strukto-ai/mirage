@@ -87,4 +87,9 @@ async def run_mv(
             else None
         ),
         stdin=stdin,
+        mount_root=(
+            ns.mounts.is_root
+            if ns is not None and ns.mounts is not None
+            else None
+        ),
     )

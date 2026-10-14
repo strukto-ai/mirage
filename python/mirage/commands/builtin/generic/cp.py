@@ -882,7 +882,9 @@ async def _clear_for_directory(
     is never backed up, so the entry is removed instead, which ``-v``
     reports. No gate or ``-i`` question applies to a directory source
     (coreutils 9.7). Outside a workspace nothing can rename the entry,
-    so the overwrite is refused as it is without a backup.
+    so the overwrite is refused as it is without a backup. So is a name
+    a link stands at: the router has followed the destination to what
+    the link leads to, which GNU leaves alone while it moves the link.
 
     Args:
         policy (TransferPolicy): The command's overwrite policy.
@@ -897,7 +899,11 @@ async def _clear_for_directory(
     Returns:
         bool: Whether the name is free for the directory.
     """
-    if copies is None or not backup_displaces(policy.backup):
+    if (
+        copies is None
+        or not backup_displaces(policy.backup)
+        or typed_link(copies.links, target, copies.cwd) is not None
+    ):
         errors.append(
             f"{policy.cmd_name}: cannot overwrite non-directory "
             f"'{target.raw_path}' with directory '{src.raw_path}'"
@@ -1916,6 +1922,13 @@ async def cp_generic(
                 f"into itself, '{target.raw_path}'"
             )
         if flags.recursive and src_is_dir:
+            if guards_created and key_of(target) in created:
+                # As a file would be, but a directory is asked nothing.
+                errors.append(
+                    f"cp: will not overwrite just-created "
+                    f"'{target.raw_path}' with '{src.raw_path}'"
+                )
+                continue
             if (
                 target_exists
                 and not target_is_dir

@@ -560,6 +560,43 @@
         "b",
         "v"
       ]
+    },
+    {
+      "id": "cp_rb_will_not_back_up_a_just_created_file",
+      "seq": 16900009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r17cj/s /data/r17cj/x/a /data/r17cj/t /data/r17cj/u && printf a > /data/r17cj/s/a && printf w > /data/r17cj/x/a/w && printf o > /data/r17cj/t/a && (cd /data/r17cj && cp -rb s/a x/a t; echo rc=$?; cp -r --backup=numbered s/a x/a u; echo rc=$?); cat /data/r17cj/t/a /data/r17cj/t/a~; find /data/r17cj/t /data/r17cj/u | sort; rm -r /data/r17cj",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=0\nao/data/r17cj/t\n/data/r17cj/t/a\n/data/r17cj/t/a~\n/data/r17cj/u\n/data/r17cj/u/a\n/data/r17cj/u/a.~1~\n/data/r17cj/u/a/w\n",
+        "stderr": "cp: will not overwrite just-created 't/a' with 'x/a'\n"
+      },
+      "flags": [
+        "r",
+        "b",
+        "backup"
+      ]
     }
   ]
 }
