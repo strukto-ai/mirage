@@ -183,17 +183,66 @@ describe('gunzipStream', () => {
   it('yields bounded expansion before reading more input', async () => {
     const archive = await gzip(ENC.encode('x'.repeat(GZIP_CHUNK_SIZE * 20)))
     const reads: number[] = []
+    const closed: boolean[] = []
     async function* source(): AsyncIterable<Uint8Array> {
-      reads.push(1)
-      yield* yieldBytes(archive)
-      reads.push(2)
-      yield* yieldBytes(archive)
+      try {
+        reads.push(1)
+        yield* yieldBytes(archive)
+        reads.push(2)
+        yield* yieldBytes(archive)
+      } finally {
+        closed.push(true)
+      }
     }
     const decoded = gunzipStream(source())[Symbol.asyncIterator]()
     expect((await decoded.next()).value).toEqual(ENC.encode('x'.repeat(GZIP_CHUNK_SIZE)))
     expect(reads).toEqual([1])
     await decoded.return?.()
     expect(reads).toEqual([1])
+    expect(closed).toEqual([true])
+  })
+
+  it.each([
+    ['header', ENC.encode('not gzip')],
+    ['trailer', cat(HELLO.subarray(0, -8), new Uint8Array(8))],
+  ] as const)('awaits source cleanup before reporting a bad %s', async (_name, data) => {
+    let closing!: () => void
+    let release!: () => void
+    const started = new Promise<void>((resolve) => {
+      closing = resolve
+    })
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let closed = false
+    let settled = false
+    async function* source(): AsyncGenerator<Uint8Array> {
+      try {
+        yield data
+        throw new Error('read past corrupt member')
+      } finally {
+        closing()
+        await released
+        closed = true
+      }
+    }
+    const compressed = source()
+    const decoding = materialize(gunzipStream(compressed)).finally(() => {
+      settled = true
+    })
+    const failure = expect(decoding).rejects.toBeInstanceOf(GzipDataError)
+    try {
+      await Promise.race([started, decoding])
+      expect(settled).toBe(false)
+      expect(closed).toBe(false)
+      release()
+      await failure
+      expect(closed).toBe(true)
+    } finally {
+      release()
+      await failure
+      await compressed.return(undefined)
+    }
   })
 
   it('reports trailing garbage after yielding valid output', async () => {

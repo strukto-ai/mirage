@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import asyncio
 import gzip
 import random
 import zlib
@@ -164,18 +165,54 @@ async def test_member_headers_trailers_and_padding_across_chunks(width):
 async def test_expansion_yields_bounded_chunks_before_reading_more_input():
     archive = gzip.compress(b"x" * (GZIP_CHUNK_SIZE * 20))
     reads = []
+    closed = []
 
     async def source():
-        reads.append(1)
-        yield archive
-        reads.append(2)
-        yield HELLO
+        try:
+            reads.append(1)
+            yield archive
+            reads.append(2)
+            yield HELLO
+        finally:
+            closed.append(True)
 
-    decoded = gunzip_stream(source())
+    compressed = source()
+    decoded = gunzip_stream(compressed)
     assert await anext(decoded) == b"x" * GZIP_CHUNK_SIZE
     assert reads == [1]
     await decoded.aclose()
     assert reads == [1]
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [b"not gzip", HELLO[:-8] + b"\0" * 8])
+async def test_decode_failure_awaits_source_cleanup(data):
+    closing, release, closed = (asyncio.Event() for _ in range(3))
+
+    async def source():
+        try:
+            yield data
+            raise AssertionError("read past corrupt member")
+        finally:
+            closing.set()
+            await release.wait()
+            closed.set()
+
+    compressed = source()
+    decoding = asyncio.create_task(materialize(gunzip_stream(compressed)))
+    try:
+        await asyncio.wait_for(closing.wait(), 1)
+        assert not decoding.done()
+        assert not closed.is_set()
+        release.set()
+        with pytest.raises(GzipDataError):
+            await decoding
+        assert closed.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(decoding, return_exceptions=True)
+        await compressed.aclose()
 
 
 @pytest.mark.asyncio

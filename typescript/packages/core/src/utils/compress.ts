@@ -443,7 +443,7 @@ class GzipDecoder {
   }
 }
 
-/** Decode gzip members with bounded output chunks and consumer backpressure. */
+/** Decode gzip members with bounded output; for-await closes input on decode errors or early return. */
 export async function* gunzipStream(
   source: AsyncIterable<Uint8Array>,
   test = false,

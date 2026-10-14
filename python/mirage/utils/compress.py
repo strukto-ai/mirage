@@ -18,6 +18,7 @@ from contextlib import aclosing
 from enum import Enum
 
 from mirage.io.cooperative import chunks
+from mirage.io.stream import close_quietly
 
 
 class GzipDataError(ValueError):
@@ -439,18 +440,23 @@ async def gunzip_stream(
 ) -> AsyncIterator[bytes]:
     """Decode concatenated members, yielding before reading more input.
 
+    Close the input before reporting a decode error or an early return.
+
     Args:
         source (AsyncIterator[bytes]): Compressed input chunks.
         test (bool): whether the run only tests its inputs.
         passthrough (bool): whether input that is not gzip is copied.
     """
     decoder = GzipDecoder(test, passthrough)
-    async for chunk in source:
-        for out in decoder.feed(chunk):
-            yield out
-    tail = decoder.finish()
-    if tail:
-        yield tail
+    try:
+        async for chunk in source:
+            for out in decoder.feed(chunk):
+                yield out
+        tail = decoder.finish()
+        if tail:
+            yield tail
+    finally:
+        await close_quietly(source)
 
 
 def gunzip_partial(
