@@ -1459,13 +1459,16 @@ class AskAB(Policy):
 @pytest.mark.asyncio
 async def test_a_killed_job_spends_the_nods_it_held():
     # A job held on a question and then killed is never retried.
-    ws = Workspace({"/data/": RAMVFS()}, policies=[AskAB()])
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[AskAB()]
+    )
     try:
         await ws.shell("{ export A=1; export B=2; } & wait")
         (nod,) = (r for r in ws.decisions.pending() if r.argv[0] == "A")
         await ws.decisions.answer(nod.id, Outcome.ALLOW)
         killed = await ws.shell(
-            "{ export A=1; export B=2; sleep 30; } & sleep 0.5; kill %1; wait"
+            "{ export A=1; export B=2; touch /data/m; sleep 30; } & "
+            "until [ -e /data/m ]; do sleep 0.1; done; kill %1; wait"
         )
         assert killed.refusal is not None and killed.refusal.kind == "pending"
         later = await ws.shell("export A=1")

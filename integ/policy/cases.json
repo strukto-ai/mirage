@@ -465,6 +465,18 @@
     {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "1\n2\n", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: B: permission denied\nC: permission denied\n", "refusal": "C before"}}}
    ]
+  },
+  {
+   "id": "a_killed_job_spends_the_nods_it_held",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent"},
+    {"op": "register_policy", "id": "vars", "pre_session": {"A": {"ask": "A needs a nod"}, "B": {"ask": "B needs a nod"}}},
+    {"op": "exec", "session": "agent", "command": "export A=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "A: permission denied\n", "refusal": "A needs a nod"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "agent", "command": "{ export A=1; export B=2; touch /data/m; sleep 30; } & until [ -e /data/m ]; do sleep 0.1; done; kill %1; wait", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "B: permission denied\n", "refusal": "B needs a nod"}}},
+    {"op": "exec", "session": "agent", "command": "export A=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "A: permission denied\n", "refusal": "A needs a nod"}}}
+   ]
   }
  ]
 }

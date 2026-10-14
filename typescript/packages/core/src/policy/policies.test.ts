@@ -1002,7 +1002,8 @@ describe('every method answers Deny and Ask', () => {
       const nod = ws.decisions.pending().find((r) => r.argv[0] === 'A')
       await ws.decisions.answer(nod?.id ?? '', Outcome.ALLOW)
       const killed = await ws.shell(
-        '{ export A=1; export B=2; sleep 30; } & sleep 0.5; kill %1; wait',
+        '{ export A=1; export B=2; touch /data/m; sleep 30; } & ' +
+          'until [ -e /data/m ]; do sleep 0.1; done; kill %1; wait',
       )
       expect(killed.refusal?.kind).toBe('pending')
       expect((await ws.shell('export A=1')).refusal?.kind).toBe('pending')
