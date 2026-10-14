@@ -17,7 +17,7 @@ import errno
 import functools
 import posixpath
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
@@ -94,6 +94,7 @@ from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
 from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
+from mirage.vfs.search import record_path
 from mirage.vfs.types import Effect, Target, VfsCall
 from mirage.view.namespace_view import (
     merge_readdir,
@@ -109,6 +110,7 @@ from mirage.workspace.dispatcher.constants import (
     ENTRY_CREATE_OPS,
     FILE_CREATE_OPS,
     HIDDEN_CREATE_OPS,
+    HIDE_FILTERED_OPS,
     LINK_ENTRY_OPS,
     NAMESPACE_TABLE_OPS,
     NATIVE_WALK_OPS,
@@ -343,6 +345,58 @@ def _visible_entries(entries: list[str], parent: str) -> list[str]:
         for e in entries
         if path_visible(vis, f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
     ]
+
+
+def _visible_answer(
+    name: str, vis: Visibility | None, path: PathSpec, result: Any
+) -> Any:
+    """A one-call read's answer without the entries the session hides.
+
+    What the walk the read stands in for would see, since every call it
+    makes reads a hidden path as absent: a ``read_tree`` answer keeps the
+    entries left visible, keyed below ``path``; ``files_containing``
+    keeps the files left visible; ``search`` keeps the records whose
+    path is visible.
+
+    Args:
+        name (str): the op, one of ``HIDE_FILTERED_OPS``.
+        vis (Visibility | None): the session's visibility.
+        path (PathSpec): the directory the read answered for.
+        result (Any): the backend's answer.
+    """
+    if name == "read_tree":
+        base = path.virtual.rstrip("/")
+        return {
+            key: st
+            for key, st in result.items()
+            if path_visible(vis, f"{base}/{key}")
+        }
+    if name == "files_containing":
+        return [hit for hit in result if path_visible(vis, hit.virtual)]
+    return [
+        record for record in result if path_visible(vis, record_path(record))
+    ]
+
+
+def _record_of(
+    records: list[OpRecord], ops: Collection[str], virtual: str
+) -> OpRecord | None:
+    """The last of a write's records that one of ``ops`` made at
+    ``virtual``.
+
+    Args:
+        records (list[OpRecord]): the records the write emitted.
+        ops (Collection[str]): the op names to look for.
+        virtual (str): the path the write ran on.
+    """
+    return next(
+        (
+            rec
+            for rec in reversed(records)
+            if rec.op in ops and rec.path == virtual
+        ),
+        None,
+    )
 
 
 def _lists(listing: list[str], virtual: str) -> bool:
@@ -759,7 +813,7 @@ class Dispatcher:
             return await self._answer_unmounted(call), IOResult()
         await self._refuse_cross_mount(call, mount)
         if await self._declines(call):
-            if call.name == "search":
+            if call.name in ("search", "files_containing"):
                 return None, IOResult()
             raise walk_declined(str(mount.vfs.name), call.name, call.path)
         mark = declared(type(mount.vfs), name) or CALLS.get(name)
@@ -1064,15 +1118,18 @@ class Dispatcher:
 
         A backend's find, du, search, tree copy or tree removal answers
         for every entry under its path in one call, past the checks each
-        entry would meet on its own. So when a hide, the command's path
-        rules or, for a ``ws.vfs`` call, a coded pre_vfs policy reach
-        below one of its paths, it is declined and the caller walks,
-        entry by entry, through calls that are each judged. Inside a
-        running line only the profile's path rules judge an entry, so a
-        coded policy declines no walk there. A file copy is declined the same way: the
-        bytes it moves never pass through a read. A tree copy is declined
-        too when a link stands below its destination: the backend writes
-        each child name as it is, where the walk's copies follow the link.
+        entry would meet on its own. So when the command's path rules or,
+        for a ``ws.vfs`` call, a coded pre_vfs policy reach below one of
+        its paths, it is declined and the caller walks, entry by entry,
+        through calls that are each judged. Inside a running line only the
+        profile's path rules judge an entry, so a coded policy declines no
+        walk there. A hide declines the copies and the removal, which
+        would reach hidden entries; a read in ``HIDE_FILTERED_OPS`` runs
+        and ``_filter`` drops what the session hides from its answer. A
+        file copy is declined the same way: the bytes it moves never pass
+        through a read. A tree copy is declined too when a link stands
+        below its destination: the backend writes each child name as it
+        is, where the walk's copies follow the link.
 
         Args:
             call (_Call): the followed op.
@@ -1086,7 +1143,9 @@ class Dispatcher:
         ):
             return True
         paths = [call.path] if call.dst is None else [call.path, call.dst]
-        if any(hidden_under(call.vis, p.virtual) for p in paths):
+        if call.name not in HIDE_FILTERED_OPS and any(
+            hidden_under(call.vis, p.virtual) for p in paths
+        ):
             return True
         if call.rule_gate is not None:
             return any(call.rule_gate.scopes(p.virtual) for p in paths)
@@ -1296,6 +1355,8 @@ class Dispatcher:
             elif call.name in SERIAL_WRITE_OPS:
                 result = await self._serial_write(call, mount)
             else:
+                if call.name == "before_full_scan":
+                    kwargs["files"] = await self._visible_files(mount, call)
                 result = await mount.call(
                     call.name, call.path.virtual, **kwargs
                 )
@@ -1327,6 +1388,28 @@ class Dispatcher:
         finally:
             scope.close()
         return result
+
+    async def _visible_files(
+        self, mount: MountEntry, call: _Call
+    ) -> int | None:
+        """How many files the session sees under a scan guard's path.
+
+        Counted off the mount's ``read_tree`` with every hidden file
+        dropped, so a guard's refusal never counts what the session
+        cannot see; None when the mount cannot answer the subtree in one
+        call.
+
+        Args:
+            mount (MountEntry): the mount serving the path.
+            call (_Call): the guard's call.
+        """
+        if not mount.vfs.supports("read_tree"):
+            return None
+        found = await mount.call("read_tree", call.path.virtual)
+        if found is None:
+            return None
+        visible = _visible_answer("read_tree", call.vis, call.path, found)
+        return sum(st.type is FileType.FILE for st in visible.values())
 
     def _streams(self, call: _Call, mount: MountEntry) -> bool:
         """Whether a read is answered as it is pulled.
@@ -1414,6 +1497,7 @@ class Dispatcher:
         async with AsyncExitStack() as held:
             for key in sorted(keys):
                 await held.enter_async_context(self._writers.with_lock(key))
+            before = await self._cached_before(call, mount)
             scope = RecordingScope(active=active_recorder() is None)
             try:
                 with command_records() as mine:
@@ -1424,49 +1508,92 @@ class Dispatcher:
                 scope.close()
             _served(call.report, result)
             await self._settle_write(mount, call.name, call.path, kwargs)
-            await self._keep_written(call, mount, mine)
+            await self._keep_written(call, mount, mine, before)
         return result
 
+    async def _cached_before(
+        self, call: _Call, mount: MountEntry
+    ) -> tuple[bytes, str | None] | None:
+        """The cached copy an append may extend, read under its name's
+        hold before the append runs: its bytes and their token.
+
+        Args:
+            call (_Call): the write about to run.
+            mount (MountEntry): the mount it runs on.
+        """
+        if call.name != "append" or not _facts_of(mount).cacheable:
+            return None
+        kept = await self._cache.get(call.path.virtual)
+        if kept is None:
+            return None
+        return kept, await self._cache.fingerprint(call.path.virtual)
+
     async def _keep_written(
-        self, call: _Call, mount: MountEntry, records: list[OpRecord]
+        self,
+        call: _Call,
+        mount: MountEntry,
+        records: list[OpRecord],
+        before: tuple[bytes, str | None] | None,
     ) -> None:
-        """Keep a whole write's bytes for the next read, under its name's hold.
+        """Keep a write's bytes for the next read, under its name's hold.
 
         The write's own record labels them with the token the backend
         answered, so a ``fresh`` mount does not refetch what it just wrote;
         a record moving another length than was sent keeps nothing, and so
         does a name another mount took while the write ran, read under the
-        cache's lock.
+        cache's lock. An append extends the cached copy only where the
+        file is proven to have been that copy: the backend rewrote it
+        whole, its write moved the copy's length plus the appended bytes,
+        and its read saw the copy's token where both have one. An append
+        the backend makes itself records no length, so the copy stays
+        dropped; an append of nothing keeps the copy as it was.
 
         Args:
             call (_Call): the write that ran.
             mount (MountEntry): the mount it ran on.
             records (list[OpRecord]): the records the write emitted.
+            before (tuple[bytes, str | None] | None): an append's cached
+                copy and its token, from before it ran.
         """
         data = call.kwargs.get("data")
         if (
-            call.name != "write"
+            call.name not in ("write", "append")
             or not isinstance(data, bytes)
             or not _facts_of(mount).cacheable
         ):
             return
-        record = next(
-            (
-                rec
-                for rec in reversed(records)
-                if rec.op in WRITE_FINGERPRINT_OPS
-                and rec.path == call.path.virtual
-            ),
-            None,
+        record = _record_of(records, WRITE_FINGERPRINT_OPS, call.path.virtual)
+        fingerprint = (
+            record.fingerprint or None if record is not None else None
         )
-        if record is not None and record.bytes != len(data):
+        if call.name == "append":
+            if before is None:
+                return
+            kept, token = before
+            read = _record_of(records, {"read"}, call.path.virtual)
+            if not data:
+                data, fingerprint = kept, token
+            elif (
+                record is None
+                or record.bytes != len(kept) + len(data)
+                or (
+                    read is not None
+                    and read.fingerprint
+                    and token is not None
+                    and read.fingerprint != token
+                )
+            ):
+                return
+            else:
+                data = kept + data
+        elif record is not None and record.bytes != len(data):
             await self._cache.remove(call.path.virtual)
             return
         await cache_io.set_cached(
             self._cache,
             call.path.virtual,
             data,
-            record.fingerprint or None if record is not None else None,
+            fingerprint,
             lambda path: _facts_of(
                 mount if self._namespace.try_mount_for(path) is mount else None
             ),
@@ -1501,6 +1628,12 @@ class Dispatcher:
             return merge_overlay_stat(
                 self._namespace.meta_for(call.path.virtual), result
             )
+        if (
+            call.name in HIDE_FILTERED_OPS
+            and result is not None
+            and hidden_under(call.vis, call.path.virtual)
+        ):
+            return _visible_answer(call.name, call.vis, call.path, result)
         return result
 
     async def _settle_write(

@@ -63,15 +63,15 @@ class QdrantVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         return await files_containing(
-            readdir, self.accessor, text, under, index
+            readdir, self.accessor, text, [path], index
         )
 
     async def search(

@@ -58,9 +58,10 @@ function listings(found: Map<string, FileStat>): Map<string, string[]> {
  * The first `readdir` of a directory no answer covers asks `readTree` for
  * everything under it, and every later `readdir` and `stat` below it answers
  * from that, so a walk costs one call. An answer of null, a mount without
- * `readTree`, or a dispatcher that declines it (a hide or a path rule below
- * the directory) leaves the walk to `readdir` and `stat`, each judged on its
- * own, as does a path the answer does not hold. Both take the path and the
+ * `readTree`, or a dispatcher that declines it (a path rule below the
+ * directory) leaves the walk to `readdir` and `stat`, each judged on its own,
+ * as does a path the answer does not hold; under a hide the dispatcher
+ * answers without the hidden entries. Both take the path and the
  * index the walk passes. `answered` collects each directory listed
  * from an answer, for a walk that charges a budget per request. Mirrors
  * Python's `tree_walk`.

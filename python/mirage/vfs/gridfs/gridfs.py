@@ -147,5 +147,16 @@ class GridFSVFS(BaseVFS):
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
 
+    def storage_location(self) -> str:
+        # The hosts, the database, the bucket and the key prefix pin the
+        # files two mounts would share. The URI's credentials are left
+        # out: they name a login, not a store.
+        cfg = self.config
+        rest = cfg.uri.get_secret_value().split("://", 1)[-1]
+        hosts = rest.rsplit("@", 1)[-1].split("/", 1)[0].split("?", 1)[0]
+        prefix = (cfg.key_prefix or "").strip("/")
+        base = f"{self.name}:{hosts}/{cfg.database}/{cfg.bucket}"
+        return f"{base}/{prefix}" if prefix else base
+
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

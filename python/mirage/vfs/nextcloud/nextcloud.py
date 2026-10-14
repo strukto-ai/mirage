@@ -129,5 +129,11 @@ class NextcloudVFS(BaseVFS):
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
 
+    def storage_location(self) -> str:
+        # The server and the user pin the WebDAV tree two mounts would
+        # share: each user's files live in a tree of their own.
+        cfg = self.config
+        return f"{self.name}:{cfg.url.rstrip('/')}:{cfg.username or ''}"
+
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

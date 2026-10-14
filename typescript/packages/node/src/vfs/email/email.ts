@@ -82,12 +82,12 @@ export class EmailVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
     if (!this.config.contentSearch) return Promise.resolve(null)
-    return emailFilesContaining(this.accessor, text, under, opts.wholeWord)
+    return emailFilesContaining(this.accessor, text, [path], opts.wholeWord)
   }
 
   override getState(): Promise<EmailVFSState> {

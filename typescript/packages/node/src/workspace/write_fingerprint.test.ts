@@ -135,6 +135,37 @@ describe('object-store write fingerprint (mocked S3)', () => {
     }
   })
 
+  // Twin of test_an_append_extends_the_copy_the_rewrite_proves: S3 appends
+  // by rewriting the object, and that write moved the cached length plus the
+  // piece, so the copy grows instead of dropping.
+  it('an append extends the copy the rewrite proves', async () => {
+    const ws = makeWorkspace(BOUNDED)
+    try {
+      await ws.shell("printf 'a\\n' > /s3/x.txt")
+      await ws.shell("printf 'b\\n' >> /s3/x.txt")
+      mock.calls.clear()
+      expect(DEC.decode((await ws.shell('cat /s3/x.txt')).stdout)).toBe('a\nb\n')
+      expect(DEC.decode((await ws.cache.get('/s3/x.txt')) ?? undefined)).toBe('a\nb\n')
+      expect(mock.calls.get('GetObject') ?? 0).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_an_append_drops_a_copy_the_object_moved_away_from.
+  it('an append drops a copy the object moved away from', async () => {
+    const ws = makeWorkspace(BOUNDED)
+    try {
+      await ws.shell("printf 'a\\n' > /s3/x.txt")
+      mock.store.set(BUCKET, 'x.txt', ENC.encode('z\n'))
+      await ws.shell("printf 'b\\n' >> /s3/x.txt")
+      expect(await ws.cache.get('/s3/x.txt')).toBeNull()
+      expect(DEC.decode((await ws.shell('cat /s3/x.txt')).stdout)).toBe('z\nb\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a write after a guarded cp keeps its own bytes', async () => {
     // Under a hide `cp` reads and writes entry by entry at the dispatcher;
     // a later write keeps its own bytes and token, which the old read's

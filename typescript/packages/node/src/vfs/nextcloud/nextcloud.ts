@@ -27,6 +27,7 @@ import { rename } from '../../core/nextcloud/rename.ts'
 import { copy } from '../../core/nextcloud/copy.ts'
 import { truncate } from '../../core/nextcloud/truncate.ts'
 import { SCOPE_ERROR } from '../../core/nextcloud/constants.ts'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 export interface NextcloudVFSState {
   type: string
@@ -133,6 +134,12 @@ export class NextcloudVFS extends BaseVFS {
 
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
+  }
+
+  override storageLocation(): string {
+    // The server and the user pin the WebDAV tree two mounts would share:
+    // each user's files live in a tree of their own.
+    return `${this.name}:${rstripSlash(this.config.url)}:${this.config.username ?? ''}`
   }
 
   override getState(): Promise<NextcloudVFSState> {

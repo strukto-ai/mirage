@@ -58,8 +58,8 @@ export class GSlidesVFS extends BaseVFS {
   override readonly renderers: Readonly<Record<string, string>> = { '.gslide.json': 'readDeck' }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
@@ -70,7 +70,7 @@ export class GSlidesVFS extends BaseVFS {
       MIME,
       SLIDES_WORDS,
       text,
-      under,
+      [path],
       index,
     )
   }

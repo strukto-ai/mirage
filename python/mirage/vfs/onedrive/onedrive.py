@@ -131,8 +131,8 @@ class OneDriveVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -145,7 +145,7 @@ class OneDriveVFS(BaseVFS):
             config,
             _readdir,
             self.accessor,
-            [(d, drive_loc(config, d.vfs_path)) for d in under],
+            [(d, drive_loc(config, d.vfs_path)) for d in [path]],
             text,
             index,
             session=self.accessor.pool,

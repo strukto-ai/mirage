@@ -487,6 +487,9 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "last_lines": ("last_lines", ("n", "index")),
     "line_count": ("line_count", ("index",)),
     "follow": ("follow", ("n", "index")),
+    "files_containing": ("files_containing", ("text",)),
+    "lines_containing": ("lines_containing", ("text",)),
+    "before_full_scan": ("before_full_scan", ("command", "reason")),
 }
 
 # The slots that change the mount: with no dispatcher there is nowhere to
@@ -496,6 +499,9 @@ _DISPATCHED_WRITES = frozenset(_DISPATCHED_SLOTS) - {
     "last_lines",
     "line_count",
     "follow",
+    "files_containing",
+    "lines_containing",
+    "before_full_scan",
 }
 
 

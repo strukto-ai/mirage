@@ -176,8 +176,8 @@ class GitHubVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -185,16 +185,18 @@ class GitHubVFS(BaseVFS):
     ) -> list[PathSpec] | None:
         if not whole_word:
             return None
-        return await _files_containing(self.accessor, index, text, under)
+        return await _files_containing(self.accessor, index, text, [path])
 
     async def before_full_scan(
         self,
+        path: PathSpec,
         command: str,
-        under: list[PathSpec],
         reason: ScanReason,
+        *,
+        files: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
-        await _before_full_scan(self.accessor, index, under, reason)
+        await _before_full_scan(self.accessor, index, path, reason, files)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

@@ -39,6 +39,24 @@ def text_option(query: SearchQuery, key: str, default: str) -> str:
     return value
 
 
+def record_path(record: str) -> str:
+    """The path a search record names: its first line, without the
+    ``:score`` a ranked store appends.
+
+    Args:
+        record (str): one record, its header line first.
+    """
+    head = record.split("\n", 1)[0]
+    path, sep, score = head.rpartition(":")
+    if not sep:
+        return head
+    try:
+        float(score)
+    except ValueError:
+        return head
+    return path
+
+
 async def search_resources(
     capability: SearchOps | None,
     accessor: Any,

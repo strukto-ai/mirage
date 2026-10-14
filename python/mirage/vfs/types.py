@@ -285,14 +285,14 @@ class ScanReason(StrEnum):
 
 
 class FilesContainingOp(Protocol):
-    """Files under ``under`` whose content may contain ``text``; None
+    """Files under ``path`` whose content may contain ``text``; None
     when the search cannot answer for every file."""
 
     def __call__(
         self,
         accessor: Any,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         /,
         *,
         whole_word: bool,
@@ -325,10 +325,12 @@ class BeforeFullScanOp(Protocol):
     def __call__(
         self,
         accessor: Any,
+        path: PathSpec,
         command: str,
-        under: list[PathSpec],
         reason: ScanReason,
         /,
+        *,
+        files: int | None = ...,
         index: IndexCacheStore = ...,
     ) -> Awaitable[None]: ...
 

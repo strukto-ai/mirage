@@ -26,8 +26,6 @@ import { formatScore } from '../../utils/score.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchMemories } from './client.ts'
 
-const ENCODER = new TextEncoder()
-
 function validate(query: string, topK: number, threshold: number): void {
   if (query === '') throw new Error('search: query is required')
   if (!Number.isInteger(topK) || topK <= 0) throw new Error('search: top-k must be positive')
@@ -48,7 +46,7 @@ export async function searchMemoriesRendered(
   topK: number,
   threshold: number,
   memoryIds?: ReadonlySet<string>,
-): Promise<Uint8Array> {
+): Promise<string[]> {
   validate(query, topK, threshold)
   const lines: string[] = []
   for (const result of await searchMemories(accessor, query, topK, threshold)) {
@@ -59,7 +57,7 @@ export async function searchMemoriesRendered(
     const memory = typeof result.memory === 'string' ? result.memory : ''
     lines.push(`${score === null ? path : `${path}:${score}`}\n${memory}`)
   }
-  return ENCODER.encode(lines.length === 0 ? '' : `${lines.join('\n')}\n`)
+  return lines
 }
 
 export async function searchMany(
@@ -84,8 +82,7 @@ export async function searchMany(
     if (match.kind !== 'memory') throw enoent(path)
     ids?.add(match.slots.memory_id ?? '')
   }
-  const output = await searchMemoriesRendered(accessor, query.query, prefix, topK, threshold, ids)
-  return output.length === 0 ? [] : new TextDecoder().decode(output).replace(/\n$/, '').split('\n')
+  return searchMemoriesRendered(accessor, query.query, prefix, topK, threshold, ids)
 }
 
 export function searchResource(

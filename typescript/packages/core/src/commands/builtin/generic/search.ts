@@ -63,7 +63,8 @@ export function makeSearch(
     const targets = defaultPaths(paths, opts.cwd, opts.mountPrefix ?? '')
     // A batch ranking answers for every scope in one call past the
     // dispatcher; where a hide or a path rule reaches the scopes each is
-    // searched at the dispatcher, which declines one the view restricts.
+    // searched at the dispatcher, which drops the hits the session hides and
+    // declines a scope a path rule reaches.
     let capability = opts.io?.search
     if (capability !== undefined && pathsScoped(opts.ns, targets, opts.mountPrefix ?? '')) {
       capability = { ...capability }

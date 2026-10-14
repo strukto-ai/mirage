@@ -86,13 +86,13 @@ export class GCalVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || !this.config.contentSearch) return Promise.resolve(null)
-    return gcalFilesContaining(this.accessor, text, under, index)
+    return gcalFilesContaining(this.accessor, text, [path], index)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

@@ -21,6 +21,7 @@ import {
   ENTRY_CREATE_OPS,
   FILE_CREATE_OPS,
   HIDDEN_CREATE_OPS,
+  HIDE_FILTERED_OPS,
   NAMESPACE_TABLE_OPS,
   NATIVE_WALK_OPS,
   NO_FOLLOW_OPS,
@@ -62,10 +63,11 @@ describe('dispatcher op sets', () => {
     expect(sorted(STAMP_WRITE_OPS)).toEqual([...writes, 'mkdir'].sort())
     expect(sorted(COPY_OPS)).toEqual(['copy', 'dir_copy'])
     expect(sorted(DESTINATION_OPS)).toEqual(['copy', 'dir_copy', 'rename'])
-    const subtree = ['dir_copy', 'read_tree', 'rename', 'rm_r', 'search']
+    const subtree = ['dir_copy', 'files_containing', 'read_tree', 'rename', 'rm_r', 'search']
     expect(sorted(SUBTREE_OPS)).toEqual(subtree)
     expect(sorted(NATIVE_WALK_OPS)).toEqual(
       [...subtree.filter((name) => name !== 'rename'), 'copy'].sort(),
     )
+    expect(sorted(HIDE_FILTERED_OPS)).toEqual(['files_containing', 'read_tree', 'search'])
   })
 })

@@ -116,7 +116,7 @@ describe('Mem0 filesystem', () => {
       new Set(['keep']),
     )
 
-    expect(new TextDecoder().decode(output)).toBe('/memories/keep.json:0.88\nremember me\n')
+    expect(output).toEqual(['/memories/keep.json:0.88\nremember me'])
   })
 })
 

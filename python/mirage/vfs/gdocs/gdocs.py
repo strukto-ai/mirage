@@ -80,8 +80,8 @@ class GDocsVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -90,7 +90,7 @@ class GDocsVFS(BaseVFS):
         if not whole_word or not self.config.content_search:
             return None
         return await _files_containing(
-            self.accessor, _readdir, MIME, DOCS_WORDS, text, under, index
+            self.accessor, _readdir, MIME, DOCS_WORDS, text, [path], index
         )
 
     async def stat(

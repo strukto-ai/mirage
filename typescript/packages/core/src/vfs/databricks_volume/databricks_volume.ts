@@ -30,6 +30,7 @@ import { write as dbxWrite } from '../../core/databricks_volume/write.ts'
 import { appendByRewrite } from '../../core/generic/rewrite.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * DatabricksVolume's functions over its accessor, which a host package builds
@@ -37,6 +38,15 @@ import { BaseVFS } from '../base.ts'
  */
 export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
   override readonly readsRanges: boolean = true
+
+  override storageLocation(): string {
+    // The workspace and the volume path pin the files two mounts would
+    // share; a profile names its workspace where no host is given.
+    const cfg = this.accessor.config
+    const workspace = cfg.host ?? `profile:${cfg.profile ?? ''}`
+    const volume = `/Volumes/${cfg.catalog}/${cfg.schema}/${cfg.volume}`
+    return `${this.name}:${workspace}:${volume}${rstripSlash(cfg.rootPath)}`
+  }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
     return dbxReaddir(this.accessor, path, index)

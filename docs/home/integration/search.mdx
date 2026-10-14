@@ -22,8 +22,8 @@ class MyVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -41,9 +41,11 @@ class MyVFS(BaseVFS):
 
     async def before_full_scan(
         self,
+        path: PathSpec,
         command: str,
-        under: list[PathSpec],
         reason: ScanReason,
+        *,
+        files: int | None = None,
         index=NULL_INDEX,
     ) -> None: ...
 ```
@@ -56,8 +58,8 @@ class MyVFS extends BaseVFS {
   override readonly searchable: readonly string[] | null = null
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> { /* ... */ }
 
@@ -68,9 +70,10 @@ class MyVFS extends BaseVFS {
   ): Promise<ByteSource | null> { /* ... */ }
 
   override beforeFullScan(
+    path: PathSpec,
     command: string,
-    under: PathSpec[],
     reason: ScanReason,
+    files: number | null,
   ): Promise<void> { /* ... */ }
 }
 ```
@@ -79,13 +82,18 @@ class MyVFS extends BaseVFS {
 
 | Method | Answer | Otherwise |
 | --- | --- | --- |
-| `files_containing` | the files under `under` that may hold `text`, matched on `vfs_path` ignoring case | `None`: every file is read |
+| `files_containing` | the files under `path` that may hold `text`, matched on `vfs_path` ignoring case | `None`: every file is read |
 | `lines_containing` | the lines of `path` that may hold `text`, in file order, as bytes or a stream | `None`: the file is read; required for a file that may hold a NUL byte |
 | `before_full_scan` | return: the scan runs | raise: the command is refused |
 
 An extra file or line costs a read; a missing one is a wrong answer. A search
-that holds only keys names each file with `mounted_path(under[0], "/" + key)`
+that holds only keys names each file with `mounted_path(path, "/" + key)`
 from `mirage.utils.key_prefix` (`mountedPath` in TypeScript).
+
+A session's hidden files are dropped from a `files_containing` answer before
+grep sees it, so a search may answer for the whole tree. Where a path rule
+reaches below a directory, the search is not asked and every file is read, so
+each read meets the rule.
 
 `searchable` names the files `files_containing` answers for, as mount-relative
 globs where a directory covers what is under it. A walked file outside it is
@@ -95,14 +103,15 @@ always read; `None` (`null`), the default, covers every file.
 
 | Method | Commands | Used when |
 | --- | --- | --- |
-| `files_containing` | `grep -r`, `-R` or `-d recurse`, `rg` | the walk reads any file, unless a flag below scans |
+| `files_containing` | `grep -r`, `-R` or `-d recurse`, `rg` | once per directory operand and pattern, when the walk reads any file, unless a flag below scans |
 | `lines_containing` | `grep`, `rg` | in place of the file with no `-n`, `-b`, `-A`, `-B`, `-C` (grep also no `-NUM` or `-z`; rg also no `--column`, `--vimgrep`, `--stop-on-nonmatch`, `--null-data`, `-U`) and one pattern; otherwise to decide whether the file is read |
-| `before_full_scan` | `grep -r`, `-R` or `-d recurse`, `rg` | once, before the first file no search answered is read |
+| `before_full_scan` | `grep -r`, `-R` or `-d recurse`, `rg` | once per directory operand, before the first file no search answered is read |
 
 | Argument | Set by |
 | --- | --- |
 | `text` | the pattern or each `-e`; for a regex, a plain-text piece of three or more characters every match holds |
-| `under` | the directory operands; for `rg` with none, the cwd |
+| `path` | a directory operand; for `rg` with none, the cwd |
+| `files` | how many files the session sees under `path`, when the mount answers `read_tree`; otherwise `None` |
 | `whole_word` | `-w` or `-x` with a plain-text pattern |
 | `ignore_case` | `-i`; for `rg`, also `-S` with a lowercase pattern |
 
@@ -116,8 +125,8 @@ These flags scan every file and call `before_full_scan` with the reason:
 | `rg -L` | `LINKS` |
 | `grep -a`, `--binary-files=text`, `rg -a`, `--binary` or `-uuu`, after a search answered | `BINARY` |
 | `rg -z`, `--pre`, `-E` naming an encoding | `TRANSFORMED` |
-| no search method, or a hide or path rule on the path | `NO_SEARCH` |
-| a search answered `None` | `UNANSWERED` |
+| no search method | `NO_SEARCH` |
+| a search answered `None`, or a path rule reaches below the directory | `UNANSWERED` |
 
 Every other flag is applied by the walk as usual. `rg --files` and
 `rg --type-list` read no content and ask nothing. `files_containing` never

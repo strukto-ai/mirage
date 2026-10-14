@@ -45,11 +45,12 @@ export const CALLS: ReadonlyMap<string, VfsCall> = new Map([...VFS_CALLS, ...NAM
 // value can serve them (sliced for ranged reads) without touching the
 // backend, subject to the reconciler's consistency check. A call that
 // answers for part of a file (first_lines, last_lines, line_count,
-// follow) is neither served from the cache nor kept in it; its caller
-// reads a cached file instead.
+// follow, lines_containing) is neither served from the cache nor kept in
+// it; its caller reads a cached file instead.
 export const DISPATCH_READ_OPS: ReadonlySet<string> = new Set(
   [...callNames(VFS_CALLS, { effects: [Effect.READ], targets: [Target.FILE] })].filter(
-    (name) => !['first_lines', 'last_lines', 'line_count', 'follow'].includes(name),
+    (name) =>
+      !['first_lines', 'last_lines', 'line_count', 'follow', 'lines_containing'].includes(name),
   ),
 )
 
@@ -121,13 +122,23 @@ export const SUBTREE_OPS: ReadonlySet<string> = new Set(
 )
 
 // Ops a backend answers in one call for what a walk does entry by entry.
-// When a hide, the command's path rules or a coded policy reach below the
-// path, the dispatcher declines them (ENOTSUP; a search answers null) and
-// the caller walks, so every entry passes the checks a walk's own calls
-// pass.
+// When the command's path rules or a coded policy reach below the path, the
+// dispatcher declines them (ENOTSUP; a search answers null) and the caller
+// walks, so every entry passes the checks a walk's own calls pass. A hide
+// declines them too, except the reads in HIDE_FILTERED_OPS.
 export const NATIVE_WALK_OPS: ReadonlySet<string> = new Set([
   ...[...SUBTREE_OPS].filter((name) => name !== 'rename'),
   ...COPY_OPS,
+])
+
+// The one-call reads whose answer names every entry it holds: under a hide
+// the dispatcher drops each hidden entry from the answer instead of
+// declining, which leaves what the walk would see, since a hidden path reads
+// as absent everywhere.
+export const HIDE_FILTERED_OPS: ReadonlySet<string> = new Set([
+  'read_tree',
+  'search',
+  'files_containing',
 ])
 
 // Ops that open the regular file they name with O_CREAT, which answers a

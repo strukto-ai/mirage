@@ -54,8 +54,8 @@ class LinearVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -64,7 +64,7 @@ class LinearVFS(BaseVFS):
         return await _files_containing(
             self.accessor,
             text,
-            under,
+            [path],
             index,
             ask_linear=whole_word and self.config.content_search,
         )

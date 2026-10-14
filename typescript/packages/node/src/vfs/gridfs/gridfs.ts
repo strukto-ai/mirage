@@ -39,6 +39,7 @@ import { copy as gridfsCopy } from '../../core/gridfs/copy.ts'
 import { truncate as gridfsTruncate } from '../../core/gridfs/truncate.ts'
 import { SCOPE_ERROR } from '../../core/gridfs/constants.ts'
 import { tree as gridfsTree } from '../../core/gridfs/readdir.ts'
+import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 export interface GridFSVFSState {
   type: string
@@ -161,6 +162,19 @@ export class GridFSVFS extends BaseVFS {
 
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
+  }
+
+  override storageLocation(): string {
+    // The hosts, the database, the bucket and the key prefix pin the files
+    // two mounts would share. The URI's credentials are left out: they name
+    // a login, not a store.
+    const cfg = this.config
+    const scheme = cfg.uri.indexOf('://')
+    const rest = scheme === -1 ? cfg.uri : cfg.uri.slice(scheme + 3)
+    const hosts = (rest.slice(rest.lastIndexOf('@') + 1).split('/')[0] ?? '').split('?')[0] ?? ''
+    const prefix = stripSlash(cfg.keyPrefix ?? '')
+    const base = `${this.name}:${hosts}/${cfg.database}/${cfg.bucket ?? 'fs'}`
+    return prefix === '' ? base : `${base}/${prefix}`
   }
 
   override getState(): Promise<GridFSVFSState> {

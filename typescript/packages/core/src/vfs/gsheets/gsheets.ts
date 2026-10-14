@@ -58,8 +58,8 @@ export class GSheetsVFS extends BaseVFS {
   override readonly renderers: Readonly<Record<string, string>> = { '.gsheet.json': 'readSheet' }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
@@ -70,7 +70,7 @@ export class GSheetsVFS extends BaseVFS {
       MIME,
       SHEETS_WORDS,
       text,
-      under,
+      [path],
       index,
     )
   }

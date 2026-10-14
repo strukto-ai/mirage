@@ -98,12 +98,12 @@ export class ChromaVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
-    return filesContaining(this.accessor, text, under, opts.ignoreCase, index)
+    return filesContaining(this.accessor, text, [path], opts.ignoreCase, index)
   }
 
   override search(

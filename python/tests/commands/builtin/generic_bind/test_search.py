@@ -79,11 +79,11 @@ class SearchRAM(RAMVFS):
         return super().read_stream(path, index)
 
     async def files_containing(
-        self, text, under, *, whole_word, ignore_case, index=NULL_INDEX
+        self, path, text, *, whole_word, ignore_case, index=NULL_INDEX
     ):
         self.asked.append((text, whole_word))
         return [
-            mounted_path(under[0], key.upper() if self.upper else key)
+            mounted_path(path, key.upper() if self.upper else key)
             for key, data in self._store.files.items()
             if _holds(data, text, ignore_case) and not key.endswith(".bin")
         ]
@@ -113,7 +113,9 @@ class SearchRAM(RAMVFS):
         finally:
             self.open -= 1
 
-    async def before_full_scan(self, command, under, reason, index=NULL_INDEX):
+    async def before_full_scan(
+        self, path, command, reason, *, files=None, index=NULL_INDEX
+    ):
         self.scans.append(reason)
         if self.refuse is not None:
             raise self.refuse(f"{reason}; narrow the path")
@@ -130,6 +132,7 @@ def _run(
     line: str,
     hide: tuple[str, ...] = (),
     pins: dict[str, str] | None = None,
+    deny: tuple[str, ...] = (),
 ) -> tuple[bytes, bytes, int]:
     async def run() -> tuple[bytes, bytes, int]:
         vfs._store.dirs.update({"/d", "/d/sub"})
@@ -138,9 +141,16 @@ def _run(
         ws.mount("/").revisions = pins or {}
         try:
             session = None
-            if hide:
+            if hide or deny:
                 session = "agent"
-                ws.create_session(session, profile={"paths": {"hide": hide}})
+                rules = [{"reason": "sealed", "paths": list(deny)}]
+                ws.create_session(
+                    session,
+                    profile={
+                        "paths": {"hide": list(hide)},
+                        "commands": {"deny": rules if deny else []},
+                    },
+                )
             result = await ws.shell(line, session_id=session)
             return result.stdout, result.stderr or b"", result.exit_code
         finally:
@@ -369,11 +379,27 @@ def test_a_cached_file_is_always_read():
     assert reads == ["d/a.txt", "d/sub/d.txt"]
 
 
-def test_a_hidden_path_is_walked_without_the_search():
+def test_a_hidden_path_keeps_the_search_and_loses_its_hits():
+    # The dispatcher drops the hidden d.txt from the answer, so the
+    # search still narrows and the hidden file is never read.
     vfs, hide = SearchRAM(), ("/d/sub",)
     line = "grep -r ada /d"
     assert _run(vfs, line, hide) == _run(RAMVFS(), line, hide)
-    assert (vfs.asked, vfs.scans) == ([], [ScanReason.NO_SEARCH])
+    assert (vfs.asked, vfs.scans) == ([("ada", False)], [])
+    assert "d/sub/d.txt" not in vfs.reads
+
+
+@pytest.mark.parametrize(
+    "line", ["grep -r ada /d", "grep -rn ada /d", "grep -rl ada /d"]
+)
+def test_a_path_rule_below_the_walk_keeps_greps_answer(line):
+    # The dispatcher asks no search below the rule and judges each line
+    # search as a read of its file, so a sealed file is reported as the
+    # plain walk reports it.
+    deny = ("/d/sub/*",)
+    assert _run(SearchRAM(), line, deny=deny) == _run(
+        RAMVFS(), line, deny=deny
+    )
 
 
 @pytest.mark.parametrize(

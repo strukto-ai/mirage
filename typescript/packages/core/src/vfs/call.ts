@@ -27,6 +27,9 @@ const DISPATCH_NAMES: ReadonlyMap<string, string> = new Map([
   ['lastLines', 'last_lines'],
   ['lineCount', 'line_count'],
   ['readTree', 'read_tree'],
+  ['filesContaining', 'files_containing'],
+  ['linesContaining', 'lines_containing'],
+  ['beforeFullScan', 'before_full_scan'],
 ])
 const METHOD_NAMES: ReadonlyMap<string, string> = new Map(
   [...DISPATCH_NAMES].map(([method, name]) => [name, method]),

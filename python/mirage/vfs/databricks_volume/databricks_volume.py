@@ -128,5 +128,14 @@ class DatabricksVolumeVFS(BaseVFS):
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
         await _copy(self.accessor, src, dst)
 
+    def storage_location(self) -> str:
+        # The workspace and the volume path pin the files two mounts would
+        # share; a profile names its workspace where no host is given.
+        cfg = self.config
+        workspace = cfg.host or f"profile:{cfg.profile or ''}"
+        root = cfg.root_path.rstrip("/")
+        volume = f"/Volumes/{cfg.catalog}/{cfg.schema_name}/{cfg.volume}"
+        return f"{self.name}:{workspace}:{volume}{root}"
+
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config, needs_override=True)

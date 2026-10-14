@@ -25,7 +25,7 @@ async def _search(accessor, query: str, path: str, top_k: int = 1) -> str:
         threshold=0.0,
         mount_prefix="/db",
     )
-    return out.decode()
+    return "\n".join(out)
 
 
 @pytest.mark.asyncio

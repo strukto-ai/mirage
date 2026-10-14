@@ -71,8 +71,8 @@ class EmailVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -80,7 +80,7 @@ class EmailVFS(BaseVFS):
     ) -> list[PathSpec] | None:
         if not self.config.content_search:
             return None
-        return await _files_containing(self.accessor, text, under, whole_word)
+        return await _files_containing(self.accessor, text, [path], whole_word)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

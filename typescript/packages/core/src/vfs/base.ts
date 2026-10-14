@@ -548,9 +548,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * Search the resource under `path`; null declines, [] is none. Results
-   * are the text records the `search` command prints, one per line. Errors
-   * and incomplete results reject, never answered as a miss.
+   * Search the resource under `path`; null declines, [] is none. One record
+   * per hit, which the `search` command prints in turn: a header line naming
+   * the hit's path (`path:score` where the store ranks), then the hit's text.
+   * The dispatcher drops each record whose path the session hides. Errors and
+   * incomplete results reject, never answered as a miss.
    */
   @vfsCall({ effect: Effect.READ, subtree: true })
   search(path: PathSpec, _query: SearchQuery, _index?: IndexCacheStore): Promise<string[] | null> {
@@ -567,21 +569,22 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * Files under `under` whose content may contain `text`. grep and rg still
+   * Files under `path` whose content may contain `text`. grep and rg still
    * walk, filter, order and label every file, and read only the ones answered
    * here, matched on `vfsPath` without case, so an extra file costs a read and
    * a missing one is a wrong answer. A search that holds only keys names each one with
-   * `mountedPath(under[0], '/' + key)`. Resolve null when the answer may be
+   * `mountedPath(path, '/' + key)`. Resolve null when the answer may be
    * incomplete (an error, a truncated result, an index that lags writes), and
    * every file is read; reject to refuse the command, and the error's message
-   * is what it prints.
+   * is what it prints. The dispatcher drops every file the session hides
+   * from the answer.
    *
+   * @param path a directory walked: one of grep's directory operands under -r
+   *   or -R, or of rg's operands or the cwd; asked once per directory.
    * @param text plain text every match holds, never a pattern: the pattern
    *   or each -e of grep and rg, or for a regex a fixed piece of at least
    *   three characters every match contains. Asked once per text; a file any
    *   answer holds is read.
-   * @param under the directories walked: grep's directory operands under -r
-   *   or -R, rg's directory operands or the cwd.
    * @param opts `wholeWord` is true under -w or -x with a plain-text
    *   pattern, where `text` is a whole word of every match, and false
    *   otherwise, where it may sit inside a word. `ignoreCase` is true under
@@ -589,9 +592,10 @@ export class BaseVFS<A extends Accessor = Accessor> {
    *   is fine.
    * @param index the mount's index.
    */
+  @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
   filesContaining(
+    _path: PathSpec,
     _text: string,
-    _under: PathSpec[],
     _opts: { wholeWord: boolean; ignoreCase: boolean },
     _index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
@@ -616,6 +620,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    *   lowercase pattern.
    * @param index the mount's index.
    */
+  @vfsCall({ effect: Effect.READ, target: Target.FILE })
   linesContaining(
     _path: PathSpec,
     _text: string,
@@ -626,28 +631,32 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * Called before grep or rg reads a file no search answered, once per command:
-   * before the walk when neither search can be asked, else at the first file
-   * `linesContaining` declines after `filesContaining` did not narrow, and a
-   * refusal then stands for every such file. Resolve to let the scan run;
-   * reject to refuse it, and the error's message is what the command prints
-   * (a filesystem error rejected at a file is that file's read error).
+   * Called before grep or rg reads a file no search answered, once per command
+   * and directory: before the walk when neither search can be asked, else at
+   * the first file `linesContaining` declines after `filesContaining` did not
+   * narrow, and a refusal then stands for every such file. Resolve to let the
+   * scan run; reject to refuse it, and the error's message is what the command
+   * prints (a filesystem error rejected at a file is that file's read error).
    *
+   * @param path a directory about to be walked, as `filesContaining` gets it.
    * @param command grep or rg.
-   * @param under the directories about to be walked, as `filesContaining`
-   *   gets them.
    * @param reason why the search cannot stand in: NO_SEARCH (no search on
    *   this mount or this path), NO_TEXT (-f, or no plain text every match
    *   holds), EVERY_LINE (-v, rg --passthru), EVERY_FILE (rg
    *   --files-without-match, rg -c with --include-zero, without -q), LINKS
    *   (rg -L), BINARY (grep -a, rg --binary: a binary file is read) or
    *   UNANSWERED (a search resolved null).
+   * @param files how many files the session sees under `path`, from the
+   *   mount's `readTree` with every hidden file dropped; null when `readTree`
+   *   cannot answer, and the guard counts them itself.
    * @param index the mount's index.
    */
+  @vfsCall({ effect: Effect.READ, target: Target.DIR })
   beforeFullScan(
+    _path: PathSpec,
     _command: string,
-    _under: PathSpec[],
     _reason: ScanReason,
+    _files: number | null,
     _index?: IndexCacheStore,
   ): Promise<void> {
     return Promise.resolve()

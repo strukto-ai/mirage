@@ -245,11 +245,11 @@ export function commandIo(vfs: BaseVFS): CommandIO {
       ? {
           filesContaining: withoutAccessor(
             (
+              path: PathSpec,
               text: string,
-              under: PathSpec[],
               opts: { wholeWord: boolean; ignoreCase: boolean },
               index?: IndexCacheStore,
-            ) => vfs.filesContaining(text, under, opts, index),
+            ) => vfs.filesContaining(path, text, opts, index),
           ),
           searchable: vfs.searchable,
         }
@@ -269,8 +269,13 @@ export function commandIo(vfs: BaseVFS): CommandIO {
     ...(has('beforeFullScan')
       ? {
           beforeFullScan: withoutAccessor(
-            (command: string, under: PathSpec[], reason: ScanReason, index?: IndexCacheStore) =>
-              vfs.beforeFullScan(command, under, reason, index),
+            (
+              path: PathSpec,
+              command: string,
+              reason: ScanReason,
+              files: number | null,
+              index?: IndexCacheStore,
+            ) => vfs.beforeFullScan(path, command, reason, files, index),
           ),
         }
       : {}),
@@ -460,13 +465,41 @@ const DISPATCHED_SLOTS = {
       (await dispatchedCall(dispatch, 'read_tree', path, [], {
         nofollow: true,
       })) as Map<string, FileStat> | null,
+  filesContaining:
+    (dispatch: DispatchFn): CommandIO['filesContaining'] =>
+    async (_accessor, path, text, opts) =>
+      (await dispatchedCall(dispatch, 'files_containing', path, [text], {
+        whole_word: opts.wholeWord,
+        ignore_case: opts.ignoreCase,
+      })) as PathSpec[] | null,
+  linesContaining:
+    (dispatch: DispatchFn): CommandIO['linesContaining'] =>
+    async (_accessor, path, text, opts) =>
+      (await dispatchedCall(dispatch, 'lines_containing', path, [text], {
+        ignore_case: opts.ignoreCase,
+      })) as ByteSource | null,
+  beforeFullScan:
+    (dispatch: DispatchFn): CommandIO['beforeFullScan'] =>
+    async (_accessor, path, command, reason) => {
+      await dispatchedCall(dispatch, 'before_full_scan', path, [command, reason])
+    },
 } satisfies Partial<Record<keyof CommandIO, (dispatch: DispatchFn) => unknown>>
 
 // The slots that change the mount: with no dispatcher there is nowhere to
 // judge and settle them.
 const DISPATCHED_WRITES: ReadonlySet<string> = new Set(
   (Object.keys(DISPATCHED_SLOTS) as (keyof typeof DISPATCHED_SLOTS)[]).filter(
-    (slot) => !['firstLines', 'lastLines', 'lineCount', 'follow', 'readTree'].includes(slot),
+    (slot) =>
+      ![
+        'firstLines',
+        'lastLines',
+        'lineCount',
+        'follow',
+        'readTree',
+        'filesContaining',
+        'linesContaining',
+        'beforeFullScan',
+      ].includes(slot),
   ),
 )
 

@@ -31,6 +31,19 @@ export function textOption(query: SearchQuery, key: string, fallback: string): s
   return value
 }
 
+/**
+ * The path a search record names: its first line, without the `:score` a
+ * ranked store appends. Mirrors Python's `record_path`.
+ */
+export function recordPath(record: string): string {
+  const newline = record.indexOf('\n')
+  const head = newline === -1 ? record : record.slice(0, newline)
+  const colon = head.lastIndexOf(':')
+  if (colon === -1) return head
+  const score = head.slice(colon + 1)
+  return score.trim() !== '' && Number.isFinite(Number(score)) ? head.slice(0, colon) : head
+}
+
 /** Batch when supported; single-scope callbacks otherwise concatenate records. */
 export async function searchResources<A extends Accessor>(
   capability: SearchOps<A> | undefined,

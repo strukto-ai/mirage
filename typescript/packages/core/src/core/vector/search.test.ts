@@ -20,7 +20,6 @@ import { makeSearch, searchRowsOutput } from './search.ts'
 import type { Row, VectorTree } from './types.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder()
 
 const ROWS: Row[] = [
   { id: '1', label: 'cat', _score: 0.9, _distance: 0.9 },
@@ -59,9 +58,7 @@ function ps(path: string): PathSpec {
 
 async function headers(t: VectorTree<Accessor>, path: string, topK = 10, threshold = 0) {
   const out = await searchRowsOutput(t, new Accessor(), 'q', [ps(path)], topK, threshold, '/db')
-  return DEC.decode(out)
-    .split('\n')
-    .filter((line) => line.includes(':'))
+  return out.map((record) => record.split('\n')[0])
 }
 
 describe('vector search', () => {
@@ -75,7 +72,7 @@ describe('vector search', () => {
       0,
       '/db',
     )
-    expect(DEC.decode(out)).toBe('/db/animals/cat/1.txt:0.9000\ncat\n')
+    expect(out).toEqual(['/db/animals/cat/1.txt:0.9000\ncat'])
   })
 
   it('leaves a pinned table out of the path', async () => {
@@ -103,7 +100,7 @@ describe('vector search', () => {
     const ops = makeSearch(tree())
     await expect(
       ops.search(new Accessor(), ps('/db/animals'), { query: 'q', options: { top_k: 1 } }),
-    ).resolves.toEqual(['/db/animals/cat/1.txt:0.9000', 'cat'])
+    ).resolves.toEqual(['/db/animals/cat/1.txt:0.9000\ncat'])
   })
 
   it.each([

@@ -90,12 +90,12 @@ export class QdrantVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     _opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
-    return filesContaining(readdir, this.accessor, text, under, index)
+    return filesContaining(readdir, this.accessor, text, [path], index)
   }
 
   override search(

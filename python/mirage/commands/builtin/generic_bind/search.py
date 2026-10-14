@@ -53,7 +53,6 @@ from mirage.utils.encoding import bom_of
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import glob_prefix_match
 from mirage.vfs.types import ScanReason
-from mirage.view.namespace_view import paths_scoped
 
 logger = logging.getLogger(__name__)
 
@@ -325,10 +324,12 @@ async def search_reads(
     An operand named on the line is never ruled out by a search asked
     about directories, nor is a path pinned to a revision, since a
     search sees the current content, nor a file the read cache holds,
-    which a read serves as it was cached. Neither is asked when a hide, a
-    path rule or a pre_vfs policy judges a path, since a search sees the
-    raw tree. When neither can stand in for a walk, ``before_full_scan``
-    may refuse it.
+    which a read serves as it was cached. Both are asked through the
+    dispatcher, which drops what the session hides from a
+    ``files_containing`` answer, judges ``lines_containing`` as a read of
+    its file, and answers None where a path rule or a pre_vfs policy
+    reaches below a directory, so every file is read and judged. When
+    neither can stand in for a walk, ``before_full_scan`` may refuse it.
 
     Args:
         io (CommandIO): the backend table.
@@ -342,8 +343,6 @@ async def search_reads(
     read_bytes = bound_op(io.read_bytes, accessor, index)
     read_stream = bound_op(io.read_stream, accessor, index)
     files, lines = io.files_containing, io.lines_containing
-    if paths_scoped(opts.ns, paths, opts.mount_prefix):
-        files = lines = None
     if not paths or (
         files is None and lines is None and io.before_full_scan is None
     ):
@@ -372,12 +371,13 @@ async def search_reads(
             *(
                 files(
                     accessor,
+                    scope,
                     text,
-                    dirs,
                     whole_word=terms.whole_word,
                     ignore_case=terms.ignore_case,
                     index=index,
                 )
+                for scope in dirs
                 for text in terms.texts
             )
         )
@@ -490,5 +490,8 @@ async def _full_scan(
         reason (ScanReason): why the search cannot stand in.
         index (IndexCacheStore): the mount's index.
     """
-    if dirs and io.before_full_scan is not None:
-        await io.before_full_scan(accessor, name, dirs, reason, index)
+    if io.before_full_scan is not None:
+        for scope in dirs:
+            await io.before_full_scan(
+                accessor, scope, name, reason, index=index
+            )

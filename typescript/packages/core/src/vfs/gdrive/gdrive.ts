@@ -124,13 +124,13 @@ export class GDriveVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
-    return gdriveFilesContaining(this.accessor, text, under, index)
+    return gdriveFilesContaining(this.accessor, text, [path], index)
   }
 
   override deltaHook(): DeltaHook {

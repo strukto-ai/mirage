@@ -12,10 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
-import { hasUnresolvedGlob } from './utils/paths.ts'
-import { isStdin } from './utils/stream.ts'
 import { UNICODE_FOLDED, foldsByUnicode, requiredNeedles } from './grep_prefilter.ts'
 
 // Classify a grep pattern for API push-down decisions.
@@ -87,15 +84,4 @@ export function searchTerms(
   const needles = requiredNeedles(matcher)
   if (needles === null || needles.some((n) => n.length < MIN_SEARCH_LITERAL)) return null
   return [needles, false]
-}
-
-// The one operand a search push-down may answer for, or null. A push-down
-// asks the backend a single whole-container question and prints its entire
-// answer, so it can only stand in for a line naming exactly one operand; given
-// two it answers for the first and drops the rest in silence. A glob operand
-// defers since an unexpanded pattern segment would be read as a literal name,
-// and a `-` operand since it is the line's stdin, which no backend holds.
-export function loneOperand(paths: PathSpec[]): PathSpec | null {
-  if (paths.length !== 1 || hasUnresolvedGlob(paths) || paths.some((p) => isStdin(p))) return null
-  return paths[0] ?? null
 }

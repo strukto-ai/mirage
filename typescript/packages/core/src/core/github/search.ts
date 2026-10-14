@@ -134,15 +134,18 @@ export async function filesContaining(
  * Each file is one blob request, so a scope that large is refused rather
  * than read. The remedy names `-w` when no search answered or the pattern
  * held no plain text on the default branch, the only one code search
- * indexes: there a whole word lets it narrow the scope.
+ * indexes: there a whole word lets it narrow the scope. `files` is the files
+ * the session sees under `path`, counted by the dispatcher; null counts the
+ * tree.
  */
 export async function beforeFullScan(
   accessor: GitHubAccessor,
-  under: readonly PathSpec[],
+  path: PathSpec,
   reason: ScanReason,
+  files: number | null,
   index?: IndexCacheStore,
 ): Promise<void> {
-  const count = await scopeFiles(accessor, under, index)
+  const count = files ?? (await scopeFiles(accessor, [path], index))
   if (count <= SCOPE_ERROR) return
   if (
     (reason === ScanReason.UNANSWERED || reason === ScanReason.NO_TEXT) &&

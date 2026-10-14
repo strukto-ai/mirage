@@ -49,3 +49,14 @@ def test_nextcloud_vfs_registers_commands():
     assert "find" in command_names
     assert "mkdir" in command_names
     assert "rm" in command_names
+
+
+def test_one_user_on_one_server_is_one_store():
+    def location(username: str) -> str | None:
+        config = NextcloudConfig(
+            url="https://cloud.example.com/", username=username
+        )
+        return NextcloudVFS(config).storage_location()
+
+    assert location("ada") == location("ada")
+    assert location("ada") != location("bob")

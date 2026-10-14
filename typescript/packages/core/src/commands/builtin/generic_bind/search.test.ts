@@ -80,13 +80,11 @@ class SearchRAM extends RAMVFS {
   }
 
   override filesContaining(
+    scope: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[]> {
     this.asked.push([text, opts.wholeWord])
-    const [scope] = under
-    if (scope === undefined) return Promise.resolve([])
     const found = [...this.store.files]
       .filter(
         ([key, data]) => holds(DEC.decode(data), text, opts.ignoreCase) && !key.endsWith('.bin'),
@@ -122,7 +120,7 @@ class SearchRAM extends RAMVFS {
     }
   }
 
-  override beforeFullScan(_command: string, _under: PathSpec[], reason: ScanReason): Promise<void> {
+  override beforeFullScan(_path: PathSpec, _command: string, reason: ScanReason): Promise<void> {
     this.scans.push(reason)
     const refuse = this.mount.refuse
     return refuse === undefined
@@ -136,16 +134,21 @@ async function run(
   line: string,
   hide?: string[],
   pins: Record<string, string> = {},
+  deny?: string[],
 ): Promise<[string, string, number]> {
   for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
   for (const [key, data] of Object.entries(TREE)) vfs.store.files.set(key, ENC.encode(data))
   const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
   for (const [path, rev] of Object.entries(pins)) ws.mount('/').revisions.set(path, rev)
+  const scoped = hide !== undefined || deny !== undefined
   try {
-    if (hide !== undefined) {
-      ws.createSession('agent', { profile: parseSessionProfile({ paths: { hide } }) })
+    if (scoped) {
+      const rules = deny === undefined ? [] : [{ reason: 'sealed', paths: deny }]
+      ws.createSession('agent', {
+        profile: parseSessionProfile({ paths: { hide: hide ?? [] }, commands: { deny: rules } }),
+      })
     }
-    const out = await ws.shell(line, hide === undefined ? {} : { sessionId: 'agent' })
+    const out = await ws.shell(line, scoped ? { sessionId: 'agent' } : {})
     return [DEC.decode(out.stdout), DEC.decode(out.stderr), out.exitCode]
   } finally {
     await ws.close()
@@ -335,12 +338,29 @@ it('always reads a cached file', async () => {
 })
 
 // Twin of test_a_hidden_path_is_walked_without_the_search.
-it('walks a hidden path without the search', async () => {
+// Twin of test_a_hidden_path_keeps_the_search_and_loses_its_hits: the
+// dispatcher drops the hidden d.txt from the answer, so the search still
+// narrows and the hidden file is never read.
+it('keeps the search under a hide and loses its hits', async () => {
   const vfs = new SearchRAM()
   const line = 'grep -r ada /d'
   expect(await run(vfs, line, ['/d/sub'])).toEqual(await run(new RAMVFS(), line, ['/d/sub']))
-  expect([vfs.asked, vfs.scans]).toEqual([[], [ScanReason.NO_SEARCH]])
+  expect([vfs.asked, vfs.scans]).toEqual([[['ada', false]], []])
+  expect(vfs.reads).not.toContain('d/sub/d.txt')
 })
+
+// Twin of test_a_path_rule_below_the_walk_keeps_greps_answer: the dispatcher
+// asks no search below the rule and judges each line search as a read of its
+// file, so a sealed file is reported as the plain walk reports it.
+it.each(['grep -r ada /d', 'grep -rn ada /d', 'grep -rl ada /d'])(
+  "keeps grep's answer under a path rule below the walk: %s",
+  async (line) => {
+    const deny = ['/d/sub/*']
+    expect(await run(new SearchRAM(), line, undefined, {}, deny)).toEqual(
+      await run(new RAMVFS(), line, undefined, {}, deny),
+    )
+  },
+)
 
 // Twin of test_a_streamed_answer_is_pulled_as_far_as_needed.
 it.each([

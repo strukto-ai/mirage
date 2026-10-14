@@ -82,13 +82,16 @@ class Shelf extends BaseVFS {
 // in one language fails the other language's test.
 const BUILT_INS = {
   append: [Effect.WRITE, Target.FILE, true, false],
+  before_full_scan: [Effect.READ, Target.DIR, false, false],
   copy: [Effect.COPY, Target.FILE, false, false],
   create: [Effect.WRITE, Target.FILE, true, false],
   dir_copy: [Effect.COPY, Target.DIR, false, true],
+  files_containing: [Effect.READ, Target.DIR, false, true],
   first_lines: [Effect.READ, Target.FILE, false, false],
   follow: [Effect.READ, Target.FILE, false, false],
   last_lines: [Effect.READ, Target.FILE, false, false],
   line_count: [Effect.READ, Target.FILE, false, false],
+  lines_containing: [Effect.READ, Target.FILE, false, false],
   mkdir: [Effect.CREATE, Target.DIR, false, false],
   pwrite: [Effect.WRITE, Target.FILE, true, false],
   read: [Effect.READ, Target.FILE, false, false],

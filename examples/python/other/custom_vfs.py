@@ -131,8 +131,8 @@ class PagesVFS(BaseVFS):
     # mounted_path names a page key at the prefix the walk runs under.
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -140,7 +140,7 @@ class PagesVFS(BaseVFS):
     ) -> list[PathSpec]:
         fold = str.lower if ignore_case else str
         return [
-            mounted_path(under[0], "/" + key)
+            mounted_path(path, "/" + key)
             for key, page in _pages(self.accessor.pages)
             if fold(text) in fold(page)
         ]

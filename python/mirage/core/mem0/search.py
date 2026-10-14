@@ -50,7 +50,7 @@ async def search_memories_rendered(
     top_k: int,
     threshold: float,
     memory_ids: set[str] | None = None,
-) -> bytes:
+) -> list[str]:
     """Run a semantic search in the scope and render ranked results.
 
     Args:
@@ -78,9 +78,7 @@ async def search_memories_rendered(
         score = format_score(r.get("score"))
         header = path if score is None else f"{path}:{score}"
         lines.append(f"{header}\n{r.get('memory', '')}")
-    if not lines:
-        return b""
-    return ("\n".join(lines) + "\n").encode()
+    return lines
 
 
 async def search_many(
@@ -112,7 +110,7 @@ async def search_many(
             raise enoent(path.virtual)
         if ids is not None:
             ids.add(match.slots["memory_id"])
-    output = await search_memories_rendered(
+    return await search_memories_rendered(
         accessor,
         query.query,
         mount_prefix=prefix,
@@ -120,7 +118,6 @@ async def search_many(
         threshold=threshold,
         memory_ids=ids,
     )
-    return output.decode().removesuffix("\n").split("\n") if output else []
 
 
 async def search_resource(

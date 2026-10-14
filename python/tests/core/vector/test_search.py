@@ -38,7 +38,7 @@ async def _headers(
         threshold=threshold,
         mount_prefix="/db",
     )
-    return [line for line in out.decode().splitlines() if ":" in line]
+    return [record.split("\n")[0] for record in out]
 
 
 @pytest.mark.asyncio
@@ -52,7 +52,7 @@ async def test_a_hit_is_spelled_under_its_table_with_its_rank(tree, accessor):
         threshold=0.0,
         mount_prefix="/db",
     )
-    assert out == b"/db/animals/cat/1.txt:0.9000\ncat\n"
+    assert out == ["/db/animals/cat/1.txt:0.9000\ncat"]
 
 
 @pytest.mark.asyncio
@@ -110,8 +110,7 @@ async def test_one_scope_searches_as_a_batch_of_one(tree, accessor):
     ops = make_search(tree)
     query = SearchQuery("q", options={"top_k": 1})
     assert await ops.search(accessor, _ps("/db/animals"), query) == [
-        "/db/animals/cat/1.txt:0.9000",
-        "cat",
+        "/db/animals/cat/1.txt:0.9000\ncat"
     ]
 
 

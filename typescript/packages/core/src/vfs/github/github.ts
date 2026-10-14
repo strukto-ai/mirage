@@ -153,22 +153,23 @@ export class GitHubVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord) return Promise.resolve(null)
-    return githubFilesContaining(this.accessor, text, under, index)
+    return githubFilesContaining(this.accessor, text, [path], index)
   }
 
   override beforeFullScan(
+    path: PathSpec,
     _command: string,
-    under: PathSpec[],
     reason: ScanReason,
+    files: number | null,
     index?: IndexCacheStore,
   ): Promise<void> {
-    return githubBeforeFullScan(this.accessor, under, reason, index)
+    return githubBeforeFullScan(this.accessor, path, reason, files, index)
   }
 
   override deltaHook(): DeltaHook {

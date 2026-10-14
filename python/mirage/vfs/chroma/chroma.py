@@ -70,15 +70,15 @@ class ChromaVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         return await _files_containing(
-            self.accessor, text, under, ignore_case, index
+            self.accessor, text, [path], ignore_case, index
         )
 
     async def search_many(

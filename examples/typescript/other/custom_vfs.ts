@@ -142,18 +142,16 @@ class PagesVFS extends BaseVFS<WikiAccessor> {
   // those. What they print is unchanged; null reads every page.
   // mountedPath names a page key at the prefix the walk runs under.
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    const [scope] = under;
-    if (scope === undefined) return Promise.resolve(null);
     const fold = (value: string) =>
       opts.ignoreCase ? value.toLowerCase() : value;
     return Promise.resolve(
       pageEntries(this.accessor.pages)
         .filter(([, page]) => fold(page).includes(fold(text)))
-        .map(([key]) => mountedPath(scope, `/${key}`)),
+        .map(([key]) => mountedPath(path, `/${key}`)),
     );
   }
 }

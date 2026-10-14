@@ -245,8 +245,9 @@ async def files_containing(
 async def before_full_scan(
     accessor: GitHubAccessor,
     index: IndexCacheStore,
-    under: list[PathSpec],
+    path: PathSpec,
     reason: ScanReason,
+    files: int | None,
 ) -> None:
     """Refuse a scan of more than ``SCOPE_ERROR`` files.
 
@@ -258,13 +259,19 @@ async def before_full_scan(
     Args:
         accessor (GitHubAccessor): backend handle.
         index (IndexCacheStore): the mount's index.
-        under (list[PathSpec]): the directories about to be walked.
+        path (PathSpec): the directory about to be walked.
         reason (ScanReason): why no search answered.
+        files (int | None): the files the session sees under ``path``,
+            counted by the dispatcher; None counts the tree.
 
     Raises:
         ValueError: the scope holds more than ``SCOPE_ERROR`` files.
     """
-    count = await _scope_files(accessor, index, under)
+    count = (
+        files
+        if files is not None
+        else await _scope_files(accessor, index, [path])
+    )
     if count <= SCOPE_ERROR:
         return
     if reason in (

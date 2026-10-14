@@ -124,14 +124,14 @@ export class OneDriveVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
     const config = this.accessor.config
-    const scopes = under.map((d) => [d, driveLoc(config, d.vfsPath)] as const)
+    const scopes = [path].map((d) => [d, driveLoc(config, d.vfsPath)] as const)
     return filesContaining(config, readdir, this.accessor, scopes, text, index)
   }
 

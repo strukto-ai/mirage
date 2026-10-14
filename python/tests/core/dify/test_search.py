@@ -121,10 +121,10 @@ async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
         threshold=0.4,
     )
 
-    assert result == (
-        b"/knowledge/guides/api:0.92\napi segment\n"
-        b"/knowledge/guides/auth:0.81\nauth segment\n"
-    )
+    assert result == [
+        "/knowledge/guides/api:0.92\napi segment",
+        "/knowledge/guides/auth:0.81\nauth segment",
+    ]
     retrieval = bodies[0]["retrieval_model"]
     assert retrieval["search_method"] == "hybrid_search"
     assert retrieval["top_k"] == 2
@@ -179,7 +179,7 @@ async def test_search_segments_unions_slug_and_name_based_paths(monkeypatch):
         RAMIndexCacheStore(),
     )
 
-    assert result == b""
+    assert result == []
     assert bodies[0]["retrieval_model"]["metadata_filtering_conditions"] == {
         "logical_operator": "or",
         "conditions": [
@@ -267,14 +267,14 @@ async def test_search_segments_empty_paths_searches_whole_dataset(monkeypatch):
         mount_prefix="/knowledge/",
     )
 
-    assert result == b"/knowledge/README.md:0.77\ndataset match\n"
+    assert result == ["/knowledge/README.md:0.77\ndataset match"]
     assert "metadata_filtering_conditions" not in bodies[0]["retrieval_model"]
 
 
-def test_records_to_bytes_formats_absolute_paths_and_scores():
-    from mirage.core.dify.search import records_to_bytes
+def test_render_records_formats_absolute_paths_and_scores():
+    from mirage.core.dify.search import render_records
 
-    result = records_to_bytes(
+    result = render_records(
         [
             {
                 "segment": {
@@ -302,10 +302,10 @@ def test_records_to_bytes_formats_absolute_paths_and_scores():
         "/knowledge/",
     )
 
-    assert result == (
-        b"/knowledge/guides/api:0.92\napi segment\n"
-        b"/knowledge/README.md\nauth segment\n"
-    )
+    assert result == [
+        "/knowledge/guides/api:0.92\napi segment",
+        "/knowledge/README.md\nauth segment",
+    ]
 
 
 @pytest.mark.parametrize("value", [None, {}, ["invalid"]])
@@ -316,10 +316,10 @@ def test_response_records_rejects_malformed_payload(value):
         response_records(value)
 
 
-def test_records_to_bytes_keeps_multiple_chunks_for_same_document():
-    from mirage.core.dify.search import records_to_bytes
+def test_render_records_keeps_multiple_chunks_for_same_document():
+    from mirage.core.dify.search import render_records
 
-    result = records_to_bytes(
+    result = render_records(
         [
             {
                 "segment": {
@@ -350,16 +350,16 @@ def test_records_to_bytes_keeps_multiple_chunks_for_same_document():
         "/knowledge/",
     )
 
-    assert result == (
-        b"/knowledge/policies/refunds:0.82\nfirst chunk\n"
-        b"/knowledge/policies/refunds:0.79\nsecond chunk\n"
-    )
+    assert result == [
+        "/knowledge/policies/refunds:0.82\nfirst chunk",
+        "/knowledge/policies/refunds:0.79\nsecond chunk",
+    ]
 
 
-def test_records_to_bytes_skips_records_with_invalid_slug():
-    from mirage.core.dify.search import records_to_bytes
+def test_render_records_skips_records_with_invalid_slug():
+    from mirage.core.dify.search import render_records
 
-    result = records_to_bytes(
+    result = render_records(
         [
             {
                 "segment": {
@@ -388,13 +388,13 @@ def test_records_to_bytes_skips_records_with_invalid_slug():
         "/knowledge/",
     )
 
-    assert result == b"/knowledge/policies/refunds:0.79\ngood chunk\n"
+    assert result == ["/knowledge/policies/refunds:0.79\ngood chunk"]
 
 
-def test_records_to_bytes_omits_score_for_non_numeric_values():
-    from mirage.core.dify.search import records_to_bytes
+def test_render_records_omits_score_for_non_numeric_values():
+    from mirage.core.dify.search import render_records
 
-    result = records_to_bytes(
+    result = render_records(
         [
             {
                 "segment": {
@@ -413,7 +413,7 @@ def test_records_to_bytes_omits_score_for_non_numeric_values():
         "/knowledge/",
     )
 
-    assert result == b"/knowledge/policies/refunds\nchunk\n"
+    assert result == ["/knowledge/policies/refunds\nchunk"]
 
 
 @pytest.mark.asyncio

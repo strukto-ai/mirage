@@ -67,8 +67,8 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
@@ -78,6 +78,6 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
       !(this.accessor.transport.searchAvailable?.() ?? true)
     )
       return Promise.resolve(null)
-    return slackFilesContaining(this.accessor, text, under, index)
+    return slackFilesContaining(this.accessor, text, [path], index)
   }
 }

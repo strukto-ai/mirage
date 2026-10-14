@@ -45,12 +45,12 @@ export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     _index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
-    return filesContaining(this.accessor, text, under, opts.wholeWord, opts.ignoreCase)
+    return filesContaining(this.accessor, text, [path], opts.wholeWord, opts.ignoreCase)
   }
 
   override search(

@@ -96,14 +96,16 @@ class SSHVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
-        return await _files_containing(self.accessor, text, under, ignore_case)
+        return await _files_containing(
+            self.accessor, text, [path], ignore_case
+        )
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)
@@ -175,6 +177,13 @@ class SSHVFS(BaseVFS):
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
+
+    def storage_location(self) -> str:
+        # The host, its port and the root pin the files two mounts would
+        # share; the user does not, since two logins see one disk.
+        cfg = self.config
+        root = cfg.root.rstrip("/")
+        return f"{self.name}:{cfg.hostname or cfg.host}:{cfg.port or 22}{root}"
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

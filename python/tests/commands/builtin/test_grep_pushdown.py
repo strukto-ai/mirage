@@ -4,7 +4,6 @@ import pytest
 
 from mirage.commands.builtin import grep_pushdown
 from mirage.commands.builtin.constants import PatternType
-from mirage.types import PathSpec
 
 
 def test_classify_pattern_newline_list_is_regex():
@@ -35,41 +34,6 @@ def test_classify_pattern_newline_list_is_regex():
 )
 def test_is_literal_pattern(pattern, fixed, expected):
     assert grep_pushdown.is_literal_pattern(pattern, fixed) is expected
-
-
-def _operand(virtual: str, pattern: str | None = None) -> PathSpec:
-    return PathSpec(
-        virtual=virtual,
-        directory=virtual.rsplit("/", 1)[0] or "/",
-        vfs_path=virtual.strip("/"),
-        pattern=pattern,
-        resolved=pattern is None,
-    )
-
-
-TRACES = _operand("/traces")
-SESSIONS = _operand("/sessions")
-
-
-def test_lone_operand_is_the_operand_rule_on_its_own():
-    # email's find push-down answers for one concrete operand only.
-    assert grep_pushdown.lone_operand([TRACES]) is TRACES
-    assert grep_pushdown.lone_operand([TRACES, SESSIONS]) is None
-    assert grep_pushdown.lone_operand([]) is None
-    assert grep_pushdown.lone_operand([_operand("/traces/*", "*")]) is None
-
-
-def test_lone_operand_never_answers_for_stdin():
-    # A `-` is the line's stdin, which no backend holds, so every
-    # push-down defers to the scan that reads the pipe.
-    dash = PathSpec(
-        virtual="/traces/-",
-        directory="/traces/",
-        vfs_path="traces/-",
-        resolved=True,
-        raw_path="-",
-    )
-    assert grep_pushdown.lone_operand([dash]) is None
 
 
 @pytest.mark.parametrize(

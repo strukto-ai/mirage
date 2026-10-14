@@ -13,17 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
 import {
   classifyPattern,
   isLiteralPattern,
-  loneOperand,
   searchTerms,
   wholeWordLiterals,
 } from './grep_pushdown.ts'
 import { compilePosixRegex } from '../../utils/posix.ts'
-import { stripSlash } from '../../utils/slash.ts'
 
 describe('classifyPattern', () => {
   it('newlines and regex are REGEX, plain text is SIMPLE, fixed is EXACT', () => {
@@ -48,42 +45,6 @@ describe('isLiteralPattern', () => {
     ['a\nb', true, true],
   ])('isLiteralPattern(%j, %j) === %j', (pattern, fixed, expected) => {
     expect(isLiteralPattern(pattern, fixed)).toBe(expected)
-  })
-})
-
-function operand(virtual: string, pattern: string | null = null): PathSpec {
-  return new PathSpec({
-    virtual,
-    directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-    vfsPath: stripSlash(virtual),
-    pattern,
-    resolved: pattern === null,
-  })
-}
-
-const TRACES = operand('/traces')
-const SESSIONS = operand('/sessions')
-
-describe('loneOperand', () => {
-  it('is the operand rule on its own, for a caller with no pattern', () => {
-    // email's find push-down answers for one concrete operand only.
-    expect(loneOperand([TRACES])).toBe(TRACES)
-    expect(loneOperand([TRACES, SESSIONS])).toBe(null)
-    expect(loneOperand([])).toBe(null)
-    expect(loneOperand([operand('/traces/*', '*')])).toBe(null)
-  })
-
-  it('never answers for stdin', () => {
-    // A `-` is the line's stdin, which no backend holds, so every push-down
-    // defers to the scan that reads the pipe.
-    const dash = new PathSpec({
-      virtual: '/traces/-',
-      directory: '/traces/',
-      vfsPath: 'traces/-',
-      resolved: true,
-      rawPath: '-',
-    })
-    expect(loneOperand([dash])).toBe(null)
   })
 })
 

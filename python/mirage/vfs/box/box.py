@@ -128,8 +128,8 @@ class BoxVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -137,7 +137,7 @@ class BoxVFS(BaseVFS):
     ) -> list[PathSpec] | None:
         if not whole_word or not self.accessor.config.content_search:
             return None
-        return await _files_containing(self.accessor, text, under)
+        return await _files_containing(self.accessor, text, [path])
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

@@ -67,15 +67,15 @@ export class LinearVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     return linearFilesContaining(
       this.accessor,
       text,
-      under,
+      [path],
       index,
       opts.wholeWord && this.config.contentSearch === true,
     )

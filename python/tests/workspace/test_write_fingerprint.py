@@ -553,3 +553,52 @@ def test_a_write_leaves_a_name_another_mount_holds():
                 await ws.close()
 
         assert asyncio.run(run()).startswith(b"2001-02-03 04:05:06")
+
+
+def test_an_append_extends_the_copy_the_rewrite_proves():
+    # S3 appends by rewriting the object, and that write moved the cached
+    # length plus the piece, so the copy grows instead of dropping and
+    # the next read downloads nothing.
+    store: dict[str, bytes] = {}
+    with _workspace(store, ReadSpec(policy=ReadPolicy.BOUNDED)) as (
+        ws,
+        client,
+    ):
+
+        async def run() -> tuple[bytes, bytes | None]:
+            try:
+                await ws.shell("printf 'a\\n' > /s3/x.txt")
+                await ws.shell("printf 'b\\n' >> /s3/x.txt")
+                client.calls.clear()
+                served = (await ws.shell("cat /s3/x.txt")).stdout
+                return served, await ws.cache.get("/s3/x.txt")
+            finally:
+                await ws.close()
+
+        served, cached = asyncio.run(run())
+
+    assert served == cached == b"a\nb\n"
+    assert client.calls["get_object"] == 0
+
+
+def test_an_append_drops_a_copy_the_object_moved_away_from():
+    # The object changed behind the copy (same length, another token), so
+    # the rewrite's read saw a token the copy does not hold and the copy
+    # is dropped rather than extended into bytes the object never held.
+    store: dict[str, bytes] = {}
+    with _workspace(store, ReadSpec(policy=ReadPolicy.BOUNDED)) as (ws, _):
+
+        async def run() -> tuple[bytes | None, bytes]:
+            try:
+                await ws.shell("printf 'a\\n' > /s3/x.txt")
+                store["x.txt"] = b"z\n"
+                await ws.shell("printf 'b\\n' >> /s3/x.txt")
+                cached = await ws.cache.get("/s3/x.txt")
+                return cached, (await ws.shell("cat /s3/x.txt")).stdout
+            finally:
+                await ws.close()
+
+        cached, served = asyncio.run(run())
+
+    assert cached is None
+    assert served == b"z\nb\n"

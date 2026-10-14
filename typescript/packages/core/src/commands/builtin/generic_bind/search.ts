@@ -14,7 +14,6 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
-import { pathsScoped } from '../../../view/namespace_view.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
 import { ScanReason } from '../../../vfs/types.ts'
@@ -244,9 +243,8 @@ async function fullScan<A extends Accessor>(
   reason: ScanReason,
   index: IndexCacheStore | undefined,
 ): Promise<void> {
-  if (dirs.length > 0 && io.beforeFullScan !== undefined) {
-    await io.beforeFullScan(accessor, name, dirs, reason, index)
-  }
+  if (io.beforeFullScan === undefined) return
+  for (const scope of dirs) await io.beforeFullScan(accessor, scope, name, reason, null, index)
 }
 
 /**
@@ -258,8 +256,10 @@ async function fullScan<A extends Accessor>(
  * named on the line is never ruled out by a search asked about directories,
  * nor is a path pinned to a revision, since a search sees the current content,
  * nor a file the read cache holds, which a read serves as it was cached.
- * Neither is asked when a hide, a path rule or a preVfs policy judges a path,
- * since a search sees the raw tree.
+ * Both are asked through the dispatcher, which drops what the session hides
+ * from a `filesContaining` answer, judges `linesContaining` as a read of its
+ * file, and answers null where a path rule or a preVfs policy reaches below a
+ * directory, so every file is read and judged.
  * When neither can stand in for a walk, `beforeFullScan` may refuse it.
  * Mirrors Python's `search_reads`.
  */
@@ -273,10 +273,9 @@ export async function searchReads<A extends Accessor>(
 ): Promise<Reads> {
   const index = opts.index ?? undefined
   const stream: Reads = (p) => io.readStream(accessor, p, index)
-  const scoped = pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')
-  const files = scoped ? undefined : io.filesContaining
+  const files = io.filesContaining
   const searchable = io.searchable ?? null
-  const lines = scoped ? undefined : io.linesContaining
+  const lines = io.linesContaining
   if (
     paths.length === 0 ||
     (files === undefined && lines === undefined && io.beforeFullScan === undefined)
@@ -307,13 +306,15 @@ export async function searchReads<A extends Accessor>(
   let hits: Set<string> | null = null
   if (files !== undefined && dirs.length > 0) {
     const answers = await Promise.all(
-      asked.texts.map((text) =>
-        files(
-          accessor,
-          text,
-          dirs,
-          { wholeWord: asked.wholeWord, ignoreCase: asked.ignoreCase },
-          index,
+      dirs.flatMap((scope) =>
+        asked.texts.map((text) =>
+          files(
+            accessor,
+            scope,
+            text,
+            { wholeWord: asked.wholeWord, ignoreCase: asked.ignoreCase },
+            index,
+          ),
         ),
       ),
     )

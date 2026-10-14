@@ -112,5 +112,13 @@ class HfBucketsVFS(BaseVFS):
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
 
+    def storage_location(self) -> str:
+        # The endpoint, the bucket and the key prefix pin the objects two
+        # mounts would share.
+        cfg = self.config
+        prefix = (cfg.key_prefix or "").strip("/")
+        base = f"{self.name}:{cfg.endpoint.rstrip('/')}:{cfg.bucket}"
+        return f"{base}/{prefix}" if prefix else base
+
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

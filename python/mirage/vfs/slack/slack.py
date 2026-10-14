@@ -87,8 +87,8 @@ class SlackVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -100,7 +100,7 @@ class SlackVFS(BaseVFS):
             or not search_available(self.config)
         ):
             return None
-        return await _files_containing(self.accessor, text, under, index)
+        return await _files_containing(self.accessor, text, [path], index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

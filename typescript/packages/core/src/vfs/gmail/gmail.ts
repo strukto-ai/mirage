@@ -75,13 +75,13 @@ export class GmailVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     _opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (this.config.contentSearch !== true) return Promise.resolve(null)
-    return gmailFilesContaining(this.accessor, text, under, index)
+    return gmailFilesContaining(this.accessor, text, [path], index)
   }
 
   override getState(): Promise<GmailVFSState> {

@@ -50,7 +50,7 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
 
     async def search_segments(accessor, query, paths, index, **kwargs):
         calls.append((paths, kwargs))
-        return b"api\nauth\n"
+        return ["api", "auth"]
 
     monkeypatch.setattr(tree, "list_all_documents", list_documents)
     monkeypatch.setattr(search, "search_segments", search_segments)
@@ -89,7 +89,7 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
 
     async def search_segments(accessor, query, paths, index, **kwargs):
         calls.append((paths, kwargs))
-        return b"dataset\n"
+        return ["dataset"]
 
     monkeypatch.setattr(search, "search_segments", search_segments)
     root = PathSpec(

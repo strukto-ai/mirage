@@ -20,6 +20,7 @@ from mirage.workspace.dispatcher.constants import (
     ENTRY_CREATE_OPS,
     FILE_CREATE_OPS,
     HIDDEN_CREATE_OPS,
+    HIDE_FILTERED_OPS,
     NAMESPACE_TABLE_OPS,
     NATIVE_WALK_OPS,
     NO_FOLLOW_OPS,
@@ -75,5 +76,7 @@ def test_the_op_classes_follow_the_declarations():
         "dir_copy",
         "read_tree",
         "search",
+        "files_containing",
     }
     assert NATIVE_WALK_OPS == SUBTREE_OPS - {"rename"} | {"copy"}
+    assert HIDE_FILTERED_OPS == {"read_tree", "search", "files_containing"}

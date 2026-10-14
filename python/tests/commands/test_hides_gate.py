@@ -17,6 +17,7 @@ import inspect
 import pkgutil
 
 import mirage.commands.builtin as builtin
+from mirage.commands.builtin.generic_bind.adapter import _DISPATCHED_SLOTS
 from mirage.commands.config import Command
 
 # A native fast path answers from the raw backend tree, so every place
@@ -59,17 +60,19 @@ def test_the_chokepoints_read_the_gate():
     """The shared fast-path forks consume the per-operand gate;
     deleting a read is how the guard silently dies, so each is pinned
     the way test_links_optin pins ``opts.ns.links``. find and the other
-    walks ask ``read_tree``, which the dispatcher declines under the
-    same gate."""
-    for module_name in (
-        "mirage.commands.builtin.generic_bind.search",
-        "mirage.commands.builtin.generic.du",
-    ):
-        module = importlib.import_module(module_name)
-        assert GATE in inspect.getsource(module), (
-            f"{module_name} no longer consults {GATE}; its native fast "
-            "path would answer for entries the session hides"
-        )
+    walks ask ``read_tree``, and grep and rg ask ``files_containing``,
+    ``lines_containing`` and ``before_full_scan``, all at the dispatcher,
+    which judges them for the session itself."""
+    module = importlib.import_module("mirage.commands.builtin.generic.du")
+    assert GATE in inspect.getsource(module), (
+        f"du no longer consults {GATE}; its one-total fast path would "
+        "answer for entries the session hides"
+    )
+    assert {
+        "files_containing",
+        "lines_containing",
+        "before_full_scan",
+    } <= set(_DISPATCHED_SLOTS)
 
 
 def test_every_wired_find_core_forks_to_the_guarded_walk():
@@ -101,7 +104,7 @@ def test_every_wired_find_core_forks_to_the_guarded_walk():
 
 def test_no_backend_registers_its_own_grep_or_rg():
     """A mount's search is ``files_containing`` and ``lines_containing``,
-    which only the generic's reads ask, behind the gate; a backend grep
+    which only the generic's reads ask, through the dispatcher; a backend grep
     or rg would answer from the raw tree and print lines out of files
     the session cannot see."""
     commands, failed = _registered()

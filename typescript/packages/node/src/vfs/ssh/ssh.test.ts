@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import '../../commands/builtin/backends.ts'
 import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -77,5 +76,15 @@ describe('SSHVFS — getState / loadState', () => {
     const result = await res.getState()
     await res.loadState(result)
     expect(await res.getState()).toEqual(result)
+  })
+})
+
+// Twin of test_two_logins_to_one_root_are_one_store.
+describe('SSHVFS storageLocation', () => {
+  it('is one store for two logins to one root', () => {
+    const location = (username: string, root: string): string =>
+      new SSHVFS({ host: 'box', username, root }).storageLocation()
+    expect(location('ada', '/srv/data')).toBe(location('bob', '/srv/data/'))
+    expect(location('ada', '/srv/data')).not.toBe(location('ada', '/srv'))
   })
 })

@@ -107,6 +107,7 @@ import {
   HIDDEN_CREATE_OPS,
   LINK_ENTRY_OPS,
   NAMESPACE_TABLE_OPS,
+  HIDE_FILTERED_OPS,
   NATIVE_WALK_OPS,
   NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
@@ -125,6 +126,7 @@ import {
   sessionAccess,
 } from '../../context/session_context.ts'
 import { hiddenUnder, moveReveals, pathVisible } from '../../utils/hidden.ts'
+import { recordPath } from '../../vfs/search.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -152,6 +154,44 @@ function visibleEntries(entries: string[], parent: string, vis = sessionVisibili
     const name = trimmed.slice(trimmed.lastIndexOf('/') + 1)
     return pathVisible(vis, `${base}/${name}`)
   })
+}
+
+/**
+ * A one-call read's answer without the entries the session hides: what the
+ * walk the read stands in for would see, since every call it makes reads a
+ * hidden path as absent. A `read_tree` answer keeps the entries left visible,
+ * keyed below `path`; `files_containing` keeps the files left visible;
+ * `search` keeps the records whose path is visible. Mirrors Python's
+ * `_visible_answer`.
+ */
+function visibleAnswer(
+  name: string,
+  vis: Visibility | null,
+  path: PathSpec,
+  result: unknown,
+): unknown {
+  if (name === 'read_tree') {
+    const base = rstripSlash(path.virtual)
+    return new Map(
+      [...(result as Map<string, FileStat>)].filter(([key]) => pathVisible(vis, `${base}/${key}`)),
+    )
+  }
+  if (name === 'files_containing') {
+    return (result as PathSpec[]).filter((hit) => pathVisible(vis, hit.virtual))
+  }
+  return (result as string[]).filter((record) => pathVisible(vis, recordPath(record)))
+}
+
+/**
+ * The last of a write's records that one of `ops` made at `virtual`. Mirrors
+ * Python's `_record_of`.
+ */
+function recordOf(
+  records: readonly OpRecord[],
+  ops: ReadonlySet<string>,
+  virtual: string,
+): OpRecord | undefined {
+  return [...records].reverse().find((rec) => ops.has(rec.op) && rec.path === virtual)
 }
 
 /**
@@ -596,7 +636,7 @@ export class Dispatcher {
     if (owner !== null) {
       await this.refuseCrossMount(call, owner)
       if (await this.declines(call)) {
-        if (name === 'search') return [null, new IOResult()]
+        if (name === 'search' || name === 'files_containing') return [null, new IOResult()]
         throw walkDeclined(owner.vfs.name, name, call.path)
       }
       const mark = declared(owner.vfs.constructor, name) ?? CALLS.get(name) ?? null
@@ -884,11 +924,13 @@ export class Dispatcher {
    *
    * A backend's find, du, search, tree copy or tree removal answers for
    * every entry under its path in one call, past the checks each entry would
-   * meet on its own. So when a hide, the command's path rules or, for a
-   * `ws.vfs` call, a coded preVfs policy reach below one of its paths, it is
-   * declined and the caller walks, entry by entry, through calls that are
-   * each judged. Inside a running line only the profile's path rules judge
-   * an entry, so a coded policy declines no walk there. A file
+   * meet on its own. So when the command's path rules or, for a `ws.vfs`
+   * call, a coded preVfs policy reach below one of its paths, it is declined
+   * and the caller walks, entry by entry, through calls that are each judged.
+   * Inside a running line only the profile's path rules judge an entry, so a
+   * coded policy declines no walk there. A hide declines the copies and the
+   * removal, which would reach hidden entries; a read in HIDE_FILTERED_OPS
+   * runs and `filter` drops what the session hides from its answer. A file
    * copy is declined the same way: the bytes it moves never pass through a
    * read. A tree copy is declined too when a link stands below its
    * destination: the backend writes each child name as it is, where the
@@ -904,7 +946,9 @@ export class Dispatcher {
       return true
     }
     const paths = call.dst === null ? [call.path] : [call.path, call.dst]
-    if (paths.some((p) => hiddenUnder(call.vis, p.virtual))) return true
+    if (!HIDE_FILTERED_OPS.has(call.name) && paths.some((p) => hiddenUnder(call.vis, p.virtual))) {
+      return true
+    }
     if (call.ruleGate !== null) return paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
     return this.policies.wantsFor('preVfs', this.sessionId(), lineRunning())
   }
@@ -1124,6 +1168,21 @@ export class Dispatcher {
   }
 
   /**
+   * How many files the session sees under a scan guard's path, counted off
+   * the mount's `readTree` with every hidden file dropped, so a guard's
+   * refusal never counts what the session cannot see; null when the mount
+   * cannot answer the subtree in one call. Mirrors Python's
+   * Dispatcher._visible_files.
+   */
+  private async visibleFiles(mount: MountEntry, vfs: BaseVFS, call: Call): Promise<number | null> {
+    if (!vfs.supports('read_tree')) return null
+    const found = (await mount.call('read_tree', call.path.virtual)) as Map<string, FileStat> | null
+    if (found === null) return null
+    const visible = visibleAnswer('read_tree', call.vis, call.path, found) as Map<string, FileStat>
+    return [...visible.values()].filter((st) => st.type === FileType.FILE).length
+  }
+
+  /**
    * Run the op on its mount and stamp what it moved.
    *
    * Returns the op's answer with the rename destination and the arguments
@@ -1163,6 +1222,7 @@ export class Dispatcher {
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
+    if (name === 'before_full_scan') fullKwargs.files = await this.visibleFiles(mount, vfs, call)
     const dst =
       DESTINATION_OPS.has(name) && call.args?.[0] instanceof PathSpec ? call.args[0] : null
     const fullArgs = (call.args ?? []).map(keyed)
@@ -1229,11 +1289,14 @@ export class Dispatcher {
               .map((virtual) => `${String(this.storeId(vfs))}:${mountKey(virtual, prefix)}`)
               .sort(compareCodePoints)
         let mine: OpRecord[] = []
-        const own = (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> =>
-          commandRecords((records) => {
+        let before: [Uint8Array, string | null] | null = null
+        const own = async (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> => {
+          before = await this.cachedBefore(call, mount)
+          return commandRecords((records) => {
             mine = records
             return run(fullKwargs, onCall)
           })
+        }
         result = await this.holdWrite(
           keys,
           opTimeout,
@@ -1246,7 +1309,7 @@ export class Dispatcher {
           async (value) => {
             served(report, value)
             await this.settleWrite(name, p, dst, fullArgs, operands(name, call.args, kwargs))
-            await this.keepWritten(call, mount, fullArgs, mine)
+            await this.keepWritten(call, mount, fullArgs, mine, before)
           },
         )
       } else {
@@ -1286,27 +1349,78 @@ export class Dispatcher {
    * The bytes kept are a copy, so a caller reusing its buffer cannot change
    * them. Mirrors Python's Dispatcher._keep_written.
    */
+  /**
+   * The cached copy an append may extend, read under its name's hold before
+   * the append runs: its bytes and their token. Mirrors Python's
+   * Dispatcher._cached_before.
+   */
+  private async cachedBefore(
+    call: Call,
+    mount: MountEntry,
+  ): Promise<[Uint8Array, string | null] | null> {
+    if (call.name !== 'append' || !factsOf(mount).cacheable) return null
+    const kept = await this.cache.get(call.path.virtual)
+    if (kept === null) return null
+    return [kept, await this.cache.fingerprint(call.path.virtual)]
+  }
+
+  /**
+   * Keep a write's bytes for the next read, under its name's hold. The
+   * write's own record labels them with the token the backend answered, so
+   * a `fresh` mount does not refetch what it just wrote; a record moving
+   * another length than was sent keeps nothing. An append extends the cached
+   * copy only where the file is proven to have been that copy: the backend
+   * rewrote it whole, its write moved the copy's length plus the appended
+   * bytes, and its read saw the copy's token where both have one. An append
+   * the backend makes itself records no length, so the copy stays dropped;
+   * an append of nothing keeps the copy as it was. Mirrors Python's
+   * Dispatcher._keep_written.
+   */
   private async keepWritten(
     call: Call,
     mount: MountEntry,
     args: readonly unknown[],
     records: readonly OpRecord[],
+    before: [Uint8Array, string | null] | null,
   ): Promise<void> {
     const sent = args[0]
-    if (call.name !== 'write' || !(sent instanceof Uint8Array) || !factsOf(mount).cacheable) return
-    const record = [...records]
-      .reverse()
-      .find((rec) => WRITE_FINGERPRINT_OPS.has(rec.op) && rec.path === call.path.virtual)
-    if (record !== undefined && record.bytes !== sent.byteLength) {
+    if (
+      (call.name !== 'write' && call.name !== 'append') ||
+      !(sent instanceof Uint8Array) ||
+      !factsOf(mount).cacheable
+    ) {
+      return
+    }
+    const record = recordOf(records, WRITE_FINGERPRINT_OPS, call.path.virtual)
+    let data: Uint8Array = sent.slice()
+    let fingerprint = record?.fingerprint ?? null
+    if (call.name === 'append') {
+      if (before === null) return
+      const [kept, token] = before
+      const read = recordOf(records, new Set(['read']), call.path.virtual)
+      if (sent.byteLength === 0) {
+        data = kept
+        fingerprint = token
+      } else if (
+        record?.bytes !== kept.byteLength + sent.byteLength ||
+        (read !== undefined &&
+          read.fingerprint !== null &&
+          read.fingerprint !== '' &&
+          token !== null &&
+          read.fingerprint !== token)
+      ) {
+        return
+      } else {
+        data = new Uint8Array(kept.byteLength + sent.byteLength)
+        data.set(kept)
+        data.set(sent, kept.byteLength)
+      }
+    } else if (record !== undefined && record.bytes !== sent.byteLength) {
       await this.cache.remove(call.path.virtual)
       return
     }
-    await setCached(
-      this.cache,
-      call.path.virtual,
-      sent.slice(),
-      record?.fingerprint ?? null,
-      (path) => factsOf(this.namespace.tryMountFor(path) === mount ? mount : null),
+    await setCached(this.cache, call.path.virtual, data, fingerprint, (path) =>
+      factsOf(this.namespace.tryMountFor(path) === mount ? mount : null),
     )
   }
 
@@ -1333,6 +1447,14 @@ export class Dispatcher {
     }
     if (call.name === 'stat' && result instanceof FileStat) {
       return mergeOverlayStat(this.namespace.metaFor(call.path.virtual), result)
+    }
+    if (
+      HIDE_FILTERED_OPS.has(call.name) &&
+      result !== null &&
+      result !== undefined &&
+      hiddenUnder(call.vis, call.path.virtual)
+    ) {
+      return visibleAnswer(call.name, call.vis, call.path, result)
     }
     return result
   }

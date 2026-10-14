@@ -778,3 +778,21 @@ async def test_workspace_execute_databricks_volume_recursive_grep_and_rg():
     assert b"/dbx/nested/info.txt:alpha debug line" in rg_io.stdout
     assert b"/dbx/nested/deeper/notes.md:beta debug detail" in rg_io.stdout
     assert not rg_io.stderr
+
+
+def test_a_volume_root_is_one_store_whatever_its_token():
+    def location(root: str, token: str) -> str | None:
+        config = DatabricksVolumeConfig(
+            catalog="main",
+            schema="default",
+            volume="agent_files",
+            root_path=root,
+            host="https://dbc.example.com",
+            token=token,
+        )
+        return DatabricksVolumeVFS(
+            config, client=FakeClient(FakeFiles())
+        ).storage_location()
+
+    assert location("/root", "a") == location("/root/", "b")
+    assert location("/root", "a") != location("/other", "a")

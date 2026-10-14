@@ -20,7 +20,6 @@ import { floatOption, intOption, textOption, validateOptions } from '../../vfs/s
 import type { SearchOps, SearchQuery } from '../../vfs/types.ts'
 import type { VectorTree } from './types.ts'
 
-const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 function targetTable(pinned: string | null, paths: PathSpec[]): string | null {
@@ -41,7 +40,7 @@ export async function searchRowsOutput<A extends Accessor>(
   topK: number,
   threshold: number,
   mountPrefix: string,
-): Promise<Uint8Array> {
+): Promise<string[]> {
   if (query === '') throw new Error('search: query is required')
   if (topK <= 0) throw new Error('search: top-k must be positive')
   const pinned = tree.pinned(accessor)
@@ -59,7 +58,7 @@ export async function searchRowsOutput<A extends Accessor>(
     const header = ranked ? `${path}:${Number(rank).toFixed(4)}` : path
     blocks.push(`${header}\n${DEC.decode(body).replace(/\n+$/, '')}`)
   }
-  return blocks.length === 0 ? new Uint8Array() : ENC.encode(blocks.join('\n') + '\n')
+  return blocks
 }
 
 /** Build a store's ranked search, one native ranking per batch. */
@@ -83,7 +82,7 @@ export function makeSearch<A extends Accessor>(
       threshold,
       mountPrefixOf(first.virtual, first.vfsPath),
     )
-    return output.length === 0 ? [] : DEC.decode(output).replace(/\n$/, '').split('\n')
+    return output
   }
   return { search: (accessor, path, query) => searchMany(accessor, [path], query), searchMany }
 }

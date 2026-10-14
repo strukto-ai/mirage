@@ -87,7 +87,3 @@ async def search_scope(
     return await resolve_glob_with(
         tree.readdir, accessor, paths, index, DEFAULT_MAX_GLOB_MATCHES
     ), prefix
-
-
-def hit_lines(output: bytes) -> list[str]:
-    return output.decode().removesuffix("\n").split("\n") if output else []

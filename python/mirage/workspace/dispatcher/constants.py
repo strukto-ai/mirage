@@ -38,11 +38,11 @@ CALLS = {**_VFS_CALLS, **NAMESPACE_CALLS}
 # value can serve them (sliced for ranged reads) without touching the
 # backend, subject to the reconciler's consistency check. A call that
 # answers for part of a file (first_lines, last_lines, line_count,
-# follow) is neither served from the cache nor kept in it; its caller
-# reads a cached file instead.
+# follow, lines_containing) is neither served from the cache nor kept
+# in it; its caller reads a cached file instead.
 DISPATCH_READ_OPS = call_names(
     _VFS_CALLS, effects={Effect.READ}, targets={Target.FILE}
-) - {"first_lines", "last_lines", "line_count", "follow"}
+) - {"first_lines", "last_lines", "line_count", "follow", "lines_containing"}
 
 # Backend mutations that run the dispatcher's post-write bookkeeping:
 # file-cache eviction, parent index invalidation, and overlay time
@@ -102,11 +102,17 @@ DESTINATION_OPS = frozenset({"rename"}) | COPY_OPS
 SUBTREE_OPS = frozenset(name for name, mark in CALLS.items() if mark.subtree)
 
 # Ops a backend answers in one call for what a walk does entry by entry.
-# When a hide, the command's path rules or a coded policy reach below
-# the path, the dispatcher declines them (ENOTSUP; a search answers
-# None) and the caller walks, so every entry passes the checks a walk's
-# own calls pass.
+# When the command's path rules or a coded policy reach below the path,
+# the dispatcher declines them (ENOTSUP; a search answers None) and the
+# caller walks, so every entry passes the checks a walk's own calls pass.
+# A hide declines them too, except the reads in ``HIDE_FILTERED_OPS``.
 NATIVE_WALK_OPS = SUBTREE_OPS - {"rename"} | COPY_OPS
+
+# The one-call reads whose answer names every entry it holds: under a
+# hide the dispatcher drops each hidden entry from the answer instead of
+# declining, which leaves what the walk would see, since a hidden path
+# reads as absent everywhere.
+HIDE_FILTERED_OPS = frozenset({"read_tree", "search", "files_containing"})
 
 # Ops that open the regular file they name with O_CREAT, which answers
 # a slash-terminated name (`x/`, only ever a directory) with EISDIR.

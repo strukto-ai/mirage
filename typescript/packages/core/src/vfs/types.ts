@@ -195,11 +195,11 @@ export const ScanReason = Object.freeze({
 
 export type ScanReason = (typeof ScanReason)[keyof typeof ScanReason]
 
-/** Files under `under` whose content may contain `text`; null when the search cannot answer for every file. */
+/** Files under `path` whose content may contain `text`; null when the search cannot answer for every file. */
 export type FilesContainingOp<A extends Accessor = Accessor> = (
   accessor: A,
+  path: PathSpec,
   text: string,
-  under: PathSpec[],
   opts: { wholeWord: boolean; ignoreCase: boolean },
   index?: IndexCacheStore,
 ) => Promise<PathSpec[] | null>
@@ -216,9 +216,10 @@ export type LinesContainingOp<A extends Accessor = Accessor> = (
 /** Called before grep or rg reads a file no search answered; reject to refuse. */
 export type BeforeFullScanOp<A extends Accessor = Accessor> = (
   accessor: A,
+  path: PathSpec,
   command: string,
-  under: PathSpec[],
   reason: ScanReason,
+  files: number | null,
   index?: IndexCacheStore,
 ) => Promise<void>
 

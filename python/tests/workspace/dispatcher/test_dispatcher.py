@@ -50,11 +50,12 @@ from mirage.types import (
     PathSpec,
     Visibility,
 )
+from mirage.utils.key_prefix import mounted_path
 from mirage.utils.ranges import slice_window, splice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
-from mirage.vfs.types import VfsCall
+from mirage.vfs.types import ScanReason, SearchQuery, VfsCall
 from mirage.workspace import Workspace
 from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
 from mirage.workspace.dispatcher.dispatcher import Dispatcher, _MountChannel
@@ -2043,3 +2044,93 @@ async def test_a_command_reads_at_the_dispatcher(line):
         await out.stdout_str()
         assert out.exit_code == 0
         assert ("read", "/d/a.txt") in seen
+
+
+class SearchedRAM(RAMVFS):
+    """A RAM mount whose searches answer every file it holds and whose
+    scan guard keeps the count it is handed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.counted: list[int | None] = []
+
+    async def files_containing(
+        self, path, text, *, whole_word, ignore_case, index=NULL_INDEX
+    ):
+        return [mounted_path(path, key) for key in self._store.files]
+
+    async def search(self, path, query, index=NULL_INDEX):
+        return [
+            f"{mounted_path(path, key).virtual}:0.5\nabout {key}"
+            for key in self._store.files
+        ]
+
+    async def before_full_scan(
+        self, path, command, reason, *, files=None, index=NULL_INDEX
+    ):
+        self.counted.append(files)
+
+
+@pytest.fixture
+def secret_hidden():
+    """Bind a session that hides one directory under the searched one."""
+    session = SessionState(
+        session_id="agent",
+        visibility=Visibility(paths=HiddenPaths(paths=("/ram/d/secret",))),
+    )
+    token = set_current_session(session)
+    yield session
+    reset_current_session(token)
+
+
+def _searched() -> SearchedRAM:
+    vfs = SearchedRAM()
+    vfs._store.dirs.update({"/d", "/d/secret"})
+    vfs._store.files.update({"/d/a.txt": b"a\n", "/d/secret/b.txt": b"b\n"})
+    return vfs
+
+
+@pytest.mark.asyncio
+async def test_a_hide_filters_a_tree_read_instead_of_declining(secret_hidden):
+    with Workspace({"/ram/": _searched()}) as ws:
+        found, _ = await ws.dispatch("read_tree", _path("/ram/d"))
+        assert set(found) == {"a.txt"}
+
+
+@pytest.mark.asyncio
+async def test_a_hide_drops_its_files_from_a_search(secret_hidden):
+    with Workspace({"/ram/": _searched()}) as ws:
+        hits, _ = await ws.dispatch(
+            "files_containing",
+            _path("/ram/d"),
+            text="a",
+            whole_word=False,
+            ignore_case=False,
+        )
+        assert [hit.virtual for hit in hits] == ["/ram/d/a.txt"]
+        records, _ = await ws.dispatch(
+            "search", _path("/ram/d"), query=SearchQuery("a")
+        )
+        assert records == ["/ram/d/a.txt:0.5\nabout /d/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_a_hide_still_declines_a_tree_removal(secret_hidden):
+    with Workspace({"/ram/": _searched()}, mode=MountMode.WRITE) as ws:
+        with pytest.raises(WalkDeclinedError):
+            await ws.dispatch("rm_r", _path("/ram/d"))
+
+
+@pytest.mark.asyncio
+async def test_a_scan_guard_counts_only_the_files_the_session_sees(
+    secret_hidden,
+):
+    vfs = _searched()
+    with Workspace({"/ram/": vfs}) as ws:
+        await ws.dispatch(
+            "before_full_scan",
+            _path("/ram/d"),
+            command="grep",
+            reason=ScanReason.NO_SEARCH,
+        )
+        assert vfs.counted == [1]

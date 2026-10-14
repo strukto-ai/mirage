@@ -27,7 +27,9 @@ import { CommandTimeoutError } from '../../errors/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
+import { ScanReason } from '../../vfs/types.ts'
 import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
@@ -1972,6 +1974,107 @@ describe('a whole write keeps its bytes', () => {
       await ws.vfs.write('/r/f', data)
       data.fill(0)
       expect(await ws.cache.get('/r/f')).toEqual(new TextEncoder().encode('sent'))
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+// A RAM mount whose searches answer every file it holds and whose scan guard
+// keeps the count it is handed. Twin of Python's SearchedRAM.
+class SearchedRAM extends RAMVFS {
+  readonly counted: (number | null)[] = []
+
+  override filesContaining(path: PathSpec): Promise<PathSpec[] | null> {
+    return Promise.resolve([...this.store.files.keys()].map((key) => mountedPath(path, key)))
+  }
+
+  override search(path: PathSpec): Promise<string[] | null> {
+    return Promise.resolve(
+      [...this.store.files.keys()].map(
+        (key) => `${mountedPath(path, key).virtual}:0.5\nabout ${key}`,
+      ),
+    )
+  }
+
+  override beforeFullScan(
+    _path: PathSpec,
+    _command: string,
+    _reason: ScanReason,
+    files: number | null,
+  ): Promise<void> {
+    this.counted.push(files)
+    return Promise.resolve()
+  }
+}
+
+function searched(): SearchedRAM {
+  const vfs = new SearchedRAM()
+  vfs.store.dirs.add('/d')
+  vfs.store.dirs.add('/d/secret')
+  vfs.store.files.set('/d/a.txt', new TextEncoder().encode('a\n'))
+  vfs.store.files.set('/d/secret/b.txt', new TextEncoder().encode('b\n'))
+  return vfs
+}
+
+function secretHidden(): SessionState {
+  return new SessionState({
+    sessionId: 'agent',
+    visibility: { paths: { paths: ['/ram/d/secret'] } },
+  })
+}
+
+describe('a hide filters a one-call read', () => {
+  // Twin of test_a_hide_filters_a_tree_read_instead_of_declining.
+  it('answers a tree read without the hidden entries', async () => {
+    const ws = new Workspace({ '/ram': searched() })
+    try {
+      const found = await runWithSession(secretHidden(), () => ws.dispatch('read_tree', '/ram/d'))
+      expect([...(found as Map<string, FileStat>).keys()]).toEqual(['a.txt'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_hide_drops_its_files_from_a_search.
+  it('drops the hidden files from a search', async () => {
+    const ws = new Workspace({ '/ram': searched() })
+    try {
+      await runWithSession(secretHidden(), async () => {
+        const hits = (await ws.dispatch('files_containing', '/ram/d', ['a'], {
+          whole_word: false,
+          ignore_case: false,
+        })) as PathSpec[]
+        expect(hits.map((hit) => hit.virtual)).toEqual(['/ram/d/a.txt'])
+        const records = await ws.dispatch('search', '/ram/d', [{ query: 'a', options: {} }])
+        expect(records).toEqual(['/ram/d/a.txt:0.5\nabout /d/a.txt'])
+      })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_hide_still_declines_a_tree_removal.
+  it('still declines a tree removal', async () => {
+    const ws = new Workspace({ '/ram': searched() }, { mode: MountMode.WRITE })
+    try {
+      await expect(
+        runWithSession(secretHidden(), () => ws.dispatch('rm_r', '/ram/d')),
+      ).rejects.toMatchObject({ declined: true })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_scan_guard_counts_only_the_files_the_session_sees.
+  it('hands a scan guard only the files the session sees', async () => {
+    const vfs = searched()
+    const ws = new Workspace({ '/ram': vfs })
+    try {
+      await runWithSession(secretHidden(), () =>
+        ws.dispatch('before_full_scan', '/ram/d', ['grep', ScanReason.NO_SEARCH]),
+      )
+      expect(vfs.counted).toEqual([1])
     } finally {
       await ws.close()
     }

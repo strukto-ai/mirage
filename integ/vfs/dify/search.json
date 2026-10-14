@@ -38,6 +38,29 @@
         "stdout": "/knowledge/policies/privacy:0.89\nCustomer data is stored encrypted at rest and in transit.\nrc=2\n",
         "stderr": "search: query is required\n"
       }
+    },
+    {
+      "id": "df_search_keeps_a_hidden_document_out",
+      "seq": 580033,
+      "targets": [
+        "dify"
+      ],
+      "command": "search \"how am I throttled\" /knowledge; echo rc=$?; search \"money back\" /knowledge/policies | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n/knowledge/policies/refunds:0.91\n",
+        "stderr": ""
+      },
+      "session": "dify-hide-auth",
+      "session_profiles": {
+        "dify-hide-auth": {
+          "paths": {
+            "hide": [
+              "/knowledge/guides/auth"
+            ]
+          }
+        }
+      }
     }
   ]
 }

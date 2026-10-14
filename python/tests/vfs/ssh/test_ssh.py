@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.email.find import find
+from mirage.vfs.ssh.config import SSHConfig
+from mirage.vfs.ssh.ssh import SSHVFS
 
-# Mail verbs live in the himalaya CLI
-# (mirage.commands.cli.builtin.himalaya), installed by name; the mount
-# only serves the filesystem surface.
-COMMANDS = [
-    find,
-]
+
+def test_two_logins_to_one_root_are_one_store():
+    def location(username: str, root: str) -> str | None:
+        config = SSHConfig(host="box", username=username, root=root)
+        return SSHVFS(config).storage_location()
+
+    assert location("ada", "/srv/data") == location("bob", "/srv/data/")
+    assert location("ada", "/srv/data") != location("ada", "/srv")

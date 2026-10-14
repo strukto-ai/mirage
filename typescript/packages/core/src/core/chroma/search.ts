@@ -23,11 +23,9 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { intOption, validateOptions } from '../../vfs/search.ts'
 import type { SearchQuery } from '../../vfs/types.ts'
 import { scalarString } from '../slug_tree/rows.ts'
-import { hitLines, searchScope, targetEntries, validateQuery } from '../slug_tree/search.ts'
+import { searchScope, targetEntries, validateQuery } from '../slug_tree/search.ts'
 import { PAGE_CHUNK_BATCH_SIZE } from './client.ts'
 import { CHROMA_TREE } from './tree.ts'
-
-const ENC = new TextEncoder()
 
 export async function searchSegments(
   accessor: ChromaAccessor,
@@ -36,7 +34,7 @@ export async function searchSegments(
   index?: IndexCacheStore,
   topK = 10,
   mountPrefix = '',
-): Promise<Uint8Array> {
+): Promise<string[]> {
   validateQuery(query, topK)
   if (mountPrefix === '' && paths.length > 0) {
     mountPrefix =
@@ -46,7 +44,7 @@ export async function searchSegments(
   let where: Where | undefined
   if (paths.length > 0) {
     scopedSlugs = new Set((await targetEntries(CHROMA_TREE, accessor, paths, index)).keys())
-    if (scopedSlugs.size === 0) return new Uint8Array(0)
+    if (scopedSlugs.size === 0) return []
     where = {
       [accessor.config.slugField]: { $in: [...scopedSlugs].sort(compareCodePoints) },
     } as Where
@@ -58,7 +56,7 @@ export async function searchSegments(
     include: ['documents', 'metadatas', 'distances'],
     ...(where !== undefined ? { where } : {}),
   })
-  return queryResultToBytes(response, accessor.config.slugField, mountPrefix, scopedSlugs)
+  return renderRecords(response, accessor.config.slugField, mountPrefix, scopedSlugs)
 }
 
 interface ChromaQueryResponse {
@@ -67,12 +65,12 @@ interface ChromaQueryResponse {
   distances?: unknown
 }
 
-function queryResultToBytes(
+function renderRecords(
   response: ChromaQueryResponse,
   slugField: string,
   mountPrefix: string,
   scopedSlugs: ReadonlySet<string> | null = null,
-): Uint8Array {
+): string[] {
   const documents = firstResultList(response.documents)
   const metadatas = firstResultList(response.metadatas)
   const distances = firstResultList(response.distances)
@@ -92,8 +90,7 @@ function queryResultToBytes(
     const content = typeof document === 'string' ? document : ''
     contents.push(`${path}:${score}\n${content}`)
   }
-  if (contents.length === 0) return new Uint8Array(0)
-  return ENC.encode(contents.join('\n') + '\n')
+  return contents
 }
 
 function firstResultList(value: unknown): unknown[] {
@@ -111,7 +108,7 @@ export async function searchMany(
   validateOptions(query, ['top_k'])
   const topK = intOption(query, 'top_k', 10)
   const [targets, prefix] = await searchScope(CHROMA_TREE, accessor, paths, index)
-  return hitLines(await searchSegments(accessor, query.query, targets, index, topK, prefix))
+  return searchSegments(accessor, query.query, targets, index, topK, prefix)
 }
 
 export function searchResource(

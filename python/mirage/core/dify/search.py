@@ -8,7 +8,6 @@ from mirage.core.dify.read import segment_text
 from mirage.core.dify.tree import DIFY_TREE, SLUG_NOUN
 from mirage.core.slug_tree.rows import normalize_slug
 from mirage.core.slug_tree.search import (
-    hit_lines,
     search_scope,
     target_entries,
     validate_query,
@@ -43,7 +42,7 @@ async def search_segments(
     top_k: int = 10,
     threshold: float = 0.0,
     mount_prefix: str = "",
-) -> bytes:
+) -> list[str]:
     search_method = validate_args(query, method, top_k, threshold)
     if not mount_prefix and paths:
         mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
@@ -60,7 +59,7 @@ async def search_segments(
             accessor, paths, index
         )
         if not conditions:
-            return b""
+            return []
         retrieval_model["metadata_filtering_conditions"] = {
             "logical_operator": "or",
             "conditions": conditions,
@@ -70,12 +69,12 @@ async def search_segments(
         f"/datasets/{accessor.config.dataset_id}/retrieve",
         {"query": query, "retrieval_model": retrieval_model},
     )
-    output = records_to_bytes(
+    output = render_records(
         response_records(response.get("records")),
         accessor.config.slug_metadata_name,
         mount_prefix,
     )
-    if paths and has_name_based_target and output == b"":
+    if paths and has_name_based_target and not output:
         logger.debug(
             "Dify scoped search returned no records for name-based documents; "
             "check that Built-in Fields are enabled in Dify dataset metadata."
@@ -140,11 +139,11 @@ def response_records(value: Any) -> list[dict[str, Any]]:
     return records
 
 
-def records_to_bytes(
+def render_records(
     records: list[dict[str, Any]],
     slug_metadata_name: str,
     mount_prefix: str,
-) -> bytes:
+) -> list[str]:
     contents: list[str] = []
     for record in records:
         segment = record.get("segment")
@@ -155,9 +154,7 @@ def records_to_bytes(
             continue
         content = segment_text(segment)
         contents.append(f"{header}\n{content}")
-    if not contents:
-        return b""
-    return ("\n".join(contents) + "\n").encode()
+    return contents
 
 
 def format_record_header(
@@ -236,17 +233,15 @@ async def search_many(
     method = text_option(query, "method", "semantic")
     threshold = float_option(query, "threshold", 0.0)
     targets, prefix = await search_scope(DIFY_TREE, accessor, paths, index)
-    return hit_lines(
-        await search_segments(
-            accessor,
-            query.query,
-            targets,
-            index,
-            top_k=top_k,
-            mount_prefix=prefix,
-            method=method,
-            threshold=threshold,
-        )
+    return await search_segments(
+        accessor,
+        query.query,
+        targets,
+        index,
+        top_k=top_k,
+        mount_prefix=prefix,
+        method=method,
+        threshold=threshold,
     )
 
 

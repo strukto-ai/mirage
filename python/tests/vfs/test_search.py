@@ -75,7 +75,7 @@ async def test_builtin_semantic_adapters_delegate_one_batch(
     monkeypatch, backend, core, operation
 ):
     module = importlib.import_module(f"mirage.core.{core}.search")
-    raw = AsyncMock(return_value=b"ranked record\n")
+    raw = AsyncMock(return_value=["ranked record"])
     monkeypatch.setattr(module, operation, raw)
     options = {"top_k": 2}
     if backend != "chroma":

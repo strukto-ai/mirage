@@ -98,8 +98,8 @@ class GCalVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
@@ -107,7 +107,7 @@ class GCalVFS(BaseVFS):
     ) -> list[PathSpec] | None:
         if not whole_word or not self.config.content_search:
             return None
-        return await _files_containing(self.accessor, text, under, index)
+        return await _files_containing(self.accessor, text, [path], index)
 
     async def unlink(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

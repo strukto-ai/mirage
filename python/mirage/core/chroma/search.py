@@ -5,7 +5,6 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.chroma.client import PAGE_CHUNK_BATCH_SIZE
 from mirage.core.chroma.tree import CHROMA_TREE
 from mirage.core.slug_tree.search import (
-    hit_lines,
     search_scope,
     target_entries,
     validate_query,
@@ -24,7 +23,7 @@ async def search_segments(
     index: IndexCacheStore = NULL_INDEX,
     top_k: int = 10,
     mount_prefix: str = "",
-) -> bytes:
+) -> list[str]:
     validate_query(query, top_k)
     if not mount_prefix and paths:
         mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
@@ -39,23 +38,23 @@ async def search_segments(
             (await target_entries(CHROMA_TREE, accessor, paths, index)).keys()
         )
         if not scoped_slugs:
-            return b""
+            return []
         kwargs["where"] = {
             accessor.config.slug_field: {"$in": sorted(scoped_slugs)}
         }
     collection = await accessor.get_collection()
     response = await collection.query(**kwargs)
-    return query_result_to_bytes(
+    return render_records(
         response, accessor.config.slug_field, mount_prefix, scoped_slugs
     )
 
 
-def query_result_to_bytes(
+def render_records(
     response: dict[str, Any],
     slug_field: str,
     mount_prefix: str,
     scoped_slugs: set[str] | None = None,
-) -> bytes:
+) -> list[str]:
     documents = first_result_list(response.get("documents"))
     metadatas = first_result_list(response.get("metadatas"))
     distances = first_result_list(response.get("distances"))
@@ -79,9 +78,7 @@ def query_result_to_bytes(
             path = prefix + path
         content = "" if document is None else str(document)
         contents.append(f"{path}:{score}\n{content}")
-    if not contents:
-        return b""
-    return ("\n".join(contents) + "\n").encode()
+    return contents
 
 
 def first_result_list(value: Any) -> list[Any]:
@@ -101,15 +98,13 @@ async def search_many(
     validate_options(query, {"top_k"})
     top_k = int_option(query, "top_k", 10)
     targets, prefix = await search_scope(CHROMA_TREE, accessor, paths, index)
-    return hit_lines(
-        await search_segments(
-            accessor,
-            query.query,
-            targets,
-            index,
-            top_k=top_k,
-            mount_prefix=prefix,
-        )
+    return await search_segments(
+        accessor,
+        query.query,
+        targets,
+        index,
+        top_k=top_k,
+        mount_prefix=prefix,
     )
 
 

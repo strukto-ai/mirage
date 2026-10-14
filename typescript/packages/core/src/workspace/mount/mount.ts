@@ -60,7 +60,7 @@ import {
 } from '../../core/generic/rewrite.ts'
 import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
-import { Effect, type SearchQuery } from '../../vfs/types.ts'
+import { Effect, type ScanReason, type SearchQuery } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
@@ -169,6 +169,9 @@ function taken(name: string, kwargs: OpKwargs): void {
     read: ['offset', 'size'],
     mkdir: ['parents'],
     truncate: ['no_create'],
+    files_containing: ['whole_word', 'ignore_case'],
+    lines_containing: ['ignore_case'],
+    before_full_scan: ['files'],
     setattr: ['mode', 'uid', 'gid', 'atime', 'mtime'],
   }
   const known = Object.hasOwn(keywords, name) ? (keywords[name] ?? []) : []
@@ -748,6 +751,37 @@ export class MountEntry {
         return [(scope, _args, kw) => vfs.readTree(scope, kw.index)]
       case 'search':
         return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, kw.index)]
+      case 'files_containing':
+        return [
+          (scope, args, kw) =>
+            vfs.filesContaining(
+              scope,
+              args[0] as string,
+              { wholeWord: kw.whole_word === true, ignoreCase: kw.ignore_case === true },
+              kw.index,
+            ),
+        ]
+      case 'lines_containing':
+        return [
+          (scope, args, kw) =>
+            vfs.linesContaining(
+              scope,
+              args[0] as string,
+              { ignoreCase: kw.ignore_case === true },
+              kw.index,
+            ),
+        ]
+      case 'before_full_scan':
+        return [
+          (scope, args, kw) =>
+            vfs.beforeFullScan(
+              scope,
+              args[0] as string,
+              args[1] as ScanReason,
+              typeof kw.files === 'number' ? kw.files : null,
+              kw.index,
+            ),
+        ]
       case 'truncate':
         return [(scope, args, kw) => vfs.truncate(scope, lengthArg(args[0]), kw.no_create === true)]
       case 'setattr':

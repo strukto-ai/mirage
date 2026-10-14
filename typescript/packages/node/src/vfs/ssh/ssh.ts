@@ -41,6 +41,7 @@ import { copy as sshCopy } from '../../core/ssh/copy.ts'
 import { truncate as sshTruncate } from '../../core/ssh/truncate.ts'
 import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
 import { SCOPE_ERROR } from '../../core/ssh/constants.ts'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 const mkdirOp: MkdirOp<SSHAccessor> = (accessor, path, parents) =>
   sshMkdir(accessor, path, parents === true)
@@ -71,6 +72,14 @@ export class SSHVFS extends BaseVFS {
   override async close(): Promise<void> {
     await this.accessor.close()
     await super.close()
+  }
+
+  override storageLocation(): string {
+    // The host, its port and the root pin the files two mounts would share;
+    // the user does not, since two logins see one disk.
+    const cfg = this.config
+    const root = rstripSlash(cfg.root ?? '/')
+    return `${this.name}:${cfg.hostname ?? cfg.host}:${String(cfg.port ?? 22)}${root}`
   }
 
   override readonly readsRanges: boolean = true
@@ -104,12 +113,12 @@ export class SSHVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     _index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
-    return sshFilesContaining(this.accessor, text, under, opts.ignoreCase)
+    return sshFilesContaining(this.accessor, text, [path], opts.ignoreCase)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

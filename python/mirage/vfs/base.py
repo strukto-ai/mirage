@@ -630,9 +630,11 @@ class BaseVFS:
     ) -> list[str] | None:
         """Search the resource under ``path``; None declines, [] is none.
 
-        Results are the text records the ``search`` command prints, one
-        per line. Errors and incomplete results are raised, never
-        answered as a miss.
+        One record per hit, which the ``search`` command prints in turn:
+        a header line naming the hit's path (``path:score`` where the
+        store ranks), then the hit's text. The dispatcher drops each
+        record whose path the session hides. Errors and incomplete
+        results are raised, never answered as a miss.
 
         Args:
             path (PathSpec): the scope.
@@ -656,36 +658,38 @@ class BaseVFS:
         """
         raise enotsup(self.name, "search", paths[0] if paths else "")
 
+    @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
-        """Files under ``under`` whose content may contain ``text``.
+        """Files under ``path`` whose content may contain ``text``.
 
         grep and rg still walk, filter, order and label every file, and
         of the files ``searchable`` names read only the ones answered
         here, matched on ``vfs_path`` without case, so an extra file
         costs a read and a missing one is a wrong answer. A search that
         holds only keys names each one with
-        ``mounted_path(under[0], "/" + key)``. Return None when the
-        answer may be incomplete (an error, a truncated result, an index
-        that lags writes), and every file is read; raise to refuse the
-        command, and the error's message is what it prints.
+        ``mounted_path(path, "/" + key)``. Return None when the answer
+        may be incomplete (an error, a truncated result, an index that
+        lags writes), and every file is read; raise to refuse the
+        command, and the error's message is what it prints. The
+        dispatcher drops every file the session hides from the answer.
 
         Args:
+            path (PathSpec): a directory walked: one of grep's directory
+                operands under -r or -R, or of rg's operands or the cwd;
+                asked once per directory.
             text (str): plain text every match holds, never a pattern:
                 the pattern or each -e of grep and rg, or for a regex a
                 fixed piece of at least three characters every match
                 contains. Asked once per text; a file any answer holds
                 is read.
-            under (list[PathSpec]): the directories walked: grep's
-                directory operands under -r or -R, rg's directory
-                operands or the cwd.
             whole_word (bool): True under -w or -x with a plain-text
                 pattern, where ``text`` is a whole word of every match;
                 False otherwise, where it may sit inside a word.
@@ -695,6 +699,7 @@ class BaseVFS:
         """
         return None
 
+    @vfs_call(effect=Effect.READ, target=Target.FILE)
     async def lines_containing(
         self,
         path: PathSpec,
@@ -726,26 +731,29 @@ class BaseVFS:
         """
         return None
 
+    @vfs_call(effect=Effect.READ, target=Target.DIR)
     async def before_full_scan(
         self,
+        path: PathSpec,
         command: str,
-        under: list[PathSpec],
         reason: ScanReason,
+        *,
+        files: int | None = None,
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         """Called before grep or rg reads a file no search answered.
 
-        Once per command: before the walk when neither search can be
-        asked, else at the first file ``lines_containing`` declines after
-        ``files_containing`` did not narrow, and a refusal then stands for
-        every such file. Return to let the scan run; raise to refuse it,
-        and the error's message is what the command prints (an OSError
-        raised at a file is that file's read error).
+        Once per command and directory: before the walk when neither
+        search can be asked, else at the first file ``lines_containing``
+        declines after ``files_containing`` did not narrow, and a refusal
+        then stands for every such file. Return to let the scan run;
+        raise to refuse it, and the error's message is what the command
+        prints (an OSError raised at a file is that file's read error).
 
         Args:
+            path (PathSpec): a directory about to be walked, as
+                ``files_containing`` gets it.
             command (str): grep or rg.
-            under (list[PathSpec]): the directories about to be walked,
-                as ``files_containing`` gets them.
             reason (ScanReason): why the search cannot stand in:
                 NO_SEARCH (no search on this mount or this path),
                 NO_TEXT (-f, or no plain text every match holds),
@@ -754,6 +762,10 @@ class BaseVFS:
                 -q), LINKS (rg -L), BINARY (grep -a, rg --binary: a
                 binary file is read) or UNANSWERED (a search returned
                 None).
+            files (int | None): how many files the session sees under
+                ``path``, from the mount's ``read_tree`` with every
+                hidden file dropped; None when ``read_tree`` cannot
+                answer, and the guard counts them itself.
             index (IndexCacheStore): the mount's index.
         """
         return None

@@ -68,8 +68,8 @@ def make_search(
         scopes = default_paths(paths, opts.cwd)
         # A batch ranking answers for every scope in one call past the
         # dispatcher; where a hide or a path rule reaches the scopes each
-        # is searched at the dispatcher, which declines one the view
-        # restricts.
+        # is searched at the dispatcher, which drops the hits the session
+        # hides and declines a scope a path rule reaches.
         if capability is not None and paths_scoped(
             opts.ns, scopes, opts.mount_prefix
         ):

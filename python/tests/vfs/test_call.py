@@ -124,13 +124,16 @@ def test_only_the_posix_calls_remove_move_or_copy_a_name(effect, names):
 # one language fails the other language's test.
 BUILT_INS = {
     "append": (Effect.WRITE, Target.FILE, True),
+    "before_full_scan": (Effect.READ, Target.DIR, False),
     "copy": (Effect.COPY, Target.FILE, False),
     "create": (Effect.WRITE, Target.FILE, True),
     "dir_copy": (Effect.COPY, Target.DIR, False, True),
+    "files_containing": (Effect.READ, Target.DIR, False, True),
     "first_lines": (Effect.READ, Target.FILE, False),
     "follow": (Effect.READ, Target.FILE, False),
     "last_lines": (Effect.READ, Target.FILE, False),
     "line_count": (Effect.READ, Target.FILE, False),
+    "lines_containing": (Effect.READ, Target.FILE, False),
     "mkdir": (Effect.CREATE, Target.DIR, False),
     "pwrite": (Effect.WRITE, Target.FILE, True),
     "read": (Effect.READ, Target.FILE, False),

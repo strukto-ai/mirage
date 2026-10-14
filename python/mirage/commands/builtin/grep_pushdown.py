@@ -20,9 +20,6 @@ from mirage.commands.builtin.grep_prefilter import (
     folds_by_unicode,
     required_needles,
 )
-from mirage.commands.builtin.utils.paths import has_unresolved_glob
-from mirage.commands.builtin.utils.stream import is_stdin
-from mirage.types import PathSpec
 
 
 def classify_pattern(
@@ -148,30 +145,3 @@ def search_terms(
     if needles is None or any(len(n) < _MIN_SEARCH_LITERAL for n in needles):
         return None
     return tuple(n.decode("ascii") for n in needles), False
-
-
-def lone_operand(paths: list[PathSpec]) -> PathSpec | None:
-    """The one operand a search push-down may answer for, or None.
-
-    A push-down asks the backend a single whole-container question and
-    prints its entire answer, so it can only stand in for a line naming
-    exactly one operand; given two it answers for the first and drops
-    the rest in silence. A glob operand defers since an unexpanded
-    pattern segment would be read as a literal name, and a ``-`` operand
-    since it is the line's stdin, which no backend holds.
-
-    Args:
-        paths (list[PathSpec]): operands as parsed.
-
-    Returns:
-        PathSpec | None: the sole concrete operand, or None when the line
-            named none, named several, named stdin, or still carries a
-            glob.
-    """
-    if (
-        len(paths) != 1
-        or has_unresolved_glob(paths)
-        or any(is_stdin(p) for p in paths)
-    ):
-        return None
-    return paths[0]

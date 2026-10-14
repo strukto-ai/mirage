@@ -150,12 +150,12 @@ export class DropboxVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || !this.accessor.contentSearch) return Promise.resolve(null)
-    return dropboxFilesContaining(this.accessor, text, under)
+    return dropboxFilesContaining(this.accessor, text, [path])
   }
 
   override deltaHook(): DeltaHook {

@@ -20,6 +20,7 @@ import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { buildDeltaHook } from '../../core/hf_buckets/watch.ts'
 import {
   assertHfRepoId,
+  HF_ENDPOINT,
   type HfBucketsConfig,
   type HfBucketsConfigRedacted,
   redactHfBucketsConfig,
@@ -39,6 +40,7 @@ import { unlink as hfUnlink } from '../../core/hf_buckets/unlink.ts'
 import { rmR as hfRmR } from '../../core/hf_buckets/rm.ts'
 import { SCOPE_ERROR } from '../../core/hf_buckets/constants.ts'
 import { tree as hfTree } from '../../core/hf_buckets/readdir.ts'
+import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 export interface HfBucketsVFSState {
   type: string
@@ -134,6 +136,15 @@ export class HfBucketsVFS extends BaseVFS {
 
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
+  }
+
+  override storageLocation(): string {
+    // The endpoint, the bucket and the key prefix pin the objects two mounts
+    // would share.
+    const cfg = this.config
+    const prefix = stripSlash(cfg.keyPrefix ?? '')
+    const base = `${this.name}:${rstripSlash(cfg.endpoint ?? HF_ENDPOINT)}:${cfg.bucket}`
+    return prefix === '' ? base : `${base}/${prefix}`
   }
 
   override getState(): Promise<HfBucketsVFSState> {

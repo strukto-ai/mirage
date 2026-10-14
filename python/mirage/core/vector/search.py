@@ -45,7 +45,7 @@ async def search_rows_output(
     top_k: int,
     threshold: float,
     mount_prefix: str,
-) -> bytes:
+) -> list[str]:
     """Rank a table's rows and render each hit under its canonical path.
 
     Args:
@@ -81,7 +81,7 @@ async def search_rows_output(
         header = path if rank is None else f"{path}:{float(rank):.4f}"
         content = body.decode().rstrip("\n")
         blocks.append(f"{header}\n{content}")
-    return ("\n".join(blocks) + "\n").encode() if blocks else b""
+    return blocks
 
 
 def make_search(tree: VectorTree[A]) -> SearchOps:
@@ -105,7 +105,7 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
         threshold = float_option(query, "threshold", 0.0)
         if method != "semantic":
             raise ValueError("search: only the 'semantic' method is supported")
-        output = await search_rows_output(
+        return await search_rows_output(
             tree,
             accessor,
             query.query,
@@ -114,7 +114,6 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
             threshold=threshold,
             mount_prefix=mount_prefix_of(paths[0].virtual, paths[0].vfs_path),
         )
-        return output.decode().removesuffix("\n").split("\n") if output else []
 
     async def search(
         accessor: A,

@@ -67,13 +67,13 @@ export class TrelloVFS extends BaseVFS {
   }
 
   override filesContaining(
+    path: PathSpec,
     text: string,
-    under: PathSpec[],
     opts: { wholeWord: boolean; ignoreCase: boolean },
     index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
-    return trelloFilesContaining(this.accessor, text, under, index)
+    return trelloFilesContaining(this.accessor, text, [path], index)
   }
 
   override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {

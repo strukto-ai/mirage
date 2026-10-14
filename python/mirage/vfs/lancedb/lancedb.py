@@ -71,15 +71,15 @@ class LanceDBVFS(BaseVFS):
 
     async def files_containing(
         self,
+        path: PathSpec,
         text: str,
-        under: list[PathSpec],
         *,
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         return await _files_containing(
-            self.accessor, text, under, whole_word, ignore_case
+            self.accessor, text, [path], whole_word, ignore_case
         )
 
     async def search(

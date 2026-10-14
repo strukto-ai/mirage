@@ -68,10 +68,11 @@ def tree_walk(
     ``read_tree`` for everything under it, and every later ``readdir``
     and ``stat`` below it answers from that, so a walk costs one call. An
     answer of None, a mount without ``read_tree``, or a dispatcher that
-    declines it (a hide or a path rule below the directory) leaves the
-    walk to ``readdir`` and ``stat``, each judged on its own, as does a
-    path the answer does not hold. Both take the path first and pass
-    everything else through.
+    declines it (a path rule below the directory) leaves the walk to
+    ``readdir`` and ``stat``, each judged on its own, as does a path the
+    answer does not hold; under a hide the dispatcher answers without the
+    hidden entries. Both take the path first and pass everything else
+    through.
 
     Args:
         read_tree (ReadTree | None): the mount's ``read_tree``, bound to
