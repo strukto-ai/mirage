@@ -14,7 +14,6 @@
 
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { inMtimeWindow } from '../../utils/dates.ts'
-import type { LinkView } from '../../view/types.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
@@ -449,18 +448,6 @@ export interface BuildTreeOptions {
   nameExclude?: string | null | undefined
   orNames?: string[] | null | undefined
   empty?: boolean | null | undefined
-}
-
-// Whether a directory holds namespace symlinks directly under it.
-//
-// `-empty` asks whether a directory has entries, and a symlink is one of
-// them. No backend readdir can see a namespace link, so every emptiness
-// probe has to add this or a directory holding only a link reads as empty.
-// Shared because find asks it in two places: the start point's row and
-// each directory the walk reaches.
-export function hasLinkChildren(links: LinkView | null | undefined, virtual: string): boolean {
-  if (links === null || links === undefined) return false
-  return links.children(rstripSlash(virtual) || '/').length > 0
 }
 
 export function buildTree(opts: BuildTreeOptions): PredNode {

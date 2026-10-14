@@ -136,13 +136,6 @@ describe('the link resolver', () => {
     ])
   })
 
-  it('merges the links standing in a directory for a walker', () => {
-    const [dispatch] = recorder()
-    const resolver = new LinkResolver(LINKS, dispatch, '/data')
-    expect(resolver.children('/data/dir/')).toEqual(['/data/dir/tl.gz'])
-    expect(resolver.children('/data/w')).toEqual([])
-  })
-
   it('leads where the table resolves a link, and a loop is ELOOP', () => {
     const [dispatch] = recorder()
     expect(new LinkResolver(LINKS, dispatch, '/data').target('/data/dir/tl.gz')).toBe('/data/t.gz')

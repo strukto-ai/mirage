@@ -747,6 +747,7 @@ describe('symlinks (namespace-backed)', () => {
     }
     const f = await ws.shell('find -L /data/d -type f')
     expect(dec(f.stdout).trimEnd().split('\n')).toEqual([
+      '/data/d/dlink/inner.txt',
       '/data/d/flink',
       '/data/d/real.txt',
       '/data/d/sub/inner.txt',

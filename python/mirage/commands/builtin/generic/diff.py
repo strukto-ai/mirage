@@ -1,8 +1,9 @@
 import difflib
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
+from functools import partial
 
 from mirage.commands.builtin.diff_format import ed_script, normal_diff
 from mirage.commands.builtin.utils.formatting import full_iso_time
@@ -24,7 +25,10 @@ from mirage.commands.spec.usage import (
     missing_operand_error,
 )
 from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.posix import posix_phrase
 from mirage.errors.render import format_fs_error
+from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
@@ -33,7 +37,8 @@ from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
 from mirage.utils.quote import shell_quote
 from mirage.utils.timezone import zone_from_env
-from mirage.view.types import StatPath
+from mirage.view.namespace_view import followed_stat
+from mirage.view.types import LinkView, StatPath
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +70,8 @@ class _Walk:
     switches: str
     stat_path: StatPath | None = None
     zone: tzinfo | None = None
+    # An entry diff could not compare, reported as it goes on (exit 2).
+    trouble: list[bytes] = field(default_factory=list)
 
 
 Absent = tuple[bool, bool]
@@ -300,6 +307,32 @@ async def _entries(walk: _Walk, path: PathSpec, absent: bool) -> set[str]:
     }
 
 
+async def _entry_kind(walk: _Walk, path: PathSpec) -> FileType | None:
+    """What an entry is, as diff's stat follows it; None, and the entry
+    named in ``trouble``, for a link that leads nowhere or loops.
+
+    GNU names each such link on each side and goes on with the rest, the
+    pair left uncompared (exit 2).
+
+    Args:
+        walk (_Walk): the comparison's reads and its trouble list.
+        path (PathSpec): the entry.
+    """
+    try:
+        row = await walk.stat_fn(path)
+    except DotWalkLoop as exc:
+        walk.trouble.append(
+            f"diff: {_name(path)}: {fs_strerror(exc)}\n".encode()
+        )
+        return None
+    if row.type == FileType.SYMLINK:
+        walk.trouble.append(
+            f"diff: {_name(path)}: {posix_phrase(FsCondition.ENOENT)}\n".encode()
+        )
+        return None
+    return row.type
+
+
 async def _diff_dirs(
     dir_a: PathSpec,
     dir_b: PathSpec,
@@ -337,12 +370,12 @@ async def _diff_dirs(
             continue
         child_a = _child_spec(dir_a, name)
         child_b = _child_spec(dir_b, name)
-        a_dir = (
-            in_a and (await walk.stat_fn(child_a)).type == FileType.DIRECTORY
-        )
-        b_dir = (
-            in_b and (await walk.stat_fn(child_b)).type == FileType.DIRECTORY
-        )
+        kind_a = await _entry_kind(walk, child_a) if in_a else None
+        kind_b = await _entry_kind(walk, child_b) if in_b else None
+        if (in_a and kind_a is None) or (in_b and kind_b is None):
+            continue
+        a_dir = kind_a == FileType.DIRECTORY
+        b_dir = kind_b == FileType.DIRECTORY
         gone = (not in_a, not in_b)
         if (a_dir or not in_a) and (b_dir or not in_b):
             body, changed = await _diff_dirs(child_a, child_b, walk, gone)
@@ -415,6 +448,7 @@ async def diff(
     stat_path: StatPath | None = None,
     zone: tzinfo | None = None,
     dispatch: DispatchFn | None = None,
+    links: LinkView | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
@@ -432,7 +466,13 @@ async def diff(
         walk = _Walk(
             read_bytes=read_bytes,
             readdir_fn=readdir_fn,
-            stat_fn=stat_fn,
+            # diff compares what each link leads to (its default
+            # --dereference), the operands' own taken there at dispatch.
+            stat_fn=(
+                partial(followed_stat, stat_fn, links)
+                if links is not None
+                else stat_fn
+            ),
             flags=flags,
             excluded=await _excluded_patterns(flags, read_bytes),
             switches="".join(f" {shell_quote(w)}" for w in switch_words(argv)),
@@ -481,6 +521,8 @@ async def diff(
             exit_code=2,
             stderr=format_fs_error("diff", exc, [*paths, *flags.exclude_from]),
         )
+    if walk.trouble:
+        return output, IOResult(exit_code=2, stderr=b"".join(walk.trouble))
     return output, IOResult(exit_code=1 if differ else 0)
 
 
@@ -546,4 +588,5 @@ async def diff_generic(
         stat_path=opts.stat_path,
         zone=zone_from_env(opts.env),
         dispatch=opts.dispatch,
+        links=opts.ns.links if opts.ns is not None else None,
     )

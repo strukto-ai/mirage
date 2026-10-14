@@ -135,6 +135,40 @@
         "stdout": "d/a\nd/lf\n\nd/ld:\nf\n\nd/sub:\nb\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "sym_glob_walks_through_a_directory_link",
+      "seq": 17000005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw5/d/sub /data/syw5/o && printf 'hello\\n' > /data/syw5/o/f && cd /data/syw5 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { ls d/*/f && cat d/l*/f && echo d/*/f; }); rm -r /data/syw5",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/ld/f\nhello\nd/ld/f\n",
+        "stderr": ""
+      }
     }
   ]
 }

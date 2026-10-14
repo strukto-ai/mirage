@@ -23,7 +23,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
 from mirage.vfs.types import DuEntries
 from mirage.view.namespace_view import paths_scoped
-from mirage.view.types import LinkView, MountView, NamespaceView, StatPath
+from mirage.view.types import MountView, NamespaceView, StatPath
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,6 @@ async def du_operands(
     resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     has_content: Callable[[PathSpec], Awaitable[bool]] | None = None,
-    links: LinkView | None = None,
     stat_path: StatPath | None = None,
 ) -> tuple[list[PathSpec], list[tuple[str, str]]]:
     """Split the operands into the ones du can read and the ones it cannot.
@@ -213,9 +212,6 @@ async def du_operands(
         has_content (Callable[[PathSpec], Awaitable[bool]] | None):
             asked only when stat failed, to
             tell an implicit directory from an absent path.
-        links (LinkView | None): the namespace's symlink facts. A link
-            has no backend inode, so it fails stat while still being a
-            perfectly readable operand.
         stat_path (StatPath | None): dispatcher-backed stat, None when du
             runs outside a workspace and there is no namespace to ask.
 
@@ -235,9 +231,6 @@ async def du_operands(
             (p.raw_path, posix_phrase(FsCondition.ENOENT)) for p in targets
         ]
     for path in resolved:
-        if links is not None and links.stat_at(path.virtual) is not None:
-            present.append(path)
-            continue
         try:
             await stat(path)
             stattable = True
@@ -529,57 +522,18 @@ def drop_shadowed(
     return kept
 
 
-def link_leaves(links: LinkView | None, root: str) -> list[tuple[str, int]]:
-    """Symlinks under an operand as du leaf entries.
-
-    Links live in the namespace, so neither a mount's ``read_tree`` nor
-    a readdir walk reports them. Merging here, above the walk, is what
-    keeps a mount with ``read_tree`` and one without from disagreeing.
-
-    Deliberate divergence: GNU sizes a symlink at 0 because it counts
-    disk blocks and a short target is stored inside the inode. mirage
-    counts bytes throughout (an object store has no block size), so a
-    link counts as its target string's length, the same number ``ls -l``
-    prints for it.
-
-    Args:
-        links (LinkView | None): the namespace's symlink facts.
-        root (str): the operand's absolute virtual path.
-    """
-    if links is None:
-        return []
-    return [(path, st.size or 0) for path, st in links.subtree(root)]
-
-
 async def _du_one(
     path: PathSpec,
     compute_size: ComputeSize,
     compute_entries: ComputeEntries,
     flags: DuFlags,
-    links: LinkView | None = None,
     mounts: MountView | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
     ns: NamespaceView | None = None,
 ) -> tuple[list[str], int, SizedRun | None]:
     label = path.raw_path
     vis = ns.visibility if ns is not None else None
-
-    link_row = links.stat_at(path.virtual) if links is not None else None
-    if link_row is not None:
-        # GNU du does not follow a symlink operand without -L; the
-        # operand is the link, and it accounts for the link alone.
-        size = link_row.size or 0
-        return (
-            [_line(size, flags.h, label)],
-            size,
-            SizedRun(((path.virtual, size),)),
-        )
-
     roots = mounts.descendants(path.virtual) if mounts is not None else []
-    leaves = link_leaves(links, path.virtual)
-    if roots:
-        leaves = drop_shadowed(leaves, roots)
-    link_total = sum(size for _, size in leaves)
 
     if flags.s and not flags.S and not roots and not paths_scoped(ns, [path]):
         # The one-total fast path trusts the backend's own sum, which a
@@ -588,11 +542,10 @@ async def _du_one(
         # that session takes the entries walk below instead; a path
         # rule likewise, since the walk is where a refused directory is
         # reported. Per operand: a hide elsewhere keeps this total.
-        total = await compute_size(path) + link_total
+        total = await compute_size(path)
         return [_line(total, flags.h, label)], total, None
 
     entries, total = await compute_entries(path)
-    total += link_total
     root_key = _norm(path.virtual)
     under = root_key.rstrip("/") + "/"
     dirs = [
@@ -607,7 +560,7 @@ async def _du_one(
     walked = directories is not None and any(
         _norm(d) == root_key for d in directories()
     )
-    if not entries and not leaves and not dirs and not walked:
+    if not entries and not dirs and not walked:
         # A backend that can only produce a size degrades to one total;
         # it cannot enumerate, so shadowed keys cannot be excluded either.
         # A walk that opened the operand already said all it can: an
@@ -620,7 +573,7 @@ async def _du_one(
             SizedRun() if total == 0 else None,
         )
 
-    virtual = to_virtual(entries, path) + leaves
+    virtual = to_virtual(entries, path)
     visible = [
         (leaf, size) for leaf, size in virtual if path_visible(vis, leaf)
     ]
@@ -672,11 +625,11 @@ async def du(
     flags: DuFlags,
     missing: Sequence[tuple[str, str]] = (),
     truncated: Callable[[], bool] | None = None,
-    links: LinkView | None = None,
     mounts: MountView | None = None,
     unreadable: Callable[[], Sequence[str]] | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
     ns: NamespaceView | None = None,
+    inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
 ) -> DuOutput:
     """Render ``du`` output for a list of operands.
 
@@ -693,8 +646,6 @@ async def du(
             typed. GNU reports each and exits 1 but still prints the rest.
         truncated (Callable[[], bool] | None): read after the walks to ask
             whether any of them hit its entry cap.
-        links (LinkView | None): the namespace's symlink facts, merged
-            into every operand's leaf list.
         mounts (MountView | None): where the mount boundaries are; leaves
             under a descendant mount's root are shadowed and dropped from
             every row and total (see ``drop_shadowed``).
@@ -710,6 +661,10 @@ async def du(
         ns (NamespaceView | None): the command's namespace view: the
             session's hides drop leaves from every row and total, and
             a judged subtree skips the one-total fast path.
+        inaccessible (Callable[[], Sequence[tuple[str, str | None]]] |
+            None): read after the walks for each link ``-L`` could not
+            follow, with the strerror GNU adds for a chain that loops
+            (it names a dangling one alone); exits 1.
     """
     lines: list[str] = []
     totals: list[int] = []
@@ -720,7 +675,6 @@ async def du(
             compute_size,
             compute_entries,
             flags,
-            links,
             mounts,
             directories,
             ns,
@@ -748,6 +702,13 @@ async def du(
         notes.append(
             f"du: cannot read directory "
             f"'{_respell_under(virtual, paths)}': Permission denied"
+        )
+        exit_code = 1
+    for virtual, detail in inaccessible() if inaccessible is not None else ():
+        shown = _respell_under(virtual, paths)
+        notes.append(
+            f"du: cannot access '{shown}'"
+            + (f": {detail}" if detail is not None else "")
         )
         exit_code = 1
     if truncated is not None and truncated():
@@ -782,6 +743,7 @@ async def du_generic(
     truncated: Callable[[], bool] | None = None,
     unreadable: Callable[[], Sequence[str]] | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
+    inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
 ) -> tuple[bytes, IOResult]:
     """Run one whole ``du`` invocation, from raw flags to rendered bytes.
 
@@ -790,12 +752,9 @@ async def du_generic(
     unreadable, then render. Keeping them here means a backend wrapper is
     wiring only, and the three steps cannot drift apart per backend.
 
-    -L dereferences: the operand was already rewritten at dispatch, and
-    withholding the link table stops the links below it from being
-    counted as entries in their own right, which is what GNU does (it
-    follows each one and finds the target already accounted for). A link
-    pointing outside the operand's own subtree is undercounted; GNU would
-    traverse into it. The last of -L and -P decides, as it does in GNU.
+    The walks meet links as entries of their own (their size is the
+    target string's length); under -L they follow them instead, which the
+    operand's own was already, at dispatch.
 
     Args:
         paths (list[PathSpec]): The operands as parsed, possibly empty.
@@ -812,15 +771,13 @@ async def du_generic(
             the walk could not open, read after the walks.
         directories (Callable[[], Sequence[str]] | None): Every directory
             the walk met, read after each operand's walk.
+        inaccessible (Callable[[], Sequence[tuple[str, str | None]]] |
+            None): The links -L could not follow, read after the walks.
 
     Raises:
         UsageError: on a bad depth or a conflicting flag combination.
     """
     flags = parse_flags(opts)
-    fl = FlagView(opts.flags, spec=SPECS["du"])
-    links = None
-    if opts.ns is not None and fl.typed_order("L", "P")[-1:] != ["L"]:
-        links = opts.ns.links
     present, missing = await du_operands(
         paths,
         opts.cwd,
@@ -831,7 +788,6 @@ async def du_generic(
             opts.ns.visibility if opts.ns is not None else None,
             compute_entries,
         ),
-        links=links,
         stat_path=opts.stat_path,
     )
     out = await du(
@@ -843,9 +799,9 @@ async def du_generic(
         truncated=truncated,
         unreadable=unreadable,
         directories=directories,
-        links=links,
         mounts=opts.ns.mounts if opts.ns is not None else None,
         ns=opts.ns,
+        inaccessible=inaccessible,
     )
     return out.stdout, IOResult(
         stderr=out.stderr, exit_code=out.exit_code, sized_runs=out.runs

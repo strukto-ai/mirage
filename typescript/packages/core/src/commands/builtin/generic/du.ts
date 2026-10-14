@@ -29,7 +29,7 @@ import { formatRecords } from '../utils/output.ts'
 import { scaledSize } from '../utils/formatting.ts'
 import { quoteText } from '../../quote.ts'
 import { INTMAX } from '../constants.ts'
-import type { LinkView, MountView, NamespaceView, StatPath } from '../../../view/types.ts'
+import type { MountView, NamespaceView, StatPath } from '../../../view/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import type { DuEntries } from '../../../vfs/types.ts'
@@ -242,7 +242,6 @@ async function duOperands(
   stat: (p: PathSpec) => Promise<unknown>,
   hasContent?: (p: PathSpec) => Promise<boolean>,
   mountPrefix?: string,
-  links: LinkView | null = null,
   statPath: StatPath | null = null,
 ): Promise<{ present: PathSpec[]; missing: [string, string][] }> {
   const targets = paths.length > 0 ? paths : [cwdSpec(cwd, mountPrefix)]
@@ -255,12 +254,6 @@ async function duOperands(
     missing.push(...targets.map((p): [string, string] => [p.rawPath, posixPhrase('ENOENT')]))
   }
   for (const path of resolved) {
-    // A link has no backend inode, so it fails stat while still being a
-    // perfectly readable operand.
-    if (links?.statAt(path.virtual) != null) {
-      present.push(path)
-      continue
-    }
     // A missing path is the diagnostic, not an error to propagate. Any
     // other backend failure (403, a driver fault) is real and must surface
     // rather than being renamed "No such file or directory".
@@ -459,59 +452,30 @@ function dropShadowed(entries: [string, number][], roots: string[]): [string, nu
   })
 }
 
-// Symlinks under an operand as du leaf entries.
-//
-// Links live in the namespace, so neither a mount's readTree nor a readdir
-// walk reports them. Merging here, above the walk, is what keeps a mount
-// with readTree and one without from disagreeing.
-//
-// Deliberate divergence: GNU sizes a symlink at 0 because it counts
-// disk blocks and a short target is stored inside the inode. mirage
-// counts bytes throughout (an object store has no block size), so a
-// link counts as its target string's length, the same number `ls -l`
-// prints for it.
-function linkLeaves(links: LinkView | null, root: string): [string, number][] {
-  if (links === null) return []
-  return links.subtree(root).map(([path, st]): [string, number] => [path, st.size ?? 0])
-}
-
 async function duOne(
   path: PathSpec,
   computeSize: ComputeSize,
   computeEntries: ComputeEntries,
   flags: DuFlags,
-  links: LinkView | null,
   mounts: MountView | null,
   directories?: () => readonly string[],
   ns?: NamespaceView,
 ): Promise<[string[], number, SizedRun | null]> {
   const label = path.rawPath
   const vis = ns?.visibility
-
-  const linkRow = links?.statAt(path.virtual) ?? null
-  if (linkRow !== null) {
-    // GNU du does not follow a symlink operand without -L; the operand
-    // is the link, and it accounts for the link alone.
-    const size = linkRow.size ?? 0
-    return [[line(size, flags.h, label)], size, { leaves: [[path.virtual, size]], directories: [] }]
-  }
-
   const roots = mounts?.descendants(path.virtual) ?? []
-  let leaves = linkLeaves(links, path.virtual)
-  if (roots.length > 0) leaves = dropShadowed(leaves, roots)
-  const linkTotal = leaves.reduce((acc, [, size]) => acc + size, 0)
 
   if (flags.s && !flags.S && roots.length === 0 && !pathsScoped(ns, [path])) {
     // The one-total fast path trusts the backend's own sum, which a
     // session hiding paths cannot: hidden leaves would be counted into
     // a total their names never justify, so that session takes the
     // entries walk below instead.
-    const total = (await computeSize(path)) + linkTotal
+    const total = await computeSize(path)
     return [[line(total, flags.h, label)], total, null]
   }
 
   const [raw, rawTotal] = await computeEntries(path)
-  let total = rawTotal + linkTotal
+  let total = rawTotal
   const rootKey = norm(path.virtual)
   const under = rootKey.replace(/\/$/, '') + '/'
   const dirs = (directories?.() ?? []).filter(
@@ -521,7 +485,7 @@ async function duOne(
       !roots.some((r) => norm(d) === r || norm(d).startsWith(r + '/')),
   )
   const walked = (directories?.() ?? []).some((d) => norm(d) === rootKey)
-  if (raw.length === 0 && leaves.length === 0 && dirs.length === 0 && !walked) {
+  if (raw.length === 0 && dirs.length === 0 && !walked) {
     // A backend that can only produce a size degrades to one total; it
     // cannot enumerate, so shadowed keys cannot be excluded either. A
     // walk that opened the operand already said all it can: an empty
@@ -535,7 +499,7 @@ async function duOne(
     ]
   }
 
-  let entries = toVirtual(raw, path).concat(leaves)
+  let entries = toVirtual(raw, path)
   const visible = entries.filter(([leaf]) => pathVisible(vis, leaf))
   if (visible.length !== entries.length) {
     // Same honesty rule as shadowed leaves: the total is the sum of
@@ -595,7 +559,9 @@ async function duOne(
  * as the operand was typed, and follows the unreadable-operand lines since
  * those are known before any walk. `directories` is read after each operand's
  * walk for every directory it met, so one no file points at (empty, or
- * refused) still gets GNU's row.
+ * refused) still gets GNU's row. `inaccessible` is read after the walks for
+ * each link `-L` could not follow, with the strerror GNU adds for a chain
+ * that loops (it names a dangling one alone); exits 1.
  */
 export async function du(
   paths: PathSpec[],
@@ -604,11 +570,11 @@ export async function du(
   computeEntries: ComputeEntries,
   missing: [string, string][] = [],
   truncated?: () => boolean,
-  links: LinkView | null = null,
   mounts: MountView | null = null,
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
   ns?: NamespaceView,
+  inaccessible?: () => readonly (readonly [string, string | null])[],
 ): Promise<DuOutput> {
   const lines: string[] = []
   let grand = 0
@@ -619,7 +585,6 @@ export async function du(
       computeSize,
       computeEntries,
       flags,
-      links,
       mounts,
       directories,
       ns,
@@ -644,6 +609,11 @@ export async function du(
     notes.push(`du: cannot read directory '${respellUnder(virtual, paths)}': Permission denied`)
     exitCode = 1
   }
+  for (const [virtual, detail] of inaccessible?.() ?? []) {
+    const shown = respellUnder(virtual, paths)
+    notes.push(`du: cannot access '${shown}'` + (detail === null ? '' : `: ${detail}`))
+    exitCode = 1
+  }
   if (truncated?.() === true) {
     notes.push(TRUNCATED_NOTE)
     exitCode = 1
@@ -661,12 +631,9 @@ export async function du(
  * then render. Keeping them here means a backend wrapper is wiring only, and
  * the three steps cannot drift apart per backend.
  *
- * -L dereferences: the operand was already rewritten at dispatch, and
- * withholding the link table stops the links below it from being counted as
- * entries in their own right, which is what GNU does (it follows each one and
- * finds the target already accounted for). A link pointing outside the
- * operand's own subtree is undercounted; GNU would traverse into it. The last
- * of -L and -P decides, as it does in GNU du.
+ * The walks meet links as entries of their own (their size is the target
+ * string's length); under -L they follow them instead, which the operand's
+ * own was already, at dispatch.
  */
 export async function duGeneric(
   paths: PathSpec[],
@@ -678,12 +645,9 @@ export async function duGeneric(
   truncated?: () => boolean,
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
+  inaccessible?: () => readonly (readonly [string, string | null])[],
 ): Promise<[Uint8Array, IOResult]> {
   const flags = parseFlags(opts)
-  const links =
-    new FlagView(opts.flags, specOf('du')).typedOrder('L', 'P').at(-1) === 'L'
-      ? null
-      : (opts.ns?.links ?? null)
   const { present, missing } = await duOperands(
     paths,
     opts.cwd,
@@ -691,7 +655,6 @@ export async function duGeneric(
     stat,
     (p) => duHasContent(opts.ns?.visibility, computeEntries, p),
     opts.mountPrefix,
-    links,
     opts.statPath ?? null,
   )
   const out = await du(
@@ -701,11 +664,11 @@ export async function duGeneric(
     computeEntries,
     missing,
     truncated,
-    links,
     opts.ns?.mounts ?? null,
     unreadable,
     directories,
     opts.ns,
+    inaccessible,
   )
   return [
     out.stdout,

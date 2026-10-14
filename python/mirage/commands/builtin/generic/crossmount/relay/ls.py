@@ -28,12 +28,11 @@ from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import gnu_basename
-from mirage.view.types import LinkView, NamespaceView, SessionView
+from mirage.view.types import NamespaceView, SessionView
 
 
 async def relayed_readdir(
     dispatch: DispatchFn,
-    links: LinkView | None,
     path: PathSpec,
     index: IndexCacheStore | None,
 ) -> list[str]:
@@ -41,28 +40,23 @@ async def relayed_readdir(
 
     The index argument is accepted and dropped. A cache index belongs to
     one mount, so the caller's index cannot answer for the mount this
-    path routes to; the relayed op consults its own mount's index.
-
-    The namespace's links are left out, as a backend's listing never
-    holds one: ls merges them from ``links`` and renders them unfollowed,
-    where a listed one would be statted through to its target.
+    path routes to; the relayed op consults its own mount's index. The
+    dispatcher's listing names the links among the entries, as a mount's
+    table does once its links are stamped on.
 
     Args:
         dispatch (DispatchFn): Workspace operation dispatcher.
-        links (LinkView | None): The namespace's symlinks.
         path (PathSpec): Directory addressed by its full virtual path.
         index (IndexCacheStore | None): Unused, see above.
     """
     names: list[str] = await dispatched_call(dispatch, "readdir", path)
-    if links is None:
-        return names
-    return [n for n in names if links.stat_at(n.rstrip("/")) is None]
+    return names
 
 
 async def relayed_stat(
     dispatch: DispatchFn, path: PathSpec, index: IndexCacheStore | None
 ) -> FileStat:
-    """Stat one entry on the mount that owns it, named by its own path.
+    """lstat one entry on the mount that owns it, named by its own path.
 
     readdir supplies the parent's names and stat supplies the target's
     facts, and relaying lets the two land on different mounts: statting
@@ -77,7 +71,9 @@ async def relayed_stat(
         path (PathSpec): Entry addressed by its full virtual path.
         index (IndexCacheStore | None): Unused, see ``relayed_readdir``.
     """
-    info: FileStat = await dispatched_call(dispatch, "stat", path)
+    info: FileStat = await dispatched_call(
+        dispatch, "stat", path, nofollow=True
+    )
     name = gnu_basename(path.virtual)
     if name in ("", "/") or info.name == name:
         return info
@@ -125,7 +121,7 @@ async def run_ls(
     links = ns.links if ns is not None else None
     return await generic_ls(
         flat_scopes(scopes),
-        readdir=p(relayed_readdir, dispatch, links),
+        readdir=p(relayed_readdir, dispatch),
         stat=stat_fn,
         links=links,
         child_mounts=(ns.child_mounts if ns is not None else None),

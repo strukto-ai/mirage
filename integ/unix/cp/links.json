@@ -387,6 +387,102 @@
         "P",
         "d"
       ]
+    },
+    {
+      "id": "cp_writes_through_a_link_in_its_destination",
+      "seq": 17000018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw18/d/sub /data/syw18/o && cd /data/syw18 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp s/a t; echo rc=$?; cat o/x; echo; readlink t/a; }); rm -r /data/syw18",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nnew\n../o/x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_b_moves_a_link_in_its_destination_aside",
+      "seq": 17000019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw19/d/sub /data/syw19/o && cd /data/syw19 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp -b s/a t; echo rc=$?; cat o/x; echo; readlink t/a~; cat t/a; }); rm -r /data/syw19",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nold\n../o/x\nnew",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_bv_onto_a_link_moves_the_link_aside",
+      "seq": 17000020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/syw20/d/sub /data/syw20/o && cd /data/syw20 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp -bv s/a t/a; echo rc=$?; cat o/x; echo; readlink t/a~; cat t/a; }); rm -r /data/syw20",
+      "expect": {
+        "exit": 0,
+        "stdout": "'s/a' -> 't/a' (backup: 't/a~')\nrc=0\nold\n../o/x\nnew",
+        "stderr": ""
+      }
     }
   ]
 }

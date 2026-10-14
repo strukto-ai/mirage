@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from functools import partial
 
 from mirage.cache.context import active_cache_manager
 from mirage.cache.index import IndexCacheStore
@@ -12,7 +13,8 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
-from mirage.utils.stat_view import DIR_SIZE, content_size
+from mirage.utils.stat_view import DIR_SIZE
+from mirage.view.namespace_view import followed_stat
 from mirage.view.types import LinkView
 
 
@@ -65,13 +67,10 @@ async def _is_empty_entry(
     is_dir: bool,
     prefix: str,
     index: IndexCacheStore | None,
-    links: LinkView | None = None,
     unstatted: dict[str, Exception] | None = None,
     unreadable: list[str] | None = None,
 ) -> bool:
     if is_dir:
-        if find_eval.has_link_children(links, path):
-            return False
         spec = PathSpec(
             virtual=path,
             directory=path,
@@ -104,6 +103,9 @@ async def _walk_collect(
     acc: list[tuple[str, str]],
     unreadable: list[str] | None = None,
     unstatted: dict[str, Exception] | None = None,
+    real: Callable[[str], str] | None = None,
+    chain: tuple[tuple[str, str], ...] = (),
+    loops: list[tuple[str, str]] | None = None,
 ) -> None:
     if maxdepth is not None and depth > maxdepth:
         return
@@ -139,119 +141,39 @@ async def _walk_collect(
             is_dir = st is not None and st.type == FileType.DIRECTORY
             kind = printf_kind(st)
         acc.append((trimmed, kind))
-        if is_dir:
-            child_spec = PathSpec(
-                virtual=trimmed,
-                directory=trimmed,
-                resolved=False,
-                vfs_path=mount_key(trimmed, prefix),
-            )
-            await _walk_collect(
-                readdir,
-                stat,
-                child_spec,
-                index,
-                maxdepth,
-                depth + 1,
-                acc,
-                unreadable,
-                unstatted,
-            )
-
-
-async def link_results(
-    links: LinkView | None,
-    search_root: str,
-    prefix: str,
-    search_key: str,
-    args: find_eval.FindArgs,
-    tree: find_eval.PredNode,
-    follow: bool = False,
-) -> list[str]:
-    """Namespace symlinks under the search root that match the expression.
-
-    Symlinks live in the namespace, not in any backend, so neither a
-    readdir walk nor a backend`s native find op can see them. Both find
-    paths merge them through here so one implementation decides what a
-    link matches.
-
-    GNU find without -L reports the link itself and never walks through
-    it, so a link is kind ``l`` (never ``f``/``d``). Its size is the
-    target string`s length, which is what ``-size`` compares, and it
-    carries the link`s own mtime.
-
-    Under ``-L`` a link is classified by what it points at instead: a
-    link to a file tests as ``f``, a link to a directory as ``d``, and
-    only a dangling link stays ``l`` (GNU reports the link itself when
-    the target cannot be stat'd). ``-size`` and ``-mtime`` then compare
-    the target's stat, since that is the file being reported.
-
-    Args:
-        links (LinkView | None): the namespace's symlink facts.
-        search_root (str): absolute virtual path of the search root.
-        prefix (str): mount prefix the backend keys are relative to.
-        search_key (str): mount-relative key of the search root.
-        args (FindArgs): parsed find expression.
-        tree (PredNode): the prefix-stamped predicate tree.
-        follow (bool): whether -L asked for the target's identity.
-    """
-    if links is None:
-        return []
-    out: list[str] = []
-    # GNU find's default is -P: a start point that is itself a symlink is
-    # reported as the link and never walked through. The backend cannot
-    # see it at all, so the subtree scan below (which only covers
-    # entries *under* the root) would miss it.
-    entries = list(links.subtree(search_root))
-    own = links.stat_at(search_root)
-    if own is not None:
-        entries.append((search_root, own))
-    for path, st in entries:
-        kind = "l"
-        if follow:
-            target = await links.target_stat(path)
-            if target is not None:
-                kind = printf_kind(target)
-                st = target
-        key = (
-            path[len(prefix) :] if prefix and path.startswith(prefix) else path
+        if not is_dir:
+            continue
+        below = chain
+        if real is not None:
+            # Under -L a directory is the one it resolves to, and one
+            # already open above is GNU's file system loop, never entered.
+            here = real(trimmed)
+            ancestor = next((v for v, r in chain if r == here), None)
+            if ancestor is not None:
+                if loops is not None:
+                    loops.append((trimmed, ancestor))
+                continue
+            below = (*chain, (trimmed, here))
+        child_spec = PathSpec(
+            virtual=trimmed,
+            directory=trimmed,
+            resolved=False,
+            vfs_path=mount_key(trimmed, prefix),
         )
-        rel = key.strip("/")
-        if search_key:
-            depth = (
-                0
-                if rel == search_key
-                else rel.count("/") - search_key.count("/")
-            )
-        else:
-            depth = 0 if rel == "" else rel.count("/") + 1
-        if args.maxdepth is not None and depth > args.maxdepth:
-            continue
-        entry = find_eval.FindEntry(
-            key=key,
-            name=path.rsplit("/", 1)[-1],
-            kind=kind,
-            depth=depth,
-            is_empty=None,
-            mtime=modified_ts(st.modified),
+        await _walk_collect(
+            readdir,
+            stat,
+            child_spec,
+            index,
+            maxdepth,
+            depth + 1,
+            acc,
+            unreadable,
+            unstatted,
+            real,
+            below,
+            loops,
         )
-        if not find_eval.keep(entry, tree, args.mindepth):
-            continue
-        size = content_size(st)
-        if args.min_size is not None and size < args.min_size:
-            continue
-        if args.max_size is not None and size > args.max_size:
-            continue
-        if args.mtime_min is not None or args.mtime_max is not None:
-            ts = modified_ts(st.modified)
-            if ts is None:
-                continue
-            if args.mtime_min is not None and ts < args.mtime_min:
-                continue
-            if args.mtime_max is not None and ts > args.mtime_max:
-                continue
-        out.append(path)
-    return out
 
 
 async def walk_find(
@@ -268,6 +190,7 @@ async def walk_find(
     unreadable: list[str] | None = None,
     unstatted: dict[str, Exception] | None = None,
     root: FileStat | None = None,
+    loops: list[tuple[str, str]] | None = None,
 ) -> list[str]:
     """Walk readdir/stat under one start point and match every entry.
 
@@ -278,6 +201,13 @@ async def walk_find(
     that fails every test only its stat could answer. It is never
     statted again. A caller that passes neither gets the failure
     propagated instead.
+
+    The table's stat and readdir see the namespace's links, so a link is
+    an entry like any other, kind ``l``. Under ``-L`` an entry is what it
+    leads to instead: a link to a directory is walked, a dangling one
+    stays ``l`` (GNU reports the link when its target cannot be statted),
+    one whose chain loops is an error, and a directory reached again
+    lands in ``loops`` with the one above it, never entered.
 
     Args:
         search_path (PathSpec): the start point.
@@ -293,7 +223,11 @@ async def walk_find(
         root (FileStat | None): the start point's stat when the caller
             has it, which is how a directory only a mount below it
             makes still reports itself; None stats it.
+        loops (list[tuple[str, str]] | None): collects, under ``-L``, each
+            directory reached again and the one above it it repeats.
     """
+    if follow and links is not None:
+        stat = partial(followed_stat, stat, links)
     collected: list[tuple[str, str]] = []
     prefix = mount_prefix_of(search_path.virtual, search_path.vfs_path)
     search_key = search_path.mount_path.strip("/")
@@ -326,7 +260,6 @@ async def walk_find(
                     True,
                     prefix,
                     cache,
-                    links,
                     unstatted,
                     unreadable,
                 )
@@ -361,6 +294,7 @@ async def walk_find(
     # readdir on it is either an error the walk would have to swallow
     # (Box answers ENOTDIR) or a wasted round trip everywhere else.
     if root_stat is None or root_stat.type == FileType.DIRECTORY:
+        real = links.resolve if follow and links is not None else None
         await _walk_collect(
             read_directory,
             stat,
@@ -371,6 +305,9 @@ async def walk_find(
             collected,
             unreadable,
             unstatted,
+            real,
+            ((root_path, real(root_path)),) if real is not None else (),
+            loops,
         )
     tree = find_eval.bind_tree(
         find_eval.args_to_tree(args),
@@ -408,7 +345,6 @@ async def walk_find(
                 is_dir,
                 prefix,
                 index,
-                links,
                 unstatted,
                 unreadable,
             )
@@ -453,12 +389,5 @@ async def walk_find(
             if args.mtime_max is not None and ts > args.mtime_max:
                 continue
         results.append(p)
-    results.extend(
-        r
-        for r in await link_results(
-            links, root_path, prefix, search_key, args, tree, follow=follow
-        )
-        if path_visible(vis, r)
-    )
     find_eval.settle_prunes(tree, learned)
     return sorted(find_eval.drop_pruned(results, tree, prefix))

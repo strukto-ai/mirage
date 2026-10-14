@@ -22,11 +22,12 @@ import { byteView, utf8Locale } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { bomOf } from '../../../utils/encoding.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
-import { globPrefixMatch } from '../../../utils/path.ts'
+import { CycleError, globPrefixMatch } from '../../../utils/path.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandOpts, CommandIO } from '../../config.ts'
+import type { LinkView } from '../../../view/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -237,6 +238,21 @@ async function directories<A extends Accessor>(
 
 // Let each walked directory's mount refuse a walk that reads every file; the
 // dispatcher passes over a path that is not a directory.
+/**
+ * Whether a link leads `virtual` elsewhere, at its name or above it. A mount's
+ * search sees only what its backend holds, never a link, so it can judge no
+ * such path. Mirrors Python's `_linked`.
+ */
+function linked(links: LinkView | undefined, virtual: string): boolean {
+  if (links === undefined) return false
+  try {
+    return links.resolve(virtual) !== virtual
+  } catch (err) {
+    if (err instanceof CycleError) return true
+    throw err
+  }
+}
+
 async function fullScan(
   dispatch: CommandOpts['dispatch'],
   dirs: PathSpec[],
@@ -253,7 +269,8 @@ async function fullScan(
  * is worth reading. An operand
  * named on the line is never ruled out by a search asked about directories,
  * nor is a path pinned to a revision, since a search sees the current content,
- * nor a file the read cache holds, which a read serves as it was cached.
+ * nor a file the read cache holds, which a read serves as it was cached, nor a
+ * path a link leads elsewhere, which the mount's search never sees.
  * Both are asked through the dispatcher, which drops what the session hides
  * from a `filesContaining` answer, judges `linesContaining` as a read of its
  * file, and answers null where a path rule or a preVfs policy reaches below a
@@ -275,6 +292,7 @@ export async function searchReads<A extends Accessor>(
   const files = io.filesContaining
   const searchable = io.searchable ?? null
   const lines = io.linesContaining
+  const links = opts.ns?.links
   const fl = new FlagView(opts.flags, specOf(name))
   if (paths.length === 0 || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
     return stream
@@ -341,6 +359,7 @@ export async function searchReads<A extends Accessor>(
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {
     const manager = activeCacheManager()
     if (manager !== null && (await manager.isCached(path))) return null
+    if (linked(links, path.virtual)) return null
     if (
       found !== null &&
       !named.has(path.virtual) &&

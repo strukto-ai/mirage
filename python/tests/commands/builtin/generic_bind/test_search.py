@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from mirage.cache.index import NULL_INDEX
+from mirage.types import MountMode
 from mirage.utils.key_prefix import mounted_path
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -134,7 +135,7 @@ def _run(
     async def run() -> tuple[bytes, bytes, int]:
         vfs._store.dirs.update({"/d", "/d/sub"})
         vfs._store.files.update(TREE)
-        ws = Workspace({"/": vfs})
+        ws = Workspace({"/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
         ws.mount("/").revisions = pins or {}
         try:
             session = None
@@ -183,6 +184,8 @@ LINES = [
     "rg --files /d",
     "echo 'x ada' | grep ada - /d/c.txt",
     "echo 'x ada' | rg ada - /d",
+    "ln -s a.txt /d/la.txt && ln -s sub /d/ls && grep -R ada /d",
+    "ln -s a.txt /d/la.txt && ln -s sub /d/ls && rg -L ada /d",
 ]
 
 MOUNTS = {

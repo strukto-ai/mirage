@@ -12,12 +12,51 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandOpts } from '../../config.ts'
-import type { LinkView } from '../../../view/types.ts'
+import type { CommandIO, CommandOpts } from '../../config.ts'
+import type { Accessor } from '../../../accessor/base.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { type FileStat, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { eloop } from '../../../errors/fs.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
+
+/**
+ * Where a name stands as lstat reaches it: every link above its final name
+ * followed, the name itself kept.
+ *
+ * The walk the kernel gives a path before a call that does not follow its
+ * final name, and the key the table files a link under, since every link is
+ * keyed by its resolved parent. A path ending in a slash resolves whole:
+ * POSIX reads `dlink/` as `dlink/.`. Throws CycleError on a loop. Mirrors
+ * Python's link_location.
+ */
+export function linkLocation(links: LinkView, virtual: string): string {
+  const cut = virtual.lastIndexOf('/')
+  const name = virtual.slice(cut + 1)
+  if (name === '') return links.resolve(virtual)
+  const head = virtual.slice(0, cut)
+  return `${links.resolve(head === '' ? '/' : head).replace(/\/+$/, '')}/${name}`
+}
+
+/**
+ * The names the links owe a directory: each link standing in it, and each
+ * directory holding one further down.
+ *
+ * No backend can list either, and the second may be one no backend serves at
+ * all (a link made below a directory chain that holds no key), so these are the
+ * names the dispatcher merges into its own listing, derived from the same
+ * table. Mirrors Python's owed_names.
+ */
+export function owedNames(links: LinkView, directory: string): string[] {
+  const base = directory.replace(/\/+$/, '') + '/'
+  const names = new Set<string>()
+  for (const [path] of links.subtree(base)) {
+    names.add(path.slice(base.length).split('/')[0] ?? '')
+  }
+  return [...names].sort(compareCodePoints)
+}
 
 /**
  * Where the name an operand was typed as stands, as lstat reaches it.
@@ -33,11 +72,7 @@ export function nameLocation(links: LinkView, path: PathSpec, cwd: string): stri
   const typed = path.rawPath !== '' ? path.rawPath : path.virtual
   const last = typed.slice(typed.lastIndexOf('/') + 1)
   if (path.walkError !== null || typed.endsWith('/') || last === '.' || last === '..') return null
-  const full = resolvePath(typed, cwd)
-  const cut = full.lastIndexOf('/')
-  const parent = full.slice(0, cut)
-  const resolved = links.resolve(parent === '' ? '/' : parent).replace(/\/+$/, '')
-  return `${resolved}/${full.slice(cut + 1)}`
+  return linkLocation(links, resolvePath(typed, cwd))
 }
 
 /**
@@ -90,17 +125,6 @@ export class LinkResolver {
   }
 
   /**
-   * The links standing directly in a directory, as virtual paths: what a
-   * walker merges into a backend's listing, which never holds a link.
-   * `directory` has every link above it resolved, which is how the table
-   * keys its links.
-   */
-  children(directory: string): string[] {
-    const base = directory.replace(/\/+$/, '')
-    return this.links.children(directory).map((row) => `${base}/${row.name}`)
-  }
-
-  /**
    * Where a link leads, every link on the way followed. A chain that loops
    * throws ELOOP, an error a walker reports as it reports any failed stat.
    */
@@ -145,6 +169,185 @@ export class LinkResolver {
   /** Remove the name itself, a link rather than what it leads to. */
   async unlink(virtual: string): Promise<void> {
     await this.dispatch('unlink', PathSpec.fromStrPath(virtual))
+  }
+}
+
+// What a table miss is: the name is not there, or a component above it is
+// not a directory. Mirrors Python's _MISSES.
+const MISSES: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR'])
+
+function missed(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code
+  return typeof code === 'string' && MISSES.has(code)
+}
+
+function basename(virtual: string): string {
+  const trimmed = virtual.replace(/\/+$/, '')
+  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || '/'
+}
+
+function named(row: FileStat, virtual: string): FileStat {
+  const name = basename(virtual)
+  return row.name === name ? row : row.with({ name })
+}
+
+/** An entry the dispatcher listed under `where`, named under `base`. Mirrors
+ * Python's _rebased. */
+function rebased(entry: string, where: string, base: string): string {
+  const root = where.replace(/\/+$/, '') + '/'
+  return `${base}/${entry.startsWith(root) ? entry.slice(root.length) : basename(entry)}`
+}
+
+/** Whether the mount at `prefix` is the one serving `virtual`. Mirrors
+ * Python's serves. */
+export function serves(mounts: MountView, prefix: string, virtual: string): boolean {
+  return mounts.rootOf(virtual).replace(/\/+$/, '') === prefix
+}
+
+function everywhere(): boolean {
+  return true
+}
+
+function located(links: LinkView, virtual: string): string {
+  try {
+    return linkLocation(links, virtual)
+  } catch (err) {
+    if (err instanceof CycleError) throw eloop(virtual)
+    throw err
+  }
+}
+
+async function linkedStat<A extends Accessor>(
+  stat: CommandIO<A>['stat'],
+  links: LinkView,
+  dispatch: DispatchFn,
+  owns: (virtual: string) => boolean,
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<FileStat> {
+  const here = path.virtual
+  const where = located(links, here)
+  const row = here.endsWith('/') ? null : links.statAt(where)
+  if (row !== null) return row
+  if (where.replace(/\/+$/, '') !== here.replace(/\/+$/, '') || !owns(where)) {
+    const [found] = await dispatch('stat', PathSpec.fromStrPath(where), [], { nofollow: true })
+    return named(found as FileStat, here)
+  }
+  try {
+    return await stat(accessor, path, index)
+  } catch (err) {
+    if (!missed(err) || owedNames(links, here).length === 0) throw err
+    return new FileStat({ name: basename(here), type: FileType.DIRECTORY })
+  }
+}
+
+async function linkedReaddir<A extends Accessor>(
+  readdir: CommandIO<A>['readdir'],
+  links: LinkView,
+  dispatch: DispatchFn,
+  owns: (virtual: string) => boolean,
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<string[]> {
+  const here = path.virtual.replace(/\/+$/, '') || '/'
+  let where: string
+  try {
+    where = links.resolve(here)
+  } catch (err) {
+    if (err instanceof CycleError) throw eloop(path.virtual)
+    throw err
+  }
+  const base = here.replace(/\/+$/, '')
+  if (where !== here || !owns(where)) {
+    const [listed] = await dispatch('readdir', PathSpec.fromStrPath(where))
+    return (listed as string[]).map((entry) => rebased(entry, where, base))
+  }
+  const owed = owedNames(links, here)
+  let entries: string[]
+  try {
+    entries = await readdir(accessor, path, index)
+  } catch (err) {
+    if (!missed(err) || owed.length === 0) throw err
+    entries = []
+  }
+  if (owed.length === 0) return entries
+  const present = new Set(entries.map((entry) => entry.replace(/\/+$/, '')))
+  return [...entries, ...owed.map((n) => `${base}/${n}`).filter((entry) => !present.has(entry))]
+}
+
+async function linkedExists<A extends Accessor>(
+  exists: NonNullable<CommandIO<A>['exists']>,
+  links: LinkView,
+  accessor: A,
+  path: PathSpec,
+): Promise<boolean> {
+  let where: string
+  try {
+    where = linkLocation(links, path.virtual)
+  } catch (err) {
+    if (err instanceof CycleError) return false
+    throw err
+  }
+  if (links.statAt(where) !== null) return true
+  return exists(accessor, path)
+}
+
+async function linkedTree<A extends Accessor>(
+  readTree: NonNullable<CommandIO<A>['readTree']>,
+  links: LinkView,
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<Map<string, FileStat> | null> {
+  const found = await readTree(accessor, path, index)
+  const base = path.virtual.replace(/\/+$/, '') + '/'
+  const rows = links.subtree(base)
+  if (found === null || rows.length === 0) return found
+  const merged = new Map(found)
+  for (const [key, row] of rows) merged.set(key.slice(base.length), row)
+  return merged
+}
+
+/**
+ * `ops` whose stat, readdir and subtree read see the namespace's links, the
+ * way the dispatcher's own do.
+ *
+ * No backend stores a link, so a mount's table asked about a name a link
+ * stands at answers ENOENT, its listing leaves the link out, and a name below a
+ * link to a directory reaches nothing. Here the table answers once for every
+ * command: `stat` is lstat (a link's own row, and the dispatcher's answer for a
+ * name a link above it leads elsewhere), `readdir` names the links among the
+ * backend's entries and lists a directory a link leads to through the
+ * dispatcher, `readTree` carries the links under its root, and a directory that
+ * holds only a link stats and lists as the dispatcher's does. What a command
+ * does with a link, follow it, copy it or leave it, stays its own rule. `owns`
+ * says whether this mount serves a path; one a link led to on another mount
+ * goes to the dispatcher. Mirrors Python's with_links.
+ */
+export function withLinks<A extends Accessor>(
+  ops: CommandIO<A>,
+  links: LinkView | undefined,
+  dispatch: DispatchFn | undefined,
+  owns: (virtual: string) => boolean = everywhere,
+): CommandIO<A> {
+  if (links === undefined || dispatch === undefined) return ops
+  const { stat, readdir, exists, readTree } = ops
+  return {
+    ...ops,
+    stat: (accessor, path, index) => linkedStat(stat, links, dispatch, owns, accessor, path, index),
+    readdir: (accessor, path, index) =>
+      linkedReaddir(readdir, links, dispatch, owns, accessor, path, index),
+    ...(exists !== undefined
+      ? { exists: (accessor: A, path: PathSpec) => linkedExists(exists, links, accessor, path) }
+      : {}),
+    ...(readTree !== undefined
+      ? {
+          readTree: (accessor: A, path: PathSpec, index?: IndexCacheStore) =>
+            linkedTree(readTree, links, accessor, path, index),
+        }
+      : {}),
   }
 }
 

@@ -302,7 +302,7 @@
       "command": "find -L /data/symx -type f",
       "expect": {
         "exit": 0,
-        "stdout": "/data/symx/flink\n/data/symx/sub/inner.txt\n",
+        "stdout": "/data/symx/dlink/inner.txt\n/data/symx/flink\n/data/symx/sub/inner.txt\n",
         "stderr": ""
       }
     },

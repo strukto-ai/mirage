@@ -21,7 +21,6 @@ from mirage.utils.dates import in_mtime_window
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
 from mirage.utils.stat_view import DIR_SIZE
-from mirage.view.types import LinkView
 
 # find's row actions: -print, -print0, -ls and -delete.
 RowActionKind = Literal["print", "print0", "ls", "delete"]
@@ -542,24 +541,6 @@ def tree_has_empty(node: PredNode) -> bool:
     if isinstance(node, (And, Or)):
         return any(tree_has_empty(kid) for kid in node.kids)
     return False
-
-
-def has_link_children(links: LinkView | None, virtual: str) -> bool:
-    """Whether a directory holds namespace symlinks directly under it.
-
-    ``-empty`` asks whether a directory has entries, and a symlink is one
-    of them. No backend readdir can see a namespace link, so every
-    emptiness probe has to add this or a directory holding only a link
-    reads as empty. Shared because ``find`` asks it in two places: the
-    start point's row and each directory the walk reaches.
-
-    Args:
-        links (LinkView | None): the namespace's symlink facts.
-        virtual (str): absolute virtual path of the directory.
-    """
-    if links is None:
-        return False
-    return bool(links.children(virtual.rstrip("/") or "/"))
 
 
 def keep(entry: FindEntry, tree: PredNode, min_depth: int | None) -> bool:

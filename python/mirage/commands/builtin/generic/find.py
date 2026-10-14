@@ -20,7 +20,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.generic import find_eval
-from mirage.core.generic.find import link_results, modified_ts, walk_find
+from mirage.core.generic.find import modified_ts, walk_find
 from mirage.core.generic.find_eval import printf_kind
 from mirage.errors.classify import failure_text
 from mirage.errors.constants import MISS_ERRORS
@@ -663,10 +663,10 @@ async def _find_root(
         follow (bool): whether ``-L`` follows namespace links.
         visibility (Visibility | None): the session's visibility.
     """
-    # A start point that is itself a symlink has no backend inode, so
-    # neither the existence guard nor the backend walk can see it. GNU's
-    # default -P reports the link and stops there, which is exactly what
-    # link_results emits below.
+    # A start point that is itself a symlink is the core's to report: the
+    # table it walks answers the link's own row, and GNU's default -P
+    # reports the link and stops there. The dispatcher's stat would
+    # follow it, so the start point's checks below leave it alone.
     root_is_link = (
         links is not None and links.stat_at(search_path.virtual) is not None
     )
@@ -700,9 +700,9 @@ async def _find_root(
     # the namespace (touch results, observed writes).
     push_mtime = stat is None
     # What the start point is decides which walk is even possible, so it
-    # is resolved once, ahead of all of them: a symlink has no backend
-    # inode (link_results reports it), a non-directory has no subtree,
-    # and nothing at all is GNU's diagnostic. Statted through the
+    # is resolved once, ahead of all of them: a symlink is walked as
+    # itself, a non-directory has no subtree, and nothing at all is GNU's
+    # diagnostic. Statted through the
     # dispatcher, so a start point the router already resolved into
     # another mount answers there rather than on this command's mount.
     start = await resolve_start(
@@ -715,28 +715,24 @@ async def _find_root(
     )
     if start.missing:
         return None, start.detail
-    if not start.walk and not root_is_link:
+    if not start.walk:
         return start.results, start.detail
-    results: list[str] = (
-        []
-        if root_is_link
-        else await find_core(
-            search_path,
-            name=args.name,
-            type=args.type,
-            min_size=args.min_size,
-            max_size=args.max_size,
-            maxdepth=args.maxdepth,
-            mindepth=args.mindepth,
-            name_exclude=args.name_exclude,
-            or_names=args.or_names,
-            mtime_min=args.mtime_min if push_mtime else None,
-            mtime_max=args.mtime_max if push_mtime else None,
-            iname=args.iname,
-            path_pattern=args.path_pattern,
-            empty=args.empty,
-            tree=tree,
-        )
+    results: list[str] = await find_core(
+        search_path,
+        name=args.name,
+        type=args.type,
+        min_size=args.min_size,
+        max_size=args.max_size,
+        maxdepth=args.maxdepth,
+        mindepth=args.mindepth,
+        name_exclude=args.name_exclude,
+        or_names=args.or_names,
+        mtime_min=args.mtime_min if push_mtime else None,
+        mtime_max=args.mtime_max if push_mtime else None,
+        iname=args.iname,
+        path_pattern=args.path_pattern,
+        empty=args.empty,
+        tree=tree,
     )
     # GNU lists a directory start point itself before descending into it,
     # so it is named even when it holds nothing. Decided here rather than
@@ -758,13 +754,6 @@ async def _find_root(
             if args.empty and dir_empty is not None
             else None
         )
-        if root_empty:
-            # A symlink is namespace state no backend readdir can see, so a
-            # directory holding only one would read as empty. GNU counts the
-            # link as an entry.
-            root_empty = not find_eval.has_link_children(
-                links, search_path.virtual
-            )
         results = with_root_row(
             results,
             search_path,
@@ -778,22 +767,7 @@ async def _find_root(
             stat=stat,
             mount_prefix=root_prefix,
         )
-    results = apply_mount_prefix(results, root_prefix)
-    root_path = (
-        search_path.virtual.rstrip("/") if search_path.virtual != "/" else "/"
-    )
-    results = sorted(
-        results
-        + await link_results(
-            links,
-            root_path,
-            root_prefix,
-            search_path.mount_path.strip("/"),
-            args,
-            tree,
-            follow=follow,
-        )
-    )
+    results = sorted(apply_mount_prefix(results, root_prefix))
     # What -prune reached is known only once every row has been judged:
     # a flat listing meets a child before its parent, so the ledger the
     # tree kept is applied here, after the backend and the link merge.
@@ -837,7 +811,9 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FindFlags:
         path=fl.as_str("path"),
         mindepth=fl.as_str("mindepth"),
         empty=fl.as_bool("empty"),
-        follow=fl.as_bool("L"),
+        # The last of -H, -L and -P decides, as in GNU; only -L follows
+        # the links the walk meets.
+        follow=fl.typed_order("H", "L", "P")[-1:] == ["L"],
     )
 
 
@@ -977,6 +953,7 @@ async def find_walk_generic(
             else:
                 unreadable: list[str] = []
                 unstatted: dict[str, Exception] = {}
+                loops: list[tuple[str, str]] = []
 
                 async def read_directory(
                     path: PathSpec, index: IndexCacheStore | None
@@ -1001,6 +978,7 @@ async def find_walk_generic(
                     unreadable=unreadable,
                     unstatted=unstatted,
                     root=start.stat,
+                    loops=loops,
                 )
                 rows = respell_raw(walked, search.virtual, search.raw_path)
                 # GNU names a directory it may not open in the walk's own
@@ -1015,6 +993,13 @@ async def find_walk_generic(
                 for path, exc in unstatted.items():
                     shown = respell_one(path, search.virtual, search.raw_path)
                     missing.append(f"find: '{shown}': {failure_text(exc)}")
+                for path, above in loops:
+                    missing.append(
+                        "find: File system loop detected; "
+                        f"'{respell_one(path, search.virtual, search.raw_path)}'"
+                        " is part of the same file system loop as "
+                        f"'{respell_one(above, search.virtual, search.raw_path)}'."
+                    )
             for row in rows:
                 if row not in first:
                     yield (row + "\n").encode()

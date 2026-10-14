@@ -19,9 +19,8 @@ import { describe, expect, it } from 'vitest'
 import type { FindOptions } from '../../../vfs/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
-import type { LinkView } from '../../../view/types.ts'
 import { findGeneric as streamFind } from './find.ts'
-import { linkResults } from '../../../core/generic/find.ts'
+import { modifiedTs } from '../../../core/generic/find.ts'
 
 async function findGeneric(...args: Parameters<typeof streamFind>) {
   const result = await streamFind(...args)
@@ -205,8 +204,6 @@ describe('generic command find', () => {
       })
     }
 
-    const noRows = (): Promise<string[]> => Promise.resolve([])
-
     // Without an emptiness probe the backend's own row stands; with one, the
     // backend's row is dropped, not merged (ssh reports every directory as
     // non-empty, so merging would print a directory `-not -empty` must skip).
@@ -231,30 +228,6 @@ describe('generic command find', () => {
         expect(DEC.decode(result?.[0] ?? undefined)).toBe(expected)
       },
     )
-
-    it('is not empty when it holds only a namespace link', async () => {
-      // No backend readdir can see a link, so the probe alone says the
-      // directory holds nothing. GNU counts the link as an entry.
-      const links = {
-        statAt: () => null,
-        children: () => [{ name: 'lk', type: FileType.SYMLINK } as FileStat],
-        subtree: () => [],
-        resolve: (p: string) => p,
-        exists: () => Promise.resolve(true),
-        targetStat: () => Promise.resolve(null),
-      } as unknown as LinkView
-      const opts = {
-        stdin: null,
-        flags: { empty: true },
-        cwd: '/',
-        statPath: () => Promise.resolve(dirStat),
-        ns: { links },
-      } as unknown as CommandOpts
-      const result = await findGeneric([root()], [], opts, noRows, undefined, () =>
-        Promise.resolve(true),
-      )
-      expect(DEC.decode(result?.[0] ?? undefined)).toBe('')
-    })
   })
 
   it('propagates non-ENOENT errors', async () => {
@@ -264,51 +237,16 @@ describe('generic command find', () => {
   })
 
   describe('-mtime reads timestamps through modifiedTs', () => {
-    function linkViewOf(modified: string | null): LinkView {
-      const st = {
-        name: 'l',
-        size: 1,
-        type: FileType.FILE,
-        content: ContentType.TEXT,
-        modified,
-      } as FileStat
-      return {
-        statAt: () => null,
-        children: () => [],
-        subtree: () => [['/l', st]],
-        resolve: (p: string) => p,
-        exists: () => Promise.resolve(true),
-        targetStat: () => Promise.resolve(null),
-      }
-    }
-
-    async function withMtime(modified: string | null): Promise<string[]> {
-      return linkResults(
-        linkViewOf(modified),
-        '/',
-        '',
-        '',
-        { op: 'true' },
-        null,
-        null,
-        null,
-        null,
-        0,
-        Number.MAX_SAFE_INTEGER,
-        false,
-      )
-    }
-
     // Date.parse('nonsense') is NaN, and every NaN comparison is false, so
     // both window checks passed and a malformed entry survived where Python
     // drops it; modifiedTs returns null for it, and a date-only stamp reads
     // as midnight UTC rather than NaN.
     it.each([
-      ['not-a-date', []],
-      ['2025-06-01T12:00:00Z', ['/l']],
-      ['2025-06-01', ['/l']],
-    ])('reads %s', async (modified, expected) => {
-      expect(await withMtime(modified)).toEqual(expected)
+      ['not-a-date', null],
+      ['2025-06-01T12:00:00Z', Date.parse('2025-06-01T12:00:00Z') / 1000],
+      ['2025-06-01', Date.parse('2025-06-01T00:00:00Z') / 1000],
+    ])('reads %s', (modified, expected) => {
+      expect(modifiedTs(modified)).toBe(expected)
     })
   })
 })

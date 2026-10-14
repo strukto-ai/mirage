@@ -21,6 +21,7 @@ import { mountPrefixOf, mountedPath, respelled } from '../../../../utils/key_pre
 import { CycleError, resolvePath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { formatRecords } from '../../utils/output.ts'
+import { linkLocation } from '../../utils/links.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
@@ -31,13 +32,11 @@ import { posixPhrase } from '../../../../errors/posix.ts'
 // there is refused rather than followed. Mirrors Python's followed_parent.
 function followedParent(virtual: string, links: LinkView | null): string {
   if (links === null) return virtual
-  const cut = virtual.lastIndexOf('/')
-  const parent = virtual.slice(0, cut) || '/'
   try {
-    return `${rstripSlash(links.resolve(parent))}/${virtual.slice(cut + 1)}`
+    return linkLocation(links, virtual)
   } catch (err) {
     if (!(err instanceof CycleError)) throw err
-    console.warn(`rmdir: following ${parent} failed: ${String(err)}`)
+    console.warn(`rmdir: following ${virtual} failed: ${String(err)}`)
     return virtual
   }
 }

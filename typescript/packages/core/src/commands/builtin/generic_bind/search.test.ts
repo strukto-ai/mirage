@@ -18,7 +18,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
-import type { PathSpec } from '../../../types.ts'
+import { MountMode, type PathSpec } from '../../../types.ts'
 import { eacces } from '../../../errors/fs.ts'
 import { mountedPath } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -137,7 +137,10 @@ async function run(
 ): Promise<[string, string, number]> {
   for (const dir of ['/d', '/d/sub']) vfs.store.dirs.add(dir)
   for (const [key, data] of Object.entries(TREE)) vfs.store.files.set(key, ENC.encode(data))
-  const ws = new Workspace({ '/': vfs }, { shellParser: await getTestParser() })
+  const ws = new Workspace(
+    { '/': vfs },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
   for (const [path, rev] of Object.entries(pins)) ws.mount('/').revisions.set(path, rev)
   const scoped = hide !== undefined || deny !== undefined
   try {
@@ -181,6 +184,8 @@ const LINES = [
   'rg --files /d',
   "echo 'x ada' | grep ada - /d/c.txt",
   "echo 'x ada' | rg ada - /d",
+  'ln -s a.txt /d/la.txt && ln -s sub /d/ls && grep -R ada /d',
+  'ln -s a.txt /d/la.txt && ln -s sub /d/ls && rg -L ada /d',
 ]
 
 const MOUNTS: Record<string, Mount> = {

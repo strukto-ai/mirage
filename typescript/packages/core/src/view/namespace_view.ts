@@ -13,9 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { normDir, rstripSlash } from '../utils/slash.ts'
-import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
+import type { PathSpec } from '../types.ts'
+import { FileStat, FileType, type Visibility } from '../types.ts'
 import { pathVisible } from '../utils/hidden.ts'
-import type { NamespaceLinks, NamespaceView } from './types.ts'
+import { eloop } from '../errors/fs.ts'
+import { CycleError } from '../utils/path.ts'
+import type { LinkView, NamespaceLinks, NamespaceView } from './types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
 /**
@@ -205,4 +208,33 @@ export function pathsScoped(
     scoped !== undefined &&
     paths.some((path) => scoped(path.pattern !== null ? prefix || '/' : path.virtual))
   )
+}
+
+/**
+ * stat(2) over a table whose stat is lstat(2): a link answers for what it
+ * leads to.
+ *
+ * What a walker that follows links (`find -L`, `du -L`, `grep -R`) asks of
+ * each entry: a link to a directory is a directory to walk and a link to a
+ * file is that file, under the link's own name. A dangling link stays the
+ * link, which is what GNU reports when the target cannot be statted, and a
+ * chain that loops throws ELOOP. `path` is the entry as `stat` takes it.
+ * Mirrors Python's followed_stat.
+ */
+export async function followedStat<P extends string | PathSpec>(
+  stat: (path: P) => Promise<FileStat>,
+  links: LinkView,
+  path: P,
+): Promise<FileStat> {
+  const row = await stat(path)
+  if (row.type !== FileType.SYMLINK) return row
+  const virtual: string = typeof path === 'string' ? path : path.virtual
+  try {
+    links.resolve(virtual)
+  } catch (err) {
+    if (err instanceof CycleError) throw eloop(virtual)
+    throw err
+  }
+  const target = await links.targetStat(virtual)
+  return target === null ? row : target.with({ name: row.name })
 }

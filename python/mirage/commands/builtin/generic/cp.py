@@ -29,7 +29,7 @@ from mirage.commands.builtin.utils.copy import (
     path_exists,
     typed_name,
 )
-from mirage.commands.builtin.utils.links import typed_link
+from mirage.commands.builtin.utils.links import name_location, typed_link
 from mirage.commands.builtin.utils.paths import (
     absent_dest_error,
     descendant_path,
@@ -44,7 +44,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import enoent, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import (
     DotWalkLoop,
@@ -73,9 +73,10 @@ from mirage.types import (
 )
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.hidden import path_visible
-from mirage.utils.key_prefix import mounted_path
+from mirage.utils.key_prefix import mounted_path, rekey
 from mirage.utils.path import CycleError, parent, resolve_path
 from mirage.utils.quote import shell_quote_always
+from mirage.view.namespace_view import followed_stat
 from mirage.view.types import LinkView
 
 _logger = logging.getLogger(__name__)
@@ -388,6 +389,51 @@ async def rename_link(
         target (PathSpec): Destination entry.
     """
     await copies.dispatch("rename", src, dst=target)
+
+
+async def dest_stat(stat: StatFn, links: LinkView, path: PathSpec) -> FileStat:
+    """stat(2) of a destination, over a table whose stat is lstat(2).
+
+    cp opens its destination the way open(2) does, through a link at the
+    name: a link to a directory is that directory, one to a file is the
+    file it writes through, and one that leads nowhere is no destination
+    at all (cp then refuses to write through it).
+
+    Args:
+        stat (StatFn): the table's stat, a link's own row for a link.
+        links (LinkView): the namespace's symlink facts.
+        path (PathSpec): the destination.
+    """
+    row = await followed_stat(stat, links, path)
+    if row.type == FileType.SYMLINK:
+        raise enoent(path)
+    return row
+
+
+def link_name(copies: TransferLinks, target: PathSpec) -> PathSpec | None:
+    """The destination as the link standing at its name, None where none
+    does.
+
+    The router follows a destination to what its link leads to, which is
+    what a plain copy writes, through the link. GNU's backup renames the
+    destination itself, a link included, and the copy then lands at the
+    name, so a backup is made of this and the copy goes here.
+
+    Args:
+        copies (TransferLinks): Namespace facts and transfer calls.
+        target (PathSpec): the destination, as the router left it.
+    """
+    where = name_location(copies.links, target, copies.cwd)
+    if where is None or copies.links.stat_at(where) is None:
+        return None
+    if where == target.virtual:
+        return target
+    return PathSpec(
+        virtual=where,
+        directory=where[: where.rfind("/") + 1] or "/",
+        vfs_path=rekey(target.virtual, target.vfs_path, where),
+        raw_path=target.raw_path,
+    )
 
 
 async def make_link(
@@ -877,7 +923,7 @@ async def _clear_for_directory(
     target: PathSpec,
     errors: list[str],
     lines: list[str] | None,
-) -> bool:
+) -> PathSpec | None:
     """Free a non-directory's name for a directory copied onto it.
 
     GNU refuses the overwrite unless a backup moves the entry aside, and
@@ -885,9 +931,9 @@ async def _clear_for_directory(
     is never backed up, so the entry is removed instead, which ``-v``
     reports. No gate or ``-i`` question applies to a directory source
     (coreutils 9.7). Outside a workspace nothing can rename the entry,
-    so the overwrite is refused as it is without a backup. So is a name
-    a link stands at: the router has followed the destination to what
-    the link leads to, which GNU leaves alone while it moves the link.
+    so the overwrite is refused as it is without a backup. A link at the
+    name is the entry moved or removed, not what it leads to, and the
+    tree then lands at its name (``link_name``).
 
     Args:
         policy (TransferPolicy): The command's overwrite policy.
@@ -900,18 +946,16 @@ async def _clear_for_directory(
         lines (list[str] | None): Verbose sink for the removal.
 
     Returns:
-        bool: Whether the name is free for the directory.
+        PathSpec | None: The name freed for the directory, None when it
+        stays taken.
     """
-    if (
-        copies is None
-        or not backup_displaces(policy.backup)
-        or typed_link(copies.links, target, copies.cwd) is not None
-    ):
+    if copies is None or not backup_displaces(policy.backup):
         errors.append(
             f"{policy.cmd_name}: cannot overwrite non-directory "
             f"'{target.raw_path}' with directory '{src.raw_path}'"
         )
-        return False
+        return None
+    target = link_name(copies, target) or target
     if typed_name(src) in (".", ".."):
         try:
             await copies.dispatch("unlink", target)
@@ -920,10 +964,10 @@ async def _clear_for_directory(
                 f"{policy.cmd_name}: cannot remove '{target.raw_path}': "
                 f"{fs_strerror(exc)}"
             )
-            return False
+            return None
         if lines is not None:
             lines.append(f"removed '{target.raw_path}'")
-        return True
+        return target
     _, ok = await make_backup(
         policy,
         NativeMove(rename=partial(rename_link, copies)),
@@ -933,7 +977,7 @@ async def _clear_for_directory(
         errors,
         copies,
     )
-    return ok
+    return target if ok else None
 
 
 async def overwrite_gate(
@@ -1447,11 +1491,20 @@ async def _mirror_dirs(
         entry_dst = spelled_from(mounted_path(target, dst_mount), target)
         entry = spelled_from(mounted_path(src, entry_mount), src)
         try:
-            exists, is_dir = await entry_kind(stat, entry_dst)
+            exists, is_dir = await entry_kind(
+                partial(dest_stat, stat, copies.links)
+                if copies is not None
+                else stat,
+                entry_dst,
+            )
             if is_dir:
                 continue
-            free = not exists or await _clear_for_directory(
-                policy, copies, stat, entry, entry_dst, errors, lines
+            free = (
+                not exists
+                or await _clear_for_directory(
+                    policy, copies, stat, entry, entry_dst, errors, lines
+                )
+                is not None
             )
             if free:
                 await strategy.mkdir(entry_dst)
@@ -1608,17 +1661,26 @@ async def copy_entries(
         )
         if kind == FileType.DIRECTORY:
             try:
-                exists, is_dir = await entry_kind(stat, entry_dst)
+                exists, is_dir = await entry_kind(
+                    partial(dest_stat, stat, copies.links)
+                    if copies is not None
+                    else stat,
+                    entry_dst,
+                )
                 if is_dir:
                     continue
-                free = not exists or await _clear_for_directory(
-                    policy or TransferPolicy(cmd_name=cmd_name),
-                    copies,
-                    stat,
-                    entry,
-                    entry_dst,
-                    errors,
-                    lines,
+                free = (
+                    not exists
+                    or await _clear_for_directory(
+                        policy or TransferPolicy(cmd_name=cmd_name),
+                        copies,
+                        stat,
+                        entry,
+                        entry_dst,
+                        errors,
+                        lines,
+                    )
+                    is not None
                 )
                 if free:
                     await strategy.mkdir(entry_dst)
@@ -1758,8 +1820,12 @@ async def cp_generic(
     sources, dst = split_operands(
         "cp", paths, flags.target_dir, flags.no_target_dir
     )
+    # cp opens its destination through a link at the name.
+    to_dest = (
+        partial(dest_stat, stat, copies.links) if copies is not None else stat
+    )
     if flags.target_dir is not None:
-        err = await target_dir_error("cp", stat, dst)
+        err = await target_dir_error("cp", to_dest, dst)
         if err is not None:
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)
         dst_is_dir = True
@@ -1770,7 +1836,7 @@ async def cp_generic(
         dst_exists = True
         dst_err = None
     else:
-        dst_exists, dst_is_dir, dst_err = await dest_kind(stat, dst)
+        dst_exists, dst_is_dir, dst_err = await dest_kind(to_dest, dst)
     if readdir is None and isinstance(strategy, PrimitiveCopy):
         readdir = strategy.readdir
     errors: list[str] = []
@@ -1904,7 +1970,7 @@ async def cp_generic(
             )
         else:
             target_exists, target_is_dir, target_err = await dest_kind(
-                stat, target
+                to_dest, target
             )
         if target_err is not None and target_err in STAT_REFUSALS:
             errors.append(
@@ -1995,10 +2061,8 @@ async def cp_generic(
             )
             if not whole_tree:
                 await before_full_scan(dispatch, src, "cp")
-            if (
-                target_exists
-                and not target_is_dir
-                and not await _clear_for_directory(
+            if target_exists and not target_is_dir:
+                freed = await _clear_for_directory(
                     policy,
                     copies,
                     stat,
@@ -2007,8 +2071,9 @@ async def cp_generic(
                     errors,
                     lines if flags.verbose else None,
                 )
-            ):
-                continue
+                if freed is None:
+                    continue
+                target = freed
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
             if isinstance(strategy, PrimitiveCopy):
@@ -2195,9 +2260,28 @@ async def cp_generic(
                 lines.append(transfer_line(src, target, None))
             errors.append(refusal)
             continue
-        backup, ok = await make_backup(
-            policy, strategy, stat, readdir, target, errors, copies
+        linked = (
+            link_name(copies, target)
+            if copies is not None and policy.backup is not None
+            else None
         )
+        if copies is not None and linked is not None:
+            # GNU's backup renames the link at the name, and the copy is
+            # then a new file there; what the link led to is untouched.
+            target = linked
+            backup, ok = await make_backup(
+                policy,
+                NativeMove(rename=partial(rename_link, copies)),
+                stat,
+                None,
+                target,
+                errors,
+                copies,
+            )
+        else:
+            backup, ok = await make_backup(
+                policy, strategy, stat, readdir, target, errors, copies
+            )
         if not ok:
             continue
         if flags.verbose:

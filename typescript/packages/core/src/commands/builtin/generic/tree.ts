@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { LINK_TARGET_KEY, FileType, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { enoent, isMissError, isWalkError } from '../../../errors/fs.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -64,6 +64,8 @@ interface TreeOpts {
   mounts: MountView | null
   crossReaddir: ((p: PathSpec) => Promise<string[]>) | null
   crossStat: ((p: PathSpec) => Promise<FileStat>) | null
+  // What a drawn link leads to, from the namespace's symlink facts.
+  targetStat: ((path: string) => Promise<FileStat | null>) | null
 }
 
 // The mount roots mounted directly on this directory. A mount point need
@@ -88,7 +90,9 @@ function childMounts(mounts: MountView | null, directory: string): string[] {
   })
 }
 
-// GNU tree's ASCII (C-locale) drawing set, matching the docker oracle.
+// GNU tree's ASCII (C-locale) drawing set, matching the docker oracle. A
+// link is drawn as `name -> target` and never walked; one leading to a
+// directory counts, and filters, as a directory (tree 2.2.1).
 async function walkTree(
   readdir: (p: PathSpec) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
@@ -126,7 +130,14 @@ async function walkTree(
   }
   if (nested.length > 0) entries = [...new Set([...entries, ...nested])]
   entries.sort(compareCodePoints)
-  const filtered: { spec: PathSpec; name: string; isDir: boolean; crossing: boolean }[] = []
+  const filtered: {
+    spec: PathSpec
+    name: string
+    isDir: boolean
+    crossing: boolean
+    // The stored target a link entry is drawn with; null for any other.
+    link: string | null
+  }[] = []
   for (const entry of entries) {
     const childPath = rstripSlash(entry)
     const name = childPath.slice(childPath.lastIndexOf('/') + 1)
@@ -140,32 +151,51 @@ async function walkTree(
     })
     const crossing = nested.includes(childPath) && treeOpts.crossReaddir !== null
     let isDir: boolean
+    let link: string | null = null
     if (crossing) {
       // The mount table already says this is a directory, and the
       // backend serving it may not stat its own root (an empty mount, or
       // a prefix store with no marker object).
       isDir = true
     } else {
+      let s: FileStat
       try {
-        const s = await stat(sub)
-        isDir = s.type === FileType.DIRECTORY
+        s = await stat(sub)
       } catch (err) {
         if (!isWalkError(err)) throw err
         continue
       }
+      isDir = s.type === FileType.DIRECTORY
+      if (s.type === FileType.SYMLINK) {
+        const target = s.extra[LINK_TARGET_KEY]
+        link = typeof target === 'string' ? target : ''
+        if (treeOpts.targetStat !== null) {
+          const leads = await treeOpts.targetStat(childPath)
+          isDir = leads !== null && leads.type === FileType.DIRECTORY
+        }
+      }
     }
     if (treeOpts.dirsOnly && !isDir) continue
-    if (treeOpts.matchPattern !== null && !isDir && !fnmatch(name, treeOpts.matchPattern)) continue
-    filtered.push({ spec: sub, name, isDir, crossing })
+    // -P spares only a real directory, a link to one included in its test
+    // (tree 2.2.1).
+    if (
+      treeOpts.matchPattern !== null &&
+      (link !== null || !isDir) &&
+      !fnmatch(name, treeOpts.matchPattern)
+    )
+      continue
+    filtered.push({ spec: sub, name, isDir, crossing, link })
   }
   for (let i = 0; i < filtered.length; i++) {
     const entry = filtered[i]
     if (entry === undefined) continue
     const last = i === filtered.length - 1
     const connector = last ? '`-- ' : '|-- '
-    lines.push(`${prefix}${connector}${entry.name}`)
+    const shown = entry.link === null ? entry.name : `${entry.name} -> ${entry.link}`
+    lines.push(`${prefix}${connector}${shown}`)
     if (entry.isDir) {
       dirs += 1
+      if (entry.link !== null) continue
       if (treeOpts.maxDepth !== null && depth + 1 >= treeOpts.maxDepth) continue
       const nextPrefix = prefix + (last ? '    ' : '|   ')
       // Past a mount root the subtree belongs to another VFS, so the
@@ -238,6 +268,7 @@ export async function treeGeneric(
         ]
   const readdirPath = opts.readdirPath
   const statPath = opts.statPath
+  const links = opts.ns?.links
   const treeOpts: TreeOpts = {
     showHidden: parsed.showHidden,
     maxDepth: parsed.maxDepth,
@@ -264,6 +295,7 @@ export async function treeGeneric(
             if (s === null) throw enoent(p)
             return s
           },
+    targetStat: links === undefined ? null : (path: string) => links.targetStat(path),
   }
   const lines: string[] = []
   let totalDirs = 0

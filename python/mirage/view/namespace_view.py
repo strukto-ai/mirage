@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
+from typing import Any
 
+from mirage.errors.fs import eloop
 from mirage.types import FileStat, FileType, PathSpec, Visibility
 from mirage.utils.hidden import path_visible
-from mirage.utils.path import norm_dir
-from mirage.view.types import NamespaceLinks, NamespaceView
+from mirage.utils.path import CycleError, norm_dir
+from mirage.view.types import LinkView, NamespaceLinks, NamespaceView
 
 
 def visible_child_segments(
@@ -237,3 +239,44 @@ def paths_scoped(
         scoped(prefix or "/" if path.pattern is not None else path.virtual)
         for path in paths
     )
+
+
+async def followed_stat(
+    stat: Callable[..., Awaitable[FileStat]],
+    links: LinkView,
+    path: str | PathSpec,
+    *args: Any,
+    **kwargs: Any,
+) -> FileStat:
+    """stat(2) over a table whose stat is lstat(2): a link answers for
+    what it leads to.
+
+    What a walker that follows links (``find -L``, ``du -L``, ``grep -R``)
+    asks of each entry: a link to a directory is a directory to walk and a
+    link to a file is that file, under the link's own name. A dangling link
+    stays the link, which is what GNU reports when the target cannot be
+    statted, and a chain that loops is ELOOP.
+
+    Args:
+        stat (Callable[..., Awaitable[FileStat]]): the table's stat, which
+            answers a link with its own row.
+        links (LinkView): the namespace's symlink facts.
+        path (str | PathSpec): the entry, as ``stat`` takes it.
+        *args (Any): passed through to ``stat``.
+        **kwargs (Any): passed through to ``stat``.
+
+    Raises:
+        DotWalkLoop: the link's chain loops (ELOOP).
+    """
+    row = await stat(path, *args, **kwargs)
+    if row.type is not FileType.SYMLINK:
+        return row
+    virtual = path.virtual if isinstance(path, PathSpec) else path
+    try:
+        links.resolve(virtual)
+    except CycleError:
+        raise eloop(virtual) from None
+    target = await links.target_stat(virtual)
+    if target is None:
+        return row
+    return target.model_copy(update={"name": row.name})

@@ -28,11 +28,21 @@ from mirage.commands.builtin.generic_bind.adapter import (
 )
 from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of, rekey
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import (
+    mount_key,
+    mount_prefix_of,
+    rekey,
+    under_path,
+)
+from mirage.utils.path import CycleError
 from mirage.vfs.types import DuEntries
-from mirage.view.types import MountView
+from mirage.view.types import LinkView, MountView
 
 
 @dataclass(slots=True)
@@ -68,6 +78,9 @@ class WalkBudget:
         mounts (MountView | None): the mount table, for a walk with no
             cap of its own.
         spent (dict[str, int]): entries charged so far per mount root.
+        inaccessible (list[tuple[str, str | None]]): under ``-L``, each
+            link that leads nowhere, with the strerror GNU adds for a
+            chain that loops.
     """
 
     remaining: int | None
@@ -76,6 +89,7 @@ class WalkBudget:
     directories: list[str] = field(default_factory=list)
     mounts: MountView | None = None
     spent: dict[str, int] = field(default_factory=dict)
+    inaccessible: list[tuple[str, str | None]] = field(default_factory=list)
 
     def spend(self, path: str) -> bool:
         """Charge one entry to the budget.
@@ -142,12 +156,68 @@ def _account_for_walk_error(
         raise exc
 
 
+@dataclass(slots=True)
+class Dereference:
+    """What ``du -L`` follows links by, for one operand.
+
+    GNU counts each file once, under the first name its walk meets. A link
+    leading back into the operand's own tree is therefore never counted,
+    since the file it reaches is counted under its own name there (where
+    GNU's readdir order may reach the link first, mirage's sorted walk
+    always prefers the file's own name), and what lies outside it is
+    counted once, under the first name the sorted walk reaches it by.
+
+    Args:
+        links (LinkView): the namespace's symlink facts.
+        tree (str): the operand, as the path it resolves to.
+        seen (set[str]): what outside the tree is counted so far, each as
+            the path it resolves to.
+    """
+
+    links: LinkView
+    tree: str
+    seen: set[str] = field(default_factory=set)
+
+
+async def _counted(
+    follow: Dereference, path: PathSpec, info: FileStat, budget: WalkBudget
+) -> FileStat | None:
+    """What ``du -L`` counts an entry as, None when it counts nothing.
+
+    Args:
+        follow (Dereference): the operand's dereference state.
+        path (PathSpec): the entry.
+        info (FileStat): its own stat, a link's row for a link.
+        budget (WalkBudget): records a link that leads nowhere.
+    """
+    try:
+        real = follow.links.resolve(path.virtual)
+    except CycleError:
+        budget.inaccessible.append(
+            (path.virtual, posix_phrase(FsCondition.ELOOP))
+        )
+        return None
+    if under_path(real, follow.tree):
+        return info if info.type != FileType.SYMLINK else None
+    if real in follow.seen:
+        return None
+    if info.type == FileType.SYMLINK:
+        target = await follow.links.target_stat(path.virtual)
+        if target is None:
+            budget.inaccessible.append((path.virtual, None))
+            return None
+        info = target
+    follow.seen.add(real)
+    return info
+
+
 async def _du_walk(
     walk: tuple[WalkCall, WalkCall, set[str]],
     index: IndexCacheStore,
     path: PathSpec,
     budget: WalkBudget,
     entries: list[tuple[str, int]] | None,
+    follow: Dereference | None = None,
 ) -> int:
     readdir, stat, answered = walk
     try:
@@ -155,6 +225,11 @@ async def _du_walk(
     except Exception as exc:
         _account_for_walk_error(exc, path, budget)
         return 0
+    if follow is not None:
+        counted = await _counted(follow, path, info, budget)
+        if counted is None:
+            return 0
+        info = counted
     if info.type != FileType.DIRECTORY:
         size = info.size or 0
         if entries is not None:
@@ -178,7 +253,9 @@ async def _du_walk(
             resolved=False,
             vfs_path=rekey(path.virtual, path.vfs_path, child),
         )
-        total += await _du_walk(walk, index, child_spec, budget, entries)
+        total += await _du_walk(
+            walk, index, child_spec, budget, entries, follow
+        )
     return total
 
 
@@ -209,10 +286,18 @@ async def walk_size(
     accessor: Accessor,
     index: IndexCacheStore,
     budget: WalkBudget,
+    links: LinkView | None,
     path: PathSpec,
 ) -> int:
     return await _du_walk(
-        _walk(ops, accessor, index), index, path, budget, None
+        _walk(ops, accessor, index),
+        index,
+        path,
+        budget,
+        None,
+        Dereference(links, links.resolve(path.virtual))
+        if links is not None
+        else None,
     )
 
 
@@ -221,11 +306,19 @@ async def walk_entries(
     accessor: Accessor,
     index: IndexCacheStore,
     budget: WalkBudget,
+    links: LinkView | None,
     path: PathSpec,
 ) -> DuEntries:
     entries: list[tuple[str, int]] = []
     total = await _du_walk(
-        _walk(ops, accessor, index), index, path, budget, entries
+        _walk(ops, accessor, index),
+        index,
+        path,
+        budget,
+        entries,
+        Dereference(links, links.resolve(path.virtual))
+        if links is not None
+        else None,
     )
     entries.sort()
     return entries, total
@@ -243,11 +336,18 @@ async def du(
     budget = WalkBudget(
         ops.max_du_entries, mounts=opts.ns.mounts if opts.ns else None
     )
+    # The links -L follows by; the last of -L and -P decides, as in GNU.
+    fl = FlagView(opts.flags, spec=SPECS["du"])
+    links = (
+        opts.ns.links
+        if opts.ns is not None and fl.typed_order("L", "P")[-1:] == ["L"]
+        else None
+    )
     compute_size: ComputeSize = partial(
-        walk_size, ops, accessor, opts.index, budget
+        walk_size, ops, accessor, opts.index, budget, links
     )
     compute_entries: ComputeEntries = partial(
-        walk_entries, ops, accessor, opts.index, budget
+        walk_entries, ops, accessor, opts.index, budget, links
     )
     return await du_generic(
         paths,
@@ -260,6 +360,7 @@ async def du(
         truncated=lambda: budget.hit,
         unreadable=lambda: budget.unreadable,
         directories=lambda: budget.directories,
+        inaccessible=lambda: budget.inaccessible,
     )
 
 

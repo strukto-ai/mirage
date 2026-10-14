@@ -26,7 +26,7 @@ import { FindParseError } from '../../errors.ts'
 import { parseDepth, parseFindExpression, parseMtime, parseSize } from '../find_parse.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import { respellOne, respellRaw } from '../../../utils/path.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import {
@@ -34,7 +34,6 @@ import {
   displayPath,
   dropPruned,
   emitStartPath,
-  hasLinkChildren,
   optionsTree,
   settlePendingPrunes,
   startBasename,
@@ -44,7 +43,6 @@ import {
 import { printfKind } from '../../../core/generic/find_eval.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { linkResults } from '../../../core/generic/find.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 
 const ENC = new TextEncoder()
@@ -271,7 +269,6 @@ interface FindFlags {
   readonly path: string | null
   readonly mindepth: string | null
   readonly empty: boolean
-  readonly follow: boolean
 }
 
 function parseFlags(bag: Record<string, FlagValue>): FindFlags {
@@ -286,7 +283,6 @@ function parseFlags(bag: Record<string, FlagValue>): FindFlags {
     path: fl.asStr('path') ?? null,
     mindepth: fl.asStr('mindepth') ?? null,
     empty: fl.asBool('empty'),
-    follow: fl.asBool('L'),
   }
 }
 
@@ -302,6 +298,9 @@ export function findGeneric(
   // A walker already evaluates times in its predicate tree. Its raw stat is
   // needed only to distinguish ENOTDIR from ENOENT at a missing start point.
   missingStat?: (spec: PathSpec) => Promise<FileStat>,
+  // Under -L, each directory the walk reached again and the one above it
+  // that it repeats.
+  loops?: () => [string, string][],
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(opts.flags)
   const nameFlag = parsed.name
@@ -398,11 +397,15 @@ export function findGeneric(
       const prefix = mountPrefixOf(root.virtual, root.vfsPath)
       const tree = bindTree(optionsTree(options), prefix, root.virtual, root.rawPath)
       const rootOptions: FindOptions = { ...options, tree }
+      // A start point that is itself a symlink is the walk's to report: the
+      // table it walks answers the link's own row, and GNU's default -P
+      // reports the link and stops there. The dispatcher's stat would follow
+      // it, so the start point's checks below leave it alone.
       const rootIsLink = (opts.ns?.links ?? null)?.statAt(root.virtual) != null
       // What the start point is decides which walk is even possible, so it
-      // is resolved once, ahead of all of them: a symlink has no backend
-      // inode (linkResults reports it), a non-directory has no subtree, and
-      // nothing at all is GNU's diagnostic. Statted through the dispatcher,
+      // is resolved once, ahead of all of them: a symlink is walked as
+      // itself, a non-directory has no subtree, and nothing at all is GNU's
+      // diagnostic. Statted through the dispatcher,
       // so a start point the router already resolved into another mount
       // answers there rather than on this command's mount.
       // The probe asks both channels a backend can answer on, so a directory
@@ -509,7 +512,7 @@ export function findGeneric(
       }
       let keys: string[]
       try {
-        keys = rootIsLink ? [] : await find(root, rootOptions)
+        keys = await find(root, rootOptions)
       } catch (err) {
         // GNU find reports missing roots and moves on; anything else
         // (rate limits, auth failures) must surface.
@@ -528,6 +531,12 @@ export function findGeneric(
       for (const [path, err] of unstatted?.() ?? []) {
         const shown = respellOne(path, root.virtual, root.rawPath)
         missing.push(`find: '${shown}': ${failureText(err)}`)
+      }
+      for (const [path, above] of loops?.() ?? []) {
+        missing.push(
+          `find: File system loop detected; '${respellOne(path, root.virtual, root.rawPath)}' ` +
+            `is part of the same file system loop as '${respellOne(above, root.virtual, root.rawPath)}'.`,
+        )
       }
       const rootKey = rstripSlash(root.mountPath) || '/'
       const rootMatches: string[] = []
@@ -554,11 +563,7 @@ export function findGeneric(
       const canProbe = !usesEmpty || dirEmpty !== undefined
       let rows = rootMatches
       if (startIsDir && !mtimePushed && canProbe) {
-        let rootEmpty = usesEmpty && dirEmpty !== undefined ? await dirEmpty(root) : null
-        // A symlink is namespace state no backend readdir can see, so a
-        // directory holding only one would read as empty. GNU counts the
-        // link as an entry.
-        if (rootEmpty === true) rootEmpty = !hasLinkChildren(opts.ns?.links, root.virtual)
+        const rootEmpty = usesEmpty && dirEmpty !== undefined ? await dirEmpty(root) : null
         rows = withRootRow(
           rootMatches,
           root.virtual === '/' ? '/' : rstripSlash(root.virtual),
@@ -569,34 +574,17 @@ export function findGeneric(
         stat !== undefined
           ? await applyMtimeFilter(rows, effMtimeMin, effMtimeMax, stat, prefix)
           : rows
-      const rootPath = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
-      const withLinks = filtered.concat(
-        await linkResults(
-          opts.ns?.links ?? null,
-          rootPath,
-          prefix,
-          stripSlash(rootKey),
-          optionsTree(rootOptions),
-          expr !== null ? expr.minDepth : minDepth,
-          expr !== null ? expr.maxDepth : maxDepth,
-          expr !== null ? expr.minSize : minSize,
-          expr !== null ? expr.maxSize : maxSize,
-          effMtimeMin,
-          effMtimeMax,
-          parsed.follow,
-        ),
-      )
-      withLinks.sort(compareCodePoints)
+      filtered.sort(compareCodePoints)
       // What -prune reached is known only once every row has been judged: a
       // flat listing meets a child before its parent, so the ledger the tree
-      // kept is applied here, after the backend and the link merge.
+      // kept is applied here, after every row is in.
       if (stat !== undefined) {
         await settlePendingPrunes(tree, (key) => rowMtime(stat, prefix, key))
       }
-      const unpruned = dropPruned(withLinks, tree, prefix)
-      // Hidden rows drop here, above the native-op/walk fork and after
-      // the link merge, so a mount's visibility behavior cannot depend
-      // on whether its backend ships a native find op.
+      const unpruned = dropPruned(filtered, tree, prefix)
+      // Hidden rows drop here, above the native-op/walk fork, so a mount's
+      // visibility behavior cannot depend on whether its backend ships a
+      // native find op.
       const visibleRows = unpruned.filter((row) => pathVisible(opts.ns?.visibility, row))
       const added = respellRaw(visibleRows, root.virtual, root.rawPath)
       for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')

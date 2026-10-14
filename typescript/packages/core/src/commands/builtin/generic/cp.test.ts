@@ -802,10 +802,13 @@ describe('a link reached through a linked directory', () => {
 })
 
 describe('a backup onto a linked destination', () => {
-  // The router followed `dst` to `f`, so moving it aside or removing it would
-  // act on `f`; GNU moves the link itself. Mirrors python's
-  // test_backup_leaves_a_linked_destination_alone.
-  it.each(['s/.', 's/sub'])('cp -rb %s leaves the link and its file alone', async (source) => {
+  // The router followed `dst` to `f`; GNU moves the link itself aside (a dot
+  // source removes it) and leaves `f` alone (coreutils 9.7). Mirrors python's
+  // test_backup_moves_a_linked_destination_aside.
+  it.each([
+    ['s/.', 'xsub\n'],
+    ['s/sub', 'xf\nb\n'],
+  ])('cp -rb %s moves the link aside', async (source, after) => {
     const ws = new Workspace(
       { '/data/': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
@@ -814,12 +817,10 @@ describe('a backup onto a linked destination', () => {
       'cd /data && mkdir -p s/sub && printf b > s/sub/b && printf x > f && ln -s f dst',
     )
     const r = await ws.shell(`cd /data && cp -rb ${source} dst`)
-    expect([r.exitCode, DEC.decode(r.stderr)]).toEqual([
-      1,
-      `cp: cannot overwrite non-directory 'dst' with directory '${source}'\n`,
-    ])
-    const after = await ws.shell('cd /data && cat f && readlink dst && ls')
-    expect(DEC.decode(after.stdout)).toBe('xf\ndst\nf\ns\n')
+    expect([r.exitCode, DEC.decode(r.stderr)]).toEqual([0, ''])
+    const shown = source === 's/sub' ? 'readlink dst~ && ls dst' : 'ls dst'
+    const rest = await ws.shell(`cd /data && cat f && test ! -L dst && ${shown}`)
+    expect(DEC.decode(rest.stdout)).toBe(after)
     await ws.close()
   })
 })

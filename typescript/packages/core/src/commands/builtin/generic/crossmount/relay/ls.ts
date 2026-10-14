@@ -16,24 +16,25 @@ import { IOResult } from '../../../../../io/types.ts'
 import type { NamespaceView, SessionView } from '../../../../../view/types.ts'
 import type { FileStat, PathSpec } from '../../../../../types.ts'
 import { gnuBasename } from '../../../../../utils/path.ts'
-import { rstripSlash } from '../../../../../utils/slash.ts'
 import type { CommandOpts } from '../../../../config.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import { overlaidStat } from '../../../generic_bind/adapter.ts'
+import { dispatchedCall, overlaidStat } from '../../../generic_bind/adapter.ts'
 import { lsGeneric } from '../../ls.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { crossOpts, flatten, readdirOp, statOp } from '../utils.ts'
+import { crossOpts, flatten, readdirOp } from '../utils.ts'
 
+// lstat one entry on the mount that owns it, named by its own path.
+//
 // readdir supplies the parent's names and stat supplies the target's facts,
 // and relaying lets the two land on different mounts: statting a nested
 // mount's root reaches a backend that calls its own root `/`, not the name
 // the parent listing knows it by. The single-mount path never sees this
 // because parent and child are one backend. The name has to win from the
 // parent's side, or `-R` descends into `parent + "/"`, which is the parent
-// again.
-function namedByPath(stat: (p: PathSpec) => Promise<FileStat>) {
+// again. Mirrors Python's relayed_stat.
+function relayedStat(dispatch: DispatchFn) {
   return async (p: PathSpec): Promise<FileStat> => {
-    const info = await stat(p)
+    const info = (await dispatchedCall(dispatch, 'stat', p, [], { nofollow: true })) as FileStat
     const name = gnuBasename(p.virtual)
     if (name === '' || name === '/' || info.name === name) return info
     return info.with({ name })
@@ -81,18 +82,14 @@ export async function runLs(
     ...(ns !== undefined ? { ns: crossingNs(ns) } : {}),
     ...(sessionView !== undefined ? { sessionView } : {}),
   }
-  // A backend's listing never holds a link: ls merges them from `links` and
-  // renders them unfollowed, where a listed one would be statted through to
-  // its target. Mirrors Python's relayed_readdir.
-  const readdir = readdirOp(dispatch)
-  const links = ns?.links
+  // The dispatcher's listing names the links among the entries, as a mount's
+  // table does once its links are stamped on. Mirrors Python's
+  // relayed_readdir.
   const result = await lsGeneric(
     flatten(scopes),
     opts,
-    links === undefined
-      ? readdir
-      : async (p) => (await readdir(p)).filter((e) => links.statAt(rstripSlash(e)) === null),
-    overlaidStat(namedByPath(statOp(dispatch)), ns?.statOverlay),
+    readdirOp(dispatch),
+    overlaidStat(relayedStat(dispatch), ns?.statOverlay),
   )
   return result ?? [null, new IOResult()]
 }

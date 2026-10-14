@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { pathVisible } from '../../../utils/hidden.ts'
-import { mountedPath, respelled } from '../../../utils/key_prefix.ts'
+import { mountedPath, rekey, respelled } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -51,6 +51,7 @@ import {
 } from '../utils/copy.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import {
+  enoent,
   fsStrerror,
   isDotWalkError,
   isEacces,
@@ -58,7 +59,8 @@ import {
   isFsError,
   isMissingPath,
 } from '../../../errors/fs.ts'
-import { typedLink } from '../utils/links.ts'
+import { nameLocation, typedLink } from '../utils/links.ts'
+import { followedStat } from '../../../view/namespace_view.ts'
 import {
   absentDestError,
   descendantPath,
@@ -307,6 +309,40 @@ export async function renameLink(
   target: PathSpec,
 ): Promise<void> {
   await copies.dispatch('rename', src, [target])
+}
+
+/**
+ * stat(2) of a destination, over a table whose stat is lstat(2). cp opens its
+ * destination the way open(2) does, through a link at the name: a link to a
+ * directory is that directory, one to a file is the file it writes through, and
+ * one that leads nowhere is no destination at all (cp then refuses to write
+ * through it). Mirrors Python's dest_stat.
+ */
+export function destStat(stat: StatFn, links: LinkView): StatFn {
+  return async (path: PathSpec) => {
+    const row = await followedStat(stat, links, path)
+    if (row.type === FileType.SYMLINK) throw enoent(path)
+    return row
+  }
+}
+
+/**
+ * The destination as the link standing at its name, null where none does. The
+ * router follows a destination to what its link leads to, which is what a plain
+ * copy writes, through the link. GNU's backup renames the destination itself, a
+ * link included, and the copy then lands at the name, so a backup is made of
+ * this and the copy goes here. Mirrors Python's link_name.
+ */
+export function linkName(copies: TransferLinks, target: PathSpec): PathSpec | null {
+  const where = nameLocation(copies.links, target, copies.cwd)
+  if (where === null || copies.links.statAt(where) === null) return null
+  if (where === target.virtual) return target
+  return new PathSpec({
+    virtual: where,
+    directory: where.slice(0, where.lastIndexOf('/') + 1) || '/',
+    vfsPath: rekey(target.virtual, target.vfsPath, where),
+    rawPath: target.rawPath,
+  })
 }
 
 /** Copy a symlink through the shared overwrite and backup policy. */
@@ -672,30 +708,27 @@ function ontoDirectory(
 // backup name. A source typed as `.` or `..` is never backed up, so the entry
 // is removed instead, which -v reports. No gate or -i question applies to a
 // directory source (coreutils 9.7). Outside a workspace nothing can rename
-// the entry, so the overwrite is refused as it is without a backup. So is a
-// name a link stands at: the router has followed the destination to what the
-// link leads to, which GNU leaves alone while it moves the link. Returns
-// whether the name is free. Mirrors Python's _clear_for_directory.
+// the entry, so the overwrite is refused as it is without a backup. A link at
+// the name is the entry moved or removed, not what it leads to, and the tree
+// then lands at its name (linkName). Returns the name freed for the
+// directory, null when it stays taken. Mirrors Python's _clear_for_directory.
 async function clearForDirectory(
   policy: TransferPolicy,
   copies: TransferLinks | undefined,
   stat: StatFn,
   src: PathSpec,
-  target: PathSpec,
+  dest: PathSpec,
   errors: string[],
   lines: string[] | undefined,
   index?: IndexCacheStore,
-): Promise<boolean> {
-  if (
-    copies === undefined ||
-    !backupDisplaces(policy.backup) ||
-    typedLink(copies.links, target, copies.cwd) !== null
-  ) {
+): Promise<PathSpec | null> {
+  if (copies === undefined || !backupDisplaces(policy.backup)) {
     errors.push(
-      `${policy.cmdName}: cannot overwrite non-directory '${target.rawPath}' with directory '${src.rawPath}'`,
+      `${policy.cmdName}: cannot overwrite non-directory '${dest.rawPath}' with directory '${src.rawPath}'`,
     )
-    return false
+    return null
   }
+  const target = linkName(copies, dest) ?? dest
   const typed = typedName(src)
   if (typed === '.' || typed === '..') {
     try {
@@ -705,10 +738,10 @@ async function clearForDirectory(
       errors.push(
         `${policy.cmdName}: cannot remove '${target.rawPath}': ${String(fsStrerror(err))}`,
       )
-      return false
+      return null
     }
     lines?.push(`removed '${target.rawPath}'`)
-    return true
+    return target
   }
   const made = await makeBackup(
     policy,
@@ -720,7 +753,7 @@ async function clearForDirectory(
     index,
     copies,
   )
-  return made.ok
+  return made.ok ? target : null
 }
 
 // Decide whether an existing target may be replaced. -n and --update=none
@@ -1045,11 +1078,16 @@ async function mirrorDirs(
     const entryDst = spelledFrom(mountedPath(target, dstMount), target)
     const entry = spelledFrom(mountedPath(src, entryMount), src)
     try {
-      const { exists, isDir } = await entryKind(stat, entryDst, index)
+      const { exists, isDir } = await entryKind(
+        copies !== undefined ? destStat(stat, copies.links) : stat,
+        entryDst,
+        index,
+      )
       if (isDir) continue
       if (
         !exists ||
-        (await clearForDirectory(policy, copies, stat, entry, entryDst, errors, lines, index))
+        (await clearForDirectory(policy, copies, stat, entry, entryDst, errors, lines, index)) !==
+          null
       ) {
         await strategy.mkdir(entryDst)
         made.add(dstMount)
@@ -1168,7 +1206,11 @@ export async function copyEntries(
     const entryDstSpec = descendantPath(target, dstBase + entry.slice(srcBase.length))
     if (kind === FileType.DIRECTORY) {
       try {
-        const { exists, isDir } = await entryKind(stat, entryDstSpec, index)
+        const { exists, isDir } = await entryKind(
+          opts.copies !== undefined ? destStat(stat, opts.copies.links) : stat,
+          entryDstSpec,
+          index,
+        )
         if (isDir) continue
         const free =
           !exists ||
@@ -1181,7 +1223,7 @@ export async function copyEntries(
             errors,
             opts.lines,
             index,
-          ))
+          )) !== null
         if (free) {
           await strategy.mkdir(entryDstSpec)
           made.add(entryDstSpec.virtual)
@@ -1347,11 +1389,13 @@ export async function cpGeneric(
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
   const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
+  // cp opens its destination through a link at the name.
+  const toDest = copies !== undefined ? destStat(stat, copies.links) : stat
   let dstIsDir: boolean
   let dstExists: boolean
   let dstErr: FsCondition | null = null
   if (flags.targetDir !== null) {
-    const err = await targetDirError('cp', stat, dst)
+    const err = await targetDirError('cp', toDest, dst)
     if (err !== null) {
       return [null, new IOResult({ stderr: ENC.encode(`${err}\n`), exitCode: 1 })]
     }
@@ -1361,7 +1405,7 @@ export async function cpGeneric(
     dstIsDir = false
     dstExists = true
   } else {
-    const probe = await destKind(stat, dst)
+    const probe = await destKind(toDest, dst)
     dstExists = probe.exists
     dstIsDir = probe.isDir
     dstErr = probe.condition
@@ -1396,7 +1440,8 @@ export async function cpGeneric(
     updateGates(flags.update) ||
     flags.backup === 'numbered'
   )
-  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr, '.')) {
+  for (const [src, dest] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr, '.')) {
+    let target = dest
     const link =
       copies !== undefined && flags.dereference === 'never'
         ? typedLink(copies.links, src, copies.cwd)
@@ -1468,7 +1513,7 @@ export async function cpGeneric(
     const probe =
       !flags.noTargetDir && target.virtual === dst.virtual
         ? { exists: dstExists, isDir: dstIsDir, condition: dstErr }
-        : await destKind(stat, target)
+        : await destKind(toDest, target)
     const { exists: targetExists, isDir: targetIsDir } = probe
     let targetErr = probe.condition
     if (targetErr !== null && STAT_REFUSALS.has(targetErr)) {
@@ -1537,10 +1582,8 @@ export async function cpGeneric(
         !intoItself &&
         !targetExists
       if (!wholeTree) await beforeFullScan(dispatch, src, 'cp')
-      if (
-        targetExists &&
-        !targetIsDir &&
-        !(await clearForDirectory(
+      if (targetExists && !targetIsDir) {
+        const freed = await clearForDirectory(
           policy,
           copies,
           stat,
@@ -1549,9 +1592,9 @@ export async function cpGeneric(
           errors,
           flags.verbose ? lines : undefined,
           index,
-        ))
-      ) {
-        continue
+        )
+        if (freed === null) continue
+        target = freed
       }
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
@@ -1710,16 +1753,25 @@ export async function cpGeneric(
       errors.push(refusal)
       continue
     }
-    const made = await makeBackup(
-      policy,
-      strategy,
-      stat,
-      versionReaddir,
-      target,
-      errors,
-      index,
-      copies,
-    )
+    const linked = copies !== undefined && policy.backup !== null ? linkName(copies, target) : null
+    let made: Awaited<ReturnType<typeof makeBackup>>
+    if (copies !== undefined && linked !== null) {
+      // GNU's backup renames the link at the name, and the copy is then a new
+      // file there; what the link led to is untouched.
+      target = linked
+      made = await makeBackup(
+        policy,
+        { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
+        stat,
+        undefined,
+        target,
+        errors,
+        index,
+        copies,
+      )
+    } else {
+      made = await makeBackup(policy, strategy, stat, versionReaddir, target, errors, index, copies)
+    }
     if (!made.ok) continue
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))
     if (isPrimitiveCopy(strategy)) {

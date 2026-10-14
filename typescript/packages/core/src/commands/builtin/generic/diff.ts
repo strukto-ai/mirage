@@ -28,7 +28,9 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { StatPath } from '../../../view/types.ts'
 import { formatFsError } from '../../../errors/render.ts'
-import { isEnoent, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isDotWalkError, isEnoent, isFsError } from '../../../errors/fs.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
+import { followedStat } from '../../../view/namespace_view.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitLinesKeepends } from '../utils/lines.ts'
@@ -112,6 +114,8 @@ interface Walk {
   switches: string
   statPath: StatPath | null
   zone: Zone
+  // An entry diff could not compare, reported as it goes on (exit 2).
+  readonly trouble: Uint8Array[]
 }
 
 type Absent = readonly [boolean, boolean]
@@ -316,6 +320,26 @@ async function entries(walk: Walk, path: PathSpec, absent: boolean): Promise<Set
   return new Set(names.filter((name) => !walk.excluded.some((pattern) => fnmatch(name, pattern))))
 }
 
+// What an entry is, as diff's stat follows it; null, and the entry named in
+// `trouble`, for a link that leads nowhere or loops. GNU names each such link
+// on each side and goes on with the rest, the pair left uncompared (exit 2).
+// Mirrors Python's _kind.
+async function entryKind(walk: Walk, path: PathSpec): Promise<FileType | null> {
+  let row: FileStat
+  try {
+    row = await walk.stat(path)
+  } catch (err) {
+    if (!isDotWalkError(err) || (err as { code?: string }).code !== 'ELOOP') throw err
+    walk.trouble.push(ENC.encode(`diff: ${path.rawPath}: ${String(fsStrerror(err))}\n`))
+    return null
+  }
+  if (row.type === FileType.SYMLINK) {
+    walk.trouble.push(ENC.encode(`diff: ${path.rawPath}: ${posixPhrase('ENOENT')}\n`))
+    return null
+  }
+  return row.type
+}
+
 /**
  * Compare two directories, one of which -N may read as empty; returns the
  * report and whether any pair differed.
@@ -349,8 +373,11 @@ async function diffDirs(
     }
     const childA = childSpec(dirA, name)
     const childB = childSpec(dirB, name)
-    const aDir = inA && (await walk.stat(childA)).type === FileType.DIRECTORY
-    const bDir = inB && (await walk.stat(childB)).type === FileType.DIRECTORY
+    const kindA = inA ? await entryKind(walk, childA) : null
+    const kindB = inB ? await entryKind(walk, childB) : null
+    if ((inA && kindA === null) || (inB && kindB === null)) continue
+    const aDir = kindA === FileType.DIRECTORY
+    const bDir = kindB === FileType.DIRECTORY
     const gone: Absent = [!inA, !inB]
     if ((aDir || !inA) && (bDir || !inB)) {
       const [body, changed] = await diffDirs(walk, childA, childB, gone)
@@ -436,6 +463,8 @@ export async function diffGeneric(
   const dash0 = p0.rawPath === '-'
   const dash1 = p1.rawPath === '-'
   const errorPaths = [...paths, ...flags.excludeFrom]
+  const links = opts.ns?.links
+  const trouble: Uint8Array[] = []
   let output: Uint8Array | undefined
   let differ = false
   try {
@@ -443,7 +472,9 @@ export async function diffGeneric(
       signal: opts.signal,
       stream,
       readdir,
-      stat,
+      // diff compares what each link leads to (its default --dereference),
+      // the operands' own taken there at dispatch.
+      stat: links === undefined ? stat : (p: PathSpec) => followedStat(stat, links, p),
       flags,
       excluded: await excludedPatterns(flags, stream),
       switches: switchWords(opts.argv ?? [])
@@ -451,6 +482,7 @@ export async function diffGeneric(
         .join(''),
       statPath: opts.statPath ?? null,
       zone: zoneFromEnv(opts.env) ?? UTC_ZONE,
+      trouble,
     }
     if (dash0 !== dash1) {
       if ((await stat(dash0 ? p1 : p0)).type === FileType.DIRECTORY) {
@@ -500,5 +532,6 @@ export async function diffGeneric(
     return [null, new IOResult({ exitCode: 2, stderr: formatFsError('diff', err, errorPaths) })]
   }
   const out: ByteSource = output
+  if (trouble.length > 0) return [out, new IOResult({ exitCode: 2, stderr: concat(trouble) })]
   return [out, new IOResult({ exitCode: differ ? 1 : 0 })]
 }

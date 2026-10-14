@@ -24,11 +24,13 @@ from mirage.workspace import Workspace
 from mirage.workspace.executor.command.run import drop_mount_caches
 
 
-@pytest.mark.parametrize("cmd", ["ls", "stat", "find", "du", "file"])
+@pytest.mark.parametrize("cmd", ["ls", "stat", "find", "file"])
 def test_the_symlink_aware_commands_read_the_links_field(cmd):
     """`CommandOpts.ns` reaches every handler; the family generic is
     where the read lives (tests/commands/test_links_optin.py pins the
-    full delegation rule), and the builder passes `opts` through."""
+    full delegation rule), and the builder passes `opts` through. Every
+    command's table already names and lstats a link (``with_links``);
+    these read the field for what a link leads to."""
     module = importlib.import_module(f"mirage.commands.builtin.generic.{cmd}")
     assert "opts.ns.links" in inspect.getsource(module)
 

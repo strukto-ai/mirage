@@ -27,7 +27,7 @@
     "gdrive-folder",
     "box"
    ],
-   "command": "find -L /data2 -name xm_link.txt -type f",
+   "command": "find -L /data2 -maxdepth 1 -name xm_link.txt -type f",
    "expect": {
     "exit": 0,
     "stdout": "/data2/xm_link.txt\n",
@@ -61,7 +61,7 @@
     "gdrive-folder",
     "box"
    ],
-   "command": "find -L /data2 -name xm_link.txt -type l",
+   "command": "find -L /data2 -maxdepth 1 -name xm_link.txt -type l",
    "expect": {
     "exit": 0,
     "stdout": "",

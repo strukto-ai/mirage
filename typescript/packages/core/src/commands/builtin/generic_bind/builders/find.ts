@@ -47,6 +47,10 @@ export function findWalk<A extends Accessor>(
   const idx = opts.index ?? undefined
   const flags = new FlagView(opts.flags, specOf('find'))
   const bounded = flags.asBool('xdev') || flags.asBool('mount')
+  // The last of -H, -L and -P decides, as in GNU; only -L follows the links
+  // the walk meets.
+  const follow = flags.typedOrder('H', 'L', 'P').at(-1) === 'L'
+  const loops: [string, string][] = []
   const mounts = opts.ns?.mounts
   const { readTree } = ops
   // The walk classifies entries through stat (see walkFind). A directory the guarded readdir
@@ -84,9 +88,9 @@ export function findWalk<A extends Accessor>(
             const overlay = opts.ns?.statOverlay
             return overlay !== undefined ? overlay(spec.virtual, st) : st
           },
-          // A namespace symlink is an entry `-empty` must count and no
-          // backend readdir can see.
           links: opts.ns?.links ?? null,
+          follow,
+          loops,
         },
         options,
         idx,
@@ -101,5 +105,6 @@ export function findWalk<A extends Accessor>(
       return failed
     },
     (spec) => ops.stat(accessor, spec, idx),
+    () => loops.splice(0),
   )
 }

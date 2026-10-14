@@ -26,7 +26,7 @@ from mirage.commands.config import Command
 # itself: a bespoke wrapper that walks its own tree cannot see a link,
 # still runs, still exits 0, and nothing notices until someone makes a
 # link on that backend.
-LINK_AWARE = ("ls", "stat", "find", "du", "file")
+LINK_AWARE = ("ls", "stat", "find", "file")
 
 # The two spellings of delegation: the family's full-command generic
 # entry, or find's walk primitives for the wrappers with custom guards
@@ -36,7 +36,6 @@ GENERIC_CALLS = {
     "ls": ("ls_generic(",),
     "stat": ("stat_generic(", "generic_stat("),
     "find": ("find_generic(", "find_walk_generic(", "resolve_start("),
-    "du": ("du_generic(",),
     "file": ("file_generic(",),
 }
 
@@ -67,6 +66,15 @@ def _registered() -> tuple[list[Command], list[str]]:
             seen.add(id(value))
             found.extend(cmds)
     return found, failed
+
+
+def test_every_bound_table_answers_for_the_links():
+    """A mount's table names and lstats the namespace's links once, for
+    every command bound to it; dropping the stamp is how every listing
+    and stat would lose them at once, so the stamp itself is pinned."""
+    import mirage.commands.builtin.generic_bind.factory as factory
+
+    assert "with_links(" in inspect.getsource(factory)
 
 
 def test_link_aware_generics_read_the_links_field():

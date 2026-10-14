@@ -398,16 +398,6 @@ class _Walker:
         except WALK_ERRORS as exc:
             self.warn(walk_error_line(chain[0][1], exc, self.parallel))
             return
-        if self.follow and self.resolver is not None:
-            listed = {_entry_name(entry) for entry in entries}
-            entries = [
-                *entries,
-                *(
-                    link
-                    for link in self.resolver.children(here)
-                    if link not in listed
-                ),
-            ]
         if self.sort_by_name:
             entries = sorted(entries, key=_entry_name)
         for entry in entries:

@@ -12,15 +12,60 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+import functools
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, replace
+from typing import Any
 
-from mirage.commands.config import CommandOpts
+from mirage.commands.config import CommandIO, CommandOpts
 from mirage.errors.fs import eloop
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, resolve_path
-from mirage.view.types import LinkView
+from mirage.view.types import LinkView, MountView
+
+_MISSES = (FileNotFoundError, NotADirectoryError)
+
+
+def link_location(links: LinkView, virtual: str) -> str:
+    """Where a name stands as lstat reaches it: every link above its final
+    name followed, the name itself kept.
+
+    The walk the kernel gives a path before a call that does not follow
+    its final name, and the key the table files a link under, since every
+    link is keyed by its resolved parent. A path ending in a slash resolves
+    whole: POSIX reads ``dlink/`` as ``dlink/.``.
+
+    Args:
+        links (LinkView): the namespace's symlink facts.
+        virtual (str): an absolute virtual path.
+
+    Raises:
+        CycleError: a link loop stands in the walk (ELOOP).
+    """
+    head, _, name = virtual.rpartition("/")
+    if not name:
+        return links.resolve(virtual)
+    return f"{links.resolve(head or '/').rstrip('/')}/{name}"
+
+
+def owed_names(links: LinkView, directory: str) -> list[str]:
+    """The names the links owe a directory: each link standing in it, and
+    each directory holding one further down.
+
+    No backend can list either, and the second may be one no backend
+    serves at all (a link made below a directory chain that holds no key),
+    so these are the names the dispatcher merges into its own listing,
+    derived from the same table.
+
+    Args:
+        links (LinkView): the namespace's symlink facts.
+        directory (str): the directory's virtual path, its links resolved.
+    """
+    base = directory.rstrip("/") + "/"
+    return sorted(
+        {path[len(base) :].split("/", 1)[0] for path, _ in links.subtree(base)}
+    )
 
 
 def name_location(links: LinkView, path: PathSpec, cwd: str) -> str | None:
@@ -45,8 +90,7 @@ def name_location(links: LinkView, path: PathSpec, cwd: str) -> str | None:
         or typed.rsplit("/", 1)[-1] in (".", "..")
     ):
         return None
-    parent, _, name = resolve_path(typed, cwd).rpartition("/")
-    return f"{links.resolve(parent or '/').rstrip('/')}/{name}"
+    return link_location(links, resolve_path(typed, cwd))
 
 
 def typed_link(links: LinkView, path: PathSpec, cwd: str) -> FileStat | None:
@@ -115,19 +159,6 @@ class LinkResolver:
             and where != path.virtual
             and self.links.stat_at(where) is None
         )
-
-    def children(self, directory: str) -> list[str]:
-        """The links standing directly in a directory, as virtual paths.
-
-        What a walker merges into a backend's listing, which never holds
-        a link.
-
-        Args:
-            directory (str): the directory's virtual path, every link
-                above it resolved, which is how the table keys its links.
-        """
-        base = directory.rstrip("/")
-        return [f"{base}/{row.name}" for row in self.links.children(directory)]
 
     def target(self, link: str) -> str:
         """Where a link leads, every link on the way followed.
@@ -204,6 +235,198 @@ class LinkResolver:
         await self.dispatch("unlink", PathSpec.from_str_path(virtual))
 
 
+def _basename(virtual: str) -> str:
+    return virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+
+
+def _named(row: FileStat, virtual: str) -> FileStat:
+    name = _basename(virtual)
+    return row if row.name == name else row.model_copy(update={"name": name})
+
+
+def _rebased(entry: str, where: str, base: str) -> str:
+    """An entry the dispatcher listed under ``where``, named under ``base``.
+
+    Args:
+        entry (str): the listed entry's virtual path.
+        where (str): the directory the dispatcher listed.
+        base (str): the directory the caller asked for, without a slash.
+    """
+    root = where.rstrip("/") + "/"
+    rest = entry[len(root) :] if entry.startswith(root) else _basename(entry)
+    return f"{base}/{rest}"
+
+
+def serves(mounts: MountView, prefix: str, virtual: str) -> bool:
+    """Whether the mount at ``prefix`` is the one serving ``virtual``.
+
+    Args:
+        mounts (MountView): the mount boundaries.
+        prefix (str): the mount's prefix, without a trailing slash.
+        virtual (str): an absolute virtual path.
+    """
+    return mounts.root_of(virtual).rstrip("/") == prefix
+
+
+def _everywhere(virtual: str) -> bool:
+    return True
+
+
+def _located(links: LinkView, virtual: str) -> str:
+    try:
+        return link_location(links, virtual)
+    except CycleError:
+        raise eloop(virtual) from None
+
+
+async def _linked_stat(
+    stat: Callable[..., Awaitable[FileStat]],
+    links: LinkView,
+    dispatch: DispatchFn,
+    owns: Callable[[str], bool],
+    accessor: Any,
+    path: PathSpec,
+    *args: Any,
+    **kwargs: Any,
+) -> FileStat:
+    here = path.virtual
+    where = _located(links, here)
+    row = None if here.endswith("/") else links.stat_at(where)
+    if row is not None:
+        return row
+    if where.rstrip("/") != here.rstrip("/") or not owns(where):
+        found, _ = await dispatch(
+            "stat", PathSpec.from_str_path(where), nofollow=True
+        )
+        return _named(found, here)
+    try:
+        return await stat(accessor, path, *args, **kwargs)
+    except _MISSES:
+        if not owed_names(links, here):
+            raise
+        return FileStat(name=_basename(here), type=FileType.DIRECTORY)
+
+
+async def _linked_readdir(
+    readdir: Callable[..., Awaitable[list[str]]],
+    links: LinkView,
+    dispatch: DispatchFn,
+    owns: Callable[[str], bool],
+    accessor: Any,
+    path: PathSpec,
+    *args: Any,
+    **kwargs: Any,
+) -> list[str]:
+    here = path.virtual.rstrip("/") or "/"
+    try:
+        where = links.resolve(here)
+    except CycleError:
+        raise eloop(path.virtual) from None
+    base = here.rstrip("/")
+    if where != here or not owns(where):
+        listed, _ = await dispatch("readdir", PathSpec.from_str_path(where))
+        return [_rebased(entry, where, base) for entry in listed]
+    owed = owed_names(links, here)
+    try:
+        entries: list[str] = await readdir(accessor, path, *args, **kwargs)
+    except _MISSES:
+        if not owed:
+            raise
+        entries = []
+    if not owed:
+        return entries
+    present = {entry.rstrip("/") for entry in entries}
+    return [
+        *entries,
+        *(f"{base}/{n}" for n in owed if f"{base}/{n}" not in present),
+    ]
+
+
+async def _linked_exists(
+    exists: Callable[..., Awaitable[bool]],
+    links: LinkView,
+    accessor: Any,
+    path: PathSpec,
+    *args: Any,
+    **kwargs: Any,
+) -> bool:
+    try:
+        where = link_location(links, path.virtual)
+    except CycleError:
+        return False
+    if links.stat_at(where) is not None:
+        return True
+    return await exists(accessor, path, *args, **kwargs)
+
+
+async def _linked_tree(
+    read_tree: Callable[..., Awaitable[dict[str, FileStat] | None]],
+    links: LinkView,
+    accessor: Any,
+    path: PathSpec,
+    *args: Any,
+    **kwargs: Any,
+) -> dict[str, FileStat] | None:
+    found = await read_tree(accessor, path, *args, **kwargs)
+    base = path.virtual.rstrip("/") + "/"
+    rows = links.subtree(base)
+    if found is None or not rows:
+        return found
+    return {**found, **{key[len(base) :]: row for key, row in rows}}
+
+
+def with_links(
+    ops: CommandIO,
+    links: LinkView | None,
+    dispatch: DispatchFn | None,
+    owns: Callable[[str], bool] | None = None,
+) -> CommandIO:
+    """``ops`` whose stat, readdir and subtree read see the namespace's
+    links, the way the dispatcher's own do.
+
+    No backend stores a link, so a mount's table asked about a name a link
+    stands at answers ENOENT, its listing leaves the link out, and a name
+    below a link to a directory reaches nothing. Here the table answers
+    once for every command: ``stat`` is lstat (a link's own row, and the
+    dispatcher's answer for a name a link above it leads elsewhere),
+    ``readdir`` names the links among the backend's entries and lists a
+    directory a link leads to through the dispatcher, ``read_tree``
+    carries the links under its root, and a directory that holds only a
+    link stats and lists as the dispatcher's does. What a command does
+    with a link, follow it, copy it or leave it, stays its own rule.
+
+    Args:
+        ops (CommandIO): the mount's table.
+        links (LinkView | None): the namespace's symlink facts.
+        dispatch (DispatchFn | None): the dispatcher, which reaches the
+            mount a link leads to.
+        owns (Callable[[str], bool] | None): whether this mount serves a
+            path, every path when None; one a link led to on another mount
+            goes to the dispatcher.
+    """
+    if links is None or dispatch is None:
+        return ops
+    if owns is None:
+        owns = _everywhere
+    return replace(
+        ops,
+        stat=functools.partial(_linked_stat, ops.stat, links, dispatch, owns),
+        readdir=functools.partial(
+            _linked_readdir, ops.readdir, links, dispatch, owns
+        ),
+        exists=(
+            functools.partial(_linked_exists, ops.exists, links)
+            if ops.exists is not None
+            else None
+        ),
+        read_tree=(
+            functools.partial(_linked_tree, ops.read_tree, links)
+            if ops.read_tree is not None
+            else None
+        ),
+    )
+
+
 def link_resolver(opts: CommandOpts) -> LinkResolver | None:
     """The link resolver an invocation carries: None when the namespace holds
     no link, the fast path, or outside a workspace.
@@ -219,4 +442,13 @@ def link_resolver(opts: CommandOpts) -> LinkResolver | None:
     )
 
 
-__all__ = ["LinkResolver", "link_resolver", "name_location", "typed_link"]
+__all__ = [
+    "LinkResolver",
+    "link_location",
+    "link_resolver",
+    "name_location",
+    "owed_names",
+    "serves",
+    "typed_link",
+    "with_links",
+]

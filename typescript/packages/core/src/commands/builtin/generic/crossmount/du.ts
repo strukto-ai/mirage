@@ -153,7 +153,6 @@ export async function runDu(
     [],
     undefined,
     null,
-    null,
     undefined,
     () => [...measured.values()].flatMap(([, dirs]) => dirs),
     ns,

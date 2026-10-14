@@ -46,8 +46,10 @@ import { type ArgmatchKind, argmatch } from '../../spec/argmatch.ts'
 import { identityOf, type Identity } from '../utils/identity.ts'
 import { fsStrerror, isDotWalkError, isEacces, isWalkError } from '../../../errors/fs.ts'
 import { failureText } from '../../../errors/classify.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
+import { followedStat } from '../../../view/namespace_view.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { CycleError, respellOne, posixNormpath } from '../../../utils/path.ts'
+import { respellOne, posixNormpath } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { contentSize } from '../../../utils/stat_view.ts'
@@ -78,9 +80,8 @@ interface WalkOpts {
   timeKind: LsTimeKind
   groupDirsFirst: boolean
   recursive: boolean
-  // Links have no backend inode, so readdir never names them. Merging
-  // them in means every caller (plain, -R, -F, -l, sorting) sees them
-  // without knowing they are special.
+  // The namespace's symlink facts. The table's readdir names the links
+  // among the entries and its stat answers each with its own row.
   links: LinkView | null
   // -L reports the target's stat under the link's own name. A
   // dereferenced directory link then carries FileType.DIRECTORY, which
@@ -522,28 +523,25 @@ function statFailedRow(entry: string): FileStat {
   })
 }
 
-// An entry whose stat fails keeps its row and never fails the whole
-// directory, whatever the error: a dropped connection on a mount whose stat
-// is a request costs that entry alone, as any failed stat does in GNU's
-// gobble_file. It is reported, and the exit is 1, only when the listing
-// prints something the stat supplies (`statNeeded`). One entry at a time,
-// as GNU's lstat loop and find's walk go: on a mount that keeps no listing
-// index each stat is a backend request, and firing a whole directory's
-// worth together is a burst the backend may refuse. Mirrors Python ls
-// `_stat_entries`.
+// Stat every name in a directory, plus the mounts below it. An entry whose
+// stat fails keeps its row and never fails the whole directory, whatever the
+// error: a dropped connection on a mount whose stat is a request costs that
+// entry alone, as any failed stat does in GNU's gobble_file. It is reported,
+// and the exit is 1, only when the listing prints something the stat
+// supplies (`statNeeded`). One entry at a time, as GNU's lstat loop and
+// find's walk go: on a mount that keeps no listing index each stat is a
+// backend request, and firing a whole directory's worth together is a burst
+// the backend may refuse. `spell` gives an entry's path as the operand
+// spelled it, for a diagnostic. Mirrors Python ls `_stat_entries`.
 async function listDir(
   readdir: Readdir,
   stat: Stat,
   dir: PathSpec,
-  all: boolean,
+  opts: WalkOpts,
   warnings: LsWarning[],
-  links: LinkView | null,
-  deref: boolean,
-  stat2: Stat,
-  childMounts: ChildMounts | null,
-  statPath: StatPath | null,
-  statNeeded: boolean,
+  spell: (virtual: string) => string,
 ): Promise<{ stats: FileStat[]; structureOnly: boolean }> {
+  const { all, links, childMounts } = opts
   let entries: string[]
   let structureOnly = false
   try {
@@ -560,35 +558,48 @@ async function listDir(
     entries = []
     structureOnly = true
   }
+  const entryStat: Stat =
+    opts.deref && links !== null ? (p: PathSpec) => followedStat(stat, links, p) : stat
   const prefix = mountPrefixOf(dir.virtual, dir.vfsPath)
   const stats: FileStat[] = []
   for (const entry of entries) {
+    let s: FileStat
     try {
-      stats.push(await stat(childSpec(entry, prefix)))
+      s = await entryStat(childSpec(entry, prefix))
     } catch (err) {
       if (!isEntryError(err)) throw err
       const row = statFailedRow(entry)
       stats.push(row)
       if (!all && row.name.startsWith('.')) continue
-      if (!statNeeded) continue
+      if (!opts.statNeeded) continue
       // An entry below an operand is never a command-line arg.
       warnings.push({
-        message: `ls: cannot access '${rstripSlash(entry)}': ${failureText(err)}`,
+        message: `ls: cannot access '${spell(rstripSlash(entry))}': ${failureText(err)}`,
+        serious: false,
+      })
+      continue
+    }
+    stats.push(s)
+    if (
+      opts.deref &&
+      opts.statNeeded &&
+      s.type === FileType.SYMLINK &&
+      (all || !s.name.startsWith('.'))
+    ) {
+      // -L reports what each link leads to; one leading nowhere is listed
+      // by name and reported, a minor problem (exit 1), where the listing
+      // stats an entry at all.
+      warnings.push({
+        message: `ls: cannot access '${spell(rstripSlash(entry))}': ${posixPhrase('ENOENT')}`,
         serious: false,
       })
     }
   }
   const seen = new Set(stats.map((s) => s.name))
-  for (const link of links?.children(dir.virtual) ?? []) {
-    if (seen.has(link.name)) continue
-    seen.add(link.name)
-    const resolved = deref && links !== null ? await derefEntry(dir, link, links, stat2) : null
-    stats.push(resolved ?? link)
-  }
   for (const name of childMounts?.(dir.virtual) ?? []) {
     if (seen.has(name)) continue
     seen.add(name)
-    stats.push(await mountRow(dir, name, statPath))
+    stats.push(await mountRow(dir, name, opts.statPath))
   }
   return {
     stats: all ? stats : stats.filter((s) => !s.name.startsWith('.')),
@@ -601,44 +612,25 @@ async function listDir(
 // A link has no backend inode, so readdir and stat both fail on one;
 // without this a link operand reads as a missing file, and a dangling
 // link fails the whole listing (GNU prints its row and exits 0). Named
-// with the operand's own spelling, like every other ls row.
-// The target's stat for a link child under -L, or null if unreadable.
-// GNU `ls -L` reports the referenced file while keeping the link's own
-// name, so a dangling link falls back to the link row.
-async function derefEntry(
-  directory: PathSpec,
-  link: FileStat,
-  links: LinkView,
-  stat: Stat,
-): Promise<FileStat | null> {
-  const child = `${rstripSlash(directory.virtual)}/${link.name}`
-  let target: string
-  try {
-    target = links.resolve(child)
-  } catch (err) {
-    if (!(err instanceof CycleError)) throw err
-    return null
-  }
-  const spec = childSpec(target, mountPrefixOf(directory.virtual, directory.vfsPath))
-  try {
-    const s = await stat(spec)
-    return s.with({ name: link.name })
-  } catch (err) {
-    if (!isWalkError(err)) throw err
-    return null
-  }
-}
-
-// Renaming a link row copies every field, not a hand-picked few: a link
-// carries real ownership (chown -h writes it), and listing the fields by
-// hand silently drops whatever the node grows next.
+// with the operand's own spelling, like every other ls row. Renaming a
+// link row copies every field, not a hand-picked few: a link carries real
+// ownership (chown -h writes it), and listing the fields by hand silently
+// drops whatever the node grows next.
 function linkRow(path: PathSpec, links: LinkView | null): FileStat | null {
   const row = links?.statAt(path.virtual) ?? null
   if (row === null) return null
   return row.with({ name: path.rawPath })
 }
 
+// A path below an operand as the operand spelled it.
+function spelledBelow(operand: PathSpec, virtual: string): string {
+  return respellOne(virtual, operand.virtual, operand.rawPath)
+}
+
 // List one operand and report whether it turned out to be a directory.
+// `chain` holds, under -RL, the directories open above this one, each as the
+// path it resolves to; `spell` gives a path below the operand as the operand
+// spelled it, null at the operand itself.
 async function probeOperand(
   readdir: Readdir,
   stat: Stat,
@@ -646,23 +638,21 @@ async function probeOperand(
   opts: WalkOpts,
   warnings: LsWarning[],
   commandLineArg: boolean,
+  chain: readonly string[] = [],
+  spell: ((virtual: string) => string) | null = null,
 ): Promise<Operand> {
+  const spelled = spell ?? ((virtual: string) => spelledBelow(path, virtual))
+  if (path.walkError === null && (commandLineArg || !opts.deref)) {
+    // The table's readdir opens what a link leads to, as opendir(3) does,
+    // so a link the line left unresolved is asked first: the router
+    // already resolved every one this ls follows.
+    const link = linkRow(path, opts.links)
+    if (link !== null) return { path, row: link, groups: [] }
+  }
   let stats: FileStat[]
   let structureOnly = false
   try {
-    const listed = await listDir(
-      readdir,
-      stat,
-      path,
-      opts.all,
-      warnings,
-      opts.links,
-      opts.deref,
-      stat,
-      opts.childMounts,
-      opts.statPath,
-      opts.statNeeded,
-    )
+    const listed = await listDir(readdir, stat, path, opts, warnings, spelled)
     stats = listed.stats
     structureOnly = listed.structureOnly
   } catch (err) {
@@ -709,6 +699,9 @@ async function probeOperand(
   )
   const groups: [PathSpec, FileStat[]][] = [[path, entries]]
   if (opts.recursive) {
+    const links = opts.links
+    const real = opts.deref && links !== null ? (virtual: string) => links.resolve(virtual) : null
+    const open = real !== null && chain.length === 0 ? [real(path.virtual)] : chain
     for (const s of entries) {
       if (s.type !== FileType.DIRECTORY) continue
       const childPath = `${rstripSlash(path.virtual)}/${s.name}`
@@ -718,6 +711,20 @@ async function probeOperand(
         // cross-mount fan-out renders that group.
         continue
       }
+      let below = open
+      if (real !== null) {
+        // Under -L a directory is the one it resolves to, and one open
+        // above this one is never listed again (exit 2).
+        const here = real(childPath)
+        if (open.includes(here)) {
+          warnings.push({
+            message: `ls: ${spelled(childPath)}: not listing already-listed directory`,
+            serious: true,
+          })
+          continue
+        }
+        below = [...open, here]
+      }
       const child = await probeOperand(
         readdir,
         stat,
@@ -725,6 +732,8 @@ async function probeOperand(
         opts,
         warnings,
         false,
+        below,
+        spelled,
       )
       // Appended one at a time: `push(...child.groups)` would spread the
       // child's whole pre-order subtree as call arguments and overflow the

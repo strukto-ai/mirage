@@ -19,6 +19,8 @@ import { guardInput } from '../utils/limit.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { fsStrerror, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
+import { followedStat } from '../../../view/namespace_view.ts'
 import { mountKey, mountPrefixOf, sameMountSpec } from '../../../utils/key_prefix.ts'
 import { respellOne } from '../../../utils/path.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/wrap.ts'
@@ -237,6 +239,9 @@ export function parseFlags(fl: FlagView): FlagSet {
   return {
     binaryMode: mode,
     recursive: directories === 'recurse',
+    // -R follows every link wherever it stands on the line, -r after it
+    // included (grep 3.11).
+    dereference: fl.asBool('dereference_recursive'),
     skipDirectories: directories === 'skip',
     skipDevices: fl.asStr('devices') === 'skip',
     filters: {
@@ -357,6 +362,10 @@ export async function grepGeneric(
   const mounts = opts.ns?.mounts
   const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, prefix)
   const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)
+  // The walk meets links as entries: -r leaves them, -R reads what each one
+  // leads to, and a directory it reaches again is a loop.
+  const follow = f.recursive && f.dereference === true ? (opts.ns?.links ?? null) : null
+  const walkedSt = follow === null ? st : (p: string) => followedStat(st, follow, p)
   let failed = false
   const notices: Uint8Array[] = []
   let matched = false
@@ -372,18 +381,35 @@ export async function grepGeneric(
     io.exitCode = exitCodeFor(matched || fileIO.exitCode === 0, failed, f.quiet)
   }
 
-  async function* scan(p: PathSpec, walked = false): AsyncIterable<Uint8Array> {
+  async function* scan(
+    p: PathSpec,
+    walked = false,
+    chain: readonly string[] = [],
+  ): AsyncIterable<Uint8Array> {
     let info: FileStat
     let entries: string[] = []
     try {
       // The probes below go by `virtual`, which cannot carry the walk's
       // verdict on an operand it refused.
       if (p.walkError !== null) throw walkRefusal(p)
-      info = isStdin(p) ? await stat(p) : await st(p.virtual)
+      info = isStdin(p) ? await stat(p) : await (walked ? walkedSt : st)(p.virtual)
+      if (follow !== null && info.type === FileType.DIRECTORY) {
+        const here = follow.resolve(p.virtual)
+        if (chain.includes(here)) {
+          if (!f.noMessages)
+            notices.push(ENC.encode(`${name}: ${p.rawPath}: warning: recursive directory loop\n`))
+          return
+        }
+        chain = [...chain, here]
+      }
       if (info.type === FileType.DIRECTORY && f.recursive) entries = await rd(p.virtual)
     } catch (error) {
       if (!isWalkError(error)) throw error
       warn(`${name}: ${p.rawPath}: ${reason(error)}`)
+      return
+    }
+    if (walked && follow !== null && info.type === FileType.SYMLINK) {
+      warn(`${name}: ${p.rawPath}: ${posixPhrase('ENOENT')}`)
       return
     }
     if (info.type === FileType.DIRECTORY) {
@@ -406,7 +432,7 @@ export async function grepGeneric(
         if (!dirAdmitted(entry, f.filters)) {
           let probe: FileStat
           try {
-            probe = await st(entry)
+            probe = await walkedSt(entry)
           } catch (error) {
             if (!isWalkError(error)) throw error
             warn(`${name}: ${child.rawPath}: ${reason(error)}`)
@@ -414,7 +440,7 @@ export async function grepGeneric(
           }
           if (probe.type === FileType.DIRECTORY) continue
         }
-        yield* scan(child, true)
+        yield* scan(child, true, chain)
         if (f.quiet && matched) break
       }
       return

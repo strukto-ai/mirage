@@ -268,10 +268,6 @@ class Walker {
       this.warn(walkErrorLine(chain[0]?.[1] ?? here, err, this.parallel))
       return
     }
-    if (this.follow && this.resolver !== null) {
-      const listed = new Set(entries.map(entryName))
-      entries = [...entries, ...this.resolver.children(here).filter((link) => !listed.has(link))]
-    }
     if (this.sortByName) entries = [...entries].sort(byName)
     for (const entry of entries) {
       // box/dropbox readdir marks folders with a trailing slash.

@@ -83,7 +83,7 @@
         "opfs",
         "disk"
       ],
-      "command": "history -c; history -s unique_history_1221; grep -Rn '^unique_history_1221$' / | sed 's/[0-9][0-9]*:/:/'",
+      "command": "history -c; history -s unique_history_1221; grep -rn '^unique_history_1221$' / | sed 's/[0-9][0-9]*:/:/'",
       "expect": {
         "exit": 0,
         "stdout": "/.bash_history::unique_history_1221\n",
@@ -98,7 +98,7 @@
         "opfs",
         "disk"
       ],
-      "command": "history -c; history -s unique_history_no_label_1221; grep -Rnh '^unique_history_no_label_1221$' / | sed 's/[0-9][0-9]*:/:/'",
+      "command": "history -c; history -s unique_history_no_label_1221; grep -rnh '^unique_history_no_label_1221$' / | sed 's/[0-9][0-9]*:/:/'",
       "expect": {
         "exit": 0,
         "stdout": ":unique_history_no_label_1221\n",

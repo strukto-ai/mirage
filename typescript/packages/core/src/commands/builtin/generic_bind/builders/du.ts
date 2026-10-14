@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { isEacces, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
-import { mountKey, mountPrefixOf, rekey } from '../../../../utils/key_prefix.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
+import { mountKey, mountPrefixOf, rekey, underPath } from '../../../../utils/key_prefix.ts'
+import { CycleError } from '../../../../utils/path.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
@@ -21,9 +23,11 @@ import { treeWalk, type WalkCall } from '../../utils/tree.ts'
 import { type ComputeEntries, type ComputeSize, duGeneric } from '../../generic/du.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from '../../../../vfs/constants.ts'
 import { type DuEntries } from '../../../../vfs/types.ts'
-import type { MountView } from '../../../../view/types.ts'
+import type { LinkView, MountView } from '../../../../view/types.ts'
 import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import type { CommandIO } from '../../../config.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 /**
@@ -53,6 +57,9 @@ export class WalkBudget {
   // one no file points at (an empty one, or a refused one) still gets
   // GNU's row.
   readonly directories: string[] = []
+  // Under -L, each link that leads nowhere, with the strerror GNU adds for
+  // a chain that loops.
+  readonly inaccessible: [string, string | null][] = []
 
   constructor(remaining: number | null, mounts?: MountView) {
     this.remaining = remaining
@@ -141,12 +148,68 @@ function treeOf<A extends Accessor>(
   return { readdir, stat, answered }
 }
 
+/**
+ * What `du -L` follows links by, for one operand.
+ *
+ * GNU counts each file once, under the first name its walk meets. A link
+ * leading back into the operand's own tree is therefore never counted, since
+ * the file it reaches is counted under its own name there (where GNU's readdir
+ * order may reach the link first, mirage's sorted walk always prefers the
+ * file's own name), and what lies outside it is counted once, under the first
+ * name the sorted walk reaches it by.
+ */
+class Dereference {
+  // What outside the tree is counted so far, each as the path it resolves to.
+  readonly seen = new Set<string>()
+
+  constructor(
+    readonly links: LinkView,
+    // The operand, as the path it resolves to.
+    readonly tree: string,
+  ) {}
+}
+
+/**
+ * What `du -L` counts an entry as, null when it counts nothing. `info` is the
+ * entry's own stat, a link's row for a link; a link that leads nowhere is
+ * recorded on `budget`.
+ */
+async function counted(
+  follow: Dereference,
+  path: PathSpec,
+  info: FileStat,
+  budget: WalkBudget,
+): Promise<FileStat | null> {
+  let real: string
+  try {
+    real = follow.links.resolve(path.virtual)
+  } catch (err) {
+    if (!(err instanceof CycleError)) throw err
+    budget.inaccessible.push([path.virtual, posixPhrase('ELOOP')])
+    return null
+  }
+  if (underPath(real, follow.tree)) return info.type !== FileType.SYMLINK ? info : null
+  if (follow.seen.has(real)) return null
+  let row = info
+  if (info.type === FileType.SYMLINK) {
+    const target = await follow.links.targetStat(path.virtual)
+    if (target === null) {
+      budget.inaccessible.push([path.virtual, null])
+      return null
+    }
+    row = target
+  }
+  follow.seen.add(real)
+  return row
+}
+
 async function duWalk(
   walk: Walk,
   index: IndexCacheStore | undefined,
   path: PathSpec,
   budget: WalkBudget,
   entries: [string, number][] | null,
+  follow: Dereference | null,
 ): Promise<number> {
   let info
   try {
@@ -154,6 +217,11 @@ async function duWalk(
   } catch (err) {
     accountForWalkError(err, path, budget)
     return 0
+  }
+  if (follow !== null) {
+    const row = await counted(follow, path, info, budget)
+    if (row === null) return 0
+    info = row
   }
   if (info.type !== FileType.DIRECTORY) {
     const size = info.size ?? 0
@@ -181,6 +249,7 @@ async function duWalk(
       PathSpec.fromStrPath(child, rekey(path.virtual, path.vfsPath, child)),
       budget,
       entries,
+      follow,
     )
   }
   return total
@@ -191,9 +260,17 @@ export function walkSize<A extends Accessor>(
   accessor: A,
   index: IndexCacheStore | undefined,
   budget: WalkBudget,
+  links: LinkView | null,
   path: PathSpec,
 ): Promise<number> {
-  return duWalk(treeOf(ops, accessor, index), index, path, budget, null)
+  return duWalk(
+    treeOf(ops, accessor, index),
+    index,
+    path,
+    budget,
+    null,
+    links === null ? null : new Dereference(links, links.resolve(path.virtual)),
+  )
 }
 
 export async function walkEntries<A extends Accessor>(
@@ -201,10 +278,18 @@ export async function walkEntries<A extends Accessor>(
   accessor: A,
   index: IndexCacheStore | undefined,
   budget: WalkBudget,
+  links: LinkView | null,
   path: PathSpec,
 ): Promise<DuEntries> {
   const entries: [string, number][] = []
-  const total = await duWalk(treeOf(ops, accessor, index), index, path, budget, entries)
+  const total = await duWalk(
+    treeOf(ops, accessor, index),
+    index,
+    path,
+    budget,
+    entries,
+    links === null ? null : new Dereference(links, links.resolve(path.virtual)),
+  )
   entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
 }
@@ -215,8 +300,13 @@ const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
     opts.ns?.mounts,
   )
-  const computeSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, p)
-  const computeEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, p)
+  // The links -L follows by; the last of -L and -P decides, as in GNU.
+  const links =
+    new FlagView(opts.flags, specOf('du')).typedOrder('L', 'P').at(-1) === 'L'
+      ? (opts.ns?.links ?? null)
+      : null
+  const computeSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, links, p)
+  const computeEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, links, p)
 
   return duGeneric(
     paths,
@@ -228,6 +318,7 @@ const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     () => budget.hit,
     () => budget.unreadable,
     () => budget.directories,
+    () => budget.inaccessible,
   )
 }
 

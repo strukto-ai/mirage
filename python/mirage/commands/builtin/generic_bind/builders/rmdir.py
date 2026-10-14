@@ -14,7 +14,6 @@
 
 import errno
 import logging
-import posixpath
 from dataclasses import replace
 
 from mirage.accessor.base import Accessor
@@ -23,6 +22,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     Operation,
     require_op,
 )
+from mirage.commands.builtin.utils.links import link_location
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
@@ -53,11 +53,10 @@ def followed_parent(virtual: str, links: LinkView | None) -> str:
     """
     if links is None:
         return virtual
-    parent, name = posixpath.split(virtual)
     try:
-        return f"{links.resolve(parent).rstrip('/')}/{name}"
+        return link_location(links, virtual)
     except CycleError as exc:
-        logger.debug("rmdir: following %s failed: %s", parent, exc)
+        logger.debug("rmdir: following %s failed: %s", virtual, exc)
         return virtual
 
 

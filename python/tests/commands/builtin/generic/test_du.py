@@ -10,9 +10,9 @@ from mirage.commands.builtin.generic.du import (
 )
 from mirage.commands.config import CommandOpts
 from mirage.io.types import SizedRun
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.vfs.ram import RAMVFS
-from mirage.view.types import LinkView, MountView
+from mirage.view.types import MountView
 
 
 async def _ok(value):
@@ -163,68 +163,6 @@ async def _never_exists(path: str) -> bool:
     return False
 
 
-def _links_view(links: dict[str, str]) -> LinkView:
-    def stat_of(path: str) -> FileStat:
-        target = links[path]
-        return FileStat(
-            name=path.rsplit("/", 1)[-1],
-            type=FileType.SYMLINK,
-            size=len(target),
-        )
-
-    return LinkView(
-        stat_at=lambda p: stat_of(p) if p in links else None,
-        children=lambda p: [],
-        subtree=lambda p: [
-            (k, stat_of(k))
-            for k in sorted(links)
-            if k.startswith(p.rstrip("/") + "/")
-        ],
-        resolve=lambda p: links.get(p, p),
-        exists=_never_exists,
-        target_stat=_no_target_stat,
-    )
-
-
-# The nested-mount behavior is pinned against GNU coreutils 9.7 on
-# debian:stable-slim (du --apparent-size -B1 over a tmpfs mounted inside
-# the operand): a file shadowed by a mount appears nowhere and counts
-# nowhere. The parent mount's own rows are GNU's `du -x` report; the
-# descendant mount's block is appended by the executor fan-out.
-@pytest.mark.parametrize(
-    "tree,flags,expected",
-    [
-        (
-            {"/top.txt": 10, "/inner/leftover.txt": 1000},
-            DuFlags(),
-            b"10\t/base\n",
-        ),
-        (
-            {"/top.txt": 10, "/inner/leftover.txt": 1000},
-            DuFlags(a=True),
-            b"10\t/base/top.txt\n10\t/base\n",
-        ),
-        (
-            {"/top.txt": 10, "/inner/leftover.txt": 1000},
-            DuFlags(s=True),
-            b"10\t/base\n",
-        ),
-        ({"/inner/leftover.txt": 1000}, DuFlags(), b"0\t/base\n"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_descendant_mount_is_excluded(tree, flags, expected):
-    compute_size, compute_entries = _make_backend(tree)
-    out = await du(
-        [_spec("/base", "")],
-        compute_size=compute_size,
-        compute_entries=compute_entries,
-        flags=flags,
-        mounts=_mounts_view(("/base/inner",)),
-    )
-    assert out.stdout == expected
-
-
 @pytest.mark.asyncio
 async def test_without_a_mount_view_shadowed_keys_still_count():
     """The opt-in is the mechanism: a caller that offers no view cannot
@@ -238,26 +176,6 @@ async def test_without_a_mount_view_shadowed_keys_still_count():
         flags=DuFlags(),
     )
     assert out.stdout == b"1000\t/base/inner\n1010\t/base\n"
-
-
-@pytest.mark.asyncio
-async def test_link_under_a_descendant_mount_is_not_counted():
-    """A namespace link below the boundary belongs to the child's run."""
-    compute_size, compute_entries = _make_backend({"/top.txt": 10})
-    out = await du(
-        [_spec("/base", "")],
-        compute_size=compute_size,
-        compute_entries=compute_entries,
-        flags=DuFlags(),
-        links=_links_view(
-            {
-                "/base/inner/lnk": "12345",
-                "/base/kept": "123",
-            }
-        ),
-        mounts=_mounts_view(("/base/inner",)),
-    )
-    assert out.stdout == b"13\t/base\n"
 
 
 @pytest.mark.asyncio

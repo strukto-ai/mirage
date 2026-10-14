@@ -53,7 +53,8 @@ from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileType, PathSpec
 from mirage.utils.encoding import bom_of
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
-from mirage.utils.path import glob_prefix_match
+from mirage.utils.path import CycleError, glob_prefix_match
+from mirage.view.types import LinkView
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,24 @@ def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | None:
         ),
         reads_binary=f.binary,
     )
+
+
+def _linked(links: LinkView | None, virtual: str) -> bool:
+    """Whether a link leads ``virtual`` elsewhere, at its name or above it.
+
+    A mount's search sees only what its backend holds, never a link, so it
+    can judge no such path.
+
+    Args:
+        links (LinkView | None): the namespace's symlink facts.
+        virtual (str): the walked path.
+    """
+    if links is None:
+        return False
+    try:
+        return links.resolve(virtual) != virtual
+    except CycleError:
+        return True
 
 
 def candidate_reads(
@@ -326,8 +345,9 @@ async def search_reads(
     An operand named on the line is never ruled out by a search asked
     about directories, nor is a path pinned to a revision, since a
     search sees the current content, nor a file the read cache holds,
-    which a read serves as it was cached. Both are asked through the
-    dispatcher, which drops what the session hides from a
+    which a read serves as it was cached, nor a path a link leads
+    elsewhere, which the mount's search never sees. Both are asked
+    through the dispatcher, which drops what the session hides from a
     ``files_containing`` answer, judges ``lines_containing`` as a read of
     its file, and answers None where a path rule or a pre_vfs policy
     reaches below a directory, so every file is read and judged. When
@@ -346,6 +366,7 @@ async def search_reads(
     read_bytes = bound_op(io.read_bytes, accessor, index)
     read_stream = bound_op(io.read_stream, accessor, index)
     files, lines = io.files_containing, io.lines_containing
+    links = opts.ns.links if opts.ns is not None else None
     fl = FlagView(opts.flags, spec=SPECS[name])
     if not paths or (
         name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
@@ -417,6 +438,8 @@ async def search_reads(
     async def narrowed(path: PathSpec) -> ByteSource | None:
         manager = active_cache_manager()
         if manager is not None and await manager.is_cached(path):
+            return None
+        if _linked(links, path.virtual):
             return None
         if (
             hits is not None

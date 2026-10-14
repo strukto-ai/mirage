@@ -26,6 +26,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     with_dir_guard,
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
+from mirage.commands.builtin.utils.links import serves, with_links
 from mirage.commands.config import (
     Command,
     CommandCatalog,
@@ -255,13 +256,24 @@ async def _run_with_namespace_globs(
     raw = table(io) if table is not None else io
     if raw.stat is io.stat and not write:
         raw = with_probe_answers(raw)
-    children = opts.ns.child_mounts if opts.ns is not None else None
-    links = opts.ns.links if opts.ns is not None else None
-    stamped = replace(
-        raw,
-        glob_children=children,
-        glob_target_stat=(links.target_stat if links is not None else None),
-        glob_follow=opts.ns.follow_operands if opts.ns is not None else None,
+    ns = opts.ns
+    links = ns.links if ns is not None else None
+    stamped = with_links(
+        replace(
+            raw,
+            glob_children=ns.child_mounts if ns is not None else None,
+            glob_target_stat=(
+                links.target_stat if links is not None else None
+            ),
+            glob_follow=ns.follow_operands if ns is not None else None,
+        ),
+        links,
+        opts.dispatch,
+        (
+            functools.partial(serves, ns.mounts, opts.mount_prefix)
+            if ns is not None and ns.mounts is not None
+            else None
+        ),
     )
     # The command's path checks speak outside the stat and slash wraps
     # (`finish`), for the slots that still reach the backend past the

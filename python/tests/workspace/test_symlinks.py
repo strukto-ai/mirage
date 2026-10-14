@@ -868,6 +868,7 @@ async def test_find_dash_l_classifies_a_link_by_its_target():
 
     r = await ws.shell("find -L /data/d -type f")
     assert r.stdout.decode().splitlines() == [
+        "/data/d/dlink/inner.txt",
         "/data/d/flink",
         "/data/d/real.txt",
         "/data/d/sub/inner.txt",

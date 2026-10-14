@@ -130,7 +130,7 @@
       "command": "tree /data/sub | wc -c",
       "expect": {
         "exit": 0,
-        "stdout": "118\n",
+        "stdout": "155\n",
         "stderr": ""
       }
     },

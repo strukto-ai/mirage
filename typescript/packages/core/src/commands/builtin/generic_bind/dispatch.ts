@@ -20,7 +20,7 @@ import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { LinkView, MountView, NamespaceView } from '../../../view/types.ts'
+import type { MountView, NamespaceView } from '../../../view/types.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -29,19 +29,16 @@ import { dispatchedSlots, type GenericCommand } from './adapter.ts'
 import type { CommandIO } from '../../config.ts'
 
 /** Use the workspace's policy-checked operations as a generic IO adapter.
- * A listing answers the way a backend's does, which is what every generic is
- * written against: no backend stores a link, and the generics merge the
- * namespace's own from `ns.links`, so the dispatcher's copy would be a second row
- * (find) or a followed stat (ls). With `bound` (a walk kept on one
+ * The dispatcher's own answers are what a mount's table answers once its links
+ * are stamped on (`withLinks`): a listing names the links in a directory and a
+ * stat of one is the link's own row. With `bound` (a walk kept on one
  * filesystem, `du -x`) a listing also leaves out the roots of the mounts
  * below it, which the walk must neither list nor stat. Mirrors Python's
  * dispatch_io. */
-export function dispatchIO(dispatch: DispatchFn, links?: LinkView, bound?: MountView): CommandIO {
+export function dispatchIO(dispatch: DispatchFn, bound?: MountView): CommandIO {
   return {
     readdir: async (_accessor, path) => {
       let entries = (await dispatch('readdir', path))[0] as string[]
-      if (links !== undefined)
-        entries = entries.filter((e) => links.statAt(rstripSlash(e)) === null)
       if (bound !== undefined) {
         const owner = bound.rootOf(path.virtual)
         entries = entries.filter((e) => bound.rootOf(rstripSlash(e)) === owner)
@@ -119,7 +116,7 @@ export async function runDispatch(
     else if (Array.isArray(value))
       rebased[key] = value.map((item) => (item instanceof PathSpec ? whole(item) : item))
   }
-  const io = dispatchIO(dispatch, ns?.links, bounded ? ns?.mounts : undefined)
+  const io = dispatchIO(dispatch, bounded ? ns?.mounts : undefined)
   const result = await builder.fn(
     ns?.followOperands === undefined ? io : { ...io, globFollow: ns.followOperands },
     new NOOPAccessor(),

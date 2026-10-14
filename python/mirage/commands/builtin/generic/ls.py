@@ -26,7 +26,8 @@ from mirage.commands.spec.usage import (
 )
 from mirage.errors.classify import failure_text, is_entry_error
 from mirage.errors.fs import fs_strerror
-from mirage.errors.types import DotWalkError, DotWalkLoop
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import DotWalkError, DotWalkLoop, FsCondition
 from mirage.io.types import IOResult
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -39,10 +40,11 @@ from mirage.types import (
     PathSpec,
 )
 from mirage.utils.key_prefix import mount_prefix_of, rekey, under_path
-from mirage.utils.path import CycleError, respell_one
+from mirage.utils.path import respell_one
 from mirage.utils.quote import escape_name
 from mirage.utils.stat_view import content_size
 from mirage.utils.width import char_width
+from mirage.view.namespace_view import followed_stat
 from mirage.view.types import ChildMounts, LinkView, MountView, StatPath
 
 logger = logging.getLogger(__name__)
@@ -957,43 +959,6 @@ async def _file_entry(
     return s.model_copy(update={"name": path.raw_path})
 
 
-async def _deref_entry(
-    directory: PathSpec,
-    link: FileStat,
-    links: LinkView,
-    stat: Stat,
-    index: IndexCacheStore,
-) -> FileStat | None:
-    """The target's stat for a link child under -L, or None if unreadable.
-
-    GNU ``ls -L`` reports the referenced file while keeping the link's
-    own name, so a dangling link falls back to the link row rather than
-    dropping out of the listing.
-
-    Args:
-        directory (PathSpec): the directory being listed.
-        link (FileStat): the link's own row, whose name is kept.
-        links (LinkView): the namespace's symlink facts.
-        stat (Stat): backend stat.
-        index (IndexCacheStore): listing cache.
-    """
-    child = directory.virtual.rstrip("/") + "/" + link.name
-    try:
-        target = links.resolve(child)
-    except CycleError:
-        return None
-    spec = PathSpec(
-        virtual=target,
-        directory=target,
-        resolved=False,
-        vfs_path=rekey(directory.virtual, directory.vfs_path, target),
-    )
-    try:
-        return (await stat(spec, index)).model_copy(update={"name": link.name})
-    except (OSError, ValueError):
-        return None
-
-
 def _link_row(path: PathSpec, links: LinkView | None) -> FileStat | None:
     """The row for an operand that is itself a symlink, else None.
 
@@ -1012,6 +977,10 @@ def _link_row(path: PathSpec, links: LinkView | None) -> FileStat | None:
     if row is None:
         return None
     return row.model_copy(update={"name": path.raw_path})
+
+
+def _spelled_below(operand: PathSpec, virtual: str) -> str:
+    return respell_one(virtual, operand.virtual, operand.raw_path)
 
 
 def _child_spec(path: PathSpec, name: str) -> PathSpec:
@@ -1087,8 +1056,9 @@ async def _stat_entries(
     child_mounts: ChildMounts | None = None,
     stat_path: StatPath | None = None,
     stat_needed: bool = True,
+    spell: Callable[[str], str] = str,
 ) -> tuple[list[FileStat], list[LsWarning]]:
-    """Stat every name in a directory, plus the symlinks living there.
+    """Stat every name in a directory, plus the mounts below it.
 
     An entry whose stat fails keeps its row and never fails the whole
     directory, whatever the error: a dropped connection on a mount
@@ -1103,10 +1073,9 @@ async def _stat_entries(
         stat (Stat): backend stat.
         all_files (bool): keep dotfiles.
         index (IndexCacheStore): listing cache.
-        links (LinkView | None): the namespace's symlink facts. Links
-            have no backend inode, so readdir never names them; merging
-            here means every caller (plain, -R, -F, -l, sorting) sees
-            them without knowing they are special.
+        links (LinkView | None): the namespace's symlink facts. The
+            table's readdir names the links among the entries and its stat
+            answers each with its own row.
         deref (bool): -L, report the target's stat under the link's own
             name instead of the link row. A dereferenced directory link
             then carries FileType.DIRECTORY, which is what makes -R
@@ -1124,9 +1093,16 @@ async def _stat_entries(
         stat_needed (bool): the listing prints something an entry's
             stat supplies, so a failed one is reported. See
             ``stat_needed``.
+        spell (Callable[[str], str]): an entry's path as the operand
+            spelled it, for a diagnostic.
     """
     stats: list[FileStat] = []
     warnings: list[LsWarning] = []
+    entry_stat = (
+        functools.partial(followed_stat, stat, links)
+        if deref and links is not None
+        else stat
+    )
     for entry in names:
         entry_spec = PathSpec(
             virtual=entry,
@@ -1135,7 +1111,7 @@ async def _stat_entries(
             vfs_path=rekey(path.virtual, path.vfs_path, entry),
         )
         try:
-            s = await stat(entry_spec, index)
+            s = await entry_stat(entry_spec, index)
         except Exception as exc:
             if not is_entry_error(exc):
                 raise
@@ -1150,7 +1126,7 @@ async def _stat_entries(
             # GNU treats it as a minor problem (exit 1).
             warnings.append(
                 LsWarning(
-                    f"ls: cannot access '{entry.rstrip('/')}': "
+                    f"ls: cannot access '{spell(entry.rstrip('/'))}': "
                     f"{failure_text(exc)}",
                     False,
                 )
@@ -1158,20 +1134,19 @@ async def _stat_entries(
             continue
         if not all_files and s.name.startswith("."):
             continue
+        if deref and stat_needed and s.type is FileType.SYMLINK:
+            # -L reports what each link leads to; one leading nowhere is
+            # listed by name and reported, a minor problem (exit 1), where
+            # the listing stats an entry at all.
+            warnings.append(
+                LsWarning(
+                    f"ls: cannot access '{spell(entry.rstrip('/'))}': "
+                    f"{posix_phrase(FsCondition.ENOENT)}",
+                    False,
+                )
+            )
         stats.append(s)
     seen = {s.name for s in stats}
-    for link in links.children(path.virtual) if links is not None else []:
-        if link.name in seen:
-            continue
-        if not all_files and link.name.startswith("."):
-            continue
-        seen.add(link.name)
-        resolved = (
-            await _deref_entry(path, link, links, stat, index)
-            if deref and links is not None
-            else None
-        )
-        stats.append(resolved if resolved is not None else link)
     for name in child_mounts(path.virtual) if child_mounts is not None else []:
         if name in seen:
             continue
@@ -1203,6 +1178,8 @@ async def probe_operand(
     group_dirs_first: bool = False,
     stat_needed: bool = True,
     escape: bool = False,
+    chain: tuple[str, ...] = (),
+    spell: Callable[[str], str] | None = None,
 ) -> tuple[Operand, list[LsWarning]]:
     """List one operand and report whether it turned out to be a directory.
 
@@ -1239,9 +1216,22 @@ async def probe_operand(
         group_dirs_first (bool): ``--group-directories-first``.
         stat_needed (bool): report an entry whose stat failed. See
             ``stat_needed``.
+        chain (tuple[str, ...]): under ``-RL``, the directories open
+            above this one, each as the path it resolves to.
+        spell (Callable[[str], str] | None): a path below the operand as
+            the operand spelled it; None at the operand itself.
     """
+    if spell is None:
+        spell = functools.partial(_spelled_below, path)
     warnings: list[LsWarning] = []
     structure_only = False
+    if path.walk_error is None and (command_line_arg or not deref):
+        # The table's readdir opens what a link leads to, as opendir(3)
+        # does, so a link the line left unresolved is asked first: the
+        # router already resolved every one this ls follows.
+        link_row = _link_row(path, links)
+        if link_row is not None:
+            return Operand(path, link_row, []), warnings
     try:
         names = await readdir(path, index)
     except (OSError, ValueError) as exc:
@@ -1317,6 +1307,7 @@ async def probe_operand(
         child_mounts=child_mounts,
         stat_path=stat_path,
         stat_needed=stat_needed,
+        spell=spell,
     )
     warnings.extend(entry_ws)
     entries = sort_stats(
@@ -1329,6 +1320,9 @@ async def probe_operand(
     )
     groups: list[tuple[PathSpec, list[FileStat]]] = [(path, entries)]
     if recursive:
+        real = links.resolve if deref and links is not None else None
+        if real is not None and not chain:
+            chain = (real(path.virtual),)
         for entry in entries:
             if entry.type != FileType.DIRECTORY:
                 continue
@@ -1338,6 +1332,21 @@ async def probe_operand(
                 # listing is another backend's, which this walk cannot
                 # read: the cross-mount fan-out renders that group.
                 continue
+            below = chain
+            if real is not None:
+                # Under -L a directory is the one it resolves to, and one
+                # open above this one is never listed again (exit 2).
+                here = real(child_path.virtual)
+                if here in chain:
+                    warnings.append(
+                        LsWarning(
+                            f"ls: {spell(child_path.virtual)}: "
+                            "not listing already-listed directory",
+                            True,
+                        )
+                    )
+                    continue
+                below = (*chain, here)
             child, child_ws = await probe_operand(
                 child_path,
                 readdir=readdir,
@@ -1357,6 +1366,8 @@ async def probe_operand(
                 group_dirs_first=group_dirs_first,
                 stat_needed=stat_needed,
                 escape=escape,
+                chain=below,
+                spell=spell,
             )
             groups.extend(child.groups)
             warnings.extend(child_ws)

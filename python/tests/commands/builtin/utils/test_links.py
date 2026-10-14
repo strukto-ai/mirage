@@ -175,12 +175,6 @@ async def test_the_dispatcher_lists_and_stats_by_the_name_it_is_handed():
     ]
 
 
-def test_a_walker_merges_the_links_standing_in_a_directory():
-    resolver = LinkResolver(links=LINKS, dispatch=_Dispatch(), cwd="/data")
-    assert resolver.children("/data/dir/") == ["/data/dir/tl.gz"]
-    assert resolver.children("/data/w") == []
-
-
 def test_a_link_leads_where_the_table_resolves_it():
     resolver = LinkResolver(links=LINKS, dispatch=_Dispatch(), cwd="/data")
     assert resolver.target("/data/dir/tl.gz") == "/data/t.gz"

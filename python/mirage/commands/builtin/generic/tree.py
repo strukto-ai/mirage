@@ -12,10 +12,22 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import MISS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import enoent
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileStat, FileType, PathSpec, ReaddirFn
+from mirage.types import (
+    LINK_TARGET_KEY,
+    FileStat,
+    FileType,
+    PathSpec,
+    ReaddirFn,
+)
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
-from mirage.view.types import MountView, ReaddirPath, StatPath
+from mirage.view.types import (
+    LinkTargetStat,
+    LinkView,
+    MountView,
+    ReaddirPath,
+    StatPath,
+)
 
 # GNU tree's ASCII (C-locale) drawing set, matching `tree` in the battery's
 # docker oracle; the vertical/indent continuations are 4 columns wide.
@@ -119,9 +131,13 @@ async def _walk_tree(
     mounts: MountView | None = None,
     cross_readdir: Readdir | None = None,
     cross_stat: Stat | None = None,
+    target_stat: LinkTargetStat | None = None,
 ) -> tuple[list[str], int, int, int]:
     """One directory's lines, its counts, and how many directories in
     its subtree (itself included) could not be opened.
+
+    A link is drawn as ``name -> target`` and never walked; one leading
+    to a directory counts, and filters, as a directory (tree 2.2.1).
 
     A directory the walk could not open (a rule refused it below the
     operand) contributes no lines and counts itself, so the caller
@@ -153,7 +169,7 @@ async def _walk_tree(
     if child_mounts:
         entries = sorted(set(entries) | set(child_mounts))
 
-    filtered: list[tuple[PathSpec, FileStat, bool]] = []
+    filtered: list[tuple[PathSpec, FileStat, bool, bool]] = []
     for entry in entries:
         entry_spec = PathSpec(
             virtual=entry,
@@ -180,21 +196,35 @@ async def _walk_tree(
             continue
         if ignore_pattern and fnmatch(s.name, ignore_pattern):
             continue
-        if dirs_only and s.type != FileType.DIRECTORY:
+        is_dir = s.type == FileType.DIRECTORY
+        if s.type == FileType.SYMLINK and target_stat is not None:
+            leads = await target_stat(entry)
+            is_dir = leads is not None and leads.type == FileType.DIRECTORY
+        if dirs_only and not is_dir:
             continue
-        not_dir = s.type != FileType.DIRECTORY
-        if match_pattern and not_dir and not fnmatch(s.name, match_pattern):
+        # -P spares only a real directory, a link to one included in its
+        # test (tree 2.2.1).
+        if (
+            match_pattern
+            and s.type != FileType.DIRECTORY
+            and not fnmatch(s.name, match_pattern)
+        ):
             continue
-        filtered.append((entry_spec, s, crossing))
+        filtered.append((entry_spec, s, crossing, is_dir))
 
-    for i, (entry_spec, s, crossing) in enumerate(filtered):
+    for i, (entry_spec, s, crossing, is_dir) in enumerate(filtered):
         is_last = i == len(filtered) - 1
         connector = _LAST if is_last else _BRANCH
-        lines.append(prefix + connector + s.name)
-        if s.type != FileType.DIRECTORY:
+        shown = s.name
+        if s.type == FileType.SYMLINK:
+            shown += f" -> {s.extra.get(LINK_TARGET_KEY, '')}"
+        lines.append(prefix + connector + shown)
+        if not is_dir:
             files += 1
             continue
         dirs += 1
+        if s.type != FileType.DIRECTORY:
+            continue
         if max_depth is not None and depth + 1 >= max_depth:
             continue
         extension = _INDENT if is_last else _VERTICAL
@@ -220,6 +250,7 @@ async def _walk_tree(
             mounts=mounts,
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
+            target_stat=target_stat,
         )
         if sub_unopened and not sub:
             # The child itself could not be opened (one that opened but
@@ -257,6 +288,7 @@ async def tree(
     readdir_path: ReaddirPath | None = None,
     mounts: MountView | None = None,
     one_file_system: bool = False,
+    links: LinkView | None = None,
 ) -> tuple[bytes, IOResult]:
     """Render each operand's tree, GNU ``tree``'s drawing, under one summary.
 
@@ -284,6 +316,8 @@ async def tree(
             which is how a subtree on another mount is read at all.
         mounts (MountView | None): where the mount boundaries are.
         one_file_system (bool): -x, draw a mount point but nothing in it.
+        links (LinkView | None): the namespace's symlink facts, which say
+            what a drawn link leads to.
     """
     cross_readdir: Readdir | None = (
         partial(_cross_readdir, readdir_path)
@@ -340,6 +374,7 @@ async def tree(
             mounts=mounts,
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
+            target_stat=links.target_stat if links is not None else None,
         )
         # `warnings` only decides the marker; emitting it would diverge.
         # With stat_path wired the two clear cases are already answered
@@ -428,4 +463,5 @@ async def tree_generic(
         readdir_path=opts.readdir_path,
         mounts=opts.ns.mounts if opts.ns is not None else None,
         one_file_system=parsed.one_file_system,
+        links=opts.ns.links if opts.ns is not None else None,
     )

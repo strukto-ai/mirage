@@ -56,12 +56,15 @@ from mirage.commands.spec.usage import (
 from mirage.concurrency.worker import Worker
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one
+from mirage.view.namespace_view import followed_stat
 
 # GNU grep with no pattern prints its synopsis and the help hint, exit 2
 # (grep 3.11; the same two lines follow `option requires an argument`).
@@ -303,6 +306,9 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         quiet=fl.as_bool("quiet"),
         no_messages=fl.as_bool("no_messages"),
         recursive=directories == "recurse",
+        # -R follows every link wherever it stands on the line, -r after
+        # it included (grep 3.11).
+        dereference=fl.as_bool("dereference_recursive"),
         skip_directories=directories == "skip",
         skip_devices=fl.as_str("devices") == "skip",
         with_filename=filename is True,
@@ -404,6 +410,13 @@ async def grep_generic(
         partial(call_readdir, readdir, prefix=prefix), mounts, prefix
     )
     st = mount_parent_stat(partial(call_stat, stat, prefix=prefix), mounts)
+    links = opts.ns.links if opts.ns is not None else None
+    # The walk meets links as entries: -r leaves them, -R reads what each
+    # one leads to, and a directory it reaches again is a loop.
+    follow = links if f.recursive and f.dereference else None
+    walked_st = (
+        partial(followed_stat, st, follow) if follow is not None else st
+    )
     rb = partial(call_read_bytes, read_bytes, prefix=prefix)
     failed = False
     diagnostics: list[bytes] = []
@@ -423,7 +436,7 @@ async def grep_generic(
         )
 
     async def scan(
-        p: PathSpec, walked: bool = False
+        p: PathSpec, walked: bool = False, chain: tuple[str, ...] = ()
     ) -> AsyncGenerator[bytes, None]:
         nonlocal matched, printed
         try:
@@ -434,8 +447,16 @@ async def grep_generic(
             info = (
                 FileStat(name="-", type=FileType.FIFO)
                 if is_stdin(p)
-                else await st(p.virtual)
+                else await (walked_st if walked else st)(p.virtual)
             )
+            if follow is not None and info.type == FileType.DIRECTORY:
+                here = follow.resolve(p.virtual)
+                if here in chain:
+                    if not f.no_messages:
+                        loop = f"grep: {p.raw_path}: warning: recursive"
+                        diagnostics.append(f"{loop} directory loop\n".encode())
+                    return
+                chain = (*chain, here)
             entries = (
                 await rd(p.virtual)
                 if info.type == FileType.DIRECTORY and f.recursive
@@ -443,6 +464,9 @@ async def grep_generic(
             )
         except WALK_ERRORS as exc:
             warn(f"grep: {p.raw_path}: {fs_strerror(exc) or exc}")
+            return
+        if walked and follow is not None and info.type == FileType.SYMLINK:
+            warn(f"grep: {p.raw_path}: {posix_phrase(FsCondition.ENOENT)}")
             return
         if info.type == FileType.DIRECTORY:
             if f.skip_directories:
@@ -464,7 +488,7 @@ async def grep_generic(
                 )
                 if not dir_admitted(entry, f.filters):
                     try:
-                        if (await st(entry)).type == FileType.DIRECTORY:
+                        if (await walked_st(entry)).type == FileType.DIRECTORY:
                             continue
                     except WALK_ERRORS as exc:
                         warn(
@@ -472,7 +496,7 @@ async def grep_generic(
                             f"{fs_strerror(exc) or exc}"
                         )
                         continue
-                async with aclosing(scan(child, True)) as child_stream:
+                async with aclosing(scan(child, True, chain)) as child_stream:
                     async for chunk in child_stream:
                         yield chunk
                 if f.quiet and matched:

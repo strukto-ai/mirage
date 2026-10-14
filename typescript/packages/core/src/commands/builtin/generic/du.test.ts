@@ -22,10 +22,10 @@ import {
   rollup,
   toVirtual,
 } from './du.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
-import type { LinkView, MountView } from '../../../view/types.ts'
+import type { MountView } from '../../../view/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 
 const DEC = new TextDecoder()
@@ -103,18 +103,9 @@ describe('du', () => {
   it('reports what it measured unless it only summed', async () => {
     const [size, entries] = backend({ '/dir/a.txt': 2, '/dir/s/b': 3 })
     const paths = [spec('/m/dir', 'dir')]
-    const out = await du(
-      paths,
-      flags(),
-      size,
-      entries,
-      [],
-      undefined,
-      null,
-      null,
-      undefined,
-      () => ['/m/dir/e'],
-    )
+    const out = await du(paths, flags(), size, entries, [], undefined, null, undefined, () => [
+      '/m/dir/e',
+    ])
     expect(out.runs).toEqual([
       {
         leaves: [
@@ -147,27 +138,6 @@ function mountsView(descendants: string[]): MountView {
   }
 }
 
-function linksView(links: Record<string, string>): LinkView {
-  const statOf = (path: string): FileStat =>
-    new FileStat({
-      name: path.split('/').pop() ?? '',
-      type: FileType.SYMLINK,
-      size: links[path]?.length ?? 0,
-    })
-  return {
-    statAt: (p: string) => (p in links ? statOf(p) : null),
-    children: () => [],
-    subtree: (p: string) =>
-      Object.keys(links)
-        .sort()
-        .filter((k) => k.startsWith(rstripSlash(p) + '/'))
-        .map((k): [string, FileStat] => [k, statOf(k)]),
-    resolve: (p: string) => links[p] ?? p,
-    exists: () => Promise.resolve(false),
-    targetStat: () => Promise.resolve(null),
-  }
-}
-
 // Pinned against GNU coreutils 9.7 on debian:stable-slim (du
 // --apparent-size -B1 over a tmpfs mounted inside the operand): a file
 // shadowed by a mount appears nowhere and counts nowhere. The parent
@@ -190,7 +160,6 @@ describe('du descendant mounts', () => {
       entries,
       [],
       undefined,
-      null,
       mountsView(['/base/inner']),
     )
     expect(DEC.decode(out.stdout)).toBe(expected)
@@ -202,21 +171,5 @@ describe('du descendant mounts', () => {
     const [size, entries] = backend(TREE)
     const out = await du([spec('/base', '')], flags(), size, entries)
     expect(DEC.decode(out.stdout)).toBe('1000\t/base/inner\n1010\t/base\n')
-  })
-
-  it('drops a namespace link below the boundary', async () => {
-    // A link below the boundary belongs to the child's run.
-    const [size, entries] = backend({ '/top.txt': 10 })
-    const out = await du(
-      [spec('/base', '')],
-      flags(),
-      size,
-      entries,
-      [],
-      undefined,
-      linksView({ '/base/inner/lnk': '12345', '/base/kept': '123' }),
-      mountsView(['/base/inner']),
-    )
-    expect(DEC.decode(out.stdout)).toBe('13\t/base\n')
   })
 })

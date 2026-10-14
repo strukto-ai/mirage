@@ -52,6 +52,9 @@ class GrepFlags:
     initial_tab: bool = False
     group_separator: bytes | None = b"--"
     label: str = "(standard input)"
+    # -R: the recursion follows every link it meets, not only the
+    # command line's.
+    dereference: bool = False
 
 
 # GNU grep's INITIAL_BUFSIZE: the window it examines before printing from it.

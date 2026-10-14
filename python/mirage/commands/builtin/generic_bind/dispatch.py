@@ -31,7 +31,7 @@ from mirage.io.stream import ensure_stream, materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import LinkView, MountView, NamespaceView
+from mirage.view.types import MountView, NamespaceView
 
 
 def _mounted(accessor: Accessor) -> bool:
@@ -44,20 +44,16 @@ def _none_below(path: str) -> list[str]:
 
 def dispatch_io(
     dispatch: DispatchFn,
-    links: LinkView | None = None,
     bound: MountView | None = None,
 ) -> CommandIO:
     """Bind a generic's IO to workspace operations.
 
-    A listing here answers the way a backend's does, which is what every
-    generic is written against: no backend stores a link, and the
-    generics merge the namespace's own from ``ns.links``, so the dispatcher's
-    copy would be a second row (find) or a followed stat (ls).
+    The dispatcher's own answers are what a mount's table answers once
+    its links are stamped on (``with_links``): a listing names the links
+    in a directory and a stat of one is the link's own row.
 
     Args:
         dispatch (DispatchFn): policy-checked operation dispatcher.
-        links (LinkView | None): the namespace's symlinks, left out of
-            every listing.
         bound (MountView | None): set for a walk kept on one filesystem
             (``du -x``): a listing then leaves out the roots of the
             mounts below it, which the walk must neither list nor stat.
@@ -68,10 +64,6 @@ def dispatch_io(
     ) -> list[str]:
         data, _ = await dispatch("readdir", path)
         entries = cast(list[str], data)
-        if links is not None:
-            entries = [
-                e for e in entries if links.stat_at(e.rstrip("/")) is None
-            ]
         if bound is not None:
             owner = bound.root_of(path.virtual)
             entries = [
@@ -181,9 +173,7 @@ async def run_dispatch(
     )
     io_ops = replace(
         dispatch_io(
-            dispatch,
-            ns.links if ns is not None else None,
-            ns.mounts if ns is not None and bounded else None,
+            dispatch, ns.mounts if ns is not None and bounded else None
         ),
         glob_follow=ns.follow_operands if ns is not None else None,
     )

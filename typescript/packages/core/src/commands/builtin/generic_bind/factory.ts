@@ -18,13 +18,15 @@ import { activeCacheManager } from '../../../cache/context.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { ChildMounts, FollowOperands, LinkView, NamespaceView } from '../../../view/types.ts'
+import type { NamespaceView } from '../../../view/types.ts'
+import { serves, withLinks } from '../utils/links.ts'
 import {
   type CommandFn,
   type Command,
   CommandCatalog,
   command,
   type CommandIO,
+  type CommandOpts,
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
@@ -144,27 +146,32 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(ops)
 }
 
-// The namespace facts a glob resolver reads, stamped on the adapter per
+// The namespace facts a command's table reads, stamped on the adapter per
 // invocation: the child names the namespace owes a directory, the stat of
 // what such a name points at, so a trailing slash follows a link the way
-// bash does, and the line's operand resolution, which a glob's matches
-// take. Conditional spreads, not `undefined` values, because
+// bash does, the line's operand resolution a glob's matches take, and the
+// links themselves, which the table's stat and readdir answer for
+// (withLinks). Conditional spreads, not `undefined` values, because
 // exactOptionalPropertyTypes refuses an explicit undefined on an optional
 // field; Python's fields are `| None` and take the uniform path.
-function stampNamespace(
-  raw: CommandIO,
-  children?: ChildMounts,
-  links?: LinkView,
-  follow?: FollowOperands,
-): CommandIO {
-  return {
-    ...raw,
-    ...(children === undefined ? {} : { globChildren: children }),
-    ...(links === undefined
-      ? {}
-      : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
-    ...(follow === undefined ? {} : { globFollow: follow }),
-  }
+function stampNamespace(raw: CommandIO, opts: CommandOpts): CommandIO {
+  const ns = opts.ns
+  const links = ns?.links
+  const mounts = ns?.mounts
+  const prefix = opts.mountPrefix ?? ''
+  return withLinks(
+    {
+      ...raw,
+      ...(ns?.childMounts === undefined ? {} : { globChildren: ns.childMounts }),
+      ...(links === undefined
+        ? {}
+        : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
+      ...(ns?.followOperands === undefined ? {} : { globFollow: ns.followOperands }),
+    },
+    links,
+    opts.dispatch,
+    mounts === undefined ? undefined : (virtual: string) => serves(mounts, prefix, virtual),
+  )
 }
 
 function bind(
@@ -212,14 +219,7 @@ function bind(
     // probe's full stat under fresh only.
     const answered = raw.stat === io.stat && b.write !== true ? withProbeAnswers(raw) : raw
     const guarded = withAbortGuard(
-      withDirGuard(
-        withCommandGuards(
-          finish(
-            stampNamespace(answered, opts.ns?.childMounts, opts.ns?.links, opts.ns?.followOperands),
-          ),
-          opts.mountPrefix,
-        ),
-      ),
+      withDirGuard(withCommandGuards(finish(stampNamespace(answered, opts)), opts.mountPrefix)),
       opts.signal,
     )
     const split = b.passThrough !== true

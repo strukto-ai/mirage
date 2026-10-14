@@ -21,30 +21,34 @@ import type { FindOptions } from '../../vfs/types.ts'
 import {
   bindTree,
   dropPruned,
-  hasLinkChildren,
   optionsTree,
   settlePrunes,
   treeHasEmpty,
   treeHasPrune,
   prunedKeys,
   type FindEntry,
-  type PredNode,
   keep,
 } from './find_eval.ts'
 import { FileType, PathSpec, type FileStat } from '../../types.ts'
 import type { LinkView } from '../../view/types.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { followedStat } from '../../view/namespace_view.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { DIR_SIZE, contentSize } from '../../utils/stat_view.ts'
+import { DIR_SIZE } from '../../utils/stat_view.ts'
 import { type PrintfKind, printfKind } from './find_eval.ts'
 
 export interface WalkFindDeps {
   readdir: (spec: PathSpec, index?: IndexCacheStore) => Promise<string[]>
   stat: (spec: PathSpec, index?: IndexCacheStore) => Promise<FileStat>
-  // `-empty` asks whether a directory has entries, and a namespace symlink
-  // is one that no backend readdir can see. Without this a directory
-  // holding only a link reads as empty.
+  // The table's stat and readdir see the namespace's links, so a link is an
+  // entry like any other, kind `l`. Under -L (`follow`) an entry is what it
+  // leads to instead: a link to a directory is walked, a dangling one stays
+  // `l` (GNU reports the link when its target cannot be statted), one whose
+  // chain loops is an error, and a directory reached again lands in `loops`
+  // with the one above it that it repeats, never entered.
   links?: LinkView | null
+  follow?: boolean
+  loops?: [string, string][]
   // Where a directory the walk could not open (a rule refused it at the
   // guarded readdir) is recorded, as its virtual path: GNU names it and
   // walks on, so a caller that collects those gets the path and the walk
@@ -114,7 +118,6 @@ async function isEmptyEntry(
   index: IndexCacheStore | undefined,
 ): Promise<boolean> {
   if (isDir) {
-    if (hasLinkChildren(deps.links, path)) return false
     const spec = new PathSpec({
       virtual: path,
       directory: path,
@@ -143,6 +146,7 @@ async function walk(
   maxDepth: number | null,
   depth: number,
   out: WalkEntry[],
+  chain: readonly (readonly [string, string])[] = [],
 ): Promise<void> {
   if (maxDepth !== null && depth > maxDepth) return
   let children: string[]
@@ -170,24 +174,43 @@ async function walk(
     }
     const isFolder = kind === 'd'
     out.push({ path: trimmed, depth, file: !isFolder, kind })
-    if (isFolder) {
-      const childSpec = new PathSpec({
-        virtual: trimmed,
-        directory: trimmed,
-        resolved: false,
-        vfsPath: mountKey(trimmed, mountPrefixOf(spec.virtual, spec.vfsPath)),
-      })
-      await walk(deps, childSpec, index, maxDepth, depth + 1, out)
+    if (!isFolder) continue
+    let below = chain
+    if (deps.follow === true && deps.links != null) {
+      // Under -L a directory is the one it resolves to, and one already open
+      // above is GNU's file system loop, never entered.
+      const here = deps.links.resolve(trimmed)
+      const ancestor = chain.find(([, real]) => real === here)
+      if (ancestor !== undefined) {
+        deps.loops?.push([trimmed, ancestor[0]])
+        continue
+      }
+      below = [...chain, [trimmed, here] as const]
     }
+    const childSpec = new PathSpec({
+      virtual: trimmed,
+      directory: trimmed,
+      resolved: false,
+      vfsPath: mountKey(trimmed, mountPrefixOf(spec.virtual, spec.vfsPath)),
+    })
+    await walk(deps, childSpec, index, maxDepth, depth + 1, out, below)
   }
 }
 
 export async function walkFind(
   path: PathSpec,
-  deps: WalkFindDeps,
+  found: WalkFindDeps,
   options: FindOptions = {},
   index?: IndexCacheStore,
 ): Promise<string[]> {
+  const links = found.links
+  const deps: WalkFindDeps =
+    found.follow === true && links != null
+      ? {
+          ...found,
+          stat: (spec, i) => followedStat((p: PathSpec) => found.stat(p, i), links, spec),
+        }
+      : found
   const collected: WalkEntry[] = []
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   // GNU lists the search root itself at depth 0 (even for the mount
@@ -247,6 +270,7 @@ export async function walkFind(
       options.maxDepth ?? null,
       1,
       collected,
+      deps.follow === true && links != null ? [[rootPath, links.resolve(rootPath)]] : [],
     )
   }
   const results: string[] = []
@@ -304,89 +328,4 @@ export async function walkFind(
   }
   settlePrunes(tree, learned)
   return dropPruned(results, tree)
-}
-
-// Namespace symlinks under the search root that match the expression.
-//
-// Symlinks live in the namespace, not in any backend, so a backend's
-// find never sees them. Merging them here, above every backend, is what
-// keeps a mount's symlink behavior from depending on its backend.
-//
-// GNU find without -L reports the link itself and never walks through
-// it, so a link is kind 'l'. Its size is the target string's length,
-// which is what -size compares, and it carries the link's own mtime.
-//
-// Under -L a link is classified by what it points at instead: a link to
-// a file tests as 'f', a link to a directory as 'd', and only a dangling
-// link stays 'l' (GNU reports the link itself when the target cannot be
-// stat'd). -size and -mtime then compare the target's stat, since that
-// is the file being reported.
-export async function linkResults(
-  links: LinkView | null,
-  searchRoot: string,
-  prefix: string,
-  searchKey: string,
-  tree: PredNode,
-  minDepth: number | null,
-  maxDepth: number | null,
-  minSize: number | null,
-  maxSize: number | null,
-  mtimeMin: number | null,
-  mtimeMax: number | null,
-  follow: boolean,
-): Promise<string[]> {
-  if (links === null) return []
-  const out: string[] = []
-  // GNU find's default is -P: a start point that is itself a symlink is
-  // reported as the link and never walked through. The backend cannot
-  // see it at all, so the subtree scan (which only covers entries
-  // *under* the root) would miss it.
-  const entries = [...links.subtree(searchRoot)]
-  const own = links.statAt(searchRoot)
-  if (own !== null) entries.push([searchRoot, own])
-  for (const [path, ownStat] of entries) {
-    let st = ownStat
-    let kind: FindEntry['kind'] = 'l'
-    if (follow) {
-      const target = await links.targetStat(path)
-      if (target !== null) {
-        kind = printfKind(target)
-        st = target
-      }
-    }
-    const key = prefix !== '' && path.startsWith(prefix) ? path.slice(prefix.length) : path
-    const rel = stripSlash(key)
-    const depth =
-      searchKey !== ''
-        ? rel === searchKey
-          ? 0
-          : rel.split('/').length - searchKey.split('/').length
-        : rel === ''
-          ? 0
-          : rel.split('/').length
-    if (maxDepth !== null && depth > maxDepth) continue
-    const entry: FindEntry = {
-      key,
-      name: path.split('/').pop() ?? path,
-      kind,
-      depth,
-      mtime: modifiedTs(st.modified),
-    }
-    if (!keep(entry, tree, minDepth)) continue
-    const size = contentSize(st)
-    if (minSize !== null && size < minSize) continue
-    if (maxSize !== null && size > maxSize) continue
-    if (mtimeMin !== null || mtimeMax !== null) {
-      // `modifiedTs` is the helper the rest of this file uses. A bare
-      // Date.parse gives NaN for a date-only or malformed stamp, which the
-      // `=== null` guard below does not catch, so every comparison came out
-      // false and the entry was kept -- where Python drops it.
-      const ts = modifiedTs(st.modified)
-      if (ts === null) continue
-      if (mtimeMin !== null && ts < mtimeMin) continue
-      if (mtimeMax !== null && ts > mtimeMax) continue
-    }
-    out.push(path)
-  }
-  return out
 }

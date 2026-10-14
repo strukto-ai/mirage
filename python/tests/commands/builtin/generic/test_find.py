@@ -26,7 +26,6 @@ from mirage.types import (
     FindType,
     PathSpec,
 )
-from mirage.view.types import LinkView
 
 
 async def find(*args, **kwargs):
@@ -774,39 +773,6 @@ async def test_find_directory_start_point_emptiness(
     )
     assert io.exit_code == 0
     assert stdout == expected
-
-
-@pytest.mark.asyncio
-async def test_find_directory_holding_only_a_link_is_not_empty():
-    """A namespace symlink is an entry, so ``-empty`` must skip its parent.
-
-    No backend readdir can see a link, so the emptiness probe alone says
-    the directory holds nothing (``has_link_children`` is what corrects
-    it). GNU counts the link and prints nothing here.
-    """
-
-    async def core(*_a, **_kw) -> list[str]:
-        return []
-
-    links = LinkView(
-        stat_at=lambda _p: None,
-        children=lambda _p: [FileStat(name="lk", type=FileType.SYMLINK)],
-        subtree=lambda _p: [],
-        resolve=lambda p: p,
-        exists=_link_exists,
-        target_stat=_link_target_stat,
-    )
-    stdout, io = await find(
-        [PathSpec(virtual="/mnt", directory="/", vfs_path="")],
-        (),
-        find_core=core,
-        stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
-        dir_empty=_dir_is_empty,
-        empty=True,
-        links=links,
-    )
-    assert io.exit_code == 0
-    assert stdout == b""
 
 
 @pytest.mark.asyncio
