@@ -70,7 +70,7 @@ from mirage.core.generic.rewrite import (
     refuse_taken,
     truncate_by_rewrite,
 )
-from mirage.errors.fs import ebusy, enotsup, exdev
+from mirage.errors.fs import ebusy, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.errors import PipeClosed
@@ -1356,35 +1356,49 @@ class MountEntry:
         override = self.command_limits.get(name)
         return override.timeout_seconds if override is not None else None
 
+    async def can_copy_from(self, source: "MountEntry", src: str) -> bool:
+        """Whether this mount's store may copy ``src`` from ``source``'s,
+        store to store.
+
+        Not when this mount's VFS cannot copy from that one, nor when the
+        store's object is not what a move's read and write would carry: a
+        cached, pinned or rendered source reads other bytes, and a
+        conditional mount on either end holds a version for the write or
+        for ``mv``'s delete. Asked before the copy's deadline starts.
+
+        Args:
+            source (MountEntry): the mount ``src`` is on.
+            src (str): the source's virtual path, on ``source``.
+        """
+        manager = source.cache_manager
+        return not (
+            not self.vfs.supports("copy_from")
+            or WritePolicy.CONDITIONAL in (self.write, source.write)
+            or src in source.revisions
+            or source.renders(get_extension(src))
+            or (
+                manager is not None
+                and await manager.is_cached(source._scope(src))
+            )
+        )
+
     async def copy_from(
         self, source: "MountEntry", src: str, dst: str
     ) -> None:
         """Copy a file from ``source``'s store into this mount's, store to
-        store.
+        store, under the mount's ``copy`` timeout.
 
         For ``cp`` and ``mv`` between two mounts, once the dispatcher
-        has judged ``src`` as a read and ``dst`` as a create. Raises
-        EXDEV when this mount's VFS cannot copy from that one, and when
-        the store's object is not what the move's read and write would
-        carry: a cached, pinned or rendered source reads other bytes, and
-        a conditional mount on either end holds a version for the write
-        or for ``mv``'s delete. The caller then moves the bytes itself.
+        has judged ``src`` as a read and ``dst`` as a create and
+        ``can_copy_from`` has said yes. The VFS raises EXDEV when it
+        cannot make the copy after all, and the caller moves the bytes
+        itself.
 
         Args:
             source (MountEntry): the mount ``src`` is on.
             src (str): the source's virtual path, on ``source``.
             dst (str): the destination's virtual path, on this mount.
         """
-        src_spec = source._scope(src)
-        manager = source.cache_manager
-        if (
-            not self.vfs.supports("copy_from")
-            or WritePolicy.CONDITIONAL in (self.write, source.write)
-            or src in source.revisions
-            or source.renders(get_extension(src))
-            or (manager is not None and await manager.is_cached(src_spec))
-        ):
-            raise exdev(src)
         async with self.use(), source.use():
             self.require_writable("write", PathSpec.from_str_path(dst), ())
             recording_token = push_mount_context(self.mount_id)
@@ -1393,7 +1407,7 @@ class MountEntry:
                 with host_io():
                     await run_with_timeout(
                         self.vfs.copy_from(
-                            source.vfs, src_spec, self._scope(dst)
+                            source.vfs, source._scope(src), self._scope(dst)
                         ),
                         self._op_timeout("copy"),
                         "copy",

@@ -1164,6 +1164,8 @@ class Dispatcher:
             raise exdev(call.path)
         await mount.ensure_ready()
         await other.ensure_ready()
+        if not await other.can_copy_from(mount, call.path.virtual):
+            raise exdev(call.path)
         key = f"{id(other.vfs)}:{mount_key(dst.virtual, other.prefix.rstrip('/'))}"
         async with self._writers.with_lock(key):
             await other.copy_from(mount, call.path.virtual, dst.virtual)

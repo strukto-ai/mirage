@@ -103,7 +103,7 @@ import {
   MountMode,
   PathSpec,
 } from '../../types.ts'
-import { ebusy, enotsup, exdev } from '../../errors/fs.ts'
+import { ebusy, enotsup } from '../../errors/fs.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -1364,16 +1364,32 @@ export class MountEntry {
   }
 
   /**
-   * Copy a file from `source`'s store into this mount's, store to store.
-   *
-   * For `cp` and `mv` between two mounts, once the dispatcher has judged
-   * `src` as a read and `dst` as a create. Rejects EXDEV when this mount's VFS
-   * cannot copy from that one, and when the store's object is not what the
-   * move's read and write would carry: a cached, pinned or rendered source
-   * reads other bytes, and a conditional mount on either end holds a version
-   * for the write or for `mv`'s delete. The caller then moves the bytes
-   * itself. `onCall` receives the store's own call once it starts, which a
-   * timeout does not stop. Mirrors Python's `copy_from`.
+   * Whether this mount's store may copy `src` from `source`'s, store to
+   * store. Not when this mount's VFS cannot copy from that one, nor when the
+   * store's object is not what a move's read and write would carry: a cached,
+   * pinned or rendered source reads other bytes, and a conditional mount on
+   * either end holds a version for the write or for `mv`'s delete. Asked
+   * before the copy's deadline starts. Mirrors Python's `can_copy_from`.
+   */
+  async canCopyFrom(source: MountEntry, src: string): Promise<boolean> {
+    return !(
+      !this.vfs.supports('copyFrom') ||
+      this.write === WritePolicy.CONDITIONAL ||
+      source.write === WritePolicy.CONDITIONAL ||
+      source.revisions.has(src) ||
+      source.renders(getExtension(src)) ||
+      (source.cacheManager !== null && (await source.cacheManager.isCached(source.scope(src))))
+    )
+  }
+
+  /**
+   * Copy a file from `source`'s store into this mount's, store to store,
+   * under the mount's `copy` timeout. For `cp` and `mv` between two mounts,
+   * once the dispatcher has judged `src` as a read and `dst` as a create and
+   * `canCopyFrom` has said yes. The VFS rejects EXDEV when it cannot make the
+   * copy after all, and the caller moves the bytes itself. `onCall` receives
+   * the store's own call once it starts, which a timeout does not stop.
+   * Mirrors Python's `copy_from`.
    */
   async copyFrom(
     source: MountEntry,
@@ -1381,24 +1397,13 @@ export class MountEntry {
     dst: string,
     onCall?: (storeCall: Promise<unknown>) => void,
   ): Promise<void> {
-    const srcSpec = source.scope(src)
-    if (
-      !this.vfs.supports('copyFrom') ||
-      this.write === WritePolicy.CONDITIONAL ||
-      source.write === WritePolicy.CONDITIONAL ||
-      source.revisions.has(src) ||
-      source.renders(getExtension(src)) ||
-      (source.cacheManager !== null && (await source.cacheManager.isCached(srcSpec)))
-    ) {
-      throw exdev(src)
-    }
     await this.use(() =>
       source.use(() =>
         runWithMountContext(
           () =>
             this.runWithWriteRevisions(async () => {
               this.requireWritable('write', PathSpec.fromStrPath(dst), [])
-              const pending = this.vfs.copyFrom(source.vfs, srcSpec, this.scope(dst))
+              const pending = this.vfs.copyFrom(source.vfs, source.scope(src), this.scope(dst))
               onCall?.(pending)
               await runWithTimeout(pending, this.opTimeout('copy'), 'copy')
             }),

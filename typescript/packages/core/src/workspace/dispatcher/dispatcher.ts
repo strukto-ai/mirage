@@ -960,6 +960,7 @@ export class Dispatcher {
     if (dst === null) throw exdev(call.path)
     await owner.ensureReady()
     await other.ensureReady()
+    if (!(await other.canCopyFrom(owner, call.path.virtual))) throw exdev(call.path)
     const key = `${String(this.storeId(other.vfs))}:${mountKey(dst.virtual, rstripSlash(other.prefix))}`
     await this.holdWrite(
       [key],
