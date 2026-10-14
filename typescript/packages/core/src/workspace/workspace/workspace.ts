@@ -90,6 +90,7 @@ import { ProcessSupervisor } from '../../process/supervisor.ts'
 import {
   WorkspaceBinding,
   captureBinding,
+  restrictedMountsFor,
   workspaceBridge,
   type RuntimeContext,
 } from '../../runtime/binding.ts'
@@ -669,6 +670,7 @@ export class Workspace {
         cwd: PathSpec.fromStrPath(session.cwd),
         env: envSnapshot(session),
         dispatch: this.buildWorkspaceBridge(undefined, dispatcher, getAdmission()),
+        restrictedMounts: restrictedMountsFor(session, this.sandboxMounts()),
       },
       scope,
     )

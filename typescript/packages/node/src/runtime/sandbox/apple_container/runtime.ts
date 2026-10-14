@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { abortable } from '@struktoai/mirage-core/utils/abort'
 import { getCurrentSession } from '@struktoai/mirage-core/context/session_context'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { ProcessExecution, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import {
   APPLE_CONTAINER_CONFIG_KEYS,
@@ -25,12 +27,11 @@ import {
 } from './config.ts'
 import {
   APPLE_CONTAINER_CLI_HINT,
-  PRELUDE,
   RUNNING_STATE,
   noContainerHint,
   notRunningHint,
 } from './constants.ts'
-import { type CliResult, runCli } from '../cli.ts'
+import { type CliResult, openCliPipe, runCli } from '../cli.ts'
 
 /**
  * Containers under Apple's `container` tool as a whole-line runtime.
@@ -46,7 +47,7 @@ import { type CliResult, runCli } from '../cli.ts'
  * filesystem except what the container was given at start
  * (`--volume`). Serve the workspace inside it at the host's mount
  * prefixes, the same contract every provider in this family carries.
- * The image needs a POSIX sh, which every argv runs under (PRELUDE).
+ * The image needs a POSIX sh, which every argv runs under (EXEC_PRELUDE).
  *
  * A line runs in its session's container (config `containers`, else
  * `container`), so one runtime can give every agent a VM of its own.
@@ -60,7 +61,7 @@ export class AppleContainerRuntime
   readonly name = 'apple_container'
   private readonly probes = new Map<string, Promise<void>>()
 
-  constructor(options: RuntimeOptions<AppleContainerConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<AppleContainerConfig> = {}) {
     super(options, APPLE_CONTAINER_CONFIG_KEYS)
     validateAppleContainerConfig(this.config)
   }
@@ -107,7 +108,7 @@ export class AppleContainerRuntime
       })
       this.probes.set(container, probe)
     }
-    await this.waitFor(probe, signal)
+    await abortable(probe, signal)
     return container
   }
 
@@ -133,27 +134,7 @@ export class AppleContainerRuntime
     }
   }
 
-  async execLine(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<RunResult> {
-    return this.execArgv(['sh', '-c', line], stdin, env, cwd, signal)
-  }
-
-  async runProcess(request: ProcessExecution): Promise<RunResult> {
-    return this.execArgv(
-      request.argv,
-      request.stdin,
-      { ...this.config.env, ...request.env },
-      request.cwd.virtual,
-      request.signal,
-    )
-  }
-
-  private async execArgv(
+  protected override async execArgv(
     argv: readonly string[],
     stdin: Uint8Array | null,
     env: Record<string, string>,
@@ -163,9 +144,21 @@ export class AppleContainerRuntime
     const container = await this.target(signal)
     const args = ['exec', '-i', '-w', '/']
     for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
-    args.push(container, 'sh', '-c', PRELUDE, 'sh', cwd, ...argv)
+    args.push(container, 'sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv)
     const result = await this.container(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
+  }
+  override async openPipe(command: string): Promise<SandboxPipe> {
+    return openCliPipe('container', [
+      'exec',
+      '-i',
+      '-w',
+      '/',
+      await this.target(),
+      'sh',
+      '-c',
+      command,
+    ])
   }
 }
 

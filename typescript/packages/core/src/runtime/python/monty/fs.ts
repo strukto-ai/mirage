@@ -255,7 +255,16 @@ export class MontyFs {
       case 'Path.read_bytes':
         return files.read(path)
       case 'Path.read_text':
-        return files.read(path).then((b) => new TextDecoder().decode(b))
+        return files.read(path).then((b) => {
+          try {
+            return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(b)
+          } catch (cause) {
+            throw Object.assign(new Error('invalid UTF-8', { cause }), {
+              name: 'UnicodeDecodeError',
+              guestCondition: 'unicode',
+            })
+          }
+        })
       case 'Path.write_bytes':
       case 'Path.write_text':
         return this.write(path, args[1], files)
@@ -321,7 +330,12 @@ export class MontyFs {
     // Handle first, as monty's own engine does: a malformed mode must
     // raise before any side effect lands on the mount.
     const handle = new this.fileHandle(path, mode)
-    await applyOpen(files, path, parseMode(mode))
+    const parsed = parseMode(mode)
+    const row = await applyOpen(files, path, parsed)
+    if (parsed.append && row !== null) {
+      const size = row.size
+      return new this.fileHandle(path, mode, { position: size })
+    }
     return handle
   }
 

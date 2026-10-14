@@ -110,3 +110,8 @@ runtimes:
   grant.
 - Host credentials are not passed to the program.
 - The runtime does not create the FUSE folder or bind it to a session.
+
+- Program lookup uses the sandbox's `PATH`, with the CLI's system default when
+  the session does not set one. Add directories such as `/usr/local/bin` to the
+  session's `PATH` when required. Missing-program diagnostics come from Sandlock.
+- A working directory absent from the host refuses the command with exit 126.

@@ -20,7 +20,9 @@ from unittest.mock import Mock
 import pytest
 
 from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.wasm.errors import ENOENT
 from mirage.runtime.wasm.execution import WasmExecution
+from mirage.runtime.wasm.fs import WasiFs
 from mirage.runtime.wasm.view import WasmView
 
 
@@ -52,7 +54,7 @@ async def test_cancel_joins_worker_and_host_operation(monkeypatch):
         finally:
             worker_finished.set()
 
-    monkeypatch.setattr(execution, "_ensure_serialized", lambda: b"")
+    monkeypatch.setattr(execution, "_checkout", lambda: (engine, None))
     monkeypatch.setattr(execution, "_run_sync", worker)
     monkeypatch.setattr(
         "mirage.runtime.wasm.execution.epoch_engine", lambda: engine
@@ -106,3 +108,185 @@ async def test_cancel_before_wasm_store_is_ready_does_not_miss_epoch(
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(task, 5)
     assert finished.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code, expected", [(0, 0), (130, 130), (200, 200), (256, 0), (-1, 255)]
+)
+async def test_guest_exit_status_keeps_output(tmp_path, code, expected):
+    wasmtime = pytest.importorskip("wasmtime")
+    module = tmp_path / "exit.wasm"
+    module.write_bytes(
+        wasmtime.wat2wasm(f"""(module
+      (import "wasi_snapshot_preview1" "fd_write"
+        (func $write (param i32 i32 i32 i32) (result i32)))
+      (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+      (memory (export "memory") 1)
+      (data (i32.const 32) "kept")
+      (func (export "_start")
+        (i32.store (i32.const 0) (i32.const 32))
+        (i32.store (i32.const 4) (i32.const 4))
+        (drop (call $write (i32.const 1) (i32.const 0) (i32.const 1) (i32.const 8)))
+        (call $exit (i32.const {code}))))""")
+    )
+    execution = WasmExecution(module, "probe")
+    assert await execution.run([], None, [], WasmView()) == (
+        b"kept",
+        None,
+        expected,
+    )
+    assert await execution.run([], None, [], WasmView()) == (
+        b"kept",
+        None,
+        expected,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("absolute", [False, True])
+async def test_cancel_interrupts_poll_clock_and_reuses_engine(
+    tmp_path, monkeypatch, absolute
+):
+    wasmtime = pytest.importorskip("wasmtime")
+    clock_setup = ""
+    if absolute:
+        clock_setup = """
+        (drop (call $clock (i32.const 1) (i64.const 0) (i32.const 24)))
+        (i64.store (i32.const 24)
+          (i64.add (i64.load (i32.const 24)) (i64.const 30000000000)))
+        (i32.store (i32.const 40) (i32.const 1))"""
+    module = tmp_path / "sleep.wasm"
+    module.write_bytes(
+        wasmtime.wat2wasm(f"""(module
+      (import "wasi_snapshot_preview1" "clock_time_get"
+        (func $clock (param i32 i64 i32) (result i32)))
+      (import "wasi_snapshot_preview1" "poll_oneoff"
+        (func $poll (param i32 i32 i32 i32) (result i32)))
+      (memory (export "memory") 1)
+      (func (export "_start")
+        (i32.store (i32.const 16) (i32.const 1))
+        (i64.store (i32.const 24) (i64.const 30000000000))
+        {clock_setup}
+        (drop (call $poll
+          (i32.const 0) (i32.const 64) (i32.const 1) (i32.const 96)))))""")
+    )
+    entered = threading.Event()
+    original = WasiFs.poll_oneoff
+
+    def poll(self, *args):
+        entered.set()
+        return original(self, *args)
+
+    monkeypatch.setattr(WasiFs, "poll_oneoff", poll)
+    execution = WasmExecution(module, "probe")
+    for _ in range(2):
+        entered.clear()
+        task = asyncio.create_task(execution.run([], None, [], WasmView()))
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 1)
+    assert len(execution._idle) == 1
+
+
+@pytest.mark.asyncio
+async def test_close_releases_pooled_native_modules(tmp_path):
+    wasmtime = pytest.importorskip("wasmtime")
+    module = tmp_path / "empty.wasm"
+    module.write_bytes(wasmtime.wat2wasm('(module (func (export "_start")))'))
+    execution = WasmExecution(module, "probe")
+    await execution.run([], None, [], WasmView())
+    assert len(execution._idle) == 1
+    engine, compiled = execution._idle[0]
+    await execution.close()
+    assert execution._idle == []
+    with pytest.raises(ValueError, match="closed"):
+        compiled.ptr()
+    with pytest.raises(ValueError, match="closed"):
+        engine.ptr()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["checkout", "worker"])
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_close_releases_late_engines(monkeypatch, phase, cancel):
+    execution = WasmExecution(Path("unused.wasm"), "probe")
+    engine, module = Mock(), Mock()
+    entered, release = threading.Event(), threading.Event()
+
+    def checkout():
+        if phase == "checkout":
+            entered.set()
+            assert release.wait(5)
+        return engine, module
+
+    def worker(*args):
+        if phase == "worker":
+            entered.set()
+            assert release.wait(5)
+        return b"", None, 0
+
+    monkeypatch.setattr(execution, "_checkout", checkout)
+    monkeypatch.setattr(execution, "_run_sync", worker)
+    task = asyncio.create_task(execution.run([], None, [], WasmView()))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        if cancel:
+            task.cancel()
+            await asyncio.sleep(0)
+        await execution.close()
+        module.close.assert_not_called()
+        engine.close.assert_not_called()
+    finally:
+        release.set()
+    if cancel:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+    else:
+        assert await asyncio.wait_for(task, 5) == (b"", None, 0)
+    assert execution._idle == []
+    module.close.assert_called_once()
+    engine.close.assert_called_once()
+    await execution.close()
+    module.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_closed_execution_refuses_new_runs():
+    execution = WasmExecution(Path("unused.wasm"), "probe")
+    await execution.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        await execution.run([], None, [], WasmView())
+
+
+@pytest.mark.asyncio
+async def test_guest_cannot_open_host_file_above_build_root(tmp_path):
+    wasmtime = pytest.importorskip("wasmtime")
+    root = tmp_path / "build"
+    root.mkdir()
+    (tmp_path / "secret").write_bytes(b"host secret")
+    module = tmp_path / "open.wasm"
+    module.write_bytes(
+        wasmtime.wat2wasm("""(module
+      (import "wasi_snapshot_preview1" "path_open"
+        (func $open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+      (import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))
+      (memory (export "memory") 1)
+      (data (i32.const 0) "../secret")
+      (func (export "_start")
+        (call $exit (call $open
+          (i32.const 3) (i32.const 1) (i32.const 0) (i32.const 9)
+          (i32.const 0) (i64.const 2) (i64.const 0) (i32.const 0) (i32.const 32)))))""")
+    )
+    execution = WasmExecution(module, "probe")
+    try:
+        assert await execution.run(
+            ["probe"], None, [], WasmView(str(root))
+        ) == (
+            b"",
+            None,
+            ENOENT,
+        )
+    finally:
+        await execution.close()

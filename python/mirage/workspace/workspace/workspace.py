@@ -93,6 +93,7 @@ from mirage.runtime.binding import (
     RuntimeContext,
     WorkspaceBinding,
     capture_binding,
+    restricted_mounts_for,
 )
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteDecision, RoutePolicy
@@ -1115,6 +1116,9 @@ class Workspace:
                 processes=self._process_view(session),
                 cwd=PathSpec.from_str_path(session.cwd),
                 env=env_snapshot(session),
+                restricted_mounts=restricted_mounts_for(
+                    session, self._sandbox_mounts()
+                ),
             )
         finally:
             reset_current_session(token)

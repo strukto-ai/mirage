@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.ssh import sdk
 from mirage.runtime.sandbox.ssh.config import SSHRuntimeConfig
 from mirage.runtime.sandbox.ssh.constants import ASYNCSSH_HINT, wrap_line
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.utils.ssh import connect_options
 
 
 class SSHRuntime(RemoteSandbox):
@@ -52,18 +52,21 @@ class SSHRuntime(RemoteSandbox):
 
     def _connect_kwargs(self) -> dict[str, Any]:
         config = self.config
-        kwargs: dict[str, Any] = {"host": config.hostname or config.host}
-        if config.port:
-            kwargs["port"] = config.port
-        if config.username:
-            kwargs["username"] = config.username
-        if config.identity_file:
-            kwargs["client_keys"] = [
-                str(Path(config.identity_file).expanduser())
-            ]
+        kwargs = connect_options(
+            config.host,
+            config.hostname,
+            config.port,
+            config.username,
+            config.identity_file,
+            config.timeout,
+        )
         kwargs["known_hosts"] = None
-        kwargs["login_timeout"] = config.timeout
         return kwargs
+
+    async def _ensure_connected(self) -> None:
+        async with self._connect_lock:
+            if self._conn is None or self._conn.is_closed():
+                await self.connect()
 
     async def connect(self) -> None:
         if sdk.connect is None:
@@ -101,9 +104,21 @@ class SSHRuntime(RemoteSandbox):
             process.close()
         await process.wait_closed()
         code = result.returncode if result.returncode is not None else 1
-        return result.stdout, result.stderr, code
+        return result.stdout, result.stderr, 128 - code if code < 0 else code
+
+    async def open_pipe(self, command: str) -> SandboxPipe:
+        process = await self._conn.create_process(
+            command, encoding=None, stderr=asyncio.subprocess.DEVNULL
+        )
+
+        async def stop() -> None:
+            process.close()
+            await process.wait_closed()
+
+        return SandboxPipe(process.stdout, process.stdin, stop)
 
     async def close(self) -> None:
+        await super().close()
         if self._conn is not None:
             self._conn.close()
             await self._conn.wait_closed()

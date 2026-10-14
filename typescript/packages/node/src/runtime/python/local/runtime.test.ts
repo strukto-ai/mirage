@@ -26,6 +26,20 @@ import { LocalRuntime } from './runtime.ts'
 const DEC = new TextDecoder()
 
 describe('LocalRuntime', () => {
+  it('waits for an exited native child without requiring stdin to close', async () => {
+    const ws = new Workspace(
+      {},
+      { mode: MountMode.EXEC, runtimes: [new LocalRuntime({ captures: ['uname'] }), 'workspace'] },
+    )
+    try {
+      const child = ws.spawn({ argv: ['uname'] })
+      expect(await child.wait()).toMatchObject({ exitCode: 0 })
+      expect(ws.processes.live()).toHaveLength(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
   it.each([
     ['dir/py/list.py', 'seed.txt\nsub\n'],
     ['path/py/stat.py', 'file 5 32768\ndir 16384\nmissing\n'],
@@ -271,11 +285,10 @@ describe('LocalRuntime', () => {
     expect(result.exitCode).toBe(3)
   })
 
-  it('a missing interpreter fails with the config hint', async () => {
-    const rt = new LocalRuntime({ config: { home: '/nope/python-does-not-exist' } })
-    await expect(
-      rt.run({ code: 'print(1)', args: [], stdin: null, env: {}, flags: {} }),
-    ).rejects.toThrow(/local python interpreter not found/)
+  it('a missing interpreter fails at construction with the config hint', () => {
+    expect(() => new LocalRuntime({ config: { home: '/nope/python-does-not-exist' } })).toThrow(
+      'local python interpreter not found',
+    )
   })
 
   it('an aborted signal kills the interpreter (limit timeout path)', async () => {
@@ -487,3 +500,22 @@ describe('LocalRuntime', () => {
     expect(buildRuntime('local')).toBeInstanceOf(LocalRuntime)
   })
 })
+
+it.each(["yes | perl -ne 'print; exit'", 'perl -e \'$|=1; print "y\\n" while 1\' | head -1'])(
+  'streams infinite pipes and closes children: %s',
+  async (line) => {
+    const rt = new LocalRuntime({ captures: ['@external'] })
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
+    )
+    try {
+      const result = await ws.shell(line)
+      expect(result.exitCode, DEC.decode(result.stderr)).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('y\n')
+    } finally {
+      await ws.close()
+    }
+  },
+  5000,
+)

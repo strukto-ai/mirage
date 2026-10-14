@@ -31,6 +31,7 @@ import {
 } from './interrupt.ts'
 import { noWorker, PyodideMemoryError, PyodideUnavailableError } from './errors.ts'
 import { loadPyodideRuntime, type PyodideInterface } from './loader.ts'
+import { sealWorkerRealm } from './seal.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { createJournal, type MutationJournal } from './fs/journal.ts'
 import { PyodideFs } from './fs/fs.ts'
@@ -39,6 +40,8 @@ import { mainFilename } from '../execution.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
 import type { FlushFailure, SyncVFS, XattrOp } from './fs/types.ts'
 import { classify } from '../../../errors/index.ts'
+import { resolvePath } from '../../../utils/path.ts'
+import { errnoError } from './fs/errors.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { KEYS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
@@ -215,6 +218,7 @@ export class PyodideRuntime extends PythonRuntime {
   private readonly maxMemory: number | null
   private readonly syncFailures: string[] = []
   private syncSkipped = 0
+  private realmSeal: Promise<void> | null = null
 
   constructor(
     options: RuntimeOptions<PyodideConfig> = {},
@@ -247,27 +251,16 @@ export class PyodideRuntime extends PythonRuntime {
     }
   }
 
-  protected override executeCode(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    return this.run(args, context)
-  }
-
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
     if (args.cwd === undefined && context !== undefined) args = { ...args, cwd: context.cwd }
-    if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
-      return this.withFreshRuntime(async (runtime) =>
-        this.capped(runtime, await runtime.runOne(args, context)),
-      )
-    }
+    const execute = async (runtime: PyodideRuntime): Promise<RunResult> =>
+      this.capped(runtime, await runtime.runOne(args, context))
+    if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0)
+      return this.withFreshRuntime(execute)
     const scope =
       context?.scope ?? new ContextScope([...captureSessionContext(), captureExecutionContext()])
     return this.schedule(() =>
-      this.withPermit(() =>
-        scope.run(() =>
-          this.withFreshRuntime(async (runtime) =>
-            this.capped(runtime, await runtime.runOne(args, context)),
-          ),
-        ),
-      ),
+      this.withPermit(() => scope.run(() => this.withFreshRuntime(execute)), args.signal),
     )
   }
 
@@ -282,8 +275,8 @@ export class PyodideRuntime extends PythonRuntime {
     return next
   }
 
-  private async withPermit<T>(task: () => Promise<T>): Promise<T> {
-    const release = await this.limiter.acquire()
+  private async withPermit<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const release = await this.limiter.acquire(signal)
     try {
       return await task()
     } finally {
@@ -399,11 +392,51 @@ export class PyodideRuntime extends PythonRuntime {
     if (this.interrupter !== null) pyodide.setInterruptBuffer(this.interrupter.view)
   }
 
+  private guardRequestedPaths(pyodide: PyodideInterface): void {
+    const sync = this.sync
+    if (sync === undefined) return
+    const fs = pyodide.FS
+    const lookup = fs.lookupPath.bind(fs)
+    const stat = fs.stat.bind(fs)
+    let metadata = 0
+    fs.stat = (path, nofollow) => {
+      metadata++
+      try {
+        return stat(path, nofollow)
+      } finally {
+        metadata--
+      }
+    }
+    fs.lookupPath = (path, options) => {
+      const result = lookup(path, options)
+      const requested = path.startsWith('/') ? path : fs.cwd() + '/' + path
+      const expected = resolvePath(options?.parent === true ? requested + '/..' : requested, '/')
+      const files = this.files
+      if (
+        metadata === 0 &&
+        result.path !== expected &&
+        files !== null &&
+        (servable(files.mountOf(requested) ?? '/') || servable(files.mountOf(result.path) ?? '/'))
+      ) {
+        try {
+          // Emscripten passes resolved nodes to filesystem callbacks. Check
+          // the requested spelling before it can act on an aliased node.
+          sync.checkPath(requested, options?.parent !== true && options?.follow === true)
+        } catch (error) {
+          const condition = classify(error)
+          throw errnoError(fs, pyodide.ERRNO_CODES, condition ?? 'EIO')
+        }
+      }
+      return result
+    }
+  }
+
   private async ensureLoaded(): Promise<PyodideInterface> {
     if (this.pyodide !== null) {
       if (this.bootstrapPromise !== null) await this.bootstrapPromise
       this.syncMounts(this.pyodide)
       await this.wireInterruptIfNeeded(this.pyodide)
+      await this.sealRealmIfWorker(this.pyodide)
       return this.pyodide
     }
     this.initPromise ??= loadPyodideRuntime({
@@ -426,6 +459,7 @@ export class PyodideRuntime extends PythonRuntime {
         }
         this.disposeModule = (dispose as (() => void | Promise<void>) | undefined) ?? null
       }
+      this.guardRequestedPaths(py)
       return py
     })
     this.pyodide = await this.initPromise
@@ -446,7 +480,27 @@ export class PyodideRuntime extends PythonRuntime {
     }
     this.syncMounts(this.pyodide)
     await this.wireInterruptIfNeeded(this.pyodide)
+    await this.sealRealmIfWorker(this.pyodide)
     return this.pyodide
+  }
+
+  /**
+   * Seal the Node worker the guest runs in, once the interpreter and any
+   * trusted init have loaded. Only inside the worker (`sync` set): the main
+   * thread runs no workspace-backed guest, and a browser worker shares the
+   * page, whose CSP is its only limit. An `init_module` has host reach by
+   * design (`'process'`), so its worker is left open; so is a Node too old
+   * for `module.registerHooks`, documented as trusted-only there.
+   *
+   * @param pyodide The loaded interpreter.
+   */
+  private async sealRealmIfWorker(pyodide: PyodideInterface): Promise<void> {
+    if (this.sync === undefined || this.reach === 'process') return
+    if (this.realmSeal !== null) return this.realmSeal
+    const host = globalThis as { process?: { versions?: { node?: unknown } } }
+    if (typeof host.process?.versions?.node !== 'string') return
+    this.realmSeal = sealWorkerRealm(pyodide)
+    await this.realmSeal
   }
 
   /**

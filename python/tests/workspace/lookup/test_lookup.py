@@ -49,7 +49,7 @@ class _Sandbox(Runtime, ProcessExecutorMixin):
 class _HostPython(PythonRuntime, ProcessExecutorMixin):
     name = "host-python"
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
     async def run_process(self, request: ProcessExecution) -> RunResult:

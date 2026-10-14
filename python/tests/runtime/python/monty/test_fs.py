@@ -54,6 +54,8 @@ class FakeDispatch:
         self.dirs: list[str] = []
 
     async def __call__(self, op, path, **kwargs):
+        if kwargs.get("admit_only"):
+            return None, None
         virtual = path.virtual
         if op == "read":
             if virtual in self.devices:

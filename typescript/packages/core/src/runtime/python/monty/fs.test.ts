@@ -404,7 +404,8 @@ describe('MontyFs mounted open and append', () => {
     const created: string[] = []
     const truncated: string[] = []
     const appended: Uint8Array[] = []
-    const dispatch = vi.fn<BridgeDispatchFn>((op, path, bytes) => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path, bytes, _dst, attrs) => {
+      if (attrs?.admitOnly) return Promise.resolve(undefined)
       if (op === 'readdir') {
         // Only the mount directory lists; probing a file path (the
         // is-it-a-directory check) misses like a real mount.

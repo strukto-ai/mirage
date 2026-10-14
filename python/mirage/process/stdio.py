@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import CAPACITY, BytePipe
+from mirage.io.stream import OutputStream
 from mirage.shell.console import Channel, JobConsole
 
 
@@ -26,10 +27,16 @@ class ProcessInput:
         self.close()
         self.pipe.close_reader()
 
-    async def stream(self) -> AsyncIterator[bytes]:
+    async def _read(self) -> AsyncIterator[bytes]:
         async for chunk in self.pipe.stream():
             self.bytes_read += len(chunk)
             yield chunk
+
+    def stream(self) -> OutputStream:
+        async def stop() -> None:
+            self.stop()
+
+        return OutputStream(self._read(), stop)
 
 
 class ProcessOutput(JobConsole):

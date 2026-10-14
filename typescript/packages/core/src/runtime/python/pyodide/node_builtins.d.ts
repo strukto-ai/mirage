@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The three Node builtins core reaches for, declared with only the members
+// The Node builtins core reaches for, declared with only the members
 // it uses, rather than depending on `@types/node`.
 //
 // Core has to work in both runtimes, and pulling the whole Node surface in
@@ -20,13 +20,14 @@
 // would survive only in review. Whatever is used has to be written down
 // here first, which is a small price for a compiler-enforced boundary.
 //
-// Every call site is guarded twice over: a `process.versions.node` probe
-// before the import, and a try/catch that degrades around it. Nothing here
-// runs in a browser; these types only have to describe the Node path well
-// enough to check it. `packages/node` depends on `@types/node` proper and
-// is where unrestricted Node code belongs.
+// These imports run only on Node paths. Worker sealing additionally checks
+// for registerHooks before changing the realm; its filesystem access only
+// canonicalizes package paths. Other Node behavior belongs in packages/node.
 
 declare module 'node:module' {
+  export const registerHooks:
+    | ((hooks: { resolve: (specifier: string) => never }) => void)
+    | undefined
   export function createRequire(url: string): {
     resolve(id: string): string
   }
@@ -34,6 +35,14 @@ declare module 'node:module' {
 
 declare module 'node:path' {
   export function dirname(p: string): string
+  export function resolve(...paths: string[]): string
+  export function relative(from: string, to: string): string
+  export function isAbsolute(path: string): boolean
+  export const sep: string
+}
+
+declare module 'node:fs/promises' {
+  export function realpath(path: string): Promise<string>
 }
 
 declare module 'node:worker_threads' {

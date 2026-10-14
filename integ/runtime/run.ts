@@ -205,6 +205,7 @@ let s3Seeded = false
 let mongoSeeded = false
 
 class EchoBox extends Runtime implements LineExecutor {
+  override readonly reach = 'workspace' as const
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'echobox'
 
@@ -227,6 +228,7 @@ class EchoBox extends Runtime implements LineExecutor {
 registerRuntime('echobox', EchoBox)
 
 class ProcessBox extends Runtime implements ProcessExecutor {
+  override readonly reach = 'workspace' as const
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'processbox'
 

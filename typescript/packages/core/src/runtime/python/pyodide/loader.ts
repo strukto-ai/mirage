@@ -25,6 +25,9 @@ const PYODIDE_CDN_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_CDN_VERSION
 const PYODIDE_HOME_ENV = 'MIRAGE_PYODIDE_HOME'
 
 interface PyodideFS extends FSHost {
+  cwd: () => string
+  stat: (path: string, nofollow?: boolean) => unknown
+  lookupPath: (path: string, options?: { parent?: boolean; follow?: boolean }) => { path: string }
   analyzePath: (path: string) => { exists: boolean }
   mkdir: (path: string) => unknown
   rmdir: (path: string) => void

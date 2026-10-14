@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.runtime.handles.file_handle import (
     FileHandle,
     overlaid,
     write_runs,
 )
+from mirage.runtime.handles.flush import apply_flush
 from mirage.runtime.handles.types import FlushStep
 
 
@@ -60,9 +63,10 @@ def test_a_large_file_is_fetched_a_chunk_at_a_time():
     assert calls == [(READ_CHUNK + 5, READ_CHUNK)]
 
 
-def test_append_mode_starts_at_the_end_and_always_writes_there():
+def test_append_mode_starts_at_zero_and_always_writes_at_the_end():
     h = _handle(b"abc", append=True)
-    assert h.pos == 3
+    assert h.pos == 0
+    assert h.read(3) == b"abc"
     h.seek(0, 0)
     h.write(b"XY")
     assert h.pread(0, 9) == b"abcXY"
@@ -193,3 +197,35 @@ def test_overlaid_lays_writes_over_the_stored_window_in_arrival_order():
 def test_overlaid_grows_the_file_and_reads_a_gap_as_zeros():
     assert overlaid(b"ab", 0, 10, [(4, b"Q")]) == b"ab\x00\x00Q"
     assert overlaid(b"", 8, 4, [(4, b"Q")]) == b""
+
+
+@pytest.mark.parametrize("stored", [b"AAAAAA", b"A", b""])
+def test_dirty_append_survives_peer_refresh(stored):
+    handle = FileHandle.opened(
+        "/f",
+        lambda offset, size: (
+            b"old"[offset:] if size is None else b"old"[offset : offset + size]
+        ),
+        size=3,
+        writable=True,
+        append=True,
+    )
+    handle.write(b"BBB")
+    handle.invalidate(
+        lambda offset, size: (
+            stored[offset:] if size is None else stored[offset : offset + size]
+        ),
+        len(stored),
+    )
+    assert apply_flush(stored, handle.flush_plan()) == stored + b"BBB"
+
+
+def test_append_invalidate_keeps_explicit_read_position():
+    h = FileHandle.opened(
+        "/f", _over(b"old"), size=3, writable=True, append=True
+    )
+    h.write(b"BBB")
+    h.seek(0, 0)
+    h.invalidate(_over(b""), 0)
+    assert h.pos == 0
+    assert apply_flush(b"", h.flush_plan()) == b"BBB"

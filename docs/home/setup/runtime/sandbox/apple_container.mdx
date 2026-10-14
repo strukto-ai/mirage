@@ -77,9 +77,14 @@ map from session ID to container, for one container per agent.
 ## Connecting the workspace
 
 A program in the container opens workspace files at the same paths as in
-Mirage, so the container must see the mounts there. Mirage does not serve them
-into an Apple container: write the same mounts at the same paths into
-`sandbox.yaml`, and start Mirage with it in the container:
+Mirage, so the container must see the mounts there. `mount_type` picks how, as
+for [Docker](/home/setup/runtime/sandbox/docker#connecting-the-workspace):
+`ssh` serves every mount over `container exec` (the image needs `sshfs`),
+`fuse` leaves them to a Mirage inside, and `both` mixes the two. `mount_type`
+serves one session, so it cannot be combined with `containers`.
+
+For `fuse`, write the same mounts at the same paths into `sandbox.yaml`, and
+start Mirage with it in the container:
 
 ```yaml
 mounts:
@@ -108,7 +113,7 @@ container exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 | Piped input | stdin |
 | Environment | The session's, over the config `env` |
 | Working directory | The shell's, unchanged |
-| Workspace files | What the Mirage inside serves; see [above](#connecting-the-workspace) |
+| Workspace files | By `mount_type`; see [above](#connecting-the-workspace) |
 | Disk and network | The container's own |
 
 ## Notes

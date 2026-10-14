@@ -46,6 +46,7 @@ function world(shape: Shape): OpenSurface & { effects: string[] } {
   const has = (list: string[] | undefined, path: string): boolean => list?.includes(path) === true
   return {
     effects,
+    checkWrite: () => Promise.resolve(),
     statOrNull: (path: string, nofollow = false): Promise<VFSStat | null> => {
       if (has(shape.files, path))
         return Promise.resolve({ size: 1, isDir: false, mode: 0o100644, mtimeMs: 0 })

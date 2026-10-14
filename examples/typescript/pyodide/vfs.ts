@@ -15,6 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
+import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
 import {
   GDocsVFS,
   LinearVFS,
@@ -61,7 +62,10 @@ async function py(ws: Workspace, label: string, code: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: ['pyodide'] })
+  const ws = new Workspace({}, {
+    mode: MountMode.EXEC,
+    runtimes: [new PyodideRuntime({ config: { packages: ['pillow'] } })],
+  })
   // The demo scripts live under /ram, so the mount carries x.
   ws.addMount('/ram', new RAMVFS(), MountMode.EXEC)
 

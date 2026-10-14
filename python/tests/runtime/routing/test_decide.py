@@ -25,7 +25,7 @@ class AlphaRuntime(Runtime):
     name = "alpha"
     captures = ("python3", "python")
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=b"alpha\n", stderr=None, exit_code=0)
 
 
@@ -33,7 +33,7 @@ class NodeRuntime(JsRuntime):
     name = "node-engine"
     captures = ("node",)
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 

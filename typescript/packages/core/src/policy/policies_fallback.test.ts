@@ -18,6 +18,7 @@ import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import type { Policy } from './base.ts'
 import {
   Outcome,
@@ -335,3 +336,37 @@ describe('a method without task isolation', () => {
     }
   })
 })
+
+it('carries the script issuer through postVfs without task isolation', async () => {
+  const source =
+    "import json\nvalue = open('/data/rule').read()\nprint(json.dumps({'kind': 'deny', 'reason': value}))"
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      shellParser: await getTestParser(),
+      profiles: {
+        checked: {
+          policy: {
+            postVfs: [
+              {
+                runtime: 'monty',
+                script: new ScriptSource(source, 'python'),
+              },
+            ],
+          },
+        },
+      },
+    },
+  )
+  try {
+    await ws.vfs.write('/data/rule', 'checked once')
+    await ws.vfs.write('/data/value', 'payload')
+    ws.createSession('s', { profile: 'checked' })
+    const result = await new Session(ws, 's').tools.read('/data/value')
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toContain('checked once')
+  } finally {
+    await ws.close()
+  }
+}, 30_000)

@@ -58,7 +58,7 @@ class FakeSandbox extends RemoteSandbox {
     return Promise.resolve()
   }
 
-  execLine(
+  override execLine(
     line: string,
     _stdin?: Uint8Array | null,
     _env?: Record<string, string>,
@@ -205,17 +205,17 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
-  it('keeps the sandbox for a session it served nothing', async () => {
+  it('refuses hidden unserved mounts without claiming the sandbox', async () => {
     const sandbox = new FakeSandbox('ssh')
     const ws = await workspace(sandbox, ['/data', '/my notes'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
-    expect(sandbox.pipes).toEqual([])
-    const result = await other.shell('python3 job.py')
+    const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(1)
-    expect(DEC.decode(result.stderr)).toContain('give session other a sandbox of its own')
+    expect(DEC.decode(result.stderr)).toContain('not served through the dispatcher')
     expect(sandbox.pipes).toEqual([])
+    expect((await other.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.pipes).toHaveLength(2)
     await ws.close()
   })
 
@@ -247,7 +247,7 @@ describe('SandboxMounts', () => {
       const result = await agent.shell('python3 job.py')
       expect(result.exitCode).toBe(1)
       expect(DEC.decode(result.stderr)).toBe(
-        "fake: /data is served by the sandbox itself, out of reach of this session's rules\n",
+        "fake: /data is not served through the dispatcher, out of reach of this session's rules\n",
       )
       expect(sandbox.commands).not.toContain('python3 job.py')
       await ws.close()
@@ -258,12 +258,12 @@ describe('SandboxMounts', () => {
     const sandbox = new FakeSandbox('fuse')
     const ws = await workspace(sandbox, ['/data/secret.csv'])
     const agent = await ws.session('agent', { profile: 'agent' })
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(1)
     sandbox.table.set('/data', 'fuse')
     const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(1)
     expect(DEC.decode(result.stderr)).toBe(
-      "fake: /data is served by the sandbox itself, out of reach of this session's rules\n",
+      "fake: /data is not served through the dispatcher, out of reach of this session's rules\n",
     )
     await ws.close()
   })
@@ -273,7 +273,7 @@ describe('SandboxMounts', () => {
     const ws = await workspace(sandbox, ['/my notes/secret'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(1)
     expect((await other.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.pipes).toEqual([])
     await ws.close()
@@ -286,7 +286,7 @@ describe('SandboxMounts', () => {
     const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(1)
     expect(DEC.decode(result.stderr)).toBe(
-      'fake: serving the workspace into a sandbox needs sshfs there; ' +
+      'python3: fake: serving the workspace into a sandbox needs sshfs there; ' +
         'install it in the image (apt-get install sshfs)\n',
     )
     expect(sandbox.pipes).toEqual([])
@@ -318,7 +318,7 @@ describe('SandboxMounts', () => {
       const result = await agent.shell('python3 job.py')
       expect(result.exitCode).toBe(1)
       expect(DEC.decode(result.stderr)).toBe(
-        "fake: /data is served by the sandbox itself, out of reach of this session's rules\n",
+        "fake: /data is not served through the dispatcher, out of reach of this session's rules\n",
       )
       await ws.close()
     },
@@ -330,9 +330,30 @@ describe('SandboxMounts', () => {
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(1)
-    expect(DEC.decode(result.stderr)).toContain('fake: /data is served by the sandbox itself')
+    expect(DEC.decode(result.stderr)).toContain(
+      'fake: /data/sub is not served through the dispatcher',
+    )
     await ws.close()
   })
+
+  it.each(['both', 'fuse'] as const)(
+    'refuses a shown read-only path on a sandbox-owned mount under %s',
+    async (mountType) => {
+      const sandbox = new FakeSandbox(mountType, ['/data'])
+      const ws = await workspace(sandbox)
+      try {
+        const agent = await ws.session('agent', {
+          profile: { paths: { hide: [], show: [{ path: '/data/locked', mode: MountMode.READ }] } },
+        })
+        const result = await agent.shell('python3 job.py')
+        expect(result.exitCode).toBe(1)
+        expect(DEC.decode(result.stderr)).toContain('/data is not served through the dispatcher')
+        expect(sandbox.commands).not.toContain('python3 job.py')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 
   it('serves the live session to a line with its own cwd', async () => {
     sessions.length = 0
@@ -375,7 +396,7 @@ describe('SandboxMounts', () => {
     const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(1)
     expect(DEC.decode(result.stderr)).toBe(
-      'fake: the sandbox mounts /data/sub itself, and serving /data would cover it\n',
+      'python3: fake: the sandbox mounts /data/sub itself, and serving /data would cover it\n',
     )
     expect(sandbox.pipes).toEqual([])
     await ws.close()

@@ -67,7 +67,7 @@ class Probe(LanguageRuntime):
             self.contexts.append(context)
         return await super()._execute_code(request, context)
 
-    async def run(self, args):
+    async def run(self, args, context=None):
         return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
 
 
@@ -367,3 +367,32 @@ async def test_context_vfs_of_a_bare_launch_stays_unscoped_and_unrecorded():
         scope.close()
     assert dispatch.sessions == [None]
     assert scope.records == []
+
+
+@pytest.mark.asyncio
+async def test_native_runtime_refused_before_running_with_hidden_files():
+    runtime = ShellProbe(captures=["*"])
+    with Workspace(
+        {"/data": RAMVFS()}, runtimes=[runtime], mode=MountMode.EXEC
+    ) as ws:
+        ws.create_session(
+            "restricted", profile={"paths": {"hide": ["/data/secret"]}}
+        )
+        result = await ws.shell("echo should-not-run", session_id="restricted")
+        assert result.exit_code == 127
+        assert result.stdout == b""
+        assert b"cannot enforce" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "hidden,expected",
+    [
+        (["/data/secret"], ("/data/",)),
+        (["/secret", "/data/secret"], ("/", "/data/")),
+        (["/data/*"], ("/data/",)),
+    ],
+)
+def test_restrictions_belong_to_the_longest_mount(hidden, expected):
+    with Workspace({"/data": RAMVFS()}, runtimes=[]) as ws:
+        ws.create_session("agent", profile={"paths": {"hide": hidden}})
+        assert ws.runtime_context("agent").restricted_mounts == expected

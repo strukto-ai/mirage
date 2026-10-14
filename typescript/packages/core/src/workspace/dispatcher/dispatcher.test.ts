@@ -2166,3 +2166,29 @@ describe('a hide filters a one-call read', () => {
     }
   })
 })
+
+it('path admission checks aliases without backend I/O', async () => {
+  const ram = new RAMVFS()
+  const ws = new Workspace(
+    { '/data': ram },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    await ws.shell('mkdir /data/real; ln -s /data/real /data/alias')
+    const call = vi
+      .spyOn(MountEntry.prototype, 'callKeyed')
+      .mockRejectedValue(new Error('unexpected backend call'))
+    const probe = { admit_only: true }
+    await expect(
+      byCommand(ws, refusing('/data/alias/new').gate, 'stat', '/data/alias/new', [], probe),
+    ).rejects.toThrow('sealed')
+    const { gate, asked } = refusing('/unrelated')
+    const [result] = await byCommand(ws, gate, 'stat', '/data/alias/new', [], probe)
+    expect(result).toBeNull()
+    expect(asked).toEqual(['/data/alias/new', '/data/real/new'])
+    expect(call).not.toHaveBeenCalled()
+    call.mockRestore()
+  } finally {
+    await ws.close()
+  }
+})

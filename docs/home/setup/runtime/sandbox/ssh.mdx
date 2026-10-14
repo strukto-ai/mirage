@@ -75,7 +75,11 @@ machine too.
 ## Connecting the workspace
 
 A program on the machine opens workspace files at the same paths as in
-Mirage, so the machine must see the mounts there. Two ways:
+Mirage, so the machine must see the mounts there. With `mount_type: ssh`,
+Mirage serves every mount over the runtime's own connection and the machine
+mounts each with `sshfs`, as for
+[Docker](/home/setup/runtime/sandbox/docker#connecting-the-workspace). Without
+it, two ways:
 
 **Files already on the machine.** Mount the machine's directory with the
 [ssh VFS](/python/vfs/ssh) at a prefix equal to its path there. The same

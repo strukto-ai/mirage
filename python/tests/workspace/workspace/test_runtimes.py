@@ -36,7 +36,7 @@ class Engine(PythonRuntime):
         self.release = asyncio.Event()
         self.release.set()
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         self.entered.set()
         await self.release.wait()
         return RunResult(

@@ -284,10 +284,14 @@ class Files:
             path (PathSpec): the virtual path.
             **kwargs: the function's arguments, by its own names.
         """
-        return await self._call(name, path.virtual, **kwargs), IOResult()
+        return await self._call(name, path, **kwargs), IOResult()
 
     async def _call(
-        self, op: str, path: str, session_id: str | None = None, **kwargs
+        self,
+        op: str,
+        path: str | PathSpec,
+        session_id: str | None = None,
+        **kwargs,
     ) -> Any:
         """Run one op through the workspace dispatcher and record it.
 
@@ -302,13 +306,14 @@ class Files:
 
         Args:
             op (str): the op name.
-            path (str): the virtual path.
+            path (str | PathSpec): the virtual path and its requested spelling.
             session_id (str | None): the session to run as when no line
                 is already running; None uses this facade's own.
             **kwargs: op arguments, by the op function's names.
         """
         timer = start_op()
         report = OpReport()
+        typed = PathSpec.from_str_path(path, cwd="/")
         seen: list[str] = []
 
         async def run() -> tuple[Any, Any]:
@@ -319,7 +324,7 @@ class Files:
             # op, the typed spelling kept for the walk that proves them.
             return await self._dispatch(
                 op,
-                PathSpec.from_str_path(path, cwd="/"),
+                typed,
                 report=report,
                 **kwargs,
             )
@@ -336,7 +341,7 @@ class Files:
             # the error propagates. The dispatcher stamps the report at the
             # moment of completion, so even a foreign error the dispatcher
             # never defined leaves the transfer on the books.
-            ran = report.path or path
+            ran = report.path or typed.virtual
             owner = self._owner(ran)
             if report.completed and owner is not None:
                 self._record_op(
@@ -351,9 +356,9 @@ class Files:
                     self._session_for(seen),
                 )
             raise
-        ran = report.path or path
+        ran = report.path or typed.virtual
         owner = self._owner(ran)
-        if owner is None:
+        if owner is None or (op == "write" and kwargs.get("admit_only")):
             return result
 
         def record(answer: Any) -> None:

@@ -47,7 +47,7 @@ export function stdinPath(): string {
  * provider (docker already streams via `docker exec -i`).
  */
 export function stdinRedirect(line: string, path: string): string {
-  return `( ${line} ) < ${path}; _s=$?; rm -f ${path}; exit $_s`
+  return `(\n${line}\n) < ${path}; _s=$?; rm -f ${path}; exit $_s`
 }
 
 export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'fuse', 'both']
@@ -82,3 +82,13 @@ export const SSHFS_HINT =
   'serving the workspace into a sandbox needs sshfs there; install it in the image (apt-get install sshfs)'
 export const PIPE_SERVER_HINT =
   'serving the workspace into a sandbox needs @struktoai/mirage-node and its ssh2 peer'
+
+/**
+ * Every argv a provider CLI execs runs under this POSIX sh prelude, with
+ * the cwd as $1 and `-w /` on the exec. An exec's `-e` can append to the
+ * image's environment rather than replace a name it already sets, and
+ * `-w` can create a missing directory instead of failing. sh imports the
+ * environment last-wins, `cd` fails loud (126) on a cwd the sandbox does
+ * not serve, and `exec` hands over the argv unchanged.
+ */
+export const EXEC_PRELUDE = 'cd -- "$1" || exit 126; shift; exec "$@"'

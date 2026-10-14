@@ -194,6 +194,8 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
   const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
   const seen = new Set<string>()
   for (const entry of entries) {
+    if (entry.captures.includes('*') && !isLineExecutor(entry))
+      throw new Error('* requires shell execution')
     if (
       entry.captures.includes(EXTERNAL_COMMANDS) &&
       !isLineExecutor(entry) &&

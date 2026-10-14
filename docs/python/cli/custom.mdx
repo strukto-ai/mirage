@@ -194,10 +194,9 @@ program's stdout, stderr, and exit status become the shell result. A script CLI
 cannot declare `config_model`, subcommands, or function handlers; it parses and
 documents its own options, including `--help`.
 
-Slot 0 is the installed name on monty and quickjs, so two installs can identify
-themselves and user-facing errors can name the invoked program. Wasi and local
-run CPython with `-c`, which owns `sys.argv[0]`; arguments still begin at index
-1. A YAML script declares no Mirage grammar, so every option reaches the
+Slot 0 is the installed name on every runtime, so two installs can identify
+themselves and user-facing errors can name the invoked program. Arguments begin
+at index 1. A YAML script declares no Mirage grammar, so every option reaches the
 program unchanged. A script CLI constructed in code may supply a `CommandSpec`
 to opt into Mirage parsing and generated help.
 

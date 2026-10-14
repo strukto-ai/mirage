@@ -20,26 +20,34 @@ import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
+  STREAMING_PROCESS,
   type LineExecutor,
-  type ProcessExecutor,
+  type StreamingProcess,
 } from '@struktoai/mirage-core/runtime/mixin'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { ProcessExecution, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type {
+  ProcessExecution,
+  StreamExecution,
+  RunResult,
+} from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
 import { SANDLOCK_CLI_HINT, SYSTEM_READABLE } from './constants.ts'
-import { closeChildren, runCli } from '../cli.ts'
+import { closeChildren, cwdRefusal, runCli } from '../cli.ts'
 
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
-export class SandlockRuntime extends Runtime implements LineExecutor, ProcessExecutor {
+export class SandlockRuntime extends Runtime implements LineExecutor, StreamingProcess {
   readonly name = 'sandlock'
   readonly [LINE_EXECUTOR] = true as const
   readonly [PROCESS_EXECUTOR] = true as const
+  readonly [STREAMING_PROCESS] = true as const
   declare config: SandlockConfig
   private readonly children = new Set<ChildProcess>()
 
   constructor(options: RuntimeOptions<SandlockConfig> = {}) {
     super(options, [EXTERNAL_COMMANDS], SANDLOCK_CONFIG_KEYS)
+    if (this.config.mountType != null)
+      throw new Error('sandlock: mountType needs a remote pipe transport')
   }
 
   policyArgv(): string[] {
@@ -68,7 +76,17 @@ export class SandlockRuntime extends Runtime implements LineExecutor, ProcessExe
     })
   }
 
-  async runProcess(request: ProcessExecution): Promise<RunResult> {
+  runProcess(request: ProcessExecution): Promise<RunResult> {
+    return this.executeProcess(request)
+  }
+
+  runStream(request: StreamExecution): Promise<RunResult> {
+    return this.executeProcess(request)
+  }
+
+  private async executeProcess(request: ProcessExecution | StreamExecution): Promise<RunResult> {
+    const refusal = await cwdRefusal(request.argv[0], request.cwd.virtual)
+    if (refusal !== null) return refusal
     request.signal?.throwIfAborted()
     const argv = ['run', ...this.policyArgv(), '--clean-env']
     for (const [key, value] of Object.entries({ ...this.config.env, ...request.env }))
@@ -84,6 +102,7 @@ export class SandlockRuntime extends Runtime implements LineExecutor, ProcessExe
         cwd: request.cwd.virtual,
         env: { PATH: process.env.PATH ?? '' },
         children: this.children,
+        ...(request.kind === 'stream' ? { output: request.output } : {}),
         ...(request.signal !== undefined ? { signal: request.signal } : {}),
       },
     )

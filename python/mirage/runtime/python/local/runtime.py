@@ -16,22 +16,30 @@ import errno
 import os
 import shutil
 import sys
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, ClassVar
 
 from mirage.errors.fs import fs_strerror
+from mirage.io.types import ByteSource
+from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import RuntimeConfig, resolve_home
-from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.runtime.mixin import StreamingProcessMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
 from mirage.runtime.python.local.config import LocalConfig
-from mirage.runtime.sandbox.cli import Children, close_children, run_cli
+from mirage.runtime.sandbox.cli import (
+    Children,
+    close_children,
+    cwd_refusal,
+    run_cli,
+)
 from mirage.runtime.types import (
     ProcessExecution,
     RunArgs,
     RunResult,
     RuntimeReach,
+    StreamExecution,
 )
 from mirage.shell.bytes import encode_text
 
@@ -68,7 +76,7 @@ def _not_run(message: str, exit_code: int) -> RunResult:
     )
 
 
-class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
+class LocalRuntime(PythonRuntime, StreamingProcessMixin):
     """Run Python code, and any other captured program, on the host.
 
     Each python3 run spawns `<interpreter> -c <code>`. Any other name
@@ -122,7 +130,9 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         # Session loader variables can execute code before --version is read.
         return await self._spawn(self._python, ["--version"], {})
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(
+        self, args: RunArgs, context: RuntimeContext | None = None
+    ) -> RunResult:
         # Honoring the init switches is just handing them back to the
         # real interpreter, which is why this tier gets them exactly
         # right (sys.flags included) where an in-process engine cannot.
@@ -134,15 +144,19 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         )
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
+        return await self._run_process(request)
+
+    async def run_stream(self, request: StreamExecution) -> RunResult:
+        return await self._run_process(request)
+
+    async def _run_process(
+        self, request: ProcessExecution | StreamExecution
+    ) -> RunResult:
         name = request.argv[0]
-        # The session cwd is a workspace path. Running somewhere else
-        # instead would point a relative path at the wrong files.
         cwd = request.cwd.virtual
-        if not os.path.isdir(cwd):
-            return _not_run(
-                f"{name}: the working directory {cwd} is not on this host\n",
-                126,
-            )
+        refusal = cwd_refusal(name, cwd)
+        if refusal is not None:
+            return refusal
         if os.path.dirname(name):
             # A name with a directory in it is a path from the cwd, as in
             # the shell. Joined, not normalized, so the host follows a
@@ -171,6 +185,9 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
                 request.env,
                 request.stdin,
                 cwd,
+                request.output
+                if isinstance(request, StreamExecution)
+                else None,
             )
         except OSError as exc:
             reason = fs_strerror(exc) or errno.errorcode.get(
@@ -183,8 +200,9 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
         program: str,
         argv: list[str],
         env: dict[str, str],
-        stdin: bytes | None = None,
+        stdin: ByteSource | None = None,
         cwd: str | None = None,
+        output: Callable[[bytes], Awaitable[None]] | None = None,
     ) -> RunResult:
         stdout, stderr, code = await run_cli(
             program,
@@ -194,6 +212,7 @@ class LocalRuntime(PythonRuntime, ProcessExecutorMixin):
             cwd=cwd,
             env={**self.config.env, **env},
             children=self._children,
+            output=output,
         )
         return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 

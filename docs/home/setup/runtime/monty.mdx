@@ -96,7 +96,8 @@ files, processes and the environment:
 | `os.chdir` | Python SDK | Lasts for the run. Raises `RuntimeError` in TypeScript. |
 | `os.environ`, `os.getenv` | Yes | The session's environment, never the host's. |
 | `argv`, `stdin` globals | Yes | The words after the script, and the piped input. |
-| `sys.argv`, `sys.stdin` | No | Use `argv` and `stdin`. |
+| `sys.argv` | Interpreter placeholder | Use `argv` for the invocation name and arguments. |
+| `sys.stdin` | No | Use `stdin`. |
 | `os.urandom` | Yes | Up to 1 MiB per call. |
 | `os.path` | No | |
 | `os.open` and file descriptors, `os.truncate` | No | |
@@ -126,7 +127,16 @@ another interpreter.
   `pathlib`, `random`, `re`, `sys`, `time`, `typing`, `unicodedata`, each
   partial. No third-party imports.
 - **Syntax:** no class inheritance, metaclasses, `classmethod`,
-  `staticmethod`, `property` or `yield`. Plain classes, function decorators,
+  `staticmethod`, `property`, method decorators or `yield`. Plain classes, function decorators,
   `with`, f-strings and comprehensions work.
 - **Introspection:** no `dir` (use `hasattr`), `vars`, `globals`, `help`,
   `callable`, `issubclass`, `super`, `compile` or `__dict__`.
+
+Mirage disables Monty's default ten-second sleep cap and assert-message
+annotations. The suspension budget is 2³¹−1 host round trips per checkout;
+command timeouts still bound a run. Program output has no separate
+Python-host collector cap. `raise SystemExit` exits successfully; a string
+message exits with status 1 and that message. Monty does not accept numeric
+exception arguments. TypeScript stat timestamps with no fractional part
+arrive as integers because the engine's JavaScript input encoding has no
+way to force an integral number to Python `float`.

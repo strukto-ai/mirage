@@ -32,6 +32,22 @@
           }
         },
         {
+          "command": "MIRAGE_NATIVE_TOKEN=one perl -e 'print $ENV{MIRAGE_NATIVE_TOKEN}' | cat",
+          "expect": {
+            "exit": 0,
+            "stdout": "one",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "perl -e 'print $ENV{MIRAGE_NATIVE_TOKEN} // q(unset)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "unset",
+            "stderr": ""
+          }
+        },
+        {
           "command": "python3 /ram/job.py a b",
           "expect": {
             "exit": 0,

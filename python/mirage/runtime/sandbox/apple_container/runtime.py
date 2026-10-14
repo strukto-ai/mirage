@@ -22,14 +22,14 @@ from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.apple_container.config import AppleContainerConfig
 from mirage.runtime.sandbox.apple_container.constants import (
     APPLE_CONTAINER_CLI_HINT,
-    PRELUDE,
     RUNNING_STATE,
     no_container_hint,
     not_running_hint,
 )
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import run_cli
-from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE
+from mirage.runtime.types import RunResult, SandboxPipe
 
 
 class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
@@ -46,7 +46,7 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
     host's filesystem except what the container was given at start
     (`--volume`). Serve the workspace inside it at the host's mount
     prefixes, the same contract every provider in this family carries.
-    The image needs a POSIX sh, which every argv runs under (PRELUDE).
+    The image needs a POSIX sh, which every argv runs under (EXEC_PRELUDE).
 
     A line runs in its session's container (config ``containers``,
     else ``container``), so one runtime can give every agent a VM of
@@ -133,19 +133,6 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
         if state != RUNNING_STATE:
             raise RuntimeError(not_running_hint(container, str(state)))
 
-    async def exec_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
-        return await self._exec_argv(("sh", "-c", line), stdin, env, cwd)
-
-    async def run_process(self, request: ProcessExecution) -> RunResult:
-        return await self._exec_argv(
-            request.argv,
-            request.stdin,
-            {**self.config.env, **request.env},
-            request.cwd.virtual,
-        )
-
     async def _exec_argv(
         self,
         argv: tuple[str, ...],
@@ -157,6 +144,21 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin):
         args = ["exec", "-i", "-w", "/"]
         for key, value in env.items():
             args += ["-e", f"{key}={value}"]
-        args += [container, "sh", "-c", PRELUDE, "sh", cwd, *argv]
+        args += [container, "sh", "-c", EXEC_PRELUDE, "sh", cwd, *argv]
         stdout, stderr, code = await self._container(args, stdin=stdin)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
+
+    async def open_pipe(self, command: str) -> SandboxPipe:
+        return await open_cli_pipe(
+            "container",
+            [
+                "exec",
+                "-i",
+                "-w",
+                "/",
+                await self._target(),
+                "sh",
+                "-c",
+                command,
+            ],
+        )

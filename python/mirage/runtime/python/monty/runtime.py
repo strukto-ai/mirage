@@ -85,11 +85,6 @@ class MontyRuntime(PythonRuntime):
         self._max_memory = memory_limit(self.config.max_memory)
         self._execution = MontyExecution(self._max_memory)
 
-    async def _execute_code(
-        self, args: RunArgs, context: RuntimeContext | None
-    ) -> RunResult:
-        return await self.run(args, context)
-
     async def run(
         self, args: RunArgs, context: RuntimeContext | None = None
     ) -> RunResult:

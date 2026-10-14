@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessExecution, RunResult, RuntimeIdentity } from './types.ts'
+import type { ProcessExecution, RunResult, RuntimeIdentity, StreamExecution } from './types.ts'
 
 /**
  * The nominal line-executor brand (python's LineExecutorMixin
@@ -65,4 +65,18 @@ export function isProcessExecutor<T extends RuntimeIdentity>(
   runtime: T,
 ): runtime is T & ProcessExecutor {
   return (runtime as Partial<ProcessExecutor>)[PROCESS_EXECUTOR] === true
+}
+
+/** An argv executor that consumes input and delivers output incrementally. */
+export const STREAMING_PROCESS: unique symbol = Symbol.for('mirage.streamingProcess')
+
+export interface StreamingProcess extends ProcessExecutor {
+  readonly [STREAMING_PROCESS]: true
+  runStream(request: StreamExecution): Promise<RunResult>
+}
+
+export function isStreamingProcess<T extends RuntimeIdentity>(
+  runtime: T,
+): runtime is T & StreamingProcess {
+  return (runtime as Partial<StreamingProcess>)[STREAMING_PROCESS] === true
 }

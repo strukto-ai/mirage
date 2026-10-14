@@ -31,7 +31,7 @@ export interface OpenMode {
   writable: boolean
   /** Opening discards existing content (w). */
   truncate: boolean
-  /** The position starts at the end (a). */
+  /** Every write lands at the end (a). */
   append: boolean
   /** A missing file is created (w, a, x). */
   create: boolean
@@ -61,15 +61,13 @@ export function parseMode(mode: string): OpenMode {
   for (const char of 'rwax') if (mode.includes(char)) bases += char
   let duplicated = false
   for (const char of MODE_CHARS) if (count(char) > 1) duplicated = true
-  if (
-    mode.length === 0 ||
-    INVALID_CHAR.test(mode) ||
-    duplicated ||
-    (mode.includes('b') && mode.includes('t')) ||
-    !MODE_BASES.includes(bases)
-  ) {
-    throw new Error(`invalid mode: '${mode}'`)
-  }
+  if (INVALID_CHAR.test(mode) || duplicated) throw new Error(`invalid mode: '${mode}'`)
+  if (mode.includes('b') && mode.includes('t'))
+    throw new Error("can't have text and binary mode at once")
+  if (!bases)
+    throw new Error('Must have exactly one of create/read/write/append mode and at most one plus')
+  if (!MODE_BASES.includes(bases))
+    throw new Error('must have exactly one of create/read/write/append mode')
   const plus = mode.includes('+')
   return {
     readable: mode.includes('r') || plus,

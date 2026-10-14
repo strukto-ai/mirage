@@ -28,7 +28,7 @@ specific to the Python SDK.
 ## WASI
 
 - A read-only mount, or a session narrowed to read, refuses a write at
-  `open()` with `OSError` errno 30, as Linux does.
+  `open()` with `OSError`: errno 30 on the host and Monty, or preview1 errno 69 under WASI.
 - The CPython build is read-only in the run. A mount at `/` coexists with it:
   each mount wins under its prefix.
 - A run starts in the shell's working directory; a missing one fails before

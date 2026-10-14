@@ -60,7 +60,7 @@ def test_garbage_modes_raise_the_cpython_refusal(bad: str):
     # One parser, the stricter half's rule: exactly one of rwax, at
     # most one each of +, b, t, and never b with t. The message is
     # CPython's own, so a guest and an embedder read the same refusal.
-    with pytest.raises(ValueError, match="invalid mode"):
+    with pytest.raises(ValueError):
         parse_mode(bad)
 
 
@@ -68,3 +68,14 @@ def test_text_flag_is_accepted_and_not_binary():
     mode = parse_mode("rt")
     assert not mode.binary
     assert mode.readable
+
+
+@pytest.mark.parametrize(
+    "mode", ["", "rw", "bt", "btq", "wx", "rr", "r++", "b", "+"]
+)
+def test_refusal_matches_cpython(mode):
+    with pytest.raises(ValueError) as native:
+        open("/dev/null", mode)
+    with pytest.raises(ValueError) as guest:
+        parse_mode(mode)
+    assert str(guest.value) == str(native.value)

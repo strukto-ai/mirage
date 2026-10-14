@@ -37,7 +37,7 @@ class FakeRuntime(Runtime):
     name = "fake"
     captures = ("python3", "made-up")
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 

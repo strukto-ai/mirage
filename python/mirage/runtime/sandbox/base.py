@@ -17,12 +17,14 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.runtime.base import Runtime
+from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.sandbox.config import SandboxConfig
+from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
 from mirage.runtime.sandbox.mounts import SandboxMounts
 from mirage.runtime.types import (
     MountType,
+    ProcessExecution,
     RunResult,
     RuntimeReach,
     SandboxPipe,
@@ -72,6 +74,29 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
         self._connected = False
         self._connect_lock = asyncio.Lock()
         self._mounts: SandboxMounts | None = None
+        check_mount_type(self.name, self.config.mount_type)
+        if self.config.mount_type is not None:
+            if type(self).open_pipe is RemoteSandbox.open_pipe:
+                raise ValueError(
+                    f"{self.name}: mount_type needs a pipe transport"
+                )
+            self._serve_mounts(self.config.mount_type)
+
+    @property
+    def file_effects_dispatched(self) -> bool:
+        return (
+            self._mounts is not None
+            and self._mounts.file_effects_dispatched
+            and self._binding is not None
+            and self._binding.mount_prefixes is not None
+            and "/" not in self._binding.mount_prefixes()
+        )
+
+    def _serves_session(self, context: RuntimeContext) -> bool:
+        return self._mounts is not None and all(
+            prefix.rstrip("/") not in ("", "/dev")
+            for prefix in context.restricted_mounts
+        )
 
     async def run_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
@@ -89,17 +114,44 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
             env (dict[str, str]): the session environment.
             cwd (str): the session working directory.
         """
-        await self._ensure_connected()
-        if self._mounts is not None:
-            refusal = await self._mounts.admit(self._binding)
-            if refusal is not None:
-                return RunResult(
-                    stdout=b"",
-                    stderr=f"{self.name}: {refusal}\n".encode(),
-                    exit_code=1,
-                )
+        refusal = await self._prepare()
+        if refusal is not None:
+            return refusal
         merged = {**self.config.env, **env}
         return await self.exec_line(line, stdin, merged, cwd)
+
+    async def run_process(self, request: ProcessExecution) -> RunResult:
+        refusal = await self._prepare()
+        if refusal is not None:
+            return refusal
+        return await self._exec_argv(
+            request.argv,
+            request.stdin,
+            {**self.config.env, **request.env},
+            request.cwd.virtual,
+        )
+
+    async def _prepare(self) -> RunResult | None:
+        await self._ensure_connected()
+        if self._mounts is None:
+            return None
+        refusal = await self._mounts.admit(self._binding)
+        if refusal is None:
+            return None
+        return RunResult(
+            stdout=b"",
+            stderr=f"{self.name}: {refusal}\n".encode(),
+            exit_code=1,
+        )
+
+    async def _exec_argv(
+        self,
+        argv: tuple[str, ...],
+        stdin: bytes | None,
+        env: dict[str, str],
+        cwd: str,
+    ) -> RunResult:
+        raise NotImplementedError
 
     def _serve_mounts(self, mount_type: MountType | None) -> None:
         """Let the sandbox see the workspace by ``mount_type``.
@@ -137,7 +189,7 @@ class RemoteSandbox(Runtime, LineExecutorMixin):
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
         """
-        raise NotImplementedError
+        return await self._exec_argv(("sh", "-c", line), stdin, env, cwd)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         """Start a command in the sandbox with its stdin and stdout held

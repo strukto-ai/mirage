@@ -84,6 +84,8 @@ class WasmExecution:
         self._max_memory = max_memory
         self._compile_lock = threading.Lock()
         self._serialized: bytes | None = None
+        self._idle: list[tuple[Any, Any]] = []
+        self._closed = False
 
     def _ensure_serialized(self) -> bytes:
         """Compile the module once, caching the compilation on disk.
@@ -95,34 +97,64 @@ class WasmExecution:
         unwritable directory just skips the disk cache.
         """
         with self._compile_lock:
+            if self._closed:
+                raise RuntimeError("WASM execution is closed")
             if self._serialized is not None:
                 return self._serialized
-            engine = epoch_engine()
-            if (
-                self._cache.is_file()
-                and self._cache.stat().st_mtime >= self._wasm.stat().st_mtime
-            ):
+            with epoch_engine() as engine:
+                if (
+                    self._cache.is_file()
+                    and self._cache.stat().st_mtime
+                    >= self._wasm.stat().st_mtime
+                ):
+                    try:
+                        with wasmtime.Module.deserialize_file(
+                            engine, str(self._cache)
+                        ):
+                            pass
+                        cached = self._cache.read_bytes()
+                        self._serialized = cached
+                        return cached
+                    except wasmtime.WasmtimeError as exc:
+                        logger.debug(
+                            "stale %s cache, recompiling: %s",
+                            self._cache.name,
+                            exc,
+                        )
+                with wasmtime.Module.from_file(
+                    engine, str(self._wasm)
+                ) as module:
+                    serialized = bytes(module.serialize())
+                self._serialized = serialized
                 try:
-                    wasmtime.Module.deserialize_file(engine, str(self._cache))
-                    cached = self._cache.read_bytes()
-                    self._serialized = cached
-                    return cached
-                except wasmtime.WasmtimeError as exc:
+                    self._cache.write_bytes(serialized)
+                except OSError as exc:
                     logger.debug(
-                        "stale %s cache, recompiling: %s",
-                        self._cache.name,
-                        exc,
+                        "cannot write %s cache: %s", self._cache.name, exc
                     )
-            module = wasmtime.Module.from_file(engine, str(self._wasm))
-            serialized = bytes(module.serialize())
-            self._serialized = serialized
-            try:
-                self._cache.write_bytes(serialized)
-            except OSError as exc:
-                logger.debug(
-                    "cannot write %s cache: %s", self._cache.name, exc
-                )
-            return serialized
+                return serialized
+
+    def _checkout(self) -> tuple[Any, Any]:
+        serialized = self._ensure_serialized()
+        with self._compile_lock:
+            if self._closed:
+                raise RuntimeError("WASM execution is closed")
+            if self._idle:
+                return self._idle.pop()
+        engine = epoch_engine()
+        try:
+            return engine, wasmtime.Module.deserialize(engine, serialized)
+        except BaseException:
+            engine.close()
+            raise
+
+    def _checkin(self, engine: Any, module: Any) -> None:
+        with self._compile_lock:
+            if not self._closed:
+                self._idle.append((engine, module))
+                return
+        module.close()
+        engine.close()
 
     async def run(
         self,
@@ -139,21 +171,21 @@ class WasmExecution:
             env (list[tuple[str, str]]): environment as (name, value) pairs.
             fs (WasmView): path router serving the run's filesystem.
         """
-        compilation = asyncio.create_task(
-            asyncio.to_thread(self._ensure_serialized)
-        )
+        compilation = asyncio.create_task(asyncio.to_thread(self._checkout))
         try:
-            serialized = await asyncio.shield(compilation)
+            engine, module = await asyncio.shield(compilation)
         except asyncio.CancelledError:
             await _join_cancelled(compilation)
+            if not compilation.cancelled() and compilation.exception() is None:
+                engine, module = compilation.result()
+                self._checkin(engine, module)
             raise
-        engine = epoch_engine()
         canceled = threading.Event()
         worker = asyncio.create_task(
             asyncio.to_thread(
                 self._run_sync,
                 engine,
-                serialized,
+                module,
                 argv,
                 stdin,
                 env,
@@ -175,61 +207,81 @@ class WasmExecution:
 
             await _join_cancelled(asyncio.create_task(stop()))
             raise
+        finally:
+            self._checkin(engine, module)
+
+    async def close(self) -> None:
+        """Release pooled native modules outside a guest's host callbacks."""
+        with self._compile_lock:
+            self._closed = True
+            self._serialized = None
+            idle, self._idle = self._idle, []
+        for engine, module in idle:
+            module.close()
+            engine.close()
 
     def _run_sync(
         self,
         engine: "wasmtime.Engine",
-        serialized: bytes,
+        module: "wasmtime.Module",
         argv: list[str],
         stdin: bytes | None,
         env: list[tuple[str, str]],
         fs: WasmView,
         canceled: threading.Event,
     ) -> tuple[bytes, bytes | None, int]:
-        module = wasmtime.Module.deserialize(engine, serialized)
-        linker = wasmtime.Linker(engine)
-        linker.define_wasi()
-        store = wasmtime.Store(engine)
-        store.set_epoch_deadline(1)
-        if self._max_memory is not None:
-            store.set_limits(memory_size=self._max_memory)
-        if canceled.is_set():
-            return b"", None, 130
-        wasi_fs = WasiFs(fs, stdin or b"")
-        install_wasi_fs(linker, store, wasi_fs)
-        wasi = wasmtime.WasiConfig()
-        wasi.argv = argv
-        wasi.env = list(env)
-        store.set_wasi(wasi)
-        try:
-            instance = linker.instantiate(store, module)
-        except wasmtime.WasmtimeError as exc:
-            if self._max_memory is None:
-                raise
-            msg = (
-                f"{self._trap_prefix}: cannot start within max_memory "
-                f"({self._max_memory} bytes): {exc}\n"
-            )
-            return b"", msg.encode(), 1
-        start = instance.exports(store)["_start"]
-        if not isinstance(start, wasmtime.Func):
-            raise RuntimeError("WASI module exports a non-function _start")
-        exit_code = 0
-        trap_message = b""
-        try:
-            start(store)
-        except wasmtime.ExitTrap as exc:
-            exit_code = exc.code
-        except wasmtime.Trap as exc:
-            exit_code = 1
-            msg = f"{self._trap_prefix}: wasm trap: {exc.message}\n"
-            trap_message = msg.encode()
-        lost = wasi_fs.close_all()
-        if lost:
-            trap_message += "".join(
-                f"{self._trap_prefix}: {line}\n" for line in lost
-            ).encode()
-            exit_code = exit_code or 1
-        stdout = bytes(wasi_fs.stdout)
-        stderr = bytes(wasi_fs.stderr) + trap_message
-        return stdout, stderr or None, exit_code
+        with (
+            wasmtime.Linker(engine) as linker,
+            wasmtime.Store(engine) as store,
+        ):
+            linker.define_wasi()
+            store.set_epoch_deadline(1)
+            if self._max_memory is not None:
+                store.set_limits(memory_size=self._max_memory)
+            if canceled.is_set():
+                return b"", None, 130
+            wasi_fs = WasiFs(fs, stdin or b"", canceled)
+            install_wasi_fs(linker, store, wasi_fs)
+            wasi = wasmtime.WasiConfig()
+            wasi.argv = argv
+            wasi.env = list(env)
+            store.set_wasi(wasi)
+            try:
+                instance = linker.instantiate(store, module)
+            except wasmtime.WasmtimeError as exc:
+                if self._max_memory is None:
+                    raise
+                msg = (
+                    f"{self._trap_prefix}: cannot start within max_memory "
+                    f"({self._max_memory} bytes): {exc}\n"
+                )
+                return b"", msg.encode(), 1
+            wasi_fs._memory = instance.exports(store).get("memory")
+            start = instance.exports(store)["_start"]
+            if not isinstance(start, wasmtime.Func):
+                raise RuntimeError("WASI module exports a non-function _start")
+            exit_code = 0
+            trap_message = b""
+            try:
+                start(store)
+            except wasmtime.ExitTrap as exc:
+                exit_code = exc.code
+            except wasmtime.WasmtimeError as exc:
+                exit_code = 1
+                trap_message = f"{self._trap_prefix}: {exc}\n".encode()
+            except wasmtime.Trap as exc:
+                if wasi_fs.exit_code is not None:
+                    exit_code = wasi_fs.exit_code
+                else:
+                    exit_code = 1
+                    msg = f"{self._trap_prefix}: wasm trap: {exc.message}\n"
+                    trap_message = msg.encode()
+            lost = wasi_fs.close_all()
+            if lost:
+                trap_message += "".join(
+                    f"{self._trap_prefix}: {line}\n" for line in lost
+                ).encode()
+                exit_code = exit_code or 1
+            stdout = bytes(wasi_fs.stdout)
+            stderr = bytes(wasi_fs.stderr) + trap_message
+            return stdout, stderr or None, exit_code

@@ -178,9 +178,9 @@ describe('E2BRuntime', () => {
     expect(FakeSandbox.connected).toEqual([['sb-live', { apiKey: 'k-123' }]])
   })
   it('takes a mountType of ssh, fuse or both', () => {
-    expect(() => new FakedE2BRuntime({ config: { sandboxId: 'sb', mountType: 'nfs' } })).toThrow(
-      'e2b mountType must be one of ssh, fuse, both, not "nfs"',
-    )
+    expect(
+      () => new FakedE2BRuntime({ config: { sandboxId: 'sb', mountType: 'nfs' as never } }),
+    ).toThrow('sandbox mountType must be one of ssh, fuse, both, not "nfs"')
     expect(
       () => new FakedE2BRuntime({ config: { sandboxId: 'sb', mountType: 'both' } }),
     ).not.toThrow()
@@ -222,7 +222,7 @@ describe('E2BRuntime', () => {
     expect(pty.ended).toBe(true)
   })
   it('requires a sandbox id', () => {
-    expect(() => new FakedE2BRuntime({ config: {} })).toThrow('sandboxId')
+    expect(() => new FakedE2BRuntime({ config: {} as never })).toThrow('sandboxId')
   })
   it.each([
     null,
@@ -309,7 +309,9 @@ describe('E2B cancellation and validation', () => {
   it.each([null, '', ' \t\n', 0, 1, false, [], {}].map((sandboxId) => ({ sandboxId })))(
     'rejects an invalid sandbox id before connecting: $sandboxId',
     ({ sandboxId }) => {
-      expect(() => new E2BRuntime({ config: { sandboxId } })).toThrow('nonblank sandboxId')
+      expect(() => new E2BRuntime({ config: { sandboxId: sandboxId as string } })).toThrow(
+        'nonblank sandboxId',
+      )
       expect(FakeSandbox.connected).toEqual([])
     },
   )

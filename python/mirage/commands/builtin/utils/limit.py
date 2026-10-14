@@ -120,9 +120,13 @@ async def run_with_timeout(coro, seconds: float | None, name: str):
     """
     if not seconds or seconds <= 0:
         return await coro
+    deadline = asyncio.timeout(seconds)
     try:
-        return await asyncio.wait_for(coro, timeout=seconds)
-    except asyncio.TimeoutError as exc:
+        async with deadline:
+            return await coro
+    except TimeoutError as exc:
+        if not deadline.expired():
+            raise
         raise CommandTimeoutError(name or "?", seconds) from exc
 
 

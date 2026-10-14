@@ -1,0 +1,226 @@
+{
+  "requires": {
+    "python": [
+      "env:MIRAGE_QUICKJS_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "load_file",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e 'console.log(std.loadFile(\"/data/f.txt\")); console.log(std.loadFile(\"/data/missing\"))'",
+          "expect": {
+            "exit": 0,
+            "stdout": "abc\nnull\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "helper_names",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e 'const span = 2; const toIndex = 3; console.log(span + toIndex)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "5\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "exit_is_uncatchable",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e 'try { std.exit(200) } catch(e) { print(\"caught\") } finally { print(\"finally\") }'",
+          "expect": {
+            "exit": 200,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "exit_flushes",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e 'let f = std.open(\"/data/out\", \"w\"); f.puts(\"written\"); std.exit(130)'; cat /data/out",
+          "expect": {
+            "exit": 0,
+            "stdout": "written",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "file_eof",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e 'let f=std.open(\"/data/f.txt\", \"r\"); print(f.readAsString(3), f.eof()); print(f.readAsString(1), f.eof()); f.close(); try {f.close()} catch(e) {print(e.name)}'",
+          "expect": {
+            "exit": 0,
+            "stdout": "abc false\n true\nTypeError\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "file_peer_refresh",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e 'let r=std.open(\"/data/f.txt\",\"r\"); print(r.readAsString()); let a=std.open(\"/data/f.txt\",\"a\"); a.puts(\"DEF\"); a.close(); r.seek(0,std.SEEK_SET); print(r.readAsString()); r.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "abc\nabcDEF\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "printf_byte_count",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e 'print(std.sprintf(\"%d %ld %lu %lx\", 2**40, 2**40, -1, 2**40)); print(std.out.printf(\"é%s\", \"é\"))'",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 1099511627776 18446744073709551615 10000000000\néé4\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_cursor",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "printf abcdef | node -e 'print(std.in.readAsString(2)); print(std.in.readAsString(2)); print(std.in.readAsString())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "ab\ncd\nef\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

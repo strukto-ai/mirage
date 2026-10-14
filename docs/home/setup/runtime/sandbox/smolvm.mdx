@@ -66,8 +66,12 @@ machine too.
 ## Connecting the workspace
 
 A program in the machine opens workspace files at the same paths as in
-Mirage, so the machine must see the mounts there. Mirage does not serve them
-into a smolvm machine: use [the sandbox image](/home/setup/runtime/sandbox#the-sandbox-image),
+Mirage, so the machine must see the mounts there. `mount_type` picks how, as
+for [Docker](/home/setup/runtime/sandbox/docker#connecting-the-workspace):
+`ssh` serves every mount over `smolvm machine exec` (the guest needs
+`sshfs`), `fuse` leaves them to a Mirage inside, and `both` mixes the two.
+
+For `fuse`, use [the sandbox image](/home/setup/runtime/sandbox#the-sandbox-image),
 which carries Mirage and `fuse3`. Write the same mounts at the same paths
 into `sandbox.yaml`, put it in the machine (in its image, or a directory
 passed with `--volume`), and start Mirage with it:
@@ -98,7 +102,7 @@ smolvm machine exec --name mirage-box -- mirage workspace create /tmp/sandbox.ya
 | Piped input | stdin |
 | Environment | The session's, over the config `env` |
 | Working directory | The shell's, unchanged |
-| Workspace files | What the Mirage inside serves; see [above](#connecting-the-workspace) |
+| Workspace files | By `mount_type`; see [above](#connecting-the-workspace) |
 | Host files | Only directories passed with `--volume` at boot |
 | Disk and network | The machine's own |
 

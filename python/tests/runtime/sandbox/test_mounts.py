@@ -156,19 +156,17 @@ async def test_a_second_session_is_refused_rather_than_shown_the_first_view():
 
 
 @pytest.mark.asyncio
-async def test_a_session_served_nothing_still_keeps_the_sandbox():
+async def test_hidden_unserved_mounts_refuse_without_claiming_the_sandbox():
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox, hide=["/data", "/my notes"])
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
-    assert sandbox.pipes == []
-    result = await other.shell("python3 job.py")
+    result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
-    assert "give session other a sandbox of its own" in (
-        await result.stderr_str()
-    )
+    assert "not served through the dispatcher" in await result.stderr_str()
     assert sandbox.pipes == []
+    assert (await other.shell("python3 job.py")).exit_code == 0
+    assert len(sandbox.pipes) == 2
     await ws.close()
 
 
@@ -204,7 +202,7 @@ async def test_a_rule_under_a_prefix_the_sandbox_serves_refuses_the_line(
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "fake: /data is served by the sandbox itself, out of reach of this "
+        "fake: /data is not served through the dispatcher, out of reach of this "
         "session's rules\n"
     )
     assert "python3 job.py" not in sandbox.commands
@@ -216,12 +214,12 @@ async def test_a_mount_the_sandbox_makes_later_under_a_rule_refuses_the_line():
     sandbox = FakeSandbox("fuse")
     ws = workspace(sandbox, hide=["/data/secret.csv"])
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert (await agent.shell("python3 job.py")).exit_code == 1
     sandbox.table["/data"] = "fuse"
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "fake: /data is served by the sandbox itself, out of reach of this "
+        "fake: /data is not served through the dispatcher, out of reach of this "
         "session's rules\n"
     )
     await ws.close()
@@ -233,7 +231,7 @@ async def test_fuse_serves_nothing_from_the_host_and_takes_any_session():
     ws = workspace(sandbox, hide=["/my notes/secret"])
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
-    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert (await agent.shell("python3 job.py")).exit_code == 1
     assert (await other.shell("python3 job.py")).exit_code == 0
     assert sandbox.pipes == []
     await ws.close()
@@ -247,7 +245,7 @@ async def test_a_sandbox_without_sshfs_fails_loud():
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "fake: serving the workspace into a sandbox needs sshfs there; "
+        "python3: fake: serving the workspace into a sandbox needs sshfs there; "
         "install it in the image (apt-get install sshfs)\n"
     )
     assert sandbox.pipes == []
@@ -278,7 +276,7 @@ async def test_a_hidden_mount_the_sandbox_serves_refuses_the_line(mount_type):
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "fake: /data is served by the sandbox itself, out of reach of this "
+        "fake: /data is not served through the dispatcher, out of reach of this "
         "session's rules\n"
     )
     await ws.close()
@@ -291,10 +289,32 @@ async def test_a_mode_cap_on_a_mount_the_sandbox_serves_refuses_the_line():
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
-    assert "fake: /data is served by the sandbox itself" in (
+    assert "fake: /data/sub is not served through the dispatcher" in (
         await result.stderr_str()
     )
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mount_type", ["both", "fuse"])
+async def test_a_shown_read_only_path_on_a_sandbox_owned_mount_refuses(
+    mount_type,
+):
+    sandbox = FakeSandbox(mount_type, own=["/data"])
+    ws = workspace(sandbox)
+    try:
+        agent = await ws.session(
+            "agent", profile={"paths": {"show": {"/data/locked": "r"}}}
+        )
+        result = await agent.shell("python3 job.py")
+        assert result.exit_code == 1
+        assert (
+            "/data is not served through the dispatcher"
+            in await result.stderr_str()
+        )
+        assert "python3 job.py" not in sandbox.commands
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -341,7 +361,7 @@ async def test_a_mount_of_its_own_under_a_served_prefix_fails_loud():
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 1
     assert await result.stderr_str() == (
-        "fake: the sandbox mounts /data/sub itself, and serving /data would "
+        "python3: fake: the sandbox mounts /data/sub itself, and serving /data would "
         "cover it\n"
     )
     assert sandbox.pipes == []

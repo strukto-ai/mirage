@@ -19,7 +19,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
-from mirage.runtime.sandbox.apple_container.constants import PRELUDE
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import ProcessExecution, ShellRequest
 from mirage.types import PathSpec
@@ -82,7 +82,7 @@ class FakeAppleContainerRuntime(AppleContainerRuntime):
 
 def prelude(cwd: str, *argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["/bin/sh", "-c", PRELUDE, "sh", cwd, *argv],
+        ["/bin/sh", "-c", EXEC_PRELUDE, "sh", cwd, *argv],
         capture_output=True,
         check=False,
     )
@@ -149,9 +149,13 @@ def test_config_needs_a_container():
             {"container": "shared", "containers": {"b": " ", "a": "box"}},
             "nonblank id: b",
         ),
+        (
+            {"mount_type": "ssh", "containers": {"a": "box"}},
+            "cannot be combined with containers",
+        ),
     ],
 )
-def test_config_refuses_a_blank_container_id(config, named):
+def test_config_refuses_what_it_cannot_serve(config, named):
     with pytest.raises(ValueError, match=named):
         AppleContainerRuntime(config=config)
 
@@ -183,7 +187,7 @@ async def test_exec_line_runs_under_the_prelude_with_stdin_and_stderr():
         "box",
         "sh",
         "-c",
-        PRELUDE,
+        EXEC_PRELUDE,
         "sh",
         "/root/workspace",
         "sh",
@@ -220,7 +224,7 @@ async def test_process_preserves_argv_and_probes_the_container_once():
             "box",
             "sh",
             "-c",
-            PRELUDE,
+            EXEC_PRELUDE,
             "sh",
             "/work",
             *argv,

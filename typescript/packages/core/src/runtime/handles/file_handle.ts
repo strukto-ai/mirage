@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { einval } from '../../errors/fs.ts'
 import { concat } from '../../utils/bytes.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 import { ChunkedHandle } from './chunked.ts'
@@ -73,8 +74,7 @@ export class FileHandle {
    *   fetch: the file adapter's read, or null when the open created or emptied
    *     the file.
    *   opts: the file's length as the open saw it, whether writes are
-   *     accepted, and whether every write lands at the end (the position
-   *     then starts there).
+   *     accepted, and whether every write lands at the end (the initial position remains zero).
    */
   static opened(
     path: string,
@@ -89,7 +89,6 @@ export class FileHandle {
             offset === 0 && size <= READ_CHUNK ? fetch(0, null) : fetch(offset, asked),
           )
     const handle = new FileHandle(path, base, opts, base === null ? 0 : size)
-    if (opts.append) handle.pos = handle.size
     return handle
   }
 
@@ -265,6 +264,7 @@ export class FileHandle {
 
   /** Set the file's length: a shrink drops bytes, growth reads zeros. */
   truncate(size: number): void {
+    if (size < 0) throw einval(this.path)
     // ftruncate(2) sets the length outright, so a cut to the length this
     // handle holds still drops what another writer appended since the open.
     if (this.base !== null && size <= this.size) {
@@ -277,6 +277,17 @@ export class FileHandle {
     }
     this.extent = size
     this.truncated = true
+  }
+
+  /** Forget stored bytes after another descriptor flushed the same file. */
+  invalidate(fetch: FileFetch, size: number): void {
+    if (this.append && !this.truncated) {
+      const shift = size - this.baseLen
+      if (this.runs.length > 0 && this.pos === this.runsEnd()) this.pos += shift
+      this.runs = this.runs.map((run) => ({ ...run, start: run.start + shift }))
+    }
+    if (!this.truncated) this.baseLen = size
+    this.base = new ChunkedHandle(this.path, size, fetch)
   }
 
   /**

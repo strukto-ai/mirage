@@ -30,7 +30,7 @@ class EchoRuntime(PythonRuntime):
     name = "echo"
     captures = ("echo-run",)
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
 
 

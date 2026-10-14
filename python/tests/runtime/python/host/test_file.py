@@ -78,6 +78,21 @@ class TestOpenFile:
             f.write(" world")
         assert _read(ops, "/data/dir/app.txt") == b"hello world"
 
+    @pytest.mark.parametrize(
+        "mode, buffering", [("ab", 0), ("ab", -1), ("a+", -1)]
+    )
+    def test_append_stream_starts_at_end_before_truncate(
+        self, mode, buffering
+    ):
+        ops, _ = make_ops_with_dir()
+        _write(ops, "/data/dir/app.txt", b"hello")
+        with make_open(ops)(
+            "/data/dir/app.txt", mode, buffering=buffering
+        ) as f:
+            assert f.tell() == 5
+            assert f.truncate() == 5
+        assert _read(ops, "/data/dir/app.txt") == b"hello"
+
     def test_readline(self):
         ops, _ = make_ops_with_dir()
         _write(ops, "/data/dir/lines.txt", b"line1\nline2\nline3")
@@ -141,7 +156,7 @@ class TestOpenFile:
     @pytest.mark.parametrize("mode", ["", "rw", "rr", "wx", "r++", "rbt"])
     def test_invalid_mode_is_rejected(self, mode):
         ops, _ = make_ops_with_dir()
-        with pytest.raises(ValueError, match="invalid mode"):
+        with pytest.raises(ValueError):
             make_open(ops)("/data/dir/f.txt", mode)
 
     def test_write_mode_truncates_when_opened(self):

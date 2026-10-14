@@ -57,3 +57,42 @@ def test_a_missing_path_raises_rather_than_reading_empty(tmp_path):
         build.read("/gone.py")
     with pytest.raises(FileNotFoundError):
         build.stat("/gone.py")
+
+
+def test_static_python_build_has_an_empty_extension_directory(tmp_path):
+    (tmp_path / "lib" / "python3.14").mkdir(parents=True)
+    build = BuildDir(tmp_path)
+    assert build.has("/lib/python3.14/lib-dynload")
+    assert build.stat("/lib/python3.14/lib-dynload").is_dir
+    assert build.readdir("/lib/python3.14/lib-dynload") == []
+    assert not (tmp_path / "lib" / "python3.14" / "lib-dynload").exists()
+
+
+@pytest.mark.parametrize(
+    "path", ["/../secret", "/../../secret", "/lib/../../../secret"]
+)
+def test_parent_traversal_is_clamped_to_guest_root(tmp_path, path):
+    root = tmp_path / "build"
+    root.mkdir()
+    (root / "secret").write_bytes(b"guest")
+    (tmp_path / "secret").write_bytes(b"host")
+    build = BuildDir(root)
+    assert build.target(path) == root / "secret"
+    assert build.read(path) == b"guest"
+    assert build.stat(path).size == 5
+    assert build.readdir("/../..") == [("secret", FT_REG)]
+
+
+def test_host_symlink_cannot_leave_build_root(tmp_path):
+    root = tmp_path / "build"
+    root.mkdir()
+    (tmp_path / "secret").write_bytes(b"host")
+    (root / "link").symlink_to(tmp_path, target_is_directory=True)
+    build = BuildDir(root)
+    for operation, path in [
+        (build.read, "/link/secret"),
+        (build.stat, "/link/secret"),
+        (build.readdir, "/link"),
+    ]:
+        with pytest.raises(PermissionError):
+            operation(path)

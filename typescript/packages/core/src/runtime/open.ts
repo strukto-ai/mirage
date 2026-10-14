@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../errors/index.ts'
-import { eexist, eisdir, enoent } from '../errors/fs.ts'
+import { eexist, eisdir, enoent, enotdir } from '../errors/fs.ts'
 import type { OpenMode } from './handles/mode.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
 
@@ -24,6 +24,7 @@ import type { VFSEntry, VFSStat } from './types.ts'
 export interface OpenSurface {
   statOrNull(path: string, nofollow?: boolean): Promise<VFSStat | null>
   listingOrNull(path: string): Promise<VFSEntry[] | null>
+  checkWrite(path: string): Promise<void>
   create(path: string): Promise<void>
   truncate(path: string): Promise<void>
 }
@@ -61,6 +62,12 @@ export async function applyOpen(
   // dangling one is a name that is there. A path with no row may still
   // be a directory the mount lists, and a create there would put a file
   // at a directory's name.
+  if (path === '') throw enoent(path)
+  if (path.endsWith('/') && path !== '/') {
+    const leaf = await surface.statOrNull(path.replace(/\/+$/, ''))
+    if (leaf !== null && !leaf.isDir) throw enotdir(path)
+    if (leaf === null && mode.create) throw eisdir(path)
+  }
   const row = await surface.statOrNull(path, mode.exclusive)
   const listed = row !== null ? row.isDir : (await surface.listingOrNull(path)) !== null
   if (mode.exclusive && (row !== null || listed)) throw eexist(path)
@@ -82,5 +89,6 @@ export async function applyOpen(
     }
     return null
   }
+  if (mode.writable) await surface.checkWrite(path)
   return row
 }

@@ -17,6 +17,8 @@ from mirage.errors.wasi import wasi_errno
 from mirage.runtime.constants import HARD_LINK_REFUSAL
 
 OK = 0
+ELOOP = wasi_errno(FsCondition.ELOOP)
+ESPIPE = 70
 EBADF = wasi_errno(FsCondition.EBADF)
 EINVAL = wasi_errno(FsCondition.EINVAL)
 EIO = wasi_errno(FsCondition.EIO)

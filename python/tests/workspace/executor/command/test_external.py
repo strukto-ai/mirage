@@ -701,3 +701,17 @@ async def test_explicit_process_command_captures_reach_the_runtime(name, args):
         assert [r.argv for r in probe.requests] == [
             tuple([name] + args.split())
         ]
+
+
+class FailingProcess(ProcessProbe):
+    async def run_process(self, request: ProcessExecution) -> RunResult:
+        raise RuntimeError("provider unavailable")
+
+
+@pytest.mark.asyncio
+async def test_a_provider_error_belongs_to_its_command_and_the_line_continues():
+    async with workspace({}, runtimes=[FailingProcess(), "workspace"]) as ws:
+        result = await ws.shell("echo before; failed-tool; echo after")
+        assert result.exit_code == 0
+        assert result.stdout == b"before\nafter\n"
+        assert result.stderr == b"failed-tool: provider unavailable\n"

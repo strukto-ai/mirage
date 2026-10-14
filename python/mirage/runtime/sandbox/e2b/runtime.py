@@ -14,7 +14,7 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
@@ -112,14 +112,6 @@ class E2BRuntime(RemoteSandbox):
     config_cls = E2BConfig
     config: E2BConfig
     _sandbox: Any = None
-
-    def __init__(
-        self,
-        captures: Sequence[str] | None = None,
-        config: E2BConfig | dict[str, Any] | None = None,
-    ) -> None:
-        super().__init__(captures, config)
-        self._serve_mounts(self.config.mount_type)
 
     def _api_params(self) -> dict[str, Any]:
         api_key = self.config.api_key

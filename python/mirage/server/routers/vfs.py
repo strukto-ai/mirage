@@ -15,18 +15,20 @@
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from mcp.server.transport_security import DEFAULT_MAX_REQUEST_BODY_SIZE
 
 from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition
+from mirage.io.stream import close_quietly
 from mirage.server.io_serde import (
     CallArgsError,
     answered,
     checked,
+    custom_answer,
     failure_to_dict,
 )
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
@@ -192,3 +194,68 @@ async def glob(
         logger.debug("glob failed", exc_info=True)
         return failure(exc)
     return JSONResponse(content={"paths": list(paths)})
+
+
+@router.post("/vfs/read_stream")
+async def read_stream(
+    workspace_id: str, request: Request, session_id: str | None = None
+) -> Response:
+    """Pull file bytes with bounded memory, through the authenticated session."""
+    entry = require_entry(request, workspace_id)
+    params = await json_body(request)
+    path, raw = params.get("path"), params.get("raw", False)
+    if (
+        set(params) - {"path", "raw"}
+        or not isinstance(path, str)
+        or not isinstance(raw, bool)
+    ):
+        raise HTTPException(
+            status_code=400, detail="expected path and optional raw boolean"
+        )
+    session = await session_of(entry, session_id)
+    try:
+        source = await entry.runner.call(session.vfs.read_stream(path, raw))
+    except Exception as exc:
+        logger.debug("vfs/read_stream failed", exc_info=True)
+        return failure(exc)
+
+    async def pull() -> bytes:
+        return await anext(source)
+
+    async def output() -> AsyncIterator[bytes]:
+        try:
+            while True:
+                try:
+                    chunk = await entry.runner.call(pull())
+                except StopAsyncIteration:
+                    return
+                yield chunk
+        finally:
+            await entry.runner.call(close_quietly(source))
+
+    return StreamingResponse(
+        output(),
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/vfs/{name}")
+async def custom_function(
+    workspace_id: str,
+    name: str,
+    request: Request,
+    session_id: str | None = None,
+) -> JSONResponse:
+    """Call a declared VFS function using the ordinary session and policy gate."""
+    entry = require_entry(request, workspace_id)
+    params = await json_body(request)
+    session = await session_of(entry, session_id)
+    try:
+        result = await entry.runner.call(custom_answer(session, name, params))
+    except CallArgsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.debug("vfs/%s failed", name, exc_info=True)
+        return failure(exc)
+    return JSONResponse(content=result)

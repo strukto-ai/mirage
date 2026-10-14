@@ -118,5 +118,15 @@ export function coerceRuntimeConfig<C extends RuntimeConfig>(
       throw new Error(`unknown ${label} config key '${key}' (${known})`)
     }
   }
+  if ('env' in config) {
+    const env = config.env
+    if (
+      env === null ||
+      typeof env !== 'object' ||
+      Array.isArray(env) ||
+      Object.values(env).some((value) => typeof value !== 'string')
+    )
+      throw new Error('runtime env must map strings to strings')
+  }
   return { ...config }
 }

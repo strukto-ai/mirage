@@ -87,6 +87,8 @@ class CountingDispatch:
     ops: list[tuple[str, str, int]] = field(default_factory=list)
 
     async def __call__(self, op, path, **kwargs):
+        if kwargs.get("admit_only"):
+            return None, None
         virtual = path.virtual
         payload = kwargs.get("data")
         size = len(payload) if payload is not None else 0

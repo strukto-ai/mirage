@@ -46,7 +46,7 @@ export interface MontyClassInstanceOptions {
  */
 export interface MontyFsBits {
   NOT_HANDLED: symbol
-  MontyFileHandle: new (path: string, mode: string) => unknown
+  MontyFileHandle: new (path: string, mode: string, options?: { position: number }) => unknown
   ClassInstance: new (instance: object, options?: MontyClassInstanceOptions) => object
 }
 

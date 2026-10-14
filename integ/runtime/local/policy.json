@@ -1,8 +1,49 @@
 {
   "cases": [
     {
-      "id": "stdin_operand_path_policy",
-      "note": "Stdin executes under a path deny in the cwd and preserves program arguments and flags.",
+      "id": "stdin_operand_keeps_program_arguments",
+      "note": "A stdin script keeps the program arguments and flags after it.",
+      "world": {
+        "runtimes": [
+          "local",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python - -c arg",
+          "stdin": "import sys; print(sys.argv[1:])\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "['-c', 'arg']\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -u -- - -c arg",
+          "stdin": "import sys; print(sys.argv[1:])\n",
+          "expect": {
+            "exit": 0,
+            "stdout": "['-c', 'arg']\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "native_run_refused_under_path_rules",
+      "note": "Native execution is refused when its file access cannot enforce the session path rules.",
       "world": {
         "runtimes": [
           "local",
@@ -39,18 +80,9 @@
           "command": "python - -c arg",
           "stdin": "import sys; print(sys.argv[1:])\n",
           "expect": {
-            "exit": 0,
-            "stdout": "['-c', 'arg']\n",
-            "stderr": ""
-          }
-        },
-        {
-          "command": "python3 -u -- - -c arg",
-          "stdin": "import sys; print(sys.argv[1:])\n",
-          "expect": {
-            "exit": 0,
-            "stdout": "['-c', 'arg']\n",
-            "stderr": ""
+            "exit": 127,
+            "stdout": "",
+            "stderr_contains": "cannot enforce"
           }
         }
       ]

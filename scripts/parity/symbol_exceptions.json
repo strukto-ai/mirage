@@ -1,5 +1,5 @@
 {
-  "baseline": 3737,
+  "baseline": 3735,
  "modules": {
   "core/render/json": {
    "python_only": {
@@ -85,7 +85,11 @@
   },
   "runtime/sandbox/cli": {
    "python_only": {
-    "_STREAM_LIMIT": "Spawning through loop.subprocess_exec, which keeps the transport that closes the pipes, means building the stream protocol with its buffer size; Node's child streams size their own."
+    "_STREAM_LIMIT": "Spawning through loop.subprocess_exec, which keeps the transport that closes the pipes, means building the stream protocol with its buffer size; Node's child streams size their own.",
+    "_spawn": "run_cli and open_cli_pipe share one loop.subprocess_exec spawn that keeps the transport stop_tree closes; Node's spawn hands back a ChildProcess whose streams close themselves."
+   },
+   "typescript_only": {
+    "untilInputCloses": "Node waits on Writable close events with removable listeners; Python cancels the feeding asyncio task when process.wait completes."
    }
   },
   "execution/context": {
@@ -491,7 +495,9 @@
     "glob": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "router": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "vfs_route": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit)."
+    "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit).",
+    "read_stream": "FastAPI has module-level route handlers; the matching Fastify handler is a closure in registerVfsRoutes.",
+    "custom_function": "FastAPI has module-level route handlers; the matching Fastify handler is a closure in registerVfsRoutes."
    },
    "typescript_only": {
     "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
@@ -699,6 +705,21 @@
   "utils/context_scope": {
    "python_only": {
     "InlineAwait": "asyncio awaits a coroutine in another context, or lets another task cancel it, only through a task of its own, which costs two turns of the event loop per stream pull; TypeScript replays its context in a closure and awaits the promise directly."
+   }
+  },
+  "runtime/mixin": {
+   "python_only": {
+    "StreamingProcessMixin": "Python detects the streaming capability by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard."
+   },
+   "typescript_only": {
+    "STREAMING_PROCESS": "Nominal TypeScript streaming capability corresponds to the Python StreamingProcessMixin.",
+    "StreamingProcess": "Nominal TypeScript streaming capability corresponds to the Python StreamingProcessMixin.",
+    "isStreamingProcess": "Nominal TypeScript streaming capability corresponds to the Python StreamingProcessMixin."
+   }
+  },
+  "runtime/types": {
+   "python_only": {
+    "ByteReader": "Python stream readers and asyncssh implement readexactly; TypeScript transports expose Web ReadableStreams."
    }
   }
  }

@@ -16,7 +16,7 @@ import { Activity } from '../utils/activity.ts'
 import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
 import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import { isLineExecutor, isProcessExecutor } from './mixin.ts'
+import { isLineExecutor, isProcessExecutor, isStreamingProcess } from './mixin.ts'
 import type {
   ExecutionRequest,
   FilesystemOperation,
@@ -80,6 +80,11 @@ export abstract class Runtime {
     this.config = coerceRuntimeConfig(options.config, configKeys)
   }
 
+  /** Whether workspace file mutations already invalidate through dispatch. */
+  get fileEffectsDispatched(): boolean {
+    return this.reach === 'workspace'
+  }
+
   get capabilities(): RuntimeCapabilities {
     return {
       languages: [],
@@ -107,12 +112,29 @@ export abstract class Runtime {
       if (current !== undefined) {
         if (current.binding !== this.binding)
           throw new Error(`${this.name}: context belongs to another binding`)
+        if (
+          this.reach !== 'workspace' &&
+          (current.restrictedMounts?.length ?? 0) > 0 &&
+          !this.servesSession(current)
+        )
+          return {
+            stdout: new Uint8Array(),
+            exitCode: 127,
+            stderr: new TextEncoder().encode(
+              `${this.name}: runtime cannot enforce this session's file restrictions\n`,
+            ),
+          }
         return await current.scope.run(() => this.executeRequest(request, current))
       }
       return await this.executeRequest(request)
     } finally {
       release()
     }
+  }
+
+  /** Whether every restricted mount is served through this caller's gate. */
+  protected servesSession(_context: RuntimeContext): boolean {
+    return false
   }
 
   /** Count one unit of work, refused once the runtime is retired. */
@@ -135,6 +157,7 @@ export abstract class Runtime {
     request: ExecutionRequest,
     _context?: RuntimeContext,
   ): Promise<RunResult> {
+    if (request.kind === 'stream' && isStreamingProcess(this)) return this.runStream(request)
     if (request.kind === 'process' && isProcessExecutor(this)) {
       if (request.argv.length === 0) throw new Error('process argv must not be empty')
       return this.runProcess(request)

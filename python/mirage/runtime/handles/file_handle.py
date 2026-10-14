@@ -15,6 +15,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from mirage.errors.fs import einval
 from mirage.runtime.handles.chunked import ChunkedHandle
 from mirage.runtime.handles.constants import READ_CHUNK
 from mirage.runtime.handles.flush import plan_flush
@@ -85,8 +86,8 @@ class FileHandle:
                 end; None when the open created or emptied the file.
             size (int): the file's length as the open saw it.
             writable (bool): whether writes are accepted.
-            append (bool): every write lands at the end, and the position
-                starts there.
+            append (bool): every write lands at the end; the initial
+                position remains zero.
         """
         base = None
         if fetch is not None:
@@ -105,8 +106,6 @@ class FileHandle:
             append=append,
             base_len=0 if base is None else size,
         )
-        if append:
-            handle.pos = handle.size
         return handle
 
     @classmethod
@@ -283,6 +282,8 @@ class FileHandle:
         Args:
             size (int): the new length.
         """
+        if size < 0:
+            raise einval(self.path)
         # ftruncate(2) sets the length outright, so a cut to the length
         # this handle holds still drops what another writer appended
         # since the open.
@@ -296,6 +297,22 @@ class FileHandle:
             self.runs = kept
         self.extent = size
         self.truncated = True
+
+    def invalidate(self, fetch: FileFetch, size: int) -> None:
+        """Forget stored bytes after another descriptor flushed the same file.
+
+        Args:
+            fetch (FileFetch): read the current stored bytes.
+            size (int): the stored file's current length.
+        """
+        if self.append and not self.truncated:
+            shift = size - self.base_len
+            if self.runs and self.pos == self._runs_end():
+                self.pos += shift
+            self.runs = [(start + shift, data) for start, data in self.runs]
+        if not self.truncated:
+            self.base_len = size
+        self.base = ChunkedHandle(path=self.path, size=size, fetch=fetch)
 
     def settle(self, fetch: FileFetch) -> None:
         """Take what was just flushed as the stored bytes, owing nothing.

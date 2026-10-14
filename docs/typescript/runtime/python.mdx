@@ -97,6 +97,41 @@ fast. Compare against `errno.ENETUNREACH`, not a number: the values are
 Emscripten's. `socket.socket()`, a TCP `bind` and name lookups still answer.
 An `init_module` that calls `useNodeSockFS()` installs real sockets.
 
+### Containment
+
+Guest Python can run JavaScript in its worker through Pyodide. On Node with
+`module.registerHooks`, Mirage hardens the worker after interpreter setup
+and before guest execution:
+
+- Further module loads are refused, including `import('node:child_process')`
+  and imports of already loaded Node modules.
+- Host globals (`process`, `global`, `fetch`, `WebSocket`, and an injected
+  `require`) are removed.
+- Exposed host filesystem and socket APIs are disabled, including
+  `mountNodeFS`, `mountNativeFS`, `useNodeSockFS`, `NODEFS`, and host file
+  preloading. Binary reads are restricted to configured local distribution
+  and package directories, with traversal and symlink escape checks.
+
+Automatic package loading still works from a local distribution. After the
+seal, network package loading and CDN fallback are unavailable. Packages
+listed in `packages` and trusted `bootstrap_code` run during initialization,
+before the seal.
+
+An `init_module` opts into host access (`reach: process`), so its worker is
+left unsealed. Node releases without `module.registerHooks`, including Node
+20 and Node 22 before 22.15, also run unsealed; use them only for trusted
+code. Standalone SDK execution without a workspace can run on the main
+thread and is trusted-only. Workspace-backed execution requires a worker.
+
+Browser workers are left unsealed: JavaScript can still use `fetch` and
+module loading, subject to the page's Content Security Policy. Each command
+gets its own worker.
+
+These measures close known host access paths. They do not make arbitrary
+JavaScript safe: Pyodide exposes mutable interpreter internals, and a worker
+thread shares the host process. For hostile code, use a
+[sandbox](/home/setup/runtime/sandbox) with a process and kernel boundary.
+
 ### Child processes
 
 `subprocess` runs Mirage commands:

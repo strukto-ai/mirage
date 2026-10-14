@@ -26,6 +26,8 @@ export interface FlushFailure {
 }
 
 export interface SyncVFS {
+  /** Check a requested alias against command rules without issuing a backend op. */
+  checkPath(path: string, follow: boolean): void
   process?(payload: string): string
   /** A file's bytes; `raw` reads what is stored rather than its rendering. */
   read(path: string, raw?: boolean): Uint8Array

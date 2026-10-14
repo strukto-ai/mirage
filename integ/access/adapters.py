@@ -1625,6 +1625,19 @@ class Http:
             )
             reply.raise_for_status()
             return tool_answer(reply.json())
+        if op == "bytes" and step["call"] == "read_stream":
+            async with http.stream(
+                "POST",
+                f"{base}/vfs/read_stream",
+                json=call_params(step),
+                params=params,
+            ) as reply:
+                data = await reply.aread()
+                if reply.status_code >= 400:
+                    return bytes_answer(
+                        step, wire_failure(reply.status_code, reply.json())
+                    )
+                return {"data_base64": base64.b64encode(data).decode()}
         if op in ("bytes", "explain"):
             explain = {"explain": "true"} if op == "explain" else {}
             reply = await http.post(

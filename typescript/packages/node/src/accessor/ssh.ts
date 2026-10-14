@@ -15,16 +15,8 @@
 import type * as Ssh2Mod from 'ssh2'
 import type { Client, SFTPWrapper } from 'ssh2'
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
-import { homedir } from 'node:os'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { connectOptions } from '../utils/ssh.ts'
 import type { SSHConfig } from '../vfs/ssh/config.ts'
-
-function expandHome(p: string): string {
-  if (p === '~') return homedir()
-  if (p.startsWith('~/')) return resolve(homedir(), p.slice(2))
-  return p
-}
 
 export class SSHAccessor extends Accessor {
   private client: Client | null = null
@@ -56,17 +48,16 @@ export class SSHAccessor extends Accessor {
     }
     const { Client: ClientCtor } = ssh2Mod
     const c = new ClientCtor()
-    const opts: Record<string, unknown> = {
-      host: this.config.hostname ?? this.config.host,
-      port: this.config.port ?? 22,
-      readyTimeout: (this.config.timeout ?? 30) * 1000,
-    }
-    if (this.config.username !== undefined) opts.username = this.config.username
-    if (this.config.password !== undefined) opts.password = this.config.password
-    if (this.config.identityFile !== undefined) {
-      opts.privateKey = readFileSync(expandHome(this.config.identityFile))
-      if (this.config.passphrase !== undefined) opts.passphrase = this.config.passphrase
-    }
+    const opts = await connectOptions(
+      this.config.host,
+      this.config.hostname,
+      this.config.port,
+      this.config.username,
+      this.config.identityFile,
+      this.config.timeout ?? 30,
+      this.config.password,
+      this.config.passphrase,
+    )
     return new Promise<SFTPWrapper>((resolveFn, rejectFn) => {
       c.on('ready', () => {
         // SFTP is a request/response protocol over small packets, and node
@@ -96,7 +87,7 @@ export class SSHAccessor extends Accessor {
           this.sftpClient = null
         }
       })
-      c.connect(opts as Parameters<Client['connect']>[0])
+      c.connect(opts)
     })
   }
 

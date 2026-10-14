@@ -11,7 +11,8 @@ std.open = (path, mode, errorObj) => {
   const fill = (size) => {
     while (__mirage_lacks(fd, size)) __mirage_fill(fd, size)
   }
-  return {
+  let closed = false
+  const methods = {
     readAsString: (max) => {
       const size = max === undefined ? -1 : toIndex(max)
       fill(size)
@@ -47,11 +48,32 @@ std.open = (path, mode, errorObj) => {
       fill(1)
       return __mirage_eof(fd)
     },
-    flush: () => undefined,
-    close: () => {
-      __mirage_close(fd)
-      return 0
+    flush: () => {
+      __mirage_flush(fd)
     },
+    close: () => {
+      closed = true
+      return __mirage_close(fd)
+    },
+  }
+  return Object.fromEntries(
+    Object.entries(methods).map(([name, method]) => [
+      name,
+      (...args) => {
+        if (closed) throw new TypeError('invalid file handle')
+        return method(...args)
+      },
+    ]),
+  )
+}
+std.loadFile = (path) => {
+  const file = std.open(path, 'r')
+  if (file === null) return null
+  try {
+    const text = file.readAsString()
+    return file.error() ? null : text
+  } finally {
+    file.close()
   }
 }
 // qjs reads a byte budget through JS_ToIndex: NaN is 0, and a negative
@@ -84,3 +106,10 @@ os.S_IFLNK = 40960
 
 os.getcwd = () => [__mirage_getcwd(), 0]
 os.chdir = (path) => __mirage_chdir(String(path))
+
+os.S_IFBLK = 24576
+os.S_IFIFO = 4096
+os.S_IFSOCK = 49152
+os.S_ISGID = 1024
+os.S_ISUID = 2048
+os.platform = 'wasi'

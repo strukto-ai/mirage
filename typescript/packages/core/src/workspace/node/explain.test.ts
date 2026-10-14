@@ -163,6 +163,7 @@ async function aliased(asked: string[]): Promise<Workspace> {
 }
 
 class LineBox extends Runtime implements LineExecutor {
+  override readonly reach = 'workspace' as const
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'sandbox'
   declare captures: readonly string[]

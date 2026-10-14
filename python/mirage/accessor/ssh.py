@@ -13,33 +13,32 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from pathlib import Path
 from typing import Any
 
 import asyncssh
 
 from mirage.accessor.base import Accessor
 from mirage.concurrency.limiter import settle
+from mirage.utils.ssh import connect_options
 from mirage.vfs.secrets import reveal_secret
 from mirage.vfs.ssh.config import SSHConfig
 
 
 def _connect_kwargs(config: SSHConfig) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"host": config.host}
-    if config.hostname:
-        kwargs["host"] = config.hostname
-    if config.port:
-        kwargs["port"] = config.port
-    if config.username:
-        kwargs["username"] = config.username
+    kwargs = connect_options(
+        config.host,
+        config.hostname,
+        config.port,
+        config.username,
+        config.identity_file,
+        config.timeout,
+    )
     if config.password is not None:
         kwargs["password"] = reveal_secret(config.password)
     if config.identity_file:
-        kwargs["client_keys"] = [str(Path(config.identity_file).expanduser())]
         if config.passphrase is not None:
             kwargs["passphrase"] = reveal_secret(config.passphrase)
     kwargs["known_hosts"] = config.known_hosts
-    kwargs["login_timeout"] = config.timeout
     return kwargs
 
 

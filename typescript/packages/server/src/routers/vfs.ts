@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Console } from 'node:console'
+import { Readable } from 'node:stream'
 import { stderr } from 'node:process'
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import type { FastifyInstance, FastifyReply } from 'fastify'
@@ -21,7 +22,7 @@ import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { CallArgsError, answered, checked, failureToDict } from '../io_serde.ts'
+import { CallArgsError, answered, checked, customAnswer, failureToDict } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
 
@@ -133,6 +134,51 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
       },
     )
   }
+  app.post<{
+    Params: { wsId: string }
+    Querystring: CallQuery
+    Body: { path?: unknown; raw?: unknown } | null
+  }>(
+    '/v1/workspaces/:wsId/vfs/read_stream',
+    { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
+    async (req, reply) => {
+      try {
+        const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
+        const body = req.body
+        if (
+          body === null ||
+          typeof body !== 'object' ||
+          Object.keys(body).some((key) => !['path', 'raw'].includes(key)) ||
+          typeof body.path !== 'string' ||
+          (body.raw !== undefined && typeof body.raw !== 'boolean')
+        )
+          throw new RouteError(400, 'expected path and optional raw boolean')
+        const session = await sessionOf(ws, req.query.session_id)
+        const source = await session.vfs.readStream(body.path, { raw: body.raw === true })
+        return await reply
+          .type('application/octet-stream')
+          .header('Cache-Control', 'no-store')
+          .send(Readable.from(source))
+      } catch (err) {
+        logger.debug('vfs/read_stream failed', err)
+        return failure(reply, err)
+      }
+    },
+  )
+  app.post<{ Params: { wsId: string; name: string }; Querystring: CallQuery }>(
+    '/v1/workspaces/:wsId/vfs/:name',
+    { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
+    async (req, reply) => {
+      try {
+        const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
+        const session = await sessionOf(ws, req.query.session_id)
+        return await reply.send(await customAnswer(session, req.params.name, req.body))
+      } catch (err) {
+        logger.debug('vfs/%s failed', req.params.name, err)
+        return failure(reply, err)
+      }
+    },
+  )
   app.post<{
     Params: { wsId: string }
     Querystring: CallQuery

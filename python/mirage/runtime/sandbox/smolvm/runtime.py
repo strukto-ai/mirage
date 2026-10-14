@@ -16,14 +16,14 @@ import json
 
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import run_cli
+from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
 from mirage.runtime.sandbox.smolvm.config import SmolvmConfig
 from mirage.runtime.sandbox.smolvm.constants import (
     RUNNING_STATE,
     SMOLVM_CLI_HINT,
     not_running_hint,
 )
-from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.runtime.types import RunResult, SandboxPipe
 
 
 class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin):
@@ -82,20 +82,6 @@ class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin):
                 not_running_hint(self.config.machine, str(state))
             )
 
-    async def exec_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-    ) -> RunResult:
-        return await self._exec_argv(("sh", "-c", line), stdin, env, cwd)
-
-    async def run_process(self, request: ProcessExecution) -> RunResult:
-        await self._ensure_connected()
-        return await self._exec_argv(
-            request.argv,
-            request.stdin,
-            {**self.config.env, **request.env},
-            request.cwd.virtual,
-        )
-
     async def _exec_argv(
         self,
         argv: tuple[str, ...],
@@ -119,3 +105,21 @@ class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin):
         args += ["--", *argv]
         stdout, stderr, code = await self._smolvm(args, stdin=stdin)
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
+
+    async def open_pipe(self, command: str) -> SandboxPipe:
+        return await open_cli_pipe(
+            "smolvm",
+            [
+                "machine",
+                "exec",
+                "--name",
+                self.config.machine,
+                "-i",
+                "-w",
+                "/",
+                "--",
+                "sh",
+                "-c",
+                command,
+            ],
+        )

@@ -24,10 +24,17 @@ const __padDigits = (s, prec) => {
   const digits = neg ? s.slice(1) : s
   return (neg ? '-' : '') + digits.padStart(prec, '0')
 }
-const __conv1 = (conv, flags, prec, arg) => {
+const __int = (n, wide, unsigned) => {
+  if (!wide) return BigInt(unsigned ? Math.trunc(n) >>> 0 : n | 0)
+  const span = 1n << 64n
+  const v = ((BigInt(Number.isFinite(n) ? Math.trunc(n) : 0) % span) + span) % span
+  return unsigned || v < span >> 1n ? v : v - span
+}
+const __conv1 = (conv, flags, prec, arg, wide) => {
   const n = Number(arg)
-  if (conv === 'd' || conv === 'i') return __sign(__padDigits(String(Math.trunc(n)), prec), flags)
-  if (conv === 'u') return __padDigits(String(Math.trunc(n) >>> 0), prec)
+  if (conv === 'd' || conv === 'i')
+    return __sign(__padDigits(String(__int(n, wide, false)), prec), flags)
+  if (conv === 'u') return __padDigits(String(__int(n, wide, true)), prec)
   if (conv === 'f' || conv === 'F') return __sign(n.toFixed(prec === undefined ? 6 : prec), flags)
   if (conv === 'e' || conv === 'E') {
     const s = __sign(__exp2(n.toExponential(prec === undefined ? 6 : prec)), flags)
@@ -41,13 +48,13 @@ const __conv1 = (conv, flags, prec, arg) => {
     return conv === 'G' ? s.toUpperCase() : s
   }
   if (conv === 'x' || conv === 'X') {
-    let s = (Math.trunc(n) >>> 0).toString(16)
+    let s = __int(n, wide, true).toString(16)
     if (flags.includes('#') && n !== 0) s = '0x' + s
     if (conv === 'X') s = s.toUpperCase()
     return s
   }
   if (conv === 'o') {
-    let s = (Math.trunc(n) >>> 0).toString(8)
+    let s = __int(n, wide, true).toString(8)
     if (flags.includes('#') && s[0] !== '0') s = '0' + s
     return s
   }
@@ -78,7 +85,12 @@ const __sprintf = (fmtIn, args) => {
     }
     let width = 0
     if (fmt[i] === '*') {
+      if (ai >= args.length) throw new ReferenceError('missing argument for format')
       width = Math.trunc(Number(args[ai++]))
+      if (width < 0) {
+        flags += '-'
+        width = -width
+      }
       i++
     } else
       while (fmt[i] >= '0' && fmt[i] <= '9') {
@@ -90,7 +102,9 @@ const __sprintf = (fmtIn, args) => {
       i++
       prec = 0
       if (fmt[i] === '*') {
+        if (ai >= args.length) throw new ReferenceError('missing argument for format')
         prec = Math.trunc(Number(args[ai++]))
+        if (prec < 0) prec = undefined
         i++
       } else
         while (fmt[i] >= '0' && fmt[i] <= '9') {
@@ -98,25 +112,27 @@ const __sprintf = (fmtIn, args) => {
           i++
         }
     }
-    while ('hlLjzt'.includes(fmt[i])) i++
+    const wide = fmt[i] === 'l'
+    if (wide) i++
     const conv = fmt[i]
     i++
     if (conv === undefined || !'diufFeEgGxXocs'.includes(conv))
       throw new TypeError('invalid conversion specifier in format string')
-    out += __pad(__conv1(conv, flags, prec, args[ai++]), flags, width)
+    if (ai >= args.length) throw new ReferenceError('missing argument for format')
+    out += __pad(__conv1(conv, flags, prec, args[ai++], wide), flags, width)
   }
   return out
 }
 globalThis.console = { log: (...a) => __mirage_log(__pieces(__join(a) + '\n')) }
 globalThis.print = (...a) => __mirage_log(__pieces(__join(a) + '\n'))
 globalThis.std = {
-  in: { readAsString: () => __text(__mirage_stdin) },
+  in: { readAsString: (max) => __text(__mirage_readStdin(max === undefined ? -1 : toIndex(max))) },
   out: {
     puts: (s) => __mirage_log(__pieces(String(s))),
     printf: (fmt, ...a) => {
       const s = __sprintf(fmt, a)
       __mirage_log(__pieces(s))
-      return s.length
+      return __mirage_byteLength(__pieces(s))
     },
   },
   err: {
@@ -124,12 +140,41 @@ globalThis.std = {
     printf: (fmt, ...a) => {
       const s = __sprintf(fmt, a)
       __mirage_error(__pieces(s))
-      return s.length
+      return __mirage_byteLength(__pieces(s))
     },
   },
   exit: (n) => {
     __mirage_setExit(n | 0)
-    throw new Error('__mirage_exit')
+    while (true) {
+      /* The VM interrupt ends execution without a catchable throw. */
+    }
   },
-  getenv: (k) => __mirage_env[k],
+  getenv: (k) =>
+    Object.prototype.hasOwnProperty.call(__mirage_env, k) ? __mirage_env[k] : undefined,
 }
+
+std.sprintf = (format, ...args) => __sprintf(format, args)
+std.printf = (...args) => std.out.printf(...args)
+
+std.Error = {}
+for (const [name, value] of Object.entries({
+  EINVAL: 28,
+  EIO: 29,
+  EACCES: 2,
+  EEXIST: 20,
+  ENOSPC: 51,
+  ENOSYS: 52,
+  EBUSY: 10,
+  ENOENT: 44,
+  EPERM: 63,
+  EPIPE: 64,
+  EBADF: 8,
+}))
+  Object.defineProperty(std.Error, name, { value, configurable: true, writable: true })
+globalThis.queueMicrotask = (fn) => {
+  if (typeof fn !== 'function') throw new TypeError('not a function')
+  Promise.resolve().then(fn)
+}
+
+globalThis.atob = (s) => __text(__mirage_atob(__pieces(String(s))))
+globalThis.btoa = (s) => __text(__mirage_btoa(__pieces(String(s))))

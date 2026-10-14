@@ -189,6 +189,8 @@ def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
     bindings: dict[str, Runtime] = {}
     seen: set[str] = set()
     for entry in entries:
+        if "*" in entry.captures and not isinstance(entry, LineExecutorMixin):
+            raise ValueError("* requires shell execution")
         if EXTERNAL_COMMANDS in entry.captures and not isinstance(
             entry, (LineExecutorMixin, ProcessExecutorMixin)
         ):

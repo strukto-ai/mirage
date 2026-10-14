@@ -2063,6 +2063,7 @@ function afterEcho(): Record<string, unknown> {
 }
 
 class Box extends Runtime implements LineExecutor {
+  override readonly reach = 'workspace' as const
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'box'
   lines: string[] = []

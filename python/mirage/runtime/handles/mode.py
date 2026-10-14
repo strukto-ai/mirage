@@ -31,7 +31,7 @@ class OpenMode:
         readable (bool): the handle may read (r, +).
         writable (bool): the handle may mutate its buffer (w, a, x, +).
         truncate (bool): opening discards existing content (w).
-        append (bool): the position starts at the end (a).
+        append (bool): every write lands at the end (a).
         create (bool): a missing file is created (w, a, x).
         exclusive (bool): an existing file refuses the open (x).
         binary (bool): the handle carries bytes, not text (b).
@@ -62,14 +62,21 @@ def parse_mode(mode: str) -> OpenMode:
     Raises:
         ValueError: the mode does not parse, in CPython's own wording.
     """
-    if (
-        not mode
-        or any(char not in MODE_CHARS for char in mode)
-        or any(mode.count(char) > 1 for char in MODE_CHARS)
-        or ("b" in mode and "t" in mode)
-        or set(mode) & set("rwax") not in MODE_BASES
+    if any(char not in MODE_CHARS for char in mode) or any(
+        mode.count(char) > 1 for char in MODE_CHARS
     ):
         raise ValueError(f"invalid mode: {mode!r}")
+    if "b" in mode and "t" in mode:
+        raise ValueError("can't have text and binary mode at once")
+    if not set(mode) & set("rwax"):
+        raise ValueError(
+            "Must have exactly one of create/read/write/append mode "
+            "and at most one plus"
+        )
+    if set(mode) & set("rwax") not in MODE_BASES:
+        raise ValueError(
+            "must have exactly one of create/read/write/append mode"
+        )
     plus = "+" in mode
     return OpenMode(
         readable="r" in mode or plus,

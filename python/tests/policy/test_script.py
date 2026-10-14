@@ -94,7 +94,7 @@ class FakeProgram(LanguageRuntime):
             stdout=self.stdout, stderr=self.stderr, exit_code=self.exit_code
         )
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         raise NotImplementedError
 
     async def close(self) -> None:

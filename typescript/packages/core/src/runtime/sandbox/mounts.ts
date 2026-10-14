@@ -13,14 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { getCurrentSession } from '../../context/session_context.ts'
-import { MountMode } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { runDetached } from '../../utils/async_context.ts'
 import type { Files } from '../../workspace/files.ts'
 import type { SessionState } from '../../workspace/session/session.ts'
-import type { WorkspaceBinding } from '../binding.ts'
+import { restrictedMountsFor, type WorkspaceBinding } from '../binding.ts'
 import type { MountType, PipeWriter, RunResult, SandboxPipe } from '../types.ts'
 import {
   MOUNT_POLL_SECONDS,
@@ -97,14 +96,6 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
   return tops
 }
 
-/** Whether the session's profile narrows the mode of `prefix` or of a mount under it. */
-function cappedUnder(session: SessionState, prefix: string): boolean {
-  for (const [path, mode] of session.mountModes ?? []) {
-    if (mode !== MountMode.EXEC && (path === prefix || path.startsWith(prefix + '/'))) return true
-  }
-  return false
-}
-
 /** The sandbox command that lazily unmounts `prefix`. */
 function unmountLine(prefix: string): string {
   const path = singleQuote(prefix)
@@ -170,7 +161,6 @@ interface Served {
  */
 export class SandboxMounts {
   private sessionId: string | null = null
-  private own: readonly string[] = []
   private readonly served = new Map<string, Served>()
   private seen: string | null = null
   private lock: Promise<unknown> = Promise.resolve()
@@ -190,6 +180,10 @@ export class SandboxMounts {
   ) {}
 
   /** Bring the mounts in step, then say why a line may not run, or null when it may. */
+  get fileEffectsDispatched(): boolean {
+    return this.mountType === 'ssh'
+  }
+
   async admit(binding: WorkspaceBinding | null, signal?: AbortSignal): Promise<string | null> {
     const files = binding?.files ?? null
     const getSession = binding?.getSession ?? null
@@ -198,6 +192,14 @@ export class SandboxMounts {
       throw new Error(`${this.runtime}: mountType needs the runtime in a workspace`)
     }
     const current = getCurrentSession()
+    const rules = current?.commands
+    if (
+      rules != null &&
+      [...rules.ask, ...rules.deny].some(
+        (rule) => (rule.commands?.length ?? 0) > 0 && ((rule.paths?.length ?? 0) > 0 || rule.mount),
+      )
+    )
+      return 'this file transport cannot enforce program-specific path rules'
     if (current === null) {
       throw new Error(
         `${this.runtime}: mountType serves a session's view, and this line runs as none`,
@@ -211,9 +213,8 @@ export class SandboxMounts {
         )
       }
       const every = mountPaths(mountPrefixes())
-      const scoped = binding.capture().ns.scoped
       const ruled = new Set(
-        [...every].filter((p) => scoped?.(p) === true || cappedUnder(current, p)),
+        restrictedMountsFor(current, mountPrefixes()).map((prefix) => rstripSlash(prefix) || '/'),
       )
       await this.reconcile(binding, files, getSession(current.sessionId), every, ruled, signal)
       const refusal = this.refusal(ruled)
@@ -233,9 +234,13 @@ export class SandboxMounts {
   }
 
   private refusal(ruled: ReadonlySet<string>): string | null {
-    for (const prefix of this.own) {
-      if (ruled.has(prefix)) {
-        return `${prefix} is served by the sandbox itself, out of reach of this session's rules`
+    for (const prefix of [...ruled].sort(compareCodePoints)) {
+      if (
+        ![...this.served.keys()].some(
+          (p) => prefix === p || prefix.startsWith(p.replace(/\/$/, '') + '/'),
+        )
+      ) {
+        return `${prefix} is not served through the dispatcher, out of reach of this session's rules`
       }
     }
     return null
@@ -297,7 +302,6 @@ export class SandboxMounts {
         throw err
       }
     }
-    this.own = own
     this.seen = seen
   }
 
@@ -335,16 +339,30 @@ export class SandboxMounts {
       },
     )
     this.served.set(prefix, entry)
-    const deadline = Date.now() + MOUNT_WAIT_SECONDS * 1000
-    while ((await this.table(signal)).get(prefix) !== 'fuse.sshfs') {
-      if (entry.ended || Date.now() > deadline) {
-        const written = await this.run(`cat ${log}`, signal)
-        let reason = said(written.stdout) || 'no word from sshfs'
-        if (entry.failure !== null) reason += `; the SFTP server failed: ${entry.failure.message}`
-        throw new Error(`${this.runtime}: sshfs did not mount ${prefix}: ${reason}`)
+    try {
+      const deadline = Date.now() + MOUNT_WAIT_SECONDS * 1000
+      while ((await this.table(signal)).get(prefix) !== 'fuse.sshfs') {
+        if (entry.ended || Date.now() > deadline) {
+          const written = await this.run(`cat ${log}`, signal)
+          let reason = said(written.stdout) || 'no word from sshfs'
+          if (entry.failure !== null) reason += `; the SFTP server failed: ${entry.failure.message}`
+          throw new Error(`${this.runtime}: sshfs did not mount ${prefix}: ${reason}`)
+        }
+        signal?.throwIfAborted()
+        await sleep(MOUNT_POLL_SECONDS * 1000)
       }
-      signal?.throwIfAborted()
-      await sleep(MOUNT_POLL_SECONDS * 1000)
+    } finally {
+      if (signal?.aborted !== true) await this.dropLog(log)
+    }
+  }
+
+  /** Remove the helper's setup log; keeping it only costs a file. */
+  private async dropLog(log: string): Promise<void> {
+    try {
+      const removed = await this.run(`rm -f -- ${log}`)
+      if (removed.exitCode !== 0) console.debug('could not remove sshfs log:', said(removed.stderr))
+    } catch (err) {
+      console.debug('could not remove sshfs log:', err)
     }
   }
 
@@ -383,7 +401,6 @@ export class SandboxMounts {
 
   private async unmount(): Promise<void> {
     for (const prefix of [...this.served.keys()]) await this.drop(prefix)
-    this.own = []
     this.seen = null
   }
 }

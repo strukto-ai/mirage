@@ -14,10 +14,18 @@
 
 import { EXTERNAL_COMMANDS } from '../constants.ts'
 import { Runtime } from '../base.ts'
+import type { RuntimeContext } from '../binding.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../mixin.ts'
-import type { MountType, RunResult, SandboxPipe } from '../types.ts'
+import type { MountType, ProcessExecution, RunResult, SandboxPipe } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
-import { BASE_CONFIG_KEYS, type NormalizedSandboxConfig, type SandboxConfig } from './config.ts'
+import { abortable } from '../../utils/abort.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import {
+  BASE_CONFIG_KEYS,
+  checkMountType,
+  type NormalizedSandboxConfig,
+  type SandboxConfig,
+} from './config.ts'
 import { SandboxMounts } from './mounts.ts'
 
 const ENC = new TextEncoder()
@@ -59,15 +67,32 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   private connecting: Promise<void> | null = null
   private mounts: SandboxMounts | null = null
 
-  constructor(
-    options: RuntimeOptions<C> | Record<string, unknown> = {},
-    configKeys?: readonly string[],
-  ) {
+  constructor(options: RuntimeOptions<C> = {}, configKeys?: readonly string[]) {
     super(options as RuntimeOptions, [EXTERNAL_COMMANDS], configKeys ?? BASE_CONFIG_KEYS)
     // The sandbox refinement of the base's coerced copy: the shared
     // collection fields are always present (env).
     const config = this.config as C
     this.config = { ...config, env: { ...config.env } }
+    const mountType = checkMountType('sandbox', config.mountType)
+    if (mountType !== null && this.openPipe === RemoteSandbox.prototype.openPipe)
+      throw new Error('sandbox: mountType needs a pipe transport')
+  }
+
+  override get fileEffectsDispatched(): boolean {
+    return (
+      this.mounts?.fileEffectsDispatched === true &&
+      this.binding?.mountPrefixes != null &&
+      !this.binding.mountPrefixes().includes('/')
+    )
+  }
+
+  protected override servesSession(context: RuntimeContext): boolean {
+    return (
+      (this.mounts !== null || this.config.mountType != null) &&
+      (context.restrictedMounts ?? []).every(
+        (prefix) => !['', '/dev'].includes(rstripSlash(prefix)),
+      )
+    )
   }
 
   /**
@@ -85,19 +110,40 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    await this.ensureConnected(signal)
-    if (this.mounts !== null) {
-      const refusal = await this.mounts.admit(this.binding, signal)
-      if (refusal !== null) {
-        return {
-          stdout: new Uint8Array(),
-          stderr: ENC.encode(`${this.name}: ${refusal}\n`),
-          exitCode: 1,
-        }
-      }
-    }
+    const refusal = await this.prepare(signal)
+    if (refusal !== null) return refusal
     const merged = { ...this.config.env, ...env }
     return this.execLine(line, stdin, merged, cwd, signal)
+  }
+
+  async runProcess(request: ProcessExecution): Promise<RunResult> {
+    const refusal = await this.prepare(request.signal)
+    if (refusal !== null) return refusal
+    return this.execArgv(
+      request.argv,
+      request.stdin,
+      { ...this.config.env, ...request.env },
+      request.cwd.virtual,
+      request.signal,
+    )
+  }
+
+  private async prepare(signal?: AbortSignal): Promise<RunResult | null> {
+    await this.ensureConnected(signal)
+    const refusal = await this.mounts?.admit(this.binding, signal)
+    return refusal == null
+      ? null
+      : { stdout: new Uint8Array(), stderr: ENC.encode(`${this.name}: ${refusal}\n`), exitCode: 1 }
+  }
+
+  protected execArgv(
+    _argv: readonly string[],
+    _stdin: Uint8Array | null,
+    _env: Record<string, string>,
+    _cwd: string,
+    _signal?: AbortSignal,
+  ): Promise<RunResult> {
+    return Promise.reject(new Error(`${this.name}: argv execution is unsupported`))
   }
 
   /** Let the sandbox see the workspace by `mountType`; null serves nothing. */
@@ -111,45 +157,34 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     )
   }
 
+  protected disconnected(): void {
+    this.connecting = null
+  }
+
   protected async ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
+    if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
     this.connecting ??= this.connect().catch((err: unknown) => {
       this.connecting = null
       throw err
     })
-    await this.waitFor(this.connecting, signal)
+    await abortable(this.connecting, signal)
     signal?.throwIfAborted()
-  }
-
-  /** Cancel this caller's wait without cancelling a shared connection. */
-  protected async waitFor<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (signal === undefined) return await operation
-    let onAbort: () => void = () => undefined
-    try {
-      return await new Promise<T>((resolve, reject) => {
-        onAbort = () => {
-          reject(new DOMException('execute aborted', 'AbortError'))
-        }
-        operation.then(resolve, reject)
-        if (signal.aborted) onAbort()
-        else signal.addEventListener('abort', onAbort, { once: true })
-      })
-    } finally {
-      signal.removeEventListener('abort', onAbort)
-    }
   }
 
   /** Attach to the user's live sandbox, failing loud if absent. */
   abstract connect(): Promise<void>
 
   /** Execute one shell line inside the sandbox. */
-  abstract execLine(
+  execLine(
     line: string,
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
-  ): Promise<RunResult>
+  ): Promise<RunResult> {
+    return this.execArgv(['sh', '-c', line], stdin, env, cwd, signal)
+  }
 
   /**
    * Start a command in the sandbox with its stdin and stdout held open,

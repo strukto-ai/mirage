@@ -21,8 +21,9 @@ from types import MappingProxyType
 from mirage.process.view import ProcessView
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
 from mirage.utils.context_scope import ContextScope
+from mirage.utils.hidden import is_glob, show_head
 from mirage.view.types import NamespaceView, SessionView
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
@@ -46,6 +47,7 @@ class RuntimeContext:
     env: Mapping[str, str]
     scope: ContextScope
     processes: ProcessView | None = None
+    restricted_mounts: tuple[str, ...] = ()
 
 
 class WorkspaceBinding:
@@ -83,6 +85,53 @@ class WorkspaceBinding:
         )
 
 
+def restricted_mounts_for(
+    session: SessionState, prefixes: list[str]
+) -> tuple[str, ...]:
+    """Map file restrictions to their owning mounts, excluding ancestor mounts.
+
+    Args:
+        session (SessionState): the execution's session.
+        prefixes (list[str]): every workspace mount, including hidden mounts.
+    """
+    entries: list[str] = []
+    hidden = session.visibility.paths
+    if hidden is not None:
+        entries.extend((*hidden.paths, *hidden.patterns))
+    shown = session.visibility.shown
+    if shown is not None:
+        entries.extend(
+            e.path
+            for e in shown.entries
+            if e.mode is not None and e.mode is not MountMode.EXEC
+        )
+    if session.commands is not None:
+        for rule in (*session.commands.ask, *session.commands.deny):
+            entries.extend(rule.paths or ((rule.mount,) if rule.mount else ()))
+    entries.extend(
+        p
+        for p, mode in (session.mount_modes or {}).items()
+        if mode is not MountMode.EXEC
+    )
+    mounts = {p.rstrip("/") or "/": p for p in prefixes}
+    mounts.setdefault("/", "/")
+    restricted: set[str] = set()
+    for entry in entries:
+        head = "/" if is_glob(entry) and "/" not in entry else show_head(entry)
+        owners = [
+            p
+            for p in mounts
+            if p == "/" or head == p or head.startswith(p + "/")
+        ]
+        restricted.add(mounts[max(owners, key=len)])
+        restricted.update(
+            value
+            for p, value in mounts.items()
+            if head == "/" or p.startswith(head + "/")
+        )
+    return tuple(sorted(restricted))
+
+
 def capture_binding(
     binding: WorkspaceBinding,
     *,
@@ -91,6 +140,7 @@ def capture_binding(
     processes: ProcessView | None = None,
     cwd: PathSpec | None = None,
     env: dict[str, str] | None = None,
+    restricted_mounts: tuple[str, ...] | None = None,
 ) -> RuntimeContext:
     """Capture callback context while reading live workspace state."""
     scope = ContextScope()
@@ -154,6 +204,16 @@ def capture_binding(
         env=MappingProxyType(dict(env or {})),
         scope=scope,
         processes=processes,
+        restricted_mounts=restricted_mounts
+        if restricted_mounts is not None
+        else tuple(
+            prefix
+            for prefix in (
+                binding.mount_prefixes() if binding.mount_prefixes else ()
+            )
+            if view.scoped is not None
+            and view.scoped(prefix.rstrip("/") or "/")
+        ),
     )
 
 

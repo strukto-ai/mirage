@@ -19,18 +19,23 @@ from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
-from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.sandbox.cli import Children, close_children, run_cli
+from mirage.runtime.mixin import LineExecutorMixin, StreamingProcessMixin
+from mirage.runtime.sandbox.cli import (
+    Children,
+    close_children,
+    cwd_refusal,
+    run_cli,
+)
 from mirage.runtime.sandbox.sandlock.config import SandlockConfig
 from mirage.runtime.sandbox.sandlock.constants import (
     SANDLOCK_CLI_HINT,
     SYSTEM_READABLE,
 )
-from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.runtime.types import ProcessExecution, RunResult, StreamExecution
 from mirage.types import PathSpec
 
 
-class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
+class SandlockRuntime(Runtime, LineExecutorMixin, StreamingProcessMixin):
     """Run native commands through the Linux Sandlock CLI.
 
     Paths are native paths. Workspace files require an existing filesystem
@@ -48,6 +53,10 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
         config: SandlockConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(captures, config)
+        if self.config.mount_type is not None:
+            raise ValueError(
+                "sandlock: mount_type needs a remote pipe transport"
+            )
         self._children: Children = {}
 
     def policy_argv(self) -> list[str]:
@@ -76,6 +85,17 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
         )
 
     async def run_process(self, request: ProcessExecution) -> RunResult:
+        return await self._run_process(request)
+
+    async def run_stream(self, request: StreamExecution) -> RunResult:
+        return await self._run_process(request)
+
+    async def _run_process(
+        self, request: ProcessExecution | StreamExecution
+    ) -> RunResult:
+        refusal = cwd_refusal(request.argv[0], request.cwd.virtual)
+        if refusal is not None:
+            return refusal
         cli = shutil.which("sandlock")
         if cli is None:
             raise FileNotFoundError(SANDLOCK_CLI_HINT)
@@ -91,6 +111,9 @@ class SandlockRuntime(Runtime, LineExecutorMixin, ProcessExecutorMixin):
             cwd=request.cwd.virtual,
             env={},
             children=self._children,
+            output=request.output
+            if isinstance(request, StreamExecution)
+            else None,
         )
         return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 

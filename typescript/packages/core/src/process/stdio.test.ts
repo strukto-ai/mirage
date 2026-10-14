@@ -21,6 +21,15 @@ describe('process stdio', () => {
     expect(pipe.bytesRead).toBe(200000)
   })
 
+  it('closing a stream wakes a pending pull and refuses later writes', async () => {
+    const pipe = new ProcessInput()
+    const stream = pipe.stream()
+    const pulling = stream.next()
+    await stream.return?.()
+    expect(await pulling).toMatchObject({ done: true })
+    await expect(pipe.write(new TextEncoder().encode('late'))).rejects.toBeInstanceOf(PipeClosed)
+  })
+
   it('refuses writes once closed', async () => {
     const pipe = new ProcessInput()
     pipe.close()

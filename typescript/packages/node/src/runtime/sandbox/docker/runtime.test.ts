@@ -94,10 +94,15 @@ describe('DockerRuntime', () => {
       'exec',
       '-i',
       '-w',
-      '/root/ws',
+      '/',
       '-e',
       'E=1',
       'cid-42',
+      'sh',
+      '-c',
+      'cd -- "$1" || exit 126; shift; exec "$@"',
+      'sh',
+      '/root/ws',
       'sh',
       '-c',
       'wc -l',
@@ -106,9 +111,9 @@ describe('DockerRuntime', () => {
   })
 
   it('takes a mountType of ssh, fuse or both', () => {
-    expect(() => new DockerRuntime({ config: { container: 'c', mountType: 'nfs' } })).toThrow(
-      'docker mountType must be one of ssh, fuse, both, not "nfs"',
-    )
+    expect(
+      () => new DockerRuntime({ config: { container: 'c', mountType: 'nfs' as never } }),
+    ).toThrow('sandbox mountType must be one of ssh, fuse, both, not "nfs"')
     expect(() => new DockerRuntime({ config: { container: 'c', mountType: 'ssh' } })).not.toThrow()
   })
 

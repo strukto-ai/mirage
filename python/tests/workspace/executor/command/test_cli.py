@@ -411,7 +411,7 @@ class FakePyRuntime(LanguageRuntime):
         self.seen: list[RunArgs] = []
         self.result = RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         self.seen.append(args)
         return self.result
 
@@ -428,7 +428,7 @@ class FakeJsRuntime(FakePyRuntime):
 class CrashingRuntime(FakePyRuntime):
     name = "crashpy"
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         raise RuntimeError("engine exploded")
 
 
@@ -436,7 +436,7 @@ class SleepingRuntime(FakePyRuntime):
     name = "sleepy"
     cancelled = False
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         try:
             await asyncio.sleep(0.5)
         except asyncio.CancelledError:
@@ -680,7 +680,7 @@ class TierPyRuntime(PythonRuntime):
         self.name = name
         self.seen: list[RunArgs] = []
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         self.seen.append(args)
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 

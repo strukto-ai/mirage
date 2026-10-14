@@ -210,6 +210,15 @@ class TestStatShape:
             if hasattr(os.stat("/tmp"), field):
                 assert getattr(st, field) is not None, field
 
+    def test_an_unlinked_descriptor_keeps_every_field(self):
+        _, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDONLY)
+        patched.unlink("/data/dir/a.txt")
+        st = patched.fstat(fd)
+        patched.close(fd)
+        assert (st.st_nlink, st.st_size, st.st_blksize) == (0, 5, 4096)
+        assert st.st_mtime_ns == int(st.st_mtime * 1_000_000_000)
+
     def test_two_paths_are_not_the_same_file(self):
         _, patched = seeded()
         assert patched.path.samefile("/data/dir/a.txt", "/data/dir/a.txt")
@@ -693,6 +702,16 @@ class TestDescriptors:
         patched.rename("/data/dir/a.txt", "/data/dir/a.txt")
         patched.close(fd)
         assert run(ops.read("/data/dir/a.txt")) == b"Jello"
+
+    def test_fdopen_opens_a_descriptor_as_io_open_does(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDWR | os.O_APPEND)
+        with patched.fdopen(fd, "a+b", 0) as f:
+            assert (f.tell(), f.truncate()) == (5, 5)
+        fd = patched.open("/data/dir/a.txt", os.O_RDONLY)
+        with patched.fdopen(fd, "r+b", 0) as f:
+            assert f.read() == b"hello"
+        assert run(ops.read("/data/dir/a.txt")) == b"hello"
 
     def test_a_host_path_keeps_a_host_descriptor(self, tmp_path):
         _, patched = seeded()

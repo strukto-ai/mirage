@@ -64,6 +64,9 @@ class World:
             return []
         return None
 
+    def check_write(self, path):
+        pass
+
     def create(self, path):
         self.effects.append(("create", path))
 

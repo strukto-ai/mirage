@@ -39,7 +39,7 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
 
-  constructor(options: RuntimeOptions<DaytonaConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<DaytonaConfig> = {}) {
     super(options, DAYTONA_CONFIG_KEYS)
     requireId('daytona', 'sandboxId', this.config.sandboxId)
   }
@@ -59,7 +59,7 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     this.sandbox = await this.client.get(this.config.sandboxId)
   }
 
-  async execLine(
+  override async execLine(
     line: string,
     stdin: Uint8Array | null,
     env: Record<string, string>,

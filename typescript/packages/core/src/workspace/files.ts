@@ -297,7 +297,7 @@ export class Files {
       }
       throw err
     }
-    if (owner === null) return result
+    if (owner === null || (op === 'write' && kwargs.admit_only === true)) return result
     const record = (answer: unknown): Promise<void> =>
       this.recordOp(
         op,

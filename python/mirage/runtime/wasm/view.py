@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+import posixpath
 from pathlib import Path
 from typing import Any
 
 from mirage.errors.fs import einval, enoent, exdev
-from mirage.runtime.constants import ABSENT_PATH
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FlushStep, Kept
 from mirage.runtime.types import VFSEntry, VFSStat
@@ -68,19 +69,8 @@ class WasmView:
             await self._files.abort()
 
     def _prefixes(self) -> list[str]:
-        """Mount prefixes that claim a path away from the build directory.
-
-        A mount at `/` is left out, and this is the only place in the
-        stack that treats it differently. Both readers here assume a
-        prefix names a directory level: `_claimed_by_mount` takes a
-        claim as exclusive, which for `/` would mean the interpreter's
-        own build tree resolves through the workspace rather than off
-        disk, and `_readdir_root` lists each prefix's first segment,
-        which for `/` is the empty string. Leaving it out costs nothing:
-        `_serving_build` already falls through to the file API for every
-        path the build does not hold, which is how a root mount is
-        served here.
-        """
+        """Non-root prefixes own their complete subtree; a root mount takes
+        what the build directory does not hold."""
         if self._files is None:
             return []
         return [p for p in self._files.prefixes() if p != "/"]
@@ -123,7 +113,13 @@ class WasmView:
             PermissionError: the build directory serves this path.
         """
         if self._serving_build(path) is not None:
-            raise PermissionError(READONLY_HINT)
+            raise PermissionError(errno.EACCES, READONLY_HINT, path)
+        if (
+            self._build is not None
+            and self._build.has(posixpath.dirname(path))
+            and (self._files is None or not self._files.serves(path))
+        ):
+            raise PermissionError(errno.EACCES, READONLY_HINT, path)
 
     def _require_files(self) -> RuntimeFiles:
         if self._files is None:
@@ -218,7 +214,7 @@ class WasmView:
         """
         try:
             return self.lstat(path) if nofollow else self.stat(path)
-        except ABSENT_PATH:
+        except FileNotFoundError:
             return None
 
     def listing_or_none(self, path: str) -> list[VFSEntry] | None:
@@ -269,6 +265,10 @@ class WasmView:
             path, offset=offset, size=size, raw=raw
         )
 
+    def check_write(self, path: str) -> None:
+        self._deny_build(path)
+        self._files_for(path).check_write(path)
+
     def create(self, path: str) -> None:
         self._deny_build(path)
         self._core_call("create", path)
@@ -305,7 +305,7 @@ class WasmView:
         if src_build or dst_build:
             if src_build != dst_build:
                 raise exdev(src)
-            raise PermissionError(READONLY_HINT)
+            raise PermissionError(errno.EACCES, READONLY_HINT, src)
         self._files_for(dst)
         self._files_for(src).rename(src, dst)
 
@@ -419,9 +419,15 @@ class WasmView:
         if path == "/":
             return self._readdir_root()
         build = self._serving_build(path)
-        if build is not None:
-            return build.readdir(path)
-        return self._readdir_files(path)
+        if build is None:
+            return self._readdir_files(path)
+        if self._files is not None and "/" in self._files.prefixes():
+            row = self._files.stat_or_none(path)
+            if row is not None and row.is_dir:
+                entries = dict(self._readdir_files(path))
+                entries.update(build.readdir(path))
+                return sorted(entries.items())
+        return build.readdir(path)
 
     def _readdir_files(self, path: str) -> list[tuple[str, int]]:
         entries: dict[str, int] = {}

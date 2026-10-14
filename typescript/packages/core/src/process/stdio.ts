@@ -1,6 +1,7 @@
 import { Channel, JobConsole } from '../shell/console/index.ts'
 import { BytePipe, CAPACITY } from '../io/pipe.ts'
 import { PipeClosed } from '../io/errors.ts'
+import { OutputStream } from '../io/stream.ts'
 
 export class ProcessInput {
   private readonly pipe: BytePipe
@@ -25,11 +26,18 @@ export class ProcessInput {
     this.close()
     this.pipe.closeReader()
   }
-  async *stream(): AsyncIterable<Uint8Array> {
+  private async *read(): AsyncGenerator<Uint8Array> {
     for await (const chunk of this.pipe.stream()) {
       this.bytesRead += chunk.byteLength
       yield chunk
     }
+  }
+
+  stream(): AsyncIterableIterator<Uint8Array> {
+    return new OutputStream(this.read(), () => {
+      this.stop()
+      return Promise.resolve()
+    })
   }
 }
 

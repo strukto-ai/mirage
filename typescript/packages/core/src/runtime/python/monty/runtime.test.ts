@@ -38,7 +38,8 @@ function makeBridge(
   const writes: [string, Uint8Array][] = []
   const mutations: string[] = []
   const appends: [string, Uint8Array][] = []
-  const dispatch: BridgeDispatchFn = (op, path, bytes, dst) => {
+  const dispatch: BridgeDispatchFn = (op, path, bytes, dst, attrs) => {
+    if (attrs?.admitOnly) return Promise.resolve(undefined)
     if (op === 'read') {
       const data = files.get(path)
       if (data === undefined) {

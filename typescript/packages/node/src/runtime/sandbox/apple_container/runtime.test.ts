@@ -22,9 +22,9 @@ import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type { ProcessExecution } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { describe, expect, it } from 'vitest'
 import type { AppleContainerConfig } from './config.ts'
-import { PRELUDE } from './constants.ts'
 import { AppleContainerRuntime } from './runtime.ts'
 import { Workspace } from '../../../workspace.ts'
 
@@ -105,7 +105,7 @@ function makeRuntime(
 }
 
 function prelude(cwd: string, ...argv: string[]): ReturnType<typeof spawnSync> {
-  return spawnSync('/bin/sh', ['-c', PRELUDE, 'sh', cwd, ...argv])
+  return spawnSync('/bin/sh', ['-c', EXEC_PRELUDE, 'sh', cwd, ...argv])
 }
 
 describe('AppleContainerRuntime', () => {
@@ -150,7 +150,8 @@ describe('AppleContainerRuntime', () => {
     [{ container: '' }, 'container must be a nonblank id'],
     [{ containers: { agent_a: '' } }, 'nonblank id: agent_a'],
     [{ container: 'shared', containers: { b: ' ', a: 'box' } }, 'nonblank id: b'],
-  ])('config %j refuses a blank container id', (config, named) => {
+    [{ mountType: 'ssh', containers: { a: 'box' } }, 'cannot be combined with containers'],
+  ])('config %j is refused', (config, named) => {
     expect(() => makeRuntime({ config })).toThrow(named)
   })
 
@@ -178,7 +179,7 @@ describe('AppleContainerRuntime', () => {
       'box',
       'sh',
       '-c',
-      PRELUDE,
+      EXEC_PRELUDE,
       'sh',
       '/root/ws',
       'sh',
@@ -230,7 +231,7 @@ describe.skipIf(process.platform === 'win32')('AppleContainerRuntime against a r
   })
 })
 
-describe.skipIf(process.platform === 'win32')('PRELUDE', () => {
+describe.skipIf(process.platform === 'win32')('EXEC_PRELUDE', () => {
   it('enters the cwd and hands over argv unchanged', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'prelude-'))
     try {
@@ -300,7 +301,7 @@ it('preserves argv through execute and shares the shell connection', async () =>
       'box',
       'sh',
       '-c',
-      PRELUDE,
+      EXEC_PRELUDE,
       'sh',
       '/work',
       ...argv,

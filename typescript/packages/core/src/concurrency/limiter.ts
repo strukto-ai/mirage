@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { abortable, mergeSignals } from '../utils/abort.ts'
+import { abortable, makeAbortError, mergeSignals } from '../utils/abort.ts'
 
 /**
  * Limit concurrent async operations within one process.
@@ -39,14 +39,29 @@ export class ConcurrencyLimiter {
    *
    * The release is idempotent so a caller that unwinds twice (a `finally`
    * plus an explicit call) cannot inflate the permit count -- python gets
-   * that from `async with` and the shape here has to supply it.
+   * that from `async with` and the shape here has to supply it. An abort
+   * leaves the queue without a permit, as a cancelled `acquire` does in
+   * python.
+   *
+   * Args:
+   *   signal: abandons the wait when it fires.
    */
-  async acquire(): Promise<() => void> {
+  async acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted === true) throw makeAbortError(signal)
     if (this.available > 0) {
       this.available -= 1
     } else {
-      await new Promise<void>((resolve) => {
-        this.waiters.push(resolve)
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = (): void => {
+          this.waiters.splice(this.waiters.indexOf(admit), 1)
+          reject(makeAbortError(signal))
+        }
+        const admit = (): void => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve()
+        }
+        this.waiters.push(admit)
+        signal?.addEventListener('abort', onAbort, { once: true })
       })
     }
     let released = false
@@ -112,8 +127,7 @@ export async function* boundedMapStream<T, R>(
   const producer = (async (): Promise<void> => {
     try {
       for (;;) {
-        const release =
-          permits === null ? (): void => undefined : await abortable(permits.acquire(), signal)
+        const release = permits === null ? (): void => undefined : await permits.acquire(signal)
         const next = await abortable(iterator.next(), signal)
         if (next.done === true) {
           release()

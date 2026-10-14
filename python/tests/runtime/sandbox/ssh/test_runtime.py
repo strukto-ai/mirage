@@ -35,6 +35,9 @@ class FakeConn:
     def __init__(self) -> None:
         self.closed = False
 
+    def is_closed(self) -> bool:
+        return self.closed
+
     def close(self) -> None:
         self.closed = True
 
@@ -71,7 +74,12 @@ def test_connect_kwargs_map_the_config():
 
 def test_connect_kwargs_defaults_stay_out():
     kwargs = SSHRuntime(config={"host": "box"})._connect_kwargs()
-    assert kwargs == {"host": "box", "known_hosts": None, "login_timeout": 30}
+    assert kwargs == {
+        "host": "box",
+        "known_hosts": None,
+        "login_timeout": 30,
+        "connect_timeout": 30,
+    }
 
 
 @pytest.mark.asyncio
@@ -234,3 +242,23 @@ async def test_a_failed_line_still_closes_its_channel():
     with pytest.raises(ConnectionResetError):
         await runtime._ssh("true", None)
     assert process.calls == ["eof", "close"]
+
+
+@pytest.mark.asyncio
+async def test_dropped_connection_reconnects_before_next_command(monkeypatch):
+    connections: list[FakeConn] = []
+
+    async def connect(**kwargs):
+        conn = FakeConn()
+        connections.append(conn)
+        return conn
+
+    monkeypatch.setattr(sdk, "connect", connect)
+    runtime = FakeSSHRuntime(config={"host": "box"})
+    await runtime.run_line("true", None, {}, "/")
+    await runtime.run_line("true", None, {}, "/")
+    assert len(connections) == 1
+    connections[0].close()
+    await runtime.run_line("true", None, {}, "/")
+    assert len(connections) == 2
+    await runtime.close()

@@ -2192,3 +2192,32 @@ async def test_a_mount_with_no_scan_guard_is_not_counted():
     with Workspace({"/ram/": vfs}) as ws:
         answer, _ = await ws.dispatch("before_full_scan", _path("/ram/d"))
     assert (answer, vfs.trees) == (None, 0)
+
+
+@pytest.mark.asyncio
+async def test_path_admission_checks_aliases_without_backend_io(monkeypatch):
+    ram = RAMVFS()
+    ws = Workspace({"/data": ram}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir /data/real; ln -s /data/real /data/alias")
+        call = AsyncMock(side_effect=AssertionError("unexpected backend call"))
+        monkeypatch.setattr(MountEntry, "call", call)
+        with pytest.raises(PermissionError):
+            await ws.dispatch(
+                "stat",
+                _path("/data/alias/new"),
+                caller=_by_command(_RefusingGate("/data/alias/new")),
+                admit_only=True,
+            )
+        gate = _RefusingGate("/unrelated")
+        result, _ = await ws.dispatch(
+            "stat",
+            _path("/data/alias/new"),
+            caller=_by_command(gate),
+            admit_only=True,
+        )
+        assert result is None
+        assert gate.asked == ["/data/alias/new", "/data/real/new"]
+        call.assert_not_awaited()
+    finally:
+        await ws.close()

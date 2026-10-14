@@ -12,26 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFile } from 'node:fs/promises'
-import { homedir, userInfo } from 'node:os'
-import { resolve } from 'node:path'
+import { constants } from 'node:os'
+import { Readable } from 'node:stream'
+import { once } from 'node:events'
+import { connectOptions } from '../../../utils/ssh.ts'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
 import { wrapLine } from './constants.ts'
 import type { CliResult } from '../cli.ts'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
-import type { Client, ClientChannel, ConnectConfig } from 'ssh2'
-
-function expandHome(p: string): string {
-  if (p === '~') return homedir()
-  if (p.startsWith('~/')) return resolve(homedir(), p.slice(2))
-  return p
-}
+import type { Client, ClientChannel } from 'ssh2'
 
 /**
  * A machine reached over SSH as a whole-line runtime.
@@ -54,7 +49,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
   readonly name = 'ssh'
   private client: Client | null = null
 
-  constructor(options: RuntimeOptions<SSHRuntimeConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<SSHRuntimeConfig> = {}) {
     super(options, SSH_RUNTIME_CONFIG_KEYS)
     requireId('ssh', 'host', this.config.host)
   }
@@ -64,39 +59,34 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
     return loadSdk()
   }
 
-  private async connectOpts(): Promise<ConnectConfig> {
-    const opts: ConnectConfig = {
-      host: this.config.hostname ?? this.config.host,
-      port: this.config.port ?? 22,
-      username: this.config.username ?? userInfo().username,
-      readyTimeout: (this.config.timeout ?? 30) * 1000,
-    }
-    if (this.config.identityFile !== undefined) {
-      opts.privateKey = await readFile(expandHome(this.config.identityFile))
-    } else if (process.env.SSH_AUTH_SOCK) {
-      // A named key is used alone; with none, the ssh-agent
-      // authenticates. The Python twin's asyncssh also tries the agent
-      // beside a named key, and the default key files.
-      opts.agent = process.env.SSH_AUTH_SOCK
-    }
-    return opts
-  }
-
   async connect(): Promise<void> {
     const sdk = await this.loadSdk()
     const client = new sdk.Client()
-    const opts = await this.connectOpts()
+    const opts = await connectOptions(
+      this.config.host,
+      this.config.hostname,
+      this.config.port,
+      this.config.username,
+      this.config.identityFile,
+      this.config.timeout ?? 30,
+    )
     await new Promise<void>((resolveFn, rejectFn) => {
       client.on('ready', () => {
         resolveFn()
       })
       client.on('error', rejectFn)
+      client.on('close', () => {
+        if (this.client === client) {
+          this.client = null
+          this.disconnected()
+        }
+      })
       client.connect(opts)
     })
     this.client = client
   }
 
-  async execLine(
+  override async execLine(
     line: string,
     stdin: Uint8Array | null,
     env: Record<string, string>,
@@ -141,8 +131,12 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
         let code: number | null = null
         stream.on('data', (chunk: Buffer) => out.push(chunk))
         stream.stderr.on('data', (chunk: Buffer) => errs.push(chunk))
-        stream.on('exit', (c: number | null) => {
-          code = c
+        stream.on('exit', (c: number | null, signalName?: string) => {
+          code =
+            c ??
+            (signalName
+              ? 128 + constants.signals[`SIG${signalName.replace(/^SIG/, '')}` as NodeJS.Signals]
+              : 1)
         })
         stream.on('close', () => {
           signal?.removeEventListener('abort', abort)
@@ -164,12 +158,38 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
     })
   }
 
-  override close(): Promise<void> {
+  override openPipe(command: string): Promise<SandboxPipe> {
+    const client = this.client
+    if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
+    return new Promise((resolve, reject) => {
+      client.exec(command, (error: Error | undefined, stream: ClientChannel) => {
+        if (error !== undefined) {
+          reject(error)
+          return
+        }
+        stream.stderr.resume()
+        const exited = once(stream, 'close').catch((err: unknown) => {
+          console.debug('ssh helper closed', err)
+        })
+        resolve({
+          reader: Readable.toWeb(stream) as ReadableStream<Uint8Array>,
+          writer: stream,
+          stop: async () => {
+            stream.close()
+            await exited
+          },
+        })
+      })
+    })
+  }
+
+  override async close(): Promise<void> {
+    await super.close()
+    this.disconnected()
     if (this.client !== null) {
       this.client.end()
       this.client = null
     }
-    return Promise.resolve()
   }
 }
 

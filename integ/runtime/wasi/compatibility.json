@@ -1,0 +1,227 @@
+{
+  "requires": {
+    "python": [
+      "env:MIRAGE_WASI_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "exit_status",
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'import sys; print(\"before\"); sys.exit(200)'",
+          "expect": {
+            "exit": 200,
+            "stdout": "before\n",
+            "stderr": ""
+          }
+        }
+      ],
+      "hosts": [
+        "python"
+      ]
+    },
+    {
+      "id": "exit_wrap",
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'import sys; sys.exit(-1)'",
+          "expect": {
+            "exit": 255,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      ],
+      "hosts": [
+        "python"
+      ]
+    },
+    {
+      "id": "traceback_source",
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'x = 1\n1 / 0'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "Traceback (most recent call last):\n  File \"<string>\", line 2, in <module>\n    1 / 0\n    ~~^~~\nZeroDivisionError: division by zero\n"
+          }
+        }
+      ],
+      "hosts": [
+        "python"
+      ]
+    },
+    {
+      "id": "sleep_deadline",
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "timeout 0.1 python3 -c \"import time; time.sleep(30)\"",
+          "expect": {
+            "exit": 124,
+            "stdout": ""
+          }
+        }
+      ],
+      "hosts": [
+        "python"
+      ]
+    },
+    {
+      "id": "rights",
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'import os\nf=os.open(\"/data/f.txt\",os.O_WRONLY)\ntry: os.read(f,1)\nexcept OSError as e: print(e.errno)\nos.close(f)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "8\n",
+            "stderr": ""
+          }
+        }
+      ],
+      "hosts": [
+        "python"
+      ]
+    },
+    {
+      "id": "path_spelling",
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'import os\nfor p in [\"/data/f.txt/\", \"/data/f.txt/.\"]:\n try: os.stat(p)\n except OSError as e: print(e.errno)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "54\n54\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c 'import os, stat\nprint(os.stat(\"/data/../data/f.txt\").st_size, os.path.isfile(\"/data/..\" + os.__file__))\nos.mkdir(\"/data/d\")\nos.symlink(\"/data/d\", \"/data/l\")\nprint(stat.S_ISDIR(os.lstat(\"/data/l/\").st_mode))\nf = open(\"/data/f.txt\")\nos.unlink(\"/data/f.txt\")\nprint(os.fstat(f.fileno()).st_nlink)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "3 True\nTrue\n0\n",
+            "stderr": ""
+          }
+        }
+      ],
+      "hosts": [
+        "python"
+      ]
+    },
+    {
+      "id": "reader_refresh",
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'r=open(\"/data/f.txt\", \"rb\", buffering=0); print(r.read()); a=open(\"/data/f.txt\",\"ab\",buffering=0); a.write(b\"DEF\"); a.close(); print(r.read()); r.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "b'abc'\nb'DEF'\n",
+            "stderr": ""
+          }
+        }
+      ],
+      "hosts": [
+        "python"
+      ]
+    }
+  ]
+}

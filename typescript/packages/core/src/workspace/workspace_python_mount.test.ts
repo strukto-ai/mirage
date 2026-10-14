@@ -100,7 +100,10 @@ describe('Workspace + Python mount', () => {
       {
         mode: MountMode.EXEC,
         shellParser: parser,
-        runtimes: [new PyodideRuntime({ config: { autoLoadFromImports: true } }), 'workspace'],
+        runtimes: [
+          new PyodideRuntime({ config: { packages: ['pillow'], autoLoadFromImports: true } }),
+          'workspace',
+        ],
       },
     )
     ws.addMount('/ram', ram, MountMode.EXEC)

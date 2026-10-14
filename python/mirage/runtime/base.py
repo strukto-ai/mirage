@@ -19,7 +19,11 @@ from typing import Any, Callable, ClassVar
 from mirage.runtime.binding import RuntimeContext, WorkspaceBinding
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
-from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
+from mirage.runtime.mixin import (
+    LineExecutorMixin,
+    ProcessExecutorMixin,
+    StreamingProcessMixin,
+)
 from mirage.runtime.types import (
     ExecutionRequest,
     FilesystemOperation,
@@ -28,6 +32,7 @@ from mirage.runtime.types import (
     RuntimeCapabilities,
     RuntimeReach,
     ShellRequest,
+    StreamExecution,
 )
 from mirage.utils.activity import Activity
 
@@ -93,6 +98,20 @@ class Runtime(ABC):
         if captures is not None:
             self.captures = tuple(captures)
         self.config = self.config_cls.coerce(config)
+        env = getattr(self.config, "env", None)
+        if env is not None and (
+            not isinstance(env, dict)
+            or any(
+                not isinstance(k, str) or not isinstance(v, str)
+                for k, v in env.items()
+            )
+        ):
+            raise ValueError("runtime env must map strings to strings")
+
+    @property
+    def file_effects_dispatched(self) -> bool:
+        """Whether workspace file mutations already invalidate through dispatch."""
+        return self.reach == "workspace"
 
     @property
     def capabilities(self) -> RuntimeCapabilities:
@@ -134,12 +153,33 @@ class Runtime(ABC):
                     raise ValueError(
                         f"{self.name}: context belongs to another binding"
                     )
+                if (
+                    self.reach != "workspace"
+                    and context.restricted_mounts
+                    and not self._serves_session(context)
+                ):
+                    return RunResult(
+                        stdout=b"",
+                        exit_code=127,
+                        stderr=(
+                            f"{self.name}: runtime cannot enforce this session's "
+                            "file restrictions\n"
+                        ).encode(),
+                    )
                 return await context.scope.run(
                     lambda: self._execute(request, context)
                 )
             return await self._execute(request, None)
         finally:
             release()
+
+    def _serves_session(self, context: RuntimeContext) -> bool:
+        """Whether every restricted mount is served through this caller's gate.
+
+        Args:
+            context (RuntimeContext): the execution's captured workspace view.
+        """
+        return False
 
     def admit(self) -> Callable[[], None]:
         """Count one unit of work, refused once the runtime is retired."""
@@ -163,6 +203,12 @@ class Runtime(ABC):
     async def _execute(
         self, request: ExecutionRequest, context: RuntimeContext | None
     ) -> RunResult:
+        if isinstance(request, StreamExecution) and isinstance(
+            self, StreamingProcessMixin
+        ):
+            if not request.argv:
+                raise ValueError("process argv must not be empty")
+            return await self.run_stream(request)
         if isinstance(request, ProcessExecution) and isinstance(
             self, ProcessExecutorMixin
         ):

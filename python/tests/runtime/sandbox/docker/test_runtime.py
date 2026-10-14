@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 
 import pytest
 
+from mirage.runtime.sandbox import cli
 from mirage.runtime.sandbox.docker import DockerRuntime
 
 
@@ -67,10 +67,15 @@ async def test_exec_line_threads_cwd_env_stdin_and_real_stderr():
         "exec",
         "-i",
         "-w",
-        "/root/workspace",
+        "/",
         "-e",
         "E=1",
         "cid-42",
+        "sh",
+        "-c",
+        'cd -- "$1" || exit 126; shift; exec "$@"',
+        "sh",
+        "/root/workspace",
         "sh",
         "-c",
         "wc -l",
@@ -87,13 +92,13 @@ def test_mount_type_is_one_of_ssh_fuse_both():
 @pytest.mark.asyncio
 async def test_a_pipe_holds_docker_exec_open_byte_for_byte(monkeypatch):
     spawned: list[tuple[str, ...]] = []
-    spawn = asyncio.create_subprocess_exec
+    spawn = cli._spawn
 
-    async def as_cat(*argv, **kwargs):
-        spawned.append(argv)
-        return await spawn("cat", **kwargs)
+    async def as_cat(executable, args, **kwargs):
+        spawned.append((executable, *args))
+        return await spawn("cat", [], **kwargs)
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", as_cat)
+    monkeypatch.setattr(cli, "_spawn", as_cat)
     runtime = DockerRuntime(config={"container": "cid-42"})
     pipe = await runtime.open_pipe("exec sshfs x y")
     assert spawned == [

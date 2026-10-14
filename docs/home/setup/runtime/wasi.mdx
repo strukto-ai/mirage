@@ -92,3 +92,14 @@ Anything built on these calls, such as `os.path`, `pathlib`, `glob`,
 | `subprocess`, `socket` | No | Raise `OSError` (errno 58). |
 
 Paths outside the mounts show the CPython build, read-only.
+
+
+Compiled modules and idle engines are reused across runs; each invocation still
+gets a fresh store, filesystem descriptors, memory and interruption epoch. A
+sleeping guest observes cancellation through the preview1 poll bridge. Exit
+statuses use the low eight bits, including 130, 200 and 255, and open files are
+flushed on exit. Traceback source lines come from the user program's line cache.
+
+The CPython WASI libc can normalize an empty path before issuing a syscall;
+Mirage cannot recover spelling already removed by the interpreter. Its preview1
+boundary rejects empty paths and preserves trailing directory requirements.

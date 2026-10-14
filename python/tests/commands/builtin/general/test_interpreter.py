@@ -35,7 +35,7 @@ class EchoRuntime(LanguageRuntime):
     def __init__(self, dispatch=None):
         self.seen: list[RunArgs] = []
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         self.seen.append(args)
         return RunResult(stdout=args.code.encode(), stderr=None, exit_code=0)
 

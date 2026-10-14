@@ -78,14 +78,17 @@ list it yourself:
 
 ## What is wired
 
-`std` and `os` are globals, as in `qjs --std`.
+`std` and `os` are globals, as in `qjs --std`. Python uses the supplied
+QuickJS-NG WASI build; TypeScript uses the bundled QuickJS engine and the
+Mirage file adapter. Both expose `std.Error`, `os.platform` (`wasi`),
+`atob`, `btoa`, and `queueMicrotask`.
 
 | JavaScript | Python SDK | TypeScript SDK | Notes |
 | --- | --- | --- | --- |
 | `std.open(path, mode, errorObj)`, modes `r`, `w`, `a`, `+`, `x`, `b` | Yes | Yes | `null` on failure, with `errorObj.errno`. A read-only mount refuses only the modes that write. |
 | FILE `readAsString`, `read`, `getline`, `seek`, `tell`, `eof` | Yes | Yes | |
 | FILE `puts`, `write` | Yes | Yes | Written at `close`, or when the run ends. |
-| FILE `flush` | Yes | Does nothing | |
+| FILE `flush` | Yes | Yes | Writes what the FILE buffered to the file. |
 | FILE `printf`, `tello` | Yes | No | |
 | `os.readdir`, `os.stat` | Yes | Yes | Return `[value, errno]`. In Python, `mode` has only the file type bits. |
 | `os.mkdir`, `os.remove`, `os.utimes` | Yes | Yes | `os.remove` also removes an empty directory. |
@@ -94,8 +97,9 @@ list it yourself:
 | `std.getenv` | Yes | Yes | The session's environment. |
 | `scriptArgs`, `std.in.readAsString()` | Yes | Yes | The words after the script, and the piped input. |
 | `std.out.puts`, `std.err.puts`, `console.log`, `print`, `std.exit` | Yes | Yes | |
-| `std.out.printf`, `std.err.printf` | Yes | Yes | C format; return the characters written. Unlike `printf` on an opened FILE. |
-| `std.loadFile`, `std.writeFile`, `std.fdopen`, `std.printf` | Yes | No | |
+| `std.out.printf`, `std.err.printf` | Yes | Yes | C format; return the UTF-8 bytes written. Unlike `printf` on an opened FILE. |
+| `std.loadFile`, `std.printf` | Yes | Yes | `loadFile` returns `null` when reading fails. |
+| `std.writeFile`, `std.fdopen` | Yes | No | |
 | `std.strerror`, `std.setenv`, `std.getenviron`, `std.out.flush` | Yes | No | |
 | `os.open`, `os.read`, `os.write`, `os.seek`, `os.close` | Yes | No | |
 | `os.sleep`, `os.setTimeout` | Yes | No | |
@@ -119,3 +123,6 @@ In TypeScript, any `std` or `os` function not listed as supported throws
 - QuickJS cannot reach host files or the network. `command_limits` bound its
   time and output, and in TypeScript a run also stops at 64 MiB of memory.
   Run untrusted or heavy code in a [sandbox](/home/setup/runtime/sandbox).
+- The Python host inherits the supplied WASI build's diagnostic filenames
+  (`<cmdline>` for evaluated source) and `os.getcwd()` spelling after `..`.
+  Its libc can normalize an empty path before Mirage sees the syscall.

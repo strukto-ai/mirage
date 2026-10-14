@@ -156,6 +156,7 @@ describe('PyodideFs', () => {
         }
         return undefined
       },
+      checkPath: () => undefined,
       xattr: () => undefined,
     }
   }
@@ -200,6 +201,7 @@ describe('PyodideFs', () => {
         throw new Error(`not a link: ${path}`)
       },
       flush: () => undefined,
+      checkPath: () => undefined,
       xattr: () => undefined,
     }
   }

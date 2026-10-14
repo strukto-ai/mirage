@@ -15,7 +15,6 @@
 import { PythonRuntime } from '../base.ts'
 import type { RunArgs, RunResult } from '../../types.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
-import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { unhonoredNotice, type InitFlags } from '../flags.ts'
 import type { MontyConfig } from './config.ts'
@@ -77,10 +76,6 @@ export class MontyRuntime extends PythonRuntime {
    * Args:
    *   args: the execution request.
    */
-  protected override executeCode(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    return this.run(args, context)
-  }
-
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
     const notice = unhonoredNotice((args.flags ?? {}) as InitFlags, this.name)
     const execution =
@@ -88,7 +83,7 @@ export class MontyRuntime extends PythonRuntime {
     const result = await execution
       .run(
         args.cwd === undefined && context !== undefined ? { ...args, cwd: context.cwd } : args,
-        this.perRunVfs(context),
+        RuntimeFiles.of(context),
       )
       .finally(async () => {
         if (execution !== this.execution) await execution.close()
@@ -103,9 +98,5 @@ export class MontyRuntime extends PythonRuntime {
 
   override close(): Promise<void> {
     return this.execution.close()
-  }
-
-  private perRunVfs(context?: RuntimeContext): RuntimeFiles | null {
-    return RuntimeFiles.of(context)
   }
 }

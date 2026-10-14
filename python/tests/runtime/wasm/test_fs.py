@@ -60,13 +60,13 @@ def test_spec_names_all_resolve_to_methods_with_matching_arity():
         # self + caller + one parameter per wasm value type.
         arity = len(inspect.signature(method).parameters)
         assert arity == len(params) + 2, name
-        assert len(results) == 1, name
+        assert len(results) == (0 if name == "proc_exit" else 1), name
 
 
 def test_spec_covers_every_fs_import_of_the_shipped_guests():
     # python.wasm imports 28 preview1 fs functions; qjs-wasi.wasm a
     # 16-function subset. fd_renumber is shadowed too (dup2 support).
-    assert len(_spec()) == 29
+    assert len(_spec()) == 33
 
 
 def _raising(exc):

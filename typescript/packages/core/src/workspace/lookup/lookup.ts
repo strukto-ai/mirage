@@ -256,11 +256,9 @@ export function program(
  * reports on it.
  */
 export function execs(name: string, session: SessionState, registry: MountRegistry): boolean {
-  return (
-    name.includes('/') ||
-    program(name, session, registry) !== null ||
-    lookup(name, session, registry) === Consumer.FUNCTION
-  )
+  if (name.includes('/') || program(name, session, registry) !== null) return true
+  const consumer = lookup(name, session, registry)
+  return consumer === Consumer.FUNCTION || consumer === Consumer.EXTERNAL
 }
 
 /**

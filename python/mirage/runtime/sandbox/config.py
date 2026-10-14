@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.sandbox.constants import MOUNT_TYPES
+from mirage.runtime.types import MountType
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,9 +32,16 @@ class SandboxConfig(RuntimeConfig):
 
     Args:
         env (dict[str, str]): environment set in the sandbox.
+        mount_type (MountType | None): how the sandbox sees the
+            workspace: ``ssh`` serves every prefix the session sees from
+            the host over SFTP (the image needs sshfs), ``fuse`` leaves
+            them to a mirage in the sandbox, ``both`` serves from the
+            host what the sandbox does not mount itself. None serves
+            nothing.
     """
 
     env: dict[str, str] = field(default_factory=dict)
+    mount_type: MountType | None = None
 
 
 def check_mount_type(runtime: str, mount_type: str | None) -> None:

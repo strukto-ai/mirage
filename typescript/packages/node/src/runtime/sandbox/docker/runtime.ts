@@ -12,17 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { spawn } from 'node:child_process'
-import { once } from 'node:events'
-import { Readable } from 'node:stream'
+import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
-import { checkMountType, requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
+import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
 import { DOCKER_CLI_HINT } from './constants.ts'
-import { type CliResult, runCli } from '../cli.ts'
+import { type CliResult, openCliPipe, runCli } from '../cli.ts'
 
 /**
  * A container the user runs as a whole-line runtime.
@@ -37,10 +35,9 @@ import { type CliResult, runCli } from '../cli.ts'
 export class DockerRuntime extends RemoteSandbox<DockerConfig> {
   readonly name = 'docker'
 
-  constructor(options: RuntimeOptions<DockerConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<DockerConfig> = {}) {
     super(options, DOCKER_CONFIG_KEYS)
     requireId('docker', 'container', this.config.container)
-    this.serveMounts(checkMountType('docker', this.config.mountType))
   }
 
   // One docker CLI invocation; the seam tests override.
@@ -67,40 +64,22 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
     }
   }
 
-  async execLine(
-    line: string,
+  protected override async execArgv(
+    argv: readonly string[],
     stdin: Uint8Array | null,
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const args = ['exec', '-i', '-w', cwd]
+    const args = ['exec', '-i', '-w', '/']
     for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
-    args.push(this.config.container, 'sh', '-c', line)
+    args.push(this.config.container, 'sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv)
     const result = await this.docker(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
   override openPipe(command: string): Promise<SandboxPipe> {
-    const child = spawn('docker', ['exec', '-i', this.config.container, 'sh', '-c', command], {
-      stdio: ['pipe', 'pipe', 'ignore'],
-    })
-    // A command that ends while an answer is on its way EPIPEs the
-    // pipe; unheard, that error would end the whole process.
-    child.stdin.on('error', (err) => {
-      console.debug(`docker: the pipe for ${command} closed`, err)
-    })
-    const exited = once(child, 'close').catch((err: unknown) => {
-      console.debug(`docker: the pipe for ${command} did not start`, err)
-    })
-    return Promise.resolve({
-      reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-      writer: child.stdin,
-      stop: async () => {
-        if (child.exitCode === null && child.signalCode === null) child.kill()
-        await exited
-      },
-    })
+    return openCliPipe('docker', ['exec', '-i', this.config.container, 'sh', '-c', command])
   }
 }
 

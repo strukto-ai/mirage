@@ -51,7 +51,7 @@ A [route policy](/home/policy/route-policy) can pick the runtime per line instea
 | Entry | Takes |
 | --- | --- |
 | A name, such as `python3` or `ffmpeg` | That program |
-| `@external` | Every program Mirage does not have itself, such as `gcc`, `ffmpeg`, `uname` or a vendor CLI |
+| `@external` | Every program Mirage does not have itself, such as `gcc`, `ffmpeg`, `perl` or a vendor CLI |
 | `*` | The whole line, Mirage's own commands included (sandboxes only) |
 
 | Runtime | Default `captures` |
@@ -88,7 +88,7 @@ Here `python3 job.py | grep error` runs `python3` in the container and
 | --- | --- | --- |
 | In-process | directly: every file it opens is the workspace's | nothing: no host files, no network, unless a Pyodide `init_module` adds them |
 | `local`, Sandlock | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under Sandlock, only the paths you grant |
-| Other sandboxes | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`), or a Mirage inside the sandbox | that sandbox's disk and network |
+| Other sandboxes | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `ssh`, `smolvm`, `apple_container`), or a Mirage inside the sandbox | that sandbox's disk and network |
 
 Mount modes, profiles and policies apply to every file call that reaches the workspace. A host or sandbox runtime also has its own files and network, which they do not cover; only an all in-process list, with no Pyodide `init_module`, keeps agent code inside them.
 
@@ -110,3 +110,10 @@ mounts:
 The deadline also stops the run in Monty, WASI, Pyodide, QuickJS, `local` and
 Sandlock. The other sandboxes only stop waiting, so give untrusted code a
 finite workload; see [sandbox timeouts](/home/setup/runtime/sandbox#timeouts).
+
+
+Session hides, path rules, and mount mode caps require a runtime that serves
+files through that session's dispatcher. A native or remote runtime without
+that capability refuses the run with exit 127 before launching a program.
+Local and Sandlock external programs stream input and output with bounded
+backpressure; a downstream command that closes its input stops the producer.

@@ -33,6 +33,7 @@ from mirage.runtime.python.host.file import (
     text_encoding,
 )
 from mirage.runtime.python.host.syscall import syscall
+from mirage.runtime.types import VFSStat
 from mirage.types import PathSpec
 from mirage.utils.path import CycleError, resolve_path
 from mirage.view.types import NamespaceLinks
@@ -106,6 +107,7 @@ class Descriptor:
     handle: FileHandle | None = None
     kept: Kept | None = None
     opened: str = ""
+    stat: VFSStat | None = None
 
     def __post_init__(self) -> None:
         if not self.opened:
@@ -226,7 +228,9 @@ class Descriptors:
         if facts.writable:
             self.land_path(path)
         row = apply_open(self._adapter, path, facts)
-        desc = Descriptor(self.walked(path), facts)
+        desc = Descriptor(
+            self.walked(path), facts, stat=row or self._adapter.stat(path)
+        )
         desc.handle = FileHandle.opened(
             path,
             None
@@ -259,7 +263,9 @@ class Descriptors:
             )
         directory = row is not None and row.is_dir
         if directory and not (facts.writable or facts.create):
-            desc = Descriptor(self.walked(path), facts)
+            desc = Descriptor(
+                self.walked(path), facts, stat=row or self._adapter.stat(path)
+            )
         else:
             desc = self._opened(path, facts)
         fd, write_end = cast(tuple[int, int], self._host.pipe())
@@ -293,6 +299,8 @@ class Descriptors:
         facts = parse_mode(mode)
         encoding = text_encoding(facts, encoding, errors, newline, buffering)
         desc = self._opened(path, facts)
+        if facts.append and desc.handle is not None:
+            desc.handle.seek(0, 2)
         key = id(desc)
         self._unnumbered[key] = desc
         raw = HandleRaw(
@@ -330,12 +338,34 @@ class Descriptors:
                     desc.kept.data, handle.flush_plan()
                 )
                 handle.settle(functools.partial(self._fetch, desc, True))
+                self._invalidate_peers(desc)
             return
         steps = handle.flush_plan()
         if not steps:
             return
         syscall(self._adapter.flush)(desc.path, steps)
         handle.settle(functools.partial(self._fetch, desc, True))
+        self._invalidate_peers(desc)
+
+    def _invalidate_peers(self, changed: Descriptor) -> None:
+        for peer in self._every():
+            same = (
+                peer.kept is changed.kept
+                if changed.kept is not None
+                else peer.kept is None and peer.path == changed.path
+            )
+            if peer is not changed and same and peer.handle is not None:
+                size = (
+                    len(kept_view(peer.kept, peer.facts.writable))
+                    if peer.kept is not None
+                    else changed.handle.size
+                    if changed.handle is not None
+                    else 0
+                )
+                peer.handle.invalidate(
+                    functools.partial(self._fetch, peer, peer.facts.writable),
+                    size,
+                )
 
     def land_path(self, path: str, follow: bool = True) -> None:
         """Land the writes of every file open on ``path``, which a change
@@ -447,6 +477,8 @@ class Descriptors:
             raise fs_error(desc.path, FsCondition.EISDIR)
         facts = parse_mode(mode)
         encoding = text_encoding(facts, encoding, errors, newline, buffering)
+        if facts.append:
+            desc.handle.seek(0, 2)
         raw = HandleRaw(
             desc.handle,
             facts.readable and desc.facts.readable,

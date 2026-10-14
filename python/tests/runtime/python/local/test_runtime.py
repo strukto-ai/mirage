@@ -524,3 +524,26 @@ def test_close_leaves_a_blocked_loops_child_to_that_loop():
             worker.join(10)
         owner.close()
     assert results[0].exit_code != 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "yes | perl -ne 'print; exit'",
+        "perl -e '$|=1; print \"y\\n\" while 1' | head -1",
+    ],
+)
+async def test_external_streams_infinite_pipes_and_closes_children(line):
+    runtime = LocalRuntime(captures=("@external",))
+    ws = Workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime, "workspace"]
+    )
+    try:
+        async with asyncio.timeout(5):
+            result = await ws.shell(line)
+        assert result.exit_code == 0, await result.stderr_str()
+        assert await result.stdout_str() == "y\n"
+        assert not runtime._children
+    finally:
+        await ws.close()

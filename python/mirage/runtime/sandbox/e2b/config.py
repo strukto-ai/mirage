@@ -16,10 +16,8 @@ from dataclasses import dataclass
 
 from mirage.runtime.sandbox.config import (
     SandboxConfig,
-    check_mount_type,
     require_id,
 )
-from mirage.runtime.types import MountType
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -31,18 +29,10 @@ class E2BConfig(SandboxConfig):
             spawn` or the SDK), with workspace files visible at matching
             paths when commands need them.
         api_key (str | None): E2B credential; None reads E2B_API_KEY.
-        mount_type (MountType | None): how the sandbox sees the
-            workspace: ``ssh`` serves every prefix the session sees from
-            the host over SFTP (the image needs sshfs), ``fuse`` leaves
-            them to a mirage in the sandbox, ``both`` serves from the
-            host what the sandbox does not mount itself. None serves
-            nothing.
     """
 
     sandbox_id: str
     api_key: str | None = None
-    mount_type: MountType | None = None
 
     def __post_init__(self) -> None:
         require_id("e2b", "sandbox_id", self.sandbox_id)
-        check_mount_type("e2b", self.mount_type)

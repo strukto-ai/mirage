@@ -110,7 +110,7 @@ export async function runWholeLine(
       }
     }
   } finally {
-    await invalidate()
+    if (!runtime.fileEffectsDispatched) await invalidate()
   }
   const [refused, bound] =
     route === null

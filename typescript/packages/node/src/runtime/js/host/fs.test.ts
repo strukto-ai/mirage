@@ -65,6 +65,26 @@ describe('patchNodeFs — mounted paths', () => {
     await ws.close()
   })
 
+  it('reports Node error metadata for open and descriptor failures', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await expect(fs.promises.open('/data/missing')).rejects.toMatchObject({
+      code: 'ENOENT',
+      syscall: 'open',
+      path: '/data/missing',
+      message: "ENOENT: no such file or directory, open '/data/missing'",
+    })
+    const handle = await fs.promises.open('/data/file', 'w')
+    await expect(handle.read(Buffer.alloc(1))).rejects.toMatchObject({
+      code: 'EBADF',
+      syscall: 'read',
+      message: 'EBADF: bad file descriptor, read',
+    })
+    await handle.close()
+    await ws.close()
+  })
+
   it('returns Buffer when no encoding is given', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)
@@ -290,6 +310,29 @@ describe('patchNodeFs — routed calls', () => {
 })
 
 describe('patchNodeFs — descriptors', () => {
+  it('refreshes another descriptor after append and preserves an unlinked stat', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f', 'abc')
+    const reader = await fs.promises.open('/data/f', 'r')
+    expect((await reader.read(Buffer.alloc(3))).bytesRead).toBe(3)
+    const writer = await fs.promises.open('/data/f', 'a')
+    await writer.write('DEF')
+    await writer.close()
+    const { buffer, bytesRead } = await reader.read(Buffer.alloc(3))
+    expect(buffer.toString('utf8', 0, bytesRead)).toBe('DEF')
+    await expect(reader.read(Buffer.alloc(3), 0, -1, 0)).rejects.toMatchObject({
+      code: 'ERR_OUT_OF_RANGE',
+    })
+    await expect(reader.read(Buffer.alloc(3), 0, 1, -5)).rejects.toMatchObject({
+      code: 'ERR_OUT_OF_RANGE',
+    })
+    await fs.promises.unlink('/data/f')
+    expect((await reader.stat()).nlink).toBe(0)
+    await reader.close()
+    await ws.close()
+  })
   it('lands a write made while a sync is out', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)

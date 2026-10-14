@@ -155,7 +155,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr_contains": "/boxdata is served by the sandbox itself, out of reach of this session's rules\n"
+            "stderr_contains": "/boxdata is not served through the dispatcher, out of reach of this session's rules\n"
           }
         },
         {
@@ -172,7 +172,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr_contains": "/boxdata is served by the sandbox itself, out of reach of this session's rules\n"
+            "stderr_contains": "/boxdata is not served through the dispatcher, out of reach of this session's rules\n"
           }
         },
         {
@@ -187,7 +187,7 @@
           "expect": {
             "exit": 1,
             "stdout": "",
-            "stderr_contains": "/boxdata is served by the sandbox itself, out of reach of this session's rules\n"
+            "stderr_contains": "/boxdata is not served through the dispatcher, out of reach of this session's rules\n"
           }
         }
       ]

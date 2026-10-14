@@ -859,16 +859,20 @@ class Dispatcher:
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
-        # The command's gate judges its own calls; a metadata call passes,
-        # as its guards let stat pass, and a scan guard reads nothing: the
-        # rule judges each read it guards.
-        rule_gate = (
-            None
-            if name in METADATA_OPS or name == "before_full_scan"
-            else caller.rule_gate
-        )
         # The dispatcher's own keywords: a read answered as it is pulled, and a
         # read of what the backend holds now, past the file cache.
+        admit_only = name in {"write", "stat"} and bool(
+            kwargs.pop("admit_only", False)
+        )
+        # The command's gate judges its own calls; a metadata call passes,
+        # as its guards let stat pass, unless it only asks admission, and a
+        # scan guard reads nothing: the rule judges each read it guards.
+        rule_gate = (
+            None
+            if (name in METADATA_OPS and not admit_only)
+            or name == "before_full_scan"
+            else caller.rule_gate
+        )
         stream = name == "read" and bool(kwargs.pop("stream", False))
         direct = name == "read" and bool(kwargs.pop("direct", False))
         await self._prepare(caller)
@@ -883,6 +887,17 @@ class Dispatcher:
         await self._refuse_rename(call)
         if report is not None:
             report.path = call.path.virtual
+        if admit_only:
+            self._follow(call)
+            if name == "stat":
+                _memory_answered(report)
+                return None, IOResult()
+            mount = self._namespace.try_mount_for(call.path.virtual)
+            if mount is None:
+                raise enoent(call.path.virtual)
+            await self._admit(call, mount, CALLS["write"])
+            _memory_answered(report)
+            return None, IOResult()
         if self._table_answers(name, call.path.virtual, kwargs):
             return (
                 await self._table_call(

@@ -93,14 +93,15 @@ export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise
     void promise.catch(() => undefined)
     return Promise.reject(makeAbortError(signal))
   }
+  let onAbort = (): void => undefined
   return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
+    onAbort = (): void => {
       reject(makeAbortError(signal))
     }
     signal.addEventListener('abort', onAbort, { once: true })
-    promise.then(resolve, reject).finally(() => {
-      signal.removeEventListener('abort', onAbort)
-    })
+    promise.then(resolve, reject)
+  }).finally(() => {
+    signal.removeEventListener('abort', onAbort)
   })
 }
 

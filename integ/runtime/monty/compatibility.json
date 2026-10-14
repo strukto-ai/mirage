@@ -1,0 +1,170 @@
+{
+  "requires": {
+    "python": [],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "assert_message",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'try:\n assert 1 == 2\nexcept AssertionError as e:\n print(str(e))'",
+          "expect": {
+            "exit": 0,
+            "stdout": "\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "append_position",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'f=open(\"/data/f.txt\",\"a\"); print(f.tell()); f.close()'",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "system_exit",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'raise SystemExit'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "system_exit_message",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'raise SystemExit(\"bye\")'",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "bye\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "strict_text",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'with open(\"/data/bad\",\"wb\") as f: f.write(b\"\\xff\")\ntry:\n open(\"/data/bad\").read()\nexcept UnicodeDecodeError:\n print(\"strict\")'",
+          "expect": {
+            "exit": 0,
+            "stdout": "strict\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "bom_text",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "abc"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'with open(\"/data/bom\",\"wb\") as f: f.write(b\"\\xef\\xbb\\xbfhi\")\nprint(len(open(\"/data/bom\").read()))'",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

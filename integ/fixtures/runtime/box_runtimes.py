@@ -42,7 +42,7 @@ class ShoutPython(LanguageRuntime):
     language = "python"
     captures = ("python3", "python")
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=f"{args.code.upper()}\n".encode(),
                          stderr=None,
                          exit_code=0)

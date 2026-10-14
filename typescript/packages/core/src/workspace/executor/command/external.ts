@@ -12,14 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ExecutionRequest, RunResult } from '../../../runtime/types.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { mergeSignals } from '../../../utils/abort.ts'
+import { hasAborted, mergeSignals } from '../../../utils/abort.ts'
 import { runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { resolveLimit } from '../../../policy/index.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, OutputState, materialize, type ByteSource } from '../../../io/types.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
-import { isProcessExecutor } from '../../../runtime/mixin.ts'
+import { BytePipe } from '../../../io/pipe.ts'
+import { PipeClosed } from '../../../io/errors.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { ContextScope } from '../../../utils/context_scope.ts'
+import { captureSessionContext } from '../../../context/session_context.ts'
+import { captureExecutionContext } from '../../../execution/context.ts'
+import { isProcessExecutor, isStreamingProcess } from '../../../runtime/mixin.ts'
 import type { RouteDecision } from '../../../runtime/routing/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { PathSpec } from '../../../types.ts'
@@ -60,6 +67,8 @@ export async function runExternal(
     session.commandLimits,
   )
   const timeout = guard?.timeoutSeconds ?? null
+  if (isStreamingProcess(runtime))
+    return streamExternal(runtime, argv, stdin, session, registry, timeout, signal)
   const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
   const runSignal = mergeSignals(signal, deadline?.signal)
   const execute = async () => {
@@ -71,7 +80,9 @@ export async function runExternal(
       stdin: input,
       ...(runSignal !== undefined ? { signal: runSignal } : {}),
     }
-    return runtime.execute(
+    return executeProgram(
+      runtime,
+      argv.name,
       isProcessExecutor(runtime)
         ? { kind: 'process', argv: argv.tokens, ...common }
         : { kind: 'shell', line: command, ...common },
@@ -100,6 +111,114 @@ export async function runExternal(
     if (err instanceof CommandTimeoutError) deadline?.abort()
     throw err
   } finally {
-    await registry.invalidateAfterExternal()
+    if (!runtime.fileEffectsDispatched) await registry.invalidateAfterExternal()
+  }
+}
+
+function streamExternal(
+  runtime: Runtime,
+  argv: Argv,
+  stdin: ByteSource | null,
+  session: SessionState,
+  registry: MountRegistry,
+  timeout: number | null,
+  signal?: AbortSignal,
+): [ByteSource, IOResult, ExecutionNode] {
+  const cwd = PathSpec.fromStrPath(session.cwd)
+  const env = envSnapshot(session)
+  const pipe = new BytePipe()
+  const controller = new AbortController()
+  const runSignal = mergeSignals(signal, controller.signal) ?? controller.signal
+  const scope = new ContextScope([...captureSessionContext(), captureExecutionContext()])
+  const io = new IOResult({
+    producer: {
+      command: argv.name,
+      declared: null,
+      prefixes: registry.allMounts().map((m) => m.prefix),
+    },
+  })
+  const state = new OutputState()
+  io.output = state
+  const node = new ExecutionNode({ command: shellJoin(argv.tokens), exitCode: 0 })
+  let task: Promise<void> | undefined
+  let settled = false
+  let closing: Promise<void> | undefined
+  const execute = async (): Promise<void> => {
+    try {
+      const result = await runWithTimeout(
+        executeProgram(runtime, argv.name, {
+          kind: 'stream',
+          argv: argv.tokens,
+          cwd,
+          env,
+          stdin,
+          output: (chunk) => pipe.write(chunk),
+          signal: runSignal,
+        }),
+        timeout,
+        argv.name,
+      )
+      if (result.stdout.length) await pipe.write(result.stdout)
+      io.exitCode = node.exitCode = result.exitCode
+      io.stderr = node.stderr = result.stderr ?? new Uint8Array()
+      pipe.end()
+    } catch (error) {
+      controller.abort()
+      pipe.end(error)
+      throw error
+    } finally {
+      settled = true
+      if (!runtime.fileEffectsDispatched) await registry.invalidateAfterExternal()
+    }
+  }
+  const close = (): Promise<void> => {
+    closing ??= (async () => {
+      pipe.closeReader()
+      if (!settled && task !== undefined) {
+        io.exitCode = node.exitCode = 141
+        controller.abort()
+      }
+      await task?.catch((error: unknown) => {
+        if (error instanceof PipeClosed || (error instanceof Error && error.name === 'AbortError'))
+          return
+        console.error(`external stream cleanup failed: ${String(error)}`)
+      })
+      await closeQuietly(stdin)
+      state.finish()
+    })()
+    return closing
+  }
+  async function* output(): AsyncGenerator<Uint8Array> {
+    task = execute()
+    void task.catch(() => undefined)
+    try {
+      yield* pipe.stream()
+      await task
+    } finally {
+      await close()
+    }
+  }
+  return [new OutputStream(scope.stream(output()), close), io, node]
+}
+
+async function executeProgram(
+  runtime: Runtime,
+  name: string,
+  request: ExecutionRequest,
+): Promise<RunResult> {
+  try {
+    return await runtime.execute(request)
+  } catch (error) {
+    if (
+      error instanceof CommandTimeoutError ||
+      (error instanceof Error && error.name === 'AbortError') ||
+      ('signal' in request && hasAborted(request.signal))
+    )
+      throw error
+    return {
+      stdout: new Uint8Array(),
+      stderr: encodeText(`${name}: ${error instanceof Error ? error.message : String(error)}\n`),
+      exitCode: 1,
+    }
   }
 }

@@ -15,7 +15,7 @@
 from typing import Protocol
 
 from mirage.errors import FsCondition, classify
-from mirage.errors.fs import eexist, eisdir, enoent
+from mirage.errors.fs import eexist, eisdir, enoent, enotdir
 from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.types import VFSEntry, VFSStat
 
@@ -33,6 +33,8 @@ class OpenSurface(Protocol):
     ) -> VFSStat | None: ...
 
     def listing_or_none(self, path: str) -> list[VFSEntry] | None: ...
+
+    def check_write(self, path: str) -> None: ...
 
     def create(self, path: str) -> None: ...
 
@@ -75,6 +77,14 @@ def apply_open(
     # dangling one is a name that is there. A path with no row may
     # still be a directory the mount lists, and a create there would
     # put a file at a directory's name.
+    if not path:
+        raise enoent(path)
+    if path.endswith("/") and path != "/":
+        leaf = surface.stat_or_none(path.rstrip("/"))
+        if leaf is not None and not leaf.is_dir:
+            raise enotdir(path)
+        if leaf is None and mode.create:
+            raise eisdir(path)
     row = surface.stat_or_none(path, nofollow=mode.exclusive)
     if row is not None:
         listed = row.is_dir
@@ -100,4 +110,6 @@ def apply_open(
             # the effect the open asked for.
             surface.create(path)
         return None
+    if mode.writable:
+        surface.check_write(path)
     return row

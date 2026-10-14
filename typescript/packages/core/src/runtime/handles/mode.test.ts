@@ -50,9 +50,20 @@ describe('parseMode', () => {
   it('refuses garbage modes in CPython wording', () => {
     // CPython's rule: exactly one of rwax, at most one each of +, b, t,
     // and never b with t.
-    for (const bad of ['', 'q', 'rw', 'rr', 'wx', 'r++', 'rbb', 'rbt', 'wq', 'b']) {
-      expect(() => parseMode(bad), bad).toThrow(/invalid mode/)
-    }
+    const plusOne = 'Must have exactly one of create/read/write/append mode and at most one plus'
+    const refusals: [string, string][] = [
+      ['', plusOne],
+      ['+', plusOne],
+      ['b', plusOne],
+      ['q', "invalid mode: 'q'"],
+      ['rr', "invalid mode: 'rr'"],
+      ['r++', "invalid mode: 'r++'"],
+      ['btq', "invalid mode: 'btq'"],
+      ['rbt', "can't have text and binary mode at once"],
+      ['rw', 'must have exactly one of create/read/write/append mode'],
+      ['wx', 'must have exactly one of create/read/write/append mode'],
+    ]
+    for (const [bad, message] of refusals) expect(() => parseMode(bad), bad).toThrow(message)
   })
 
   it('accepts the text flag and reads it as not binary', () => {

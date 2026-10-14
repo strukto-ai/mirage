@@ -169,6 +169,7 @@ class EchoBox(Runtime, LineExecutorMixin):
     """A test-only whole-line runtime: echoes the raw line back."""
 
     name = "echobox"
+    reach = "workspace"
     captures = ("nvidia-smi",)
 
     async def run_line(
@@ -189,6 +190,7 @@ class ProcessBox(Runtime, ProcessExecutorMixin):
     """A host-authored argv runtime using the public capability import."""
 
     name = "processbox"
+    reach = "workspace"
     captures = (EXTERNAL_COMMANDS,)
 
     async def run_process(self, request: ProcessExecution) -> RunResult:

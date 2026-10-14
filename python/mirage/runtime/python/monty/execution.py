@@ -87,7 +87,7 @@ class MontyExecution:
         # with it). feed_run awaits off the event loop, so the loop
         # stays free; a dead or timed-out worker surfaces as
         # MontyCrashedError and the pool replaces it.
-        collector = pydantic_monty.CollectStreams()
+        collector = pydantic_monty.CollectStreams(max_bytes=None)
         pool = await self._ensure_pool()
         # argv[0] is the program's own name when the caller has one (a
         # CLI install's head word), else the interpreter's placeholder.
@@ -102,12 +102,15 @@ class MontyExecution:
         cwd = args.cwd.virtual if args.cwd is not None else None
         # A script is Monty's own script_name, which it keeps the last
         # part of for `__file__`, under the directory a feed starts in.
-        checkout = (
-            pool.checkout(limits=self._limits)
-            if args.script_path is None
-            else pool.checkout(
-                script_name=main_filename(args), limits=self._limits
-            )
+        checkout = pool.checkout(
+            limits=self._limits,
+            assert_message_annotations=False,
+            os_policy={"sleep_system_max": float("inf")},
+            **(
+                {"script_name": main_filename(args)}
+                if args.script_path is not None
+                else {}
+            ),
         )
         try:
             async with checkout as session:
@@ -134,6 +137,15 @@ class MontyExecution:
             return RunResult(stdout=b"", stderr=trace.encode(), exit_code=1)
         except pydantic_monty.MontyRuntimeError as exc:
             stdout, stderr = _split_streams(collector)
+            if isinstance(exc.exception(), SystemExit):
+                message = exc.display(format="msg")
+                return RunResult(
+                    stdout=stdout,
+                    stderr=(stderr or b"") + (message + "\n").encode()
+                    if message
+                    else stderr,
+                    exit_code=1 if message else 0,
+                )
             trace = exc.display(format="traceback") + "\n"
             return RunResult(
                 stdout=stdout,

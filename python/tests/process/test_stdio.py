@@ -45,3 +45,16 @@ async def test_output_routes_stderr_to_its_own_pipe_unless_merged():
         await output.emit(Channel.STDERR, b"err")
         output.end()
         assert tuple(await reads) == expected
+
+
+@pytest.mark.asyncio
+async def test_closing_stream_cancels_pending_pull_and_refuses_writes():
+    pipe = ProcessInput()
+    stream = pipe.stream()
+    pulling = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    await asyncio.wait_for(stream.aclose(), 1)
+    with pytest.raises(asyncio.CancelledError):
+        await pulling
+    with pytest.raises(PipeClosed):
+        await pipe.write(b"late")

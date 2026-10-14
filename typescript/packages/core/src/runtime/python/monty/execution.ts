@@ -73,13 +73,8 @@ export class MontyExecution {
   }
 
   async run(args: RunArgs, files: RuntimeFiles | null): Promise<RunResult> {
-    const pool = await this.ensurePool()
-    // A script is Monty's own scriptName, which it keeps the last part of
-    // for `__file__`, under the directory a feed starts in.
-    const session = await pool.checkout(
-      args.scriptPath !== undefined
-        ? { scriptName: mainFilename(args), limits: this.limits }
-        : { limits: this.limits },
+    const session = await this.checkout(
+      args.scriptPath === undefined ? undefined : mainFilename(args),
     )
     // Monty executes on its own worker process, so the event loop stays
     // live to observe the limit deadline and the kill signal; a trip
@@ -181,6 +176,25 @@ export class MontyExecution {
     return this.module
   }
 
+  private async checkout(scriptName?: string | null): Promise<MontySessionLike> {
+    const pool = await this.ensurePool()
+    return pool.checkout({
+      ...(scriptName === undefined ? {} : { scriptName }),
+      limits: this.limits,
+      assertMessageAnnotations: false,
+      osPolicy: { sleepSystemMax: Infinity },
+    })
+  }
+
+  private result(out: string[], err: string[], exitCode: number): RunResult {
+    const enc = new TextEncoder()
+    return {
+      stdout: enc.encode(out.join('')),
+      stderr: err.length > 0 ? enc.encode(err.join('')) : null,
+      exitCode,
+    }
+  }
+
   private async feedOne(
     session: MontySessionLike,
     code: string,
@@ -201,34 +215,25 @@ export class MontyExecution {
       },
       os: new MontyFs(module, args.env, files).handle,
     }
+    let exitCode = 0
     try {
       await session.feedRun(code, options)
     } catch (caught) {
+      exitCode = 1
       if (caught instanceof module.MontySyntaxError || caught instanceof module.MontyRuntimeError) {
-        err.push(displayError(caught) + '\n')
-        return {
-          stdout: new TextEncoder().encode(out.join('')),
-          stderr: err.length > 0 ? new TextEncoder().encode(err.join('')) : null,
-          exitCode: 1,
+        const inner = (caught as { exception?: { typeName: string; message: string } }).exception
+        if (inner?.typeName === 'SystemExit') {
+          if (inner.message) err.push(inner.message + '\n')
+          exitCode = inner.message ? 1 : 0
+        } else {
+          err.push(displayError(caught) + '\n')
         }
-      }
-      // A dead worker (hard crash, or the pool's own watchdog) is a
-      // failed command, not a broken host: exit 1 with a note, prior
-      // stdout kept, mirroring python's MontyCrashedError handler.
-      if (caught instanceof module.MontyCrashedError) {
+      } else if (caught instanceof module.MontyCrashedError) {
         err.push(`${this.name}: worker ${caught.timedOut ? 'timed out' : 'crashed'}\n`)
-        return {
-          stdout: new TextEncoder().encode(out.join('')),
-          stderr: new TextEncoder().encode(err.join('')),
-          exitCode: 1,
-        }
+      } else {
+        throw caught
       }
-      throw caught
     }
-    return {
-      stdout: new TextEncoder().encode(out.join('')),
-      stderr: err.length > 0 ? new TextEncoder().encode(err.join('')) : null,
-      exitCode: 0,
-    }
+    return this.result(out, err, exitCode)
   }
 }

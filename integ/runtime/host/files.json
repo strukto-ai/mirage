@@ -179,12 +179,12 @@
       "steps": [
         {
           "program": {
-            "python": "import errno, os\nfd = os.open('/data/new.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\nprint(os.write(fd, b'hello'), os.fstat(fd).st_size)\nos.fsync(fd)\nprint(open('/data/new.txt').read())\nos.close(fd)\nfd = os.open('/data/new.txt', os.O_RDONLY)\ntry:\n    os.write(fd, b'x')\nexcept OSError as e:\n    print(errno.errorcode[e.errno])\nprint(os.read(fd, 9).decode())\nos.close(fd)",
-            "node": "const fsp = require('node:fs').promises\nlet h = await fsp.open('/data/new.txt', 'wx')\nconst { bytesWritten } = await h.write('hello')\nconsole.log(bytesWritten, (await h.stat()).size)\nawait h.sync()\nconsole.log(await fsp.readFile('/data/new.txt', 'utf8'))\nawait h.close()\nh = await fsp.open('/data/new.txt', 'r')\ntry {\n  await h.write('x')\n} catch (e) {\n  console.log(e.code)\n}\nconst { bytesRead, buffer } = await h.read(Buffer.alloc(9), 0, 9, null)\nconsole.log(buffer.toString('utf8', 0, bytesRead))\nawait h.close()"
+            "python": "import errno, os\nfd = os.open('/data/new.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\nprint(os.write(fd, b'hello'), os.fstat(fd).st_size)\nos.fsync(fd)\nprint(open('/data/new.txt').read())\nos.close(fd)\nfd = os.open('/data/new.txt', os.O_RDONLY)\ntry:\n    os.write(fd, b'x')\nexcept OSError as e:\n    print(errno.errorcode[e.errno])\ntry:\n    os.ftruncate(fd, 0)\nexcept OSError as e:\n    print(errno.errorcode[e.errno])\nprint(os.read(fd, 9).decode())\nos.close(fd)",
+            "node": "const fsp = require('node:fs').promises\nlet h = await fsp.open('/data/new.txt', 'wx')\nconst { bytesWritten } = await h.write('hello')\nconsole.log(bytesWritten, (await h.stat()).size)\nawait h.sync()\nconsole.log(await fsp.readFile('/data/new.txt', 'utf8'))\nawait h.close()\nh = await fsp.open('/data/new.txt', 'r')\ntry {\n  await h.write('x')\n} catch (e) {\n  console.log(e.code)\n}\ntry {\n  await h.truncate(0)\n} catch (e) {\n  console.log(e.code)\n}\nconst { bytesRead, buffer } = await h.read(Buffer.alloc(9), 0, 9, null)\nconsole.log(buffer.toString('utf8', 0, bytesRead))\nawait h.close()"
           },
           "expect": {
             "exit": 0,
-            "stdout": "5 5\nhello\nEBADF\nhello\n"
+            "stdout": "5 5\nhello\nEBADF\nEINVAL\nhello\n"
           }
         },
         {

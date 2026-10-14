@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "id": "worker_realm_is_sealed_against_the_host",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "hello.txt": "world"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 - <<'PY'\nimport pyodide_js\n\nF = pyodide_js.loadPackage.constructor.constructor\n\n\ndef kind(name):\n    return F('n', 'return typeof globalThis[n]')(name)\n\n\ndef refused(attempt):\n    try:\n        attempt()\n        return 'ran'\n    except Exception as e:\n        return 'refused' if 'sandboxed worker' in str(e) else 'other: ' + str(e)[:60]\n\n\nprint('python', sum(i * i for i in range(5)))\nprint('mount', open('/data/hello.txt').read())\nprint('globals', kind('process'), kind('global'), kind('require'), kind('fetch'), kind('WebSocket'))\nprint('nodefs', F('fs', 'return typeof fs.filesystems.NODEFS')(pyodide_js.FS))\nprint('module-nodefs', F('m', 'return typeof m.NODEFS')(pyodide_js._module))\nprint('mountNodeFS', refused(lambda: pyodide_js.mountNodeFS('/host', '/opt/host/marker')))\nprint('loadBinaryFile', refused(lambda: pyodide_js._api.loadBinaryFile('/opt/host/marker')))\nprint('file-url', refused(lambda: pyodide_js._api.loadBinaryFile('file:///opt/host/marker')))\nprint('traversal', refused(lambda: pyodide_js._api.loadBinaryFile(str(pyodide_js._api.config.indexURL) + '../../../../../../../../opt/host/marker')))\nprint('asyncLoad', refused(lambda: pyodide_js._module.asyncLoad('/opt/host/marker')))\nprint('preload', refused(lambda: pyodide_js._module.FS_createPreloadedFile('/', 'host', '/opt/host/marker', True, False)))\nprint('lazy-load', refused(lambda: F('fs', 'return fs.forceLoadFile({url: \\\"/opt/host/marker\\\"})')(pyodide_js.FS)))\nPY",
+          "expect": {
+            "exit": 0,
+            "stdout": "python 30\nmount world\nglobals undefined undefined undefined undefined undefined\nnodefs undefined\nmodule-nodefs undefined\nmountNodeFS refused\nloadBinaryFile refused\nfile-url refused\ntraversal refused\nasyncLoad refused\npreload refused\nlazy-load refused\n",
+            "stderr": ""
+          }
+        }
+      ],
+      "note": "The Node worker closes exposed host handles and loaders, including file URLs and traversal, while Python and mount reads keep working. Guest module import refusal and local package loading are also covered by seal.test.ts."
+    }
+  ]
+}

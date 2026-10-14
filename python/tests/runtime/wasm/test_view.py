@@ -316,26 +316,32 @@ def test_readdir_root_merges_host_bridge_and_mounts(tmp_path):
     ]
 
 
-def test_a_root_mount_does_not_shadow_the_build_directory(tmp_path):
-    """`/` is the one prefix that must not become a claim here.
-
-    A claim is exclusive, so a root claim would cover the interpreter's
-    own build tree and `import os` would resolve through the workspace
-    instead of off disk. The build keeps what it holds and the root
-    mount takes the rest, which is the same fallthrough any unclaimed
-    path already uses.
-    """
+def test_a_root_mount_lists_beside_the_build_without_shadowing_it(tmp_path):
     (tmp_path / "lib").mkdir()
     (tmp_path / "lib" / "os.py").write_text("stdlib")
+    (tmp_path / "lib" / "sys.py").write_text("fallback")
     bridge = FakeVFS(
-        files={"/lib/os.py": b"mount-side", "/mine.txt": b"root-side"},
+        files={
+            "/lib/os.py": b"mount-side",
+            "/lib/extra.py": b"mounted",
+            "/mine.txt": b"root-side",
+        },
+        dirs={"/lib"},
         prefixes=["/"],
     )
     fs = WasmView(str(tmp_path), bridge)
     assert fs.read("/lib/os.py") == b"stdlib"
+    assert fs.read("/lib/extra.py") == b"mounted"
     assert fs.read("/mine.txt") == b"root-side"
     # An empty name would be the root prefix mistaken for a directory.
     assert all(name for name, _ in fs.readdir("/"))
+
+    assert fs.read("/lib/sys.py") == b"fallback"
+    assert {name for name, _ in fs.readdir("/lib")} == {
+        "extra.py",
+        "os.py",
+        "sys.py",
+    }
 
 
 def test_rename_within_bridge_and_across_routes(tmp_path):
@@ -486,3 +492,29 @@ def test_a_mutation_of_a_build_file_stays_refused(tmp_path):
         fs.symlink("/lib/os.py", "elsewhere.py")
     with pytest.raises(PermissionError):
         fs.setattr("/lib/os.py", atime=None, mtime="x", nofollow=False)
+
+
+@pytest.mark.parametrize("path", ["/lib", "/lib/nested"])
+def test_nonroot_mount_hides_build_listing_beside_root_overlay(tmp_path, path):
+    directory = tmp_path / path.lstrip("/")
+    directory.mkdir(parents=True)
+    (directory / "hidden.py").write_text("build-only")
+    bridge = FakeVFS(
+        files={path + "/visible.py": b"mounted"}, prefixes=["/", "/lib/"]
+    )
+    view = WasmView(str(tmp_path), bridge)
+    assert view.readdir(path) == [("visible.py", FT_REG)]
+    with pytest.raises(FileNotFoundError):
+        view.stat(path + "/hidden.py")
+
+
+def test_build_only_view_confines_parent_traversal(tmp_path):
+    root = tmp_path / "build"
+    root.mkdir()
+    (tmp_path / "secret").write_bytes(b"host")
+    (root / "guest").write_bytes(b"guest")
+    view = WasmView(str(root))
+    with pytest.raises(FileNotFoundError):
+        view.read("/../secret")
+    assert view.read("/../guest") == b"guest"
+    assert view.readdir("/..") == [("guest", FT_REG)]

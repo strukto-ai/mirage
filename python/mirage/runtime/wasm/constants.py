@@ -45,5 +45,20 @@ OFLAG_TRUNC = 8
 FDFLAG_APPEND = 1
 
 # rights
+RIGHT_FD_READ = 1 << 1
 RIGHT_FD_WRITE = 1 << 6
 ALL_RIGHTS = 2**64 - 1
+
+
+# Trap in wasm, not by raising from a Python callback: wasmtime-py keeps
+# callback exceptions in a process-wide slot, shared by concurrent runs.
+TERMINATION_SHIM = """(module
+  (import "mirage_wasi" "proc_exit" (func $exit (param i32)))
+  (import "mirage_wasi" "poll_oneoff" (func $poll (param i32 i32 i32 i32) (result i32)))
+  (func (export "proc_exit") (param $code i32)
+    (call $exit (local.get $code)) unreachable)
+  (func (export "poll_oneoff") (param i32 i32 i32 i32) (result i32) (local $result i32)
+    (local.set $result (call $poll
+      (local.get 0) (local.get 1) (local.get 2) (local.get 3)))
+    (if (i32.lt_s (local.get $result) (i32.const 0)) (then unreachable))
+    (local.get $result)))"""

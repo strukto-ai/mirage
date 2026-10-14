@@ -1927,7 +1927,7 @@ jobs:
         timeout-minutes: 10
         run: |
           pnpm -C typescript --filter @struktoai/mirage-core add --save-dev pyodide@0.29.0
-          pnpm -C typescript --filter @struktoai/mirage-integ exec tsx runtime/run.ts pyodide/network pyodide/invoke
+          pnpm -C typescript --filter @struktoai/mirage-integ exec tsx runtime/run.ts pyodide/network pyodide/invoke pyodide/containment
 
   # The sandbox suites run on e2b against E2B Embed, E2B's own stack (API,
   # orchestrator, Firecracker sandboxes) on this runner: hosted Linux

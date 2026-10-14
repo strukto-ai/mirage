@@ -192,8 +192,16 @@ class MontyFs(AbstractOS):
         # lands on the mount.
         handle = MontyFileHandle(str(path), mode)
         files = self._files_for(path)
+        parsed = parse_mode(mode)
         with _as_guest(str(path)):
-            apply_open(files, str(path), parse_mode(mode))
+            row = apply_open(files, str(path), parsed)
+            if parsed.append and row is not None:
+                size = (
+                    row.size
+                    if row.size is not None
+                    else len(files.read(str(path)))
+                )
+                return MontyFileHandle(str(path), mode, position=size)
         return handle
 
     def path_read_text(self, path: PurePosixPath | MontyFileHandle) -> str:

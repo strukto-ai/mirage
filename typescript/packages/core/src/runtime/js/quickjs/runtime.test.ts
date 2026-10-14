@@ -54,3 +54,47 @@ describe('QuickJS cwd', () => {
     }
   })
 })
+
+describe('QuickJS compatibility', () => {
+  it.each([
+    [
+      'const span = 1; const toIndex = 2; const __join = 3; print(span + toIndex + __join)',
+      '6\n',
+      '',
+      0,
+    ],
+    [
+      "try { std.exit(200) } catch (e) { print('caught') } finally { print('finally') }; print('after')",
+      '',
+      '',
+      200,
+    ],
+    ["throw 'plain'", '', 'plain\n', 1],
+    ['throw 42', '', '42\n', 1],
+    ['throw new Error()', '', 'Error\n', 1],
+    ["print(std.getenv('toString'))", 'undefined\n', '', 0],
+    ["print(std.out.printf('é%s', 'é')); print(std.out.printf('%d', 2**40))", 'éé4\n01\n', '', 0],
+    [
+      'print(std.in.readAsString(2), std.in.readAsString(1), std.in.readAsString())',
+      'ab c def\n',
+      '',
+      0,
+    ],
+    [
+      "print(atob(btoa('a\\0b')).length, std.Error.ENOENT, os.S_IFIFO); queueMicrotask(() => print('job'))",
+      '3 44 4096\njob\n',
+      '',
+      0,
+    ],
+  ])('runs %s', async (code, stdout, stderr, exitCode) => {
+    const result = await new QuickJsRuntime().run({
+      code,
+      args: [],
+      env: {},
+      stdin: new TextEncoder().encode('abcdef'),
+    })
+    expect(new TextDecoder().decode(result.stdout)).toBe(stdout)
+    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe(stderr)
+    expect(result.exitCode).toBe(exitCode)
+  })
+})

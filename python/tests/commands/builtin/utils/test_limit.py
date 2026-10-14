@@ -213,3 +213,13 @@ async def test_timeout_wrapper_retains_owned_producer_close(pending_pull):
     if pending is not None:
         await asyncio.gather(pending, return_exceptions=True)
     assert closed.is_set()
+
+
+async def _connection_timeout():
+    raise TimeoutError("connect failed")
+
+
+@pytest.mark.asyncio
+async def test_an_inner_timeout_keeps_its_own_reason():
+    with pytest.raises(TimeoutError, match="connect failed"):
+        await run_with_timeout(_connection_timeout(), 1, "ssh")

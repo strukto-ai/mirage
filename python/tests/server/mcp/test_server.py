@@ -255,7 +255,6 @@ async def test_all_calls_serves_the_vfs_calls_and_explain(workspace):
 async def test_progress_previews_arrive_before_completion_and_keep_final_result(
     workspace,
 ):
-
     updates = []
     first = asyncio.Event()
 

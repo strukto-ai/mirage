@@ -16,11 +16,11 @@ import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/r
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { ProcessExecution, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SMOLVM_CONFIG_KEYS, type SmolvmConfig } from './config.ts'
 import { RUNNING_STATE, SMOLVM_CLI_HINT, notRunningHint } from './constants.ts'
-import { type CliResult, runCli } from '../cli.ts'
+import { type CliResult, openCliPipe, runCli } from '../cli.ts'
 
 /**
  * A microVM the user runs as a whole-line runtime.
@@ -41,7 +41,7 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements Proces
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'smolvm'
 
-  constructor(options: RuntimeOptions<SmolvmConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<SmolvmConfig> = {}) {
     super(options, SMOLVM_CONFIG_KEYS)
     requireId('smolvm', 'machine', this.config.machine)
   }
@@ -78,28 +78,7 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements Proces
     }
   }
 
-  async execLine(
-    line: string,
-    stdin: Uint8Array | null,
-    env: Record<string, string>,
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<RunResult> {
-    return this.execArgv(['sh', '-c', line], stdin, env, cwd, signal)
-  }
-
-  async runProcess(request: ProcessExecution): Promise<RunResult> {
-    await this.ensureConnected(request.signal)
-    return this.execArgv(
-      request.argv,
-      request.stdin,
-      { ...this.config.env, ...request.env },
-      request.cwd.virtual,
-      request.signal,
-    )
-  }
-
-  private async execArgv(
+  protected override async execArgv(
     argv: readonly string[],
     stdin: Uint8Array | null,
     env: Record<string, string>,
@@ -113,6 +92,21 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements Proces
     args.push('--', ...argv)
     const result = await this.smolvm(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
+  }
+  override async openPipe(command: string): Promise<SandboxPipe> {
+    return openCliPipe('smolvm', [
+      'machine',
+      'exec',
+      '--name',
+      this.config.machine,
+      '-i',
+      '-w',
+      '/',
+      '--',
+      'sh',
+      '-c',
+      command,
+    ])
   }
 }
 

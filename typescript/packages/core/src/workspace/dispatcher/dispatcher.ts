@@ -660,6 +660,11 @@ export class Dispatcher {
     kwargs = stripped
     // The dispatcher's own keywords: a read answered as it is pulled, and a read
     // of what the backend holds now, past the file cache.
+    const admitOnly = (name === 'write' || name === 'stat') && kwargs?.admit_only === true
+    if (admitOnly) {
+      kwargs = { ...kwargs }
+      delete kwargs.admit_only
+    }
     const { stream, direct, ...own } = (kwargs ?? {}) as { stream?: unknown; direct?: unknown }
     if (name === 'read' && (stream !== undefined || direct !== undefined)) kwargs = own
     await this.prepare()
@@ -671,15 +676,31 @@ export class Dispatcher {
       return [null, new IOResult()]
     }
     // The command's gate judges its own calls; a metadata call passes, as
-    // its guards let stat pass, and a scan guard reads nothing: the rule
-    // judges each read it guards.
+    // its guards let stat pass, unless it only asks admission, and a scan
+    // guard reads nothing: the rule judges each read it guards.
     const gate =
-      METADATA_OPS.has(name) || name === 'before_full_scan' ? null : (this.caller?.ruleGate ?? null)
+      (METADATA_OPS.has(name) && !admitOnly) || name === 'before_full_scan'
+        ? null
+        : (this.caller?.ruleGate ?? null)
     const call = await this.walk(name, path, args, kwargs, gate, report, issuer)
     call.stream = name === 'read' && stream === true
     call.direct = name === 'read' && direct === true
     await this.refuseRename(call)
     if (report) report.path = call.path.virtual
+    if (admitOnly) {
+      this.follow(call)
+      if (name === 'stat') {
+        memoryAnswered(report)
+        return [null, new IOResult()]
+      }
+      const owner = this.namespace.tryMountFor(call.path.virtual)
+      if (owner === null) throw enoent(call.path)
+      const writeCall = CALLS.get('write')
+      if (writeCall === undefined) throw new Error('missing write call definition')
+      await this.admit(call, owner, this.boundary(owner), writeCall)
+      memoryAnswered(report)
+      return [null, new IOResult()]
+    }
     if (this.tableAnswers(name, call.path.virtual, call.kwargs)) {
       return [
         await this.tableCall(name, call.path, call.args ?? [], call.kwargs ?? {}, report, issuer),

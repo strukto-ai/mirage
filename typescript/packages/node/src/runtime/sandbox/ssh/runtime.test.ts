@@ -15,11 +15,17 @@
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir, userInfo } from 'node:os'
+import type * as Os from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SSHRuntime } from './runtime.ts'
 import type { Ssh2Sdk } from './sdk.ts'
+
+vi.mock('node:os', async (original) => ({
+  ...(await original<typeof Os>()),
+  homedir: () => '/private/tmp/mirage-ssh-test-no-default-keys',
+}))
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -72,10 +78,14 @@ class FakeClient {
 
   end(): void {
     this.ended = true
+    this.handlers.get('close')?.()
   }
 }
 
 class SdkFakeRuntime extends SSHRuntime {
+  protected override ssh(): Promise<SshResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), code: 0 })
+  }
   protected override loadSdk(): Promise<Ssh2Sdk> {
     return Promise.resolve({ Client: FakeClient } as unknown as Ssh2Sdk)
   }
@@ -95,7 +105,7 @@ async function withAgentSock<T>(value: string | undefined, fn: () => Promise<T>)
 
 describe('SSHRuntime', () => {
   it('host is required', () => {
-    expect(() => new SSHRuntime({ config: {} })).toThrow('host')
+    expect(() => new SSHRuntime({ config: {} as never })).toThrow('host')
   })
 
   it('dresses the line with cwd and env and threads stdin', async () => {
@@ -118,6 +128,7 @@ describe('SSHRuntime', () => {
       port: 2222,
       username: 'deploy',
       readyTimeout: 5000,
+      authHandler: [{ type: 'none', username: 'deploy' }],
     })
   })
 
@@ -129,11 +140,14 @@ describe('SSHRuntime', () => {
       port: 22,
       username: userInfo().username,
       readyTimeout: 30000,
-      agent: '/tmp/agent.sock',
+      authHandler: [
+        { type: 'none', username: userInfo().username },
+        { type: 'agent', username: userInfo().username, agent: '/tmp/agent.sock' },
+      ],
     })
   })
 
-  it('connect reads the identity file into privateKey and keeps the agent out', async () => {
+  it('connect tries the agent and the named identity', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-ssh-key-'))
     const keyPath = join(dir, 'id_ed25519')
     await writeFile(keyPath, 'fake-key')
@@ -145,7 +159,11 @@ describe('SSHRuntime', () => {
         port: 22,
         username: userInfo().username,
         readyTimeout: 30000,
-        privateKey: Buffer.from('fake-key'),
+        authHandler: [
+          { type: 'none', username: userInfo().username },
+          { type: 'agent', username: userInfo().username, agent: '/tmp/agent.sock' },
+          { type: 'publickey', username: userInfo().username, key: Buffer.from('fake-key') },
+        ],
       })
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -225,4 +243,17 @@ describe('SSHRuntime cancellation', () => {
     controller.abort()
     expect([runtime.channel.signals, runtime.channel.closed]).toEqual([[], true])
   })
+})
+
+it('reconnects after the previous client closes', async () => {
+  const runtime = new SdkFakeRuntime({ config: { host: 'box' } })
+  await runtime.runLine('true', null, {}, '/')
+  const first = made.at(-1)
+  if (first === undefined) throw new Error('no SSH client')
+  await runtime.runLine('true', null, {}, '/')
+  expect(made.at(-1)).toBe(first)
+  first.end()
+  await runtime.runLine('true', null, {}, '/')
+  expect(made.at(-1)).not.toBe(first)
+  await runtime.close()
 })

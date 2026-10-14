@@ -18,7 +18,7 @@ import { createRequire } from 'node:module'
 import { posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { classify } from '@struktoai/mirage-core/errors/classify'
-import { ebadf, isMissingPath } from '@struktoai/mirage-core/errors/fs'
+import { ebadf, einval, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { posixErrno, posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import { workspaceBridge } from '@struktoai/mirage-core/runtime/binding'
@@ -63,13 +63,25 @@ function ns(date: Date): bigint {
 /** A refusal spelled the way node's own fs spells an error. */
 function refusal(condition: FsCondition, syscall: string, path: string): NodeJS.ErrnoException {
   const err: NodeJS.ErrnoException = new Error(
-    `${condition}: ${posixPhrase(condition)}, ${syscall} '${path}'`,
+    `${condition}: ${posixPhrase(condition).toLowerCase()}, ${syscall} '${path}'`,
   )
   err.code = condition
   err.errno = -posixErrno(condition)
   err.syscall = syscall
   err.path = path
   return err
+}
+
+function fsError(error: unknown, syscall: string, path?: string): Error {
+  const condition = classify(error)
+  if (condition === null)
+    return error instanceof Error ? error : new Error(String(error), { cause: error })
+  const converted = refusal(condition, syscall, path ?? '')
+  if (path === undefined) {
+    converted.message = `${condition}: ${posixPhrase(condition).toLowerCase()}, ${syscall}`
+    delete converted.path
+  }
+  return Object.assign(converted, { cause: error })
 }
 
 function syncRefusal(name: string, path: string): NodeJS.ErrnoException {
@@ -113,6 +125,18 @@ function stampOf(time: unknown): string {
   return new Date(ms).toISOString()
 }
 
+/** Refuse an integer argument outside `[min, max]` as node does. */
+function checkRange(name: string, value: number, max: number, min = 0): void {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw Object.assign(
+      new RangeError(
+        `The value of "${name}" is out of range. It must be >= ${String(min)} && <= ${String(max)}. Received ${String(value)}`,
+      ),
+      { code: 'ERR_OUT_OF_RANGE' },
+    )
+  }
+}
+
 /** A read's buffer, where in it to put the bytes, how many to read and
  * from where, out of any of node's read spellings: `(buffer, offset,
  * length, position)`, `(buffer, options)`, `(options)` or nothing, then
@@ -129,6 +153,10 @@ function readArgs(args: unknown[]): [Uint8Array, number, number, number | null, 
   const offset = Number((positional ? rest[0] : options.offset) ?? 0)
   const length = Number((positional ? rest[1] : options.length) ?? buffer.byteLength - offset)
   const position = (positional ? rest[2] : options.position) as number | bigint | null | undefined
+  checkRange('offset', offset, buffer.length)
+  checkRange('length', length, buffer.length - offset)
+  if (typeof position === 'number' || typeof position === 'bigint')
+    checkRange('position', Number(position), Number.MAX_SAFE_INTEGER, -1)
   return [buffer, offset, length, positionOf(position), original]
 }
 
@@ -198,7 +226,7 @@ class MountedFileHandle {
 
   /** A descriptor call on this handle's descriptor; EBADF once it closed. */
   private call(name: string, ...args: unknown[]): Promise<unknown[]> {
-    if (!this.live()) return Promise.reject(ebadf(String(this.fd)))
+    if (!this.live()) return Promise.reject(fsError(ebadf(String(this.fd)), name))
     return this.host.descriptorCall(name, [this.fd, ...args])
   }
 
@@ -347,7 +375,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     return !(this.ws.syntheticRoot && mount === this.ws.registry.rootMount)
   }
 
-  private statsOf(path: string, st: VFSStat, options?: Options): unknown {
+  private statsOf(path: string, st: VFSStat, options?: Options, unlinked = false): unknown {
     // The stat every runtime shares; an owner the row lacks is this
     // process's own.
     const posix = posixStat(st, path, this.ws.registry.tryMountFor(path)?.prefix ?? '/', {
@@ -372,7 +400,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
       dev: posix.dev,
       ino: posix.ino,
       mode: posix.mode,
-      nlink: posix.nlink,
+      nlink: unlinked ? 0 : posix.nlink,
       uid: posix.uid,
       gid: posix.gid,
       rdev: posix.rdev,
@@ -716,8 +744,12 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
 
   /** A mounted path's `FileHandle`, as `fs.promises.open` answers. */
   async open(path: string, flags?: unknown): Promise<MountedFileHandle> {
-    const fd = await this.descriptors.open(path, openFlags(flags))
-    return new MountedFileHandle(this, fd, this.descriptors.get(fd))
+    try {
+      const fd = await this.descriptors.open(path, openFlags(flags))
+      return new MountedFileHandle(this, fd, this.descriptors.get(fd))
+    } catch (error) {
+      throw fsError(error, 'open', path)
+    }
   }
 
   /** A read into `buffer` at `offset`, at `position` or, when null, at the
@@ -751,68 +783,76 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   /** A descriptor call on a mounted descriptor, answered with what node's
    * callback gets after its error slot. */
   async descriptorCall(name: string, args: unknown[]): Promise<unknown[]> {
-    const fd = args[0] as number
-    const rest = args.slice(1)
-    const desc = this.descriptors.get(fd)
-    if (desc === undefined) throw ebadf(String(fd))
-    switch (name) {
-      case 'read': {
-        const [buffer, offset, length, position, original] = readArgs(rest)
-        const read = () => this.readInto(fd, buffer, offset, length, position)
-        return [await this.descriptors.serial(fd, read), original]
-      }
-      case 'write': {
-        const [bytes, position] = writeArgs(rest[0], rest.slice(1))
-        return [await this.fdWrite(fd, bytes, position), rest[0]]
-      }
-      case 'readv':
-        return this.descriptors.serial(fd, async () => {
+    try {
+      const fd = args[0] as number
+      const rest = args.slice(1)
+      const desc = this.descriptors.get(fd)
+      if (desc === undefined) throw ebadf(String(fd))
+      switch (name) {
+        case 'read': {
+          const [buffer, offset, length, position, original] = readArgs(rest)
+          const read = () => this.readInto(fd, buffer, offset, length, position)
+          return [await this.descriptors.serial(fd, read), original]
+        }
+        case 'write': {
+          const [bytes, position] = writeArgs(rest[0], rest.slice(1))
+          return [await this.fdWrite(fd, bytes, position), rest[0]]
+        }
+        case 'readv':
+          return await this.descriptors.serial(fd, async () => {
+            const buffers = rest[0] as Uint8Array[]
+            let at = positionOf(rest[1])
+            let total = 0
+            for (const buffer of buffers) {
+              const got = await this.readInto(fd, buffer, 0, buffer.byteLength, at)
+              total += got
+              if (at !== null) at += got
+              if (got < buffer.byteLength) break
+            }
+            return [total, buffers]
+          })
+        case 'writev': {
           const buffers = rest[0] as Uint8Array[]
-          let at = positionOf(rest[1])
-          let total = 0
-          for (const buffer of buffers) {
-            const got = await this.readInto(fd, buffer, 0, buffer.byteLength, at)
-            total += got
-            if (at !== null) at += got
-            if (got < buffer.byteLength) break
-          }
-          return [total, buffers]
-        })
-      case 'writev': {
-        const buffers = rest[0] as Uint8Array[]
-        const position = positionOf(rest[1])
-        const joined = Buffer.concat(buffers.map((b) => bytesOf(b, null)))
-        return [await this.fdWrite(fd, joined, position), buffers]
+          const position = positionOf(rest[1])
+          const joined = Buffer.concat(buffers.map((b) => bytesOf(b, null)))
+          return [await this.fdWrite(fd, joined, position), buffers]
+        }
+        case 'fstat': {
+          const st =
+            desc.kept !== null && desc.stat !== null ? desc.stat : await this.files.stat(desc.path)
+          const size = desc.handle?.size ?? st.size
+          return [
+            this.statsOf(desc.opened, { ...st, size }, rest[0] as Options, desc.kept !== null),
+          ]
+        }
+        case 'ftruncate':
+          if (!desc.mode.writable) throw einval(desc.path)
+          await this.descriptors.serial(fd, () => {
+            this.descriptors.file(fd, false, true).truncate(Math.max(0, Number(rest[0] ?? 0)))
+            return Promise.resolve()
+          })
+          return []
+        case 'fsync':
+        case 'fdatasync':
+          await this.descriptors.serial(fd, () => this.descriptors.land(desc))
+          return []
+        case 'close':
+          await this.descriptors.close(fd)
+          return []
+        case 'fchmod':
+          await this.chmod(desc.path, rest[0] as number)
+          return []
+        case 'fchown':
+          await this.chown(desc.path, rest[0] as number, rest[1] as number)
+          return []
+        case 'futimes':
+          await this.utimes(desc.path, rest[0], rest[1])
+          return []
+        default:
+          throw new TypeError(`mirage.patchNodeFs: ${name} is not a descriptor call`)
       }
-      case 'fstat': {
-        const st = await this.files.stat(desc.path)
-        const size = desc.handle?.size ?? st.size
-        return [this.statsOf(desc.opened, { ...st, size }, rest[0] as Options)]
-      }
-      case 'ftruncate':
-        await this.descriptors.serial(fd, () => {
-          this.descriptors.file(fd, false, true).truncate(Number(rest[0] ?? 0))
-          return Promise.resolve()
-        })
-        return []
-      case 'fsync':
-      case 'fdatasync':
-        await this.descriptors.serial(fd, () => this.descriptors.land(desc))
-        return []
-      case 'close':
-        await this.descriptors.close(fd)
-        return []
-      case 'fchmod':
-        await this.chmod(desc.path, rest[0] as number)
-        return []
-      case 'fchown':
-        await this.chown(desc.path, rest[0] as number, rest[1] as number)
-        return []
-      case 'futimes':
-        await this.utimes(desc.path, rest[0], rest[1])
-        return []
-      default:
-        throw new TypeError(`mirage.patchNodeFs: ${name} is not a descriptor call`)
+    } catch (error) {
+      throw fsError(error, name)
     }
   }
 
@@ -957,7 +997,7 @@ export function patchNodeFs(ws: Workspace): () => void {
     const path = mountedIn('open', rest)
     if (typeof done !== 'function' || path === null) return original(...args)
     answer(
-      host.descriptors.open(path, openFlags(rest[1])).then((fd) => [fd]),
+      host.open(path, rest[1]).then((handle) => [handle.fd]),
       done as Fn,
     )
     return undefined
@@ -973,12 +1013,15 @@ export function patchNodeFs(ws: Workspace): () => void {
       if (host.descriptors.get(args[0]) === undefined) return original(...args)
       const done = args.at(-1)
       // fs.close is the one whose callback node lets a caller leave out;
-      // a failure then has nowhere to go but the log.
+      // node throws an unhandled close error on the next turn.
       const callback: Fn =
         typeof done === 'function'
           ? (done as Fn)
           : (err: unknown) => {
-              if (err !== null) console.debug(`mirage.patchNodeFs: ${name} failed`, err)
+              if (err !== null)
+                process.nextTick(() => {
+                  throw err instanceof Error ? err : new Error('close failed', { cause: err })
+                })
             }
       answer(
         host.descriptorCall(name, typeof done === 'function' ? args.slice(0, -1) : args),

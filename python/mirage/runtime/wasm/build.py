@@ -13,8 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import posixpath
 from pathlib import Path
 
+from mirage.errors.fs import eacces
 from mirage.runtime.types import VFSStat
 from mirage.runtime.wasm.constants import FT_DIR, FT_REG
 
@@ -33,7 +35,7 @@ class BuildDir:
     """
 
     def __init__(self, root: Path) -> None:
-        self._root = root
+        self._root = root.resolve()
 
     def target(self, path: str) -> Path:
         """The host path a guest path names, present or not.
@@ -41,8 +43,20 @@ class BuildDir:
         Args:
             path (str): guest-absolute path.
         """
-        rel = path.lstrip("/")
-        return self._root / rel if rel else self._root
+        rel = posixpath.normpath("/" + path.lstrip("/")).lstrip("/")
+        target = (self._root / rel).resolve()
+        if not target.is_relative_to(self._root):
+            raise eacces(path)
+        return target
+
+    def _empty_extensions(self, path: str) -> bool:
+        target = self.target(path)
+        return (
+            target.name == "lib-dynload"
+            and target.parent.name.startswith("python3.")
+            and target.parent.is_dir()
+            and not target.exists()
+        )
 
     def has(self, path: str) -> bool:
         """Whether this build actually holds `path`.
@@ -50,7 +64,11 @@ class BuildDir:
         Args:
             path (str): guest-absolute path.
         """
-        return path == "/" or self.target(path).exists()
+        return (
+            path == "/"
+            or self._empty_extensions(path)
+            or self.target(path).exists()
+        )
 
     def stat(self, path: str) -> VFSStat:
         """Stat a build path.
@@ -62,6 +80,8 @@ class BuildDir:
         Args:
             path (str): guest-absolute path.
         """
+        if self._empty_extensions(path):
+            return VFSStat(size=0, is_dir=True, mode=0o40555)
         host = self.target(path)
         st = os.stat(host)
         return VFSStat(
@@ -91,6 +111,8 @@ class BuildDir:
         Args:
             path (str): guest-absolute path.
         """
+        if self._empty_extensions(path):
+            return []
         entries = []
         for entry in os.scandir(self.target(path)):
             entries.append((entry.name, FT_DIR if entry.is_dir() else FT_REG))

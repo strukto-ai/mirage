@@ -20,10 +20,12 @@ import { RulePolicy } from '../../../policy/rule.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
-import type { ProcessExecution, RunResult } from '../../../runtime/types.ts'
+import type { ProcessExecution, StreamExecution, RunResult } from '../../../runtime/types.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
+  STREAMING_PROCESS,
+  type StreamingProcess,
   type LineExecutor,
   type ProcessExecutor,
 } from '../../../runtime/mixin.ts'
@@ -54,6 +56,17 @@ class ProcessProbe extends Runtime implements ProcessExecutor {
       stderr: null,
       exitCode: 0,
     })
+  }
+}
+
+class StreamingProbe extends ProcessProbe implements StreamingProcess {
+  readonly [STREAMING_PROCESS] = true as const
+  streams: StreamExecution[] = []
+
+  async runStream(request: StreamExecution): Promise<RunResult> {
+    this.streams.push(request)
+    await request.output(ENC.encode(request.env.TOKEN ?? 'unset'))
+    return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
   }
 }
 
@@ -120,6 +133,22 @@ describe('external program capture', () => {
       expect(probe.requests[0]?.env.TOKEN).toBe('one')
       await ws.shell('native-tool')
       expect(probe.requests[1]?.env.TOKEN).toBeUndefined()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('captures temporary launch settings before a native stream is pulled', async () => {
+    const probe = new StreamingProbe()
+    const ws = await workspace(probe)
+    try {
+      await ws.shell('mkdir /work; cd /work')
+      const result = await ws.shell('TOKEN=one PATH=/private/bin native-tool | cat')
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('one')
+      expect(probe.streams[0]?.env.PATH).toBe('/private/bin')
+      expect(probe.streams[0]?.cwd.virtual).toBe('/work')
+      expect(DEC.decode((await ws.shell('native-tool')).stdout)).toBe('unset')
     } finally {
       await ws.close()
     }
@@ -624,6 +653,23 @@ it.each([
     const result = await ws.shell(`${name} ${args}`)
     expect(result.exitCode).toBe(0)
     expect(probe.requests.map((r) => r.argv)).toEqual([[name, ...args.split(' ')]])
+  } finally {
+    await ws.close()
+  }
+})
+
+class FailingProcess extends ProcessProbe {
+  override runProcess(_request: ProcessExecution): Promise<RunResult> {
+    return Promise.reject(new Error('provider unavailable'))
+  }
+}
+it('keeps a provider error on its command and continues the line', async () => {
+  const ws = await workspace(new FailingProcess())
+  try {
+    const result = await ws.shell('echo before; failed-tool; echo after')
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(result.stdout)).toBe('before\nafter\n')
+    expect(DEC.decode(result.stderr)).toBe('failed-tool: provider unavailable\n')
   } finally {
     await ws.close()
   }

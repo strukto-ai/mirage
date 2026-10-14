@@ -28,13 +28,20 @@ import { MOUNT_TYPES } from './constants.ts'
 export interface SandboxConfig extends RuntimeConfig {
   /** Environment set in the sandbox. */
   env?: Record<string, string>
+  /**
+   * How the sandbox sees the workspace: `ssh` serves every prefix the
+   * session sees from the host over SFTP (the image needs sshfs), `fuse`
+   * leaves them to a mirage in the sandbox, `both` serves from the host
+   * what the sandbox does not mount itself. Unset serves nothing.
+   */
+  mountType?: MountType
 }
 
 /** A provider config with the shared collection fields always present. */
 export type NormalizedSandboxConfig<C extends SandboxConfig = SandboxConfig> = C &
   Required<Pick<SandboxConfig, 'env'>>
 
-export const BASE_CONFIG_KEYS: readonly string[] = ['env']
+export const BASE_CONFIG_KEYS: readonly string[] = ['env', 'mountType']
 
 /** Fail loud on a `mountType` other than ssh, fuse or both; unset serves nothing. */
 export function checkMountType(runtime: string, mountType: unknown): MountType | null {

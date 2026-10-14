@@ -34,8 +34,10 @@ from mirage.policy.types import (
     ShellNode,
     VfsExplanation,
 )
+from mirage.server.constants import RESERVED_KWARGS
 from mirage.server.vfs_calls import BYTES, Args, VfsCall, schema_of
-from mirage.types import FileStat, JsonValue, Refusal
+from mirage.types import FileStat, JsonValue, PathSpec, Refusal
+from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.workspace.workspace import Session
 
 
@@ -222,11 +224,13 @@ def _to_json(value: Any) -> JsonValue:
         return base64.b64encode(value).decode()
     if isinstance(value, FileStat):
         return value.model_dump(mode="json", exclude={"extra"})
+    if isinstance(value, PathSpec):
+        return value.virtual
     if isinstance(value, Mapping):
-        return dict(value)
+        return {str(key): _to_json(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return list(value)
-    if isinstance(value, (str, bool)):
+        return [_to_json(item) for item in value]
+    if value is None or isinstance(value, (str, bool, int, float)):
         return value
     raise TypeError(f"no JSON form for {type(value).__name__}")
 
@@ -248,3 +252,44 @@ async def answered(
     if explain:
         return explanation_to_dict(result)
     return {} if call.answer is None else {call.answer: _to_json(result)}
+
+
+def custom_args(
+    params: Mapping[str, JsonValue],
+) -> tuple[str, dict[str, JsonValue]]:
+    """Validate a remote function call without accepting host context overrides.
+
+    Args:
+        params (Mapping[str, JsonValue]): the request's JSON object.
+    """
+    if set(params) - {"path", "kwargs"} or not isinstance(
+        params.get("path"), str
+    ):
+        raise CallArgsError("expected path and optional kwargs")
+    kwargs = params.get("kwargs", {})
+    if not isinstance(kwargs, dict) or any(
+        key.startswith("_") or key in RESERVED_KWARGS for key in kwargs
+    ):
+        raise CallArgsError("kwargs contains a reserved dispatch argument")
+    path = params["path"]
+    assert isinstance(path, str)
+    return path, kwargs
+
+
+async def custom_answer(
+    session: Session, name: str, params: Mapping[str, JsonValue]
+) -> JsonValue:
+    """Dispatch a user VFS function through the session's normal file boundary.
+
+    Args:
+        session (Session): authenticated workspace session.
+        name (str): declared VFS function name.
+        params (Mapping[str, JsonValue]): path and JSON keyword arguments.
+    """
+    if name in CALLS:
+        raise CallArgsError(f"{name} is not a custom VFS function")
+    path, kwargs = custom_args(params)
+    result, _ = await session.vfs.dispatch(
+        name, PathSpec.from_str_path(path, cwd="/"), **kwargs
+    )
+    return {"value": _to_json(result)}

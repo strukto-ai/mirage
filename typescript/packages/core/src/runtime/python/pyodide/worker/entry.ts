@@ -40,6 +40,13 @@ console.warn = (...messages: unknown[]) => {
   post({ kind: 'notice', message: messages.map(String).join(' ') })
 }
 const sync: SyncVFS = {
+  checkPath: (path, follow) => {
+    call({
+      op: 'dispatch',
+      path,
+      args: ['stat', path, undefined, undefined, { admitOnly: true, nofollow: !follow }],
+    })
+  },
   process: (payload) => call({ op: 'process', path: '', payload }) as string,
   read: (path, raw = false) => call({ op: 'read', path, raw }) as Uint8Array,
   stat: (path) => call({ op: 'stat', path }) as VFSStat,

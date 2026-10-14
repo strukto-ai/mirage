@@ -47,7 +47,7 @@ from mirage.mount.constants import (
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
 from mirage.mount.types import MountAttrs
-from mirage.runtime.types import PipeWriter
+from mirage.runtime.types import ByteReader, PipeWriter
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 
@@ -534,10 +534,10 @@ class PipeReader:
     has none) and a logger.
 
     Args:
-        stream (asyncio.StreamReader): the client's bytes.
+        stream (ByteReader): the client's bytes.
     """
 
-    def __init__(self, stream: asyncio.StreamReader) -> None:
+    def __init__(self, stream: ByteReader) -> None:
         self._stream = stream
         self.logger = asyncssh.logging.logger
 
@@ -551,7 +551,7 @@ class PipeReader:
 async def serve_pipe(
     files: Files,
     session: SessionState,
-    reader: asyncio.StreamReader,
+    reader: ByteReader,
     writer: PipeWriter,
 ) -> None:
     """Answer SFTP on a byte pipe as ``session``, until the client closes it.
@@ -563,7 +563,7 @@ async def serve_pipe(
     Args:
         files (Files): the workspace's ``ws.vfs``.
         session (SessionState): the session every request runs as.
-        reader (asyncio.StreamReader): the client's requests.
+        reader (ByteReader): the client's requests.
         writer (PipeWriter): where the answers go.
     """
     core = MountCore(files, session=session)

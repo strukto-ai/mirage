@@ -19,6 +19,7 @@ import { ebadf, eisdir, eloop, enoent, enotdir } from '@struktoai/mirage-core/er
 import { keptView, type RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
 import { FileHandle } from '@struktoai/mirage-core/runtime/handles/file_handle'
 import { applyFlush } from '@struktoai/mirage-core/runtime/handles/flush'
+import type { VFSStat } from '@struktoai/mirage-core/runtime/types'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/mode'
 import type { FileFetch, Kept } from '@struktoai/mirage-core/runtime/handles/types'
 import { applyOpen } from '@struktoai/mirage-core/runtime/open'
@@ -101,6 +102,7 @@ export interface Descriptor {
   handle: FileHandle | null
   kept: Kept | null
   opened: string
+  stat: VFSStat | null
 }
 
 /** Read `size` bytes at `offset` without moving the handle's position,
@@ -206,7 +208,7 @@ export class Descriptors {
     if ((flags & O_DIRECTORY) !== 0 && row?.isDir !== true) {
       throw row === null ? enoent(path) : enotdir(path)
     }
-    const desc: Descriptor = { path, mode, handle: null, kept: null, opened: path }
+    const desc: Descriptor = { path, mode, handle: null, kept: null, opened: path, stat: row }
     // What other descriptors on the file still owe lands first, so their
     // older writes never land over what this one writes.
     if (mode.writable) await this.landPath(path)
@@ -218,6 +220,7 @@ export class Descriptors {
         { size: opened?.size ?? 0, writable: mode.writable, append: mode.append },
       )
     }
+    desc.stat ??= await this.files.stat(path)
     desc.path = this.walked(path)
     desc.opened = desc.path
     const fd = (this.native.openSync as (p: string, f: string) => number)(devNull, 'r')
@@ -252,6 +255,7 @@ export class Descriptors {
       if (handle.dirty) {
         desc.kept.data = applyFlush(desc.kept.data, handle.flushPlan())
         handle.settle(this.fetch(desc, true))
+        this.invalidatePeers(desc)
       }
       return
     }
@@ -259,6 +263,22 @@ export class Descriptors {
     if (steps.length === 0) return
     await this.files.flush(desc.path, steps)
     handle.settle(this.fetch(desc, true))
+    this.invalidatePeers(desc)
+  }
+
+  private invalidatePeers(changed: Descriptor): void {
+    for (const peer of this.table.values()) {
+      const same =
+        changed.kept !== null
+          ? peer.kept === changed.kept
+          : peer.kept === null && peer.path === changed.path
+      if (peer === changed || !same || peer.handle === null) continue
+      const size =
+        peer.kept === null
+          ? (changed.handle?.size ?? 0)
+          : keptView(peer.kept, peer.mode.writable).length
+      peer.handle.invalidate(this.fetch(peer, peer.mode.writable), size)
+    }
   }
 
   /** Land the writes of every descriptor open on `path`, which a change of

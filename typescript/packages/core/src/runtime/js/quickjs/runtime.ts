@@ -16,7 +16,6 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { HOME_CONFIG_KEYS, type RuntimeOptions } from '../../config.ts'
 import { JsRuntime } from '../base.ts'
 import type { RunArgs, RunResult } from '../../types.ts'
-import type { RuntimeContext } from '../../binding.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
@@ -69,10 +68,6 @@ export class QuickJsRuntime extends JsRuntime {
     }
   }
 
-  protected override executeCode(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
-    return this.run(args, context)
-  }
-
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
     const newAsyncModule = await this.loadModule()
     const QuickJS = await newAsyncModule()
@@ -92,13 +87,13 @@ export class QuickJsRuntime extends JsRuntime {
     // The guest executes on this event loop, so a busy loop blocks the
     // limit timer itself: the VM's interrupt hook is the only thing
     // that can still fire (python's epoch interruption on a thread).
-    const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds)
+    const timedOut = this.installInterrupt(runtime, args.signal, args.timeoutSeconds, exit)
     try {
       this.installGlobals(ctx, args, out, err, exit)
       const files = RuntimeFiles.of(context)
       const closeAll = installQuickJsFs(ctx, files)
 
-      const boot = ctx.evalCode(BOOTSTRAP, 'mirage:bootstrap')
+      const boot = ctx.evalCode(`(() => { ${BOOTSTRAP} })()`, 'mirage:bootstrap')
       if (boot.error) {
         boot.error.dispose()
         throw new Error('quickjs bootstrap failed')
@@ -181,12 +176,13 @@ export class QuickJsRuntime extends JsRuntime {
     runtime: QuickJSAsyncRuntime,
     signal: AbortSignal | undefined,
     timeoutSeconds: number | undefined,
+    exit: { called: boolean },
   ): { value: boolean } {
     const timedOut = { value: false }
     const deadline =
       timeoutSeconds !== undefined && timeoutSeconds > 0 ? Date.now() + timeoutSeconds * 1000 : null
-    if (signal === undefined && deadline === null) return timedOut
     runtime.setInterruptHandler(() => {
+      if (exit.called) return true
       if (deadline !== null && Date.now() > deadline) {
         timedOut.value = true
         return true
@@ -211,17 +207,39 @@ export class QuickJsRuntime extends JsRuntime {
       ctx.newFunction('', (h) => {
         sink.push(fromGuestText(ctx, h))
       })
+    setGlobal(
+      '__mirage_atob',
+      ctx.newFunction('atob', (h) => toGuestText(ctx, atob(fromGuestText(ctx, h)))),
+    )
+    setGlobal(
+      '__mirage_btoa',
+      ctx.newFunction('btoa', (h) => toGuestText(ctx, btoa(fromGuestText(ctx, h)))),
+    )
     setGlobal('__mirage_log', hostLog(out))
     setGlobal('__mirage_error', hostLog(err))
     setGlobal(
       '__mirage_setExit',
       ctx.newFunction('', (h) => {
-        exit.code = Number(ctx.dump(h)) | 0
+        exit.code = Number(ctx.dump(h)) & 255
         exit.called = true
       }),
     )
-    const stdin = args.stdin !== null ? DEC.decode(args.stdin) : ''
-    setGlobal('__mirage_stdin', toGuestText(ctx, stdin))
+    const stdin = args.stdin ?? new Uint8Array()
+    let position = 0
+    setGlobal(
+      '__mirage_readStdin',
+      ctx.newFunction('', (max) => {
+        const count = ctx.getNumber(max)
+        const end = count < 0 ? stdin.length : Math.min(stdin.length, position + count)
+        const text = DEC.decode(stdin.subarray(position, end))
+        position = end
+        return toGuestText(ctx, text)
+      }),
+    )
+    setGlobal(
+      '__mirage_byteLength',
+      ctx.newFunction('', (text) => ctx.newNumber(ENC.encode(fromGuestText(ctx, text)).length)),
+    )
     const argv = ctx.newArray()
     // A named program takes scriptArgs[0], the slot qjs fills with a
     // script's path when it runs a file; an unnamed run leaves the args
@@ -311,9 +329,12 @@ export class QuickJsRuntime extends JsRuntime {
       p.dispose()
       return typeof value === 'string' ? value : undefined
     }
-    const name = readStr('name') ?? 'Error'
-    const message = readStr('message') ?? readStr('stack') ?? 'error'
-    return `${name}: ${message}`
+    if (ctx.typeof(handle) !== 'object' || ctx.dump(handle) === null)
+      return String(ctx.dump(handle))
+    const name = readStr('name')
+    const message = readStr('message')
+    if (name === undefined && message === undefined) return String(ctx.dump(handle))
+    return message ? `${name ?? 'Error'}: ${message}` : (name ?? 'Error')
   }
 
   private async loadModule(): Promise<NewAsyncModule> {

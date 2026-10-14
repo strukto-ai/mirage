@@ -61,8 +61,11 @@ export abstract class LanguageRuntime extends Runtime {
     return super.executeRequest(request, context)
   }
 
-  protected executeCode(args: RunArgs, _context?: RuntimeContext): Promise<RunResult> {
-    return this.run(args)
+  protected executeCode(args: RunArgs, context?: RuntimeContext): Promise<RunResult> {
+    return this.run(
+      args.cwd === undefined && context !== undefined ? { ...args, cwd: context.cwd } : args,
+      context,
+    )
   }
 
   /** Report the bound interpreter's version. */
@@ -87,5 +90,5 @@ export abstract class LanguageRuntime extends Runtime {
    * The adapter owns engine reuse; this does not reset workspace
    * state or undo external effects.
    */
-  abstract run(args: RunArgs): Promise<RunResult>
+  abstract run(args: RunArgs, context?: RuntimeContext): Promise<RunResult>
 }

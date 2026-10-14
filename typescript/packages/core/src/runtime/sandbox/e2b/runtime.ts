@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { abortable } from '../../../utils/abort.ts'
 import { RemoteSandbox } from '../base.ts'
 import { registerRuntime } from '../../table.ts'
 import type { PipeWriter, RunResult, SandboxPipe } from '../../types.ts'
 import type { RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { checkMountType, requireId } from '../config.ts'
+import { requireId } from '../config.ts'
 import { PTY_MARK, PTY_RAW } from '../constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
@@ -102,10 +103,9 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 
-  constructor(options: RuntimeOptions<E2BConfig> | Record<string, unknown> = {}) {
+  constructor(options: RuntimeOptions<E2BConfig> = {}) {
     super(options, E2B_CONFIG_KEYS)
     requireId('e2b', 'sandboxId', this.config.sandboxId)
-    this.serveMounts(checkMountType('e2b', this.config.mountType))
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -127,7 +127,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
     this.sandbox = await sdk.Sandbox.connect(this.config.sandboxId, this.apiParams())
   }
 
-  async execLine(
+  override async execLine(
     line: string,
     stdin: Uint8Array | null,
     env: Record<string, string>,
@@ -150,8 +150,8 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
       signal?.throwIfAborted()
       try {
         if (stdin !== null) {
-          if (stdin.byteLength > 0) await this.waitFor(handle.sendStdin(stdin), signal)
-          await this.waitFor(handle.closeStdin(), signal)
+          if (stdin.byteLength > 0) await abortable(handle.sendStdin(stdin), signal)
+          await abortable(handle.closeStdin(), signal)
         }
       } catch (error) {
         // The command may exit before the input RPC arrives. Wait for its
@@ -160,7 +160,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
         // eslint-disable-next-line @typescript-eslint/no-deprecated
         if (!(error instanceof sdk.NotFoundError)) throw error
       }
-      result = await this.waitFor(handle.wait(), signal)
+      result = await abortable(handle.wait(), signal)
       signal?.throwIfAborted()
     } catch (error) {
       if (!signal?.aborted && error instanceof sdk.CommandExitError) {

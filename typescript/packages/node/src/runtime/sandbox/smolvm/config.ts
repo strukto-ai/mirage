@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
+import { BASE_CONFIG_KEYS, type SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
 
 /** How to reach the user's running microVM. */
 export interface SmolvmConfig extends SandboxConfig {
@@ -27,4 +27,4 @@ export interface SmolvmConfig extends SandboxConfig {
   machine: string
 }
 
-export const SMOLVM_CONFIG_KEYS: readonly string[] = ['env', 'machine']
+export const SMOLVM_CONFIG_KEYS: readonly string[] = [...BASE_CONFIG_KEYS, 'machine']

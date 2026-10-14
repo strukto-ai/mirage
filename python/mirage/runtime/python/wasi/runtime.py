@@ -20,7 +20,7 @@ from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.config import RuntimeConfig, memory_limit, resolve_home
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.python.execution import prepare_source
+from mirage.runtime.python.execution import main_filename, prepare_source
 from mirage.runtime.python.flags import init_argv
 from mirage.runtime.python.wasi.config import WasiConfig
 from mirage.runtime.types import (
@@ -78,7 +78,7 @@ class WasiRuntime(PythonRuntime):
     an injected dispatch, only the build directory is visible.
 
     Runs execute on a worker thread with the GIL released, and each run
-    gets its own epoch-interruption engine: cancelling the `run` task
+    leases its own epoch-interruption engine: cancelling the `run` task
     bumps the epoch, which traps the run and reclaims the thread, so a
     limit timeout stops the interpreter instead of leaking it.
 
@@ -135,11 +135,6 @@ class WasiRuntime(PythonRuntime):
             memory_limit(self.config.max_memory),
         )
 
-    async def _execute_code(
-        self, args: RunArgs, context: RuntimeContext | None
-    ) -> RunResult:
-        return await self.run(args, context)
-
     async def run(
         self, args: RunArgs, context: RuntimeContext | None = None
     ) -> RunResult:
@@ -164,11 +159,25 @@ class WasiRuntime(PythonRuntime):
         # sys.path, as it does on CPython.
         source = prepare_source(args, search_path=True)
         cwd = args.cwd or (context.cwd if context is not None else None)
-        if cwd is not None:
-            source = (
-                f"__import__('os').chdir({cwd.virtual!r})\n"
-                f"exec(compile({source!r}, '<string>', 'exec'), globals())"
-            )
+        filename = (
+            main_filename(args)
+            or (args.prog if args.script_cli else None)
+            or "<string>"
+        )
+        if source == args.code:
+            source = f"exec(compile({args.code!r}, {filename!r}, 'exec'), globals())"
+        preamble = (
+            "" if cwd is None else f"__import__('os').chdir({cwd.virtual!r})\n"
+        )
+        source = (
+            f"__import__('linecache').cache[{filename!r}] = "
+            f"({len(args.code)}, None, {args.code.splitlines(keepends=True)!r}, "
+            f"{filename!r})\n"
+            "__import__('sys').excepthook = (lambda hook: lambda t, v, tb: "
+            "hook(t, v, tb) if tb is None or tb.tb_frame.f_back is not None "
+            "else hook(t, v.with_traceback(tb.tb_next), tb.tb_next))"
+            "(__import__('sys').excepthook)\n" + preamble + source
+        )
         # sys.argv becomes [prog, *args.args], matching the local runtime.
         stdout, stderr, exit_code = await self._execution.run(
             argv=["python", *init_argv(args.flags), "-c", source, *args.args],
@@ -184,3 +193,6 @@ class WasiRuntime(PythonRuntime):
             fs=fs,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    async def close(self) -> None:
+        await self._execution.close()

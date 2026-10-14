@@ -32,16 +32,6 @@ STATE_HINTS: dict[str, str] = {
     ),
 }
 
-# Every argv runs under this POSIX sh prelude, with the cwd as $1 and
-# `-w /` on the exec. `container exec -e` appends to the image's
-# environment rather than replacing a name it already sets, so a bare
-# argv would see the image's PATH first (getenv returns the first
-# match), and `-w` creates a missing directory instead of failing. sh
-# imports the environment last-wins, `cd` fails loud on a cwd the
-# container does not serve, and `exec` hands over the argv unchanged
-# with one value per name.
-PRELUDE = 'cd -- "$1" || exit; shift; exec "$@"'
-
 
 def no_container_hint(session_id: str | None) -> str:
     """Why a line has nowhere to run: its session maps to no container.

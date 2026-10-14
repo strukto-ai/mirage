@@ -296,7 +296,8 @@ def execs(name: str, session: SessionState, registry: "MountRegistry") -> bool:
     return (
         "/" in name
         or program(name, session, registry) is not None
-        or lookup(name, session, registry) is Consumer.FUNCTION
+        or lookup(name, session, registry)
+        in (Consumer.FUNCTION, Consumer.EXTERNAL)
     )
 
 

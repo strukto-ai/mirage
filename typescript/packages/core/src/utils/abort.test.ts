@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { abortable, joinOrAbort, makeAbortError, sleep } from './abort.ts'
 
 function never(): Promise<never> {
@@ -37,11 +37,13 @@ describe('abortable', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 40))
   })
 
-  it('rejects as an abort as soon as the signal fires', async () => {
+  it('rejects and removes its listener before the abandoned operation settles', async () => {
     const controller = new AbortController()
+    const removed = vi.spyOn(controller.signal, 'removeEventListener')
     const pending = abortable(never(), controller.signal)
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(removed).toHaveBeenCalledWith('abort', expect.any(Function))
   })
 })
 

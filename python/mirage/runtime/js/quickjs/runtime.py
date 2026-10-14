@@ -114,11 +114,6 @@ class QuickJsRuntime(JsRuntime):
             stdout = f"JavaScript (quickjs-ng {version})\n".encode()
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
-    async def _execute_code(
-        self, args: RunArgs, context: RuntimeContext | None
-    ) -> RunResult:
-        return await self.run(args, context)
-
     async def run(
         self, args: RunArgs, context: RuntimeContext | None = None
     ) -> RunResult:
@@ -164,3 +159,6 @@ class QuickJsRuntime(JsRuntime):
             fs=fs,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
+
+    async def close(self) -> None:
+        await self._execution.close()

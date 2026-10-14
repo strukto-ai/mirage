@@ -120,14 +120,14 @@ def test_config_vfs_entry_takes_no_options():
 class AlphaRuntime(PythonRuntime):
     name = "alpha"
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=b"ran-alpha\n", stderr=None, exit_code=0)
 
 
 class BetaRuntime(PythonRuntime):
     name = "beta"
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=b"ran-beta\n", stderr=None, exit_code=0)
 
 
@@ -677,7 +677,7 @@ class ResolverProbe(PythonRuntime):
         super().bind(binding)
         self.resolver = binding.resolver
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 

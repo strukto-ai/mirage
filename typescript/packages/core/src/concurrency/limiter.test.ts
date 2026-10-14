@@ -63,6 +63,18 @@ describe('ConcurrencyLimiter', () => {
     expect(state.peak).toBe(2)
   })
 
+  it('an aborted waiter leaves the queue without taking a permit', async () => {
+    const limiter = new ConcurrencyLimiter(1)
+    const release = await limiter.acquire()
+    const controller = new AbortController()
+    const abandoned = limiter.acquire(controller.signal)
+    const next = limiter.acquire()
+    controller.abort()
+    await expect(abandoned).rejects.toMatchObject({ name: 'AbortError' })
+    release()
+    expect(typeof (await next)).toBe('function')
+  })
+
   it('a throwing holder still returns its permit', async () => {
     const limiter = new ConcurrencyLimiter(1)
     const release = await limiter.acquire()

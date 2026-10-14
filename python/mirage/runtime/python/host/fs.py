@@ -368,23 +368,27 @@ class HostFs:
             prefix == owner for prefix, _ in self._files.writable_mounts()
         )
 
-    def _stat_of(self, virtual: str, st: VFSStat) -> _real_os.stat_result:
+    def _stat_of(
+        self, virtual: str, st: VFSStat, unlinked: bool = False
+    ) -> _real_os.stat_result:
         """One `os.stat_result` for a row, by the rule every runtime
         shares; an owner the row lacks is the host process's own.
 
         Args:
             virtual (str): the path being statted (the inode's name).
             st (VFSStat): the mount's row for it.
+            unlinked (bool): the file has no name left, so no link.
         """
+        posix = posix_stat(
+            st,
+            virtual,
+            owner_prefix(self._files.mount_prefixes(), virtual) or "/",
+            uid=self._uid,
+            gid=self._gid,
+            unknown_ns=int(self._now * 1_000_000_000),
+        )
         return stat_result(
-            posix_stat(
-                st,
-                virtual,
-                owner_prefix(self._files.mount_prefixes(), virtual) or "/",
-                uid=self._uid,
-                gid=self._gid,
-                unknown_ns=int(self._now * 1_000_000_000),
-            )
+            dataclasses.replace(posix, nlink=0) if unlinked else posix
         )
 
     def _isdir(self, virtual: str) -> bool:
@@ -1064,6 +1068,8 @@ class HostFs:
         self._descriptors.close(fd)
 
     def read(self, fd: int, n: int) -> bytes:
+        if n < 0:
+            raise fs_error(self._descriptors[fd].path, FsCondition.EINVAL)
         return self._descriptors.file(fd, True, False).read(n)
 
     def write(self, fd: int, data: Any) -> int:
@@ -1073,7 +1079,7 @@ class HostFs:
 
     def pread(self, fd: int, n: int, offset: int) -> bytes:
         handle = self._descriptors.file(fd, True, False)
-        if offset < 0:
+        if offset < 0 or n < 0:
             raise fs_error(self._descriptors[fd].path, FsCondition.EINVAL)
         return handle.pread(offset, n)
 
@@ -1156,15 +1162,21 @@ class HostFs:
 
     def fstat(self, fd: int) -> _real_os.stat_result:
         desc = self._descriptors[fd]
-        st = self._adapter.stat(desc.path)
+        st = (
+            desc.stat
+            if desc.kept is not None and desc.stat is not None
+            else self._adapter.stat(desc.path)
+        )
         if desc.handle is not None:
             st = dataclasses.replace(st, size=desc.handle.size)
-        return self._stat_of(desc.opened, st)
+        return self._stat_of(desc.opened, st, desc.kept is not None)
 
     def fsync(self, fd: int) -> None:
         self._descriptors.land(self._descriptors[fd])
 
     def ftruncate(self, fd: int, length: int) -> None:
+        if not self._descriptors[fd].facts.writable:
+            raise fs_error(self._descriptors[fd].path, FsCondition.EINVAL)
         self._descriptors.file(fd, False, True).truncate(length)
 
     # A descriptor in a path slot names its file, so these are the path

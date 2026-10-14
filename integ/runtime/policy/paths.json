@@ -313,6 +313,180 @@
           }
         }
       ]
+    },
+    {
+      "id": "native_runtime_refuses_session_file_restrictions",
+      "runtimes": [
+        "local"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "secret"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/data/secret.txt"
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "print(\"must not execute\")"
+          },
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "local: runtime cannot enforce this session's file restrictions\n"
+          }
+        },
+        {
+          "profile": {}
+        },
+        {
+          "program": {
+            "python": "print(\"visible\")"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "visible\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "program_rules_check_requested_symlink_paths_before_mutations",
+      "runtimes": [
+        "wasi",
+        "quickjs",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "allowed/item": "kept"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /data/allowed /data/blocked",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "profile": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "blocked alias",
+                  "commands": {
+                    "python3": [
+                      "/data/blocked/*"
+                    ],
+                    "node": [
+                      "/data/blocked/*"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nassert os.stat(\"/data/blocked/item\").st_size == 4\ntry:\n    os.unlink('/data/blocked/item')\nexcept PermissionError:\n    print('denied')\nelse:\n    raise AssertionError('alias bypassed command rule')\nprint(open('/data/allowed/item').read())",
+            "js": "if (os.stat(\"/data/blocked/item\")[1] !== 0) throw new Error(\"metadata refused\")\nconsole.log(os.remove('/data/blocked/item') < 0 ? 'denied' : 'bypassed')\nconst f = std.open('/data/allowed/item', 'r')\nconsole.log(f.readAsString())\nf.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "denied\nkept\n",
+            "ops_absent": [
+              "unlink /data/allowed/item"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "program_can_change_an_allowed_link_without_following_its_denied_target",
+      "runtimes": [
+        "wasi",
+        "quickjs",
+        "pyodide"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "private/file": "kept",
+              "public/seed": "seed"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /data/public /data/alias; ln -s /data/private/file /data/public/link",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "profile": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "private target",
+                  "commands": {
+                    "python3": [
+                      "/data/private/*"
+                    ],
+                    "node": [
+                      "/data/private/*"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nos.rename('/data/alias/link', '/data/alias/moved')\nos.unlink('/data/alias/moved')\nprint('changed')",
+            "js": "if (os.rename('/data/alias/link', '/data/alias/moved') !== 0) throw new Error('rename refused')\nif (os.remove('/data/alias/moved') !== 0) throw new Error('unlink refused')\nconsole.log('changed')"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "changed\n",
+            "ops_absent": [
+              "read /data/private/file",
+              "unlink /data/private/file"
+            ]
+          }
+        },
+        {
+          "command": "cat /data/private/file",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept"
+          }
+        }
+      ]
     }
   ]
 }

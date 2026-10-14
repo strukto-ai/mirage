@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypeAlias
@@ -285,6 +284,12 @@ class RunResult:
     exit_code: int
 
 
+class ByteReader(Protocol):
+    """The byte reads an SFTP transport needs."""
+
+    async def readexactly(self, n: int) -> bytes: ...
+
+
 class PipeWriter(Protocol):
     """Where a pipe's bytes go: an ``asyncio.StreamWriter``, or anything
     with its two calls."""
@@ -299,12 +304,12 @@ class SandboxPipe:
     """A command a sandbox runs with its stdin and stdout held open.
 
     Args:
-        reader (asyncio.StreamReader): what the command writes.
+        reader (ByteReader): what the command writes.
         writer (PipeWriter): what the command reads.
         stop (Callable[[], Awaitable[None]]): ends the command.
     """
 
-    reader: asyncio.StreamReader
+    reader: ByteReader
     writer: PipeWriter
     stop: Callable[[], Awaitable[None]]
 
@@ -339,7 +344,21 @@ class ProcessExecution:
     kind: Literal["process"] = field(default="process", init=False)
 
 
-ExecutionRequest: TypeAlias = CodeExecution | ShellRequest | ProcessExecution
+@dataclass(frozen=True, slots=True)
+class StreamExecution:
+    """An argv execution with bounded input and an awaited stdout consumer."""
+
+    argv: tuple[str, ...]
+    cwd: PathSpec
+    env: dict[str, str]
+    stdin: ByteSource | None
+    output: Callable[[bytes], Awaitable[None]]
+    kind: Literal["stream"] = field(default="stream", init=False)
+
+
+ExecutionRequest: TypeAlias = (
+    CodeExecution | ShellRequest | ProcessExecution | StreamExecution
+)
 
 # Guest APIs that can operate on workspace files. Policy and backend support
 # still decide whether an individual operation is allowed.

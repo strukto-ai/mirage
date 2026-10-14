@@ -5,10 +5,14 @@ description: Full CPython in WebAssembly, with packages such as numpy, for pytho
 ---
 
 [Pyodide](https://pyodide.org) is full CPython compiled to WebAssembly, run
-in a worker, with packages such as numpy loaded on import. It has no host
-files or network: the files it opens are the workspace's, under the same
-mount modes and permissions as shell commands. Each command starts a fresh
-interpreter. TypeScript SDK only, in Node and in browsers.
+in a worker, with packages such as numpy loaded on import. The files it opens
+are the workspace's, under the same mount modes and permissions as shell
+commands. On supported Node versions, Mirage hardens the worker against
+known host file, module, and network access paths after interpreter setup.
+This is not a security boundary for hostile code; see
+[containment](/typescript/runtime/python#containment) for limits and browser
+behavior. Each command starts a fresh interpreter. TypeScript SDK
+only, in Node and in browsers.
 
 ## Installation
 

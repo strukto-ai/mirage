@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
-import { eloop, isMissingOp, isMissingPath } from '../errors/fs.ts'
+import { einval, eloop, isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
   atimeMs,
   contentSize,
@@ -336,7 +336,7 @@ export class RuntimeFiles {
     try {
       return await this.stat(path, nofollow)
     } catch (err) {
-      if (isAbsent(err)) return null
+      if (classify(err) === 'ENOENT') return null
       throw err
     }
   }
@@ -477,6 +477,11 @@ export class RuntimeFiles {
     }
   }
 
+  /** Admit writable access without changing content or metadata. */
+  async checkWrite(path: string): Promise<void> {
+    await this.dispatch('write', path, undefined, undefined, { admitOnly: true })
+  }
+
   /**
    * Establish an empty file at `path` through the mount, so write
    * modes and a missing parent answer at open time and the ledger
@@ -488,6 +493,7 @@ export class RuntimeFiles {
 
   /** Set `path`'s length: a shrink drops bytes, growth reads zeros. */
   async truncate(path: string, length = 0): Promise<void> {
+    if (length < 0) throw einval(path)
     await this.dispatch('truncate', path, undefined, undefined, { length })
   }
 

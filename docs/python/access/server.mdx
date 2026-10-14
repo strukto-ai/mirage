@@ -113,3 +113,16 @@ The protocol is the same on both servers. These are the differences in how this 
 | [`mirage/server/ssh/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/server/ssh) | The SSH server: shell, exec, SFTP and SCP. |
 | [`mirage/workspace/tools/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/workspace/tools) | The agent tool table behind `session.tools`, which every interface calls. |
 | [`mirage/cli/`](https://github.com/strukto-ai/mirage/tree/main/python/mirage/cli) | The `mirage` CLI, one module per verb. |
+
+
+## Custom VFS calls and streaming reads
+
+`POST /v1/workspaces/{id}/vfs/{name}` dispatches a registered VFS operation with
+JSON `{ "path": "/data/item", "kwargs": {} }` and returns `{ "value": ... }`.
+It uses the authenticated request's session and the ordinary dispatcher; callers
+cannot override session or admission fields. Binary values use the server's
+base64 JSON representation.
+
+`POST /v1/workspaces/{id}/vfs/read_stream` takes `{ "path": "/data/item", "raw": false }`
+and streams `application/octet-stream`. It uses the same authentication and file
+policy as other VFS routes, with bounded reads and cancellation cleanup.

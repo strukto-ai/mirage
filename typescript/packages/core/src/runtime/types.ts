@@ -94,6 +94,8 @@ export type ShellFn = (line: string, stdin: ByteSource | null) => Promise<IOResu
  * `replace` (XATTR_CREATE and XATTR_REPLACE).
  */
 export type BridgeOpAttrs = SetAttrFields & {
+  /** Check writable-open admission or stat's command path rules without backend I/O. */
+  admitOnly?: boolean
   parents?: boolean
   create?: boolean
   replace?: boolean
@@ -249,7 +251,18 @@ export interface ProcessExecution {
   signal?: AbortSignal
 }
 
-export type ExecutionRequest = CodeExecution | ShellRequest | ProcessExecution
+/** An argv execution with bounded input and an awaited stdout consumer. */
+export interface StreamExecution {
+  kind: 'stream'
+  argv: readonly [string, ...string[]]
+  cwd: PathSpec
+  env: Record<string, string>
+  stdin: ByteSource | null
+  output: (chunk: Uint8Array) => Promise<void>
+  signal?: AbortSignal
+}
+
+export type ExecutionRequest = CodeExecution | ShellRequest | ProcessExecution | StreamExecution
 
 /** Guest APIs for workspace files; policy and backend support still apply per operation. */
 export type FilesystemOperation = 'read' | 'write' | 'list' | 'stat' | 'glob'

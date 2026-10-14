@@ -19,7 +19,7 @@ from typing import Any, TypeVar
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.concurrency.limiter import ConcurrencyLimiter
-from mirage.errors.fs import eloop, numbered
+from mirage.errors.fs import einval, eloop, numbered
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.binding import RuntimeContext
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
@@ -229,7 +229,7 @@ class RuntimeFiles:
     async def _call(self, name: str, path: str, /, **kwargs: Any) -> Any:
         async with self._limiter.acquire():
             result, _ = await self._dispatch(
-                name, PathSpec.from_str_path(path), **kwargs
+                name, PathSpec.from_str_path(path, cwd="/"), **kwargs
             )
         return result
 
@@ -401,7 +401,7 @@ class RuntimeFiles:
     ) -> VFSStat | None:
         """The path's row, or None when the mount says it is not there.
 
-        Only an absence (``ABSENT_PATH``) answers None. Anything else
+        Only a missing path answers None. Anything else
         raises, since a refusal is not an answer about the path.
 
         Args:
@@ -410,7 +410,7 @@ class RuntimeFiles:
         """
         try:
             return self.stat(path, nofollow=nofollow)
-        except ABSENT_PATH:
+        except FileNotFoundError:
             return None
 
     def view_stat(self, path: str) -> VFSStat | None:
@@ -565,10 +565,20 @@ class RuntimeFiles:
             gid=st.gid,
         )
 
+    def check_write(self, path: str) -> None:
+        """Admit writable access without changing content or metadata.
+
+        Args:
+            path (str): the existing file being opened.
+        """
+        self.call("write", path, admit_only=True)
+
     def create(self, path: str) -> None:
         self.call("create", path)
 
     def truncate(self, path: str, length: int = 0) -> None:
+        if length < 0:
+            raise einval(path)
         self.call("truncate", path, length=length)
 
     def unlink(self, path: str) -> None:
@@ -592,7 +602,7 @@ class RuntimeFiles:
         """
         if self.mount_of(src) != self.mount_of(dst):
             raise CrossMountError(src, dst)
-        self.call("rename", src, dst=PathSpec.from_str_path(dst))
+        self.call("rename", src, dst=PathSpec.from_str_path(dst, cwd="/"))
 
     def symlink(self, path: str, target: str) -> None:
         """Create a namespace symlink at `path` pointing at `target`.

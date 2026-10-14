@@ -14,7 +14,7 @@
 
 from abc import ABC, abstractmethod
 
-from mirage.runtime.types import ProcessExecution, RunResult
+from mirage.runtime.types import ProcessExecution, RunResult, StreamExecution
 
 
 class LineExecutorMixin(ABC):
@@ -54,3 +54,11 @@ class ProcessExecutorMixin(ABC):
     @abstractmethod
     async def run_process(self, request: ProcessExecution) -> RunResult:
         """Run a process with the request's cwd, environment and stdin."""
+
+
+class StreamingProcessMixin(ProcessExecutorMixin):
+    """An argv executor that consumes input and delivers output incrementally."""
+
+    @abstractmethod
+    async def run_stream(self, request: StreamExecution) -> RunResult:
+        """Await each output write and return status after the child exits."""

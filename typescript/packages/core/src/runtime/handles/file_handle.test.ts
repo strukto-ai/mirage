@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { applyFlush } from './flush.ts'
 import { READ_CHUNK } from './constants.ts'
 import { FileHandle, overlaid, writeRuns } from './file_handle.ts'
 import type { FileFetch } from './types.ts'
@@ -78,12 +79,21 @@ describe('FileHandle', () => {
 
   it('writes at the end every time in append mode', async () => {
     const h = handle('abc', { append: true })
-    expect(h.pos).toBe(3)
+    expect(h.pos).toBe(0)
     h.seek(0, 0)
     h.write(enc.encode('XY'))
     h.seek(0, 0)
     expect(await read(h, 9)).toBe('abcXY')
     expect(h.flushPlan()).toEqual([{ kind: 'append', data: enc.encode('XY') }])
+  })
+
+  it('keeps an explicit read position when rebasing pending append data', () => {
+    const h = handle('old', { append: true })
+    h.write(enc.encode('BBB'))
+    h.seek(0, 0)
+    h.invalidate(over(''), 0)
+    expect(h.pos).toBe(0)
+    expect(h.flushPlan()).toEqual([{ kind: 'append', data: enc.encode('BBB') }])
   })
 
   it('owes only what it wrote since a settle', async () => {
@@ -234,3 +244,13 @@ describe('overlaid', () => {
     expect(overlaid(new Uint8Array(), 8, 4, [[4, enc('Q')]])).toEqual(new Uint8Array())
   })
 })
+
+it.each(['AAAAAA', 'A', ''])(
+  'keeps dirty append bytes when a peer changes the stored file to %s',
+  (stored) => {
+    const h = handle('old', { append: true })
+    h.write(enc.encode('BBB'))
+    h.invalidate(over(stored), stored.length)
+    expect(dec.decode(applyFlush(enc.encode(stored), h.flushPlan()))).toBe(stored + 'BBB')
+  },
+)

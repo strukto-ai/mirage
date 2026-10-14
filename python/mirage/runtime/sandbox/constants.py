@@ -57,7 +57,7 @@ def stdin_redirect(line: str, path: str) -> str:
         path (str): the uploaded stdin file (from stdin_path()).
     """
     quoted = shlex.quote(path)
-    return f"( {line} ) < {quoted}; _s=$?; rm -f {quoted}; exit $_s"
+    return f"(\n{line}\n) < {quoted}; _s=$?; rm -f {quoted}; exit $_s"
 
 
 def sdk_install_hint(name: str) -> str:
@@ -111,3 +111,11 @@ PIPE_SERVER_HINT = (
     "serving the workspace into a sandbox needs asyncssh; "
     "install with: pip install mirage-ai[ssh]"
 )
+
+# Every argv a provider CLI execs runs under this POSIX sh prelude, with
+# the cwd as $1 and `-w /` on the exec. An exec's `-e` can append to the
+# image's environment rather than replace a name it already sets, and
+# `-w` can create a missing directory instead of failing. sh imports the
+# environment last-wins, `cd` fails loud (126) on a cwd the sandbox does
+# not serve, and `exec` hands over the argv unchanged.
+EXEC_PRELUDE = 'cd -- "$1" || exit 126; shift; exec "$@"'

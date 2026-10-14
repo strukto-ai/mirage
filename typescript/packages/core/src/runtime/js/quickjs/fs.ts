@@ -49,6 +49,29 @@ interface Place {
 }
 
 /**
+ * Read a file's bytes for its handle: kept bytes once its name is gone,
+ * else through the mount; a writer reads what is stored.
+ */
+function fetchFor(
+  files: RuntimeFiles,
+  place: Place,
+): (offset: number, size: number | null) => Promise<Uint8Array> {
+  return (offset, size) => {
+    if (place.kept === null) {
+      const raw = place.raw
+      return files.read(place.path, size === null ? { offset, raw } : { offset, size, raw })
+    }
+    try {
+      return Promise.resolve(
+        keptView(place.kept, place.raw).slice(offset, size === null ? undefined : offset + size),
+      )
+    } catch (err) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)))
+    }
+  }
+}
+
+/**
  * Hand text to the guest. The engine takes a C string, so text holding
  * a NUL crosses as the pieces between its NULs, which the bootstrap
  * joins back.
@@ -112,6 +135,7 @@ export function installQuickJsFs(
   // with EBADF, as on a directory, and clearerr does not change that.
   const writeOnly = new Set<number>()
   const failed = new Set<number>()
+  const ended = new Set<number>()
   const readFails = (fd: number, size = -1): boolean => {
     if (!directories.has(fd) && !unreadable.has(fd) && !writeOnly.has(fd)) return false
     if (size === 0) return true
@@ -121,7 +145,11 @@ export function installQuickJsFs(
   let cwd = PathSpec.fromStrPath('/')
   const absolute = (handle: QuickJSHandle): string => {
     const path = ctx.getString(handle)
-    return path === '' ? '' : resolvePath(path, cwd.virtual)
+    if (path === '') return ''
+    const resolved = resolvePath(path, cwd.virtual)
+    return resolved !== '/' && (path.endsWith('/') || path.endsWith('/.'))
+      ? resolved + '/'
+      : resolved
   }
 
   // Read what the files open on `path` need before its name is removed or
@@ -243,30 +271,11 @@ export function installQuickJsFs(
       // Nothing is read at open: the handle fetches what a read lands in.
       // A handle that writes reads the stored bytes, since its writes land
       // on them; a read-only one sees the rendering.
-      const bound = files
-      handle = FileHandle.opened(
-        path,
-        row === null
-          ? null
-          : (offset, size) => {
-              const kept = place.kept
-              if (kept === null) {
-                return bound.read(
-                  place.path,
-                  size === null ? { raw: mode.writable } : { offset, size, raw: mode.writable },
-                )
-              }
-              try {
-                const view = keptView(kept, mode.writable)
-                return Promise.resolve(
-                  view.slice(offset, size === null ? undefined : offset + size),
-                )
-              } catch (err) {
-                return Promise.reject(err instanceof Error ? err : new Error(String(err)))
-              }
-            },
-        { size: row?.size ?? 0, writable: mode.writable, append: mode.append },
-      )
+      handle = FileHandle.opened(path, row === null ? null : fetchFor(files, place), {
+        size: row?.size ?? 0,
+        writable: mode.writable,
+        append: mode.append,
+      })
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
     }
@@ -277,20 +286,54 @@ export function installQuickJsFs(
     return ctx.newNumber(fd)
   })
 
+  const land = async (file: FileHandle, place: Place): Promise<void> => {
+    if (!file.dirty || files === null) return
+    if (place.kept === null) await files.flush(place.path, file.flushPlan())
+    else place.kept.data = applyFlush(place.kept.data, file.flushPlan())
+    for (const [fd, peer] of places) {
+      const same =
+        place.kept === null
+          ? peer.kept === null && peer.path === place.path
+          : peer.kept === place.kept
+      const handle = table.get(fd)
+      if (handle === undefined || !same) continue
+      const fetch = fetchFor(files, peer)
+      if (handle === file) handle.settle(fetch)
+      else handle.invalidate(fetch, file.size)
+    }
+  }
+
+  defineAsync('__mirage_flush', async (fdH) => {
+    const fd = ctx.getNumber(fdH)
+    const file = table.get(fd)
+    const place = places.get(fd)
+    if (file === undefined || place === undefined) return ctx.newNumber(-WASI.EBADF)
+    try {
+      await land(file, place)
+      return ctx.newNumber(0)
+    } catch (err) {
+      return ctx.newNumber(-errnoFor(err))
+    }
+  })
+
   defineAsync('__mirage_close', async (fdH) => {
     const fd = ctx.getNumber(fdH)
     directories.delete(fd)
     unreadable.delete(fd)
     writeOnly.delete(fd)
     failed.delete(fd)
+    ended.delete(fd)
     const place = places.get(fd)
     places.delete(fd)
     const file = table.pop(fd)
-    if (file === undefined || place === undefined) return ctx.undefined
-    if (!file.dirty || files === null) return ctx.undefined
-    if (place.kept === null) await files.flush(place.path, file.flushPlan())
-    else place.kept.data = applyFlush(place.kept.data, file.flushPlan())
-    return ctx.undefined
+    if (file === undefined || place === undefined) return ctx.newNumber(-WASI.EBADF)
+    if (!file.dirty || files === null) return ctx.newNumber(0)
+    try {
+      await land(file, place)
+      return ctx.newNumber(0)
+    } catch (err) {
+      return ctx.newNumber(-errnoFor(err))
+    }
   })
 
   defineAsync('__mirage_readdir', (pathH) => readdir(ctx, files, absolute(pathH)))
@@ -329,7 +372,9 @@ export function installQuickJsFs(
     const file = table.get(fd)
     const size = ctx.getNumber(maxH)
     if (file === undefined || readFails(fd, size)) return ctx.newString('')
-    return toGuestText(ctx, DEC.decode(file.read(size)))
+    const bytes = file.read(size)
+    if ((size < 0 && file.eof) || bytes.length < size) ended.add(fd)
+    return toGuestText(ctx, DEC.decode(bytes))
   })
 
   defineSync('__mirage_read_bytes', (fdH, maxH) => {
@@ -337,12 +382,21 @@ export function installQuickJsFs(
     const file = table.get(fd)
     const size = ctx.getNumber(maxH)
     const bytes = file === undefined || readFails(fd, size) ? new Uint8Array(0) : file.read(size)
+    if (file !== undefined && !readFails(fd, size) && bytes.length < size) ended.add(fd)
     return ctx.newArrayBuffer(bytes.slice().buffer)
   })
 
   defineSync('__mirage_getline', (fdH) => {
     const fd = ctx.getNumber(fdH)
-    const line = readFails(fd) ? null : (table.get(fd)?.readLine() ?? null)
+    const file = table.get(fd)
+    const before = file?.pos ?? 0
+    const line = readFails(fd) ? null : (file?.readLine() ?? null)
+    if (
+      file !== undefined &&
+      !readFails(fd) &&
+      (line === null || file.pos === before + line.length)
+    )
+      ended.add(fd)
     return line === null ? ctx.null : toGuestText(ctx, DEC.decode(line))
   })
 
@@ -352,6 +406,7 @@ export function installQuickJsFs(
     // A cleared stream reads again, so a fetch that failed is tried anew.
     unreadable.delete(ctx.getNumber(fdH))
     failed.delete(ctx.getNumber(fdH))
+    ended.delete(ctx.getNumber(fdH))
     return ctx.undefined
   })
 
@@ -375,6 +430,7 @@ export function installQuickJsFs(
     const file = table.get(ctx.getNumber(fdH))
     if (file === undefined) return ctx.newNumber(-WASI.EBADF)
     const moved = file.seek(ctx.getNumber(offsetH), ctx.getNumber(whenceH))
+    if (moved !== null) ended.delete(ctx.getNumber(fdH))
     return ctx.newNumber(moved === null ? -WASI.EINVAL : 0)
   })
 
@@ -385,7 +441,7 @@ export function installQuickJsFs(
 
   defineSync('__mirage_eof', (fdH) => {
     const file = table.get(ctx.getNumber(fdH))
-    const atEof = file === undefined || file.eof
+    const atEof = file === undefined || ended.has(ctx.getNumber(fdH))
     return atEof ? ctx.true : ctx.false
   })
 

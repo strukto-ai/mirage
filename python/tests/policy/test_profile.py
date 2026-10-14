@@ -1304,6 +1304,7 @@ class _Box(Runtime, LineExecutorMixin):
     """A runtime that takes every line raw, recording what reached it."""
 
     name = "box"
+    reach = "workspace"
     captures = ("*",)
 
     def __init__(self) -> None:

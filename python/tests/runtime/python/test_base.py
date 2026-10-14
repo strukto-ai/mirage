@@ -23,7 +23,7 @@ class ProcessRuntime(PythonRuntime):
     name = "custom-process"
     runs = 0
 
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(self, args: RunArgs, context=None) -> RunResult:
         self.runs += 1
         return RunResult(
             stdout=b"unexpected execution", stderr=None, exit_code=0

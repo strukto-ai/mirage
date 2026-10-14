@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { nonblank, type SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
+import {
+  BASE_CONFIG_KEYS,
+  nonblank,
+  type SandboxConfig,
+} from '@struktoai/mirage-core/runtime/sandbox/config'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 /** How to reach the user's running containers. */
@@ -23,7 +27,11 @@ export interface AppleContainerConfig extends SandboxConfig {
   containers?: Record<string, string>
 }
 
-export const APPLE_CONTAINER_CONFIG_KEYS: readonly string[] = ['env', 'container', 'containers']
+export const APPLE_CONTAINER_CONFIG_KEYS: readonly string[] = [
+  ...BASE_CONFIG_KEYS,
+  'container',
+  'containers',
+]
 
 /** Validate container ids before any session can use the runtime. */
 export function validateAppleContainerConfig(config: AppleContainerConfig): void {
@@ -41,6 +49,11 @@ export function validateAppleContainerConfig(config: AppleContainerConfig): void
   if (blank.length > 0) {
     throw new Error(
       `apple_container containers must map each session to a nonblank id: ${blank.join(', ')}`,
+    )
+  }
+  if (config.mountType != null && Object.keys(containers).length > 0) {
+    throw new Error(
+      'apple_container mountType serves one session, so it cannot be combined with containers',
     )
   }
 }

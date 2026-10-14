@@ -48,3 +48,8 @@ class AppleContainerConfig(SandboxConfig):
                 "apple_container containers must map each "
                 "session to a nonblank id: " + ", ".join(blank)
             )
+        if self.mount_type is not None and self.containers:
+            raise ValueError(
+                "apple_container mount_type serves one session, "
+                "so it cannot be combined with containers"
+            )

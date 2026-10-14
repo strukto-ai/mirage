@@ -39,7 +39,7 @@ class RecordingSandbox extends RemoteSandbox {
     return Promise.resolve()
   }
 
-  execLine(
+  override execLine(
     line: string,
     stdin: Uint8Array | null,
     env: Record<string, string>,

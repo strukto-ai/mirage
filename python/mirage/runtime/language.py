@@ -67,7 +67,9 @@ class LanguageRuntime(Runtime):
     async def _execute_code(
         self, args: RunArgs, context: RuntimeContext | None
     ) -> RunResult:
-        return await self.run(args)
+        if args.cwd is None and context is not None:
+            args = replace(args, cwd=context.cwd)
+        return await self.run(args, context)
 
     async def version(self, env: dict[str, str]) -> RunResult:
         """Report the bound interpreter's version.
@@ -82,7 +84,9 @@ class LanguageRuntime(Runtime):
         )
 
     @abstractmethod
-    async def run(self, args: RunArgs) -> RunResult:
+    async def run(
+        self, args: RunArgs, context: RuntimeContext | None = None
+    ) -> RunResult:
         """Execute one program and return its captured outcome.
 
         Each call represents an independent language command, such as
@@ -93,4 +97,5 @@ class LanguageRuntime(Runtime):
 
         Args:
             args (RunArgs): the execution request.
+            context (RuntimeContext | None): the caller's workspace view.
         """

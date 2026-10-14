@@ -17,10 +17,12 @@ import functools
 import logging
 import posixpath
 import struct
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
+from mirage.errors.fs import enoent, enotdir
 from mirage.errors.wasi import errno_for
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.files import kept_view
@@ -43,14 +45,18 @@ from mirage.runtime.wasm.constants import (
     OFLAG_DIRECTORY,
     OFLAG_EXCL,
     OFLAG_TRUNC,
+    RIGHT_FD_READ,
     RIGHT_FD_WRITE,
+    TERMINATION_SHIM,
 )
 from mirage.runtime.wasm.errors import (
     EBADF,
     EINVAL,
     EIO,
+    ELOOP,
     ENOENT,
     ENOTDIR,
+    ESPIPE,
     LINK_REFUSAL,
     OK,
 )
@@ -150,7 +156,7 @@ def _open_mode(oflags: int, rights_base: int, fdflags: int) -> OpenMode:
     truncate = bool(oflags & OFLAG_TRUNC)
     append = bool(fdflags & FDFLAG_APPEND)
     return OpenMode(
-        readable=True,
+        readable=bool(rights_base & RIGHT_FD_READ),
         writable=create
         or truncate
         or append
@@ -191,6 +197,7 @@ class FdEntry:
     stat: VFSStat | None = None
     kept: Kept | None = None
     opened: str = ""
+    readable: bool = True
 
 
 class WasiFs:
@@ -204,8 +211,15 @@ class WasiFs:
     clocks, args, env, and randomness stay native.
     """
 
-    def __init__(self, fs: WasmView, stdin: bytes) -> None:
+    def __init__(
+        self,
+        fs: WasmView,
+        stdin: bytes,
+        cancelled: threading.Event | None = None,
+    ) -> None:
+        self._cancelled = cancelled or threading.Event()
         self._fs = fs
+        self.exit_code: int | None = None
         self.stdout = bytearray()
         self.stderr = bytearray()
         self._memory: "wasmtime.Memory | None" = None
@@ -217,6 +231,94 @@ class WasiFs:
         self._fds.set(1, FdEntry(kind="stdout"))
         self._fds.set(2, FdEntry(kind="stderr"))
         self._fds.set(3, FdEntry(kind="dir", path="/", preopen=True))
+
+    def proc_exit(self, caller: "wasmtime.Caller", code: int) -> None:
+        self.exit_code = code & 255
+
+    def clock_time_get(
+        self,
+        caller: "wasmtime.Caller",
+        clock: int,
+        precision: int,
+        result: int,
+    ) -> int:
+        if clock not in (0, 1):
+            return EINVAL
+        now = time.time_ns() if clock == 0 else time.monotonic_ns()
+        self._store(caller, result, struct.pack("<Q", now))
+        return OK
+
+    def clock_res_get(
+        self, caller: "wasmtime.Caller", clock: int, result: int
+    ) -> int:
+        if clock not in (0, 1):
+            return EINVAL
+        info = time.get_clock_info("time" if clock == 0 else "monotonic")
+        resolution = max(1, round(info.resolution * 1_000_000_000))
+        self._store(caller, result, struct.pack("<Q", resolution))
+        return OK
+
+    def poll_oneoff(
+        self,
+        caller: "wasmtime.Caller",
+        incoming: int,
+        outgoing: int,
+        count: int,
+        nevents: int,
+    ) -> int:
+        if count <= 0:
+            return EINVAL
+        subscriptions = self._load(caller, incoming, count * 48)
+        if len(subscriptions) != count * 48:
+            return EINVAL
+        now = time.monotonic_ns()
+        events: list[tuple[int, bytes]] = []
+        for offset in range(0, len(subscriptions), 48):
+            userdata = struct.unpack_from("<Q", subscriptions, offset)[0]
+            kind = subscriptions[offset + 8]
+            error, nbytes, deadline = OK, 0, now
+            if kind == 0:
+                clock = struct.unpack_from("<I", subscriptions, offset + 16)[0]
+                timeout = struct.unpack_from("<Q", subscriptions, offset + 24)[
+                    0
+                ]
+                flags = struct.unpack_from("<H", subscriptions, offset + 40)[0]
+                if clock not in (0, 1) or flags & ~1:
+                    error = EINVAL
+                else:
+                    remaining = timeout
+                    if flags & 1:
+                        remaining -= time.time_ns() if clock == 0 else now
+                    deadline = now + max(0, remaining)
+            elif kind in (1, 2):
+                fd = struct.unpack_from("<I", subscriptions, offset + 16)[0]
+                entry = self._fds.get(fd)
+                if entry is None or entry.kind == "dir":
+                    error = EBADF
+                elif kind == 1:
+                    if entry.handle is None or not entry.readable:
+                        error = EBADF
+                    else:
+                        nbytes = max(0, entry.handle.size - entry.handle.pos)
+                elif entry.kind == "stdin" or (
+                    entry.handle is not None and not entry.handle.writable
+                ):
+                    error = EBADF
+            else:
+                return EINVAL
+            event = struct.pack("<QHB5xQH6x", userdata, error, kind, nbytes, 0)
+            events.append((deadline, event))
+        delay = max(
+            0, min(deadline for deadline, _ in events) - time.monotonic_ns()
+        )
+        if self._cancelled.wait(delay / 1_000_000_000):
+            self.exit_code = 130
+            return -1
+        now = time.monotonic_ns()
+        ready = [event for deadline, event in events if deadline <= now]
+        self._store(caller, outgoing, b"".join(ready))
+        self._store(caller, nevents, pack_u32(len(ready)))
+        return OK
 
     # -- guest memory -----------------------------------------------------
 
@@ -246,10 +348,26 @@ class WasiFs:
         if entry is None or entry.kind != "dir":
             return None
         rel = self._load(caller, ptr, length).decode()
+        if not rel:
+            raise enoent(rel)
         base = entry.path
         joined = rel if rel.startswith("/") else posixpath.join(base, rel)
-        normed = posixpath.normpath(joined)
-        return normed if normed.startswith("/") else "/" + normed
+        parts = joined.split("/")
+        for index, part in enumerate(parts):
+            if part in (".", "..") and index > 1:
+                ancestor = "/".join(parts[:index])
+                if not self._fs.stat(ancestor).is_dir:
+                    raise enotdir(ancestor)
+        normed = posixpath.normpath(self._fs.walked(joined, follow=False))
+        if joined.endswith(("/", "/.")) and normed != "/":
+            row = self._fs.stat_or_none(normed)
+            if row is not None and not row.is_dir:
+                raise enotdir(joined)
+        lexical = posixpath.normpath(joined)
+        requested = joined if ".." in parts and normed != lexical else lexical
+        if joined.endswith(("/", "/.")) and requested != "/":
+            requested = requested.rstrip("/") + "/"
+        return requested if requested.startswith("/") else "/" + requested
 
     # -- fd lookups -------------------------------------------------------
 
@@ -311,6 +429,10 @@ class WasiFs:
         path = self._path_arg(caller, dirfd, ptr, length)
         if path is None:
             return EBADF
+        if not dirflags & LOOKUP_SYMLINK_FOLLOW:
+            row = self._fs.stat_or_none(path, nofollow=True)
+            if row is not None and row.is_link:
+                return ELOOP
         if oflags & OFLAG_DIRECTORY:
             st = self._fs.stat_or_none(path)
             if st is None:
@@ -336,6 +458,7 @@ class WasiFs:
             path=self._fs.walked(path),
             stat=self._fs.stat_or_none(path) if row is None else row,
             opened=path,
+            readable=mode.readable,
         )
         # Nothing is read at open: the handle fetches what a read lands
         # in. A handle that writes reads the stored bytes, since its
@@ -363,12 +486,7 @@ class WasiFs:
         if entry is None or entry.preopen:
             return EBADF
         self._fds.pop(fd)
-        h = entry.handle
-        if entry.kind == "file" and h is not None and h.dirty:
-            if entry.kept is None:
-                self._fs.flush(entry.path, h.flush_plan())
-            else:
-                entry.kept.data = apply_flush(entry.kept.data, h.flush_plan())
+        self._land(entry)
         return OK
 
     def close_all(self) -> list[str]:
@@ -419,7 +537,8 @@ class WasiFs:
         nread: int,
     ) -> int:
         h = self._handle(fd)
-        if h is None:
+        entry = self._fds.get(fd)
+        if h is None or entry is None or not entry.readable:
             return EBADF
         total = 0
         for bptr, blen in self._iovs(caller, iovs, count):
@@ -442,7 +561,8 @@ class WasiFs:
         nread: int,
     ) -> int:
         h = self._file_handle(fd)
-        if h is None:
+        entry = self._fds.get(fd)
+        if h is None or entry is None or not entry.readable:
             return EBADF
         total, pos = 0, offset
         for bptr, blen in self._iovs(caller, iovs, count):
@@ -513,6 +633,8 @@ class WasiFs:
         whence: int,
         out: int,
     ) -> int:
+        if fd in (0, 1, 2):
+            return ESPIPE
         h = self._handle(fd)
         if h is None:
             return EBADF
@@ -524,6 +646,8 @@ class WasiFs:
         return OK
 
     def fd_tell(self, caller: "wasmtime.Caller", fd: int, out: int) -> int:
+        if fd in (0, 1, 2):
+            return ESPIPE
         h = self._handle(fd)
         if h is None:
             return EBADF
@@ -551,14 +675,14 @@ class WasiFs:
         if entry.kind == "file" and entry.handle is not None:
             # The size is the handle's, which counts what it wrote.
             row = entry.stat or VFSStat(size=0, is_dir=False, mode=FILE_MODE)
-            packed = pack_filestat(
-                posix_stat(
-                    dataclasses.replace(row, size=entry.handle.size),
-                    entry.opened,
-                    "/",
-                ),
-                FT_REG,
+            posix = posix_stat(
+                dataclasses.replace(row, size=entry.handle.size),
+                entry.opened,
+                "/",
             )
+            if entry.kept is not None:
+                posix = dataclasses.replace(posix, nlink=0)
+            packed = pack_filestat(posix, FT_REG)
         elif entry.kind == "dir":
             st = self._fs.stat(entry.path)
             packed = pack_filestat(posix_stat(st, entry.path, "/"), FT_DIR)
@@ -585,8 +709,10 @@ class WasiFs:
         # The follow bit is how a guest spells stat versus lstat, so it
         # is read rather than ignored: without it every link answered as
         # its target and os.path.islink was always False.
-        follow = bool(flags & LOOKUP_SYMLINK_FOLLOW)
+        follow = bool(flags & LOOKUP_SYMLINK_FOLLOW) or path.endswith("/")
         st = self._fs.stat(path) if follow else self._fs.lstat(path)
+        if path.endswith("/") and not st.is_dir:
+            return ENOTDIR
         packed = pack_filestat(posix_stat(st, path, "/"), filetype_of(st))
         self._store(caller, buf, packed)
         return OK
@@ -780,10 +906,32 @@ class WasiFs:
         if entry.kept is not None:
             entry.kept.data = apply_flush(entry.kept.data, h.flush_plan())
             h.settle(functools.partial(self._fetch, entry, True))
+            self._invalidate_peers(entry)
             return
         self._fs.flush(entry.path, h.flush_plan())
         h.settle(functools.partial(self._fetch, entry, True))
         entry.stat = self._fs.stat(entry.path)
+        self._invalidate_peers(entry)
+
+    def _invalidate_peers(self, changed: FdEntry) -> None:
+        for peer in self._fds.values():
+            same = (
+                peer.kept is changed.kept
+                if changed.kept is not None
+                else peer.kept is None and peer.path == changed.path
+            )
+            if peer is not changed and same and peer.handle is not None:
+                size = (
+                    len(kept_view(peer.kept, peer.handle.writable))
+                    if peer.kept is not None
+                    else changed.handle.size
+                    if changed.handle is not None
+                    else 0
+                )
+                peer.handle.invalidate(
+                    functools.partial(self._fetch, peer, peer.handle.writable),
+                    size,
+                )
 
     def _land_path(self, path: str) -> None:
         """Land the writes of every file fd open on ``path``, which a
@@ -936,6 +1084,10 @@ class WasiFs:
 def _spec() -> dict[str, tuple[list[Any], list[Any]]]:
     i32, i64 = ValType.i32(), ValType.i64()
     return {
+        "proc_exit": ([i32], []),
+        "clock_time_get": ([i32, i64, i32], [i32]),
+        "clock_res_get": ([i32, i32], [i32]),
+        "poll_oneoff": ([i32, i32, i32, i32], [i32]),
         "fd_advise": ([i32, i64, i64, i32], [i32]),
         "fd_close": ([i32], [i32]),
         "fd_datasync": ([i32], [i32]),
@@ -977,9 +1129,9 @@ def install_wasi_fs(
     """Shadow the linker's native preview1 filesystem imports.
 
     Every fd_*/path_* import routes to the WasiFs host functions;
-    non-filesystem imports (args, env, clocks, random, poll, proc_exit)
-    keep the native define_wasi definitions. These are the only host
-    callbacks mirage creates, so the slab lock goes in first.
+    clocks and polling share one time base and cancellation signal.
+    Args, env and random keep the native define_wasi definitions. These are
+    the only host callbacks mirage creates, so the slab lock goes in first.
 
     Args:
         linker (wasmtime.Linker): linker that already ran define_wasi().
@@ -992,7 +1144,9 @@ def install_wasi_fs(
         method = getattr(wasi_fs, name)
         linker.define(
             store,
-            "wasi_snapshot_preview1",
+            "mirage_wasi"
+            if name in ("proc_exit", "poll_oneoff")
+            else "wasi_snapshot_preview1",
             name,
             Func(
                 store,
@@ -1000,4 +1154,13 @@ def install_wasi_fs(
                 functools.partial(_call_guarded, method),
                 access_caller=True,
             ),
+        )
+    with wasmtime.Module(store.engine, TERMINATION_SHIM) as shim:
+        instance = linker.instantiate(store, shim)
+    for name in ("proc_exit", "poll_oneoff"):
+        linker.define(
+            store,
+            "wasi_snapshot_preview1",
+            name,
+            instance.exports(store)[name],
         )

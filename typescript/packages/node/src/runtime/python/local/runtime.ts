@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { ChildProcess } from 'node:child_process'
 import { accessSync, constants, statSync } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
@@ -19,15 +20,24 @@ import { delimiter, isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
 import { resolveHome, type RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import {
+  PROCESS_EXECUTOR,
+  STREAMING_PROCESS,
+  type StreamingProcess,
+} from '@struktoai/mirage-core/runtime/mixin'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
 import { initArgv, type InitFlags } from '@struktoai/mirage-core/runtime/python/flags'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import type { ProcessExecution, RunArgs, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type {
+  ProcessExecution,
+  StreamExecution,
+  RunArgs,
+  RunResult,
+} from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
-import { closeChildren, runCli } from '../../sandbox/cli.ts'
+import { closeChildren, cwdRefusal, runCli } from '../../sandbox/cli.ts'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
 
@@ -135,9 +145,10 @@ function notRun(message: string, exitCode: number): RunResult {
  * or the MIRAGE_LOCAL_HOME environment variable at another binary, e.g. a
  * project venv whose packages the code needs.
  */
-export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
+export class LocalRuntime extends PythonRuntime implements StreamingProcess {
   readonly name = 'local'
   readonly [PROCESS_EXECUTOR] = true as const
+  readonly [STREAMING_PROCESS] = true as const
   // Spawns the host interpreter: a real process with the user's own
   // filesystem and network, entry points the workspace gate never sees. This
   // is the base default; declared here so the claim is explicit at the
@@ -148,7 +159,18 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
 
   constructor(options: RuntimeOptions = {}) {
     super(options, LOCAL_CONFIG_KEYS)
-    this.python = onHostPath(resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV) ?? 'python3')
+    const chosen = resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV)
+    this.python = onHostPath(chosen ?? 'python3')
+    if (chosen !== undefined) {
+      try {
+        accessSync(this.python, constants.X_OK)
+      } catch (cause) {
+        throw new Error(
+          `local python interpreter not found: ${chosen} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
+          { cause },
+        )
+      }
+    }
   }
 
   override version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
@@ -169,21 +191,20 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     )
   }
 
-  async runProcess(request: ProcessExecution): Promise<RunResult> {
+  runProcess(request: ProcessExecution): Promise<RunResult> {
+    return this.executeProcess(request)
+  }
+
+  runStream(request: StreamExecution): Promise<RunResult> {
+    return this.executeProcess(request)
+  }
+
+  private async executeProcess(request: ProcessExecution | StreamExecution): Promise<RunResult> {
     request.signal?.throwIfAborted()
     const name = request.argv[0]
-    // The session cwd is a workspace path. Running somewhere else instead
-    // would point a relative path at the wrong files.
     const cwd = request.cwd.virtual
-    const here = await stat(cwd).catch((err: unknown) => {
-      const code = (err as NodeJS.ErrnoException).code
-      if (code === undefined) throw err
-      debuglog('mirage')('local: cannot use %s as the working directory: %s', cwd, code)
-      return null
-    })
-    if (here?.isDirectory() !== true) {
-      return notRun(`${name}: the working directory ${cwd} is not on this host\n`, 126)
-    }
+    const refusal = await cwdRefusal(name, cwd)
+    if (refusal !== null) return refusal
     let program: string
     if (name.includes('/')) {
       // A name with a slash is a path from the cwd, as in the shell.
@@ -205,6 +226,7 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
       request.stdin,
       request.signal,
       cwd,
+      request.kind === 'stream' ? request.output : undefined,
     ).catch((err: unknown) => {
       const { code, syscall } = err as NodeJS.ErrnoException
       if (code === undefined || syscall?.startsWith('spawn') !== true) throw err
@@ -216,9 +238,10 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     program: string,
     argv: string[],
     env: Record<string, string>,
-    stdin: Uint8Array | null,
+    stdin: ByteSource | null,
     signal?: AbortSignal,
     cwd?: string,
+    output?: (chunk: Uint8Array) => Promise<void>,
   ): Promise<RunResult> {
     const missing =
       program === this.python
@@ -228,6 +251,7 @@ export class LocalRuntime extends PythonRuntime implements ProcessExecutor {
     const { stdout, stderr, code } = await runCli(program, missing, argv, stdin, {
       env: { ...(this.config as LocalConfig).env, ...env },
       children: this.children,
+      ...(output === undefined ? {} : { output }),
       ...(cwd !== undefined ? { cwd } : {}),
       ...(signal !== undefined ? { signal } : {}),
     })

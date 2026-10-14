@@ -59,6 +59,38 @@ async def test_run_cli_returns_both_streams_and_the_status():
 
 
 @pytest.mark.asyncio
+async def test_run_cli_streams_input_and_output_and_maps_a_signal():
+    async def source():
+        yield b"a"
+        yield b"b"
+
+    seen: list[bytes] = []
+
+    async def output(chunk: bytes) -> None:
+        seen.append(chunk)
+
+    out, _, code = await run_cli(
+        "sh", None, ["-c", "cat; kill -TERM $$"], source(), output=output
+    )
+    assert (out, b"".join(seen), code) == (b"", b"ab", 128 + signal.SIGTERM)
+
+
+@pytest.mark.asyncio
+async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
+    held = asyncio.Event()
+
+    async def source():
+        await held.wait()
+        yield b""
+
+    async with asyncio.timeout(5):
+        out, _, code = await run_cli(
+            "sh", None, ["-c", "printf done"], source()
+        )
+    assert (out, code) == (b"done", 0)
+
+
+@pytest.mark.asyncio
 async def test_a_missing_cli_raises_its_hint():
     with pytest.raises(RuntimeError, match="install it"):
         await run_cli("mirage-no-such-cli", "install it", [], None)

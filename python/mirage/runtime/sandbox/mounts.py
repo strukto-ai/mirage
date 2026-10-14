@@ -21,7 +21,7 @@ from contextvars import Context
 from typing import Any
 
 from mirage.context import get_current_session
-from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.binding import WorkspaceBinding, restricted_mounts_for
 from mirage.runtime.sandbox.constants import (
     MOUNT_POLL_SECONDS,
     MOUNT_WAIT_SECONDS,
@@ -32,7 +32,6 @@ from mirage.runtime.sandbox.constants import (
     UNMOUNT_WAIT_SECONDS,
 )
 from mirage.runtime.types import MountType, RunResult, SandboxPipe
-from mirage.types import MountMode
 from mirage.utils.quote import single_quote
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
@@ -106,22 +105,6 @@ def mount_paths(prefixes: Iterable[str]) -> set[str]:
     return {p.rstrip("/") for p in prefixes} - {"", "/dev"}
 
 
-def capped_under(session: SessionState, prefix: str) -> bool:
-    """Whether the session's profile narrows the mode of ``prefix`` or of
-    a mount under it.
-
-    Args:
-        session (SessionState): the line's session.
-        prefix (str): a mountpoint.
-    """
-    modes = session.mount_modes or {}
-    return any(
-        mode is not MountMode.EXEC
-        and (path == prefix or path.startswith(prefix + "/"))
-        for path, mode in modes.items()
-    )
-
-
 def unmount_line(prefix: str) -> str:
     """The sandbox command that lazily unmounts ``prefix``.
 
@@ -179,10 +162,14 @@ class SandboxMounts:
         self._run = run
         self._open_pipe = open_pipe
         self._session_id: str | None = None
-        self._own: tuple[str, ...] = ()
         self._served: dict[str, tuple[SandboxPipe, asyncio.Task[None]]] = {}
         self._seen: tuple[frozenset[str], frozenset[str]] | None = None
         self._lock = asyncio.Lock()
+
+    @property
+    def file_effects_dispatched(self) -> bool:
+        """SSH mode serves every workspace prefix through the host's gate."""
+        return self._mount_type == "ssh"
 
     async def admit(self, binding: WorkspaceBinding | None) -> str | None:
         """Bring the mounts in step, then say why a line may not run.
@@ -208,6 +195,12 @@ class SandboxMounts:
                 f"{self._runtime}: mount_type serves a session's view, "
                 "and this line runs as none"
             )
+        rules = current.commands
+        if rules is not None and any(
+            rule.commands and (rule.paths or rule.mount)
+            for rule in (*rules.ask, *rules.deny)
+        ):
+            return "this file transport cannot enforce program-specific path rules"
         async with self._lock:
             if self._session_id not in (None, current.session_id):
                 return (
@@ -216,12 +209,11 @@ class SandboxMounts:
                     "a sandbox of its own"
                 )
             every = mount_paths(binding.mount_prefixes())
-            scoped = binding.capture().ns.scoped
             ruled = frozenset(
-                p
-                for p in every
-                if (scoped is not None and scoped(p))
-                or capped_under(current, p)
+                p.rstrip("/") or "/"
+                for p in restricted_mounts_for(
+                    current, binding.mount_prefixes()
+                )
             )
             await self._reconcile(
                 binding,
@@ -244,10 +236,13 @@ class SandboxMounts:
             self._session_id = None
 
     def _refusal(self, ruled: frozenset[str]) -> str | None:
-        for prefix in self._own:
-            if prefix in ruled:
+        for prefix in sorted(ruled):
+            if not any(
+                prefix == p or prefix.startswith(p.rstrip("/") + "/")
+                for p in self._served
+            ):
                 return (
-                    f"{prefix} is served by the sandbox itself, out of "
+                    f"{prefix} is not served through the dispatcher, out of "
                     "reach of this session's rules"
                 )
         return None
@@ -306,7 +301,6 @@ class SandboxMounts:
             except BaseException:
                 await self._unmount()
                 raise
-        self._own = own
         self._seen = (frozenset(every), visible)
 
     async def _serve(
@@ -338,22 +332,43 @@ class SandboxMounts:
             context=Context(),
         )
         self._served[prefix] = (pipe, task)
-        deadline = asyncio.get_running_loop().time() + MOUNT_WAIT_SECONDS
-        while (await self._table()).get(prefix) != "fuse.sshfs":
-            if task.done() or asyncio.get_running_loop().time() > deadline:
-                written = await self._run(f"cat {log}")
-                failed = (
-                    task.exception()
-                    if task.done() and not task.cancelled()
-                    else None
-                )
-                reason = said(written.stdout) or "no word from sshfs"
-                if failed is not None:
-                    reason += f"; the SFTP server failed: {failed}"
-                raise RuntimeError(
-                    f"{self._runtime}: sshfs did not mount {prefix}: {reason}"
-                )
-            await asyncio.sleep(MOUNT_POLL_SECONDS)
+        try:
+            deadline = asyncio.get_running_loop().time() + MOUNT_WAIT_SECONDS
+            while (await self._table()).get(prefix) != "fuse.sshfs":
+                if task.done() or asyncio.get_running_loop().time() > deadline:
+                    written = await self._run(f"cat {log}")
+                    failed = (
+                        task.exception()
+                        if task.done() and not task.cancelled()
+                        else None
+                    )
+                    reason = said(written.stdout) or "no word from sshfs"
+                    if failed is not None:
+                        reason += f"; the SFTP server failed: {failed}"
+                    raise RuntimeError(
+                        f"{self._runtime}: sshfs did not mount {prefix}: {reason}"
+                    )
+                await asyncio.sleep(MOUNT_POLL_SECONDS)
+        finally:
+            current = asyncio.current_task()
+            if current is None or not current.cancelling():
+                await self._drop_log(log)
+
+    async def _drop_log(self, log: str) -> None:
+        """Remove the helper's setup log; keeping it only costs a file.
+
+        Args:
+            log (str): the quoted log path in the sandbox.
+        """
+        try:
+            removed = await self._run(f"rm -f -- {log}")
+        except Exception as exc:
+            logger.debug("could not remove sshfs log: %s", exc)
+            return
+        if removed.exit_code != 0:
+            logger.debug(
+                "could not remove sshfs log: %s", said(removed.stderr)
+            )
 
     async def _table(self) -> dict[str, str]:
         listed = await self._run("cat /proc/mounts")
@@ -397,5 +412,4 @@ class SandboxMounts:
     async def _unmount(self) -> None:
         for prefix in list(self._served):
             await self._drop(prefix)
-        self._own = ()
         self._seen = None

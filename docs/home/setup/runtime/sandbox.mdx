@@ -11,18 +11,18 @@ to [`@external`](/home/setup/runtime/overview#captures), every program
 Mirage does not have itself.
 
 A program there opens workspace files at the same paths, so the sandbox
-must see the mounts. `docker` and `e2b` pick how with `mount_type`: `ssh`
+must see the mounts. `docker`, `e2b`, `ssh`, `smolvm`, and `apple_container` pick how with `mount_type`: `ssh`
 serves them from the workspace, `fuse` from a Mirage inside the sandbox, and
-`both` mixes the two. The others use a Mirage inside.
+`both` mixes the two. Daytona uses a Mirage inside.
 
 | Runtime | Runs programs in | Workspace files through |
 | --- | --- | --- |
 | [Docker](/home/setup/runtime/sandbox/docker) | A Docker container | `mount_type`: `ssh`, `fuse` or `both` |
 | [E2B](/home/setup/runtime/sandbox/e2b) | An E2B cloud sandbox | `mount_type`: `ssh`, `fuse` or `both` |
 | [Daytona](/home/setup/runtime/sandbox/daytona) | A Daytona cloud sandbox | FUSE, from a Mirage inside |
-| [smolvm](/home/setup/runtime/sandbox/smolvm) | A microVM with its own kernel | FUSE, from a Mirage inside |
-| [Apple Container](/home/setup/runtime/sandbox/apple_container) | A container on macOS, one per agent if you map them | FUSE, from a Mirage inside |
-| [SSH](/home/setup/runtime/sandbox/ssh) | Any machine running `sshd` | The ssh VFS at the same paths, or FUSE from a Mirage there |
+| [smolvm](/home/setup/runtime/sandbox/smolvm) | A microVM with its own kernel | `mount_type`: `ssh`, `fuse` or `both` |
+| [Apple Container](/home/setup/runtime/sandbox/apple_container) | A container on macOS, one per agent if you map them | `mount_type`: `ssh`, `fuse` or `both` |
+| [SSH](/home/setup/runtime/sandbox/ssh) | Any machine running `sshd` | `mount_type`: `ssh`, `fuse` or `both` |
 | [Sandlock](/home/setup/runtime/sandbox/sandlock) | This Linux host, confined | A [FUSE folder](/home/setup/fuse) you grant |
 
 ## The sandbox image
@@ -59,3 +59,21 @@ output.
   may survive. The other providers leave it running, and a Daytona sandbox has no timeout of its
   own, so it keeps running and billing. Use the provider's own limits.
 </Warning>
+
+
+## Serving the session's files
+
+With `mount_type: ssh`, a passive `sshfs` helper in the sandbox carries file
+operations over its stdin and stdout to the host's SFTP adapter. That adapter
+calls the session's dispatcher, including hides, path rules, `pre_vfs`, mount
+modes, observation and cache invalidation. It reuses the provider's authenticated
+exec channel; no public listener, separate credential or backend credential in
+the sandbox is required. Each served sandbox belongs to one session.
+
+Every restricted prefix must be served by that transport. Root and `/dev`
+restrictions, a hidden mount that would expose underlying guest files, and
+restrictions on a sandbox's own FUSE mount refuse the run. Program-specific file
+rules also refuse it: SFTP cannot identify which remote child issued an open.
+In-process runtimes carry the program identity into the dispatcher. Writes through
+fully served mounts invalidate the affected paths without clearing the whole cache.
+The helper's setup log is removed after either successful setup or failure.

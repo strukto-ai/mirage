@@ -26,9 +26,11 @@ import type {
   ShellNode,
   VfsExplanation,
 } from '@struktoai/mirage-core/policy/types'
-import { FileStat, type JsonValue, type Refusal } from '@struktoai/mirage-core/types'
+import { FileStat, PathSpec, type JsonValue, type Refusal } from '@struktoai/mirage-core/types'
+import { CALLS } from '@struktoai/mirage-core/workspace/dispatcher/constants'
 import type { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { RESERVED_KWARGS } from './constants.ts'
 import { BYTES, schemaOf, type Args, type VfsCall } from './vfs_calls.ts'
 
 interface IoResultDict {
@@ -175,11 +177,27 @@ export async function checked(call: VfsCall, params: unknown): Promise<Record<st
 }
 
 function toJson(value: unknown): JsonValue {
+  if (value === undefined) return null
   if (value instanceof Uint8Array) return Buffer.from(value).toString('base64')
   if (value instanceof FileStat) {
     return Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'extra')) as JsonValue
   }
-  return value as JsonValue
+  if (value instanceof PathSpec) return value.virtual
+  if (Array.isArray(value)) return value.map(toJson)
+  if (value !== null && typeof value === 'object') {
+    const proto: unknown = Object.getPrototypeOf(value)
+    if (proto !== Object.prototype && proto !== null)
+      throw new TypeError(`no JSON form for ${value.constructor.name}`)
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, toJson(item)]))
+  }
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    typeof value === 'number'
+  )
+    return value
+  throw new TypeError(`no JSON form for ${typeof value}`)
 }
 
 /**
@@ -197,4 +215,36 @@ export async function answered(
   }
   const result = await call.run(session.vfs, args)
   return call.answer === null ? {} : { [call.answer]: toJson(result) }
+}
+
+/** Validate a remote function call without accepting host context overrides. */
+export function customArgs(params: unknown): { path: string; kwargs: Record<string, JsonValue> } {
+  if (params === null || typeof params !== 'object' || Array.isArray(params))
+    throw new CallArgsError('expected path and optional kwargs')
+  const body = params as Record<string, unknown>
+  if (
+    Object.keys(body).some((key) => !['path', 'kwargs'].includes(key)) ||
+    typeof body.path !== 'string'
+  )
+    throw new CallArgsError('expected path and optional kwargs')
+  const kwargs = body.kwargs === undefined ? {} : body.kwargs
+  if (
+    kwargs === null ||
+    typeof kwargs !== 'object' ||
+    Array.isArray(kwargs) ||
+    Object.keys(kwargs).some((key) => key.startsWith('_') || RESERVED_KWARGS.has(key))
+  )
+    throw new CallArgsError('kwargs contains a reserved dispatch argument')
+  return { path: body.path, kwargs: kwargs as Record<string, JsonValue> }
+}
+
+/** Dispatch a user VFS function through the session's normal file boundary. */
+export async function customAnswer(
+  session: Session,
+  name: string,
+  params: unknown,
+): Promise<JsonValue> {
+  if (CALLS.has(name)) throw new CallArgsError(`${name} is not a custom VFS function`)
+  const { path, kwargs } = customArgs(params)
+  return { value: toJson(await session.vfs.dispatch(name, path, [], kwargs)) }
 }

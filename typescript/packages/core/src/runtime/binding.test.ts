@@ -351,3 +351,34 @@ it('does not share process views by profile or follow reused session IDs', async
     await ws.close()
   }
 })
+
+it('refuses a native runtime before running with hidden files', async () => {
+  const runtime = new ShellProbe({ captures: ['*'] })
+  const ws = await world([runtime])
+  try {
+    ws.createSession('restricted', { profile: { paths: { hide: ['/data/secret'] } } })
+    const result = await ws.shell('echo should-not-run', { sessionId: 'restricted' })
+    expect(result.exitCode).toBe(127)
+    expect(dec.decode(result.stdout)).toBe('')
+    expect(dec.decode(result.stderr)).toContain('cannot enforce')
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([
+  [['/data/secret'], ['/data/']],
+  [
+    ['/secret', '/data/secret'],
+    ['/', '/data/'],
+  ],
+  [['/data/*'], ['/data/']],
+])('maps restrictions to their owning mount: %s', async (hide, expected) => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [] })
+  try {
+    ws.createSession('agent', { profile: { paths: { hide } } })
+    expect(ws.runtimeContext('agent').restrictedMounts).toEqual(expected)
+  } finally {
+    await ws.close()
+  }
+})

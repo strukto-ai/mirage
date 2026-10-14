@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessView } from '../process/view.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 import { captureSessionContext } from '../context/session_context.ts'
 import { captureExecutionContext } from '../execution/context.ts'
 import type { NamespaceView, OpKwargs, SessionView } from '../view/types.ts'
+import { isGlob, showHead } from '../utils/hidden.ts'
 import { PathSpec } from '../types.ts'
 import { ContextScope } from '../utils/context_scope.ts'
 import type { MountResolver } from './resolver.ts'
@@ -34,6 +36,7 @@ export interface RuntimeContext {
   readonly env: Readonly<Record<string, string>>
   readonly scope: ContextScope
   readonly processes: ProcessView | null
+  readonly restrictedMounts?: readonly string[]
 }
 
 /** Live workspace connection; capture creates views scoped to one execution. */
@@ -61,6 +64,35 @@ export class WorkspaceBinding {
   }
 }
 
+/** Map restrictions to owning mounts, not ancestors whose trees contain another mount. */
+export function restrictedMountsFor(session: SessionState, prefixes: readonly string[]): string[] {
+  const hidden = session.visibility.paths
+  const entries = [...(hidden?.paths ?? []), ...(hidden?.patterns ?? [])]
+  entries.push(
+    ...(session.visibility.shown?.entries ?? [])
+      .filter((e) => e.mode !== null && e.mode !== 'exec')
+      .map((e) => e.path),
+  )
+  for (const rule of [...(session.commands?.ask ?? []), ...(session.commands?.deny ?? [])]) {
+    entries.push(...(rule.paths?.length ? rule.paths : rule.mount ? [rule.mount] : []))
+  }
+  for (const [prefix, mode] of session.mountModes ?? []) if (mode !== 'exec') entries.push(prefix)
+  const mounts = new Map(prefixes.map((p) => [p.replace(/\/+$/, '') || '/', p]))
+  if (!mounts.has('/')) mounts.set('/', '/')
+  const restricted = new Set<string>()
+  for (const entry of entries) {
+    const head = isGlob(entry) && !entry.includes('/') ? '/' : showHead(entry)
+    const owners = [...mounts.keys()].filter(
+      (p) => p === '/' || head === p || head.startsWith(p + '/'),
+    )
+    owners.sort((a, b) => b.length - a.length)
+    restricted.add(mounts.get(owners[0] ?? '/') ?? '/')
+    for (const [path, prefix] of mounts)
+      if (head === '/' || path.startsWith(head + '/')) restricted.add(prefix)
+  }
+  return [...restricted].sort(compareCodePoints)
+}
+
 /** Pin callback attribution without copying authoritative workspace state. */
 export function captureBinding(
   binding: WorkspaceBinding,
@@ -70,6 +102,7 @@ export function captureBinding(
     processes?: ProcessView
     cwd?: PathSpec
     env?: Readonly<Record<string, string>>
+    restrictedMounts?: readonly string[]
     // The bridge bound to the session the views describe; the binding's
     // own serves a context captured with no session named.
     dispatch?: BridgeDispatchFn
@@ -134,6 +167,12 @@ export function captureBinding(
     ns,
     sessionView,
     processes: views.processes ?? null,
+    restrictedMounts: Object.freeze(
+      views.restrictedMounts ??
+        (binding.mountPrefixes?.() ?? []).filter(
+          (prefix) => source.scoped?.(prefix.replace(/\/+$/, '') || '/') === true,
+        ),
+    ),
     cwd: views.cwd ?? PathSpec.fromStrPath('/'),
     env: Object.freeze({ ...views.env }),
     scope,
@@ -168,6 +207,10 @@ export function workspaceBridge(
         return (await dispatch('read', path, [], kwargs)) as Uint8Array
       }
       case 'write': {
+        if (attrs?.admitOnly === true) {
+          await dispatch('write', path, [], { admit_only: true })
+          return undefined
+        }
         if (bytes === undefined) throw new Error('write op requires bytes')
         const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayLike<number>)
         await dispatch('write', path, [buf])
@@ -188,14 +231,12 @@ export function workspaceBridge(
         // The mount's own row, nothing projected: the file adapter
         // builds the one VFSStat both languages read, so the two
         // tiers cannot drift into two translations of one fact.
-        // `nofollow` is the only attrs field a stat carries, and it
-        // is the caller's lstat; the dispatcher consumes it.
-        return await dispatch(
-          'stat',
-          path,
-          [],
-          attrs?.nofollow === true ? { nofollow: true } : undefined,
-        )
+        // `nofollow` is the caller's lstat; `admitOnly` checks a guest's
+        // requested alias against command rules without backend I/O.
+        return await dispatch('stat', path, [], {
+          ...(attrs?.nofollow === true ? { nofollow: true } : {}),
+          ...(attrs?.admitOnly === true ? { admit_only: true } : {}),
+        })
       case 'create':
         await dispatch('create', path)
         return undefined
@@ -215,7 +256,7 @@ export function workspaceBridge(
         return undefined
       case 'rename': {
         if (dst === undefined) throw new Error('rename op requires dst')
-        await dispatch('rename', path, [PathSpec.fromStrPath(dst)])
+        await dispatch('rename', path, [PathSpec.fromStrPath(dst, undefined, '/')])
         return undefined
       }
       case 'symlink': {
