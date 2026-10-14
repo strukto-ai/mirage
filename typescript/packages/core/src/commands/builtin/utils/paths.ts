@@ -15,6 +15,7 @@
 import type { LinkView, StatPath } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { FileStat } from '../../../types.ts'
+import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'
 import { dotWalkError, eexist, enoent, isMissingPath } from '../../../errors/fs.ts'
 import { operandSpelling } from '../../../errors/render.ts'
@@ -80,10 +81,11 @@ export function descendantPath(root: PathSpec, virtual: string): PathSpec {
 export async function entryKind(
   stat: StatFn,
   path: PathSpec,
+  index?: IndexCacheStore,
 ): Promise<{ exists: boolean; isDir: boolean }> {
   let info: FileStat
   try {
-    info = await stat(path)
+    info = await stat(path, index)
   } catch (err) {
     const code = (err as { code?: unknown }).code
     if (!isMissingPath(err) && code !== 'ENOTDIR') throw err

@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import { eisdir } from '@struktoai/mirage-core/errors/fs'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { destError, isNotFound, resolveParentDirHandle } from './utils.ts'
+import { destError, isNotFound, isTypeMismatch, resolveParentDirHandle } from './utils.ts'
 
 export async function unlink(accessor: OPFSAccessor, path: PathSpec): Promise<void> {
   const root = await accessor.root()
@@ -30,6 +31,16 @@ export async function unlink(accessor: OPFSAccessor, path: PathSpec): Promise<vo
     // name that cannot be there; the raw TypeMismatchError named no errno.
     throw destError(err, path)
   }
+  // unlink(2) answers EISDIR for a directory, where removeEntry would take
+  // an empty one and name a full one's refusal by no errno.
+  let directory = true
+  try {
+    await parentDir.getDirectoryHandle(name, { create: false })
+  } catch (err) {
+    if (!isNotFound(err) && !isTypeMismatch(err)) throw err
+    directory = false
+  }
+  if (directory) throw eisdir(path)
   try {
     await parentDir.removeEntry(name)
   } catch (err) {

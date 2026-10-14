@@ -57,12 +57,18 @@ import {
   isMissingPath,
 } from '../../../errors/fs.ts'
 import { typedLink } from '../utils/links.ts'
-import { absentDestError, descendantPath, nearestAncestor, spelledFrom } from '../utils/paths.ts'
+import {
+  absentDestError,
+  descendantPath,
+  entryKind,
+  nearestAncestor,
+  spelledFrom,
+} from '../utils/paths.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import type { LinkView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { CycleError, resolvePath } from '../../../utils/path.ts'
+import { CycleError, parent, resolvePath } from '../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 
@@ -331,6 +337,7 @@ export async function makeLink(
     copies,
   )
   if (!made.ok) return false
+  lines?.push(transferLine(src, target, made.backup, policy.cmdName))
   try {
     if (await pathExists(stat, target)) await copies.dispatch('unlink', target)
     await copies.dispatch('symlink', target, [], { target: text })
@@ -341,7 +348,6 @@ export async function makeLink(
     )
     return false
   }
-  lines?.push(transferLine(src, target, made.backup))
   return true
 }
 
@@ -778,10 +784,50 @@ export async function makeBackup(
 }
 
 // The cp verbose line, with GNU's backup annotation when one exists.
-function transferLine(src: PathSpec, target: PathSpec, backup: PathSpec | null): string {
+// The verbose line for one copied entry, with GNU's backup note. GNU prints
+// it before the create, so a create that fails still shows it; mv words a
+// copy across mounts `copied`. Mirrors Python's transfer_line.
+function transferLine(
+  src: PathSpec,
+  target: PathSpec,
+  backup: PathSpec | null,
+  cmdName = 'cp',
+): string {
   let line = `'${src.rawPath}' -> '${target.rawPath}'`
   if (backup !== null) line += ` (backup: '${backup.rawPath}')`
-  return line
+  return cmdName === 'mv' ? `copied ${line}` : line
+}
+
+/**
+ * GNU's verdict on a source this cp already began to copy, as the stderr line
+ * and whether it is only a warning, or null to copy it. Copied again to the
+ * same place, it is a warning and is skipped. A directory meeting a second
+ * place would be a hard link to a directory, which cp refuses unless -L or -H
+ * followed it there; a file is copied again (coreutils 9.7). A file under a
+ * backup that moves the first copy aside goes on to the just-created rule.
+ * Mirrors Python's _repeated_source.
+ */
+function repeatedSource(
+  earlier: PathSpec | undefined,
+  src: PathSpec,
+  target: PathSpec,
+  srcIsDir: boolean,
+  flags: CpFlags,
+  keyOf: BackendKeyFn,
+): [string, boolean] | null {
+  if (earlier === undefined) return null
+  if (keyOf(earlier) === keyOf(target)) {
+    if (!srcIsDir && backupDisplaces(flags.backup)) return null
+    const noun = srcIsDir ? 'directory' : 'file'
+    return [`cp: warning: source ${noun} '${src.rawPath}' specified more than once`, true]
+  }
+  if (srcIsDir && flags.dereference === 'never') {
+    return [
+      `cp: will not create hard link '${target.rawPath}' to directory '${earlier.rawPath}'`,
+      false,
+    ]
+  }
+  return null
 }
 
 // Recreate a source tree's directories under the destination root. Only
@@ -843,16 +889,19 @@ async function copyEntry(
   }
 }
 
-// A failed mkdir stops the whole source, mirroring copyEntries and GNU: the
-// children of a directory that could not be created cannot land, so reporting
-// one line per descendant (and then copying the files anyway) would be both
-// noisy and wrong. Returns false when the caller must skip the file pass.
 // Whether `path` is `root` or below it. Mirrors Python's within.
 export function within(path: string, root: string): boolean {
   const base = rstripSlash(root)
   return rstripSlash(path) === base || path.startsWith(`${base}/`)
 }
 
+// Recreate a source tree's directories under the destination root, for the
+// per-entry path. A directory that cannot be made, or whose name a
+// non-directory holds, is GNU's line and its tree is left out; its siblings
+// still copy, as GNU's walk goes on (coreutils 9.7). Returns the source
+// directories whose trees the file pass leaves out, and the destination
+// directories this made, whose entries cannot be taken yet (null where the
+// backend has no directories). Mirrors Python's _mirror_dirs.
 async function mirrorDirs(
   strategy: NativeCopy,
   stat: StatFn,
@@ -864,8 +913,8 @@ async function mirrorDirs(
   intoItself: boolean,
   index?: IndexCacheStore,
   lines?: string[],
-): Promise<boolean> {
-  if (strategy.mkdir === undefined) return true
+): Promise<{ blocked: string[]; made: Set<string> | null }> {
+  if (strategy.mkdir === undefined) return { blocked: [], made: null }
   // A destination inside the source leaves its own subtree out, as the
   // file pass does.
   const mounts = [srcBase, ...(await strategy.find(src, { type: 'd' }))].filter(
@@ -876,25 +925,34 @@ async function mirrorDirs(
   // the Set happened to hold, which is insertion order here and hash order in
   // Python. Same key on both sides, same output.
   const unique = [...new Set(mounts)].sort((a, b) => a.length - b.length || compareCodePoints(a, b))
+  const blocked: string[] = []
+  const made = new Set<string>()
   for (const entryMount of unique) {
-    const entryDst = spelledFrom(
-      mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
-      target,
-    )
-    if (await isDirectory(stat, entryDst, index)) continue
+    if (blocked.some((root) => within(entryMount, root))) continue
+    const dstMount = dstBase + entryMount.slice(srcBase.length)
+    const entryDst = spelledFrom(mountedPath(target, dstMount), target)
+    const entry = spelledFrom(mountedPath(src, entryMount), src)
+    const { exists, isDir } = await entryKind(stat, entryDst, index)
+    if (isDir) continue
+    if (exists) {
+      errors.push(
+        `cp: cannot overwrite non-directory '${entryDst.rawPath}' with directory '${entry.rawPath}'`,
+      )
+      blocked.push(entryMount)
+      continue
+    }
     try {
       await strategy.mkdir(entryDst)
     } catch (err) {
       if (!isFsError(err)) throw err
       errors.push(`cp: cannot create directory '${entryDst.rawPath}': ${String(fsStrerror(err))}`)
-      return false
+      blocked.push(entryMount)
+      continue
     }
-    if (lines !== undefined) {
-      const entry = spelledFrom(mountedPath(src, entryMount), src)
-      lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
-    }
+    made.add(dstMount)
+    if (lines !== undefined) lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
   }
-  return true
+  return { blocked, made }
 }
 
 // List a tree as {path, kind} pairs, parents before children. The kind is
@@ -953,16 +1011,18 @@ export async function cpWalk(
 }
 
 // Copy a walked source tree entry by entry with GNU per-entry errors: the
-// shared primitive-transfer loop of cp and mv. A failed mkdir aborts the
-// source (its children cannot be created); a failed read or write is
-// reported and the remaining entries still copy, like GNU cp/mv on a
-// cross-device transfer. Every error line carries fsStrerror, so a backend
+// shared primitive-transfer loop of cp and mv. A directory that cannot be
+// made, or whose name a non-directory holds, leaves its own tree out; a
+// failed read or write is reported; either way the remaining entries still
+// copy, like GNU cp/mv on a cross-device transfer. Every error line carries fsStrerror, so a backend
 // missing the needed op reports `Operation not supported` instead of
 // aborting the command. A FIFO or device is GNU's failed recreate
 // (specialFileError), never read. `policy` applies -n/--update/--backup per
 // file entry, like GNU during a recursive merge (null overwrites
-// unconditionally); `lines` is an optional per-entry sink. Returns whether
-// every entry landed.
+// unconditionally); `lines` is an optional per-entry sink, a file's line
+// written before its create; `rootBackup` is the backup the caller made of
+// the target, which the source's own line notes. Returns whether every
+// entry landed.
 export async function copyEntries(
   cmdName: string,
   strategy: PrimitiveCopy | PrimitiveMove,
@@ -976,31 +1036,55 @@ export async function copyEntries(
     policy?: TransferPolicy
     lines?: string[] | undefined
     copies?: TransferLinks | undefined
+    rootBackup?: PathSpec | null
   } = {},
 ): Promise<boolean> {
   const srcBase = rstripSlash(src.virtual)
   const dstBase = rstripSlash(target.virtual)
   let copiedAll = true
+  const blocked: string[] = []
+  const made = new Set<string>()
   for (const { path: entry, kind } of entries) {
+    if (blocked.some((root) => within(entry, root))) continue
     const entrySpec = descendantPath(src, entry)
     const entryDstSpec = descendantPath(target, dstBase + entry.slice(srcBase.length))
     if (kind === FileType.DIRECTORY) {
-      try {
-        if (!(await isDirectory(stat, entryDstSpec, index))) {
-          await strategy.mkdir(entryDstSpec)
-          if (opts.lines !== undefined) {
-            opts.lines.push(`'${entrySpec.rawPath}' -> '${entryDstSpec.rawPath}'`)
-          }
-        }
-      } catch (err) {
-        // GNU stops this source: the children of a directory it could
-        // not create cannot land.
-        if (!isFsError(err)) throw err
+      const { exists, isDir } = await entryKind(stat, entryDstSpec, index)
+      if (isDir) continue
+      if (exists) {
         errors.push(
-          `${cmdName}: cannot create directory '${entryDstSpec.rawPath}': ${String(fsStrerror(err))}`,
+          `${cmdName}: cannot overwrite non-directory '${entryDstSpec.rawPath}' with directory '${entrySpec.rawPath}'`,
         )
-        return false
+      } else {
+        try {
+          await strategy.mkdir(entryDstSpec)
+          made.add(entryDstSpec.virtual)
+          opts.lines?.push(
+            cmdName === 'mv'
+              ? `created directory '${entryDstSpec.rawPath}'`
+              : `'${entrySpec.rawPath}' -> '${entryDstSpec.rawPath}'`,
+          )
+          continue
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          errors.push(
+            `${cmdName}: cannot create directory '${entryDstSpec.rawPath}': ${String(fsStrerror(err))}`,
+          )
+        }
       }
+      copiedAll = false
+      blocked.push(entry)
+      continue
+    }
+    if (
+      entry !== src.virtual &&
+      !made.has(parent(entryDstSpec.virtual)) &&
+      (await isDirectory(stat, entryDstSpec, index))
+    ) {
+      errors.push(
+        `${cmdName}: cannot overwrite directory '${entryDstSpec.rawPath}' with non-directory '${entrySpec.rawPath}'`,
+      )
+      copiedAll = false
       continue
     }
     const link = opts.copies?.links.statAt(entry)
@@ -1032,11 +1116,12 @@ export async function copyEntries(
       continue
     const refusal = specialFileError(cmdName, kind, entryDstSpec)
     if (refusal !== null) {
+      opts.lines?.push(transferLine(entrySpec, entryDstSpec, null, cmdName))
       errors.push(refusal)
       copiedAll = false
       continue
     }
-    let backup: PathSpec | null = null
+    let backup: PathSpec | null = entry === src.virtual ? (opts.rootBackup ?? null) : null
     if (opts.policy !== undefined) {
       const made = await makeBackup(
         opts.policy,
@@ -1054,12 +1139,15 @@ export async function copyEntries(
       }
       backup = made.backup
     }
+    opts.lines?.push(transferLine(entrySpec, entryDstSpec, backup, cmdName))
     let data: Uint8Array
     try {
       data = await strategy.readBytes(entrySpec)
     } catch (err) {
       if (!isFsError(err)) throw err
-      errors.push(`${cmdName}: cannot open '${entry}' for reading: ${String(fsStrerror(err))}`)
+      errors.push(
+        `${cmdName}: cannot open '${entrySpec.rawPath}' for reading: ${String(fsStrerror(err))}`,
+      )
       copiedAll = false
       continue
     }
@@ -1074,7 +1162,6 @@ export async function copyEntries(
       copiedAll = false
       continue
     }
-    if (opts.lines !== undefined) opts.lines.push(transferLine(entrySpec, entryDstSpec, backup))
   }
   return copiedAll
 }
@@ -1146,20 +1233,16 @@ export async function cpGeneric(
     backupDisplaces(flags.backup)
   const lines: string[] = []
   let warned = 0
-  const seen = new Set<string>()
+  // Where each source's first copy went, by source and by link name.
+  const firstCopy = new Map<string, PathSpec>()
+  const firstLink = new Map<string, PathSpec>()
   const created = new Set<string>()
   const guardsCreated = !(
     flags.noClobber ||
     updateGates(flags.update) ||
     flags.backup === 'numbered'
   )
-  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr)) {
-    if (dstIsDir && seen.has(keyOf(src)) && !backupDisplaces(flags.backup)) {
-      errors.push(`cp: warning: source file '${src.rawPath}' specified more than once`)
-      warned += 1
-      continue
-    }
-    seen.add(keyOf(src))
+  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr, '.')) {
     const link =
       copies !== undefined && flags.dereference === 'never'
         ? typedLink(copies.links, src, copies.cwd)
@@ -1176,6 +1259,13 @@ export async function cpGeneric(
         errors.push(`cp: '${src.rawPath}' and '${target.rawPath}' are the same file`)
         continue
       }
+      const repeat = repeatedSource(firstLink.get(named), src, target, false, flags, keyOf)
+      if (repeat !== null) {
+        errors.push(repeat[0])
+        if (repeat[1]) warned += 1
+        continue
+      }
+      if (!firstLink.has(named)) firstLink.set(named, target)
       if (guardsCreated && created.has(keyOf(target))) {
         if (policy.ask && !(await policy.ask(target))) continue
         errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
@@ -1236,6 +1326,9 @@ export async function cpGeneric(
     if (slashRefusesFile(target, targetExists, srcIsDir)) targetErr ??= 'ENOTDIR'
     if (targetErr !== null) {
       const noun = srcIsDir ? 'directory' : 'regular file'
+      // GNU announces a file before the create this refuses; a directory's
+      // line waits for its mkdir.
+      if (flags.verbose && !srcIsDir) lines.push(transferLine(src, target, null))
       errors.push(`cp: cannot create ${noun} '${target.rawPath}': ${posixPhrase(targetErr)}`)
       continue
     }
@@ -1258,6 +1351,13 @@ export async function cpGeneric(
       errors.push(`cp: not writing through dangling symlink '${target.rawPath}'`)
       continue
     }
+    const repeat = repeatedSource(firstCopy.get(keyOf(src)), src, target, srcIsDir, flags, keyOf)
+    if (repeat !== null) {
+      errors.push(repeat[0])
+      if (repeat[1]) warned += 1
+      continue
+    }
+    if (!firstCopy.has(keyOf(src))) firstCopy.set(keyOf(src), target)
     if (intoItself) {
       errors.push(`cp: cannot copy a directory, '${src.rawPath}', into itself, '${target.rawPath}'`)
     }
@@ -1330,14 +1430,22 @@ export async function cpGeneric(
         index,
         flags.verbose ? lines : undefined,
       )
-      if (!mirrored) continue
       for (const entryMount of await strategy.find(src, { type: 'f' })) {
         if (intoItself && within(entryMount, dstBase)) continue
+        if (mirrored.blocked.some((root) => within(entryMount, root))) continue
+        const dstMount = dstBase + entryMount.slice(srcBase.length)
         const entry = spelledFrom(mountedPath(src, entryMount), src)
-        const entryDst = spelledFrom(
-          mountedPath(target, dstBase + entryMount.slice(srcBase.length)),
-          target,
-        )
+        const entryDst = spelledFrom(mountedPath(target, dstMount), target)
+        if (
+          mirrored.made !== null &&
+          !mirrored.made.has(parent(dstMount)) &&
+          (await isDirectory(stat, entryDst, index))
+        ) {
+          errors.push(
+            `cp: cannot overwrite directory '${entryDst.rawPath}' with non-directory '${entry.rawPath}'`,
+          )
+          continue
+        }
         if (!(await overwriteGate(policy, stat, entry, entryDst, errors))) continue
         const made = await makeBackup(
           policy,
@@ -1350,6 +1458,7 @@ export async function cpGeneric(
           copies,
         )
         if (!made.ok) continue
+        if (flags.verbose) lines.push(transferLine(entry, entryDst, made.backup))
         try {
           await copyEntry(strategy, copies, entry, entryDst)
         } catch (err) {
@@ -1359,7 +1468,6 @@ export async function cpGeneric(
           )
           continue
         }
-        if (flags.verbose) lines.push(transferLine(entry, entryDst, made.backup))
       }
       if (copies !== undefined) {
         await copyTreeLinks(
@@ -1384,6 +1492,7 @@ export async function cpGeneric(
     if (!(await overwriteGate(policy, stat, src, target, errors))) continue
     const refusal = flags.recursive ? specialFileError('cp', srcKind, target) : null
     if (refusal !== null) {
+      if (flags.verbose) lines.push(transferLine(src, target, null))
       errors.push(refusal)
       continue
     }
@@ -1398,6 +1507,7 @@ export async function cpGeneric(
       copies,
     )
     if (!made.ok) continue
+    if (flags.verbose) lines.push(transferLine(src, target, made.backup))
     if (isPrimitiveCopy(strategy)) {
       let data: Uint8Array
       try {
@@ -1429,7 +1539,6 @@ export async function cpGeneric(
       }
     }
     created.add(keyOf(target))
-    if (flags.verbose) lines.push(transferLine(src, target, made.backup))
   }
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
   return [

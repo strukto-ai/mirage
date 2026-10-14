@@ -111,6 +111,40 @@
       "flags": [
         "s"
       ]
+    },
+    {
+      "id": "ln_s_dot_names_the_directory_itself",
+      "seq": 16200005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && mkdir -p r16lndot/s r16lndot/t && cd r16lndot && ln -s /data/r16lndot/s/. t; echo rc=$?; ln -sf s/.. t; echo rc=$?; ls -A t; cd /data && rm -r r16lndot)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "ln: failed to create symbolic link 't/.': File exists\nln: t/..: cannot overwrite directory\n"
+      }
     }
   ]
 }

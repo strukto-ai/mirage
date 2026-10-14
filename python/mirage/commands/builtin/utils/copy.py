@@ -13,10 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import posixpath
+from dataclasses import replace
+
 from mirage.commands.builtin.utils.paths import descendant_path
 from mirage.errors.fs import eloop, enoent, enotdir
 from mirage.errors.types import FsCondition
 from mirage.types import FileType, PathSpec, StatFn
+from mirage.utils.path import parent
 
 # The destination verdicts met at the destination's own stat, before any
 # create or rename: a plain file in its chain, or a link loop in it. cp
@@ -40,6 +44,7 @@ def copy_targets(
     dst_is_dir: bool,
     dst_exists: bool = True,
     dst_err: FsCondition | None = None,
+    dotdot: str = "..",
 ) -> list[tuple[PathSpec, PathSpec]]:
     """Map copy or move sources to their destination paths.
 
@@ -61,6 +66,9 @@ def copy_targets(
             picks GNU's ENOENT wording over ENOTDIR.
         dst_err (FsCondition | None): The destination probe's condition
             when it can be neither found nor created there.
+        dotdot (str): What a source typed as ``..`` lands as: ``..``,
+            the destination's parent, for mv; ``.`` for cp, which never
+            copies into ``dir/..`` (coreutils 9.7).
 
     Returns:
         list[tuple[PathSpec, PathSpec]]: Source-to-target pairs.
@@ -74,27 +82,45 @@ def copy_targets(
         raise enotdir(label)
     if not dst_is_dir:
         return [(sources[0], dst)]
-    pairs: list[tuple[PathSpec, PathSpec]] = []
-    for src in sources:
-        pairs.append((src, child_path(dst, landing_name(src))))
-    return pairs
+    return [(src, landing_path(dst, src, dotdot)) for src in sources]
 
 
-def landing_name(src: PathSpec) -> str:
-    """The name a source lands under inside a directory destination.
-
-    GNU names it after the operand as typed, so a link the router
-    followed still lands under its own name (``cp al dir`` makes
-    ``dir/al``, not ``dir/a.txt``). ``''``, ``.`` and ``..`` name no entry
-    of their own, so they keep the name of what they resolve to.
+def typed_name(src: PathSpec) -> str:
+    """The operand's last component as typed, trailing slashes dropped.
 
     Args:
-        src (PathSpec): the source operand.
+        src (PathSpec): the operand.
     """
-    typed = src.raw_path.rstrip("/").rsplit("/", 1)[-1]
-    if typed not in ("", ".", ".."):
-        return typed
-    return src.mount_path.rstrip("/").rsplit("/", 1)[-1]
+    return src.raw_path.rstrip("/").rsplit("/", 1)[-1]
+
+
+def landing_path(dst: PathSpec, src: PathSpec, dotdot: str = "..") -> PathSpec:
+    """Where a source lands inside a directory destination.
+
+    GNU appends the operand's last component as typed, so a link the
+    router followed still lands under its own name (``cp al dir`` makes
+    ``dir/al``, not ``dir/a.txt``), and ``s/.`` lands at ``dir/.``, the
+    directory itself: ``cp -r s/. dir`` merges s's contents into dir.
+    An operand with no name of its own (the root) keeps the name of
+    what it resolves to.
+
+    Args:
+        dst (PathSpec): the directory destination.
+        src (PathSpec): the source operand.
+        dotdot (str): what a ``..`` operand lands as (see copy_targets).
+    """
+    typed = typed_name(src)
+    if typed == "..":
+        typed = dotdot
+    if typed == "":
+        typed = src.mount_path.rstrip("/").rsplit("/", 1)[-1]
+    if typed not in (".", ".."):
+        return child_path(dst, typed)
+    shown = posixpath.join(dst.raw_path, typed)
+    if typed == ".":
+        return replace(dst, raw_path=shown)
+    above = descendant_path(dst, parent(dst.virtual.rstrip("/")))
+    return replace(above, raw_path=shown)
 
 
 async def path_exists(stat: StatFn, path: PathSpec) -> bool:

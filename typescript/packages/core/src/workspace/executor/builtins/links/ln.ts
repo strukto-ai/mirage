@@ -339,7 +339,10 @@ async function dirAt(
 function into(source: string | PathSpec, dirAbs: string, dirTyped: string): LinkPlan {
   const base = gnuBasename(rstripSlash(wordText(source)))
   const joined = dirAbs === '/' ? `/${base}` : `${rstripSlash(dirAbs)}/${base}`
-  return { source, linkAbs: joined, linkTyped: `${rstripSlash(dirTyped)}/${base}` }
+  // `.` and `..` name the directory or its parent, which already stands
+  // there: GNU's symlink(2) answers EEXIST (coreutils 9.7).
+  const linkAbs = base === '.' || base === '..' ? posixNormpath(joined) : joined
+  return { source, linkAbs, linkTyped: `${rstripSlash(dirTyped)}/${base}` }
 }
 
 // Turn ln's operands into the links to make, GNU's four forms: `ln -t DIR
@@ -641,10 +644,13 @@ export async function makeLink(
   // GNU's same-name check, before any backup or removal: -f would
   // otherwise unlink the source it is about to link, leaving `ln -sf a a`
   // a self-loop where a file was. GNU waives it when a backup keeps the
-  // original, so `ln -sfb a a` still goes through.
+  // original, so `ln -sfb a a` still goes through, and a name typed as `.`
+  // or `..` removes nothing, so -f meets the directory there.
+  const dotted = typed.endsWith('/.') || typed.endsWith('/..')
   if (
     flags.force &&
     !backs &&
+    !dotted &&
     operandAbs(namespace, plan.source, cwd, vis) === plan.linkAbs &&
     (visibleLink(namespace, vis, plan.linkAbs) || (await pathStat(dispatch, plan.linkAbs)) !== null)
   ) {
@@ -691,7 +697,15 @@ export async function makeLink(
     // occupied name (symlink(2)'s EEXIST), so the removal is what makes
     // the flag work rather than a formality; a destination that is not
     // there is what -f is for, so its miss is the expected case and not
-    // an error.
+    // an error. unlink(2) refuses a directory (EISDIR); a backend that would
+    // remove one is never asked.
+    if (!visibleLink(namespace, vis, plan.linkAbs)) {
+      const found = await pathStat(dispatch, plan.linkAbs)
+      if (found?.type === FileType.DIRECTORY) {
+        errors.push(`ln: ${typed}: cannot overwrite directory\n`)
+        return
+      }
+    }
     try {
       await dispatch('unlink', linkSpec)
     } catch (err) {

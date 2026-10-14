@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { exists } from './exists.ts'
+import { mkdir } from './mkdir.ts'
 import { unlink } from './unlink.ts'
 import { write } from './write.ts'
 
@@ -28,6 +29,12 @@ describe('opfs/unlink', () => {
   it('is a no-op on missing', async () => {
     const accessor = makeMockAccessor()
     await expect(unlink(accessor, spec('/missing'))).resolves.toBeUndefined()
+  })
+  it('answers EISDIR for a directory and keeps it, as unlink(2)', async () => {
+    const accessor = makeMockAccessor()
+    await mkdir(accessor, spec('/d'))
+    await expect(unlink(accessor, spec('/d'))).rejects.toMatchObject({ code: 'EISDIR' })
+    expect(await exists(accessor, spec('/d'))).toBe(true)
   })
   it('answers ENOTDIR for a name under a plain file', async () => {
     const accessor = makeMockAccessor()

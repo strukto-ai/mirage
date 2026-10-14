@@ -48,6 +48,7 @@ from mirage.commands.builtin.utils.copy import (
     backend_key_default,
     copy_targets,
     path_exists,
+    typed_name,
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
@@ -183,6 +184,7 @@ async def _remove_entries(
     stat: StatFn,
     entries: list[tuple[PathSpec, FileType]],
     errors: list[str],
+    lines: list[str] | None = None,
 ) -> bool:
     """Remove copied source entries children first, GNU rm style.
 
@@ -199,6 +201,8 @@ async def _remove_entries(
         entries (list[tuple[PathSpec, FileType]]): ``walk`` output,
             parents first; removal runs it in reverse.
         errors (list[str]): Collected stderr lines, appended in place.
+        lines (list[str] | None): Verbose sink for GNU's ``removed``
+            lines; None keeps the removal silent.
 
     Returns:
         bool: Whether the source is fully gone.
@@ -213,13 +217,15 @@ async def _remove_entries(
         try:
             await (strategy.rmdir if is_dir else strategy.unlink)(entry)
         except FS_ERRORS as exc:
-            if await _entry_gone(strategy, stat, entry, is_dir):
+            if not await _entry_gone(strategy, stat, entry, is_dir):
+                errors.append(
+                    f"mv: cannot remove '{entry.raw_path}': {fs_strerror(exc)}"
+                )
+                failed.append(base)
                 continue
-            errors.append(
-                f"mv: cannot remove '{entry.raw_path}': {fs_strerror(exc)}"
-            )
-            failed.append(base)
-            continue
+        if lines is not None:
+            noun = "directory " if is_dir else ""
+            lines.append(f"removed {noun}'{entry.raw_path}'")
     return not failed
 
 
@@ -309,6 +315,12 @@ async def _exchange_pair(
         errors.append(
             f"mv: cannot exchange '{src.raw_path}' and "
             f"'{target.raw_path}': Invalid cross-device link"
+        )
+        return
+    if typed_name(src) in (".", ".."):
+        errors.append(
+            f"mv: cannot exchange '{src.raw_path}' and "
+            f"'{target.raw_path}': {posix_phrase(FsCondition.EBUSY)}"
         )
         return
     if not await path_exists(stat, src) or not await path_exists(stat, target):
@@ -475,7 +487,12 @@ async def mv_generic(
                 lines if flags.verbose else None,
             )
             continue
-        if key_of(target).startswith(key_of(src) + "/"):
+        # A source typed as `.` or `..` names no entry a rename can take,
+        # so GNU's rename answers EBUSY once the gates let it run, before
+        # any subdirectory verdict (coreutils 9.7). Across mounts GNU
+        # copies it and then refuses to remove it; mirage refuses first.
+        busy = typed_name(src) in (".", "..")
+        if not busy and key_of(target).startswith(key_of(src) + "/"):
             errors.append(
                 f"mv: cannot move '{src.raw_path}' to a "
                 f"subdirectory of itself, '{target.raw_path}'"
@@ -540,6 +557,12 @@ async def mv_generic(
             )
             continue
         if not await overwrite_gate(policy, stat, src, target, errors):
+            continue
+        if busy:
+            errors.append(
+                f"mv: cannot move '{src.raw_path}' to "
+                f"'{target.raw_path}': {posix_phrase(FsCondition.EBUSY)}"
+            )
             continue
         # GNU refuses to replace a non-empty directory whether the target
         # was named outright (-T) or mapped under an existing destination
@@ -641,6 +664,17 @@ async def mv_generic(
                 )
                 continue
         elif isinstance(strategy, PrimitiveMove):
+            if target_err is FsCondition.ENOENT:
+                # GNU's rename meets the absent parent before it falls
+                # back to a copy across devices.
+                errors.append(
+                    f"mv: cannot move '{src.raw_path}' to "
+                    f"'{target.raw_path}': {posix_phrase(target_err)}"
+                )
+                continue
+            # Across mounts GNU copies and then removes, and -v says so
+            # entry by entry instead of `renamed` (coreutils 9.7).
+            verbose = lines if flags.verbose else None
             entries = await walk(strategy.readdir, stat, src)
             copied_all = await copy_entries(
                 "mv",
@@ -650,19 +684,24 @@ async def mv_generic(
                 target,
                 entries,
                 errors,
+                lines=verbose,
                 copies=copies,
+                root_backup=backup,
             )
             if not copied_all:
                 # GNU keeps the whole source tree when any copy failed;
                 # the destination keeps the entries that landed.
                 continue
             removed_all = await _remove_entries(
-                strategy, stat, entries, errors
+                strategy, stat, entries, errors, verbose
             )
             if not removed_all:
                 # GNU leaves the copied destination in place and reports
                 # the source entries it could not remove.
                 continue
+            if not src_is_dir:
+                created.add(key_of(target))
+            continue
         else:
             try:
                 await strategy.rename(src, target)

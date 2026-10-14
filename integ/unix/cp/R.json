@@ -134,6 +134,103 @@
         "stderr": "cp: cannot create special file '/data/cpdev': Operation not supported\nls: cannot access '/data/cpdev': No such file or directory\n"
       },
       "note": "Divergence: GNU bash 5.2.37 (root in debian:stable-slim) prints \"st=0\\n/data/cpdev\\nst=0\\n0\\n\": cp -r recreates the device node. A Mirage mount cannot store a device, so cp -r answers as GNU does where mknod fails; with mknod refused (EOPNOTSUPP) GNU prints exactly this case's output. Without -r both read the device."
+    },
+    {
+      "id": "cp_r_dot_merges_the_contents",
+      "seq": 16200001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "(cd /data && mkdir -p r16dot/s/sub r16dot/t r16dot/v && printf a > r16dot/s/a && printf b > r16dot/s/sub/b && cp -r r16dot/s/. r16dot/t && cp -r r16dot/s/sub/.. r16dot/u && cp -r r16dot/s/sub/../ r16dot/v; echo rc=$?; find r16dot/t r16dot/u r16dot/v | sort; rm -r r16dot)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nr16dot/t\nr16dot/t/a\nr16dot/t/sub\nr16dot/t/sub/b\nr16dot/u\nr16dot/u/a\nr16dot/u/sub\nr16dot/u/sub/b\nr16dot/v\nr16dot/v/a\nr16dot/v/sub\nr16dot/v/sub/b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_r_dot_lands_in_the_destination_itself",
+      "seq": 16200002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "(cd /data && mkdir -p r16dotx/s/sub && printf a > r16dotx/s/a && cd r16dotx && (cd s && cp -r . ../t) && find t | sort && cp -rv s/sub/.. t && cp -r s/. s; echo rc=$?; cp -r s/sub/.. s/sub; echo rc=$?; cd /data && rm -r r16dotx)",
+      "expect": {
+        "exit": 0,
+        "stdout": "t\nt/a\nt/sub\n's/sub/../a' -> 't/./a'\nrc=1\nrc=1\n",
+        "stderr": "cp: 's/.' and 's/.' are the same file\ncp: cannot copy a directory, 's/sub/..', into itself, 's/sub/.'\n"
+      },
+      "note": "GNU copies part of a tree into itself, in readdir order, before it says it could not; the case lists no tree after that refusal."
+    },
+    {
+      "id": "cp_r_repeated_source_follows_gnu",
+      "seq": 16200003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "(cd /data && mkdir -p r16rep/s/sub r16rep/t r16rep/u && printf a > r16rep/s/a && cd r16rep && cp -r s s u; echo rc=$?; cp -r s/. s t; echo rc=$?; ln -s s/a la && cp s/a la u; echo rc=$?; find t u | sort; cd /data && rm -r r16rep)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=1\nrc=0\nt\nt/a\nt/sub\nu\nu/a\nu/la\nu/s\nu/s/a\nu/s/sub\n",
+        "stderr": "cp: warning: source directory 's' specified more than once\ncp: will not create hard link 't/s' to directory 't/.'\n"
+      }
     }
   ]
 }

@@ -335,14 +335,17 @@ describe('mvGeneric primitive transfer errors', () => {
       after: TWO_MOVED,
     },
     {
-      name: 'verbose lists only the moves that fully completed',
+      name: 'verbose names each copy, and each removal that landed',
       files: TWO,
       dirs: ['/src', '/d'],
       paths: ['/src/a.txt', '/src/b.txt', '/d'],
       fails: { unlinkFails: new Map([['/src/a.txt', eacces('/src/a.txt')]]) },
       flags: mvFlags({ verbose: true }),
       exit: 1,
-      out: "renamed '/src/b.txt' -> '/d/b.txt'\n",
+      out:
+        "copied '/src/a.txt' -> '/d/a.txt'\n" +
+        "copied '/src/b.txt' -> '/d/b.txt'\n" +
+        "removed '/src/b.txt'\n",
       err: DENIED_A,
       after: TWO_MOVED,
     },

@@ -98,6 +98,70 @@
         "stdout": "'r10rv/s/n' -> 'r10rv/d/s/n'\n'r10rv/s/n/f' -> 'r10rv/d/s/n/f'\nrc=0\nr10rv/d\nr10rv/d/s\nr10rv/d/s/n\nr10rv/d/s/n/f\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cp_v_names_a_file_before_its_create_fails",
+      "seq": 16200006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "(cd /data && mkdir -p r16vc/s/sub && printf a > r16vc/s/f && printf b > r16vc/s/sub/g && cd r16vc && cp -v s/f nodir/x; echo rc=$?; cp -v s/f newname/; echo rc=$?; cp -rv s/sub nodir/y; echo rc=$?; cd /data && rm -r r16vc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "'s/f' -> 'nodir/x'\nrc=1\n's/f' -> 'newname/'\nrc=1\nrc=1\n",
+        "stderr": "cp: cannot create regular file 'nodir/x': No such file or directory\ncp: cannot create regular file 'newname/': Not a directory\ncp: cannot create directory 'nodir/y': No such file or directory\n"
+      }
+    },
+    {
+      "id": "cp_rv_merge_reports_a_taken_entry",
+      "seq": 16200007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix",
+        "ssh"
+      ],
+      "command": "(cd /data && mkdir -p r16vm/s/sub r16vm/t r16vm/u/sub/g && printf a > r16vm/s/f && printf b > r16vm/s/sub/g && printf x > r16vm/t/sub && cd r16vm && cp -rv s/. t; echo rc=$?; cp -rv s/. u; echo rc=$?; find t u | sort; cd /data && rm -r r16vm)",
+      "expect": {
+        "exit": 0,
+        "stdout": "'s/./f' -> 't/./f'\nrc=1\n's/./f' -> 'u/./f'\nrc=1\nt\nt/f\nt/sub\nu\nu/f\nu/sub\nu/sub/g\n",
+        "stderr": "cp: cannot overwrite non-directory 't/./sub' with directory 's/./sub'\ncp: cannot overwrite directory 'u/./sub/g' with non-directory 's/./sub/g'\n"
+      }
     }
   ]
 }

@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rekey, underPath } from '../../../utils/key_prefix.ts'
+import { underPath } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
+import type { PathSpec } from '../../../types.ts'
 import {
   FileType,
-  PathSpec,
   type MoveStrategy,
   type NativeMove,
   type PrimitiveMove,
@@ -33,6 +33,7 @@ import {
   backendKeyDefault,
   copyTargets,
   pathExists,
+  typedName,
   type BackendKeyFn,
 } from '../utils/copy.ts'
 import {
@@ -46,6 +47,7 @@ import {
   withInner,
 } from '../../../errors/fs.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { descendantPath } from '../utils/paths.ts'
 import {
   type TransferLinks,
   linkStat,
@@ -180,6 +182,7 @@ async function removeEntries(
   src: PathSpec,
   entries: { path: string; kind: FileType }[],
   errors: string[],
+  lines?: string[],
 ): Promise<boolean> {
   const failed: string[] = []
   for (let i = entries.length - 1; i >= 0; i -= 1) {
@@ -191,17 +194,19 @@ async function removeEntries(
       failed.push(base)
       continue
     }
-    const spec = PathSpec.fromStrPath(node.path, rekey(src.virtual, src.vfsPath, node.path))
+    const spec = descendantPath(src, node.path)
     try {
       if (isDir) await strategy.rmdir(spec)
       else await strategy.unlink(spec)
     } catch (err) {
       if (!isFsError(err)) throw err
-      if (await entryGone(strategy, stat, spec, isDir)) continue
-      errors.push(`mv: cannot remove '${node.path}': ${String(fsStrerror(err))}`)
-      failed.push(base)
-      continue
+      if (!(await entryGone(strategy, stat, spec, isDir))) {
+        errors.push(`mv: cannot remove '${spec.rawPath}': ${String(fsStrerror(err))}`)
+        failed.push(base)
+        continue
+      }
     }
+    lines?.push(`removed ${isDir ? 'directory ' : ''}'${spec.rawPath}'`)
   }
   return failed.length === 0
 }
@@ -260,6 +265,12 @@ async function exchangePair(
   if (isPrimitiveMove(strategy)) {
     errors.push(
       `mv: cannot exchange '${src.rawPath}' and '${target.rawPath}': Invalid cross-device link`,
+    )
+    return
+  }
+  if (typedName(src) === '.' || typedName(src) === '..') {
+    errors.push(
+      `mv: cannot exchange '${src.rawPath}' and '${target.rawPath}': ${posixPhrase('EBUSY')}`,
     )
     return
   }
@@ -388,7 +399,12 @@ export async function mvGeneric(
       await exchangePair(strategy, stat, src, target, errors, flags.verbose ? lines : undefined)
       continue
     }
-    if (keyOf(target).startsWith(keyOf(src) + '/')) {
+    // A source typed as `.` or `..` names no entry a rename can take, so
+    // GNU's rename answers EBUSY once the gates let it run, before any
+    // subdirectory verdict (coreutils 9.7). Across mounts GNU copies it and
+    // then refuses to remove it; mirage refuses first.
+    const busy = typedName(src) === '.' || typedName(src) === '..'
+    if (!busy && keyOf(target).startsWith(keyOf(src) + '/')) {
       errors.push(
         `mv: cannot move '${src.rawPath}' to a subdirectory of itself, '${target.rawPath}'`,
       )
@@ -437,6 +453,12 @@ export async function mvGeneric(
       continue
     }
     if (!(await overwriteGate(policy, stat, src, target, errors))) continue
+    if (busy) {
+      errors.push(
+        `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase('EBUSY')}`,
+      )
+      continue
+    }
     // GNU refuses to replace a non-empty directory whether the target was
     // named outright (-T) or mapped under an existing destination
     // directory, so this cannot be gated on noTargetDir. It runs after the
@@ -526,6 +548,17 @@ export async function mvGeneric(
         continue
       }
     } else if (isPrimitiveMove(strategy)) {
+      if (targetErr === 'ENOENT') {
+        // GNU's rename meets the absent parent before it falls back to a
+        // copy across devices.
+        errors.push(
+          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase(targetErr)}`,
+        )
+        continue
+      }
+      // Across mounts GNU copies and then removes, and -v says so entry by
+      // entry instead of `renamed` (coreutils 9.7).
+      const verbose = flags.verbose ? lines : undefined
       const entries = await cpWalk(strategy.readdir, stat, src, index)
       const copiedAll = await copyEntries(
         'mv',
@@ -536,15 +569,17 @@ export async function mvGeneric(
         entries,
         errors,
         index,
-        { copies },
+        { copies, lines: verbose, rootBackup: made.backup },
       )
       // GNU keeps the whole source tree when any copy failed; the
       // destination keeps the entries that landed.
       if (!copiedAll) continue
-      const removedAll = await removeEntries(strategy, stat, src, entries, errors)
+      const removedAll = await removeEntries(strategy, stat, src, entries, errors, verbose)
       // GNU leaves the copied destination in place and reports the source
       // entries it could not remove.
       if (!removedAll) continue
+      if (!srcIsDir) created.add(keyOf(target))
+      continue
     } else {
       try {
         await strategy.rename(src, target)

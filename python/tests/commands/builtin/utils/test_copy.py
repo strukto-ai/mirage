@@ -14,29 +14,37 @@
 
 import pytest
 
-from mirage.commands.builtin.utils.copy import landing_name
+from mirage.commands.builtin.utils.copy import landing_path
 from mirage.types import PathSpec
 
 
-@pytest.mark.parametrize(
-    "typed,virtual,name",
-    [
-        ("al", "/data/a.txt", "al"),
-        ("dir/al/", "/data/a.txt", "al"),
-        ("/data/x/y", "/data/x/y", "y"),
-        ("", "/data/sub", "sub"),
-        (".", "/data/sub", "sub"),
-        ("sub/..", "/data", "data"),
-    ],
-)
-def test_landing_name_is_the_operand_as_typed(typed, virtual, name):
-    # GNU names a source inside a directory after the operand as typed,
-    # so a followed link lands under its own name; the empty name, `.`
-    # and `..` name no entry, so they keep what they resolve to.
-    src = PathSpec(
+def _spec(virtual: str, raw: str) -> PathSpec:
+    return PathSpec(
         virtual=virtual,
         directory=virtual.rsplit("/", 1)[0] or "/",
         vfs_path=virtual.strip("/"),
-        raw_path=typed,
+        raw_path=raw,
     )
-    assert landing_name(src) == name
+
+
+@pytest.mark.parametrize(
+    "typed,virtual,dotdot,landing,shown",
+    [
+        ("al", "/data/a.txt", "..", "/data/t/al", "t/al"),
+        ("dir/al/", "/data/a.txt", "..", "/data/t/al", "t/al"),
+        ("/data/x/y", "/data/x/y", "..", "/data/t/y", "t/y"),
+        ("", "/data/sub", "..", "/data/t/sub", "t/sub"),
+        (".", "/data/sub", "..", "/data/t", "t/."),
+        ("s/./", "/data/s", "..", "/data/t", "t/."),
+        ("sub/..", "/data", "..", "/data", "t/.."),
+        ("sub/..", "/data", ".", "/data/t", "t/."),
+    ],
+)
+def test_landing_path_appends_the_operand_as_typed(
+    typed, virtual, dotdot, landing, shown
+):
+    # GNU appends the operand's last component as typed, so a followed
+    # link lands under its own name and `.` lands in the destination
+    # itself; cp lands `..` there too, mv in the destination's parent.
+    got = landing_path(_spec("/data/t", "t"), _spec(virtual, typed), dotdot)
+    assert (got.virtual, got.raw_path) == (landing, shown)

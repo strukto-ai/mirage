@@ -23,6 +23,8 @@ import { eloop, enoent, enotdir, isMissingPath } from '../../../errors/fs.ts'
 // Python's STAT_REFUSALS.
 export const STAT_REFUSALS: ReadonlySet<FsCondition> = new Set<FsCondition>(['ENOTDIR', 'ELOOP'])
 import { rstripSlash } from '../../../utils/slash.ts'
+import { respelled } from '../../../utils/key_prefix.ts'
+import { parent } from '../../../utils/path.ts'
 import type { FsCondition } from '../../../errors/types.ts'
 
 export type BackendKeyFn = (path: PathSpec) => string
@@ -41,12 +43,16 @@ function childPath(parent: PathSpec, name: string): PathSpec {
 // exist because a plain file stands in its chain or behind its slash
 // (`cp a b reg/x`, `cp a b reg/`), which the destination probe reports as
 // its strerror (identical wording in cp and mv).
+//
+// A source typed as `..` lands as `dotdot`: `..`, the destination's parent,
+// for mv; `.` for cp, which never copies into `dir/..` (coreutils 9.7).
 export function copyTargets(
   sources: PathSpec[],
   dst: PathSpec,
   dstIsDir: boolean,
   dstExists = true,
   dstErr: FsCondition | null = null,
+  dotdot = '..',
 ): [PathSpec, PathSpec][] {
   if (sources.length > 1 && !dstIsDir) {
     if (dstErr === 'ELOOP') throw eloop(`target '${dst.rawPath}'`)
@@ -57,20 +63,32 @@ export function copyTargets(
     const first = sources[0]
     return first === undefined ? [] : [[first, dst]]
   }
-  return sources.map((src): [PathSpec, PathSpec] => [src, childPath(dst, landingName(src))])
+  return sources.map((src): [PathSpec, PathSpec] => [src, landingPath(dst, src, dotdot)])
+}
+
+// The operand's last component as typed, trailing slashes dropped.
+export function typedName(src: PathSpec): string {
+  return rstripSlash(src.rawPath).split('/').pop() ?? ''
 }
 
 /**
- * The name a source lands under inside a directory destination. GNU names it
- * after the operand as typed, so a link the router followed still lands under
- * its own name (`cp al dir` makes `dir/al`, not `dir/a.txt`). `''`, `.` and
- * `..` name no entry of their own, so they keep the name of what they resolve
- * to. Mirrors Python's landing_name.
+ * Where a source lands inside a directory destination. GNU appends the
+ * operand's last component as typed, so a link the router followed still
+ * lands under its own name (`cp al dir` makes `dir/al`, not `dir/a.txt`), and
+ * `s/.` lands at `dir/.`, the directory itself: `cp -r s/. dir` merges s's
+ * contents into dir. An operand with no name of its own (the root) keeps the
+ * name of what it resolves to. `dotdot` is what a `..` operand lands as (see
+ * copyTargets). Mirrors Python's landing_path.
  */
-export function landingName(src: PathSpec): string {
-  const typed = rstripSlash(src.rawPath).split('/').pop() ?? ''
-  if (typed !== '' && typed !== '.' && typed !== '..') return typed
-  return rstripSlash(src.mountPath).split('/').pop() ?? ''
+export function landingPath(dst: PathSpec, src: PathSpec, dotdot = '..'): PathSpec {
+  let typed = typedName(src)
+  if (typed === '..') typed = dotdot
+  if (typed === '') typed = rstripSlash(src.mountPath).split('/').pop() ?? ''
+  if (typed !== '.' && typed !== '..') return childPath(dst, typed)
+  const base = dst.rawPath
+  const shown = base === '' || base.endsWith('/') ? `${base}${typed}` : `${base}/${typed}`
+  if (typed === '.') return respelled(dst, shown)
+  return respelled(descendantPath(dst, parent(rstripSlash(dst.virtual))), shown)
 }
 
 export async function pathExists(stat: StatFn, path: PathSpec): Promise<boolean> {

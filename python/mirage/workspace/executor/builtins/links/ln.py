@@ -418,11 +418,12 @@ def _into(source: str | PathSpec, dir_abs: str, dir_typed: str) -> LinkPlan:
         dir_typed (str): the directory operand as typed.
     """
     base = posixpath.basename(word_text(source).rstrip("/"))
-    return LinkPlan(
-        source,
-        posixpath.join(dir_abs, base),
-        f"{dir_typed.rstrip('/')}/{base}",
-    )
+    link_abs = posixpath.join(dir_abs, base)
+    if base in (".", ".."):
+        # `.` and `..` name the directory or its parent, which already
+        # stands there: GNU's symlink(2) answers EEXIST (coreutils 9.7).
+        link_abs = posixpath.normpath(link_abs)
+    return LinkPlan(source, link_abs, f"{dir_typed.rstrip('/')}/{base}")
 
 
 async def plan_links(
@@ -742,9 +743,13 @@ async def make_link(
                 f"ln: failed to create {kind} '{typed}': File exists\n"
             )
             return
+    # A name typed as `.` or `..` removes nothing, so -f meets the
+    # directory there rather than GNU's same-name check.
+    dotted = typed.endswith(("/.", "/.."))
     if (
         flags.force
         and not backs
+        and not dotted
         and operand_abs(namespace, plan.source, cwd) == plan.link_abs
         and (
             _visible_link(namespace, plan.link_abs)
@@ -796,7 +801,13 @@ async def make_link(
         # an occupied name (symlink(2)'s EEXIST), so the removal is what
         # makes the flag work rather than a formality; a destination
         # that is not there is what -f is for, so its miss is the
-        # expected case and not an error.
+        # expected case and not an error. unlink(2) refuses a directory
+        # (EISDIR); a backend that would remove one is never asked.
+        if not _visible_link(namespace, plan.link_abs):
+            found = await path_stat(dispatch, plan.link_abs)
+            if found is not None and found.type is FileType.DIRECTORY:
+                errors.append(f"ln: {typed}: cannot overwrite directory\n")
+                return
         try:
             await dispatch("unlink", link_spec)
         except (FileNotFoundError, NotADirectoryError):

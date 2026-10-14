@@ -14,24 +14,30 @@
 
 import { expect, it } from 'vitest'
 import { PathSpec } from '../../../types.ts'
-import { landingName } from './copy.ts'
+import { landingPath } from './copy.ts'
 
-// GNU names a source inside a directory after the operand as typed, so a
-// followed link lands under its own name; the empty name, `.` and `..` name
-// no entry, so they keep what they resolve to. Mirrors test_copy.py.
-it.each([
-  ['al', '/data/a.txt', 'al'],
-  ['dir/al/', '/data/a.txt', 'al'],
-  ['/data/x/y', '/data/x/y', 'y'],
-  ['', '/data/sub', 'sub'],
-  ['.', '/data/sub', 'sub'],
-  ['sub/..', '/data', 'data'],
-])('lands %j (at %s) as %s', (rawPath, virtual, name) => {
-  const src = new PathSpec({
+function spec(virtual: string, rawPath: string): PathSpec {
+  return new PathSpec({
     virtual,
     directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
     vfsPath: virtual.replace(/^\/+/, ''),
     rawPath,
   })
-  expect(landingName(src)).toBe(name)
+}
+
+// GNU appends the operand's last component as typed, so a followed link lands
+// under its own name and `.` lands in the destination itself; cp lands `..`
+// there too, mv in the destination's parent. Mirrors test_copy.py.
+it.each([
+  ['al', '/data/a.txt', '..', '/data/t/al', 't/al'],
+  ['dir/al/', '/data/a.txt', '..', '/data/t/al', 't/al'],
+  ['/data/x/y', '/data/x/y', '..', '/data/t/y', 't/y'],
+  ['', '/data/sub', '..', '/data/t/sub', 't/sub'],
+  ['.', '/data/sub', '..', '/data/t', 't/.'],
+  ['s/./', '/data/s', '..', '/data/t', 't/.'],
+  ['sub/..', '/data', '..', '/data', 't/..'],
+  ['sub/..', '/data', '.', '/data/t', 't/.'],
+])('lands %j (at %s, .. as %s) at %s, shown %s', (rawPath, virtual, dotdot, landing, shown) => {
+  const got = landingPath(spec('/data/t', 't'), spec(virtual, rawPath), dotdot)
+  expect([got.virtual, got.rawPath]).toEqual([landing, shown])
 })

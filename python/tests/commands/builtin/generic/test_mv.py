@@ -346,7 +346,9 @@ def _unsup(op: str, *paths: str) -> dict[str, OSError]:
             ["/src/a.txt", "/src/b.txt", "/d"],
             {"verbose": True, "unlink_fails": {"/src/a.txt": _PERM}},
             1,
-            b"renamed '/src/b.txt' -> '/d/b.txt'\n",
+            b"copied '/src/a.txt' -> '/d/a.txt'\n"
+            b"copied '/src/b.txt' -> '/d/b.txt'\n"
+            b"removed '/src/b.txt'\n",
             _DENIED_A,
             _TWO_MOVED,
         ),
@@ -404,7 +406,7 @@ def _unsup(op: str, *paths: str) -> dict[str, OSError]:
     ],
     ids=[
         "unlink-failure-continues",
-        "verbose-skips-failed",
+        "verbose-names-each-copy-and-removal",
         "read-failure",
         "tree-unlink-reports-files-not-dirs",
         "tree-copy-failure-keeps-source",
