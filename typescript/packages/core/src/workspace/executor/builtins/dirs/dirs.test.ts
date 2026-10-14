@@ -14,8 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../../types.ts'
-import { CycleError } from '../../../../utils/path.ts'
+import { CycleError, resolveSymlinks } from '../../../../utils/path.ts'
 import { joinPath, resolveTarget, splitModeOptions, typedPath } from './dirs.ts'
+
+// A follow over a fixed link table, as the session's link view resolves.
+function through(links: ReadonlyMap<string, string>): (path: string) => string {
+  return (path) => resolveSymlinks(path, links)
+}
 
 describe('splitModeOptions', () => {
   it('reads clusters and applies last-wins', () => {
@@ -59,16 +64,18 @@ describe('the cd path helpers', () => {
   })
 
   it('resolveTarget follows links before or after .. per mode', () => {
-    const links = new Map([['/data/lk', '/data/deep/real']])
+    const links = through(new Map([['/data/lk', '/data/deep/real']]))
     expect(resolveTarget('/data/lk/..', links, false)).toBe('/data')
     expect(resolveTarget('/data/lk/..', links, true)).toBe('/data/deep')
   })
 
   it('resolveTarget refuses a loop', () => {
-    const links = new Map([
-      ['/a', '/b'],
-      ['/b', '/a'],
-    ])
+    const links = through(
+      new Map([
+        ['/a', '/b'],
+        ['/b', '/a'],
+      ]),
+    )
     expect(() => resolveTarget('/a', links, true)).toThrow(CycleError)
   })
 })

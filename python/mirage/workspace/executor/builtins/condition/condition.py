@@ -30,6 +30,7 @@ from mirage.workspace.executor.builtins.condition.types import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.namespace.view import link_view
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
@@ -61,6 +62,7 @@ async def handle_test(
         session=session,
         name=name,
         view=view,
+        links=link_view(namespace, dispatch, session.visibility),
     )
     try:
         if isinstance(args, list):

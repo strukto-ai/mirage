@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import { CycleError, dottedSpelling, resolvePath, resolveSymlinks } from '../../../../utils/path.ts'
+import { CycleError, dottedSpelling, resolvePath } from '../../../../utils/path.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
@@ -30,11 +30,8 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 /** Resolve a file operand to an addressable scope. */
 function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
   if (val instanceof PathSpec) return val
-  const resolved = resolveSymlinks(
-    dottedSpelling(val, ctx.session.cwd) ?? resolvePath(val, ctx.session.cwd),
-    ctx.namespace.symlinkTargets(),
-  )
-  return toScope(resolved)
+  const spelled = dottedSpelling(val, ctx.session.cwd) ?? resolvePath(val, ctx.session.cwd)
+  return toScope(ctx.links !== undefined ? ctx.links.resolve(spelled) : spelled)
 }
 
 /**
@@ -94,9 +91,8 @@ export async function applyUnary(
     }
   }
   if (op === '-L' || op === '-h') {
-    return ctx.namespace.isLink(
-      operandAbs(ctx.namespace, val, ctx.session.cwd, ctx.session.visibility),
-    )
+    const where = operandAbs(ctx.namespace, val, ctx.session.cwd, ctx.session.visibility)
+    return ctx.links !== undefined && ctx.links.statAt(where) !== null
   }
   if (FILE_UNARY.has(op)) {
     if (!(val instanceof PathSpec) && text === '') return false

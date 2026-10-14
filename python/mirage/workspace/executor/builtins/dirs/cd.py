@@ -36,6 +36,8 @@ from mirage.workspace.executor.builtins.dirs.dirs import (
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.expand.classify import classify_bare_path
+from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.namespace.view import link_view
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import (
     change_dir,
@@ -105,22 +107,42 @@ def _cd_candidates(
 
 
 async def _linked_stat(
-    dispatch: DispatchFn, links: dict[str, str], path: PathSpec
+    dispatch: DispatchFn, follow: Callable[[str], str] | None, path: PathSpec
 ) -> FileStat:
-    """Stat a name the way ``cd`` resolves one, through its link table.
+    """Stat a name the way ``cd`` resolves one, through its links.
 
     The walk that proves a name in front of ``..`` a directory has to
     see the links the operand itself is resolved through.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        links (dict[str, str]): the symlink table cd resolves with.
+        follow (Callable[[str], str] | None): the session's link
+            resolution, None while the namespace holds no link.
         path (PathSpec): the name to stat.
     """
     target = (
-        resolve_target(path.virtual, links, True) if links else path.virtual
+        resolve_target(path.virtual, follow, True)
+        if follow is not None
+        else path.virtual
     )
     return await dispatch_stat(dispatch, PathSpec.from_str_path(target))
+
+
+def _session_follow(
+    namespace: Namespace, dispatch: DispatchFn, session: SessionState
+) -> Callable[[str], str] | None:
+    """The links ``cd`` resolves through, as the session sees them; None
+    while the namespace holds none.
+
+    Args:
+        namespace (Namespace): the link table.
+        dispatch (DispatchFn): op dispatcher.
+        session (SessionState): the session changing directory.
+    """
+    if not namespace.symlink_targets():
+        return None
+    links = link_view(namespace, dispatch, session.visibility)
+    return links.resolve if links is not None else None
 
 
 async def handle_cd(
@@ -130,12 +152,11 @@ async def handle_cd(
     session: SessionState,
     print_path: bool = False,
     cdpath_target: str | None = None,
-    links: dict[str, str] | None = None,
+    follow: Callable[[str], str] | None = None,
     physical: bool = False,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     raw = _scope_path(path)
     named = typed_path(path)
-    table = links or {}
     # `-L` joins a relative operand to the name the shell is *spelling*,
     # `-P` to the one it resolves to: from a logical /data/lk whose target
     # is /data/deep/real, bash sends `cd -L ..` to /data and `cd -P ..` to
@@ -151,7 +172,7 @@ async def handle_cd(
             walk = PathSpec.from_str_path(resolve_path(dotted, "/"))
             try:
                 refusal = await dot_refusal(
-                    partial(_linked_stat, dispatch, table),
+                    partial(_linked_stat, dispatch, follow),
                     replace(walk, dotted=dotted),
                 )
             except CycleError:
@@ -167,9 +188,9 @@ async def handle_cd(
         # collapses the pair, which is why `cd -P .` re-spells the cwd.
         spelled = norm(candidate)
         logical = spelled
-        if table:
+        if follow is not None:
             try:
-                resolved = resolve_target(candidate, table, physical)
+                resolved = resolve_target(candidate, follow, physical)
             except CycleError:
                 error = (
                     f"bash: cd: {named}: Too many levels of symbolic links\n"
@@ -297,7 +318,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
             registry.is_mount_root,
             home,
             session,
-            links=namespace.symlink_targets(),
+            follow=_session_follow(namespace, dispatch, session),
             physical=physical,
         )
     raw = cd_operands[0]
@@ -317,7 +338,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
             old,
             session,
             print_path=True,
-            links=namespace.symlink_targets(),
+            follow=_session_follow(namespace, dispatch, session),
             physical=physical,
         )
     path: str | PathSpec
@@ -336,6 +357,6 @@ async def cd_builtin(call: BuiltinCall) -> Result:
         path,
         session,
         cdpath_target=cdpath_target,
-        links=namespace.symlink_targets(),
+        follow=_session_follow(namespace, dispatch, session),
         physical=physical,
     )

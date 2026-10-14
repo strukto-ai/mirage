@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 import pytest
 
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.utils.path import resolve_symlinks
 from mirage.workspace.executor.builtins.dirs import handle_cd
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
@@ -150,7 +153,11 @@ async def test_cd_follows_a_symlink_to_its_target():
     dispatch, _ = dispatcher(dirs={"/real"})
     sess = session()
     _, io, _ = await handle_cd(
-        dispatch, no_mount_root, "/link", sess, links={"/link": "/real"}
+        dispatch,
+        no_mount_root,
+        "/link",
+        sess,
+        follow=partial(resolve_symlinks, links={"/link": "/real"}),
     )
     assert io.exit_code == 0
     assert sess.cwd == "/real"
@@ -161,7 +168,11 @@ async def test_cd_follows_a_symlink_that_is_only_a_prefix_of_the_operand():
     dispatch, _ = dispatcher(dirs={"/real/sub"})
     sess = session()
     _, io, _ = await handle_cd(
-        dispatch, no_mount_root, "/link/sub", sess, links={"/link": "/real"}
+        dispatch,
+        no_mount_root,
+        "/link/sub",
+        sess,
+        follow=partial(resolve_symlinks, links={"/link": "/real"}),
     )
     assert io.exit_code == 0
     assert sess.cwd == "/real/sub"
@@ -172,7 +183,11 @@ async def test_cd_follows_a_chain_of_symlinks_to_the_final_target():
     dispatch, _ = dispatcher(dirs={"/real"})
     sess = session()
     _, io, _ = await handle_cd(
-        dispatch, no_mount_root, "/a", sess, links={"/a": "/b", "/b": "/real"}
+        dispatch,
+        no_mount_root,
+        "/a",
+        sess,
+        follow=partial(resolve_symlinks, links={"/a": "/b", "/b": "/real"}),
     )
     assert io.exit_code == 0
     assert sess.cwd == "/real"
@@ -196,7 +211,7 @@ async def test_cd_logical_mode_simplifies_dotdot_before_following_links():
         no_mount_root,
         "/link/..",
         sess,
-        links={"/link": "/deep/real"},
+        follow=partial(resolve_symlinks, links={"/link": "/deep/real"}),
     )
     assert io.exit_code == 0
     assert sess.cwd == "/"
@@ -211,7 +226,7 @@ async def test_cd_physical_mode_applies_dotdot_to_the_link_target():
         no_mount_root,
         "/link/..",
         sess,
-        links={"/link": "/deep/real"},
+        follow=partial(resolve_symlinks, links={"/link": "/deep/real"}),
         physical=True,
     )
     assert io.exit_code == 0
@@ -227,7 +242,7 @@ async def test_cd_physical_mode_resolves_a_link_in_the_middle_of_the_path():
         no_mount_root,
         "/link/sub/..",
         sess,
-        links={"/link": "/deep/real"},
+        follow=partial(resolve_symlinks, links={"/link": "/deep/real"}),
         physical=True,
     )
     assert io.exit_code == 0
@@ -248,7 +263,7 @@ async def test_cd_physical_mode_reads_dotdot_off_a_relative_operands_spelling():
         no_mount_root,
         operand,
         sess,
-        links={"/link": "/deep/real"},
+        follow=partial(resolve_symlinks, links={"/link": "/deep/real"}),
         physical=True,
     )
     assert io.exit_code == 0
@@ -270,7 +285,11 @@ async def test_cd_reports_eloop_on_a_symlink_cycle():
     dispatch, _ = dispatcher()
     sess = session(cwd="/data")
     _, io, _ = await handle_cd(
-        dispatch, no_mount_root, "/a", sess, links={"/a": "/b", "/b": "/a"}
+        dispatch,
+        no_mount_root,
+        "/a",
+        sess,
+        follow=partial(resolve_symlinks, links={"/a": "/b", "/b": "/a"}),
     )
     assert io.exit_code == 1
     assert io.stderr == b"bash: cd: /a: Too many levels of symbolic links\n"

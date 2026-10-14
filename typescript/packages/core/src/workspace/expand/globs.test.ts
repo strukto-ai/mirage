@@ -68,6 +68,7 @@ class LazyDirVFS extends BaseVFS {
 function linkTo(target: string): NamespaceLinks {
   return {
     follow: (p) => (p === '/ram/lnk' ? target : p),
+    followParent: (p) => p,
     isLink: (p) => p === '/ram/lnk',
     readlink: (p) => (p === '/ram/lnk' ? target : null),
     linkStatAt: () => null,

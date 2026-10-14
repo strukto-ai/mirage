@@ -85,7 +85,7 @@ function mountView(registry: MountRegistry, vis: Visibility | null): MountView {
 // The live symlink facts on offer, or null without a namespace, built
 // with the namespace's own attr overlay so a link's target stat carries
 // the same rows `ls -l` renders.
-function linkViewFor(
+export function linkViewFor(
   namespace: Namespace | null,
   dispatch: DispatchFn,
   vis: Visibility | null,

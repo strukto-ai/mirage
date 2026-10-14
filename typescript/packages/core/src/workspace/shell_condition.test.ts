@@ -177,6 +177,8 @@ describe('[[ ]] semantics', () => {
 const stubNamespace = {
   symlinkTargets: () => new Map<string, string>(),
   isLink: () => false,
+  follow: (path: string) => path,
+  linkStatAt: () => null,
 } as unknown as Namespace
 
 const stubSession = { cwd: '/data', env: {}, arrays: {} } as unknown as SessionState

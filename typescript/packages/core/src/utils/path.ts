@@ -260,7 +260,7 @@ export class CycleError extends Error {
   }
 }
 
-export function resolveSymlinks(path: string, links: Map<string, string>): string {
+export function resolveSymlinks(path: string, links: ReadonlyMap<string, string>): string {
   const pending = path.split('/').reverse()
   const resolved: string[] = []
   let hops = 0

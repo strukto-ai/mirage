@@ -225,7 +225,7 @@ class NamespaceLinks(Protocol):
     downward (workspace injects, lower layers never import workspace
     modules).
 
-    Read-only, and the TypeScript twin declares the same six members
+    Read-only, and the TypeScript twin declares the same seven members
     in the same order. A link is created and removed through the
     dispatcher (``Files.symlink``, ``Files.unlink``), never here: the
     dispatcher is the only layer that sees both planes, so it is where
@@ -240,6 +240,15 @@ class NamespaceLinks(Protocol):
 
     def follow(self, path: str) -> str:
         """Resolve symlink prefixes in ``path`` (identity when none).
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        ...
+
+    def follow_parent(self, path: str) -> str:
+        """``path`` with every link above its final name followed, the
+        walk a call that acts on the name itself is given.
 
         Args:
             path (str): absolute virtual path.
@@ -273,7 +282,7 @@ class NamespaceLinks(Protocol):
         """
         ...
 
-    def symlink_targets(self) -> dict[str, str]:
+    def symlink_targets(self) -> Mapping[str, str]:
         """Every link path to its stored target, the whole table."""
         ...
 

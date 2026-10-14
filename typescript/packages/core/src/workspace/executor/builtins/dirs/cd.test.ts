@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { resolveSymlinks } from '../../../../utils/path.ts'
 import { varsFromEnv } from '../../../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../../types.ts'
@@ -19,6 +20,11 @@ import { ContentType, FileType } from '../../../../types.ts'
 import { SessionState } from '../../../session/session.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { handleCd } from './cd.ts'
+
+// A follow over a fixed link table, as the session's link view resolves.
+function through(links: ReadonlyMap<string, string>): (path: string) => string {
+  return (path) => resolveSymlinks(path, links)
+}
 
 function dispatcher(dirs: string[] = [], files: string[] = []) {
   const seen: string[] = []
@@ -125,7 +131,7 @@ describe('handleCd', () => {
       s,
       false,
       null,
-      new Map([['/link', '/real']]),
+      through(new Map([['/link', '/real']])),
     )
     expect(io.exitCode).toBe(0)
     expect(s.cwd).toBe('/real')
@@ -141,10 +147,12 @@ describe('handleCd', () => {
       s,
       false,
       null,
-      new Map([
-        ['/a', '/b'],
-        ['/b', '/a'],
-      ]),
+      through(
+        new Map([
+          ['/a', '/b'],
+          ['/b', '/a'],
+        ]),
+      ),
     )
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toBe(
@@ -173,7 +181,7 @@ describe('handleCd', () => {
       s,
       false,
       null,
-      new Map([['/link', '/deep/real']]),
+      through(new Map([['/link', '/deep/real']])),
     )
     expect(io.exitCode).toBe(0)
     expect(s.cwd).toBe('/')
@@ -189,7 +197,7 @@ describe('handleCd', () => {
       s,
       false,
       null,
-      new Map([['/link', '/deep/real']]),
+      through(new Map([['/link', '/deep/real']])),
       true,
     )
     expect(io.exitCode).toBe(0)
@@ -206,7 +214,7 @@ describe('handleCd', () => {
       s,
       false,
       null,
-      new Map([['/link', '/deep/real']]),
+      through(new Map([['/link', '/deep/real']])),
       true,
     )
     expect(io.exitCode).toBe(0)
@@ -231,7 +239,7 @@ describe('handleCd', () => {
       s,
       false,
       null,
-      new Map([['/link', '/deep/real']]),
+      through(new Map([['/link', '/deep/real']])),
       true,
     )
     expect(io.exitCode).toBe(0)

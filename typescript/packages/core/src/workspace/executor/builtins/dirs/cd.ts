@@ -24,6 +24,8 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import { toScope, scopePath } from '../scope.ts'
 import { joinPath, resolveTarget, typedPath, splitModeOptions } from './dirs.ts'
 import type { BuiltinCall, Result } from '../types.ts'
+import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import { linkViewFor } from '../../../mount/namespace/view.ts'
 import { CD_OPTIONS, CD_USAGE } from './constants.ts'
 import { classifyBarePath } from '../../../expand/classify/index.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -63,13 +65,25 @@ function cdCandidates(
   return out
 }
 
-// Stat a name the way cd resolves one, through its link table: the walk
-// that proves a name in front of `..` a directory has to see the links the
-// operand itself is resolved through. Mirrors Python's _linked_stat.
-function linkedStat(dispatch: DispatchFn, links: Map<string, string>): StatFn {
+// Stat a name the way cd resolves one, through its links: the walk that
+// proves a name in front of `..` a directory has to see the links the operand
+// itself is resolved through. Mirrors Python's _linked_stat.
+function linkedStat(dispatch: DispatchFn, follow: ((path: string) => string) | null): StatFn {
   const stat = dispatchStat(dispatch)
   return (path: PathSpec) =>
-    stat(links.size > 0 ? PathSpec.fromStrPath(resolveTarget(path.virtual, links, true)) : path)
+    stat(follow !== null ? PathSpec.fromStrPath(resolveTarget(path.virtual, follow, true)) : path)
+}
+
+// The links cd resolves through, as the session sees them; null while the
+// namespace holds none. Mirrors Python's _session_follow.
+function sessionFollow(
+  namespace: Namespace,
+  dispatch: DispatchFn,
+  session: SessionState,
+): ((path: string) => string) | null {
+  if (namespace.symlinkTargets().size === 0) return null
+  const links = linkViewFor(namespace, dispatch, session.visibility)
+  return links === null ? null : (path: string) => links.resolve(path)
 }
 
 export async function handleCd(
@@ -79,12 +93,11 @@ export async function handleCd(
   session: SessionState,
   printPath = false,
   cdpathTarget: string | null = null,
-  links: Map<string, string> | null = null,
+  follow: ((path: string) => string) | null = null,
   physical = false,
 ): Promise<Result> {
   const raw = scopePath(path)
   const named = typedPath(path)
-  const table = links ?? new Map<string, string>()
   // -L joins a relative operand to the name the shell is *spelling*, -P
   // to the one it resolves to: from a logical /data/lk whose target is
   // /data/deep/real, bash sends `cd -L ..` to /data and `cd -P ..` to
@@ -100,7 +113,7 @@ export async function handleCd(
       const walk = PathSpec.fromStrPath(dotted, undefined, '/')
       let refusal: Error | null
       try {
-        refusal = await dotRefusal(linkedStat(dispatch, table), walk)
+        refusal = await dotRefusal(linkedStat(dispatch, follow), walk)
       } catch (exc) {
         if (!(exc instanceof CycleError)) throw exc
         error = `bash: cd: ${named}: Too many levels of symbolic links\n`
@@ -117,9 +130,9 @@ export async function handleCd(
     const spelled = posixNormpath(candidate)
     let logical = spelled
     let resolved = logical
-    if (table.size > 0) {
+    if (follow !== null) {
       try {
-        resolved = resolveTarget(candidate, table, physical)
+        resolved = resolveTarget(candidate, follow, physical)
       } catch (exc) {
         if (exc instanceof CycleError) {
           error = `bash: cd: ${named}: Too many levels of symbolic links\n`
@@ -204,7 +217,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
     bad,
     physical,
   } = splitModeOptions([...call.argv.operands], CD_OPTIONS, shellPhysical)
-  const links = namespace.symlinkTargets()
+  const follow = sessionFollow(namespace, dispatch, session)
   if (bad !== null) {
     const err = encodeText(`bash: cd: -${bad}: invalid option\n${CD_USAGE}`)
     return [
@@ -238,7 +251,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
       session,
       false,
       null,
-      links,
+      follow,
       physical,
     )
   }
@@ -261,7 +274,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
       session,
       true,
       null,
-      links,
+      follow,
       physical,
     )
   }
@@ -284,7 +297,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
     session,
     false,
     cdpathTarget,
-    links,
+    follow,
     physical,
   )
 }

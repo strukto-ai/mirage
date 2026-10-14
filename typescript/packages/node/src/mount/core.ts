@@ -191,7 +191,9 @@ export class MountCore {
     }
     const slash = path.lastIndexOf('/')
     const parent = slash <= 0 ? '/' : path.slice(0, slash)
-    return posix.relative(parent, virtualTarget)
+    // A target that is the link's own directory is `.`, as Python's relpath
+    // names it; posix.relative answers the empty string.
+    return posix.relative(parent, virtualTarget) || '.'
   }
 
   /**
@@ -627,8 +629,7 @@ export class MountCore {
     if (follow) return links.follow(virtual)
     // An op on the entry itself (unlink, rename, lsetattr) names the link,
     // which may loop: only the links above it are followed.
-    const slash = virtual.lastIndexOf('/')
-    return posix.join(links.follow(virtual.slice(0, slash) || '/'), virtual.slice(slash + 1))
+    return links.followParent(virtual)
   }
 
   /**

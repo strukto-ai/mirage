@@ -15,7 +15,7 @@
 import errno
 import os
 import posixpath
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 
 from mirage.utils.fnmatch import fnmatch
 
@@ -301,7 +301,7 @@ class CycleError(OSError):
         super().__init__(errno.ELOOP, os.strerror(errno.ELOOP), path)
 
 
-def resolve_symlinks(path: str, links: dict[str, str]) -> str:
+def resolve_symlinks(path: str, links: Mapping[str, str]) -> str:
     """Resolve symlink prefixes in ``path`` until stable.
 
     Walks components in order, expanding links before interpreting a later
@@ -310,7 +310,7 @@ def resolve_symlinks(path: str, links: dict[str, str]) -> str:
 
     Args:
         path (str): An absolute virtual path.
-        links (dict[str, str]): Map of link virtual-path to target.
+        links (Mapping[str, str]): Map of link virtual-path to target.
 
     Returns:
         str: The path with all symlink prefixes resolved.

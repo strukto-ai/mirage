@@ -25,6 +25,7 @@ import type { NamespaceLinks } from './types.ts'
 // fails the other language's test instead of drifting quietly.
 const MEMBERS = [
   'follow',
+  'followParent',
   'isLink',
   'readlink',
   'linkStatAt',

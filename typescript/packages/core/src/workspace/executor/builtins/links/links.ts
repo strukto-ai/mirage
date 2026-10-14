@@ -18,7 +18,7 @@ import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { Visibility, FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
-import { fsStrerror, isEnoent } from '../../../../errors/fs.ts'
+import { fsStrerror, isDotWalkError, isEnoent } from '../../../../errors/fs.ts'
 import { CycleError, gnuBasename, posixNormpath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { sessionVisibility } from '../../../../context/session_context.ts'
@@ -285,10 +285,15 @@ export async function followDirectoryLinks(
       continue
     }
     const followed = followPaths(namespace, [item], true, true, vis)[0]
-    const target =
-      followed instanceof PathSpec && followed.walkError === null
-        ? await statOrNull(dispatch, followed)
-        : null
+    let target: FileStat | null = null
+    if (followed instanceof PathSpec && followed.walkError === null) {
+      try {
+        target = await statOrNull(dispatch, followed)
+      } catch (err) {
+        // A loop leads nowhere: GNU lstats it then and lists the link.
+        if (!isDotWalkError(err) || (err as { code?: string }).code !== 'ELOOP') throw err
+      }
+    }
     out.push(
       target !== null && target.type === FileType.DIRECTORY && followed !== undefined
         ? followed

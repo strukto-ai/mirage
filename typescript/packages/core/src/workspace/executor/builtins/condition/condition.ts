@@ -29,6 +29,7 @@ import { ShellBuiltin as SB } from '../../../../shell/types.ts'
 import { wordText } from '../../../../types.ts'
 import { sessionView } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
+import { linkViewFor } from '../../../mount/namespace/view.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
@@ -43,12 +44,14 @@ export async function handleTest(
   name = 'test',
   view?: SessionView,
 ): Promise<Result> {
+  const links = linkViewFor(namespace, dispatch, session.visibility)
   const ctx: CondContext = {
     dispatch,
     namespace,
     session,
     name,
     ...(view !== undefined ? { view } : {}),
+    ...(links !== null ? { links } : {}),
   }
   let result: boolean
   try {

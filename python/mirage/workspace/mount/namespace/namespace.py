@@ -14,7 +14,7 @@
 
 import asyncio
 import base64
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -177,6 +177,7 @@ class Namespace:
         self._registry = registry
         self._store = store if store is not None else RAMNamespaceStore()
         self._nodes: dict[str, NodeMeta] = {}
+        self._links: dict[str, str] | None = None
         self._loaded = False
         self._load_lock = asyncio.Lock()
 
@@ -203,10 +204,12 @@ class Namespace:
                     path: NodeMeta.from_fields(entry)
                     for path, entry in entries.items()
                 }
+                self._links = None
                 self._loaded = True
 
     async def replace_nodes(self, entries: dict[str, NodeMeta]) -> None:
         self._nodes = dict(entries)
+        self._links = None
         self._loaded = True
         await self._store.replace_all(
             {path: meta.to_fields() for path, meta in entries.items()}
@@ -215,12 +218,19 @@ class Namespace:
     async def close(self) -> None:
         await self._store.close()
 
-    def symlink_targets(self) -> dict[str, str]:
-        return {
-            path: meta.target
-            for path, meta in self._nodes.items()
-            if meta.target is not None
-        }
+    def symlink_targets(self) -> Mapping[str, str]:
+        """Every link and its target, kept until the table next changes.
+
+        Every op follows through this map, so it is built once per change
+        rather than once per follow.
+        """
+        if self._links is None:
+            self._links = {
+                path: meta.target
+                for path, meta in self._nodes.items()
+                if meta.target is not None
+            }
+        return self._links
 
     def is_link(self, path: str) -> bool:
         meta = self._nodes.get(path)
@@ -234,6 +244,7 @@ class Namespace:
         meta = self._nodes.setdefault(link, NodeMeta())
         meta.target = target
         meta.mtime = mtime
+        self._links = None
         await self._store.set(link, meta.to_fields())
 
     def meta_for(self, path: str) -> NodeMeta | None:
@@ -420,6 +431,7 @@ class Namespace:
     async def unlink(self, path: str) -> bool:
         if path in self._nodes:
             del self._nodes[path]
+            self._links = None
             await self._store.delete([path])
             return True
         return False
@@ -443,6 +455,7 @@ class Namespace:
         for path in doomed:
             del self._nodes[path]
         if doomed:
+            self._links = None
             await self._store.delete(doomed)
         return len(doomed)
 
@@ -451,6 +464,7 @@ class Namespace:
         if meta is None:
             return False
         self._nodes[dst] = meta
+        self._links = None
         await self._store.set(dst, meta.to_fields())
         await self._store.delete([src])
         return True
@@ -522,9 +536,9 @@ class Namespace:
         """
         base = directory.rstrip("/") + "/"
         return [
-            (path, link_stat(path.rsplit("/", 1)[-1], meta))
-            for path, meta in self._nodes.items()
-            if meta.target is not None and path.startswith(base)
+            (path, link_stat(path.rsplit("/", 1)[-1], self._nodes[path]))
+            for path in self.symlink_targets()
+            if path.startswith(base)
         ]
 
     def link_stats_under(self, directory: str) -> list[FileStat]:
@@ -572,11 +586,9 @@ class Namespace:
         """
         base = directory.rstrip("/") + "/"
         return [
-            (path[len(base) :], meta)
-            for path, meta in self._nodes.items()
-            if meta.target is not None
-            and path.startswith(base)
-            and "/" not in path[len(base) :]
+            (path[len(base) :], self._nodes[path])
+            for path in self.symlink_targets()
+            if path.startswith(base) and "/" not in path[len(base) :]
         ]
 
     async def rename_under(self, src: str, dst: str) -> int:
@@ -604,6 +616,7 @@ class Namespace:
         if not moved:
             return 0
         landing = dst.rstrip("/")
+        self._links = None
         for path, meta in moved:
             del self._nodes[path]
         for path, meta in moved:
@@ -643,6 +656,7 @@ class Namespace:
         for path in doomed:
             del self._nodes[path]
         if doomed:
+            self._links = None
             await self._store.delete(doomed)
         return len(doomed)
 

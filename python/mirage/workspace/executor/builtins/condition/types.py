@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Union
 
 from mirage.runtime.types import DispatchFn
-from mirage.view.types import SessionView
+from mirage.view.types import LinkView, SessionView
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
 
@@ -108,3 +108,5 @@ class CondContext:
     # The gated session view, which an assignment inside a
     # numeric operand lands through; None outside a workspace.
     view: SessionView | None = None
+    # The links as this session sees them: a hidden link is no link.
+    links: LinkView | None = None

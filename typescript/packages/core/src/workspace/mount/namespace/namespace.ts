@@ -65,9 +65,10 @@ const XATTR_FIELD_PREFIX = 'xattr:'
 // Render a symlink node as a stat row. Size is the target string's
 // byte length and mode is left unset so the formatter supplies 0777,
 // which is what a real symlink inode reports (a link carries no
-// permission bits of its own). Ownership is not in that category: a link
-// has a real uid/gid that `chown -h` writes and `ls -l` shows, so both
-// ride through from the node. The target rides along in `extra` so
+// permission bits of its own). Ownership and the stamps are not in that
+// category: a link has a real uid/gid that `chown -h` writes and `ls -l`
+// shows, and real times that `touch -h` writes, so all four ride
+// through from the node. The target rides along in `extra` so
 // every surface that has to name it (ls -l's `name -> target`, file's
 // "symbolic link to") reads one fact rather than querying the link
 // table a second time.
@@ -80,6 +81,7 @@ function linkStat(name: string, meta: NodeMeta): FileStat {
     type: FileType.SYMLINK,
     ...(meta.uid !== undefined ? { uid: meta.uid } : {}),
     ...(meta.gid !== undefined ? { gid: meta.gid } : {}),
+    ...(meta.atime !== undefined ? { atime: meta.atime } : {}),
     extra: { [LINK_TARGET_KEY]: target },
   })
 }
@@ -142,6 +144,8 @@ export class Namespace {
   private readonly resolveFn: ResolveFn
   private readonly store: NamespaceStore
   private nodeTable = new Map<string, NodeMeta>()
+  // Every link and its target, kept until the table next changes.
+  private links: Map<string, string> | null = null
   private loaded = false
   private loading: Promise<void> | null = null
 
@@ -165,6 +169,7 @@ export class Namespace {
       const table = new Map<string, NodeMeta>()
       for (const [path, fields] of entries) table.set(path, metaFromFields(fields))
       this.nodeTable = table
+      this.links = null
       this.loaded = true
     })
     await this.loading
@@ -172,6 +177,7 @@ export class Namespace {
 
   async replaceNodes(entries: Map<string, NodeMeta>): Promise<void> {
     this.nodeTable = new Map(entries)
+    this.links = null
     this.loaded = true
     const out = new Map<string, NodeFields>()
     for (const [path, meta] of entries) out.set(path, metaToFields(meta))
@@ -182,12 +188,17 @@ export class Namespace {
     await this.store.close()
   }
 
-  symlinkTargets(): Map<string, string> {
-    const out = new Map<string, string>()
-    for (const [path, meta] of this.nodeTable) {
-      if (meta.target !== undefined) out.set(path, meta.target)
+  // Every link and its target. Every op follows through this map, so it
+  // is built once per change rather than once per follow.
+  symlinkTargets(): ReadonlyMap<string, string> {
+    if (this.links === null) {
+      const out = new Map<string, string>()
+      for (const [path, meta] of this.nodeTable) {
+        if (meta.target !== undefined) out.set(path, meta.target)
+      }
+      this.links = out
     }
-    return out
+    return this.links
   }
 
   isLink(path: string): boolean {
@@ -203,6 +214,7 @@ export class Namespace {
     meta.target = target
     meta.mtime = mtime
     this.nodeTable.set(link, meta)
+    this.links = null
     await this.store.set(link, metaToFields(meta))
   }
 
@@ -335,7 +347,10 @@ export class Namespace {
 
   async unlink(path: string): Promise<boolean> {
     const removed = this.nodeTable.delete(path)
-    if (removed) await this.store.delete([path])
+    if (removed) {
+      this.links = null
+      await this.store.delete([path])
+    }
     return removed
   }
 
@@ -349,7 +364,10 @@ export class Namespace {
       if (globPrefixMatch(path, pattern)) doomed.push(path)
     }
     for (const path of doomed) this.nodeTable.delete(path)
-    if (doomed.length > 0) await this.store.delete(doomed)
+    if (doomed.length > 0) {
+      this.links = null
+      await this.store.delete(doomed)
+    }
     return doomed.length
   }
 
@@ -358,6 +376,7 @@ export class Namespace {
     if (meta === undefined) return false
     this.nodeTable.delete(src)
     this.nodeTable.set(dst, meta)
+    this.links = null
     await this.store.set(dst, metaToFields(meta))
     await this.store.delete([src])
     return true
@@ -404,8 +423,9 @@ export class Namespace {
   linkStatsBelow(directory: string): [string, FileStat][] {
     const base = rstripSlash(directory) + '/'
     const out: [string, FileStat][] = []
-    for (const [path, meta] of this.nodeTable) {
-      if (meta.target !== undefined && path.startsWith(base)) {
+    for (const path of this.symlinkTargets().keys()) {
+      const meta = this.nodeTable.get(path)
+      if (meta !== undefined && path.startsWith(base)) {
         out.push([path, linkStat(path.split('/').pop() ?? path, meta)])
       }
     }
@@ -438,12 +458,9 @@ export class Namespace {
   private linksUnder(directory: string): [string, NodeMeta][] {
     const base = rstripSlash(directory) + '/'
     const out: [string, NodeMeta][] = []
-    for (const [path, meta] of this.nodeTable) {
-      if (
-        meta.target !== undefined &&
-        path.startsWith(base) &&
-        !path.slice(base.length).includes('/')
-      ) {
+    for (const path of this.symlinkTargets().keys()) {
+      const meta = this.nodeTable.get(path)
+      if (meta !== undefined && path.startsWith(base) && !path.slice(base.length).includes('/')) {
         out.push([path.slice(base.length), meta])
       }
     }
@@ -466,6 +483,7 @@ export class Namespace {
     }
     if (moved.length === 0) return 0
     const landing = rstripSlash(dst)
+    this.links = null
     for (const [path] of moved) this.nodeTable.delete(path)
     for (const [path, meta] of moved) {
       const target = `${landing}/${path.slice(base.length)}`
@@ -493,7 +511,10 @@ export class Namespace {
       doomed.push(path)
     }
     for (const path of doomed) this.nodeTable.delete(path)
-    if (doomed.length > 0) await this.store.delete(doomed)
+    if (doomed.length > 0) {
+      this.links = null
+      await this.store.delete(doomed)
+    }
     return doomed.length
   }
 

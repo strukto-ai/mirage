@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+from collections.abc import Callable
 
 from mirage.types import PathSpec
-from mirage.utils.path import MAX_SYMLINK_HOPS, CycleError, resolve_symlinks
 from mirage.workspace.executor.builtins.dirs.constants import CD_OPTIONS
 
 DirArgs = list[str | PathSpec]
@@ -116,17 +116,18 @@ def typed_path(val: str | PathSpec) -> str:
 
 
 def resolve_target(
-    combined: str, links: dict[str, str], physical: bool
+    combined: str, follow: Callable[[str], str], physical: bool
 ) -> str:
     """Resolve a combined ``cd`` path, following symlinks per mode.
 
     Logical (``-L``, default) simplifies ``..`` textually first, then
     follows links. Physical (``-P``) follows links first so ``..`` acts on
-    the link target. Both loop resolve<->normalize until stable.
+    the link target. The namespace's walk leaves no link in what it
+    answers, so one walk settles either.
 
     Args:
         combined (str): The absolute target (cwd joined to arg).
-        links (dict[str, str]): The symlink table (link -> target).
+        follow (Callable[[str], str]): The session's link resolution.
         physical (bool): True for ``-P``, False for ``-L``.
 
     Returns:
@@ -135,10 +136,4 @@ def resolve_target(
     Raises:
         CycleError: On a symlink loop or unbounded expansion (ELOOP).
     """
-    p = combined if physical else norm(combined)
-    for _ in range(MAX_SYMLINK_HOPS):
-        n = norm(resolve_symlinks(p, links))
-        if n == p:
-            return n
-        p = n
-    raise CycleError(p)
+    return norm(follow(combined if physical else norm(combined)))

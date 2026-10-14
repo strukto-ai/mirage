@@ -1121,8 +1121,7 @@ class MountCore:
             return virtual
         if follow:
             return links.follow(virtual)
-        parent, _, name = virtual.rpartition("/")
-        return posixpath.join(links.follow(parent or "/"), name)
+        return links.follow_parent(virtual)
 
     async def truncate(self, path: str, length: int) -> None:
         """Resize a file, settling every open handle on the same file.

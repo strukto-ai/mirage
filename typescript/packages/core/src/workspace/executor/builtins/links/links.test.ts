@@ -367,6 +367,29 @@ describe('rm and unlink reach a link through the dispatcher', () => {
       await ws.close()
     }
   })
+
+  it('test and cd see no hidden link', async () => {
+    // test and cd resolve through the session's links, so a hidden link
+    // is no link and leads nowhere, as every other command meets it.
+    const ws = await makeWs()
+    try {
+      await ws.shell(
+        'echo b > /data/f.txt; mkdir /data/d; ln -s f.txt /data/lk.sec; ln -s d /data/dl.sec',
+      )
+      ws.createSession('agent', { profile: { paths: { hide: ['/data/lk.sec', '/data/dl.sec'] } } })
+      const probe = 'test -L /data/lk.sec; echo $?; [ -e /data/lk.sec ]; echo $?'
+      const hidden = await ws.shell(probe, { sessionId: 'agent' })
+      const cd = await ws.shell('cd /data/dl.sec', { sessionId: 'agent' })
+      expect(DEC.decode(hidden.stdout)).toBe('1\n1\n')
+      expect(cd.exitCode).toBe(1)
+      expect(err(cd)).toBe('bash: cd: /data/dl.sec: No such file or directory\n')
+      const seen = await ws.shell(`${probe}; cd /data/dl.sec && pwd`)
+      expect(DEC.decode(seen.stdout)).toBe('0\n0\n/data/dl.sec\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('every refused operand speaks in one voice', async () => {
     // GNU reports each operand it could not remove, so a read grant is
     // one line per operand -- a link the node table refuses and a

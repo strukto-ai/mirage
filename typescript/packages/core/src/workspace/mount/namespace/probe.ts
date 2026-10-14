@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { isEnotdir, isMissError } from '../../../errors/fs.ts'
+import { isEnotdir, isMissError, isEnoent } from '../../../errors/fs.ts'
 import { gnuBasename, posixNormpath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { StatOverlay } from '../../../view/types.ts'
@@ -23,12 +23,16 @@ import type { FsCondition } from '../../../errors/types.ts'
 
 export async function statOrNull(dispatch: DispatchFn, path: PathSpec): Promise<FileStat | null> {
   // A missing destination is an expected mv case (plain rename), not an
-  // error to surface.
+  // error to surface. ENOTDIR counts as missing too: a path under a plain
+  // file cannot exist. Anything else (a refusal, a loop, a transport error)
+  // propagates, as Python's stat_or_none does: a permission error is not a
+  // missing file, and a link whose target refuses its stat is not dangling.
   try {
     const [stat] = await dispatch('stat', path)
     return stat instanceof FileStat ? stat : null
-  } catch {
-    return null
+  } catch (err) {
+    if (isEnoent(err) || isEnotdir(err)) return null
+    throw err
   }
 }
 

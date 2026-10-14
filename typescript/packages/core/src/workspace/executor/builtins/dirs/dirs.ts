@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../../../types.ts'
-import {
-  CycleError,
-  MAX_SYMLINK_HOPS,
-  posixNormpath,
-  resolveSymlinks,
-} from '../../../../utils/path.ts'
+import { posixNormpath } from '../../../../utils/path.ts'
 import { CD_OPTIONS } from './constants.ts'
 
 export type DirArgs = (string | PathSpec)[]
@@ -75,20 +70,16 @@ export function splitModeOptions(
 
 // Resolve a combined `cd` target following symlinks per mode. Logical (-L,
 // default) simplifies `..` textually first, then follows links; physical (-P)
-// follows links first so `..` acts on the target. Both loop until stable.
-// Throws CycleError on a symlink loop (ELOOP).
+// follows links first so `..` acts on the target. The namespace's walk leaves
+// no link in what it answers, so one walk settles either. `follow` is the
+// session's link resolution, which throws CycleError on a loop (ELOOP).
+// Mirrors Python's resolve_target.
 export function resolveTarget(
   combined: string,
-  links: Map<string, string>,
+  follow: (path: string) => string,
   physical: boolean,
 ): string {
-  let p = physical ? combined : posixNormpath(combined)
-  for (let hop = 0; hop < MAX_SYMLINK_HOPS; hop++) {
-    const n = posixNormpath(resolveSymlinks(p, links))
-    if (n === p) return n
-    p = n
-  }
-  throw new CycleError(p)
+  return posixNormpath(follow(physical ? combined : posixNormpath(combined)))
 }
 
 // Join an operand to `cwd` WITHOUT simplifying `..`. resolvePath normalizes,

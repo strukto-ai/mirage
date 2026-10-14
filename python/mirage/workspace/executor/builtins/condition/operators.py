@@ -20,12 +20,7 @@ from mirage.io.types import materialize
 from mirage.shell.errors import ArithError
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.path import (
-    CycleError,
-    dotted_spelling,
-    resolve_path,
-    resolve_symlinks,
-)
+from mirage.utils.path import CycleError, dotted_spelling, resolve_path
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY,
     FILE_UNARY,
@@ -51,12 +46,12 @@ def operand_scope(ctx: CondContext, val: str | PathSpec) -> PathSpec:
     """
     if isinstance(val, PathSpec):
         return val
-    resolved = resolve_symlinks(
-        dotted_spelling(val, ctx.session.cwd)
-        or resolve_path(val, ctx.session.cwd),
-        ctx.namespace.symlink_targets(),
+    spelled = dotted_spelling(val, ctx.session.cwd) or resolve_path(
+        val, ctx.session.cwd
     )
-    return _to_scope(resolved)
+    return _to_scope(
+        ctx.links.resolve(spelled) if ctx.links is not None else spelled
+    )
 
 
 async def path_kind(
@@ -127,9 +122,8 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             # other thing that ends it.
             raise exc.signal(fatal=True) from exc
     if op in ("-L", "-h"):
-        return ctx.namespace.is_link(
-            operand_abs(ctx.namespace, val, ctx.session.cwd)
-        )
+        where = operand_abs(ctx.namespace, val, ctx.session.cwd)
+        return ctx.links is not None and ctx.links.stat_at(where) is not None
     if op in FILE_UNARY:
         if not isinstance(val, PathSpec) and not text:
             return False

@@ -25,6 +25,7 @@ from mirage.workspace import Workspace
 # other language's test instead of drifting quietly.
 MEMBERS = (
     "follow",
+    "follow_parent",
     "is_link",
     "readlink",
     "link_stat_at",

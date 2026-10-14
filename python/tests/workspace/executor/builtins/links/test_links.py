@@ -341,6 +341,28 @@ async def test_rm_f_silences_a_hidden_link():
 
 
 @pytest.mark.asyncio
+async def test_test_and_cd_see_no_hidden_link():
+    # test and cd resolve through the session's links, so a hidden link
+    # is no link and leads nowhere, as every other command meets it.
+    ws = _ws()
+    await ws.shell(
+        "echo b > /data/f.txt; mkdir /data/d; "
+        "ln -s f.txt /data/lk.sec; ln -s d /data/dl.sec"
+    )
+    ws.create_session(
+        "agent", profile={"paths": {"hide": ["/data/lk.sec", "/data/dl.sec"]}}
+    )
+    probe = "test -L /data/lk.sec; echo $?; [ -e /data/lk.sec ]; echo $?"
+    hidden = await ws.shell(probe, session_id="agent")
+    cd = await ws.shell("cd /data/dl.sec", session_id="agent")
+    assert hidden.stdout == b"1\n1\n"
+    assert cd.exit_code == 1
+    assert cd.stderr == b"bash: cd: /data/dl.sec: No such file or directory\n"
+    seen = await ws.shell(f"{probe}; cd /data/dl.sec && pwd")
+    assert seen.stdout == b"0\n0\n/data/dl.sec\n"
+
+
+@pytest.mark.asyncio
 async def test_every_refused_operand_speaks_in_one_voice():
     # GNU reports each operand it could not remove, so a read grant is
     # one line per operand -- a link the node table refuses and a

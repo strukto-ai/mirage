@@ -14,7 +14,7 @@
 
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
-import type { SessionView } from '../../../../view/types.ts'
+import type { LinkView, SessionView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 
 interface CondLazy {
@@ -57,4 +57,6 @@ export interface CondContext {
   // The gated session view, which an assignment inside a numeric
   // operand lands through; absent outside a workspace.
   view?: SessionView
+  // The links as this session sees them: a hidden link is no link.
+  links?: LinkView
 }

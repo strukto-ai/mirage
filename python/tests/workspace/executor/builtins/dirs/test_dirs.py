@@ -1,7 +1,9 @@
+from functools import partial
+
 import pytest
 
 from mirage.types import PathSpec
-from mirage.utils.path import CycleError
+from mirage.utils.path import CycleError, resolve_symlinks
 from mirage.workspace.executor.builtins.dirs.dirs import (
     join_raw,
     norm,
@@ -52,11 +54,15 @@ def test_typed_path_keeps_the_spelling():
 
 
 def test_resolve_target_logical_vs_physical():
-    links = {"/data/lk": "/data/deep/real"}
-    assert resolve_target("/data/lk/..", links, physical=False) == "/data"
-    assert resolve_target("/data/lk/..", links, physical=True) == "/data/deep"
+    follow = partial(resolve_symlinks, links={"/data/lk": "/data/deep/real"})
+    assert resolve_target("/data/lk/..", follow, physical=False) == "/data"
+    assert resolve_target("/data/lk/..", follow, physical=True) == "/data/deep"
 
 
 def test_resolve_target_refuses_a_loop():
     with pytest.raises(CycleError):
-        resolve_target("/a", {"/a": "/b", "/b": "/a"}, physical=True)
+        resolve_target(
+            "/a",
+            partial(resolve_symlinks, links={"/a": "/b", "/b": "/a"}),
+            physical=True,
+        )

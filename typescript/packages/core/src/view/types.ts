@@ -160,7 +160,7 @@ export interface SessionView {
 // consume it through this seam so the dependency points downward
 // (workspace injects, lower layers never import workspace modules).
 //
-// Read-only, and the Python twin declares the same six members in the
+// Read-only, and the Python twin declares the same seven members in the
 // same order. A link is created and removed through the dispatcher
 // (`Files.symlink`, `Files.unlink`), never here: the dispatcher is the only layer
 // that sees both planes, so it is where symlink(2)'s refusal to
@@ -174,6 +174,9 @@ export interface SessionView {
 export interface NamespaceLinks {
   // Resolve symlink prefixes in `path` (identity when none).
   follow(path: string): string
+  // `path` with every link above its final name followed, the walk a call
+  // that acts on the name itself is given.
+  followParent(path: string): string
   // Whether `path` names a symlink entry.
   isLink(path: string): boolean
   // The stored target for a link path, null when not a link.
@@ -182,7 +185,7 @@ export interface NamespaceLinks {
   // backend inode, so this table is the only authority for one.
   linkStatAt(path: string): FileStat | null
   // Every link path to its stored target, the whole table.
-  symlinkTargets(): Map<string, string>
+  symlinkTargets(): ReadonlyMap<string, string>
   // The names of the links directly under `directory`, which a listing's
   // link marks need; a link prefix resolves first, as the listing does.
   linkNamesUnder(directory: string): Set<string>
