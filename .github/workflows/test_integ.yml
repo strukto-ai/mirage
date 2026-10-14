@@ -2410,7 +2410,7 @@ jobs:
         run: ./python/.venv/bin/python integ/shell_coverage.py
       - name: Upload coverage reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integ-shell-coverage
           path: .cache/integ-shell-coverage
