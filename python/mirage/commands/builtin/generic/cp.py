@@ -27,6 +27,7 @@ from mirage.commands.builtin.utils.copy import (
     copy_targets,
     is_directory,
     path_exists,
+    typed_name,
 )
 from mirage.commands.builtin.utils.links import typed_link
 from mirage.commands.builtin.utils.paths import (
@@ -865,6 +866,67 @@ def _onto_directory(
     )
 
 
+async def _clear_for_directory(
+    policy: TransferPolicy,
+    copies: TransferLinks | None,
+    stat: StatFn,
+    src: PathSpec,
+    target: PathSpec,
+    errors: list[str],
+    lines: list[str] | None,
+) -> bool:
+    """Free a non-directory's name for a directory copied onto it.
+
+    GNU refuses the overwrite unless a backup moves the entry aside, and
+    then renames it to its backup name. A source typed as ``.`` or ``..``
+    is never backed up, so the entry is removed instead, which ``-v``
+    reports. No gate or ``-i`` question applies to a directory source
+    (coreutils 9.7). Outside a workspace nothing can rename the entry,
+    so the overwrite is refused as it is without a backup.
+
+    Args:
+        policy (TransferPolicy): The command's overwrite policy.
+        copies (TransferLinks | None): The dispatcher that renames or
+            removes the entry; None outside a workspace.
+        stat (StatFn): Stats a path; raises when missing.
+        src (PathSpec): The directory being copied.
+        target (PathSpec): The non-directory holding its name.
+        errors (list[str]): Collected stderr lines, appended in place.
+        lines (list[str] | None): Verbose sink for the removal.
+
+    Returns:
+        bool: Whether the name is free for the directory.
+    """
+    if copies is None or not backup_displaces(policy.backup):
+        errors.append(
+            f"{policy.cmd_name}: cannot overwrite non-directory "
+            f"'{target.raw_path}' with directory '{src.raw_path}'"
+        )
+        return False
+    if typed_name(src) in (".", ".."):
+        try:
+            await copies.dispatch("unlink", target)
+        except FS_ERRORS as exc:
+            errors.append(
+                f"{policy.cmd_name}: cannot remove '{target.raw_path}': "
+                f"{fs_strerror(exc)}"
+            )
+            return False
+        if lines is not None:
+            lines.append(f"removed '{target.raw_path}'")
+        return True
+    _, ok = await make_backup(
+        policy,
+        NativeMove(rename=partial(rename_link, copies)),
+        stat,
+        None,
+        target,
+        errors,
+        copies,
+    )
+    return ok
+
+
 async def overwrite_gate(
     policy: TransferPolicy,
     stat: StatFn,
@@ -1252,6 +1314,8 @@ async def _mirror_dirs(
     src_base: str,
     dst_base: str,
     errors: list[str],
+    policy: TransferPolicy,
+    copies: TransferLinks | None,
     into_itself: bool,
     lines: list[str] | None = None,
 ) -> tuple[list[str], set[str] | None]:
@@ -1265,8 +1329,8 @@ async def _mirror_dirs(
     children so a nested tree lands in order.
 
     A directory that cannot be made, or whose name a non-directory
-    holds, is GNU's line and its tree is left out; its siblings still
-    copy, as GNU's walk goes on (coreutils 9.7).
+    holds that no backup moves aside, is GNU's line and its tree is left
+    out; its siblings still copy, as GNU's walk goes on (coreutils 9.7).
 
     Args:
         strategy (NativeCopy): Native copy capability.
@@ -1276,6 +1340,9 @@ async def _mirror_dirs(
         src_base (str): Source root's mount path, no trailing slash.
         dst_base (str): Destination root's mount path, no trailing slash.
         errors (list[str]): Collected stderr lines, appended in place.
+        policy (TransferPolicy): The copy's overwrite policy, whose
+            backup moves a non-directory out of a directory's way.
+        copies (TransferLinks | None): The dispatcher that moves it.
         into_itself (bool): Whether the destination lies inside the
             source; its subtree is then left out, as the file pass does.
         lines (list[str] | None): Verbose sink for the directories this
@@ -1312,7 +1379,10 @@ async def _mirror_dirs(
             exists, is_dir = await entry_kind(stat, entry_dst)
             if is_dir:
                 continue
-            if not exists:
+            free = not exists or await _clear_for_directory(
+                policy, copies, stat, entry, entry_dst, errors, lines
+            )
+            if free:
                 await strategy.mkdir(entry_dst)
         except FS_ERRORS as exc:
             errors.append(
@@ -1320,17 +1390,13 @@ async def _mirror_dirs(
                 f"'{entry_dst.raw_path}': {fs_strerror(exc)}"
             )
         else:
-            if not exists:
+            if free:
                 made.add(dst_mount)
                 if lines is not None:
                     lines.append(
                         f"'{entry.raw_path}' -> '{entry_dst.raw_path}'"
                     )
                 continue
-            errors.append(
-                f"cp: cannot overwrite non-directory "
-                f"'{entry_dst.raw_path}' with directory '{entry.raw_path}'"
-            )
         blocked.append(entry_mount)
     return blocked, made
 
@@ -1422,12 +1488,13 @@ async def copy_entries(
     """Copy a walked source tree entry by entry with GNU per-entry errors.
 
     The shared primitive-transfer loop of cp and mv. A directory that
-    cannot be made, or whose name a non-directory holds, leaves its own
-    tree out; a failed read or write is reported; either way the
-    remaining entries still copy, like GNU cp/mv on a cross-device
-    transfer. Every error line carries ``fs_strerror``, so a backend
-    missing the needed op (``OperationNotSupportedError``) reports
-    ``Operation not supported`` instead of aborting the command. A FIFO
+    cannot be made, or whose name a non-directory holds that no backup
+    moves aside, leaves its own tree out; a failed read or write is
+    reported; either way the remaining entries still copy, like GNU
+    cp/mv on a cross-device transfer. Every error line carries
+    ``fs_strerror``, so a backend missing the needed op
+    (``OperationNotSupportedError``) reports ``Operation not supported``
+    instead of aborting the command. A FIFO
     or device is GNU's failed recreate (``_special_file_error``), never
     read.
     ``-n``/``--update``/``--backup`` apply per file entry, like GNU
@@ -1473,7 +1540,16 @@ async def copy_entries(
                 exists, is_dir = await entry_kind(stat, entry_dst)
                 if is_dir:
                     continue
-                if not exists:
+                free = not exists or await _clear_for_directory(
+                    policy or TransferPolicy(cmd_name=cmd_name),
+                    copies,
+                    stat,
+                    entry,
+                    entry_dst,
+                    errors,
+                    lines,
+                )
+                if free:
                     await strategy.mkdir(entry_dst)
             except FS_ERRORS as exc:
                 errors.append(
@@ -1481,7 +1557,7 @@ async def copy_entries(
                     f"'{entry_dst.raw_path}': {fs_strerror(exc)}"
                 )
             else:
-                if not exists:
+                if free:
                     made.add(entry_dst.virtual)
                     if lines is not None:
                         lines.append(
@@ -1491,11 +1567,6 @@ async def copy_entries(
                             f"'{entry_dst.raw_path}'"
                         )
                     continue
-                errors.append(
-                    f"{cmd_name}: cannot overwrite non-directory "
-                    f"'{entry_dst.raw_path}' with directory "
-                    f"'{entry.raw_path}'"
-                )
             copied_all = False
             blocked.append(entry.virtual)
             continue
@@ -1796,13 +1867,15 @@ async def cp_generic(
                 f"{posix_phrase(target_err)}"
             )
             continue
-        # A directory onto a non-directory is refused before any gate; a
-        # file a directory stands in the way of waits for them (below).
+        # A directory onto a non-directory is refused before any gate,
+        # unless a backup moves the entry aside (below); a file a directory
+        # stands in the way of waits for the gates (further below).
         mismatch = (
             overwrite_type_error(
                 "cp", src, src_is_dir, target, target_exists, target_is_dir
             )
             if src_is_dir
+            and (copies is None or not backup_displaces(flags.backup))
             else None
         )
         if mismatch is not None:
@@ -1843,6 +1916,20 @@ async def cp_generic(
                 f"into itself, '{target.raw_path}'"
             )
         if flags.recursive and src_is_dir:
+            if (
+                target_exists
+                and not target_is_dir
+                and not await _clear_for_directory(
+                    policy,
+                    copies,
+                    stat,
+                    src,
+                    target,
+                    errors,
+                    lines if flags.verbose else None,
+                )
+            ):
+                continue
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
             if isinstance(strategy, PrimitiveCopy):
@@ -1932,6 +2019,8 @@ async def cp_generic(
                 src_base,
                 dst_base,
                 errors,
+                policy,
+                copies,
                 into_itself,
                 lines if flags.verbose else None,
             )

@@ -523,6 +523,43 @@
         "stdout": "'/data/r10rb/src/f.txt' -> '/data/r10rb/d/src/f.txt' (backup: '/data/r10rb/d/src/f.txt~')\nrc=0\nSRC\nDST\nf.txt\nf.txt~\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cp_rb_moves_a_file_out_of_a_directorys_way",
+      "seq": 16900005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r17cb/s/sub/deep /data/r17cb/t/sub /data/r17cb/u && printf q > /data/r17cb/s/sub/deep/q && printf x > /data/r17cb/t/sub/deep && printf y > /data/r17cb/u/sub && printf w > /data/r17cb/w && (cd /data/r17cb && cp -rbv s/sub t; echo rc=$?; cp -rb s/sub u; echo rc=$?; cp -rbv s/sub/. w; echo rc=$?); find /data/r17cb | sort; cat /data/r17cb/t/sub/deep~ /data/r17cb/u/sub~; rm -r /data/r17cb",
+      "expect": {
+        "exit": 0,
+        "stdout": "'s/sub/deep' -> 't/sub/deep'\n's/sub/deep/q' -> 't/sub/deep/q'\nrc=0\nrc=0\nremoved 'w'\n's/sub/.' -> 'w'\n's/sub/./deep' -> 'w/deep'\n's/sub/./deep/q' -> 'w/deep/q'\nrc=0\n/data/r17cb\n/data/r17cb/s\n/data/r17cb/s/sub\n/data/r17cb/s/sub/deep\n/data/r17cb/s/sub/deep/q\n/data/r17cb/t\n/data/r17cb/t/sub\n/data/r17cb/t/sub/deep\n/data/r17cb/t/sub/deep/q\n/data/r17cb/t/sub/deep~\n/data/r17cb/u\n/data/r17cb/u/sub\n/data/r17cb/u/sub/deep\n/data/r17cb/u/sub/deep/q\n/data/r17cb/u/sub~\n/data/r17cb/w\n/data/r17cb/w/deep\n/data/r17cb/w/deep/q\nxy",
+        "stderr": ""
+      },
+      "flags": [
+        "r",
+        "b",
+        "v"
+      ]
     }
   ]
 }

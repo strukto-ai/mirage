@@ -45,6 +45,7 @@ import {
   copyTargets,
   isDirectory,
   pathExists,
+  typedName,
   type BackendKeyFn,
 } from '../utils/copy.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
@@ -664,6 +665,56 @@ function ontoDirectory(
   return `${cmdName}: cannot overwrite directory '${target.rawPath}' with non-directory '${src.rawPath}'`
 }
 
+// Free a non-directory's name for a directory copied onto it. GNU refuses the
+// overwrite unless a backup moves the entry aside, and then renames it to its
+// backup name. A source typed as `.` or `..` is never backed up, so the entry
+// is removed instead, which -v reports. No gate or -i question applies to a
+// directory source (coreutils 9.7). Outside a workspace nothing can rename
+// the entry, so the overwrite is refused as it is without a backup. Returns
+// whether the name is free. Mirrors Python's _clear_for_directory.
+async function clearForDirectory(
+  policy: TransferPolicy,
+  copies: TransferLinks | undefined,
+  stat: StatFn,
+  src: PathSpec,
+  target: PathSpec,
+  errors: string[],
+  lines: string[] | undefined,
+  index?: IndexCacheStore,
+): Promise<boolean> {
+  if (copies === undefined || !backupDisplaces(policy.backup)) {
+    errors.push(
+      `${policy.cmdName}: cannot overwrite non-directory '${target.rawPath}' with directory '${src.rawPath}'`,
+    )
+    return false
+  }
+  const typed = typedName(src)
+  if (typed === '.' || typed === '..') {
+    try {
+      await copies.dispatch('unlink', target)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      errors.push(
+        `${policy.cmdName}: cannot remove '${target.rawPath}': ${String(fsStrerror(err))}`,
+      )
+      return false
+    }
+    lines?.push(`removed '${target.rawPath}'`)
+    return true
+  }
+  const made = await makeBackup(
+    policy,
+    { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) },
+    stat,
+    undefined,
+    target,
+    errors,
+    index,
+    copies,
+  )
+  return made.ok
+}
+
 // Decide whether an existing target may be replaced. -n and --update=none
 // skip silently; --update=none-fail records GNU's `not replacing` error;
 // --update=older replaces only when the source is strictly newer. A source
@@ -947,11 +998,12 @@ export function within(path: string, root: string): boolean {
 
 // Recreate a source tree's directories under the destination root, for the
 // per-entry path. A directory that cannot be made, or whose name a
-// non-directory holds, is GNU's line and its tree is left out; its siblings
-// still copy, as GNU's walk goes on (coreutils 9.7). Returns the source
-// directories whose trees the file pass leaves out, and the destination
-// directories this made, whose entries cannot be taken yet (null where the
-// backend has no directories). Mirrors Python's _mirror_dirs.
+// non-directory holds that no backup moves aside, is GNU's line and its tree
+// is left out; its siblings still copy, as GNU's walk goes on (coreutils
+// 9.7). Returns the source directories whose trees the file pass leaves out,
+// and the destination directories this made, whose entries cannot be taken
+// yet (null where the backend has no directories). Mirrors Python's
+// _mirror_dirs.
 async function mirrorDirs(
   strategy: NativeCopy,
   stat: StatFn,
@@ -960,6 +1012,8 @@ async function mirrorDirs(
   srcBase: string,
   dstBase: string,
   errors: string[],
+  policy: TransferPolicy,
+  copies: TransferLinks | undefined,
   intoItself: boolean,
   index?: IndexCacheStore,
   lines?: string[],
@@ -985,15 +1039,15 @@ async function mirrorDirs(
     try {
       const { exists, isDir } = await entryKind(stat, entryDst, index)
       if (isDir) continue
-      if (!exists) {
+      if (
+        !exists ||
+        (await clearForDirectory(policy, copies, stat, entry, entryDst, errors, lines, index))
+      ) {
         await strategy.mkdir(entryDst)
         made.add(dstMount)
         if (lines !== undefined) lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
         continue
       }
-      errors.push(
-        `cp: cannot overwrite non-directory '${entryDst.rawPath}' with directory '${entry.rawPath}'`,
-      )
     } catch (err) {
       if (!isFsError(err)) throw err
       errors.push(`cp: cannot create directory '${entryDst.rawPath}': ${String(fsStrerror(err))}`)
@@ -1060,17 +1114,17 @@ export async function cpWalk(
 
 // Copy a walked source tree entry by entry with GNU per-entry errors: the
 // shared primitive-transfer loop of cp and mv. A directory that cannot be
-// made, or whose name a non-directory holds, leaves its own tree out; a
-// failed read or write is reported; either way the remaining entries still
-// copy, like GNU cp/mv on a cross-device transfer. Every error line carries fsStrerror, so a backend
-// missing the needed op reports `Operation not supported` instead of
-// aborting the command. A FIFO or device is GNU's failed recreate
-// (specialFileError), never read. `policy` applies -n/--update/--backup per
-// file entry, like GNU during a recursive merge (null overwrites
-// unconditionally); `lines` is an optional per-entry sink, a file's line
-// written before its create; `rootBackup` is the backup the caller made of
-// the target, which the source's own line notes. Returns whether every
-// entry landed.
+// made, or whose name a non-directory holds that no backup moves aside,
+// leaves its own tree out; a failed read or write is reported; either way the
+// remaining entries still copy, like GNU cp/mv on a cross-device transfer.
+// Every error line carries fsStrerror, so a backend missing the needed op
+// reports `Operation not supported` instead of aborting the command. A FIFO
+// or device is GNU's failed recreate (specialFileError), never read. `policy`
+// applies -n/--update/--backup per file entry, like GNU during a recursive
+// merge (null overwrites unconditionally); `lines` is an optional per-entry
+// sink, a file's line written before its create; `rootBackup` is the backup
+// the caller made of the target, which the source's own line notes. Returns
+// whether every entry landed.
 export async function copyEntries(
   cmdName: string,
   strategy: PrimitiveCopy | PrimitiveMove,
@@ -1093,6 +1147,13 @@ export async function copyEntries(
   let copiedAll = true
   const blocked = opts.blocked ?? []
   const made = new Set<string>()
+  const entryPolicy: TransferPolicy = opts.policy ?? {
+    cmdName,
+    noClobber: false,
+    update: null,
+    backup: null,
+    suffix: DEFAULT_BACKUP_SUFFIX,
+  }
   for (const { path: entry, kind } of entries) {
     if (blocked.some((root) => within(entry, root))) continue
     const entrySpec = descendantPath(src, entry)
@@ -1101,11 +1162,19 @@ export async function copyEntries(
       try {
         const { exists, isDir } = await entryKind(stat, entryDstSpec, index)
         if (isDir) continue
-        if (exists) {
-          errors.push(
-            `${cmdName}: cannot overwrite non-directory '${entryDstSpec.rawPath}' with directory '${entrySpec.rawPath}'`,
-          )
-        } else {
+        const free =
+          !exists ||
+          (await clearForDirectory(
+            entryPolicy,
+            opts.copies,
+            stat,
+            entrySpec,
+            entryDstSpec,
+            errors,
+            opts.lines,
+            index,
+          ))
+        if (free) {
           await strategy.mkdir(entryDstSpec)
           made.add(entryDstSpec.virtual)
           opts.lines?.push(
@@ -1134,13 +1203,7 @@ export async function copyEntries(
         entrySpec,
         entryDstSpec,
         typeof raw === 'string' ? raw : '',
-        opts.policy ?? {
-          cmdName,
-          noClobber: false,
-          update: null,
-          backup: null,
-          suffix: DEFAULT_BACKUP_SUFFIX,
-        },
+        entryPolicy,
         errors,
         opts.lines,
       )
@@ -1379,11 +1442,13 @@ export async function cpGeneric(
       errors.push(`cp: cannot create ${noun} '${target.rawPath}': ${posixPhrase(targetErr)}`)
       continue
     }
-    // A directory onto a non-directory is refused before any gate; a file a
-    // directory stands in the way of waits for them (below).
-    const mismatch = srcIsDir
-      ? overwriteTypeError('cp', src, srcIsDir, target, targetExists, targetIsDir)
-      : null
+    // A directory onto a non-directory is refused before any gate, unless a
+    // backup moves the entry aside (below); a file a directory stands in the
+    // way of waits for the gates (further below).
+    const mismatch =
+      srcIsDir && (copies === undefined || !backupDisplaces(flags.backup))
+        ? overwriteTypeError('cp', src, srcIsDir, target, targetExists, targetIsDir)
+        : null
     if (mismatch !== null) {
       errors.push(mismatch)
       continue
@@ -1413,6 +1478,22 @@ export async function cpGeneric(
       errors.push(`cp: cannot copy a directory, '${src.rawPath}', into itself, '${target.rawPath}'`)
     }
     if (flags.recursive && srcIsDir) {
+      if (
+        targetExists &&
+        !targetIsDir &&
+        !(await clearForDirectory(
+          policy,
+          copies,
+          stat,
+          src,
+          target,
+          errors,
+          flags.verbose ? lines : undefined,
+          index,
+        ))
+      ) {
+        continue
+      }
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
       if (isPrimitiveCopy(strategy)) {
@@ -1484,6 +1565,8 @@ export async function cpGeneric(
         srcBase,
         dstBase,
         errors,
+        policy,
+        copies,
         intoItself,
         index,
         flags.verbose ? lines : undefined,
