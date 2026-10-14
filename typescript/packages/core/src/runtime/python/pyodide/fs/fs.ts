@@ -212,12 +212,25 @@ export class PyodideFs {
       read: this.streamRead.bind(this),
       write: this.streamWrite.bind(this),
       llseek: this.llseek.bind(this),
+      getattr: (stream) =>
+        this.attrOf(stream.node, stream.opened ?? this.nodes.pathOf(stream.node)),
     }
     this.nodes = new NodeTable(host, prefix, nodeOps, streamOps)
     this.type = { mount: this.nodes.mount.bind(this.nodes) }
   }
 
   private getattr(node: FSNode): FSAttr {
+    return this.attrOf(node, this.nodes.pathOf(node))
+  }
+
+  /**
+   * One node's stat, its inode named by `path`.
+   *
+   * Args:
+   *   node: the node to describe.
+   *   path: the name its inode is reported under.
+   */
+  private attrOf(node: FSNode, path: string): FSAttr {
     if (node.unclassified === true) this.classifyNode(node)
     // A link sizes as its target string, which is what lstat reports on
     // every POSIX system and what MEMFS answers for its own links.
@@ -227,12 +240,11 @@ export class PyodideFs {
         ? BLKSIZE
         : (node.usedBytes ?? 0)
     // The stat every runtime shares, so one path reports one inode
-    // whoever asks, named by the path the node was made under so a
-    // rename keeps it; a sandbox owns nothing, so an owner the node
-    // lacks is 0. The times stay the node's, which carry unflushed writes.
+    // whoever asks; a sandbox owns nothing, so an owner the node lacks
+    // is 0. The times stay the node's, which carry unflushed writes.
     const posix = posixStat(
       { size, isDir: this.host.isDir(node.mode), mode: node.mode },
-      node.inodePath ?? this.nodes.pathOf(node),
+      path,
       '/',
       { uid: node.uid ?? 0, gid: node.gid ?? 0 },
     )
@@ -587,6 +599,7 @@ export class PyodideFs {
   private streamOpen(stream: FSStream): void {
     this.loadContents(stream.node, (stream.flags & O_ACCMODE) !== 0)
     stream.node.opens = (stream.node.opens ?? 0) + 1
+    stream.opened = this.nodes.pathOf(stream.node)
   }
 
   private streamRead(

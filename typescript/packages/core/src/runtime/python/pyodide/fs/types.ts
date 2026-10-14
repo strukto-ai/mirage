@@ -116,11 +116,6 @@ export interface FSNode {
   /** Its name went while a stream had it open (`PyodideFs.orphan`). */
   unlinked?: boolean
   /**
-   * The path it was made under, which names its inode: a rename keeps
-   * the inode, as a host descriptor keeps the path it was opened under.
-   */
-  inodePath?: string
-  /**
    * A symlink's target, verbatim as it was typed. Emscripten's own
    * MEMFS keeps it under this name and `FS.readlink` reads it, so the
    * spelling is the interpreter's, not ours.
@@ -132,6 +127,12 @@ export interface FSStream {
   node: FSNode
   position: number
   flags: number
+  /**
+   * The path it was opened under, which names its inode for `fstat`: a
+   * rename keeps it, as a host descriptor keeps the path it was opened
+   * under, while a stat by path names the current one.
+   */
+  opened?: string
 }
 
 export interface FSAttr {
@@ -189,6 +190,8 @@ export interface StreamOps {
     position: number,
   ): number
   llseek(stream: FSStream, offset: number, whence: number): number
+  /** What `fstat` answers; Emscripten asks the node when it is absent. */
+  getattr?(stream: FSStream): FSAttr
 }
 
 /** The node-building slice of the Emscripten FS namespace. */

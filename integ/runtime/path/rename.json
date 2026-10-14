@@ -460,6 +460,41 @@
       ]
     },
     {
+      "id": "a_name_reused_after_a_rename_is_another_file",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "i.txt": "i"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nos.rename('/data/i.txt', '/data/j.txt')\nwith open('/data/i.txt', 'w') as f:\n    f.write('new')\nprint(os.path.samefile('/data/i.txt', '/data/j.txt'))",
+            "node": "const fs = require('node:fs').promises\nawait fs.rename('/data/i.txt', '/data/j.txt')\nawait fs.writeFile('/data/i.txt', 'new')\nconst a = await fs.stat('/data/i.txt')\nconst b = await fs.stat('/data/j.txt')\nconsole.log(a.ino === b.ino)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "False\n"
+          },
+          "expect_on": {
+            "host@typescript": {
+              "stdout": "false\n"
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "a_rename_onto_its_own_file_through_a_link_keeps_its_handles",
       "runtimes": [
         "wasi",

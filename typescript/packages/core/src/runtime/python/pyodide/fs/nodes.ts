@@ -75,7 +75,6 @@ export class NodeTable {
       parent.children ??= new Map()
       parent.children.set(name, node)
     }
-    node.inodePath = this.pathOf(node)
     return node
   }
 
