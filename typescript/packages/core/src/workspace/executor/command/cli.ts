@@ -32,6 +32,7 @@ import type { NamespaceView, SessionView, StatPath } from '../../../view/types.t
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Argument, type FlagValue } from '../../../commands/spec/types.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
+import { errorVirtualPath, fsStrerror } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
@@ -153,6 +154,18 @@ function selectRuntime(
     ]
   }
   return [chosen, null]
+}
+
+/**
+ * What a failed leaf says after its name: a file error stamped with its
+ * path as the path and phrase, the way the shell's own commands say it,
+ * anything else in its own words. Mirrors Python's `_leaf_message`.
+ */
+function leafMessage(err: unknown): string {
+  const strerror = fsStrerror(err)
+  if (strerror !== null && typeof (err as { virtualPath?: unknown }).virtualPath === 'string')
+    return `${errorVirtualPath(err)}: ${strerror}`
+  return err instanceof Error ? err.message : String(err)
 }
 
 /** The 127 a script CLI answers when no entry can run its program. */
@@ -530,8 +543,7 @@ export async function handleCli(
     // service already applied); without the drop a github mount keeps
     // serving its pre-write bytes.
     if (binding.write && dropCaches !== null) await dropCaches()
-    const message = err instanceof Error ? err.message : String(err)
-    const stderr = encodeText(`${prog}: ${message}\n`)
+    const stderr = encodeText(`${prog}: ${leafMessage(err)}\n`)
     return [
       err instanceof PartialOutputError ? err.stdout : null,
       new IOResult({ exitCode: 1, stderr }),
@@ -593,8 +605,8 @@ async function* cliOutput(
     )
       throw error
     if (error instanceof PartialOutputError) yield* chunks(error.stdout)
-    const message = error instanceof Error ? error.message : String(error)
-    const diagnostic = error instanceof UsageError ? `${message}\n` : `${prog}: ${message}\n`
+    const diagnostic =
+      error instanceof UsageError ? `${error.message}\n` : `${prog}: ${leafMessage(error)}\n`
     io.stderr = concat([await io.materializeStderr(), encodeText(diagnostic)])
     io.exitCode = error instanceof UsageError ? error.exitCode : 1
   } finally {

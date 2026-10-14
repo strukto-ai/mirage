@@ -44,6 +44,7 @@ from mirage.commands.spec.types import (
     UsageStyle,
 )
 from mirage.concurrency.limiter import run_blocking
+from mirage.errors.fs import error_path, fs_strerror
 from mirage.errors.types import CommandTimeoutError, FsCondition
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks
@@ -205,6 +206,20 @@ def _missing(message: str) -> IOResult:
         message (str): the refusal, naming the world.
     """
     return IOResult(exit_code=127, stderr=encode_text(f"{message}\n"))
+
+
+def _leaf_message(exc: BaseException) -> str:
+    """What a failed leaf says after its name: a file error stamped with
+    its path as the path and phrase, the way the shell's own commands say
+    it, anything else in its own words.
+
+    Args:
+        exc (BaseException): the leaf's failure.
+    """
+    strerror = fs_strerror(exc)
+    if strerror is None or not isinstance(getattr(exc, "filename", None), str):
+        return str(exc)
+    return f"{error_path(exc)}: {strerror}"
 
 
 async def _script_output(
@@ -627,7 +642,7 @@ async def handle_cli(
         # serving its pre-write bytes.
         if binding.write and drop_caches is not None:
             await drop_caches()
-        err_stderr = encode_text(f"{prog}: {exc}\n")
+        err_stderr = encode_text(f"{prog}: {_leaf_message(exc)}\n")
         err_io = IOResult(exit_code=1, stderr=err_stderr)
         printed = exc.stdout if isinstance(exc, PartialOutputError) else None
         return (
@@ -687,7 +702,9 @@ async def _cli_output(
             async for data in chunks(exc.stdout):
                 yield data
         message = (
-            f"{exc}\n" if isinstance(exc, UsageError) else f"{prog}: {exc}\n"
+            f"{exc}\n"
+            if isinstance(exc, UsageError)
+            else f"{prog}: {_leaf_message(exc)}\n"
         )
         io.stderr = await io.materialize_stderr() + encode_text(message)
         io.exit_code = exc.exit_code if isinstance(exc, UsageError) else 1

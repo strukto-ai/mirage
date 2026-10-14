@@ -403,7 +403,7 @@ describe('policy cli fact', () => {
     try {
       const refused = await ws.shell('abc write /abc/x')
       expect(refused.exitCode).toBe(1)
-      expect(refused.stderrText.startsWith('abc write: ')).toBe(true)
+      expect(refused.stderrText).toBe('abc write: /abc/x: Read-only file system\n')
       const listed = await ws.shell('ls /abc')
       expect([listed.exitCode, dec.decode(listed.stdout)]).toEqual([0, ''])
       expect((await ws.shell('abc write /data/x')).exitCode).toBe(0)

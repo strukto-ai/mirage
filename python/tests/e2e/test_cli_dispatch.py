@@ -337,7 +337,8 @@ async def test_a_cli_write_into_a_read_only_mount_is_refused():
     workspace.register_cli("abc", ABC)
     try:
         code, _, err = await run(workspace, "abc write /abc/x")
-        assert code == 1 and err.startswith(b"abc write: ")
+        assert code == 1
+        assert err == b"abc write: /abc/x: Read-only file system\n"
         assert await run(workspace, "ls /abc") == (0, b"", b"")
         assert (await run(workspace, "abc write /data/x"))[0] == 0
         assert await run(workspace, "cat /data/x") == (0, b"hi\n", b"")
