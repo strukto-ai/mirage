@@ -16,6 +16,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.sha256sum import sha256sum_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
+    bound_uncached,
     dir_aware_stat,
     dir_aware_stream,
     resolve_or_empty,
@@ -39,6 +40,7 @@ async def sha256sum(
         opts,
         dir_aware_stat(ops, accessor, opts),
         dir_aware_stream(ops, accessor, opts),
+        bound_uncached(ops.checksum, accessor, opts.index),
     )
 
 

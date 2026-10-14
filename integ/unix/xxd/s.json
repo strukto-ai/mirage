@@ -1,0 +1,303 @@
+{
+  "cases": [
+    {
+      "id": "xxd_s_counts_the_address_from_the_seek",
+      "seq": 17000006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "xxd -s 3 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000003: 6c6f 0a77 6f72 6c64 0a66 6f6f 0a62 6172  lo.world.foo.bar\n00000013: 0a62 617a 0a                             .baz.\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "xxd_s_minus_seeks_back_from_the_end",
+      "seq": 17000007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "xxd -s -4 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000014: 6261 7a0a                                baz.\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "xxd_s_and_l_read_base_zero",
+      "seq": 17000008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "xxd -s 0x10 -l 4 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000010: 6261 720a                                bar.\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "l"
+      ]
+    },
+    {
+      "id": "xxd_s_before_the_start_cannot_seek",
+      "seq": 17000009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "xxd -s -100 /data/a.txt",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": "xxd: Sorry, cannot seek.\n"
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "xxd_s_past_the_end_dumps_nothing",
+      "seq": 17000010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "xxd -s 100 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "xxd_p_s_l_dump_the_window",
+      "seq": 17000011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "xxd -p -s 6 -l 5 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "776f726c64\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p",
+        "s",
+        "l"
+      ]
+    },
+    {
+      "id": "xxd_s_reads_stdin_off",
+      "seq": 17000012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/a.txt | xxd -s 20",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000014: 6261 7a0a                                baz.\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "xxd_s_minus_on_stdin_cannot_seek",
+      "seq": 17000013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat /data/a.txt | xxd -s -2",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": "xxd: Sorry, cannot seek.\n"
+      },
+      "flags": [
+        "s"
+      ]
+    }
+  ]
+}

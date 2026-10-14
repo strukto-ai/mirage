@@ -118,6 +118,7 @@
             "pages": [
               "home/integration/search",
               "home/integration/lines",
+              "home/integration/checksums",
               "home/integration/walks"
             ]
           },

@@ -400,6 +400,33 @@ class BaseVFS:
         raise enotsup(self.name, "line_count", path)
 
     @vfs_call(effect=Effect.READ, target=Target.FILE)
+    async def checksum(
+        self,
+        path: PathSpec,
+        algorithm: str,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> str | None:
+        """The digest the backend keeps for a file, without reading it.
+
+        ``md5sum`` and its siblings ask this before they read, except
+        under ``-c``, which checks the bytes themselves, so a backend
+        that stores a file's digest (an object's MD5 ETag, a drive's
+        ``md5Checksum``) does not send the file. Answer only a digest of
+        exactly the bytes a read gives, in lowercase hex: a stored value
+        that can be anything else (a multipart or encrypted object's
+        ETag) is None. A file the read cache holds is read instead.
+        Return None to have the file read and hashed; raise the file's
+        read error otherwise.
+
+        Args:
+            path (PathSpec): the file.
+            algorithm (str): the hashlib name, ``md5``, ``sha1``,
+                ``sha256``, ``sha384`` or ``sha512``.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "checksum", path)
+
+    @vfs_call(effect=Effect.READ, target=Target.FILE)
     async def follow(
         self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes] | None:

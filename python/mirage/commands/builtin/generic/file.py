@@ -2,17 +2,21 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.constants import MIME_SYMLINK
+from mirage.commands.builtin.constants import FILE_HEADER_BYTES, MIME_SYMLINK
 from mirage.commands.builtin.file_sniff import (
     detect_file_type,
     format_file_result,
 )
-from mirage.commands.builtin.utils.operands import operand_stat
+from mirage.commands.builtin.utils.operands import (
+    normalized_read,
+    operand_stat,
+)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.cooperative import read_prefix
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
@@ -20,6 +24,8 @@ from mirage.types import (
     FileStat,
     FileType,
     PathSpec,
+    PolymorphicReadFn,
+    ReadRangeFn,
     StatFn,
 )
 from mirage.utils.path import CycleError
@@ -77,11 +83,31 @@ def _special_description(s: FileStat, mime: bool) -> str | None:
     )
 
 
+async def _header(
+    stream: PolymorphicReadFn,
+    read_range: ReadRangeFn | None,
+    path: PathSpec,
+) -> bytes:
+    """The first bytes of a file, the most ``file`` sniffs: one ranged
+    read where the mount has one, else the stream, closed once they
+    are in.
+
+    Args:
+        stream (PolymorphicReadFn): bound reader, ``stream(path)``.
+        read_range (Callable | None): bound byte-window reader.
+        path (PathSpec): the file.
+    """
+    if read_range is not None:
+        return bytes(await read_range(path, offset=0, size=FILE_HEADER_BYTES))
+    return await read_prefix(normalized_read(stream)(path), FILE_HEADER_BYTES)
+
+
 async def file_cmd(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    stream: PolymorphicReadFn,
     stat_fn: Callable[..., Awaitable[FileStat]],
+    read_range: ReadRangeFn | None = None,
     b: bool = False,
     i: bool = False,
     links: LinkView | None = None,
@@ -92,8 +118,11 @@ async def file_cmd(
 
     Args:
         paths (list[PathSpec]): operands to describe.
-        read_bytes (Callable): backend reader, for the content sniff.
+        stream (PolymorphicReadFn): backend reader, for the content
+            sniff, which reads only a file's first bytes.
         stat_fn (Callable): backend stat.
+        read_range (Callable | None): the backend's byte window, read
+            for those bytes instead where the mount has one.
         b (bool): brief, omit the filename column. GNU always names the
             operand exactly as typed, never a resolved or absolutised
             form, so every row is labelled with ``raw_path``.
@@ -132,7 +161,7 @@ async def file_cmd(
             lines.append(format_file_result(p.raw_path, special, b, False))
             continue
         try:
-            header = (await read_bytes(p))[:512]
+            header = await _header(stream, read_range, p)
         except Exception as exc:
             _logger.debug(
                 "file: failed to read header for %s: %s", p.virtual, exc
@@ -161,14 +190,16 @@ async def file_generic(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    stream: PolymorphicReadFn,
     stat_fn: StatFn,
+    read_range: ReadRangeFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(opts.flags)
     return await file_cmd(
         paths,
-        read_bytes=read_bytes,
+        stream=stream,
         stat_fn=stat_fn,
+        read_range=read_range,
         b=parsed.brief,
         i=parsed.mime,
         links=opts.ns.links if opts.ns is not None else None,

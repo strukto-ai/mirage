@@ -98,14 +98,16 @@ export async function readFileVersioned(
  *   index: listing cache, consulted for the file id.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
-export async function read(
+/**
+ * The index entry of the file at `path`, listing its parent when the index
+ * does not hold it. Rejects ENOENT when nothing is there and EISDIR when a
+ * folder is. Mirrors Python's `file_entry`.
+ */
+export async function fileEntry(
   accessor: GDriveAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
-  options?: { offset?: number; size?: number },
-): Promise<Uint8Array> {
-  const offset = options?.offset ?? 0
-  const size = options?.size ?? null
+): Promise<IndexEntry> {
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const key = path.vfsPath
   if (index === undefined) throw enoent(path.virtual)
@@ -119,8 +121,20 @@ export async function read(
       : null,
   )
   if (entry === null) throw enoent(path.virtual)
+  if (DIRECTORY_RESOURCE_TYPES.has(entry.resourceType)) throw eisdir(path.virtual)
+  return entry
+}
+
+export async function read(
+  accessor: GDriveAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+  options?: { offset?: number; size?: number },
+): Promise<Uint8Array> {
+  const offset = options?.offset ?? 0
+  const size = options?.size ?? null
+  const entry = await fileEntry(accessor, path, index)
   const rt = entry.resourceType
-  if (DIRECTORY_RESOURCE_TYPES.has(rt)) throw eisdir(path.virtual)
   if (!NATIVE_RESOURCE_TYPES.has(rt))
     return readFileVersioned(accessor.tokenManager, entry.id, path.virtual, entry, offset, size)
   const timer = startOp()

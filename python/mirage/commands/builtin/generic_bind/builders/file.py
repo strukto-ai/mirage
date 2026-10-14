@@ -37,8 +37,9 @@ async def file(
         resolved,
         list(texts),
         opts,
-        bound_op(ops.read_bytes, accessor, opts.index),
+        bound_op(ops.read_stream, accessor, opts.index),
         bound_op(ops.stat, accessor, opts.index),
+        bound_op(ops.read_range, accessor, opts.index),
     )
 
 

@@ -15,12 +15,14 @@
 import { sha384Hex } from '../../../utils/hash.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { checksumGeneric, type Stream } from './checksum.ts'
+import { checksumGeneric, type StoredDigest, type Stream } from './checksum.ts'
 
 export async function sha384sumGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: Stream,
+  stat?: (p: PathSpec) => Promise<unknown>,
+  stored?: StoredDigest,
 ): Promise<CommandFnResult> {
-  return checksumGeneric(paths, opts, stream, sha384Hex, 'sha384sum')
+  return checksumGeneric(paths, opts, stream, sha384Hex, 'sha384sum', stat, stored)
 }

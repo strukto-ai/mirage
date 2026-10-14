@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "id": "tac_head_takes_the_last_lines",
+      "seq": 17000014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tac /data/a.txt | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "baz\nbar\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "tac_b_puts_the_separator_before_its_record",
+      "seq": 17000015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tac -b /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n\nbaz\nbar\nfoo\nworldhello",
+        "stderr": ""
+      },
+      "flags": [
+        "before"
+      ]
+    },
+    {
+      "id": "tac_keeps_a_last_line_without_a_newline",
+      "seq": 17000016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tac /data/no_nl.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "no trailing newline",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "tac_s_one_byte_separator",
+      "seq": 17000017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tac -s o /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nbar\nbaz\norld\nfo\nwohello",
+        "stderr": ""
+      },
+      "flags": [
+        "separator"
+      ]
+    }
+  ]
+}

@@ -24,6 +24,7 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { readdir as gdriveReaddir } from '../../core/gdrive/readdir.ts'
 import { read as gdriveRead } from '../../core/gdrive/read.ts'
+import { checksum as gdriveChecksum } from '../../core/gdrive/checksum.ts'
 import { stat as gdriveStat } from '../../core/gdrive/stat.ts'
 import { exists as gdriveExists } from '../../core/gdrive/exists.ts'
 import { write as gdriveWrite } from '../../core/gdrive/write.ts'
@@ -77,6 +78,14 @@ export class GDriveVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return gdriveStat(this.accessor, path, index)
+  }
+
+  override checksum(
+    path: PathSpec,
+    algorithm: string,
+    index?: IndexCacheStore,
+  ): Promise<string | null> {
+    return gdriveChecksum(this.accessor, path, algorithm, index)
   }
 
   override exists(path: PathSpec): Promise<boolean> {

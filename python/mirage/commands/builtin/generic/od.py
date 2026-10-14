@@ -1,5 +1,5 @@
 import struct
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.commands.builtin.constants import (
     OD_OVERFLOW_UNITS,
@@ -8,10 +8,20 @@ from mirage.commands.builtin.constants import (
     XSTRTOUMAX_PATTERN,
 )
 from mirage.commands.builtin.utils.size_suffix import parse_base0
-from mirage.commands.builtin.utils.stream import resolve_source, stdin_stream
+from mirage.commands.builtin.utils.stream import (
+    is_stdin,
+    resolve_source,
+    stdin_stream,
+)
 from mirage.commands.errors import UsageError
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
+from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.shell.bytes import encode_text
+from mirage.types import PathSpec, ReadRangeFn
+
+SKIP_PAST_END = b"od: cannot skip past end of combined input\n"
 
 
 def parse_count(value: str, flag: str) -> int:
@@ -86,27 +96,154 @@ def _format_values(data: bytes, type_spec: str) -> str:
     return " ".join(values)
 
 
+async def _taken(
+    source: AsyncIterator[bytes], skip: int, left: int | None
+) -> tuple[list[bytes], int]:
+    """One operand's bytes past ``skip`` and up to ``left``, the stream
+    closed once ``left`` are in.
+
+    Args:
+        source (AsyncIterator[bytes]): the operand's stream.
+        skip (int): bytes still to skip.
+        left (int | None): bytes still to keep, None for all.
+
+    Returns:
+        tuple[list[bytes], int]: the bytes kept and the skip left over.
+    """
+    kept: list[bytes] = []
+    stream = chunks(source)
+    try:
+        async for chunk in stream:
+            if skip:
+                dropped = min(skip, len(chunk))
+                chunk = chunk[dropped:]
+                skip -= dropped
+            if left is not None:
+                chunk = chunk[:left]
+                left -= len(chunk)
+            if chunk:
+                kept.append(chunk)
+            if left == 0:
+                break
+    finally:
+        await stream.aclose()
+    return kept, skip
+
+
+async def _combined(
+    paths: list[PathSpec],
+    read: Callable[[PathSpec], AsyncIterator[bytes]],
+    read_range: ReadRangeFn | None,
+    size_of: Callable[[PathSpec], Awaitable[int | None]] | None,
+    skip: int,
+    limit: int | None,
+) -> tuple[bytes, bytes, bool, int]:
+    """The operands as od's one input, past ``skip`` and within ``limit``.
+
+    As GNU od: a regular file wholly inside the skip is passed over
+    unread, and the rest of the skip is one ranged read where the mount
+    has one, which also stops at ``limit``. An operand that cannot be
+    opened is reported and passed over; one that fails to read (a
+    directory) is reported, ends any skip, and counts as opened. Once
+    ``limit`` bytes are in, no later operand is opened.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        read (Callable): the operands' stream, stdin for ``-``.
+        read_range (Callable | None): the mount's byte window.
+        size_of (Callable | None): a regular file's size.
+        skip (int): -j.
+        limit (int | None): -N.
+
+    Returns:
+        tuple[bytes, bytes, bool, int]: the bytes, the error lines,
+        whether any operand opened, and the skip left unspent.
+    """
+    kept: list[bytes] = []
+    err = b""
+    opened = False
+    left = limit
+    for p in paths:
+        if left == 0 and opened:
+            break
+        try:
+            size = (
+                await size_of(p)
+                if size_of is not None
+                and read_range is not None
+                and (skip or left is not None)
+                and not is_stdin(p)
+                else None
+            )
+            if size is not None and read_range is not None:
+                opened = True
+                if skip >= size:
+                    skip -= size
+                    continue
+                want = size - skip if left is None else min(left, size - skip)
+                data = bytes(await read_range(p, offset=skip, size=want))
+                part, skip = [data], 0
+            else:
+                part, skip = await _taken(read(p), skip, left)
+                opened = True
+        except FS_ERRORS as exc:
+            err += encode_text(fs_error_line("od", p, exc))
+            if isinstance(exc, IsADirectoryError):
+                opened = True
+                skip = 0
+            continue
+        kept.extend(part)
+        if left is not None:
+            left -= sum(len(chunk) for chunk in part)
+    return b"".join(kept), err, opened, skip
+
+
 async def od_generic(
     paths: list[PathSpec],
     *,
     read_stream: Callable[[PathSpec], AsyncIterator[bytes]],
+    read_range: ReadRangeFn | None = None,
+    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     stdin: ByteSource | None = None,
     address_radix: str = "o",
     skip: int = 0,
     limit: int | None = None,
     formats: list[str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    # od defines multiple FILE operands as one concatenated input, so skip
-    # and limit offsets apply across the whole run, not per file.
-    chunks: list[bytes] = []
+    """Dump the operands, GNU od semantics; mirrors odGeneric.
+
+    od defines multiple FILE operands as one concatenated input, so skip
+    and limit offsets apply across the whole run, not per file.
+
+    Args:
+        paths (list[PathSpec]): the operands, empty for stdin.
+        read_stream (Callable): bound reader, ``read_stream(path)``.
+        read_range (Callable | None): the mount's byte window, which
+            serves -j and -N without reading the bytes they pass.
+        size_of (Callable | None): a regular file's size.
+        stdin (ByteSource | None): the line's input.
+        address_radix (str): -A.
+        skip (int): -j.
+        limit (int | None): -N.
+        formats (list[str] | None): the -t types in order.
+    """
     if paths:
-        read = stdin_stream(read_stream, stdin)
-        for p in paths:
-            chunks.extend([chunk async for chunk in read(p)])
+        data, err, opened, unspent = await _combined(
+            paths,
+            stdin_stream(read_stream, stdin, sole=True),
+            read_range,
+            size_of,
+            skip,
+            limit,
+        )
     else:
-        chunks.extend([chunk async for chunk in resolve_source(stdin)])
-    raw = b"".join(chunks)
-    data = raw[skip : skip + limit if limit is not None else None]
+        kept, unspent = await _taken(resolve_source(stdin), skip, limit)
+        data, err, opened = b"".join(kept), b"", True
+    if unspent:
+        return None, IOResult(exit_code=1, stderr=err + SKIP_PAST_END)
+    io = IOResult(exit_code=1 if err else 0, stderr=err or None)
+    if not opened:
+        return None, io
     type_specs = formats or ["o2"]
     lines: list[str] = []
     for offset in range(0, len(data), 16):
@@ -128,8 +265,8 @@ async def od_generic(
     if final_address:
         lines.append(final_address)
     if not lines:
-        return b"", IOResult()
-    return ("\n".join(lines) + "\n").encode(), IOResult()
+        return b"", io
+    return ("\n".join(lines) + "\n").encode(), io
 
 
 __all__ = ["od_generic", "parse_count"]

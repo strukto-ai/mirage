@@ -16,3 +16,9 @@ SCOPE_ERROR = 5000
 CONDITION_LOST_CODES = frozenset(
     {"412", "PreconditionFailed", "409", "ConditionalRequestConflict"}
 )
+
+# The stores whose ETag is an object's MD5 for a single-part upload kept
+# unencrypted, so md5sum can take it instead of reading the object.
+MD5_ETAG_STORES = frozenset(
+    {"s3", "r2", "gcs", "minio", "ceph", "digitalocean", "wasabi"}
+)

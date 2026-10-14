@@ -45,12 +45,19 @@ export const CALLS: ReadonlyMap<string, VfsCall> = new Map([...VFS_CALLS, ...NAM
 // value can serve them (sliced for ranged reads) without touching the
 // backend, subject to the reconciler's consistency check. A call that
 // answers for part of a file (first_lines, last_lines, line_count,
-// follow, lines_containing) is neither served from the cache nor kept in
-// it; its caller reads a cached file instead.
+// checksum, follow, lines_containing) is neither served from the cache nor
+// kept in it; its caller reads a cached file instead.
 export const DISPATCH_READ_OPS: ReadonlySet<string> = new Set(
   [...callNames(VFS_CALLS, { effects: [Effect.READ], targets: [Target.FILE] })].filter(
     (name) =>
-      !['first_lines', 'last_lines', 'line_count', 'follow', 'lines_containing'].includes(name),
+      ![
+        'first_lines',
+        'last_lines',
+        'line_count',
+        'checksum',
+        'follow',
+        'lines_containing',
+      ].includes(name),
   ),
 )
 

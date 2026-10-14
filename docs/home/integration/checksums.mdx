@@ -1,0 +1,53 @@
+---
+title: Checksums
+description: The VFS method md5sum and its siblings ask, and which stores answer it.
+icon: fingerprint
+---
+
+A VFS that defines `checksum` lets `md5sum`, `sha1sum`, `sha256sum`,
+`sha384sum`, `sha512sum` and `md5` print a file's digest without reading it,
+when the store already keeps that digest: an object's MD5 ETag, or the MD5,
+SHA-1 and SHA-256 a drive records for each file.
+
+## Interface
+
+<CodeGroup>
+
+```python Python
+from mirage import NULL_INDEX, BaseVFS, PathSpec
+
+
+class MyVFS(BaseVFS):
+    async def checksum(
+        self, path: PathSpec, algorithm: str, index=NULL_INDEX
+    ) -> str | None: ...
+```
+
+```ts TypeScript
+import { BaseVFS, type PathSpec } from '@struktoai/mirage-core'
+
+class MyVFS extends BaseVFS {
+  override checksum(path: PathSpec, algorithm: string): Promise<string | null> { /* ... */ }
+}
+```
+
+</CodeGroup>
+
+`algorithm` is `md5`, `sha1`, `sha256`, `sha384` or `sha512`. Answer the
+digest in lowercase hex only when it is the digest of exactly the bytes a read
+gives; answer `None` (`null`) when the store keeps none, or keeps a value that
+can be something else, and the file is read and hashed. Raise the error a read
+of the file would raise.
+
+A file the read cache holds is hashed from the cache instead. `-c` always
+reads, since it checks the bytes themselves, and standard input is always
+read. `checksum` is a dispatcher call like `read`: hides, path rules, the
+mount's mode and policies apply to it.
+
+## Backends
+
+| Backend | Digests | Read instead |
+| --- | --- | --- |
+| S3, R2, GCS, MinIO, Ceph, DigitalOcean Spaces, Wasabi | `md5`, from the object's ETag | a multipart upload, an object under SSE-KMS or SSE-C, and on stores other than AWS any encrypted object |
+| Google Drive | `md5`, `sha1`, `sha256` | Google Docs, Sheets and Slides files, which have no stored bytes |
+| Box | `sha1`, asked live | a file Box has not hashed yet |

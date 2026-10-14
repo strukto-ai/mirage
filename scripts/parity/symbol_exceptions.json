@@ -118,6 +118,16 @@
     "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes."
    }
   },
+  "commands/builtin/generic/cmp": {
+   "typescript_only": {
+    "newlines": "Counts newlines in a Uint8Array, which has no count; Python's bytes.count does it."
+   }
+  },
+  "commands/builtin/generic/tac": {
+   "typescript_only": {
+    "indexOf": "Finds a separator in a Uint8Array, which has no subsequence search; Python's bytes.split does it."
+   }
+  },
   "commands/builtin/generic/iconv_multibyte": {
    "typescript_only": {
     "logger": "An opt-in diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes."

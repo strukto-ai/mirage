@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readPrefix } from '../../../io/cooperative.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -128,12 +129,6 @@ function parseFlags(fl: FlagView): CmpFlags {
   }
 }
 
-function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) return false
-  for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false
-  return true
-}
-
 /**
  * GNU's `EOF on FILE` diagnostic for a common-prefix difference.
  *
@@ -141,28 +136,29 @@ function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
  * exits 1. A shorter file with no bytes to compare is `which is empty`.
  * Otherwise `-l` reports the byte only, and every other mode adds the
  * line: `line N` when the file ends on a newline, `in line N` when it
- * ends inside line N.
+ * ends inside line N. `held` is how many bytes the shorter file had past
+ * its skip, `lines` the newlines among them and `last` the last of them,
+ * -1 for none. Mirrors Python's _eof_error.
  */
 function eofError(
-  names: readonly [string, string],
-  data1: Uint8Array,
-  data2: Uint8Array,
+  shorter: string,
+  held: number,
+  lines: number,
+  last: number,
   verbose: boolean,
 ): Uint8Array {
-  const firstShorter = data1.byteLength < data2.byteLength
-  const shorter = firstShorter ? names[0] : names[1]
-  const held = firstShorter ? data1 : data2
-  if (held.byteLength === 0) return ENC.encode(`cmp: EOF on ${shorter} which is empty\n`)
-  let msg = `cmp: EOF on ${shorter} after byte ${String(held.byteLength)}`
+  if (held === 0) return ENC.encode(`cmp: EOF on ${shorter} which is empty\n`)
+  let msg = `cmp: EOF on ${shorter} after byte ${String(held)}`
   if (!verbose) {
-    let lines = 0
-    for (const byte of held) if (byte === NEWLINE) lines += 1
-    msg +=
-      held[held.byteLength - 1] === NEWLINE
-        ? `, line ${String(lines)}`
-        : `, in line ${String(lines + 1)}`
+    msg += last === NEWLINE ? `, line ${String(lines)}` : `, in line ${String(lines + 1)}`
   }
   return ENC.encode(`${msg}\n`)
+}
+
+function newlines(data: Uint8Array): number {
+  let count = 0
+  for (const byte of data) if (byte === NEWLINE) count += 1
+  return count
 }
 
 /**
@@ -207,8 +203,147 @@ interface Compared {
   readonly printBytes: boolean
 }
 
-/** cmp's answer for two inputs already past their skips. Mirrors Python's
- * _compared. */
+/** One operand's bytes as cmp pulls them, a chunk at a time. Mirrors Python's
+ * _Operand. */
+class Operand {
+  held: Uint8Array = new Uint8Array()
+  private readonly source: AsyncIterator<Uint8Array>
+
+  constructor(source: AsyncIterable<Uint8Array>, signal?: AbortSignal) {
+    this.source = chunks(source, signal)
+  }
+
+  /** Hold the next chunk when none is held; false at the end. */
+  async pull(): Promise<boolean> {
+    if (this.held.byteLength === 0) {
+      const next = await this.source.next()
+      if (next.done !== true) this.held = next.value
+    }
+    return this.held.byteLength > 0
+  }
+
+  /** Drop the first `count` bytes. */
+  async skip(count: number): Promise<void> {
+    let left = count
+    while (left > 0 && (await this.pull())) {
+      const dropped = Math.min(left, this.held.byteLength)
+      this.held = this.held.subarray(dropped)
+      left -= dropped
+    }
+  }
+
+  /** What is left, up to `limit` bytes. */
+  async rest(limit: number | null): Promise<Uint8Array> {
+    const parts: Uint8Array[] = []
+    let left = limit
+    while ((left === null || left > 0) && (await this.pull())) {
+      const part = left === null ? this.held : this.held.subarray(0, left)
+      this.held = this.held.subarray(part.byteLength)
+      parts.push(part)
+      if (left !== null) left -= part.byteLength
+    }
+    return concat(parts)
+  }
+
+  async close(): Promise<void> {
+    await this.source.return?.()
+  }
+}
+
+/**
+ * Whether `-s` can answer 1 from two regular files' sizes, unread: diffutils
+ * does when the bytes left past each skip differ and the shorter run ends
+ * within `-n`. A stdin operand, or a size the stat does not give, leaves it to
+ * the read, as does a stat that fails, which the read then reports. Mirrors
+ * Python's _sizes_differ.
+ */
+async function sizesDiffer(
+  sizeOf: (p: PathSpec) => Promise<number | null>,
+  paths: readonly [PathSpec, PathSpec],
+  skip: readonly [number, number],
+  limit: number | null,
+): Promise<boolean> {
+  const left: number[] = []
+  for (const [index, p] of paths.entries()) {
+    if (isStdin(p)) return false
+    let size: number | null
+    try {
+      size = await sizeOf(p)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      console.debug(`cmp: no size for ${p.virtual}: ${String(err)}`)
+      return false
+    }
+    if (size === null) return false
+    left.push(Math.max(size - (skip[index] ?? 0), 0))
+  }
+  const [a = 0, b = 0] = left
+  return a !== b && (limit === null || Math.min(a, b) < limit)
+}
+
+/** GNU's `differ:` line for the first byte the files disagree on, at offset
+ * `at` from the skip (from 0) on line `line`. Mirrors Python's _differ. */
+function differ(
+  names: readonly [string, string],
+  at: number,
+  line: number,
+  a: number,
+  b: number,
+  printBytes: boolean,
+): [ByteSource | null, IOResult] {
+  // GNU counts in `byte` under -b and in `char` otherwise, on the same
+  // offset -- the word tracks the flag, not a unit.
+  const unit = printBytes ? 'byte' : 'char'
+  let msg = `${names[0]} ${names[1]} differ: ${unit} ${String(at + 1)}, line ${String(line)}`
+  if (printBytes) msg += ` is ${octal(a, 3)} ${visible(a)} ${octal(b, 3)} ${visible(b)}`
+  return [formatRecords([msg]), new IOResult({ exitCode: 1 })]
+}
+
+/** cmp's answer without -l, read only to the first difference. Mirrors
+ * Python's _streamed. */
+async function streamed(
+  first: Operand,
+  second: Operand,
+  names: readonly [string, string],
+  parsed: Compared,
+): Promise<[ByteSource | null, IOResult]> {
+  const { silent, limit } = parsed
+  let compared = 0
+  let lines = 0
+  let last = -1
+  while (limit === null || compared < limit) {
+    const more1 = await first.pull()
+    const more2 = await second.pull()
+    if (!more1 && !more2) return [null, new IOResult()]
+    if (!more1 || !more2) {
+      if (silent) return [null, new IOResult({ exitCode: 1 })]
+      const shorter = more1 ? names[1] : names[0]
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr: eofError(shorter, compared, lines, last, false) }),
+      ]
+    }
+    let count = Math.min(first.held.byteLength, second.held.byteLength)
+    if (limit !== null) count = Math.min(count, limit - compared)
+    const a = first.held.subarray(0, count)
+    const b = second.held.subarray(0, count)
+    for (let at = 0; at < count; at++) {
+      if (a[at] === b[at]) continue
+      if (silent) return [null, new IOResult({ exitCode: 1 })]
+      const line = 1 + lines + newlines(a.subarray(0, at))
+      return differ(names, compared + at, line, a[at] ?? 0, b[at] ?? 0, parsed.printBytes)
+    }
+    compared += count
+    lines += newlines(a)
+    last = a[count - 1] ?? -1
+    first.held = first.held.subarray(count)
+    second.held = second.held.subarray(count)
+  }
+  return [null, new IOResult()]
+}
+
+/** cmp's answer for two inputs already read past their skips. Mirrors
+ * Python's _compared. */
 function compared(
   first: Uint8Array,
   second: Uint8Array,
@@ -222,9 +357,15 @@ function compared(
     data1 = data1.slice(0, parsed.limit)
     data2 = data2.slice(0, parsed.limit)
   }
-  if (arraysEqual(data1, data2)) return [null, new IOResult()]
-  if (parsed.silent) return [null, new IOResult({ exitCode: 1 })]
   const common = Math.min(data1.byteLength, data2.byteLength)
+  let same = data1.byteLength === data2.byteLength
+  for (let idx = 0; same && idx < common; idx++) if (data1[idx] !== data2[idx]) same = false
+  if (same) return [null, new IOResult()]
+  if (parsed.silent) return [null, new IOResult({ exitCode: 1 })]
+  const firstShorter = data1.byteLength < data2.byteLength
+  const shorter = firstShorter ? names[0] : names[1]
+  const held = firstShorter ? data1 : data2
+  const last = held[held.byteLength - 1] ?? -1
   if (parsed.verbose) {
     const width = offsetWidth(sizes, parsed.limit)
     const outLines: string[] = []
@@ -241,27 +382,24 @@ function compared(
     const io =
       data1.byteLength === data2.byteLength
         ? new IOResult({ exitCode: 1 })
-        : new IOResult({ exitCode: 1, stderr: eofError(names, data1, data2, true) })
+        : new IOResult({
+            exitCode: 1,
+            stderr: eofError(shorter, held.byteLength, 0, last, true),
+          })
     return [formatRecords(outLines), io]
   }
   for (let idx = 0; idx < common; idx++) {
     const a = data1[idx] ?? 0
     const b = data2[idx] ?? 0
     if (a === b) continue
-    let line = 1
-    for (let k = 0; k < idx; k++) if (data1[k] === NEWLINE) line += 1
-    // GNU counts in `byte` under -b and in `char` otherwise, on the
-    // same offset -- the word tracks the flag, not a unit.
-    const unit = parsed.printBytes ? 'byte' : 'char'
-    let msg = `${names[0]} ${names[1]} differ: ${unit} ${String(idx + 1)}, line ${String(line)}`
-    if (parsed.printBytes) {
-      msg += ` is ${octal(a, 3)} ${visible(a)} ${octal(b, 3)} ${visible(b)}`
-    }
-    return [formatRecords([msg]), new IOResult({ exitCode: 1 })]
+    return differ(names, idx, 1 + newlines(data1.subarray(0, idx)), a, b, parsed.printBytes)
   }
   return [
     null,
-    new IOResult({ exitCode: 1, stderr: eofError(names, data1, data2, parsed.verbose) }),
+    new IOResult({
+      exitCode: 1,
+      stderr: eofError(shorter, held.byteLength, newlines(held), last, false),
+    }),
   ]
 }
 
@@ -313,11 +451,19 @@ async function oneStdinTwice(
   return [out, io]
 }
 
+/**
+ * Compare two files byte by byte, GNU cmp semantics. Each file is streamed
+ * and the reads stop at the first difference, or at `-n`; only `-l`, which
+ * lists every difference, reads both to the end. Under `-s` two regular files
+ * whose sizes past their skips differ answer 1 unread, as diffutils does.
+ * Mirrors Python's cmp_cmd.
+ */
 export async function cmpGeneric(
   paths: PathSpec[],
   texts: readonly string[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  sizeOf?: (p: PathSpec) => Promise<number | null>,
 ): Promise<[ByteSource | null, IOResult]> {
   const parsed = parseFlags(new FlagView(opts.flags, specOf('cmp')))
   const p0 = paths[0]
@@ -325,41 +471,56 @@ export async function cmpGeneric(
   const skip = operandSkips(texts, parsed.skip)
   // A lone FILE1 is compared with stdin, which GNU names `-`.
   const p1 = paths[1] ?? STDIN_OPERAND
-  const read = stdinStream(stream, opts.stdin)
+  const read = stdinStream(stream, opts.stdin, true)
   if (isStdin(p0) && isStdin(p1)) return oneStdinTwice(read, p0, skip, parsed)
   const names = [p0.rawPath, p1.rawPath] as const
+  const same = p0.virtual === p1.virtual && skip[0] === skip[1]
+  if (
+    parsed.silent &&
+    sizeOf !== undefined &&
+    !same &&
+    (await sizesDiffer(sizeOf, [p0, p1], skip, parsed.limit))
+  ) {
+    return [null, new IOResult({ exitCode: 1 })]
+  }
   // GNU cmp reserves exit 1 for "files differ"; trouble is exit 2.
   // diffutils 3.10 opens both operands before it reads either, and -s drops
   // the message only for an operand it cannot open: a directory opens, fails
   // at its first read, and is reported whatever -s says, unless both operands
   // name it, which is the same file at the same offset and so equal unread.
-  const data: Uint8Array[] = []
-  let unread: unknown = null
-  for (const [index, p] of [p0, p1].entries()) {
-    try {
-      data.push(
-        isStdin(p) && parsed.limit !== null
-          ? await readPrefix(read(p), (skip[index] ?? 0) + parsed.limit, opts.signal)
-          : await materialize(read(p)),
-      )
-    } catch (err) {
-      if (isEisdir(err)) {
-        unread ??= err
-        data.push(new Uint8Array())
-        continue
+  // Opening is the first chunk's pull.
+  const operands: Operand[] = []
+  try {
+    let unread: unknown = null
+    for (const p of [p0, p1]) {
+      const operand = new Operand(read(p), opts.signal)
+      operands.push(operand)
+      try {
+        await operand.pull()
+      } catch (err) {
+        if (isEisdir(err)) {
+          unread ??= err
+          continue
+        }
+        if (!isFsError(err)) throw err
+        const stderr = parsed.silent ? null : formatFsError('cmp', err, paths)
+        return [null, new IOResult({ exitCode: 2, stderr })]
       }
-      if (!isFsError(err)) throw err
-      const stderr = parsed.silent ? null : formatFsError('cmp', err, paths)
-      return [null, new IOResult({ exitCode: 2, stderr })]
     }
+    if (same) return [null, new IOResult()]
+    if (unread !== null)
+      return [null, new IOResult({ exitCode: 2, stderr: formatFsError('cmp', unread, paths) })]
+    const [first, second] = operands as [Operand, Operand]
+    await first.skip(skip[0])
+    await second.skip(skip[1])
+    if (!parsed.verbose) return await streamed(first, second, names, parsed)
+    const data1 = await first.rest(parsed.limit)
+    const data2 = await second.rest(parsed.limit)
+    const sizes: number[] = []
+    if (!isStdin(p0)) sizes.push(data1.byteLength)
+    if (!isStdin(p1)) sizes.push(data2.byteLength)
+    return compared(data1, data2, names, sizes, parsed)
+  } finally {
+    for (const operand of operands) await operand.close()
   }
-  if (p0.virtual === p1.virtual && skip[0] === skip[1]) return [null, new IOResult()]
-  if (unread !== null)
-    return [null, new IOResult({ exitCode: 2, stderr: formatFsError('cmp', unread, paths) })]
-  const data1 = data[0] ?? new Uint8Array()
-  const data2 = data[1] ?? new Uint8Array()
-  const sizes: number[] = []
-  if (!isStdin(p0)) sizes.push(data1.byteLength - skip[0])
-  if (!isStdin(p1)) sizes.push(data2.byteLength - skip[1])
-  return compared(data1.slice(skip[0]), data2.slice(skip[1]), names, sizes, parsed)
 }

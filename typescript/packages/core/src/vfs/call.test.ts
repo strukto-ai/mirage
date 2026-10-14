@@ -83,6 +83,7 @@ class Shelf extends BaseVFS {
 const BUILT_INS = {
   append: [Effect.WRITE, Target.FILE, true, false],
   before_full_scan: [Effect.READ, Target.DIR, false, false],
+  checksum: [Effect.READ, Target.FILE, false, false],
   copy: [Effect.COPY, Target.FILE, false, false],
   create: [Effect.WRITE, Target.FILE, true, false],
   dir_copy: [Effect.COPY, Target.DIR, false, true],

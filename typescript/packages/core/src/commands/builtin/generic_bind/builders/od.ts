@@ -1,14 +1,7 @@
 import { odGeneric, parseCount } from '../../generic/od.ts'
-import { resolveSource, stdinStream } from '../../utils/stream.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type GenericCommand, resolveGlobOf } from '../adapter.ts'
-
-async function* concatSources(sources: AsyncIterable<Uint8Array>[]): AsyncIterable<Uint8Array> {
-  for (const source of sources) {
-    for await (const chunk of source) yield chunk
-  }
-}
+import { type GenericCommand, fileSize, resolveGlobOf } from '../adapter.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'od',
@@ -16,22 +9,24 @@ export const BUILDER: GenericCommand = {
   fn: async (ops, accessor, paths, _texts, opts) => {
     const index = opts.index ?? undefined
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, index) : []
-    // od defines multiple FILE operands as one concatenated input, so skip
-    // and limit offsets apply across the whole run, not per file.
-    const read = stdinStream((p) => ops.readStream(accessor, p, index), opts.stdin)
-    const source =
-      resolved.length === 0 ? resolveSource(opts.stdin) : concatSources(resolved.map(read))
+    const { readRange } = ops
     const fl = new FlagView(opts.flags, specOf('od'))
     // asStr, not a truthiness test: an explicitly empty value is an
     // invalid argument to GNU, not an absent flag.
     const skipValue = fl.asStr('skip_bytes')
     const limitValue = fl.asStr('read_bytes')
     return odGeneric(
-      source,
+      resolved,
+      (p) => ops.readStream(accessor, p, index),
+      opts.stdin,
       fl.asStr('address_radix') ?? 'o',
       skipValue !== undefined ? parseCount(skipValue, '-j') : 0,
       limitValue !== undefined ? parseCount(limitValue, '-N') : null,
       fl.occurrences('format', 'c').map(([name, value]) => (name === 'c' ? 'c' : String(value))),
+      readRange === undefined
+        ? null
+        : (p, offset, size) => readRange(accessor, p, index, offset, size),
+      fileSize(ops, accessor, opts),
     )
   },
 }

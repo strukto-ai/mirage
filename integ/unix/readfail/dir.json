@@ -56,7 +56,7 @@
       "command": "od /data/rfdir",
       "expect": {
         "exit": 1,
-        "stdout": "",
+        "stdout": "0000000\n",
         "stderr": "od: /data/rfdir: Is a directory\n"
       }
     },

@@ -38,6 +38,7 @@ import type {
   FollowOp,
   LastLinesOp,
   LineCountOp,
+  ChecksumOp,
   LinesContainingOp,
   MkdirOp,
   PathOp,
@@ -141,6 +142,7 @@ export interface CommandIO<A extends Accessor = Accessor> {
   firstLines?: FirstLinesOp<A>
   lastLines?: LastLinesOp<A>
   lineCount?: LineCountOp<A>
+  checksum?: ChecksumOp<A>
   follow?: FollowOp<A>
   readTree?: ReadTreeOp<A>
   // Child names the namespace owes a directory (nested mount roots and

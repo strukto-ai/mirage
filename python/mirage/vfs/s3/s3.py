@@ -20,7 +20,8 @@ from typing import Any
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.generic.rewrite import append_by_rewrite
-from mirage.core.s3.constants import SCOPE_ERROR
+from mirage.core.s3.checksum import checksum as _checksum
+from mirage.core.s3.constants import MD5_ETAG_STORES, SCOPE_ERROR
 from mirage.core.s3.copy import copy as _copy
 from mirage.core.s3.create import create as _create
 from mirage.core.s3.exists import exists as _exists
@@ -126,6 +127,17 @@ class S3VFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def checksum(
+        self,
+        path: PathSpec,
+        algorithm: str,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> str | None:
+        if self.name not in MD5_ETAG_STORES:
+            return None
+        aws = self.name == VFSName.S3 and not self._endpoint
+        return await _checksum(self.accessor, path, algorithm, aws, index)
 
     def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

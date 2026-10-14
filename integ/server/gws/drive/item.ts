@@ -26,6 +26,10 @@ export function md5(data: Buffer): string {
   return createHash('md5').update(data).digest('hex')
 }
 
+function digest(algorithm: string, data: Buffer): string {
+  return createHash(algorithm).update(data).digest('hex')
+}
+
 export function fmtFile(item: DriveItem): JsonObj {
   const out: JsonObj = {
     kind: 'drive#file',
@@ -43,6 +47,8 @@ export function fmtFile(item: DriveItem): JsonObj {
   if (!isNativeMime(item.mimeType) && item.mimeType !== FOLDER_MIME) {
     out.size = String(item.content.length)
     out.md5Checksum = md5(item.content)
+    out.sha1Checksum = digest('sha1', item.content)
+    out.sha256Checksum = digest('sha256', item.content)
   }
   if (item.revisions.length > 0) {
     out.headRevisionId = (item.revisions[item.revisions.length - 1] as Revision).id

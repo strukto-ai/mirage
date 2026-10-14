@@ -17,6 +17,7 @@ from mirage.commands.builtin.generic.md5 import md5_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
+    bound_uncached,
     dir_aware_stat,
     resolve_or_empty,
 )
@@ -39,6 +40,7 @@ async def md5(
         opts,
         dir_aware_stat(ops, accessor, opts),
         bound_op(ops.read_bytes, accessor, opts.index),
+        bound_uncached(ops.checksum, accessor, opts.index),
     )
 
 

@@ -220,3 +220,66 @@ describe('the skip operands', () => {
     )
   })
 })
+
+function chunked(
+  files: Record<string, string[]>,
+  pulled: string[],
+): (p: PathSpec) => AsyncIterable<Uint8Array> {
+  return (p) =>
+    (async function* gen() {
+      for (const chunk of files[p.virtual] ?? []) {
+        await Promise.resolve()
+        pulled.push(p.virtual)
+        yield ENC.encode(chunk)
+      }
+    })()
+}
+
+describe('the streamed compare', () => {
+  // Mirrors python's test_a_difference_stops_the_reads.
+  it('stops the reads at a difference', async () => {
+    const pulled: string[] = []
+    const files = { [P1.virtual]: ['ab\nc', 'd', 'never'], [P2.virtual]: ['ab', '\ncX', 'never'] }
+    const opts = { flags: {}, stdin: null } as unknown as CommandOpts
+    const [src, io] = await cmpGeneric([P1, P2], [], opts, chunked(files, pulled))
+    expect([DEC.decode(await materialize(src)), io.exitCode]).toEqual([
+      '/F/one /F/two differ: char 5, line 2\n',
+      1,
+    ])
+    expect(pulled.filter((p) => p === P1.virtual)).toHaveLength(2)
+    expect(pulled.filter((p) => p === P2.virtual)).toHaveLength(2)
+  })
+
+  // Mirrors python's test_a_shorter_file_ends_the_streamed_compare.
+  it.each([
+    [['ab', '\n'], ['a', 'b\nmore'], 'after byte 3, line 1'],
+    [['ab', 'c'], ['abcd'], 'after byte 3, in line 1'],
+    [[], ['x'], 'which is empty'],
+  ])('ends at the shorter file: %#', async (first, second, err) => {
+    const files = { [P1.virtual]: first, [P2.virtual]: second }
+    const opts = { flags: {}, stdin: null } as unknown as CommandOpts
+    const [src, io] = await cmpGeneric([P1, P2], [], opts, chunked(files, []))
+    expect(src).toBeNull()
+    expect([DEC.decode(await materialize(io.stderr)), io.exitCode]).toEqual([
+      `cmp: EOF on /F/one ${err}\n`,
+      1,
+    ])
+  })
+
+  // Mirrors python's test_s_answers_from_the_sizes_when_they_differ.
+  it.each([
+    [[3, 5], undefined, 1, false],
+    [[3, 5], '3', 0, true],
+    [[5, 5], undefined, 0, true],
+    [[null, 5], undefined, 0, true],
+  ] as const)('answers -s from sizes %j -n %s', async (sizes, limit, code, read) => {
+    const pulled: string[] = []
+    const files = { [P1.virtual]: ['abc'], [P2.virtual]: ['abc'] }
+    const flags = limit === undefined ? { silent: true } : { silent: true, bytes: limit }
+    const opts = { flags, stdin: null } as unknown as CommandOpts
+    const sizeOf = (p: PathSpec): Promise<number | null> =>
+      Promise.resolve(p.virtual === P1.virtual ? sizes[0] : sizes[1])
+    const [src, io] = await cmpGeneric([P1, P2], [], opts, chunked(files, pulled), sizeOf)
+    expect([src, io.exitCode, pulled.length > 0]).toEqual([null, code, read])
+  })
+})

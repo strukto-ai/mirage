@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.gdrive.checksum import checksum as _checksum
 from mirage.core.gdrive.copy import copy as _copy
 from mirage.core.gdrive.create import create as _create
 from mirage.core.gdrive.exists import exists as _exists
@@ -79,6 +80,14 @@ class GoogleDriveVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def checksum(
+        self,
+        path: PathSpec,
+        algorithm: str,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> str | None:
+        return await _checksum(self.accessor, path, algorithm, index)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)

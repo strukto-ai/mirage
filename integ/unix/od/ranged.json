@@ -1,0 +1,196 @@
+{
+  "cases": [
+    {
+      "id": "od_j_passes_a_file_wholly_inside_the_skip",
+      "seq": 17000001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "od -c -j 20 /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000024   b   a   z  \\n   1  \\n   2  \\n   3  \\n\n0000036\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "j"
+      ]
+    },
+    {
+      "id": "od_j_n_read_only_their_window",
+      "seq": 17000002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "od -A d -c -j 24 -N 3 /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000024   1  \\n   2\n0000027\n",
+        "stderr": ""
+      },
+      "flags": [
+        "A",
+        "c",
+        "j",
+        "N"
+      ]
+    },
+    {
+      "id": "od_reports_a_missing_operand_and_reads_on",
+      "seq": 17000003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "od -c -j 2 /data/nope.txt /data/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "0000002   2  \\n   3  \\n\n0000006\n",
+        "stderr": "od: /data/nope.txt: No such file or directory\n"
+      },
+      "flags": [
+        "c",
+        "j"
+      ]
+    },
+    {
+      "id": "od_n_opens_no_operand_past_the_limit",
+      "seq": 17000004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "od -c -N 2 /data/b.txt /data/nope.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   1  \\n\n0000002\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "N"
+      ]
+    },
+    {
+      "id": "od_j_past_the_end_is_refused",
+      "seq": 17000005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "od -c -j 100 /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "od: cannot skip past end of combined input\n"
+      },
+      "flags": [
+        "c",
+        "j"
+      ]
+    }
+  ]
+}

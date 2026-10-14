@@ -1,6 +1,9 @@
 import hashlib
 
-from mirage.commands.builtin.generic.checksum import checksum_generic
+from mirage.commands.builtin.generic.checksum import (
+    StoredDigest,
+    checksum_generic,
+)
 from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
@@ -12,6 +15,7 @@ async def sha384sum_generic(
     opts: CommandOpts,
     stat: StatFn,
     stream: PolymorphicReadFn,
+    stored: StoredDigest | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     return await checksum_generic(
         paths,
@@ -22,6 +26,7 @@ async def sha384sum_generic(
         factory=hashlib.sha384,
         algorithm="sha384",
         name="sha384sum",
+        stored=stored,
     )
 
 

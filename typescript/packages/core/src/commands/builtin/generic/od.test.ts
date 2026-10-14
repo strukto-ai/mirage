@@ -14,7 +14,9 @@
 import { describe, expect, it } from 'vitest'
 
 import { UsageError } from '../../errors.ts'
-import { parseCount } from './od.ts'
+import { materialize } from '../../../io/types.ts'
+import { PathSpec } from '../../../types.ts'
+import { odGeneric, parseCount } from './od.ts'
 
 describe('od parseCount', () => {
   // strtoumax base 0 (0x hex, leading 0 octal), GNU size suffixes, and one
@@ -59,5 +61,68 @@ describe('od parseCount', () => {
     expect(() => parseCount('0x10000000000000000', '-j')).toThrow(
       new UsageError("od: -j argument '0x10000000000000000' too large", 1),
     )
+  })
+})
+
+const ENC = new TextEncoder()
+const DEC = new TextDecoder()
+
+describe('od skips and limits with ranged reads', () => {
+  // Mirrors python's test_od_skips_and_limits_with_ranged_reads.
+  const files: Record<string, string> = { '/a': 'abc', '/b': 'defgh' }
+  const p = (name: string): PathSpec =>
+    new PathSpec({ virtual: name, directory: '/', vfsPath: name.slice(1), rawPath: name })
+  const missing = (name: string): Error =>
+    Object.assign(new Error(`ENOENT: ${name}`), { code: 'ENOENT', path: name })
+  it.each([
+    [['/a', '/b'], 4, null, '0000004   e   f   g   h\n0000010\n', '', ['/b@1+4']],
+    [['/a', '/b'], 3, 2, '0000003   d   e\n0000005\n', '', ['/b@0+2']],
+    [['/a', '/b'], 1, 1, '0000001   b\n0000002\n', '', ['/a@1+1']],
+    [
+      ['/a', '/x', '/b'],
+      3,
+      2,
+      '0000003   d   e\n0000005\n',
+      'od: /x: No such file or directory\n',
+      ['/b@0+2'],
+    ],
+    [['/a', '/b'], 10, null, '', 'od: cannot skip past end of combined input\n', []],
+    [['/x'], 0, null, '', 'od: /x: No such file or directory\n', ['/x']],
+  ] as const)('%j -j %d -N %s', async (names, skip, limit, out, err, reads) => {
+    const read: string[] = []
+    const stream = async function* (q: PathSpec): AsyncIterable<Uint8Array> {
+      read.push(q.virtual)
+      await Promise.resolve()
+      const data = files[q.virtual]
+      if (data === undefined) throw missing(q.virtual)
+      yield ENC.encode(data)
+    }
+    const readRange = (q: PathSpec, offset: number, size: number | null): Promise<Uint8Array> => {
+      read.push(`${q.virtual}@${String(offset)}+${String(size)}`)
+      const data = ENC.encode(files[q.virtual] ?? '')
+      return Promise.resolve(data.subarray(offset, size === null ? undefined : offset + size))
+    }
+    const sizeOf = (q: PathSpec): Promise<number | null> => {
+      const data = files[q.virtual]
+      return data === undefined ? Promise.reject(missing(q.virtual)) : Promise.resolve(data.length)
+    }
+    const [stdout, io] = await odGeneric(
+      names.map(p),
+      stream,
+      null,
+      'o',
+      skip,
+      limit,
+      ['c'],
+      readRange,
+      sizeOf,
+    )
+    const errs = io.stderr === null ? '' : DEC.decode(await materialize(io.stderr))
+    expect([DEC.decode(await materialize(stdout)), errs, io.exitCode]).toEqual([
+      out,
+      err,
+      err === '' ? 0 : 1,
+    ])
+    expect(read).toEqual(reads)
   })
 })

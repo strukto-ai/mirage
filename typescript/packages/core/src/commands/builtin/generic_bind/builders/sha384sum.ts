@@ -15,15 +15,25 @@
 import { sha384sumGeneric } from '../../generic/sha384sum.ts'
 import {
   type GenericCommand,
+  boundUncached,
+  dirAwareStat,
   dirAwareStream,
   resolveGlobOf,
   type GenericCommandFn,
 } from '../adapter.ts'
+import type { PathSpec } from '../../../../types.ts'
 
 const sha384sum: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return sha384sumGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
+  const { checksum } = ops
+  return sha384sumGeneric(
+    resolved,
+    opts,
+    dirAwareStream(ops, accessor, opts),
+    dirAwareStat(ops, accessor, opts),
+    boundUncached(checksum && ((p: PathSpec, a: string) => checksum(accessor, p, a, idx))),
+  )
 }
 
 export const BUILDER: GenericCommand = {

@@ -16,11 +16,15 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import type { ByteSource } from '../../../io/types.ts'
+import { parseBase0 } from '../utils/size_suffix.ts'
+import { singleChunk } from '../utils/operands.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { PathSpec, ReadRangeFn } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
-import type { CommandFnResult, CommandOpts } from '../../config.ts'
+import type { CommandOpts } from '../../config.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
 import { extraOperandError, readFailExitCode } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
@@ -28,10 +32,17 @@ import { CommandName } from '../../spec/types.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-// xxd's exit for an OUTFILE it cannot open, and for a dump that seeks
-// backwards on a stream (vim's xxd 2024-12-07).
+// xxd's exit for an OUTFILE it cannot open, for an INFILE it cannot seek
+// where -s says, and for a dump that seeks backwards on a stream (vim's xxd
+// 2024-12-07).
 const OPEN_OUTPUT_EXIT = 3
+const CANNOT_SEEK_EXIT = 4
 const SEEK_BACK_EXIT = 5
+const CANNOT_SEEK = 'xxd: Sorry, cannot seek.\n'
+// A number as C's strtol reads it at base 0: optional space and sign, then
+// hex after 0x, octal after a bare 0, decimal otherwise; anything after the
+// digits is ignored.
+const STRTOL_PATTERN = /^\s*([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)/
 // The most NUL bytes one chunk carries when a dump's offset skips ahead.
 const GAP_CHUNK = 65536
 
@@ -58,8 +69,9 @@ async function* xxdDumpStream(
   cols: number,
   group: number,
   uppercase: boolean,
+  base = 0,
 ): AsyncIterable<Uint8Array> {
-  let offset = 0
+  let offset = base
   let leftover = new Uint8Array(0)
   const hexColumnWidth = cols * 2 + Math.floor(cols / group) - 1
   const emitRow = (row: Uint8Array): Uint8Array => {
@@ -259,6 +271,135 @@ async function* applyLimits(
 
 void padLeft
 
+/** `text` as C's `strtol(text, NULL, 0)` reads it: 0 when it holds no number.
+ * Mirrors Python's strtol. */
+export function strtol(text: string): number {
+  const match = STRTOL_PATTERN.exec(text)
+  if (match === null) return 0
+  const value = Number(parseBase0(match[2] ?? '0'))
+  return match[1] === '-' ? -value : value
+}
+
+/** `-s` as xxd reads it: `[+][-]offset`. `relative` (`+`) seeks from where
+ * INFILE stands, which is its start here; `back` (`-`) seeks back from its
+ * end. Mirrors Python's XxdSeek. */
+export interface XxdSeek {
+  readonly offset: number
+  readonly relative: boolean
+  readonly back: boolean
+}
+
+/** The `-s` operand. Mirrors Python's parse_seek. */
+export function parseSeek(raw: string): XxdSeek {
+  const relative = raw.startsWith('+')
+  const rest = relative ? raw.slice(1) : raw
+  const back = rest.startsWith('-')
+  return { offset: strtol(back ? rest.slice(1) : rest), relative, back }
+}
+
+async function* resumed(
+  held: Uint8Array,
+  rest: AsyncIterator<Uint8Array>,
+): AsyncIterable<Uint8Array> {
+  try {
+    if (held.byteLength > 0) yield held
+    for (;;) {
+      const next = await rest.next()
+      if (next.done === true) return
+      yield next.value
+    }
+  } finally {
+    await rest.return?.()
+  }
+}
+
+/** `source` with its first `count` bytes read off, or null when it ends
+ * first. Mirrors Python's _past. */
+async function past(
+  source: AsyncIterable<Uint8Array>,
+  count: number,
+): Promise<AsyncIterable<Uint8Array> | null> {
+  const iterator = chunks(source)
+  let held: Uint8Array = new Uint8Array()
+  let left = count
+  while (left > 0) {
+    const next = await iterator.next()
+    if (next.done === true) return null
+    held = next.value.subarray(Math.min(left, next.value.byteLength))
+    left -= next.value.byteLength - held.byteLength
+  }
+  return resumed(held, iterator)
+}
+
+/** `source` cut at `limit` bytes, closed once they are out. Mirrors Python's
+ * _limited. */
+async function* limited(
+  source: AsyncIterable<Uint8Array>,
+  limit: number | null,
+): AsyncIterable<Uint8Array> {
+  let left = limit
+  for await (const piece of chunks(source)) {
+    let chunk = piece
+    if (left !== null) {
+      chunk = chunk.subarray(0, left)
+      left -= chunk.byteLength
+    }
+    if (chunk.byteLength > 0) yield chunk
+    if (left === 0) break
+  }
+}
+
+/**
+ * INFILE from where `-s` puts it and within `-l`, and the offset its first
+ * byte has; null when xxd cannot seek there. A file seeks: past its end it
+ * dumps nothing, before its start it cannot, and a seek from its end needs its
+ * size. Where the mount reads ranges and the size is known, the dump is one
+ * ranged read. Stdin cannot seek, so it is read off, and ends too soon or
+ * seeks from its end only to fail. Mirrors Python's _seeked.
+ */
+async function seeked(
+  path: PathSpec | null,
+  read: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  stdin: ByteSource | null,
+  readRange: ReadRangeFn | null,
+  sizeOf: ((p: PathSpec) => Promise<number | null>) | null,
+  seek: XxdSeek,
+  limit: number,
+): Promise<[AsyncIterable<Uint8Array>, number] | null> {
+  const window = limit > 0 ? limit : null
+  if (path === null || isStdin(path)) {
+    let source = path === null ? resolveSource(stdin) : read(path)
+    if (seek.back) return null
+    if (seek.offset > 0) {
+      const after = await past(source, seek.offset)
+      if (after === null) return null
+      source = after
+    }
+    return [limited(source, window), Math.max(seek.offset, 0)]
+  }
+  let size = sizeOf !== null ? await sizeOf(path) : null
+  let data: Uint8Array | null = null
+  if (seek.back && !seek.relative && size === null) {
+    data = await materialize(read(path))
+    size = data.byteLength
+  }
+  const start = seek.back ? (seek.relative ? -seek.offset : (size ?? 0) - seek.offset) : seek.offset
+  if (start < 0) return null
+  if (data !== null) {
+    const end = window === null ? undefined : start + window
+    return [singleChunk(data.subarray(start, end)), start]
+  }
+  if (readRange !== null && size !== null && (start > 0 || window !== null)) {
+    let want = Math.max(size - start, 0)
+    if (window !== null) want = Math.min(want, window)
+    const got = want > 0 ? await readRange(path, start, want) : new Uint8Array()
+    return [singleChunk(got), start]
+  }
+  let source = read(path)
+  if (start > 0) source = (await past(source, start)) ?? singleChunk(new Uint8Array())
+  return [limited(source, window), start]
+}
+
 /**
  * Write the dump (or with -r the bytes) to OUTFILE, reading INFILE first, as
  * xxd opens it first. Mirrors Python's _write_output.
@@ -270,10 +411,10 @@ async function writeOutput(
   writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
   render: () => AsyncIterable<Uint8Array> | null,
-): Promise<CommandFnResult> {
+): Promise<[ByteSource | null, IOResult]> {
   const [input, target] = paths
   if (input === undefined || target === undefined) return [null, new IOResult()]
-  const failed = (p: PathSpec, err: unknown, exitCode: number): CommandFnResult => [
+  const failed = (p: PathSpec, err: unknown, exitCode: number): [ByteSource | null, IOResult] => [
     null,
     new IOResult({ stderr: ENC.encode(fsErrorLine('xxd', p, err)), exitCode }),
   ]
@@ -333,7 +474,7 @@ interface XxdFlags {
   readonly uppercase: boolean
   readonly cols: number
   readonly group: number
-  readonly skip: number
+  readonly seek: XxdSeek
   readonly limit: number
 }
 
@@ -350,8 +491,8 @@ function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
     uppercase: fl.asBool('u'),
     cols: count(fl.raw('c'), 16),
     group: count(fl.raw('g'), 2),
-    skip: count(fl.raw('s'), 0),
-    limit: count(fl.raw('args_l'), 0),
+    seek: parseSeek(fl.asStr('s') ?? ''),
+    limit: strtol(fl.asStr('args_l') ?? ''),
   }
 }
 
@@ -372,26 +513,35 @@ export async function xxdGeneric(
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
   writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null = null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
-): Promise<CommandFnResult> {
-  stream = stdinStream(stream, opts.stdin)
+  readRange: ReadRangeFn | null = null,
+  sizeOf: ((p: PathSpec) => Promise<number | null>) | null = null,
+): Promise<[ByteSource | null, IOResult]> {
+  stream = stdinStream(stream, opts.stdin, true)
   const parsed = parseFlags(opts.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
+  const { seek, limit, uppercase } = parsed
   let source: AsyncIterable<Uint8Array>
-  if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    source = stream(first)
+  let base = 0
+  if (parsed.reverse) {
+    source = paths[0] !== undefined ? stream(paths[0]) : resolveSource(opts.stdin)
+    if (seek.offset !== 0 || limit > 0) {
+      source = applyLimits(
+        source,
+        Math.max(seek.offset, 0),
+        limit > 0 ? limit : Number.MAX_SAFE_INTEGER,
+      )
+    }
   } else {
-    source = resolveSource(opts.stdin)
-  }
-  const { skip, limit, uppercase } = parsed
-  if (skip > 0 || limit > 0) {
-    source = applyLimits(source, skip, limit > 0 ? limit : Number.MAX_SAFE_INTEGER)
+    const found = await seeked(paths[0] ?? null, stream, opts.stdin, readRange, sizeOf, seek, limit)
+    if (found === null) {
+      return [null, new IOResult({ exitCode: CANNOT_SEEK_EXIT, stderr: ENC.encode(CANNOT_SEEK) })]
+    }
+    ;[source, base] = found
   }
   const render = (): AsyncIterable<Uint8Array> | null => {
     if (parsed.reverse) return null
     if (parsed.plain) return xxdPlainStream(source, uppercase)
-    return xxdDumpStream(source, parsed.cols, parsed.group, uppercase)
+    return xxdDumpStream(source, parsed.cols, parsed.group, uppercase, base)
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {

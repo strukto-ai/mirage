@@ -24,6 +24,7 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { readdir as boxReaddir } from '../../core/box/readdir.ts'
 import { read as boxRead, readStream as boxStream } from '../../core/box/read.ts'
+import { checksum as boxChecksum } from '../../core/box/checksum.ts'
 import { stat as boxStat } from '../../core/box/stat.ts'
 import { exists as boxExists } from '../../core/box/exists.ts'
 import { write as boxWrite } from '../../core/box/write.ts'
@@ -89,6 +90,14 @@ export class BoxVFS extends BaseVFS {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return boxStat(this.accessor, path, index)
+  }
+
+  override checksum(
+    path: PathSpec,
+    algorithm: string,
+    index?: IndexCacheStore,
+  ): Promise<string | null> {
+    return boxChecksum(this.accessor, path, algorithm, index)
   }
 
   override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {

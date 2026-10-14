@@ -18,6 +18,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_uncached,
     dir_aware_stream,
+    file_size,
     resolve_or_empty,
 )
 from mirage.commands.config import CommandIO, CommandOpts
@@ -39,6 +40,7 @@ async def wc(
         opts,
         dir_aware_stream(ops, accessor, opts),
         bound_uncached(ops.line_count, accessor, opts.index),
+        file_size(ops, accessor, opts),
     )
 
 

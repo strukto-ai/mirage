@@ -227,6 +227,8 @@ PageFetch: TypeAlias = Callable[[str | None], Awaitable[dict[str, Any]]]
 
 ReadBytesFn: TypeAlias = Callable[..., Awaitable[bytes]]
 ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]
+# A bound byte-window reader, called as ``read_range(path, offset=, size=)``.
+ReadRangeFn: TypeAlias = Callable[..., Awaitable[bytes]]
 # A "polymorphic" reader is the loose `read` contract head/tail/wc
 # accept: a backend may hand back materialized bytes, an awaitable of
 # bytes, or an async byte stream; ensure_stream normalizes downstream.

@@ -17,6 +17,7 @@ import {
   type GenericCommand,
   boundUncached,
   dirAwareStream,
+  fileSize,
   resolveGlobOf,
   type GenericCommandFn,
 } from '../adapter.ts'
@@ -32,6 +33,7 @@ const wc: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     opts,
     dirAwareStream(ops, accessor, opts),
     boundUncached(lineCount && ((p: PathSpec) => lineCount(accessor, p, idx))),
+    fileSize(ops, accessor, opts),
   )
 }
 

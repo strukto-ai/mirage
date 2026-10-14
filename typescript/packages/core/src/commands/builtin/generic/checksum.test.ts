@@ -119,3 +119,53 @@ describe('checksum --check', () => {
     ).rejects.toThrow('403 Forbidden')
   })
 })
+
+describe('a stored digest', () => {
+  const fake = (b: Uint8Array): Promise<string> => Promise.resolve(`h${DEC.decode(b)}`)
+
+  // Mirrors python's test_a_stored_digest_stands_in_for_the_read.
+  it('stands in for the read', async () => {
+    const reads: string[] = []
+    const asked: [string, string][] = []
+    const read = (p: PathSpec): AsyncIterable<Uint8Array> => {
+      reads.push(p.virtual)
+      return makeStream({ '/b': 'abc' })(p)
+    }
+    const stored = (p: PathSpec, algorithm: string): Promise<string | null> => {
+      asked.push([p.virtual, algorithm])
+      return Promise.resolve(p.virtual === '/a' ? 'f'.repeat(32) : null)
+    }
+    const result = await checksumGeneric(
+      [spec('/a'), spec('/b')],
+      opts({}),
+      read,
+      fake,
+      'md5sum',
+      () => Promise.resolve(null),
+      stored,
+    )
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe(
+      `${'f'.repeat(32)}  /a\nhabc  /b\n`,
+    )
+    expect(asked).toEqual([
+      ['/a', 'md5'],
+      ['/b', 'md5'],
+    ])
+    expect(reads).toEqual(['/b'])
+  })
+
+  // Mirrors python's test_check_reads_the_bytes_and_asks_no_stored_digest.
+  it('is never asked under -c', async () => {
+    const stored = (): Promise<string | null> => Promise.reject(new Error('asked under -c'))
+    const result = await checksumGeneric(
+      [spec('/list')],
+      opts({ check: true }),
+      makeStream({ '/list': `${DIGEST}  /f\n`, '/f': 'abc' }),
+      hasher,
+      'md5sum',
+      () => Promise.resolve(null),
+      stored,
+    )
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe('/f: OK\n')
+  })
+})

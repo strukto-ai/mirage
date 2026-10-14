@@ -286,6 +286,13 @@ export function commandIo(vfs: BaseVFS): CommandIO {
           ),
         }
       : {}),
+    ...(has('checksum')
+      ? {
+          checksum: withoutAccessor((path: PathSpec, algorithm: string, index?: IndexCacheStore) =>
+            vfs.checksum(path, algorithm, index),
+          ),
+        }
+      : {}),
     ...(has('follow')
       ? {
           follow: withoutAccessor((path: PathSpec, n: number, index?: IndexCacheStore) =>
@@ -307,9 +314,9 @@ export function commandIo(vfs: BaseVFS): CommandIO {
  * `op`, answering null for a file the read cache holds.
  *
  * For the calls that stand in for a read (`firstLines`, `lastLines`,
- * `lineCount`): a file the cache holds is read from there instead, so a warm
- * run sends nothing and prints what the cached copy holds, as the read it
- * replaces would. Mirrors Python's `bound_uncached`.
+ * `lineCount`, `checksum`): a file the cache holds is read from there
+ * instead, so a warm run sends nothing and prints what the cached copy holds,
+ * as the read it replaces would. Mirrors Python's `bound_uncached`.
  */
 export function boundUncached<T extends unknown[], R>(
   op: ((path: PathSpec, ...args: T) => Promise<R | null>) | undefined,
@@ -438,6 +445,10 @@ const DISPATCHED_SLOTS = {
     (dispatch: DispatchFn): CommandIO['lineCount'] =>
     async (_accessor, path) =>
       (await dispatchedCall(dispatch, 'line_count', path)) as number | null,
+  checksum:
+    (dispatch: DispatchFn): CommandIO['checksum'] =>
+    async (_accessor, path, algorithm) =>
+      (await dispatchedCall(dispatch, 'checksum', path, [algorithm])) as string | null,
   follow:
     (dispatch: DispatchFn): CommandIO['follow'] =>
     async (_accessor, path, n) =>
@@ -475,6 +486,7 @@ const DISPATCHED_WRITES: ReadonlySet<string> = new Set(
         'firstLines',
         'lastLines',
         'lineCount',
+        'checksum',
         'follow',
         'readTree',
         'filesContaining',
@@ -669,6 +681,28 @@ export function dirAwareStat<A extends Accessor>(
   opts: CommandOpts,
 ): (p: PathSpec) => Promise<FileStat> {
   return (p) => statRefusingDirs(ops, accessor, opts, p)
+}
+
+/**
+ * A regular file's size from its stat, for a command whose answer is the size
+ * alone (`wc -c`), as GNU takes it from `st_size`. Null reads the file
+ * instead: for a file the read cache holds, which is read from there as the
+ * read it replaces would be, for anything but a regular file (a device or a
+ * pipe has no size to trust), and for a size the stat does not know. A
+ * directory fails with EISDIR as `dirAwareStat` has it. Mirrors Python's
+ * `file_size`.
+ */
+export function fileSize<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  opts: CommandOpts,
+): (p: PathSpec) => Promise<number | null> {
+  return async (p) => {
+    const manager = activeCacheManager()
+    if (manager !== null && (await manager.isCached(p))) return null
+    const st = await statRefusingDirs(ops, accessor, opts, p)
+    return st.type === FileType.FILE ? st.size : null
+  }
 }
 
 // Stat through the backend, then merge the namespace attr overlay, so the
@@ -1070,7 +1104,7 @@ function refusedAfterAbort<T extends unknown[], R>(
  * flight settles on its own, and `readStream` is left alone because the
  * reader it returns is guarded as it is drained (`guardInput`). The
  * presence facts (stat, exists, readTree) and the line answers
- * (firstLines, lastLines, lineCount, follow) are refused too. They cost no
+ * (firstLines, lastLines, lineCount, checksum, follow) are refused too. They cost no
  * write, which is why the policy guard leaves them, but each one is a
  * request on an API-backed mount: `stat a b` whose first call outlives
  * the grace would start the second after the caller was released. The
@@ -1096,6 +1130,7 @@ export function withAbortGuard<A extends Accessor = Accessor>(
   if (ops.firstLines !== undefined) guarded.firstLines = refusedAfterAbort(signal, ops.firstLines)
   if (ops.lastLines !== undefined) guarded.lastLines = refusedAfterAbort(signal, ops.lastLines)
   if (ops.lineCount !== undefined) guarded.lineCount = refusedAfterAbort(signal, ops.lineCount)
+  if (ops.checksum !== undefined) guarded.checksum = refusedAfterAbort(signal, ops.checksum)
   if (ops.follow !== undefined) guarded.follow = refusedAfterAbort(signal, ops.follow)
   if (ops.write !== undefined) guarded.write = refusedAfterAbort(signal, ops.write)
   if (ops.mkdir !== undefined) guarded.mkdir = refusedAfterAbort(signal, ops.mkdir)

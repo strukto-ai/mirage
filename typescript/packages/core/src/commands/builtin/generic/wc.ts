@@ -247,8 +247,9 @@ export function shownCounts(flags: WcFlags): number {
  * of `lineCount` first, so a mount that can count a file's lines on its own
  * (a `COUNT(*)` on a table) does not send it; null, or no `lineCount`, reads
  * the file. A row counted that way has no byte size, so the columns are as
- * wide as the printed numbers. Mirrors Python's `wc_generic` and
- * `format_multi`.
+ * wide as the printed numbers. Bytes counted alone are asked of `sizeOf`
+ * first, as GNU takes a regular file's size from its stat. Mirrors Python's
+ * `wc_generic` and `format_multi`.
  */
 export async function wcGeneric(
   paths: PathSpec[],
@@ -256,6 +257,7 @@ export async function wcGeneric(
   opts: CommandOpts,
   stream: Stream,
   lineCount?: (p: PathSpec) => Promise<number | null>,
+  sizeOf?: (p: PathSpec) => Promise<number | null>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
@@ -273,14 +275,23 @@ export async function wcGeneric(
       lineCount !== undefined
         ? lineCount
         : null
+    const sized =
+      parsed.bytes &&
+      !(parsed.lines || parsed.words || parsed.chars || parsed.maxLineLength) &&
+      sizeOf !== undefined
+        ? sizeOf
+        : null
     let pushed = false
     for (const p of paths) {
       let counts: WcCounts
       try {
         const found = counted === null || isStdin(p) ? null : await counted(p)
+        const size = sized === null || isStdin(p) ? null : await sized(p)
         if (found !== null) {
           counts = { lines: found, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
           pushed = true
+        } else if (size !== null) {
+          counts = { lines: 0, words: 0, bytes: size, chars: 0, maxLineLength: 0 }
         } else {
           counts = await countsOf(stream(p), opts, parsed)
         }

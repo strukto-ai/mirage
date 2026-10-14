@@ -130,3 +130,49 @@ async def test_non_fs_read_failure_propagates():
             read_stream=read_stream,
             check=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_a_stored_digest_stands_in_for_the_read():
+    reads: list[str] = []
+    asked: list[tuple[str, str]] = []
+
+    async def read_stream(p: PathSpec):
+        reads.append(p.virtual)
+        yield b"abc"
+
+    async def stored(p: PathSpec, algorithm: str) -> str | None:
+        asked.append((p.virtual, algorithm))
+        return "f" * 32 if p.virtual == "/a" else None
+
+    read_bytes, _ = _fs({})
+    out, io = await checksum(
+        [_spec("/a"), _spec("/b")],
+        factory=_FakeDigest,
+        algorithm="md5",
+        read_bytes=read_bytes,
+        read_stream=read_stream,
+        stored=stored,
+    )
+    got = b"".join([chunk async for chunk in out])
+    assert got == f"{'f' * 32}  /a\n{_DIGEST}  /b\n".encode()
+    assert asked == [("/a", "md5"), ("/b", "md5")]
+    assert reads == ["/b"]
+
+
+@pytest.mark.asyncio
+async def test_check_reads_the_bytes_and_asks_no_stored_digest():
+    async def stored(p: PathSpec, algorithm: str) -> str | None:
+        raise AssertionError("asked a stored digest under -c")
+
+    read_bytes, read_stream = _fs({"/list": f"{_DIGEST}  /f\n", "/f": "abc"})
+    out, io = await checksum(
+        [_spec("/list")],
+        factory=_FakeDigest,
+        algorithm="md5",
+        read_bytes=read_bytes,
+        read_stream=read_stream,
+        check=True,
+        stored=stored,
+    )
+    assert (out, io.exit_code) == (b"/f: OK\n", 0)

@@ -35,6 +35,7 @@ from mirage.types import Limit, PathSpec
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.types import (
+    ChecksumOp,
     ExistsOp,
     FilesContainingOp,
     FirstLinesOp,
@@ -160,6 +161,7 @@ class CommandIO:
     first_lines: FirstLinesOp | None = None
     last_lines: LastLinesOp | None = None
     line_count: LineCountOp | None = None
+    checksum: ChecksumOp | None = None
     follow: FollowOp | None = None
     read_tree: ReadTreeOp | None = None
     glob_children: ChildMounts | None = None

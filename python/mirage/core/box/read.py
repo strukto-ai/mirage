@@ -31,11 +31,23 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.ranges import window_for
 
 
-async def _resolve_entry(
+async def file_entry(
     accessor: BoxAccessor,
     path: PathSpec,
-    index: IndexCacheStore,
+    index: IndexCacheStore = NULL_INDEX,
 ) -> IndexEntry:
+    """The index entry of the file at ``path``, listing its parent when
+    the index does not hold it.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): the file.
+        index (IndexCacheStore): listing cache, consulted for the file id.
+
+    Raises:
+        FileNotFoundError: nothing is there.
+        IsADirectoryError: a folder is.
+    """
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.vfs_path)
     key = path.vfs_path
@@ -78,7 +90,7 @@ async def read(
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
     """
-    entry = await _resolve_entry(accessor, path, index)
+    entry = await file_entry(accessor, path, index)
     timer = start_op()
     window = window_for(offset, size)
     data = await download_file(accessor.token_manager, entry.id, window)
@@ -116,7 +128,7 @@ async def read_stream(
         path (PathSpec): the path to read.
         index (IndexCacheStore): listing cache, consulted for the file id.
     """
-    entry = await _resolve_entry(accessor, path, index)
+    entry = await file_entry(accessor, path, index)
     rec = record_stream("read", path.virtual, "box")
     conditioned = writes_conditioned()
     digest = (

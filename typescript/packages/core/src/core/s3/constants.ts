@@ -19,3 +19,15 @@ export const CONDITION_LOST_CODES: ReadonlySet<string> = new Set([
   '409',
   'ConditionalRequestConflict',
 ])
+
+// The stores whose ETag is an object's MD5 for a single-part upload kept
+// unencrypted, so md5sum can take it instead of reading the object.
+export const MD5_ETAG_STORES: ReadonlySet<string> = new Set([
+  's3',
+  'r2',
+  'gcs',
+  'minio',
+  'ceph',
+  'digitalocean',
+  'wasabi',
+])

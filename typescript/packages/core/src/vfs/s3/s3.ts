@@ -15,7 +15,8 @@
 import type { S3Accessor } from '../../accessor/s3.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { appendByRewrite } from '../../core/generic/rewrite.ts'
-import { SCOPE_ERROR } from '../../core/s3/constants.ts'
+import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
+import { MD5_ETAG_STORES, SCOPE_ERROR } from '../../core/s3/constants.ts'
 import { copy as s3Copy } from '../../core/s3/copy.ts'
 import { create as s3Create } from '../../core/s3/create.ts'
 import { exists as s3Exists } from '../../core/s3/exists.ts'
@@ -79,6 +80,16 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
     return s3Stat(this.accessor, path, index)
+  }
+
+  override checksum(
+    path: PathSpec,
+    algorithm: string,
+    index?: IndexCacheStore,
+  ): Promise<string | null> {
+    if (!MD5_ETAG_STORES.has(this.name) || this.presigned) return Promise.resolve(null)
+    const aws = this.name === 's3' && this.resolvedEndpoint === undefined
+    return s3Checksum(this.accessor, path, algorithm, aws, index)
   }
 
   override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {

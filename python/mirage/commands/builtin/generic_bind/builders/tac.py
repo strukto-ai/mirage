@@ -18,6 +18,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
     dir_aware_stat,
+    file_size,
     resolve_or_empty,
 )
 from mirage.commands.config import CommandIO, CommandOpts
@@ -39,6 +40,8 @@ async def tac(
         opts,
         dir_aware_stat(ops, accessor, opts),
         bound_op(ops.read_stream, accessor, opts.index),
+        bound_op(ops.read_range, accessor, opts.index),
+        file_size(ops, accessor, opts),
     )
 
 

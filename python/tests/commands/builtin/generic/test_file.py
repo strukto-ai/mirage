@@ -22,17 +22,17 @@ def _make_backend(files: dict[str, tuple[bytes, ContentType]], dirs: set[str]):
             )
         raise FileNotFoundError(p.virtual)
 
-    async def read_bytes(p: PathSpec) -> bytes:
-        return files[p.virtual][0]
+    async def stream(p: PathSpec):
+        yield files[p.virtual][0]
 
-    return stat_fn, read_bytes
+    return stat_fn, stream
 
 
 @pytest.mark.asyncio
 async def test_file_missing_operand_raises():
-    stat_fn, read_bytes = _make_backend({}, set())
+    stat_fn, stream = _make_backend({}, set())
     with pytest.raises(ValueError):
-        await file_cmd([], read_bytes=read_bytes, stat_fn=stat_fn)
+        await file_cmd([], stream=stream, stat_fn=stat_fn)
 
 
 @pytest.mark.asyncio
@@ -42,10 +42,48 @@ async def test_file_read_error_logs_and_falls_back():
             name="x", size=1, type=FileType.FILE, content=ContentType.TEXT
         )
 
-    async def read_bytes(path):
+    async def stream(path):
         raise OSError("denied")
+        yield b""
+
+    out, _ = await file_cmd([_spec("x")], stream=stream, stat_fn=stat_fn)
+    assert b"x:" in out
+
+
+@pytest.mark.asyncio
+async def test_file_reads_only_the_first_bytes():
+    pulled: list[int] = []
+
+    async def stat_fn(path):
+        return FileStat(name="x", size=10**6, type=FileType.FILE)
+
+    async def stream(path):
+        for n in range(1000):
+            pulled.append(n)
+            yield b"%PDF-1.4\n" if n == 0 else b"x" * 1000
+
+    out, _ = await file_cmd([_spec("/x")], stream=stream, stat_fn=stat_fn)
+    assert out == b"/x: application/pdf\n"
+    assert len(pulled) == 2
+
+
+@pytest.mark.asyncio
+async def test_file_asks_a_ranged_read_for_the_header():
+    asked: list[tuple[int, int]] = []
+
+    async def stat_fn(path):
+        return FileStat(name="x", size=10**6, type=FileType.FILE)
+
+    async def stream(path):
+        raise AssertionError("streamed")
+        yield b""
+
+    async def read_range(path, *, offset, size):
+        asked.append((offset, size))
+        return b"\x89PNG\r\n\x1a\n"
 
     out, _ = await file_cmd(
-        [_spec("x")], read_bytes=read_bytes, stat_fn=stat_fn
+        [_spec("/x")], stream=stream, stat_fn=stat_fn, read_range=read_range
     )
-    assert b"x:" in out
+    assert out == b"/x: image/png\n"
+    assert asked == [(0, 512)]

@@ -14,8 +14,10 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.od import parse_count
+from mirage.commands.builtin.generic.od import od_generic, parse_count
 from mirage.commands.errors import UsageError
+from mirage.io.stream import materialize
+from mirage.types import PathSpec
 
 
 # strtoumax base 0 (0x hex, leading 0 octal), GNU size suffixes, and one
@@ -70,3 +72,89 @@ def test_uintmax_boundary_is_exact():
     assert str(exc.value) == (
         "od: -j argument '0x10000000000000000' too large"
     )
+
+
+def _files(files: dict[str, bytes], read: list[str]):
+    async def read_stream(path):
+        read.append(path.virtual)
+        if path.virtual not in files:
+            raise FileNotFoundError(
+                2, "No such file or directory", path.virtual
+            )
+        yield files[path.virtual]
+
+    async def read_range(path, *, offset, size):
+        read.append(f"{path.virtual}@{offset}+{size}")
+        return files[path.virtual][offset : offset + size]
+
+    async def size_of(path):
+        if path.virtual not in files:
+            raise FileNotFoundError(
+                2, "No such file or directory", path.virtual
+            )
+        return len(files[path.virtual])
+
+    return read_stream, read_range, size_of
+
+
+def _p(name: str) -> PathSpec:
+    return PathSpec(
+        virtual=name, directory="/", vfs_path=name[1:], raw_path=name
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "names,skip,limit,out,err,reads",
+    [
+        (
+            ["/a", "/b"],
+            4,
+            None,
+            "0000004   e   f   g   h\n0000010\n",
+            "",
+            ["/b@1+4"],
+        ),
+        (["/a", "/b"], 3, 2, "0000003   d   e\n0000005\n", "", ["/b@0+2"]),
+        (["/a", "/b"], 1, 1, "0000001   b\n0000002\n", "", ["/a@1+1"]),
+        (
+            ["/a", "/x", "/b"],
+            3,
+            2,
+            "0000003   d   e\n0000005\n",
+            "od: /x: No such file or directory\n",
+            ["/b@0+2"],
+        ),
+        (
+            ["/a", "/b"],
+            10,
+            None,
+            "",
+            "od: cannot skip past end of combined input\n",
+            [],
+        ),
+        (["/x"], 0, None, "", "od: /x: No such file or directory\n", ["/x"]),
+    ],
+)
+async def test_od_skips_and_limits_with_ranged_reads(
+    names, skip, limit, out, err, reads
+):
+    read: list[str] = []
+    stream, read_range, size_of = _files({"/a": b"abc", "/b": b"defgh"}, read)
+    stdout, io = await od_generic(
+        [_p(n) for n in names],
+        read_stream=stream,
+        read_range=read_range,
+        size_of=size_of,
+        skip=skip,
+        limit=limit,
+        formats=["c"],
+    )
+    got = b"" if stdout is None else await materialize(stdout)
+    errs = b"" if io.stderr is None else await materialize(io.stderr)
+    assert (got.decode(), errs.decode(), io.exit_code) == (
+        out,
+        err,
+        1 if err else 0,
+    )
+    assert read == reads

@@ -132,6 +132,44 @@ async def read_file_versioned(
     return data
 
 
+async def file_entry(
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> IndexEntry:
+    """The index entry of the file at ``path``, listing its parent when
+    the index does not hold it.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        path (PathSpec): the file.
+        index (IndexCacheStore): listing cache, consulted for the file id.
+
+    Raises:
+        FileNotFoundError: nothing is there.
+        IsADirectoryError: a folder is.
+    """
+    virtual = path.virtual
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    key = path.vfs_path
+    virtual_key = prefix + "/" + key if prefix else "/" + key
+    parent_key = posixpath.dirname(virtual_key) or "/"
+    parent_path = PathSpec.from_str_path(
+        parent_key, mount_key(parent_key, prefix)
+    )
+    warm = (
+        partial(readdir, accessor, parent_path, index)
+        if parent_key != virtual_key
+        else None
+    )
+    entry = await entry_or_warm(index, virtual_key, warm)
+    if entry is None:
+        raise enoent(virtual)
+    if entry.resource_type in DIRECTORY_RESOURCE_TYPES:
+        raise eisdir(virtual)
+    return entry
+
+
 async def read(
     accessor: GDriveAccessor,
     path: PathSpec,
@@ -153,23 +191,7 @@ async def read(
         size (int | None): how many bytes, or None for the rest.
     """
     virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    key = path.vfs_path
-    virtual_key = prefix + "/" + key if prefix else "/" + key
-    parent_key = posixpath.dirname(virtual_key) or "/"
-    parent_path = PathSpec.from_str_path(
-        parent_key, mount_key(parent_key, prefix)
-    )
-    warm = (
-        partial(readdir, accessor, parent_path, index)
-        if parent_key != virtual_key
-        else None
-    )
-    entry = await entry_or_warm(index, virtual_key, warm)
-    if entry is None:
-        raise enoent(virtual)
-    if entry.resource_type in DIRECTORY_RESOURCE_TYPES:
-        raise eisdir(virtual)
+    entry = await file_entry(accessor, path, index)
     if entry.resource_type not in NATIVE_RESOURCE_TYPES:
         return await read_file_versioned(
             accessor.token_manager, entry.id, virtual, entry, offset, size

@@ -840,6 +840,13 @@ export type ReadStreamFn<Args extends unknown[] = [path: PathSpec]> = (
   ...args: Args
 ) => AsyncIterable<Uint8Array>
 
+/** A bound byte-window reader, called as `readRange(path, offset, size)`. */
+export type ReadRangeFn = (
+  path: PathSpec,
+  offset: number,
+  size: number | null,
+) => Promise<Uint8Array>
+
 export type CopyFn<Args extends unknown[] = [src: PathSpec, target: PathSpec]> = (
   ...args: Args
 ) => Promise<void>

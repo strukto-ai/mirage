@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "id": "wc_c_takes_each_size",
+      "seq": 17000018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc -c /data/a.txt /data/b.txt /data/empty.txt /data/binary.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "24 /data/a.txt\n 6 /data/b.txt\n 0 /data/empty.txt\n12 /data/binary.bin\n42 total\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "wc_c_on_a_directory",
+      "seq": 17000019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc -c /data/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "0 /data/sub\n",
+        "stderr": "wc: /data/sub: Is a directory\n"
+      },
+      "flags": [
+        "c"
+      ]
+    }
+  ]
+}

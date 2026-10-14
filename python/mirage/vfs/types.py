@@ -328,6 +328,20 @@ class LineCountOp(Protocol):
     ) -> Awaitable[int | None]: ...
 
 
+class ChecksumOp(Protocol):
+    """The digest ``path``'s backend keeps for ``algorithm``; None when
+    the file is to be read and hashed."""
+
+    def __call__(
+        self,
+        accessor: Any,
+        path: PathSpec,
+        algorithm: str,
+        /,
+        index: IndexCacheStore = ...,
+    ) -> Awaitable[str | None]: ...
+
+
 class ReadTreeOp(Protocol):
     """Every entry under ``path``, keyed by its path below it; None when
     the directory is to be walked."""

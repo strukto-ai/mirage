@@ -17,6 +17,7 @@ from mirage.commands.builtin.generic.cmp import cmp_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
+    file_size,
 )
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
@@ -37,7 +38,8 @@ async def cmp_cmd(
         resolved,
         list(texts),
         opts,
-        bound_op(ops.read_bytes, accessor, opts.index),
+        bound_op(ops.read_stream, accessor, opts.index),
+        file_size(ops, accessor, opts),
     )
 
 

@@ -38,11 +38,18 @@ CALLS = {**_VFS_CALLS, **NAMESPACE_CALLS}
 # value can serve them (sliced for ranged reads) without touching the
 # backend, subject to the reconciler's consistency check. A call that
 # answers for part of a file (first_lines, last_lines, line_count,
-# follow, lines_containing) is neither served from the cache nor kept
-# in it; its caller reads a cached file instead.
+# checksum, follow, lines_containing) is neither served from the cache
+# nor kept in it; its caller reads a cached file instead.
 DISPATCH_READ_OPS = call_names(
     _VFS_CALLS, effects={Effect.READ}, targets={Target.FILE}
-) - {"first_lines", "last_lines", "line_count", "follow", "lines_containing"}
+) - {
+    "first_lines",
+    "last_lines",
+    "line_count",
+    "checksum",
+    "follow",
+    "lines_containing",
+}
 
 # Backend mutations that run the dispatcher's post-write bookkeeping:
 # file-cache eviction, parent index invalidation, and overlay time

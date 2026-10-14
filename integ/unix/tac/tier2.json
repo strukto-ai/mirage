@@ -13,7 +13,7 @@
       "seq": 910046,
       "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'a|b|c|' | tac --before --separator='|'",
-      "expect": { "exit": 0, "stdout": "|c|b|a", "stderr": "" },
+      "expect": { "exit": 0, "stdout": "||c|ba", "stderr": "" },
       "flags": ["before", "separator"]
     },
     {

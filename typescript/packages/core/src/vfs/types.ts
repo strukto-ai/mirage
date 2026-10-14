@@ -208,6 +208,14 @@ export type LineCountOp<A extends Accessor = Accessor> = (
   index?: IndexCacheStore,
 ) => Promise<number | null>
 
+/** The digest `path`'s backend keeps for `algorithm`; null when the file is to be read and hashed. */
+export type ChecksumOp<A extends Accessor = Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  algorithm: string,
+  index?: IndexCacheStore,
+) => Promise<string | null>
+
 /** Every entry under `path`, keyed by its path below it; null when the directory is to be walked. */
 export type ReadTreeOp<A extends Accessor = Accessor> = (
   accessor: A,

@@ -367,6 +367,7 @@ async def format_multi(
     max_line_length: bool = False,
     total: str = "auto",
     line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[bytes, bytes, list[CountedRun]]:
     """Format wc output for multiple already-resolved paths.
 
@@ -380,7 +381,8 @@ async def format_multi(
     ``line_count`` first, so a mount that can count a file's lines on
     its own (a ``COUNT(*)`` on a table) does not send it; a row counted
     that way has no byte size, so the columns are as wide as the
-    printed numbers.
+    printed numbers. Bytes counted alone are asked of ``size_of``
+    first, as GNU takes a regular file's size from its stat.
 
     Args:
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
@@ -389,6 +391,9 @@ async def format_multi(
         line_count (Callable[[PathSpec], Awaitable[int | None]] | None):
             the mount's ``line_count`` called as ``line_count(path)``;
             None, or an answer of None, reads the file.
+        size_of (Callable[[PathSpec], Awaitable[int | None]] | None):
+            a regular file's size, called as ``size_of(path)``; None, or
+            an answer of None, reads the file.
 
     Returns:
         tuple[bytes, bytes, list[CountedRun]]: Encoded wc output (``b""``
@@ -414,6 +419,13 @@ async def format_multi(
         and line_count is not None
         else None
     )
+    sized = (
+        size_of
+        if bytes_
+        and not (lines or words or chars or max_line_length)
+        and size_of is not None
+        else None
+    )
     pushed = False
     for path in paths:
         try:
@@ -422,9 +434,16 @@ async def format_multi(
                 if counted is not None and not is_stdin(path)
                 else None
             )
+            size = (
+                await sized(path)
+                if sized is not None and not is_stdin(path)
+                else None
+            )
             if found is not None:
                 counts = WCCounts(lines=found)
                 pushed = True
+            elif size is not None:
+                counts = WCCounts(bytes_=size)
             else:
                 source = read(path)
                 if inspect.isawaitable(source):
@@ -474,6 +493,7 @@ async def wc_generic(
     opts: CommandOpts,
     stream: PolymorphicReadFn,
     line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run wc over resolved operands, GNU semantics; mirrors wcGeneric.
 
@@ -481,8 +501,8 @@ async def wc_generic(
     dir-aware stream, so a directory operand reports ``Is a directory``);
     everything else lives here: flag parsing, per-operand
     report-and-continue via ``format_multi``, the total row, and the
-    stdin fallback. wc reads every operand anyway, so the read itself is
-    the probe and no separate stat is taken.
+    stdin fallback. A read is its own probe, so no separate stat is
+    taken, except under ``-c`` alone, where the stat is the answer.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -493,6 +513,8 @@ async def wc_generic(
         line_count (Callable[[PathSpec], Awaitable[int | None]] | None):
             the mount's ``line_count``, asked for ``-l`` alone (see
             ``format_multi``).
+        size_of (Callable[[PathSpec], Awaitable[int | None]] | None):
+            a regular file's size, asked for ``-c`` alone.
     """
     try:
         parsed = parse_flags(opts.flags)
@@ -514,6 +536,7 @@ async def wc_generic(
             max_line_length=parsed.max_line_length,
             total=parsed.total,
             line_count=line_count,
+            size_of=size_of,
         )
         io = operands_io(err)
         io.counted_runs = runs

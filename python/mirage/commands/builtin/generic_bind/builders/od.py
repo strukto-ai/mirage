@@ -4,6 +4,7 @@ from mirage.commands.builtin.generic.od import parse_count
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
+    file_size,
     resolve_or_empty,
 )
 from mirage.commands.config import CommandIO, CommandOpts
@@ -34,6 +35,8 @@ async def od(
     return await generic_od(
         paths,
         read_stream=bound_op(ops.read_stream, accessor, opts.index),
+        read_range=bound_op(ops.read_range, accessor, opts.index),
+        size_of=file_size(ops, accessor, opts),
         stdin=opts.stdin,
         address_radix=fl.as_str("address_radix") or "o",
         skip=(parse_count(skip_value, "-j") if skip_value is not None else 0),

@@ -74,7 +74,8 @@ Only `readdir`, `read`, and `stat` are required. Mirage derives a stream from
 `read`, existence checks from `stat`, and treats the resource as remote and
 available. A window of a file is cut from the whole `read` unless the class
 sets `readsRanges` true; then `read(path, index, offset, size)` receives the
-window (`size === null` means through EOF) and fetches only that. A derived
+window (`size === null` means through EOF) and fetches only that, and `file`,
+`od -j`, `xxd -s` and `tac` then read only the bytes they show. A derived
 stream still fetches the entire file; define `readStream` for large files.
 
 `readdir` returns each child's full virtual path (the directory's
@@ -86,7 +87,7 @@ Every other function is optional, and each stands alone:
 | Functions | Purpose |
 | --- | --- |
 | `readdir`, `read`, `stat` | Required filesystem behavior. |
-| `readStream`, `exists`, `readTree`, `firstLines`, `lastLines`, `lineCount`, `follow` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines)). |
+| `readStream`, `exists`, `readTree`, `firstLines`, `lastLines`, `lineCount`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rmR`, `rename`, `copy`, `dirCopy`, `truncate`, `setattr` | Individually supported mutations. |
 | `search`, `searchMany` | Optional resource search. |
 | `filesContaining`, `linesContaining`, `beforeFullScan` | Optional: let grep and rg skip what your search rules out, and refuse a scan of every file. |

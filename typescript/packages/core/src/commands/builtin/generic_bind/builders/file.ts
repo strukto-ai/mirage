@@ -18,11 +18,13 @@ import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../ad
 const file: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
+  const { readRange } = ops
   return fileGeneric(
     resolved,
     opts,
     (p) => ops.stat(accessor, p, idx),
-    (p) => ops.readBytes(accessor, p, idx),
+    (p) => ops.readStream(accessor, p, idx),
+    readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
   )
 }
 

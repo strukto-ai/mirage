@@ -15,6 +15,7 @@
 import { publishRead, writesConditioned } from '../../cache/context.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
+import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { record, recordStream, startOp } from '../../observe/context.ts'
@@ -26,6 +27,37 @@ import { readdir } from './readdir.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { windowFor } from '../../utils/ranges.ts'
+
+/**
+ * The index entry of the file at `path`, listing its parent when the index
+ * does not hold it. Rejects ENOENT when nothing is there and EISDIR when a
+ * folder is. Mirrors Python's `file_entry`.
+ */
+export async function fileEntry(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<IndexEntry> {
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  let p = path.virtual
+  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
+  const key = stripSlash(p)
+  if (key === '') throw eisdir(path.virtual)
+  if (index === undefined) throw enoent(path.virtual)
+  const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
+
+  const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
+  const entry = await entryOrWarm(
+    index,
+    virtualKey,
+    parentKey !== virtualKey
+      ? () => readdir(accessor, PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix)), index)
+      : null,
+  )
+  if (entry === null) throw enoent(path.virtual)
+  if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
+  return entry
+}
 
 /**
  * Read a file, optionally only a byte range of it. On a `write: conditional`
@@ -45,24 +77,7 @@ export async function read(
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
   const window = windowFor(options?.offset ?? 0, options?.size ?? null)
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  let p = path.virtual
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
-  if (key === '') throw eisdir(path.virtual)
-  if (index === undefined) throw enoent(path.virtual)
-  const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
-
-  const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-  const entry = await entryOrWarm(
-    index,
-    virtualKey,
-    parentKey !== virtualKey
-      ? () => readdir(accessor, PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix)), index)
-      : null,
-  )
-  if (entry === null) throw enoent(path.virtual)
-  if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
+  const entry = await fileEntry(accessor, path, index)
   const timer = startOp()
   const data = await downloadFile(accessor.tokenManager, entry.id, window)
   // Only a whole read through a row with a sha1 can yield a token, so nothing
@@ -98,24 +113,7 @@ export async function* readStream(
   path: PathSpec,
   index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  let p = path.virtual
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
-  if (key === '') throw eisdir(path.virtual)
-  if (index === undefined) throw enoent(path.virtual)
-  const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
-
-  const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-  const entry = await entryOrWarm(
-    index,
-    virtualKey,
-    parentKey !== virtualKey
-      ? () => readdir(accessor, PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix)), index)
-      : null,
-  )
-  if (entry === null) throw enoent(path.virtual)
-  if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
+  const entry = await fileEntry(accessor, path, index)
   const rec = recordStream('read', path.virtual, 'box')
   const conditioned = writesConditioned(path)
   const digest = rec !== null && entryToken(entry) !== null ? new Sha1() : null

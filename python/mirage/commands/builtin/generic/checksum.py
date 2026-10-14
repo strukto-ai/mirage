@@ -146,6 +146,8 @@ class Digest(Protocol):
 
 
 DigestFactory = Callable[..., Digest]
+# The mount's stored digest of a file for an algorithm, or None to read it.
+StoredDigest = Callable[[PathSpec, str], Awaitable[str | None]]
 
 
 def _hash_line(
@@ -180,6 +182,7 @@ async def _hash_stream(
 
 async def _hash_multi(
     paths: list[PathSpec],
+    digests: list[str | None],
     read_stream: Callable[..., AsyncIterator[bytes]],
     factory: DigestFactory,
     algorithm: str,
@@ -187,13 +190,13 @@ async def _hash_multi(
     tag: bool,
     zero: bool,
 ) -> AsyncIterator[bytes]:
-    for p in paths:
-        h = factory()
-        async for chunk in read_stream(p):
-            h.update(chunk)
-        yield _hash_line(
-            h.hexdigest(), p.raw_path, algorithm, binary, tag, zero
-        )
+    for p, digest in zip(paths, digests):
+        if digest is None:
+            h = factory()
+            async for chunk in read_stream(p):
+                h.update(chunk)
+            digest = h.hexdigest()
+        yield _hash_line(digest, p.raw_path, algorithm, binary, tag, zero)
 
 
 _PLAIN_LINE = re.compile(r"^([0-9a-fA-F]+) [ *](.*)$")
@@ -447,7 +450,33 @@ async def checksum(
     quiet: bool = False,
     warn: bool = False,
     cwd: PathSpec | str = "/",
+    stored: StoredDigest | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Hash each operand, or with ``check`` verify each checksum list.
+
+    An operand's digest is asked of ``stored`` first, the one the
+    mount keeps, and the file is read only when there is none; a list
+    under ``check`` is always verified against the bytes.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        factory (DigestFactory): the digest constructor.
+        algorithm (str): its name, e.g. ``"md5"``.
+        read_bytes (Callable): bound whole reader.
+        read_stream (Callable): bound streamed reader.
+        stdin (ByteSource | None): the line's input.
+        check (bool): -c.
+        binary (bool): -b.
+        tag (bool): --tag.
+        zero (bool): -z.
+        strict (bool): --strict.
+        ignore_missing (bool): --ignore-missing.
+        status (bool): --status.
+        quiet (bool): --quiet.
+        warn (bool): -w.
+        cwd (PathSpec | str): where a list's names resolve.
+        stored (StoredDigest | None): the mount's stored digest.
+    """
     if check and paths:
         if isinstance(cwd, PathSpec):
             cwd_dir = cwd.virtual
@@ -488,8 +517,16 @@ async def checksum(
             exit_code=exit_code, stderr=b"".join(errs) or None
         )
     if paths:
+        digests = [
+            (
+                await stored(p, algorithm)
+                if stored is not None and not is_stdin(p)
+                else None
+            )
+            for p in paths
+        ]
         return _hash_multi(
-            paths, read_stream, factory, algorithm, binary, tag, zero
+            paths, digests, read_stream, factory, algorithm, binary, tag, zero
         ), IOResult()
     source = resolve_source(stdin)
     return _hash_stream(
@@ -507,6 +544,7 @@ async def checksum_generic(
     factory: DigestFactory,
     algorithm: str,
     name: str,
+    stored: StoredDigest | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run a GNU ``*sum`` over resolved operands; mirrors checksumGeneric.
 
@@ -525,6 +563,8 @@ async def checksum_generic(
         factory (DigestFactory): Digest constructor, e.g. hashlib.md5.
         algorithm (str): Digest name for rendered lines, e.g. ``"md5"``.
         name (str): The invoked command name, for its spec and stderr.
+        stored (StoredDigest | None): the mount's ``checksum``, the
+            digest it keeps, asked before an operand is read.
     """
     parsed = parse_flags(opts.flags, name)
     stat = stdin_stat(stat)
@@ -565,9 +605,16 @@ async def checksum_generic(
             tag=parsed.tag,
             zero=parsed.zero,
             cwd=opts.cwd,
+            stored=stored,
         ),
         err,
     )
 
 
-__all__ = ["Digest", "DigestFactory", "checksum", "checksum_generic"]
+__all__ = [
+    "Digest",
+    "DigestFactory",
+    "StoredDigest",
+    "checksum",
+    "checksum_generic",
+]

@@ -99,3 +99,44 @@ describe('wc asks the mount for a line count', () => {
     expect(reads).toEqual(['/bb', '/a', '/bb'])
   })
 })
+
+describe('wc takes bytes alone from the size', () => {
+  // Mirrors python's test_bytes_alone_come_from_the_size.
+  it.each([
+    [{ bytes: true }, true, false],
+    [{ bytes: true, lines: true }, false, true],
+    [{ chars: true }, false, true],
+  ])('flags %j', async (flags, sized, read) => {
+    const reads: string[] = []
+    const asked: string[] = []
+    const stream = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      reads.push(p.virtual)
+      await Promise.resolve()
+      yield new TextEncoder().encode('abc\n')
+    }
+    const sizeOf = (p: PathSpec): Promise<number | null> => {
+      asked.push(p.virtual)
+      return Promise.resolve(4)
+    }
+    const opts = { stdin: null, flags, cwd: '/', vfs: null } as unknown as CommandOpts
+    await wcGeneric([PathSpec.fromStrPath('/f')], [], opts, stream, undefined, sizeOf)
+    expect([asked.length > 0, reads.length > 0]).toEqual([sized, read])
+  })
+
+  it('reads a file whose size is unknown', async () => {
+    const stream = async function* (): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield new TextEncoder().encode('abcde')
+    }
+    const opts = {
+      stdin: null,
+      flags: { bytes: true },
+      cwd: '/',
+      vfs: null,
+    } as unknown as CommandOpts
+    const result = await wcGeneric([PathSpec.fromStrPath('/f')], [], opts, stream, undefined, () =>
+      Promise.resolve(null),
+    )
+    expect(new TextDecoder().decode(await materialize(result?.[0] ?? null))).toBe('5 /f\n')
+  })
+})

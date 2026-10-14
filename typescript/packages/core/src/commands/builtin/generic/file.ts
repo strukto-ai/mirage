@@ -17,10 +17,17 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { operandStat } from '../utils/operands.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { DEVICE_NUMBERS_KEY, FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import {
+  DEVICE_NUMBERS_KEY,
+  FileType,
+  type FileStat,
+  type PathSpec,
+  type ReadRangeFn,
+} from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { detectFileType, formatFileResult } from '../file_sniff.ts'
-import { MIME_SYMLINK } from '../constants.ts'
+import { FILE_HEADER_BYTES, MIME_SYMLINK } from '../constants.ts'
+import { readPrefix } from '../../../io/cooperative.ts'
 import { LINK_TARGET_KEY } from '../../../types.ts'
 import type { LinkView } from '../../../view/types.ts'
 import { CycleError } from '../../../utils/path.ts'
@@ -74,11 +81,27 @@ function specialDescription(s: FileStat, mime: boolean): string | null {
     : 'character special'
 }
 
+/**
+ * The first bytes of a file, the most `file` sniffs: one ranged read where the
+ * mount has one, else the stream, closed once they are in. Mirrors Python's
+ * _header.
+ */
+async function header(
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  readRange: ReadRangeFn | null,
+  p: PathSpec,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  if (readRange !== null) return readRange(p, 0, FILE_HEADER_BYTES)
+  return readPrefix(stream(p), FILE_HEADER_BYTES, signal)
+}
+
 export async function fileGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stat: (p: PathSpec) => Promise<FileStat>,
-  read: (p: PathSpec) => Promise<Uint8Array>,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  readRange: ReadRangeFn | null = null,
 ): Promise<CommandFnResult> {
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('file: missing operand\n') })]
@@ -108,14 +131,13 @@ export async function fileGeneric(
       lines.push(formatFileResult(p.rawPath, special, brief, false))
       continue
     }
-    let header: Uint8Array
+    let head: Uint8Array
     try {
-      const raw = await read(p)
-      header = raw.subarray(0, 512)
+      head = await header(stream, readRange, p, opts.signal)
     } catch {
-      header = new Uint8Array(0)
+      head = new Uint8Array(0)
     }
-    const result = detectFileType(header, s)
+    const result = detectFileType(head, s)
     lines.push(formatFileResult(p.rawPath, result, brief, mime))
   }
   const out: ByteSource = formatRecords(lines)

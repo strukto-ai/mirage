@@ -125,6 +125,7 @@ def test_only_the_posix_calls_remove_move_or_copy_a_name(effect, names):
 BUILT_INS = {
     "append": (Effect.WRITE, Target.FILE, True),
     "before_full_scan": (Effect.READ, Target.DIR, False),
+    "checksum": (Effect.READ, Target.FILE, False),
     "copy": (Effect.COPY, Target.FILE, False),
     "create": (Effect.WRITE, Target.FILE, True),
     "dir_copy": (Effect.COPY, Target.DIR, False, True),

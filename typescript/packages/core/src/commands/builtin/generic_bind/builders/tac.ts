@@ -16,6 +16,7 @@ import { tacGeneric } from '../../generic/tac.ts'
 import {
   type GenericCommand,
   dirAwareStream,
+  fileSize,
   resolveGlobOf,
   type GenericCommandFn,
 } from '../adapter.ts'
@@ -23,7 +24,14 @@ import {
 const tac: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return tacGeneric(resolved, opts, dirAwareStream(ops, accessor, opts))
+  const { readRange } = ops
+  return tacGeneric(
+    resolved,
+    opts,
+    dirAwareStream(ops, accessor, opts),
+    readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
+    fileSize(ops, accessor, opts),
+  )
 }
 
 export const BUILDER: GenericCommand = {

@@ -17,21 +17,45 @@ import type { PathSpec } from '../../../types.ts'
 import { md5Hex } from '../../../utils/hash.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { formatRecords } from '../utils/output.ts'
-import { operandsIo, readOperands } from '../utils/operands.ts'
+import { operandsIo } from '../utils/operands.ts'
+import { isStdin } from '../utils/stream.ts'
+import { isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import type { StoredDigest } from './checksum.ts'
 
+/**
+ * Run BSD md5 over resolved operands. An operand's digest is asked of
+ * `stored` first, once `stat` has found a file there, and the file is read
+ * only when there is none. Mirrors Python's md5_generic.
+ */
 export async function md5Generic(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  stat?: (p: PathSpec) => Promise<unknown>,
+  stored?: StoredDigest,
 ): Promise<CommandFnResult> {
   const lines: string[] = []
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the good hashes still
     // print (GNU md5sum).
-    const [ok, err] = await readOperands(paths, stream, 'md5')
+    let err = ''
+    for (const p of paths) {
+      try {
+        let digest: string | null = null
+        if (stat !== undefined && stored !== undefined && !isStdin(p)) {
+          await stat(p)
+          digest = await stored(p, 'md5')
+        }
+        digest ??= md5Hex(await materialize(stream(p)))
+        lines.push(`${digest}  ${p.rawPath}`)
+      } catch (e) {
+        if (!isFsError(e)) throw e
+        err += fsErrorLine('md5', p, e)
+      }
+    }
     const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    for (const o of ok) lines.push(`${md5Hex(o.data)}  ${o.path.rawPath}`)
+    if (lines.length === 0 && err !== '') return [null, io]
     const out: ByteSource = formatRecords(lines)
     return [out, io]
   }

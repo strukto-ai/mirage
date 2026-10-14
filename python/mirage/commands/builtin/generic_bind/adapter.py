@@ -151,9 +151,9 @@ def bound_uncached(
     cache holds.
 
     For the calls that stand in for a read (``first_lines``,
-    ``last_lines``, ``line_count``): a file the cache holds is read from
-    there instead, so a warm run sends nothing and prints what the cached
-    copy holds, as the read it replaces would.
+    ``last_lines``, ``line_count``, ``checksum``): a file the cache holds
+    is read from there instead, so a warm run sends nothing and prints
+    what the cached copy holds, as the read it replaces would.
 
     Args:
         fn (OperationFn | None): backend op ``(accessor, path, *args,
@@ -392,6 +392,7 @@ def command_io(vfs: BaseVFS) -> CommandIO:
         first_lines=slot("first_lines"),
         last_lines=slot("last_lines"),
         line_count=slot("line_count"),
+        checksum=slot("checksum"),
         follow=slot("follow"),
         read_tree=slot("read_tree"),
     )
@@ -485,6 +486,7 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "first_lines": ("first_lines", ("n", "index")),
     "last_lines": ("last_lines", ("n", "index")),
     "line_count": ("line_count", ("index",)),
+    "checksum": ("checksum", ("algorithm", "index")),
     "follow": ("follow", ("n", "index")),
     "files_containing": ("files_containing", ("text",)),
     "lines_containing": ("lines_containing", ("text",)),
@@ -496,6 +498,7 @@ _DISPATCHED_WRITES = frozenset(_DISPATCHED_SLOTS) - {
     "first_lines",
     "last_lines",
     "line_count",
+    "checksum",
     "follow",
     "files_containing",
     "lines_containing",
@@ -925,6 +928,36 @@ def dir_aware_stat(
             namespace's child names.
     """
     return functools.partial(_stat_refusing_dirs, ops, accessor, opts)
+
+
+def file_size(
+    ops: CommandIO, accessor: Accessor, opts: CommandOpts
+) -> Callable[[PathSpec], Awaitable[int | None]]:
+    """A regular file's size from its stat, for a command whose answer is
+    the size alone (``wc -c``), as GNU takes it from ``st_size``.
+
+    None reads the file instead: for a file the read cache holds, which
+    is read from there as the read it replaces would be, for anything
+    but a regular file (a device or a pipe has no size to trust), and
+    for a size the stat does not know. A directory fails with EISDIR as
+    ``dir_aware_stat`` has it. Called as ``size(path)``; mirrors
+    ``fileSize`` in adapter.ts.
+
+    Args:
+        ops (CommandIO): Backend I/O bundle providing ``stat``/``readdir``.
+        accessor (Accessor): Backend accessor bound into stats.
+        opts (CommandOpts): the invocation's bag, for the index and the
+            namespace's child names.
+    """
+
+    async def size(path: PathSpec) -> int | None:
+        manager = active_cache_manager()
+        if manager is not None and await manager.is_cached(path):
+            return None
+        st = await _stat_refusing_dirs(ops, accessor, opts, path)
+        return st.size if st.type == FileType.FILE else None
+
+    return size
 
 
 async def _stream_refusing_dirs(

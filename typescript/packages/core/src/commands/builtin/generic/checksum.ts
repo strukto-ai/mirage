@@ -22,17 +22,20 @@ import { ensureStream } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { fsStrerror, isEisdir, isMissingPath, isWalkError } from '../../../errors/fs.ts'
+import { fsStrerror, isEisdir, isFsError, isMissingPath, isWalkError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { STDIN_HEADER_NAME, STDIN_OPERAND } from '../utils/constants.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
-import { operandsIo, readOperands } from '../utils/operands.ts'
+import { operandsIo } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 export type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 export type Hasher = (bytes: Uint8Array) => Promise<string>
+// The mount's stored digest of a file for an algorithm, or null to read it.
+export type StoredDigest = (p: PathSpec, algorithm: string) => Promise<string | null>
 
 interface ChecksumFlags {
   readonly check: boolean
@@ -288,12 +291,20 @@ function parseCheckLine(line: string, name: string): [string, string] | null {
   return [digest.toLowerCase(), file]
 }
 
+/**
+ * Run a GNU `*sum` over resolved operands. An operand's digest is asked of
+ * `stored` first, the one the mount keeps, once `stat` has found a file
+ * there, and the file is read only when there is none; a list under `-c` is
+ * always verified against the bytes. Mirrors Python's checksum_generic.
+ */
 export async function checksumGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   read: Stream,
   hasher: Hasher,
   name: string,
+  stat?: (p: PathSpec) => Promise<unknown>,
+  stored?: StoredDigest,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(opts.flags, name)
   const stream = stdinStream(read, opts.stdin)
@@ -331,11 +342,25 @@ export async function checksumGeneric(
   if (paths.length > 0) {
     // A missing operand is reported and skipped; the good hashes still
     // print (GNU coreutils checksum commands).
-    const [ok, err] = await readOperands(paths, stream, name)
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
+    const algorithm = name.slice(0, -3)
     let body = ''
-    for (const o of ok) body += hashLine(await hasher(o.data), o.path.rawPath, name, parsed)
+    let err = ''
+    for (const p of paths) {
+      try {
+        let digest: string | null = null
+        if (stat !== undefined && stored !== undefined && !isStdin(p)) {
+          await stat(p)
+          digest = await stored(p, algorithm)
+        }
+        digest ??= await hasher(await materialize(stream(p)))
+        body += hashLine(digest, p.rawPath, name, parsed)
+      } catch (e) {
+        if (!isFsError(e)) throw e
+        err += fsErrorLine(name, p, e)
+      }
+    }
+    const io = operandsIo(err)
+    if (body === '' && err !== '') return [null, io]
     const result: ByteSource = ENC.encode(body)
     return [result, io]
   }

@@ -401,6 +401,24 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
+   * The digest the backend keeps for a file, without reading it.
+   *
+   * `md5sum` and its siblings ask this before they read, except under `-c`,
+   * which checks the bytes themselves, so a backend that stores a file's
+   * digest (an object's MD5 ETag, a drive's `md5Checksum`) does not send the
+   * file. Answer only a digest of exactly the bytes a read gives, in
+   * lowercase hex: a stored value that can be anything else (a multipart or
+   * encrypted object's ETag) is null. `algorithm` is the hashlib name, `md5`,
+   * `sha1`, `sha256`, `sha384` or `sha512`. A file the read cache holds is
+   * read instead. Resolves null to have the file read and hashed; rejects
+   * with the file's read error otherwise.
+   */
+  @vfsCall({ effect: Effect.READ, target: Target.FILE })
+  checksum(path: PathSpec, _algorithm: string, _index?: IndexCacheStore): Promise<string | null> {
+    return Promise.reject(enotsup(this.name, 'checksum', path))
+  }
+
+  /**
    * The last `n` lines of a file, then each line added to it, as it lands.
    *
    * `tail -f` on one file asks this for all it prints, so a backend that can

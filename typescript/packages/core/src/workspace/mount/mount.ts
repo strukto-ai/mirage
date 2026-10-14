@@ -745,6 +745,8 @@ export class MountEntry {
         return [(scope, args, kw) => vfs.lastLines(scope, args[0] as number, kw.index)]
       case 'line_count':
         return [(scope, _args, kw) => vfs.lineCount(scope, kw.index)]
+      case 'checksum':
+        return [(scope, args, kw) => vfs.checksum(scope, args[0] as string, kw.index)]
       case 'follow':
         return [(scope, args, kw) => vfs.follow(scope, args[0] as number, kw.index)]
       case 'read_tree':

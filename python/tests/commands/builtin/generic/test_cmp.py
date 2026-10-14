@@ -31,10 +31,10 @@ DEV_STDIN = PathSpec.from_str_path("/dev/stdin", "")
 
 
 def _reader(first: bytes, second: bytes):
-    async def read_bytes(path: PathSpec) -> bytes:
-        return first if path.virtual == P1.virtual else second
+    async def stream(path: PathSpec):
+        yield first if path.virtual == P1.virtual else second
 
-    return read_bytes
+    return stream
 
 
 @pytest.mark.parametrize(
@@ -179,13 +179,14 @@ async def test_two_stdin_operands_at_one_offset_are_equal_unread(texts):
     # One name at one skip, or the second skip of zero that leaves the one
     # descriptor where the first put it: diffutils 3.10 reads neither.
 
-    async def unread(path: PathSpec) -> bytes:
+    async def unread(path: PathSpec):
         raise AssertionError(f"read {path.virtual}")
+        yield b""
 
     src, io = await cmp_cmd(
         [DASH, DEV_STDIN] if not texts else [DASH, DASH],
         texts,
-        read_bytes=unread,
+        stream=unread,
         stdin=b"abc",
         skip=(1, 1) if not texts else (0, 0),
     )
@@ -213,7 +214,7 @@ async def test_the_skip_operands_read_as_i_and_keep_the_larger(
     texts, skip, out, code
 ):
     src, io = await cmp_cmd(
-        [P1, P2], texts, read_bytes=_reader(b"xhello\n", b"hello\n"), skip=skip
+        [P1, P2], texts, stream=_reader(b"xhello\n", b"hello\n"), skip=skip
     )
     got = b"" if src is None else await materialize(src)
     assert (got.decode(), io.exit_code) == (out, code)
@@ -236,7 +237,7 @@ async def test_the_skip_operands_read_as_i_and_keep_the_larger(
 )
 async def test_a_bad_or_extra_skip_operand_is_a_usage_error(texts, message):
     with pytest.raises(UsageError) as exc:
-        await cmp_cmd([P1, P2], texts, read_bytes=_reader(b"", b""))
+        await cmp_cmd([P1, P2], texts, stream=_reader(b"", b""))
     assert str(exc.value) == (
         f"{message}\ncmp: Try 'cmp --help' for more information."
     )
@@ -255,3 +256,76 @@ def test_parse_flags_reads_the_long_spellings_and_refuses_l_with_s():
         "cmp: options -l and -s are incompatible\n"
         "cmp: Try 'cmp --help' for more information."
     )
+
+
+def _chunked(files: dict[str, list[bytes]], pulled: list[str]):
+    async def stream(path: PathSpec):
+        for chunk in files[path.virtual]:
+            pulled.append(path.virtual)
+            yield chunk
+
+    return stream
+
+
+@pytest.mark.asyncio
+async def test_a_difference_stops_the_reads():
+    pulled: list[str] = []
+    files = {
+        P1.virtual: [b"ab\nc", b"d", b"never"],
+        P2.virtual: [b"ab", b"\ncX", b"never"],
+    }
+    src, io = await cmp_cmd([P1, P2], stream=_chunked(files, pulled))
+    assert (await materialize(src), io.exit_code) == (
+        b"/F/one /F/two differ: char 5, line 2\n",
+        1,
+    )
+    assert pulled.count(P1.virtual) == 2
+    assert pulled.count(P2.virtual) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "first,second,err",
+    [
+        ([b"ab", b"\n"], [b"a", b"b\nmore"], "after byte 3, line 1"),
+        ([b"ab", b"c"], [b"abcd"], "after byte 3, in line 1"),
+        ([], [b"x"], "which is empty"),
+    ],
+)
+async def test_a_shorter_file_ends_the_streamed_compare(first, second, err):
+    files = {P1.virtual: first, P2.virtual: second}
+    src, io = await cmp_cmd([P1, P2], stream=_chunked(files, []))
+    assert src is None
+    assert (await materialize(io.stderr), io.exit_code) == (
+        f"cmp: EOF on /F/one {err}\n".encode(),
+        1,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sizes,limit,code,read",
+    [
+        ((3, 5), None, 1, False),
+        ((3, 5), 3, 0, True),
+        ((5, 5), None, 0, True),
+        ((None, 5), None, 0, True),
+    ],
+)
+async def test_s_answers_from_the_sizes_when_they_differ(
+    sizes, limit, code, read
+):
+    pulled: list[str] = []
+    files = {P1.virtual: [b"abc"], P2.virtual: [b"abc"]}
+
+    async def size_of(path: PathSpec) -> int | None:
+        return sizes[0] if path.virtual == P1.virtual else sizes[1]
+
+    src, io = await cmp_cmd(
+        [P1, P2],
+        stream=_chunked(files, pulled),
+        size_of=size_of,
+        silent=True,
+        limit=limit,
+    )
+    assert (src, io.exit_code, bool(pulled)) == (None, code, read)

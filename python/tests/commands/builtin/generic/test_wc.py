@@ -220,3 +220,48 @@ async def test_format_multi_asks_line_count_for_lines_alone():
         paths, read=read, lines=True, words=True, line_count=line_count
     )
     assert read_paths == ["/bb", "/a", "/bb"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,sized,read",
+    [
+        ({"bytes_": True}, True, False),
+        ({"bytes_": True, "lines": True}, False, True),
+        ({"chars": True}, False, True),
+    ],
+)
+async def test_bytes_alone_come_from_the_size(flags, sized, read):
+    reads: list[str] = []
+    asked: list[str] = []
+
+    async def stream(path):
+        reads.append(path.virtual)
+        yield b"abc\n"
+
+    async def size_of(path):
+        asked.append(path.virtual)
+        return 4
+
+    p = PathSpec.from_str_path("/f", "")
+    body, err, _ = await format_multi(
+        [p], read=stream, size_of=size_of, **flags
+    )
+    assert err == b""
+    assert body.split()[0] in (b"4", b"1")
+    assert (bool(asked), bool(reads)) == (sized, read)
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_size_reads_the_file():
+    async def stream(path):
+        yield b"abcde"
+
+    async def size_of(path):
+        return None
+
+    p = PathSpec.from_str_path("/f", "")
+    body, _, _ = await format_multi(
+        [p], read=stream, size_of=size_of, bytes_=True
+    )
+    assert body == b"5 /f\n"

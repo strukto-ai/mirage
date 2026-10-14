@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.box.checksum import checksum as _checksum
 from mirage.core.box.client import BoxTokenManager
 from mirage.core.box.copy import copy as _copy
 from mirage.core.box.create import create as _create
@@ -83,6 +84,14 @@ class BoxVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> FileStat:
         return await _stat(self.accessor, path, index)
+
+    async def checksum(
+        self,
+        path: PathSpec,
+        algorithm: str,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> str | None:
+        return await _checksum(self.accessor, path, algorithm, index)
 
     def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
