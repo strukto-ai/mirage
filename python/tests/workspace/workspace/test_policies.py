@@ -1451,6 +1451,29 @@ async def test_the_writes_of_a_line_are_spent_when_it_ends():
         await ws.close()
 
 
+class AskAB(Policy):
+    async def pre_session(self, ctx: SessionContext) -> Action | None:
+        return Ask(f"{ctx.key} needs a nod") if ctx.key in ("A", "B") else None
+
+
+@pytest.mark.asyncio
+async def test_a_killed_job_spends_the_nods_it_held():
+    # A job held on a question and then killed is never retried.
+    ws = Workspace({"/data/": RAMVFS()}, policies=[AskAB()])
+    try:
+        await ws.shell("{ export A=1; export B=2; } & wait")
+        (nod,) = [r for r in ws.decisions.pending() if r.argv[0] == "A"]
+        await ws.decisions.answer(nod.id, Outcome.ALLOW)
+        killed = await ws.shell(
+            "{ export A=1; export B=2; sleep 30; } & sleep 0.5; kill %1; wait"
+        )
+        assert killed.refusal is not None and killed.refusal.kind == "pending"
+        later = await ws.shell("export A=1")
+        assert later.refusal is not None and later.refusal.kind == "pending"
+    finally:
+        await ws.close()
+
+
 class AskReads(Policy):
     def __init__(self) -> None:
         self.seen: list[tuple[VfsContext, VfsContext]] = []

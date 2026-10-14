@@ -221,7 +221,7 @@ export async function handleBackground(
     // writes as it is written: the terminal, or the substitution or pipe
     // it was started in.
     const console_ = new Tee(job.console, new JobCopy(output, killed))
-    const hold = { held: false }
+    const hold = { held: false, ended: false }
     const lineSink = refusalSink()
     // The line still hears of every refusal; a question left waiting also
     // holds the job.
@@ -287,7 +287,7 @@ export async function handleBackground(
       if (stderr.byteLength > 0) {
         await console_.emit(Channel.STDERR, stderr)
       }
-      hold.held ||= io.refusal?.kind === 'pending'
+      hold.ended = hold.held || io.refusal?.kind === 'pending'
       return [io, execNode]
     }
     // The job's session writes are calls of the job's, spent at its end,
@@ -314,9 +314,10 @@ export async function handleBackground(
       releaseProgram()
 
       if (jobHanded !== null && decisions !== null) {
-        // A job held on a question leaves its grants standing for the
-        // retry, as a held line does.
-        if (hold.held) decisions.release(session.sessionId, jobHanded)
+        // A job that ended held on a question leaves its grants standing
+        // for the retry, as a held line does; a killed or failed one spends
+        // them.
+        if (hold.ended) decisions.release(session.sessionId, jobHanded)
         else await decisions.revoke(session.sessionId, jobHanded)
       }
     }

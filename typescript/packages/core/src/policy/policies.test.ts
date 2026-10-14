@@ -988,6 +988,29 @@ describe('every method answers Deny and Ask', () => {
     }
   })
 
+  class AskAB implements Policy {
+    preSession(ctx: SessionContext): Action | null {
+      return ['A', 'B'].includes(ctx.key) ? { kind: 'ask', reason: `${ctx.key} needs a nod` } : null
+    }
+  }
+
+  it('a killed job spends the nods it held', async () => {
+    // A job held on a question and then killed is never retried.
+    const ws = executableWorkspace(undefined, [new AskAB()])
+    try {
+      await ws.shell('{ export A=1; export B=2; } & wait')
+      const nod = ws.decisions.pending().find((r) => r.argv[0] === 'A')
+      await ws.decisions.answer(nod?.id ?? '', Outcome.ALLOW)
+      const killed = await ws.shell(
+        '{ export A=1; export B=2; sleep 30; } & sleep 0.5; kill %1; wait',
+      )
+      expect(killed.refusal?.kind).toBe('pending')
+      expect((await ws.shell('export A=1')).refusal?.kind).toBe('pending')
+    } finally {
+      await ws.close()
+    }
+  })
+
   class AskReads implements Policy {
     readonly seen: [VfsContext, VfsResultContext][] = []
     private readonly pre: VfsContext[] = []

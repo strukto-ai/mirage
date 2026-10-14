@@ -273,6 +273,7 @@ async def handle_background(
             else None
         )
         held = False
+        ended_held = False
         line_sink = refusal_sink()
 
         def note(refusal: Refusal) -> None:
@@ -351,7 +352,7 @@ async def handle_background(
             stderr = await io.materialize_stderr()
             if stderr:
                 await console.emit(Channel.STDERR, stderr)
-            held = held or (
+            ended_held = held or (
                 io.refusal is not None and io.refusal.kind == "pending"
             )
             return io, exec_node
@@ -363,9 +364,10 @@ async def handle_background(
             if call is not None:
                 reset_op_call(call)
             if job_handed is not None and decisions is not None:
-                # A job held on a question leaves its grants standing
-                # for the retry, as a held line does.
-                if held:
+                # A job that ended held on a question leaves its grants
+                # standing for the retry, as a held line does; a killed
+                # or failed one spends them.
+                if ended_held:
                     decisions.release(session.session_id, job_handed)
                 else:
                     await decisions.revoke(session.session_id, job_handed)
