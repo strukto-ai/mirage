@@ -40,6 +40,9 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
+from mirage.commands.builtin.generic_bind.adapter import (
+    with_dispatch_rule_guard,
+)
 from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.concurrency.limiter import run_blocking
@@ -560,8 +563,10 @@ class Workspace:
         self._patched: list[Patched] = []
         self._vfs_loop: asyncio.AbstractEventLoop | None = None
 
+        # A program's own file calls carry the gate of the command that
+        # runs it, so a rule scoped to `python3` reaches its `open()`.
         self._runtime_binding = WorkspaceBinding(
-            self.dispatch,
+            with_dispatch_rule_guard(self.dispatch),
             self._sandbox_resolver,
             lambda _binding: self.runtime_context(),
             self._files,

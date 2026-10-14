@@ -133,6 +133,76 @@
       ]
     },
     {
+      "id": "a_rule_scoped_to_the_program_reaches_its_own_calls",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "sealed/f.txt": "f\n",
+              "open.txt": "o\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "sealed",
+                  "commands": {
+                    "python3": [
+                      "/data/sealed/*"
+                    ],
+                    "node": [
+                      "/data/sealed/*"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "program": {
+            "python": "for path in ['/data/sealed/f.txt', '/data/open.txt']:\n    try:\n        with open(path) as f:\n            f.read()\n        print('opened')\n    except OSError as e:\n        print(type(e).__name__)",
+            "js": "for (const path of ['/data/sealed/f.txt', '/data/open.txt']) {\n  const err = {}\n  const f = std.open(path, 'r', err)\n  if (f === null) {\n    console.log(err.errno)\n    continue\n  }\n  f.readAsString()\n  const failed = f.error()\n  f.close()\n  console.log(failed ? 'failed' : 'opened')\n}"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "PermissionError\nopened\n",
+              "ops_absent": [
+                "read /data/sealed/f.txt"
+              ]
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "failed\nopened\n",
+              "ops_absent": [
+                "read /data/sealed/f.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "cat /data/sealed/f.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "f\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "a_hidden_mount_is_not_named",
       "runtimes": [
         "monty",

@@ -61,6 +61,20 @@ describe('python3: a rule on the script', () => {
     },
   )
 
+  it('reaches its own open', async () => {
+    const ws = await guarded()
+    try {
+      await ws.shell("printf 'print(1)\\n' > /secret.py")
+      const io = await ws.shell(`python3 -c "open('/secret.py').read()"`)
+      expect(io.exitCode).toBe(1)
+      expect(stderrStr(io)).toContain('PermissionError: [Errno 13]')
+      const cat = await ws.shell('cat /secret.py')
+      expect([cat.exitCode, stdoutStr(cat)]).toEqual([0, 'print(1)\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it.each(["python3 -c 'print(argv[1:])' secret.py"])(
     'keeps the words after the script as its argv: %s',
     async (line) => {

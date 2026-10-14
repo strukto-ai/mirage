@@ -257,6 +257,11 @@ export async function handleCommand(
     )
   }
 
+  // Every op the command or CLI issues from here carries its gate to the
+  // dispatcher, so a rule scoped to a CLI reaches its own reads, and so does
+  // every mount run below: one run, a fan-out or a cross-mount.
+  dispatch = withDispatchRuleGuard(dispatch, admission)
+
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)
   // and above every mount branch (a CLI consults no mount).
@@ -314,9 +319,6 @@ export async function handleCommand(
     parts = [runs, option, ...parts.slice(1)]
   }
 
-  // Every op the command issues from here carries its gate to the dispatcher,
-  // and so does every mount run below: one run, a fan-out or a cross-mount.
-  dispatch = withDispatchRuleGuard(dispatch, admission)
   const runCtx: RunOnMountCtx = {
     admission,
     ...(signal !== undefined ? { signal } : {}),

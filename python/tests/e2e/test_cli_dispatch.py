@@ -29,7 +29,7 @@ from mirage.policy import Deny, Policy, RouteContext
 from mirage.policy.match import Outcome
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.types import ScriptSource
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 
 
@@ -302,6 +302,132 @@ async def test_policy_sees_the_cli_verbs():
     io = await workspace.shell("echo unaffected")
     assert io.exit_code == 0
     assert denied[-1] is None
+
+
+async def put(inv: CLIInvocation[None]):
+    assert inv.view is not None and inv.view.dispatch is not None
+    path = PathSpec.from_str_path(inv.texts[0])
+    await inv.view.dispatch("write", path, data=b"hi\n")
+    return None, IOResult()
+
+
+ABC = CLI(
+    spec=CommandSpec(
+        name="abc",
+        subcommands=(
+            CommandSpec(
+                name="write",
+                arguments=(Argument("texts", nargs=1, metavar="path"),),
+            ),
+        ),
+    ),
+    handlers={"write": CLIHandler(fn=put)},
+)
+
+
+@pytest.mark.asyncio
+async def test_a_cli_write_into_a_read_only_mount_is_refused():
+    workspace = Workspace(
+        {
+            "/abc": (RAMVFS(), MountMode.READ),
+            "/data": (RAMVFS(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+    )
+    workspace.register_cli("abc", ABC)
+    try:
+        code, _, err = await run(workspace, "abc write /abc/x")
+        assert code == 1 and err.startswith(b"abc write: ")
+        assert await run(workspace, "ls /abc") == (0, b"", b"")
+        assert (await run(workspace, "abc write /data/x"))[0] == 0
+        assert await run(workspace, "cat /data/x") == (0, b"hi\n", b"")
+    finally:
+        await workspace.close()
+
+
+async def peek(inv: CLIInvocation[None]):
+    assert inv.view is not None and inv.view.dispatch is not None
+    data, _ = await inv.view.dispatch(
+        "read", PathSpec.from_str_path("/data/secret.txt")
+    )
+    return data, IOResult()
+
+
+PEEK = CLI(spec=CommandSpec(name="peek"), handlers={"": CLIHandler(fn=peek)})
+
+
+@pytest.mark.asyncio
+async def test_an_account_cli_under_hides_runs_where_the_allow_list_names_it():
+    hidden = {"hide": ["/data/secret.txt"]}
+    workspace = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "hides": {"paths": hidden},
+            "wildcard": {"paths": hidden, "commands": {"allow": ["*"]}},
+            "named": {"paths": hidden, "commands": {"allow": ["*", "sl"]}},
+        },
+    )
+    workspace.register_cli("sl", make_tree(), config={"token": "tok"})
+    workspace.register_cli("peek", PEEK)
+    await workspace.shell("echo top > /data/secret.txt")
+    for name in ("hides", "wildcard", "named"):
+        workspace.create_session(name, profile=name)
+    try:
+        for name in ("hides", "wildcard"):
+            io = await workspace.shell(
+                "sl message send -t x hi", session_id=name
+            )
+            err = await materialize(io.stderr) if io.stderr else b""
+            assert (io.exit_code, err) == (126, b"sl: Permission denied\n")
+            assert io.refusal is not None
+            assert io.refusal.reason == "sl message send is not allowed"
+        io = await workspace.shell(
+            "sl message send -t x hi", session_id="named"
+        )
+        out = await materialize(io.stdout) if io.stdout else b""
+        assert (io.exit_code, out) == (0, b"sent[tok] to=x: hi\n")
+        io = await workspace.shell("peek", session_id="hides")
+        assert io.exit_code == 1
+        code, out, _ = await run(workspace, "sl message send -t x hi")
+        assert (code, out) == (0, b"sent[tok] to=x: hi\n")
+    finally:
+        await workspace.close()
+
+
+@pytest.mark.asyncio
+async def test_a_rule_scoped_to_a_cli_reaches_its_own_reads():
+    workspace = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "sealed": {
+                "commands": {
+                    "deny": [
+                        {
+                            "reason": "sealed",
+                            "commands": {"peek": ["/data/secret.txt"]},
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    workspace.register_cli("peek", PEEK)
+    await workspace.shell("echo top > /data/secret.txt")
+    workspace.create_session("s", profile="sealed")
+    try:
+        io = await workspace.shell("peek", session_id="s")
+        out = await materialize(io.stdout) if io.stdout else b""
+        assert (io.exit_code, out) == (1, b"")
+        assert io.refusal is not None and io.refusal.reason == "sealed"
+        io = await workspace.shell("cat /data/secret.txt", session_id="s")
+        out = await materialize(io.stdout) if io.stdout else b""
+        assert (io.exit_code, out) == (0, b"top\n")
+        code, out, _ = await run(workspace, "peek")
+        assert (code, out) == (0, b"top\n")
+    finally:
+        await workspace.close()
 
 
 def _quickjs_home() -> str | None:

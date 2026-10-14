@@ -34,6 +34,7 @@ import type {
 } from '../../policy/index.ts'
 import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
+import { splitPattern } from '../../policy/match/pattern.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { commandNodes } from '../../runtime/routing/index.ts'
 import { getParts, getRedirects, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
@@ -53,6 +54,7 @@ import {
   commandWords,
   programTokens,
 } from '../executor/command/routing.ts'
+import { dropsMountCaches } from '../executor/command/cli.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { specForCommand, specWordBases, specWordKinds } from '../expand/spec_hints.ts'
@@ -409,6 +411,7 @@ export async function gate(
 ): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask)[]]> {
   const tool = intrinsic || isTool(name, session)
   const [tokens, program] = programTokens(registry, name, [...args], session.cwd)
+  const install = registry.clis.get(name)
   const implied =
     name in CWD_DEFAULT_RAW
       ? defaultCwdOperand([name, ...operands], name, registry, session.cwd, stdin)
@@ -449,6 +452,22 @@ export async function gate(
   const answers = (await registry.policies.answers('preCommand', ctx, every, rulesOnly)).filter(
     (a): a is Deny | Ask => a.kind !== 'route',
   )
+  // An account CLI reaches its service by id, past every hide, so a
+  // profile that hides paths runs one only where its allow list names it;
+  // the wildcard does not.
+  if (
+    tool &&
+    install !== null &&
+    dropsMountCaches(install.cli) &&
+    session.visibility.paths !== null &&
+    !(session.visibility.commands ?? []).some((p) => splitPattern(p)[0] === name)
+  ) {
+    answers.unshift({
+      kind: 'deny',
+      reason: `${program.join(' ')} is not allowed`,
+      policy: PermissionsPolicy.name,
+    })
+  }
   return [ctx, answers.find((a) => a.kind === 'deny') ?? answers[0] ?? null, answers]
 }
 

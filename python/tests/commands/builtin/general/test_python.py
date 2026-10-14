@@ -71,6 +71,23 @@ async def test_a_rule_on_the_script_reads_it_however_it_is_typed(line, shown):
 
 
 @pytest.mark.asyncio
+async def test_a_rule_on_python3_reaches_its_own_open():
+    ws = Workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, profiles={"guarded": GUARDED}
+    )
+    try:
+        await ws.shell("printf 'print(1)\\n' > /secret.py")
+        agent = await ws.session("agent", profile="guarded")
+        io = await agent.shell("python3 -c \"open('/secret.py').read()\"")
+        assert io.exit_code == 1
+        assert "PermissionError: [Errno 13]" in await io.stderr_str()
+        io = await agent.shell("cat /secret.py")
+        assert (io.exit_code, await io.stdout_str()) == (0, "print(1)\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line",
     ["python3 -c 'print(argv[1:])' secret.py"],

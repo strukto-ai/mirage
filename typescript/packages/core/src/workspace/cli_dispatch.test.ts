@@ -15,6 +15,7 @@ import { CommandSpec, WordKind } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
 
 import { Outcome } from '../policy/index.ts'
+import { parseSessionProfile } from '../policy/profile.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -26,7 +27,7 @@ import type { Policy } from '../policy/base.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
-import { MountMode } from '../types.ts'
+import { MountMode, PathSpec } from '../types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import type { RuntimeLanguage } from '../runtime/types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -392,6 +393,126 @@ describe('policy cli fact', () => {
     expect(seen.at(-1)).toBeNull()
     await ws.close()
   })
+
+  it('a CLI write into a read-only mount is refused', async () => {
+    const ws = new Workspace(
+      { '/abc': [new RAMVFS(), MountMode.READ], '/data': [new RAMVFS(), MountMode.WRITE] },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    ws.registerCli('abc', ABC)
+    try {
+      const refused = await ws.shell('abc write /abc/x')
+      expect(refused.exitCode).toBe(1)
+      expect(refused.stderrText.startsWith('abc write: ')).toBe(true)
+      const listed = await ws.shell('ls /abc')
+      expect([listed.exitCode, dec.decode(listed.stdout)]).toEqual([0, ''])
+      expect((await ws.shell('abc write /data/x')).exitCode).toBe(0)
+      const read = await ws.shell('cat /data/x')
+      expect([read.exitCode, dec.decode(read.stdout)]).toEqual([0, 'hi\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('an account CLI under hides runs where the allow list names it', async () => {
+    const hidden = { hide: ['/data/secret.txt'] }
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: {
+          hides: { paths: hidden },
+          wildcard: { paths: hidden, commands: { allow: ['*'] } },
+          named: { paths: hidden, commands: { allow: ['*', 'sl'] } },
+        },
+      },
+    )
+    ws.registerCli('sl', makeTree(), { token: 'tok' })
+    ws.registerCli('peek', PEEK)
+    await ws.shell('echo top > /data/secret.txt')
+    for (const name of ['hides', 'wildcard', 'named']) ws.createSession(name, { profile: name })
+    try {
+      for (const name of ['hides', 'wildcard']) {
+        const refused = await ws.shell('sl message send -t x hi', { sessionId: name })
+        expect([refused.exitCode, refused.stderrText]).toEqual([126, 'sl: Permission denied\n'])
+        expect(refused.refusal?.reason).toBe('sl message send is not allowed')
+      }
+      const named = await ws.shell('sl message send -t x hi', { sessionId: 'named' })
+      expect([named.exitCode, dec.decode(named.stdout)]).toEqual([0, 'sent[tok] to=x: hi\n'])
+      const peeked = await ws.shell('peek', { sessionId: 'hides' })
+      expect(peeked.exitCode).toBe(1)
+      const open = await ws.shell('sl message send -t x hi')
+      expect([open.exitCode, dec.decode(open.stdout)]).toEqual([0, 'sent[tok] to=x: hi\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("a rule scoped to a CLI reaches the CLI's own reads", async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: {
+          sealed: parseSessionProfile({
+            commands: {
+              deny: [{ reason: 'sealed', commands: { peek: ['/data/secret.txt'] } }],
+            },
+          }),
+        },
+      },
+    )
+    ws.registerCli('peek', PEEK)
+    await ws.shell('echo top > /data/secret.txt')
+    ws.createSession('s', { profile: 'sealed' })
+    try {
+      const refused = await ws.shell('peek', { sessionId: 's' })
+      expect([refused.exitCode, dec.decode(refused.stdout)]).toEqual([1, ''])
+      expect(refused.refusal?.reason).toBe('sealed')
+      const cat = await ws.shell('cat /data/secret.txt', { sessionId: 's' })
+      expect([cat.exitCode, dec.decode(cat.stdout)]).toEqual([0, 'top\n'])
+      const open = await ws.shell('peek')
+      expect([open.exitCode, dec.decode(open.stdout)]).toEqual([0, 'top\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+async function peek(inv: CLIInvocation): Promise<[Uint8Array, IOResult]> {
+  const dispatch = inv.view?.dispatch
+  if (dispatch === undefined) throw new Error('no dispatch')
+  const [data] = await dispatch('read', PathSpec.fromStrPath('/data/secret.txt'))
+  return [data as Uint8Array, new IOResult()]
+}
+
+const PEEK = new CLI({
+  spec: new CommandSpec({ name: 'peek' }),
+  handlers: { '': new CLIHandler({ fn: peek }) },
+})
+
+async function put(inv: CLIInvocation): Promise<[null, IOResult]> {
+  const dispatch = inv.view?.dispatch
+  if (dispatch === undefined) throw new Error('no dispatch')
+  await dispatch('write', PathSpec.fromStrPath(inv.texts[0] ?? ''), [
+    new TextEncoder().encode('hi\n'),
+  ])
+  return [null, new IOResult()]
+}
+
+const ABC = new CLI({
+  spec: new CommandSpec({
+    name: 'abc',
+    subcommands: [
+      new CommandSpec({
+        name: 'write',
+        arguments: [new Argument('texts', { metavar: 'path', nargs: 1 })],
+      }),
+    ],
+  }),
+  handlers: { write: new CLIHandler({ fn: put }) },
 })
 
 class DenyAwsWrites implements Policy {

@@ -36,6 +36,7 @@ import { Consumer } from '../lookup/types.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { lookup, program, programNote, programs } from '../lookup/lookup.ts'
 import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
+import { withDispatchRuleGuard } from '../../commands/builtin/generic_bind/adapter.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
@@ -71,7 +72,7 @@ import {
   parseMountMode,
 } from '../../types.ts'
 import type { Policies } from '../../policy/index.ts'
-import { DryRun, Outcome, type ShellExplanation } from '../../policy/types.ts'
+import { DryRun, Outcome, type EntryGate, type ShellExplanation } from '../../policy/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { Files } from '../files.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -97,6 +98,7 @@ import { ContextScope } from '../../utils/context_scope.ts'
 import { captureRecordingContext } from '../../observe/context.ts'
 import {
   captureSessionContext,
+  getAdmission,
   getCurrentSessionUnlessForeign,
   runExplaining,
   runWithRefusalSink,
@@ -110,7 +112,7 @@ import { asyncContextIsolatesTasks, createAsyncContext } from '../../utils/async
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
-import type { BridgeDispatchFn, EvalResult } from '../../runtime/types.ts'
+import type { BridgeDispatchFn, DispatchFn, EvalResult } from '../../runtime/types.ts'
 import { MontyUnavailableError } from '../../runtime/python/monty/index.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import { isEvaluator } from '../../runtime/mixin.ts'
@@ -687,7 +689,7 @@ export class Workspace {
         processes: this.processView(session),
         cwd: PathSpec.fromStrPath(session.cwd),
         env: envSnapshot(session),
-        dispatch: this.buildWorkspaceBridge(undefined, dispatcher),
+        dispatch: this.buildWorkspaceBridge(undefined, dispatcher, getAdmission()),
       },
       scope,
     )
@@ -820,18 +822,22 @@ export class Workspace {
   // every op as the `issuer` kwarg, which the dispatcher
   // lifts onto the dispatcher's context and never forwards to a backend:
   // it is how a profile policy's own reads reach its `preVfs` marked as
-  // its own, as an argument rather than ambient state.
+  // its own, as an argument rather than ambient state. A `gate` is the
+  // command running the program, so a rule scoped to `python3` reaches its
+  // `open()`.
   private buildWorkspaceBridge(
     issuer?: symbol,
     dispatcher: Dispatcher = this.dispatcher,
+    gate: EntryGate | null = null,
   ): BridgeDispatchFn {
+    const dispatch = withDispatchRuleGuard(dispatcher.dispatch, gate)
     return workspaceBridge((name, path, args, kwargs = {}) =>
       this.dispatchInternal(
         name,
         path,
         args,
         issuer === undefined ? kwargs : { ...kwargs, issuer },
-        dispatcher,
+        dispatch,
       ),
     )
   }
@@ -1518,7 +1524,7 @@ export class Workspace {
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
-    dispatcher: Dispatcher = this.dispatcher,
+    dispatch: DispatchFn = this.dispatcher.dispatch,
   ): Promise<unknown> {
     // The Dispatcher owns the whole pipeline: pre-dispatch
     // initialization (namespace load, pending drift checks), symlink
@@ -1527,7 +1533,7 @@ export class Workspace {
     // enforcement, per-op commandLimits on the executing mount,
     // revisions, overlay stat, and post-write invalidation. The same
     // single path Python's Workspace.dispatch delegates to.
-    const [result] = await dispatcher.dispatch(name, PathSpec.fromStrPath(path), args, kwargs)
+    const [result] = await dispatch(name, PathSpec.fromStrPath(path), args, kwargs)
     return result
   }
 

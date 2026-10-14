@@ -427,6 +427,20 @@
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "agent", "command": "f(){ cat /data/secret; }; f; f(){ cat /data/secret; }; f", "expect": {"value": {"exit_code": 0, "stdout": "s\ns\n", "stderr": "", "refusal": null}}}
    ]
+  },
+  {
+   "id": "a_cli_that_reaches_a_service_runs_under_hides_only_where_the_allow_list_names_it",
+   "settings": {"mode": "write", "runtimes": ["monty", "workspace"], "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "register_cli", "name": "probe", "script": {"source": "print('ran')", "language": "python"}, "runtime": "monty"},
+    {"op": "session", "id": "hides", "profile": {"paths": {"hide": ["/data/secret.txt"]}}},
+    {"op": "session", "id": "wildcard", "profile": {"paths": {"hide": ["/data/secret.txt"]}, "commands": {"allow": ["*"]}}},
+    {"op": "session", "id": "named", "profile": {"paths": {"hide": ["/data/secret.txt"]}, "commands": {"allow": ["*", "probe"]}}},
+    {"op": "exec", "session": "hides", "command": "probe", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "probe: Permission denied\n", "refusal": "probe is not allowed"}}},
+    {"op": "exec", "session": "wildcard", "command": "probe", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "probe: Permission denied\n", "refusal": "probe is not allowed"}}},
+    {"op": "exec", "session": "named", "command": "probe", "expect": {"value": {"exit_code": 0, "stdout": "ran\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "command": "probe", "expect": {"value": {"exit_code": 0, "stdout": "ran\n", "stderr": "", "refusal": null}}}
+   ]
   }
  ]
 }

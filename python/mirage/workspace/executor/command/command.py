@@ -275,6 +275,11 @@ async def handle_command(
             execute_fn,
         )
 
+    # Every op the command or CLI issues from here carries its gate to the
+    # dispatcher, so a rule scoped to a CLI reaches its own reads.
+    if dispatch is not None:
+        dispatch = with_dispatch_rule_guard(dispatch)
+
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)
     # and above every mount branch (a CLI consults no mount). A CLI that
@@ -329,11 +334,6 @@ async def handle_command(
     if runs_as(cmd_name, registry) != cmd_name:
         cmd_name, option = EXEC_WRAPPERS[cmd_name]
         parts = [cmd_name, option, *parts[1:]]
-
-    # Every op the command issues from here carries its gate to the entry
-    # point.
-    if dispatch is not None:
-        dispatch = with_dispatch_rule_guard(dispatch)
 
     if cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(

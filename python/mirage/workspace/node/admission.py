@@ -45,6 +45,7 @@ from mirage.policy.match import (
     io_refusal,
     reads_args,
     scopes_paths,
+    split_pattern,
 )
 from mirage.runtime.routing import command_nodes
 from mirage.shell import parse
@@ -62,6 +63,7 @@ from mirage.utils.hidden import is_glob, path_visible
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.links.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _to_scope
+from mirage.workspace.executor.command.cli import drops_mount_caches
 from mirage.workspace.executor.command.routing import (
     CWD_DEFAULT_RAW,
     command_words,
@@ -407,6 +409,7 @@ async def gate(
     """
     tool = intrinsic or is_tool(name, session)
     tokens, program = program_tokens(registry, name, args, session.cwd)
+    install = registry.clis.get(name)
     implied = (
         default_cwd_operand(
             [name, *operands], name, registry, session.cwd, stdin
@@ -461,6 +464,24 @@ async def gate(
         "pre_command", ctx, every, rules_only
     )
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
+    # An account CLI reaches its service by id, past every hide, so a
+    # profile that hides paths runs one only where its allow list names
+    # it; the wildcard does not.
+    if (
+        tool
+        and install is not None
+        and drops_mount_caches(install.cli)
+        and session.visibility.paths is not None
+        and not any(
+            split_pattern(p)[:1] == (name,)
+            for p in session.visibility.commands or ()
+        )
+    ):
+        refused = Deny(
+            f"{' '.join(program)} is not allowed",
+            policy=PermissionsPolicy.__name__,
+        )
+        answers = (refused, *answers)
     first = answers[0] if answers else None
     return (
         ctx,
