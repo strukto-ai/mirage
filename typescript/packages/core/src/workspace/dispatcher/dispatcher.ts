@@ -686,7 +686,8 @@ export class Dispatcher {
       }
       if (across !== null) {
         await this.copyAcross(call, owner, across)
-        return [await boundary.complete(mark, call.path, call.write, null), new IOResult()]
+        await boundary.complete(mark, call.path, call.write, null, call.issuer)
+        return [null, new IOResult()]
       }
     }
     let resolved: [BaseVFS, PathSpec, MountMode]
@@ -931,17 +932,6 @@ export class Dispatcher {
   }
 
   /**
-   * Answer EXDEV for a rename or a copy between two mounts.
-   *
-   * A mount is a filesystem boundary: rename(2) moves a name within one and
-   * answers EXDEV across two, before any permission is weighed, so `mv`
-   * falls back to copy and unlink instead of the source's backend taking
-   * the destination for one of its keys; a backend copies only within
-   * itself, the same way. It resolves both parent directories first, so a
-   * missing one is ENOENT (ENOTDIR through a file) ahead of EXDEV. Mirrors
-   * Python's Dispatcher._refuse_cross_mount.
-   */
-  /**
    * The mount a copy's destination is on, when that is another mount whose
    * store may copy from this one's; null otherwise. Mirrors Python's
    * Dispatcher._copy_target.
@@ -976,6 +966,17 @@ export class Dispatcher {
     })
   }
 
+  /**
+   * Answer EXDEV for a rename or a copy between two mounts.
+   *
+   * A mount is a filesystem boundary: rename(2) moves a name within one and
+   * answers EXDEV across two, before any permission is weighed, so `mv`
+   * falls back to copy and unlink instead of the source's backend taking
+   * the destination for one of its keys; a backend copies only within
+   * itself, the same way. It resolves both parent directories first, so a
+   * missing one is ENOENT (ENOTDIR through a file) ahead of EXDEV. Mirrors
+   * Python's Dispatcher._refuse_cross_mount.
+   */
   private async refuseCrossMount(call: Call, owner: MountEntry): Promise<void> {
     // A function runs on one backend, so every path it is handed must be
     // on the mount that serves it.
@@ -1311,8 +1312,7 @@ export class Dispatcher {
     // mount, and the timeout window covers only the backend op — cache
     // probes and post-write invalidation stay outside the budget —
     // mirroring Python's Mount.call.
-    const opOverride = mount.commandLimits.get(name) ?? null
-    const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
+    const opTimeout = mount.opTimeout(name)
     // A fill keeps the token its backend records with the read; a read
     // outside a line (FUSE, ws.vfs) records into a scope of its own for that.
     const recorded = <T>(fill: () => Promise<T>): Promise<T> =>

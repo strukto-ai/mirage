@@ -13,18 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { xxdGeneric } from '../../generic/xxd.ts'
-import {
-  type GenericCommand,
-  fileSize,
-  requireOp,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
 const xxd: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const write = requireOp(ops.write, 'write')
-  const { pwrite, readRange } = ops
+  const pwrite = ops.pwrite
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
   return xxdGeneric(
     resolved,
@@ -33,8 +27,6 @@ const xxd: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     (p) => ops.readBytes(accessor, p, idx),
     (p, d) => write(accessor, p, d),
     pwrite === undefined ? null : (p, d, offset) => pwrite(accessor, p, d, offset),
-    readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
-    fileSize(ops, accessor, opts),
   )
 }
 

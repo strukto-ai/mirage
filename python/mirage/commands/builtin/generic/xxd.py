@@ -1,19 +1,12 @@
 import binascii
 import re
-from collections.abc import (
-    AsyncGenerator,
-    AsyncIterator,
-    Awaitable,
-    Callable,
-    Mapping,
-)
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.size_suffix import parse_base0
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
-    ranged_stream,
     resolve_source,
     stdin_stream,
 )
@@ -25,9 +18,9 @@ from mirage.commands.spec.usage import extra_operand_error, read_fail_exit_code
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.cooperative import chunks
-from mirage.io.stream import materialize, yield_bytes
+from mirage.io.stream import async_chain, materialize, yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, ReadBytesFn, ReadRangeFn, ReadStreamFn
+from mirage.types import PathSpec, ReadBytesFn, ReadStreamFn
 
 # xxd's exit for an OUTFILE it cannot open, for an INFILE it cannot seek
 # where -s says, and for a dump that seeks backwards on a stream (vim's
@@ -237,28 +230,6 @@ def _patched(existing: bytes, segments: list[tuple[int, bytes]]) -> bytes:
     return bytes(buf)
 
 
-async def _apply_limits(
-    source: AsyncIterator[bytes], skip: int, limit: int
-) -> AsyncIterator[bytes]:
-    pos = 0
-    remaining = limit
-    async for chunk in source:
-        chunk_len = len(chunk)
-        if pos + chunk_len <= skip:
-            pos += chunk_len
-            continue
-        if pos < skip:
-            chunk = chunk[skip - pos :]
-            pos = skip
-        if remaining <= 0:
-            break
-        if len(chunk) > remaining:
-            chunk = chunk[:remaining]
-        yield chunk
-        remaining -= len(chunk)
-        pos += len(chunk)
-
-
 def strtol(text: str) -> int:
     """``text`` as C's ``strtol(text, NULL, 0)`` reads it: 0 when it
     holds no number.
@@ -316,24 +287,6 @@ def parse_seek(raw: str) -> XxdSeek:
     )
 
 
-async def _resumed(
-    held: bytes, rest: AsyncGenerator[bytes, None]
-) -> AsyncIterator[bytes]:
-    """``held``, then the rest of the stream it was read from.
-
-    Args:
-        held (bytes): bytes already pulled.
-        rest (AsyncGenerator[bytes, None]): the stream they came from.
-    """
-    try:
-        if held:
-            yield held
-        async for chunk in rest:
-            yield chunk
-    finally:
-        await rest.aclose()
-
-
 async def _past(
     source: AsyncIterator[bytes], count: int
 ) -> AsyncIterator[bytes] | None:
@@ -352,81 +305,7 @@ async def _past(
             return None
         held = chunk[count:]
         count -= len(chunk) - len(held)
-    return _resumed(held, stream)
-
-
-async def _seeked(
-    path: PathSpec | None,
-    read: Callable[[PathSpec], AsyncIterator[bytes]],
-    stdin: ByteSource | None,
-    read_range: ReadRangeFn | None,
-    size_of: Callable[[PathSpec], Awaitable[int | None]] | None,
-    seek: XxdSeek,
-    limit: int | None,
-) -> tuple[AsyncIterator[bytes], int] | None:
-    """INFILE from where ``-s`` puts it and within ``-l``, and the offset
-    its first byte has; None when xxd cannot seek there.
-
-    A file seeks: past its end it dumps nothing, before its start it
-    cannot, and a seek from its end needs its size. Where the mount reads
-    ranges and the size is known, the dump is one ranged read. Stdin
-    cannot seek, so it is read off, and ends too soon or seeks from its
-    end only to fail.
-
-    Args:
-        path (PathSpec | None): INFILE, None for stdin.
-        read (Callable): the stream of INFILE, stdin for ``-``.
-        stdin (ByteSource | None): the line's input.
-        read_range (Callable | None): the mount's byte window.
-        size_of (Callable | None): a regular file's size.
-        seek (XxdSeek): -s.
-        limit (int | None): -l, None for no limit.
-    """
-    window = limit
-    if path is None or is_stdin(path):
-        source = read(path) if path is not None else resolve_source(stdin)
-        if seek.back:
-            return None
-        if seek.offset > 0:
-            past = await _past(source, seek.offset)
-            if past is None:
-                return None
-            source = past
-        return _limited(source, window), max(seek.offset, 0)
-    size = await size_of(path) if size_of is not None else None
-    data: bytes | None = None
-    if seek.back and not seek.relative and size is None:
-        data = await materialize(read(path))
-        size = len(data)
-    if seek.back:
-        start = -seek.offset if seek.relative else (size or 0) - seek.offset
-    else:
-        start = seek.offset
-    if start < 0:
-        return None
-    if data is not None:
-        end = None if window is None else start + window
-        return yield_bytes(data[start:end]), start
-    if (
-        read_range is not None
-        and size is not None
-        and window is None
-        and start
-    ):
-        return ranged_stream(read_range, path, start, size), start
-    if read_range is not None and size is not None and window is not None:
-        want = min(max(size - start, 0), window)
-        got = (
-            bytes(await read_range(path, offset=start, size=want))
-            if want
-            else b""
-        )
-        return yield_bytes(got), start
-    source = read(path)
-    if start:
-        past = await _past(source, start)
-        source = past if past is not None else yield_bytes(b"")
-    return _limited(source, window), start
+    return async_chain([held, stream])
 
 
 async def _limited(
@@ -453,6 +332,50 @@ async def _limited(
         await stream.aclose()
 
 
+async def _seeked(
+    path: PathSpec | None,
+    read: Callable[[PathSpec], AsyncIterator[bytes]],
+    stdin: ByteSource | None,
+    seek: XxdSeek,
+    limit: int | None,
+) -> tuple[AsyncIterator[bytes], int] | None:
+    """INFILE from where ``-s`` puts it and within ``-l``, and the offset
+    its first byte has; None when xxd cannot seek there.
+
+    A file seeks: past its end it dumps nothing, before its start it
+    cannot, and a seek from its end reads it whole for its size. Stdin
+    cannot seek, so it is read off, and ends too soon or seeks from its
+    end only to fail.
+
+    Args:
+        path (PathSpec | None): INFILE, None for stdin.
+        read (Callable): the stream of INFILE, stdin for ``-``.
+        stdin (ByteSource | None): the line's input.
+        seek (XxdSeek): -s.
+        limit (int | None): -l, None for no limit.
+    """
+    piped = path is None or is_stdin(path)
+    source = read(path) if path is not None else resolve_source(stdin)
+    if piped and seek.back:
+        return None
+    if not seek.back:
+        start = seek.offset
+    elif seek.relative:
+        start = -seek.offset
+    else:
+        data = await materialize(source)
+        start = len(data) - seek.offset
+        source = yield_bytes(data)
+    if start < 0:
+        return None
+    past = await _past(source, start)
+    if past is None:
+        if piped:
+            return None
+        past = yield_bytes(b"")
+    return _limited(past, limit), start
+
+
 async def xxd(
     paths: list[PathSpec],
     *,
@@ -468,8 +391,6 @@ async def xxd(
     group: int = 2,
     seek: XxdSeek | None = None,
     limit: int | None = None,
-    read_range: ReadRangeFn | None = None,
-    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """xxd over INFILE (or stdin) to OUTFILE (or stdout).
 
@@ -491,9 +412,6 @@ async def xxd(
         stdin (ByteSource | None): standard input.
         seek (XxdSeek | None): -s.
         limit (int | None): -l, None for no limit.
-        read_range (Callable | None): the mount's byte window, which
-            serves a dump's -s and -l without reading what they pass.
-        size_of (Callable | None): a regular file's size.
     """
     if len(paths) > 2:
         raise extra_operand_error(
@@ -507,14 +425,13 @@ async def xxd(
             read(paths[0]) if paths else resolve_source(stdin)
         )
         if seek.offset or limit:
-            source = _apply_limits(source, max(seek.offset, 0), limit or 2**63)
+            past = await _past(source, max(seek.offset, 0))
+            source = _limited(past or yield_bytes(b""), limit or None)
     else:
         seeked = await _seeked(
             paths[0] if paths else None,
             read,
             stdin,
-            read_range,
-            size_of,
             seek,
             limit,
         )
@@ -683,8 +600,6 @@ async def xxd_generic(
     read_bytes: ReadBytesFn | None = None,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     pwrite_bytes: Callable[..., Awaitable[None]] | None = None,
-    read_range: ReadRangeFn | None = None,
-    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(opts.flags)
     return await xxd(
@@ -701,6 +616,4 @@ async def xxd_generic(
         group=parsed.group,
         seek=parsed.seek,
         limit=parsed.limit,
-        read_range=read_range,
-        size_of=size_of,
     )

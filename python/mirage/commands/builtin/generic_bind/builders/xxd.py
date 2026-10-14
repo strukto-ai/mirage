@@ -20,7 +20,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     Operation,
     bound_op,
-    file_size,
     require_op,
     resolve_or_empty,
 )
@@ -45,8 +44,6 @@ async def xxd(
         bound_op(ops.read_bytes, accessor, opts.index),
         partial(require_op(ops, Operation.WRITE), accessor),
         partial(ops.pwrite, accessor) if ops.pwrite is not None else None,
-        bound_op(ops.read_range, accessor, opts.index),
-        file_size(ops, accessor, opts),
     )
 
 

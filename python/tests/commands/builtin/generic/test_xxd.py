@@ -57,74 +57,41 @@ def test_parse_seek_reads_the_signs(raw, seek):
     assert parse_seek(raw) == seek
 
 
-def _io(read: list[str]):
-    async def stream(path):
-        read.append("stream")
-        yield DATA
-
-    async def read_range(path, *, offset, size):
-        read.append(f"{offset}+{size}")
-        return DATA[offset : offset + size]
-
-    async def size_of(path):
-        return len(DATA)
-
-    return stream, read_range, size_of
+async def _stream(path):
+    yield DATA
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "seek,limit,out,reads",
+    "seek,limit,out",
     [
         (
             "2",
             None,
             "00000002: 6667 68                                  fgh\n",
-            ["2+3"],
         ),
-        (
-            "-2",
-            1,
-            "00000003: 67                                       g\n",
-            ["3+1"],
-        ),
-        ("10", None, "", []),
-        ("1", 0, "", []),
+        ("-2", 1, "00000003: 67                                       g\n"),
+        ("10", None, ""),
+        ("1", 0, ""),
         (
             "0",
             None,
             "00000000: 6465 6667 68                             defgh\n",
-            ["stream"],
         ),
     ],
 )
-async def test_a_dump_seeks_with_one_ranged_read(seek, limit, out, reads):
-    read: list[str] = []
-    stream, read_range, size_of = _io(read)
+async def test_a_dump_starts_its_addresses_at_the_seek(seek, limit, out):
     stdout, io = await xxd(
-        [F],
-        read_stream=stream,
-        seek=parse_seek(seek),
-        limit=limit,
-        read_range=read_range,
-        size_of=size_of,
+        [F], read_stream=_stream, seek=parse_seek(seek), limit=limit
     )
     assert (await materialize(stdout)).decode() == out
     assert io.exit_code == 0
-    assert read == reads
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seek", ["-10", "+-2"])
 async def test_a_seek_before_the_start_cannot_seek(seek):
-    stream, read_range, size_of = _io([])
-    stdout, io = await xxd(
-        [F],
-        read_stream=stream,
-        seek=parse_seek(seek),
-        read_range=read_range,
-        size_of=size_of,
-    )
+    stdout, io = await xxd([F], read_stream=_stream, seek=parse_seek(seek))
     assert (stdout, io.exit_code, io.stderr) == (
         None,
         4,
@@ -157,31 +124,3 @@ async def test_stdin_is_read_off_and_cannot_seek_back(seek, code, out):
 )
 def test_parse_limit_reads_no_limit_for_a_negative_count(raw, limit):
     assert parse_limit(raw) == limit
-
-
-@pytest.mark.asyncio
-async def test_a_seek_without_a_limit_reads_growing_blocks():
-    data = bytes(range(256)) * 1024
-    asked: list[tuple[int, int]] = []
-
-    async def stream(path):
-        raise AssertionError("streamed")
-        yield b""
-
-    async def read_range(path, *, offset, size):
-        asked.append((offset, size))
-        return data[offset : offset + size]
-
-    async def size_of(path):
-        return len(data)
-
-    stdout, _ = await xxd(
-        [F],
-        read_stream=stream,
-        seek=parse_seek("16"),
-        read_range=read_range,
-        size_of=size_of,
-    )
-    first = await anext(stdout)
-    assert first.startswith(b"00000010: 1011 1213")
-    assert asked == [(16, 64 * 1024)]

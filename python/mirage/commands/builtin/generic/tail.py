@@ -37,14 +37,18 @@ from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.types import FileType, PathSpec, PolymorphicReadFn, StatFn
+from mirage.types import (
+    FileType,
+    PathSpec,
+    PolymorphicReadFn,
+    ReadRangeFn,
+    StatFn,
+)
 from mirage.utils.quote import shell_quote
 
 DEFAULT_SLEEP_INTERVAL = 1.0
 # GNU's `follow_mode_string`, in declaration order.
 FOLLOW_ARGS = ("descriptor", "name")
-# A bound byte-window reader, called as ``read_range(path, offset=, size=)``.
-ReadRange = Callable[..., Awaitable[bytes]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,7 +381,7 @@ async def _counted(source: Any, box: list[int]) -> AsyncIterator[bytes]:
 
 async def _window(
     read: Callable[..., Any],
-    read_range: ReadRange | None,
+    read_range: ReadRangeFn | None,
     path: PathSpec,
     offset: int,
     size: int,
@@ -386,7 +390,7 @@ async def _window(
 
     Args:
         read (Callable[..., Any]): whole-file reader, the fallback.
-        read_range (ReadRange | None): the backend's byte window, if
+        read_range (ReadRangeFn | None): the backend's byte window, if
             it has one.
         path (PathSpec): the file.
         offset (int): where the last poll ended.
@@ -472,7 +476,7 @@ async def _polled_file(
 
 async def _catch_up(
     read: Callable[..., Any],
-    read_range: ReadRange | None,
+    read_range: ReadRangeFn | None,
     io: IOResult,
     p: PathSpec,
     size: int | None,
@@ -485,7 +489,7 @@ async def _catch_up(
 
     Args:
         read (Callable[..., Any]): bound whole-file reader.
-        read_range (ReadRange | None): the backend's byte window, if
+        read_range (ReadRangeFn | None): the backend's byte window, if
             it has one.
         io (IOResult): the result a truncation notice lands on.
         p (PathSpec): the file.
@@ -515,7 +519,7 @@ async def _follow(
     *,
     read: Callable[..., Any],
     poll_read: Callable[..., Any],
-    read_range: ReadRange | None,
+    read_range: ReadRangeFn | None,
     stat: StatFn,
     counts: TailCounts,
     show_headers: bool,
@@ -585,7 +589,7 @@ async def _follow(
         read (Callable[..., Any]): bound whole-file reader, for the
             first print.
         poll_read (Callable[..., Any]): the polls' whole-file reader.
-        read_range (ReadRange | None): the polls' byte-window reader.
+        read_range (ReadRangeFn | None): the polls' byte-window reader.
         stat (StatFn): the polls' stat.
         counts (TailCounts): what the first print shows.
         show_headers (bool): the ``==> name <==`` rule.
@@ -819,7 +823,7 @@ async def tail_generic(
     opts: CommandOpts,
     stat: StatFn,
     stream: PolymorphicReadFn,
-    read_range: ReadRange | None = None,
+    read_range: ReadRangeFn | None = None,
     last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
     | None = None,
     follow: Callable[[PathSpec, int], Awaitable[AsyncIterator[bytes] | None]]
@@ -842,7 +846,7 @@ async def tail_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
-        read_range (ReadRange | None): Bound byte-window reader
+        read_range (ReadRangeFn | None): Bound byte-window reader
             called as ``read_range(path, offset, size)``, for a follow
             that only wants what the file gained; None reads whole.
         last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]

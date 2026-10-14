@@ -20,7 +20,6 @@ import type { CommandOpts } from '../../config.ts'
 import { tacGeneric } from './tac.ts'
 
 const ENC = new TextEncoder()
-const BIG = PathSpec.fromStrPath('/big')
 
 function streamOf(data: Uint8Array): (p: PathSpec) => AsyncIterable<Uint8Array> {
   return async function* () {
@@ -29,65 +28,9 @@ function streamOf(data: Uint8Array): (p: PathSpec) => AsyncIterable<Uint8Array> 
   }
 }
 
-function ranged(
-  data: Uint8Array,
-  asked: [number, number | null][],
-): (p: PathSpec, offset: number, size: number | null) => Promise<Uint8Array> {
-  return (_p, offset, size) => {
-    asked.push([offset, size])
-    return Promise.resolve(data.subarray(offset, size === null ? undefined : offset + size))
-  }
-}
-
 function opts(flags: Record<string, unknown>, stdin: Uint8Array | null = null): CommandOpts {
   return { flags, stdin } as unknown as CommandOpts
 }
-
-describe('tac read from the end', () => {
-  // Mirrors python's test_a_ranged_tac_gives_what_a_whole_read_gives.
-  const lines = Array.from({ length: 40000 }, (_, n) => `line ${String(n)}\n`).join('')
-  it.each([
-    ['a\nb\nc\n'],
-    ['a\nb\nc'],
-    ['\n\nx\n'],
-    [lines],
-    ['x'.repeat(100000) + '\n' + 'y'.repeat(70000)],
-  ])('gives what a whole read gives: %#', async (text) => {
-    const data = ENC.encode(text)
-    for (const before of [false, true]) {
-      const flags = before ? { before: true } : {}
-      const [whole] = await tacGeneric([BIG], opts(flags), streamOf(data))
-      const [fromEnd] = await tacGeneric(
-        [BIG],
-        opts(flags),
-        streamOf(new Uint8Array()),
-        ranged(data, []),
-        () => Promise.resolve(data.byteLength),
-      )
-      expect(await materialize(fromEnd)).toEqual(await materialize(whole))
-    }
-  })
-
-  // Mirrors python's test_a_ranged_tac_reads_only_the_end_a_reader_pulls.
-  it('reads only the end a reader pulls', async () => {
-    const data = ENC.encode(
-      Array.from({ length: 400000 }, (_, n) => `line ${String(n)}\n`).join(''),
-    )
-    const asked: [number, number | null][] = []
-    const [out] = await tacGeneric(
-      [BIG],
-      opts({}),
-      streamOf(new Uint8Array()),
-      ranged(data, asked),
-      () => Promise.resolve(data.byteLength),
-    )
-    const iterator = (out as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
-    const first = await iterator.next()
-    const head = first.done === true ? new Uint8Array() : first.value
-    expect(new TextDecoder().decode(head).startsWith('line 399999\nline 399998\n')).toBe(true)
-    expect(asked).toEqual([[data.byteLength - 64 * 1024, 64 * 1024]])
-  })
-})
 
 describe('tac records', () => {
   // Mirrors python's test_tac_keeps_bytes_and_puts_b_before_the_record.
@@ -109,24 +52,26 @@ describe('tac records', () => {
 describe('tac failures and separators', () => {
   // Mirrors python's test_a_file_that_fails_to_read_is_reported_and_tac_goes_on.
   it('reports a file that fails to read and goes on', async () => {
-    const bad = PathSpec.fromStrPath('/bad')
-    const good = PathSpec.fromStrPath('/good')
-    const readRange = (p: PathSpec, offset: number, size: number | null): Promise<Uint8Array> => {
-      if (p.virtual === '/bad')
-        return Promise.reject(Object.assign(new Error('/bad'), { code: 'EACCES' }))
-      const data = ENC.encode('a\nb\n')
-      return Promise.resolve(data.subarray(offset, size === null ? undefined : offset + size))
+    const stream = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      if (p.virtual === '/bad') throw Object.assign(new Error('/bad'), { code: 'EACCES' })
+      yield ENC.encode('a\nb\n')
     }
     const [out, io] = await tacGeneric(
-      [bad, good],
+      [PathSpec.fromStrPath('/bad'), PathSpec.fromStrPath('/good')],
       opts({}),
-      streamOf(new Uint8Array()),
-      readRange,
-      () => Promise.resolve(4),
+      stream,
     )
     expect(new TextDecoder().decode(await materialize(out))).toBe('b\na\n')
     expect(io.exitCode).toBe(1)
     expect(new TextDecoder().decode(await materialize(io.stderr))).toContain('/bad')
+  })
+
+  // Mirrors python's test_an_empty_separator_is_nul.
+  it('reads an empty separator as NUL', async () => {
+    const data = Uint8Array.of(0x61, 0x00, 0x62, 0x00)
+    const [out] = await tacGeneric([], opts({ separator: '' }, data), streamOf(new Uint8Array()))
+    expect(await materialize(out)).toEqual(Uint8Array.of(0x62, 0x00, 0x61, 0x00))
   })
 
   // Mirrors python's test_a_raw_byte_separator_splits_on_that_byte.

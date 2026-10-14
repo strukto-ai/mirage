@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage import Mount, MountMode, Workspace
 from mirage.cache.index import NULL_INDEX
 from mirage.errors.fs import exdev
-from mirage.types import PathSpec
+from mirage.types import Limit, PathSpec, WritePolicy
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 
@@ -94,3 +96,52 @@ async def test_a_hidden_destination_refuses_the_store_copy():
     io = await ws.shell("cp /a/f /b/g", session_id=session.session_id)
     assert io.exit_code == 1
     assert b.copied == []
+
+
+def _mount(ws: Workspace, prefix: str):
+    return next(m for m in ws._registry._mounts if m.prefix == prefix)
+
+
+@pytest.mark.asyncio
+async def test_a_cached_source_moves_the_bytes_a_read_gives():
+    a, b = StoreRAM(), StoreRAM()
+    a.caches_reads = True
+    ws = await _seeded(a, b)
+    await ws.shell("cat /a/f")
+    io = await ws.shell("cp /a/f /b/g")
+    assert io.exit_code == 0, io.stderr
+    assert b.copied == []
+    assert (await ws.shell("cat /b/g")).stdout == b"payload\n"
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_source_moves_the_bytes():
+    a, b = StoreRAM(), StoreRAM()
+    ws = await _seeded(a, b)
+    _mount(ws, "/a/").revisions["/a/f"] = "v1"
+    io = await ws.shell("cp /a/f /b/g")
+    assert io.exit_code == 0, io.stderr
+    assert b.copied == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["/a/", "/b/"])
+async def test_a_conditional_mount_moves_the_bytes(prefix):
+    a, b = StoreRAM(), StoreRAM()
+    ws = await _seeded(a, b)
+    _mount(ws, prefix).write = WritePolicy.CONDITIONAL
+    await ws.shell("mv /a/f /b/g")
+    assert b.copied == []
+
+
+@pytest.mark.asyncio
+async def test_a_store_copy_keeps_the_copy_timeout():
+    class Slow(StoreRAM):
+        async def copy_from(self, source, src, dst):
+            await asyncio.sleep(5)
+
+    a, b = StoreRAM(), Slow()
+    ws = await _seeded(a, b)
+    _mount(ws, "/b/").command_limits["copy"] = Limit(timeout_seconds=0.05)
+    io = await ws.shell("cp /a/f /b/g")
+    assert io.exit_code != 0

@@ -54,59 +54,28 @@ describe('xxd numbers', () => {
 })
 
 describe('xxd -s', () => {
-  const io = (read: string[]) =>
-    [
-      async function* (): AsyncIterable<Uint8Array> {
-        read.push('stream')
-        await Promise.resolve()
-        yield DATA
-      },
-      (_p: PathSpec, offset: number, size: number | null): Promise<Uint8Array> => {
-        read.push(`${String(offset)}+${String(size)}`)
-        return Promise.resolve(DATA.subarray(offset, size === null ? undefined : offset + size))
-      },
-      (): Promise<number | null> => Promise.resolve(DATA.byteLength),
-    ] as const
+  const stream = async function* (): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
+    yield DATA
+  }
 
-  // Mirrors python's test_a_dump_seeks_with_one_ranged_read.
+  // Mirrors python's test_a_dump_starts_its_addresses_at_the_seek.
   it.each([
-    ['2', undefined, '00000002: 6667 68                                  fgh\n', ['2+3']],
-    ['-2', '1', '00000003: 67                                       g\n', ['3+1']],
-    ['10', undefined, '', []],
-    ['1', '0', '', []],
-    ['0', undefined, '00000000: 6465 6667 68                             defgh\n', ['stream']],
-  ])('-s %s -l %s', async (seek, limit, out, reads) => {
-    const read: string[] = []
-    const [stream, readRange, sizeOf] = io(read)
+    ['2', undefined, '00000002: 6667 68                                  fgh\n'],
+    ['-2', '1', '00000003: 67                                       g\n'],
+    ['10', undefined, ''],
+    ['1', '0', ''],
+    ['0', undefined, '00000000: 6465 6667 68                             defgh\n'],
+  ])('-s %s -l %s', async (seek, limit, out) => {
     const flags = limit === undefined ? { s: seek } : { s: seek, args_l: limit }
-    const [stdout, result] = await xxdGeneric(
-      [F],
-      opts(flags),
-      stream,
-      null,
-      null,
-      null,
-      readRange,
-      sizeOf,
-    )
+    const [stdout, result] = await xxdGeneric([F], opts(flags), stream)
     expect(DEC.decode(await materialize(stdout))).toBe(out)
     expect(result.exitCode).toBe(0)
-    expect(read).toEqual(reads)
   })
 
   // Mirrors python's test_a_seek_before_the_start_cannot_seek.
   it.each(['-10', '+-2'])('-s %s cannot seek', async (seek) => {
-    const [stream, readRange, sizeOf] = io([])
-    const [stdout, result] = await xxdGeneric(
-      [F],
-      opts({ s: seek }),
-      stream,
-      null,
-      null,
-      null,
-      readRange,
-      sizeOf,
-    )
+    const [stdout, result] = await xxdGeneric([F], opts({ s: seek }), stream)
     expect([stdout, result.exitCode, DEC.decode(await materialize(result.stderr))]).toEqual([
       null,
       4,
@@ -139,33 +108,5 @@ describe('xxd -l', () => {
     ['-1', null],
   ])('parseLimit %j', (raw, limit) => {
     expect(parseLimit(raw)).toBe(limit)
-  })
-
-  // Mirrors python's test_a_seek_without_a_limit_reads_growing_blocks.
-  it('reads a seek without a limit in growing blocks', async () => {
-    const data = new Uint8Array(256 * 1024).map((_, i) => i % 256)
-    const asked: [number, number | null][] = []
-    const stream = (): AsyncIterable<Uint8Array> => {
-      throw new Error('streamed')
-    }
-    const readRange = (_p: PathSpec, offset: number, size: number | null): Promise<Uint8Array> => {
-      asked.push([offset, size])
-      return Promise.resolve(data.subarray(offset, size === null ? undefined : offset + size))
-    }
-    const [stdout] = await xxdGeneric(
-      [F],
-      opts({ s: '16' }),
-      stream,
-      null,
-      null,
-      null,
-      readRange,
-      () => Promise.resolve(data.byteLength),
-    )
-    const first = await (stdout as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]().next()
-    expect(DEC.decode(first.done === true ? new Uint8Array() : first.value)).toMatch(
-      /^00000010: 1011 1213/,
-    )
-    expect(asked).toEqual([[16, 64 * 1024]])
   })
 })

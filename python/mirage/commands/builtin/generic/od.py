@@ -1,5 +1,5 @@
 import struct
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 
 from mirage.commands.builtin.constants import (
     OD_OVERFLOW_UNITS,
@@ -8,18 +8,14 @@ from mirage.commands.builtin.constants import (
     XSTRTOUMAX_PATTERN,
 )
 from mirage.commands.builtin.utils.size_suffix import parse_base0
-from mirage.commands.builtin.utils.stream import (
-    is_stdin,
-    resolve_source,
-    stdin_stream,
-)
+from mirage.commands.builtin.utils.stream import resolve_source, stdin_stream
 from mirage.commands.errors import UsageError
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
-from mirage.types import PathSpec, ReadRangeFn
+from mirage.types import PathSpec
 
 SKIP_PAST_END = b"od: cannot skip past end of combined input\n"
 
@@ -133,25 +129,19 @@ async def _taken(
 async def _combined(
     paths: list[PathSpec],
     read: Callable[[PathSpec], AsyncIterator[bytes]],
-    read_range: ReadRangeFn | None,
-    size_of: Callable[[PathSpec], Awaitable[int | None]] | None,
     skip: int,
     limit: int | None,
 ) -> tuple[bytes, bytes, bool, int]:
     """The operands as od's one input, past ``skip`` and within ``limit``.
 
-    As GNU od: a regular file wholly inside the skip is passed over
-    unread, and the rest of the skip is one ranged read where the mount
-    has one, which also stops at ``limit``. An operand that cannot be
-    opened is reported and passed over; one that fails to read (a
-    directory) is reported, ends any skip, and counts as opened. Once
-    ``limit`` bytes are in, no later operand is opened.
+    As GNU od: an operand that cannot be opened is reported and passed
+    over; one that fails to read (a directory) is reported, ends any
+    skip, and counts as opened. Once ``limit`` bytes are in, no later
+    operand is opened.
 
     Args:
         paths (list[PathSpec]): the operands.
         read (Callable): the operands' stream, stdin for ``-``.
-        read_range (Callable | None): the mount's byte window.
-        size_of (Callable | None): a regular file's size.
         skip (int): -j.
         limit (int | None): -N.
 
@@ -167,31 +157,14 @@ async def _combined(
         if left == 0 and opened:
             break
         try:
-            size = (
-                await size_of(p)
-                if size_of is not None
-                and read_range is not None
-                and (skip or left is not None)
-                and not is_stdin(p)
-                else None
-            )
-            if size is not None and read_range is not None:
-                opened = True
-                if skip >= size:
-                    skip -= size
-                    continue
-                want = size - skip if left is None else min(left, size - skip)
-                data = bytes(await read_range(p, offset=skip, size=want))
-                part, skip = [data], 0
-            else:
-                part, skip = await _taken(read(p), skip, left)
-                opened = True
+            part, skip = await _taken(read(p), skip, left)
         except FS_ERRORS as exc:
             err += encode_text(fs_error_line("od", p, exc))
             if isinstance(exc, IsADirectoryError):
                 opened = True
                 skip = 0
             continue
+        opened = True
         kept.extend(part)
         if left is not None:
             left -= sum(len(chunk) for chunk in part)
@@ -202,8 +175,6 @@ async def od_generic(
     paths: list[PathSpec],
     *,
     read_stream: Callable[[PathSpec], AsyncIterator[bytes]],
-    read_range: ReadRangeFn | None = None,
-    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     stdin: ByteSource | None = None,
     address_radix: str = "o",
     skip: int = 0,
@@ -218,9 +189,6 @@ async def od_generic(
     Args:
         paths (list[PathSpec]): the operands, empty for stdin.
         read_stream (Callable): bound reader, ``read_stream(path)``.
-        read_range (Callable | None): the mount's byte window, which
-            serves -j and -N without reading the bytes they pass.
-        size_of (Callable | None): a regular file's size.
         stdin (ByteSource | None): the line's input.
         address_radix (str): -A.
         skip (int): -j.
@@ -231,8 +199,6 @@ async def od_generic(
         data, err, opened, unspent = await _combined(
             paths,
             stdin_stream(read_stream, stdin, sole=True),
-            read_range,
-            size_of,
             skip,
             limit,
         )

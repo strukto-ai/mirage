@@ -3,12 +3,12 @@ import { chunks } from '../../../io/cooperative.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import type { PathSpec, ReadRangeFn } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { UsageError } from '../../errors.ts'
 import { OD_OVERFLOW_UNITS, OD_SIZE_UNITS, UINTMAX, XSTRTOUMAX_PATTERN } from '../constants.ts'
 import { parseBase0 } from '../utils/size_suffix.ts'
-import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
+import { resolveSource, stdinStream } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
 
@@ -106,20 +106,16 @@ async function taken(
 }
 
 /**
- * The operands as od's one input, past `skip` and within `limit`. As GNU od: a
- * regular file wholly inside the skip is passed over unread, and the rest of
- * the skip is one ranged read where the mount has one, which also stops at
- * `limit`. An operand that cannot be opened is reported and passed over; one
- * that fails to read (a directory) is reported, ends any skip, and counts as
- * opened. Once `limit` bytes are in, no later operand is opened. Returns the
- * bytes, the error lines, whether any operand opened, and the skip left
- * unspent. Mirrors Python's _combined.
+ * The operands as od's one input, past `skip` and within `limit`. As GNU od:
+ * an operand that cannot be opened is reported and passed over; one that fails
+ * to read (a directory) is reported, ends any skip, and counts as opened. Once
+ * `limit` bytes are in, no later operand is opened. Returns the bytes, the
+ * error lines, whether any operand opened, and the skip left unspent. Mirrors
+ * Python's _combined.
  */
 async function combined(
   paths: readonly PathSpec[],
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  readRange: ReadRangeFn | null,
-  sizeOf: ((p: PathSpec) => Promise<number | null>) | null,
   skip: number,
   limit: number | null,
 ): Promise<[Uint8Array, string, boolean, number]> {
@@ -130,27 +126,9 @@ async function combined(
   let left = limit
   for (const p of paths) {
     if (left === 0 && opened) break
+    let part: Uint8Array[]
     try {
-      const size =
-        sizeOf !== null && readRange !== null && (toSkip > 0 || left !== null) && !isStdin(p)
-          ? await sizeOf(p)
-          : null
-      let part: Uint8Array[]
-      if (size !== null && readRange !== null) {
-        opened = true
-        if (toSkip >= size) {
-          toSkip -= size
-          continue
-        }
-        const want = left === null ? size - toSkip : Math.min(left, size - toSkip)
-        part = [await readRange(p, toSkip, want)]
-        toSkip = 0
-      } else {
-        ;[part, toSkip] = await taken(read(p), toSkip, left)
-        opened = true
-      }
-      kept.push(...part)
-      if (left !== null) for (const chunk of part) left -= chunk.byteLength
+      ;[part, toSkip] = await taken(read(p), toSkip, left)
     } catch (e) {
       if (!isFsError(e)) throw e
       err += fsErrorLine('od', p, e)
@@ -158,7 +136,11 @@ async function combined(
         opened = true
         toSkip = 0
       }
+      continue
     }
+    opened = true
+    kept.push(...part)
+    if (left !== null) for (const chunk of part) left -= chunk.byteLength
   }
   return [concat(kept), err, opened, toSkip]
 }
@@ -166,8 +148,7 @@ async function combined(
 /**
  * Dump the operands, GNU od semantics. od defines multiple FILE operands as
  * one concatenated input, so skip and limit offsets apply across the whole
- * run, not per file. `readRange` serves -j and -N without reading the bytes
- * they pass. Mirrors Python's od_generic.
+ * run, not per file. Mirrors Python's od_generic.
  */
 export async function odGeneric(
   paths: readonly PathSpec[],
@@ -177,8 +158,6 @@ export async function odGeneric(
   skip: number,
   limit: number | null,
   formats: readonly string[],
-  readRange: ReadRangeFn | null = null,
-  sizeOf: ((p: PathSpec) => Promise<number | null>) | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
   let data: Uint8Array
   let err = ''
@@ -188,8 +167,6 @@ export async function odGeneric(
     ;[data, err, opened, unspent] = await combined(
       paths,
       stdinStream(read, stdin, true),
-      readRange,
-      sizeOf,
       skip,
       limit,
     )

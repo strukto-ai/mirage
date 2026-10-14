@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '../../../io/types.ts'
-import { FileStat, FileType, type PathSpec, type ReadRangeFn } from '../../../types.ts'
-import { RANGE_FIRST_BLOCK, RANGE_MAX_BLOCK } from '../constants.ts'
+import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
 
 export async function readStdinAsync(stdin: ByteSource | null): Promise<Uint8Array | null> {
@@ -98,26 +97,4 @@ export function stdinStat(
     isStdin(path, dash)
       ? Promise.resolve(new FileStat({ name: '-', type: FileType.FIFO }))
       : stat(path)
-}
-
-/**
- * Bytes `start` to `end` of a file, one ranged read per block, so a reader
- * that stops early leaves the rest unread and no block is held whole. Mirrors
- * Python's ranged_stream.
- */
-export async function* rangedStream(
-  readRange: ReadRangeFn,
-  path: PathSpec,
-  start: number,
-  end: number,
-): AsyncIterable<Uint8Array> {
-  let at = start
-  let block = RANGE_FIRST_BLOCK
-  while (at < end) {
-    const data = await readRange(path, at, Math.min(block, end - at))
-    if (data.byteLength === 0) return
-    yield data
-    at += data.byteLength
-    block = Math.min(block * 2, RANGE_MAX_BLOCK)
-  }
 }

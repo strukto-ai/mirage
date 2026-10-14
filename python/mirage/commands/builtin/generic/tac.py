@@ -1,18 +1,15 @@
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.constants import (
-    RANGE_FIRST_BLOCK,
-    RANGE_MAX_BLOCK,
-)
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     normalized_read,
+    operands_io,
+    read_operands,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    is_stdin,
     resolve_source,
     stdin_stat,
     stdin_stream,
@@ -21,11 +18,10 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.errors.constants import FS_ERRORS
-from mirage.errors.render import fs_error_line
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.stream import yield_bytes
+from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
-from mirage.types import PathSpec, PolymorphicReadFn, ReadRangeFn, StatFn
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +31,22 @@ class TacFlags:
     regex: bool = False
 
 
+def _separator_of(raw: str | None) -> str:
+    """``-s`` as tac reads it: a newline when absent, and NUL when empty,
+    as the C string's terminator.
+
+    Args:
+        raw (str | None): as typed.
+    """
+    if raw is None:
+        return "\n"
+    return raw or "\0"
+
+
 def parse_flags(flags: Mapping[str, FlagValue]) -> TacFlags:
     fl = FlagView(flags, spec=SPECS["tac"])
     return TacFlags(
-        separator=fl.as_str("separator") or "\n",
+        separator=_separator_of(fl.as_str("separator")),
         before=fl.as_bool("before"),
         regex=fl.as_bool("regex"),
     )
@@ -64,47 +72,6 @@ def _records(data: bytes, separator: bytes, before: bool) -> list[bytes]:
     return [record for record in records if record]
 
 
-async def _reverse_ranged(
-    read_range: ReadRangeFn,
-    path: PathSpec,
-    size: int,
-    separator: bytes,
-    before: bool,
-) -> AsyncIterator[bytes]:
-    """A file's records last first, read from its end a block at a time.
-
-    Only a whole record is let out, so a reader that stops after the
-    last lines leaves the rest unread. For a one-byte separator, which
-    no record boundary can straddle unseen.
-
-    Args:
-        read_range (Callable): the mount's byte window.
-        path (PathSpec): the file.
-        size (int): its size.
-        separator (bytes): the one-byte separator.
-        before (bool): -b.
-    """
-    pos = size
-    held = b""
-    block = RANGE_FIRST_BLOCK
-    while pos > 0:
-        start = max(pos - block, 0)
-        got = await read_range(path, offset=start, size=pos - start)
-        held = bytes(got) + held
-        pos = start
-        block = min(block * 2, RANGE_MAX_BLOCK)
-        at = held.find(separator)
-        if pos == 0 or at < 0:
-            continue
-        cut = at if before else at + 1
-        out = b"".join(reversed(_records(held[cut:], separator, before)))
-        held = held[:cut]
-        if out:
-            yield out
-    if held:
-        yield b"".join(reversed(_records(held, separator, before)))
-
-
 async def _reverse_source(
     source: AsyncIterator[bytes], separator: str, before: bool, regex: bool
 ) -> bytes:
@@ -128,44 +95,6 @@ async def _reverse_source(
     return "".join(records).encode()
 
 
-async def _reversed(
-    plans: list[tuple[PathSpec, int | AsyncIterator[bytes]]],
-    read_range: ReadRangeFn | None,
-    separator: str,
-    before: bool,
-    regex: bool,
-    io: IOResult,
-) -> AsyncIterator[bytes]:
-    """Each operand's records last first, one operand after another.
-
-    An operand that fails to read is reported on ``io`` and the next
-    one goes on, as GNU tac does.
-
-    Args:
-        plans (list[tuple[PathSpec, int | AsyncIterator[bytes]]]): each
-            operand with its size, to read it from its end, or its
-            stream, to read it whole.
-        read_range (ReadRangeFn | None): the mount's byte window.
-        separator (str): -s.
-        before (bool): -b.
-        regex (bool): -r.
-        io (IOResult): takes each failed operand's line.
-    """
-    for p, plan in plans:
-        try:
-            if isinstance(plan, int) and read_range is not None:
-                async for chunk in _reverse_ranged(
-                    read_range, p, plan, encode_text(separator), before
-                ):
-                    yield chunk
-            elif not isinstance(plan, int):
-                yield await _reverse_source(plan, separator, before, regex)
-        except FS_ERRORS as exc:
-            held = await materialize(io.stderr) if io.stderr else b""
-            io.stderr = held + encode_text(fs_error_line("tac", p, exc))
-            io.exit_code = 1
-
-
 async def tac(
     paths: list[PathSpec],
     *,
@@ -174,30 +103,17 @@ async def tac(
     separator: str = "\n",
     before: bool = False,
     regex: bool = False,
-    read_range: ReadRangeFn | None = None,
-    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if paths:
-        # A file the mount serves ranges for, with a size its stat knows
-        # and a one-byte separator, is read from its end; any other is
-        # read whole. Each is planned here, while the command runs, and
-        # read as the output is pulled.
-        ranged = (
-            read_range is not None
-            and size_of is not None
-            and not regex
-            and len(encode_text(separator)) == 1
-        )
-        plans: list[tuple[PathSpec, int | AsyncIterator[bytes]]] = []
-        for p in paths:
-            size = (
-                await size_of(p)
-                if ranged and size_of is not None and not is_stdin(p)
-                else None
+        ok, err = await read_operands(paths, read_stream, "tac")
+        parts: list[bytes] = []
+        for operand in ok:
+            parts.append(
+                await _reverse_source(
+                    yield_bytes(operand.data), separator, before, regex
+                )
             )
-            plans.append((p, size if size is not None else read_stream(p)))
-        io = IOResult()
-        return _reversed(plans, read_range, separator, before, regex, io), io
+        return b"".join(parts), operands_io(err)
 
     source = resolve_source(stdin)
     return await _reverse_source(source, separator, before, regex), IOResult()
@@ -209,8 +125,6 @@ async def tac_generic(
     opts: CommandOpts,
     stat: StatFn,
     stream: PolymorphicReadFn,
-    read_range: ReadRangeFn | None = None,
-    size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run tac over resolved operands; mirrors tacGeneric.
 
@@ -221,9 +135,6 @@ async def tac_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
-        read_range (Callable | None): the mount's byte window, which
-            reads a file from its end.
-        size_of (Callable | None): a regular file's size.
     """
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, opts.stdin)
@@ -239,8 +150,6 @@ async def tac_generic(
             separator=parsed.separator,
             before=parsed.before,
             regex=parsed.regex,
-            read_range=read_range,
-            size_of=size_of,
         ),
         err,
     )

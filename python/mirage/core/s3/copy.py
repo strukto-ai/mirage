@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.context import writes_conditioned
-from mirage.core.object_store.copy import make_copy
+from mirage.core.object_store.copy import make_copy, settle_copy
 from mirage.core.s3.client import (
     _client_kwargs,
     _key,
@@ -24,6 +23,7 @@ from mirage.core.s3.client import (
 from mirage.core.s3.driver import DRIVER
 from mirage.core.s3.exists import exists
 from mirage.errors.fs import enoent, exdev
+from mirage.observe.context import start_op
 from mirage.types import PathSpec
 from mirage.vfs.s3.config import S3Config
 from mirage.vfs.secrets import reveal_secret
@@ -60,9 +60,7 @@ async def copy_from(
     buckets when one set of credentials reaches both, so it is tried
     only when both mounts send their requests to the same endpoint with
     the same credentials; otherwise, or when S3 refuses it, it is EXDEV,
-    and the caller moves the bytes. A conditional mount's write carries
-    its condition, which the move's write does, so it is EXDEV there
-    too. A missing source is ENOENT.
+    and the caller moves the bytes. A missing source is ENOENT.
 
     Args:
         accessor (S3Accessor): this mount's accessor.
@@ -71,11 +69,12 @@ async def copy_from(
         dst (PathSpec): the copy, on this mount.
     """
     config = accessor.config
-    if writes_conditioned() or _service(config) != _service(source.config):
+    if _service(config) != _service(source.config):
         raise exdev(dst)
     client = await accessor.cached_client(
         lambda: async_session(config).client(**_client_kwargs(config))
     )
+    timer = start_op()
     try:
         await client.copy_object(
             Bucket=config.bucket,
@@ -91,3 +90,4 @@ async def copy_from(
         if hasattr(exc, "response"):
             raise exdev(dst) from exc
         raise
+    await settle_copy(dst, DRIVER.vfs, timer)

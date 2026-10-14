@@ -74,7 +74,7 @@ def test_uintmax_boundary_is_exact():
     )
 
 
-def _files(files: dict[str, bytes], read: list[str]):
+def _stream(files: dict[str, bytes], read: list[str]):
     async def read_stream(path):
         read.append(path.virtual)
         if path.virtual not in files:
@@ -83,18 +83,7 @@ def _files(files: dict[str, bytes], read: list[str]):
             )
         yield files[path.virtual]
 
-    async def read_range(path, *, offset, size):
-        read.append(f"{path.virtual}@{offset}+{size}")
-        return files[path.virtual][offset : offset + size]
-
-    async def size_of(path):
-        if path.virtual not in files:
-            raise FileNotFoundError(
-                2, "No such file or directory", path.virtual
-            )
-        return len(files[path.virtual])
-
-    return read_stream, read_range, size_of
+    return read_stream
 
 
 def _p(name: str) -> PathSpec:
@@ -113,17 +102,24 @@ def _p(name: str) -> PathSpec:
             None,
             "0000004   e   f   g   h\n0000010\n",
             "",
-            ["/b@1+4"],
+            ["/a", "/b"],
         ),
-        (["/a", "/b"], 3, 2, "0000003   d   e\n0000005\n", "", ["/b@0+2"]),
-        (["/a", "/b"], 1, 1, "0000001   b\n0000002\n", "", ["/a@1+1"]),
+        (
+            ["/a", "/b"],
+            3,
+            2,
+            "0000003   d   e\n0000005\n",
+            "",
+            ["/a", "/b"],
+        ),
+        (["/a", "/b"], 1, 1, "0000001   b\n0000002\n", "", ["/a"]),
         (
             ["/a", "/x", "/b"],
             3,
             2,
             "0000003   d   e\n0000005\n",
             "od: /x: No such file or directory\n",
-            ["/b@0+2"],
+            ["/a", "/x", "/b"],
         ),
         (
             ["/a", "/b"],
@@ -131,21 +127,18 @@ def _p(name: str) -> PathSpec:
             None,
             "",
             "od: cannot skip past end of combined input\n",
-            [],
+            ["/a", "/b"],
         ),
         (["/x"], 0, None, "", "od: /x: No such file or directory\n", ["/x"]),
     ],
 )
-async def test_od_skips_and_limits_with_ranged_reads(
+async def test_od_skips_and_limits_across_operands(
     names, skip, limit, out, err, reads
 ):
     read: list[str] = []
-    stream, read_range, size_of = _files({"/a": b"abc", "/b": b"defgh"}, read)
     stdout, io = await od_generic(
         [_p(n) for n in names],
-        read_stream=stream,
-        read_range=read_range,
-        size_of=size_of,
+        read_stream=_stream({"/a": b"abc", "/b": b"defgh"}, read),
         skip=skip,
         limit=limit,
         formats=["c"],

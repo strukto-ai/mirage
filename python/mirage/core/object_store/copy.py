@@ -28,9 +28,29 @@ from mirage.core.object_store.driver import (
 )
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.errors.fs import enoent
-from mirage.observe.context import record, start_op
+from mirage.observe.context import OpTimer, record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
+
+
+async def settle_copy(dst_spec: PathSpec, vfs: str, timer: OpTimer) -> None:
+    """Account for a copy onto ``dst_spec``: the change is recorded, so a
+    snapshot drops the destination's earlier pin, and its cached bytes
+    and its ancestors' listings are dropped.
+
+    Args:
+        dst_spec (PathSpec): the copy's destination.
+        vfs (str): the store's VFS name.
+        timer (OpTimer): started when the copy was sent.
+    """
+    # The destination, not the source: a copy replaces dst's bytes and
+    # leaves src untouched, so only dst's token stops describing its
+    # object.
+    record("copy", dst_spec.virtual, vfs, 0, timer)
+    # The eviction rides with the record, as in unlink.
+    await invalidate_after_write(dst_spec)
+    # The copy can materialize the destination's missing ancestors.
+    await invalidate_ancestors(dst_spec)
 
 
 def make_copy(
@@ -74,17 +94,8 @@ def make_copy(
             # None when the store raised: only a clean False, "nothing was
             # copied", is safe to skip -- a raise may have left a partial
             # object behind.
-            if copied is False:
-                return
-            # The destination, not the source: a copy replaces dst's
-            # bytes and leaves src untouched, so only dst's token stops
-            # describing its object.
-            record("copy", dst_spec.virtual, driver.vfs, 0, timer)
-            # The eviction rides with the record, as in unlink.
-            await invalidate_after_write(dst_spec)
-            # The copy can materialize the destination's missing
-            # ancestors.
-            await invalidate_ancestors(dst_spec)
+            if copied is not False:
+                await settle_copy(dst_spec, driver.vfs, timer)
 
         cond = await write_condition(dst_spec, "copy")
         async with driver.connect(accessor) as conn:

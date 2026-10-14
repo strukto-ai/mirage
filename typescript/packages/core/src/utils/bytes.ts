@@ -24,3 +24,14 @@ export function concat(chunks: readonly Uint8Array[]): Uint8Array {
   }
   return out
 }
+
+/** Where `needle` first occurs in `haystack` at or after `from`, -1 when it
+ * does not; an empty `needle` occurs at `from`. */
+export function findBytes(haystack: Uint8Array, needle: Uint8Array, from = 0): number {
+  if (needle.length === 0) return from
+  outer: for (let i = from; i + needle.length <= haystack.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer
+    return i
+  }
+  return -1
+}

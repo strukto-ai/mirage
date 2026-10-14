@@ -143,6 +143,43 @@
       "flags": [
         "separator"
       ]
+    },
+    {
+      "id": "tac_s_empty_separates_on_nul",
+      "seq": 17000021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\0b\\0' | tac -s '' | od -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   b  \\0   a  \\0\n0000004\n",
+        "stderr": ""
+      },
+      "flags": [
+        "separator"
+      ]
     }
   ]
 }

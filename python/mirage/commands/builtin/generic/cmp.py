@@ -159,7 +159,7 @@ def operand_skips(
 class _Operand:
     """One operand's bytes as cmp pulls them, a chunk at a time."""
 
-    def __init__(self, source: AsyncIterator[bytes]) -> None:
+    def __init__(self, source: bytes | AsyncIterator[bytes]) -> None:
         self._source = chunks(source)
         self.held = b""
 
@@ -321,21 +321,55 @@ async def cmp_cmd(
         first, second = operands
         await first.skip(skip[0])
         await second.skip(skip[1])
-        if not verbose:
-            return await _streamed(
-                first, second, names, silent, limit, print_bytes
-            )
-        data1 = await first.rest(limit)
-        data2 = await second.rest(limit)
-        sizes = [len(data1)] if not is_stdin(p0) else []
-        if not is_stdin(p1):
-            sizes.append(len(data2))
-        return _compared(
-            data1, data2, names, sizes, silent, verbose, limit, print_bytes
+        return await _answered(
+            first,
+            second,
+            names,
+            (is_stdin(p0), is_stdin(p1)),
+            silent,
+            verbose,
+            limit,
+            print_bytes,
         )
     finally:
         for operand in operands:
             await operand.close()
+
+
+async def _answered(
+    first: _Operand,
+    second: _Operand,
+    names: tuple[str, str],
+    piped: tuple[bool, bool],
+    silent: bool,
+    verbose: bool,
+    limit: int | None,
+    print_bytes: bool,
+) -> tuple[ByteSource | None, IOResult]:
+    """cmp's answer for two inputs past their skips: read to the first
+    difference, or with -l, which lists every one, to the end.
+
+    Args:
+        first (_Operand): the first input.
+        second (_Operand): the second.
+        names (tuple[str, str]): the two operands as typed.
+        piped (tuple[bool, bool]): whether each is stdin, which has no
+            size to width -l's offset column.
+        silent (bool): -s.
+        verbose (bool): -l.
+        limit (int | None): -n.
+        print_bytes (bool): -b.
+    """
+    if not verbose:
+        return await _streamed(
+            first, second, names, silent, limit, print_bytes
+        )
+    data1 = await first.rest(limit)
+    data2 = await second.rest(limit)
+    sizes = [
+        len(data) for data, pipe in zip((data1, data2), piped) if not pipe
+    ]
+    return _listed(data1, data2, names, sizes, silent, limit, print_bytes)
 
 
 async def _streamed(
@@ -457,11 +491,11 @@ async def _one_stdin_twice(
     if silent and left[0] != left[1]:
         if limit is None or min(left) < limit:
             return None, IOResult(exit_code=1)
-    stdout, io = _compared(
-        data[skip[0] + skip[1] :],
-        b"",
+    stdout, io = await _answered(
+        _Operand(data[skip[0] + skip[1] :]),
+        _Operand(b""),
         ("-", "-"),
-        [],
+        (True, True),
         silent,
         verbose,
         limit,
@@ -473,73 +507,51 @@ async def _one_stdin_twice(
     return stdout, io
 
 
-def _compared(
+def _listed(
     data1: bytes,
     data2: bytes,
     names: tuple[str, str],
     sizes: list[int],
     silent: bool,
-    verbose: bool,
     limit: int | None,
     print_bytes: bool,
 ) -> tuple[ByteSource | None, IOResult]:
-    """cmp's answer for two inputs already read past their skips.
+    """cmp -l's answer for two inputs read past their skips and within
+    ``-n``: a row for every byte they differ on.
 
     Args:
         data1 (bytes): the first input's compared bytes.
         data2 (bytes): the second input's.
         names (tuple[str, str]): the two operands as typed.
         sizes (list[int]): bytes left after the skip in each regular
-            operand, which size -l's offset column.
+            operand, which size the offset column.
         silent (bool): -s.
-        verbose (bool): -l.
         limit (int | None): -n.
         print_bytes (bool): -b.
     """
-    if limit is not None:
-        data1 = data1[:limit]
-        data2 = data2[:limit]
     if data1 == data2:
         return None, IOResult()
     if silent:
         return None, IOResult(exit_code=1)
-    common = min(len(data1), len(data2))
-    shorter = names[0] if len(data1) < len(data2) else names[1]
-    held = data1 if len(data1) < len(data2) else data2
-    if verbose:
-        width = offset_width(sizes, limit)
-        out_lines: list[str] = []
-        for idx in range(common):
-            if data1[idx] != data2[idx]:
-                row = f"{idx + 1:>{width}} {data1[idx]:>3o}"
-                if print_bytes:
-                    row += f" {visible(data1[idx]):<4}"
-                row += f" {data2[idx]:>3o}"
-                if print_bytes:
-                    row += f" {visible(data2[idx])}"
-                out_lines.append(row)
-        io = IOResult(exit_code=1)
-        if len(data1) != len(data2):
-            io.stderr = _eof_error(
-                shorter, len(held), 0, held[-1] if held else -1, True
-            )
-        return format_records(out_lines), io
-    for idx in range(common):
+    width = offset_width(sizes, limit)
+    out_lines: list[str] = []
+    for idx in range(min(len(data1), len(data2))):
         if data1[idx] != data2[idx]:
-            line = 1 + data1[:idx].count(_NEWLINE)
-            return _differ(
-                names, idx, line, data1[idx], data2[idx], print_bytes
-            )
-    return None, IOResult(
-        exit_code=1,
-        stderr=_eof_error(
-            shorter,
-            len(held),
-            held.count(_NEWLINE),
-            held[-1] if held else -1,
-            False,
-        ),
-    )
+            row = f"{idx + 1:>{width}} {data1[idx]:>3o}"
+            if print_bytes:
+                row += f" {visible(data1[idx]):<4}"
+            row += f" {data2[idx]:>3o}"
+            if print_bytes:
+                row += f" {visible(data2[idx])}"
+            out_lines.append(row)
+    io = IOResult(exit_code=1)
+    if len(data1) != len(data2):
+        shorter = names[0] if len(data1) < len(data2) else names[1]
+        held = data1 if len(data1) < len(data2) else data2
+        io.stderr = _eof_error(
+            shorter, len(held), 0, held[-1] if held else -1, True
+        )
+    return format_records(out_lines), io
 
 
 def _eof_error(

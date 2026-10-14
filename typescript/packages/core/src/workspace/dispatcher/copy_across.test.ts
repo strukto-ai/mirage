@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 
 import { exdev } from '../../errors/fs.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
-import { MountMode, type PathSpec } from '../../types.ts'
+import { Limit, MountMode, type PathSpec, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -114,5 +114,57 @@ describe('a copy between two stores', () => {
     const io = await ws.shell('cp /a/f /b/g', { sessionId: session.sessionId })
     expect(io.exitCode).toBe(1)
     expect(b.copied).toEqual([])
+  })
+})
+
+/** A source whose reads the file cache keeps. */
+class CachedStoreRAM extends StoreRAM {
+  override readonly cachesReads = true
+}
+
+/** A destination whose store copy outlasts any deadline. */
+class SlowStoreRAM extends StoreRAM {
+  override async copyFrom(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 5000))
+  }
+}
+
+describe('a copy a read would answer otherwise', () => {
+  // Mirrors python's test_a_cached_source_moves_the_bytes_a_read_gives.
+  it('moves the bytes of a cached source', async () => {
+    const b = new StoreRAM()
+    const ws = await seeded(new CachedStoreRAM(), b)
+    await ws.shell('cat /a/f')
+    const io = await ws.shell('cp /a/f /b/g')
+    expect(io.exitCode).toBe(0)
+    expect(b.copied).toEqual([])
+    expect(stdoutStr(await ws.shell('cat /b/g'))).toBe('payload\n')
+  })
+
+  // Mirrors python's test_a_pinned_source_moves_the_bytes.
+  it('moves the bytes of a pinned source', async () => {
+    const b = new StoreRAM()
+    const ws = await seeded(new StoreRAM(), b)
+    ws.registry.mountFor('/a/f').revisions.set('/a/f', 'v1')
+    const io = await ws.shell('cp /a/f /b/g')
+    expect(io.exitCode).toBe(0)
+    expect(b.copied).toEqual([])
+  })
+
+  // Mirrors python's test_a_conditional_mount_moves_the_bytes.
+  it.each(['/a/f', '/b/g'])('moves the bytes with %s on a conditional mount', async (path) => {
+    const b = new StoreRAM()
+    const ws = await seeded(new StoreRAM(), b)
+    ;(ws.registry.mountFor(path) as { write: string }).write = WritePolicy.CONDITIONAL
+    await ws.shell('mv /a/f /b/g')
+    expect(b.copied).toEqual([])
+  })
+
+  // Mirrors python's test_a_store_copy_keeps_the_copy_timeout.
+  it('keeps the copy timeout', async () => {
+    const ws = await seeded(new StoreRAM(), new SlowStoreRAM())
+    ws.registry.mountFor('/b/g').commandLimits.set('copy', new Limit({ timeoutSeconds: 0.05 }))
+    const io = await ws.shell('cp /a/f /b/g')
+    expect(io.exitCode).not.toBe(0)
   })
 })

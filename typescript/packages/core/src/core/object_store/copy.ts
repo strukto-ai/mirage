@@ -19,7 +19,8 @@ import {
   invalidateAncestors,
   writeCondition,
 } from '../../cache/context.ts'
-import { record, startOp } from '../../observe/context.ts'
+import { type OpTimer, record, startOp } from '../../observe/context.ts'
+import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import {
@@ -30,6 +31,21 @@ import {
   requireHook,
 } from './driver.ts'
 import { ConditionLostError } from './errors.ts'
+
+/**
+ * Account for a copy onto `dst`: the change is recorded, so a snapshot drops
+ * the destination's earlier pin, and its cached bytes and its ancestors'
+ * listings are dropped. Mirrors Python's settle_copy.
+ */
+export async function settleCopy(dst: PathSpec, vfs: string, timer: OpTimer): Promise<void> {
+  // The destination, not the source: a copy replaces dst's bytes and leaves
+  // src untouched, so only dst's token stops describing its object.
+  record('copy', dst.virtual, vfs, 0, timer)
+  // The eviction rides with the record, as in unlink.
+  await invalidateAfterWrite(dst)
+  // The copy can materialize the destination's missing ancestors.
+  await invalidateAncestors(dst)
+}
 
 /**
  * Build single-object copy over one driver. The driver must carry a
@@ -63,15 +79,7 @@ export function makeCopy<A extends Accessor, C>(
       // undefined when the store threw: only a clean false, "nothing was
       // copied", is safe to skip -- a throw may have left a partial object
       // behind.
-      if (copied === false) return
-      // The destination, not the source: a copy replaces dst's bytes and
-      // leaves src untouched, so only dst's token stops describing its
-      // object.
-      record('copy', dst.virtual, driver.vfs, 0, timer)
-      // The eviction rides with the record, as in unlink.
-      await invalidateAfterWrite(dst)
-      // The copy can materialize the destination's missing ancestors.
-      await invalidateAncestors(dst)
+      if (copied !== false) await settleCopy(dst, driver.vfs, timer)
     }
     const cond = await writeCondition(dst, 'copy')
     const { conn, close } = await driver.connect(accessor)

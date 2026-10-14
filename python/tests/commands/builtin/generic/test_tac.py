@@ -1,6 +1,6 @@
 import pytest
 
-from mirage.commands.builtin.generic.tac import tac
+from mirage.commands.builtin.generic.tac import parse_flags, tac
 from mirage.types import PathSpec
 
 
@@ -36,66 +36,6 @@ async def test_tac_file_reverses_lines():
     assert await _drain(output) == ["c", "b", "a"]
 
 
-def _ranged(data: bytes, asked: list[tuple[int, int]]):
-    async def read_range(path: PathSpec, *, offset: int, size: int) -> bytes:
-        asked.append((offset, size))
-        return data[offset : offset + size]
-
-    return read_range
-
-
-def _size(data: bytes):
-    async def size_of(path: PathSpec) -> int | None:
-        return len(data)
-
-    return size_of
-
-
-BIG = PathSpec(vfs_path="big", virtual="/big", directory="/", resolved=True)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("before", [False, True])
-@pytest.mark.parametrize(
-    "data",
-    [
-        b"a\nb\nc\n",
-        b"a\nb\nc",
-        b"\n\nx\n",
-        b"".join(b"line %d\n" % n for n in range(40000)),
-        b"x" * 100000 + b"\n" + b"y" * 70000,
-    ],
-)
-async def test_a_ranged_tac_gives_what_a_whole_read_gives(data, before):
-    whole, _ = await tac(
-        [BIG], read_stream=_read_stream({BIG.virtual: data}), before=before
-    )
-    ranged, _ = await tac(
-        [BIG],
-        read_stream=_read_stream({}),
-        before=before,
-        read_range=_ranged(data, []),
-        size_of=_size(data),
-    )
-    expect = b"".join([c async for c in whole])
-    assert b"".join([c async for c in ranged]) == expect
-
-
-@pytest.mark.asyncio
-async def test_a_ranged_tac_reads_only_the_end_a_reader_pulls():
-    data = b"".join(b"line %d\n" % n for n in range(400000))
-    asked: list[tuple[int, int]] = []
-    out, _ = await tac(
-        [BIG],
-        read_stream=_read_stream({}),
-        read_range=_ranged(data, asked),
-        size_of=_size(data),
-    )
-    first = await anext(out)
-    assert first.startswith(b"line 399999\nline 399998\n")
-    assert asked == [(len(data) - 64 * 1024, 64 * 1024)]
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "data,before,expect",
@@ -128,23 +68,22 @@ async def test_a_file_that_fails_to_read_is_reported_and_tac_goes_on():
         vfs_path="good", virtual="/good", directory="/", resolved=True
     )
 
-    async def read_range(path, *, offset, size):
+    async def read_stream(path):
         if path.virtual == "/bad":
             raise PermissionError(13, "Permission denied", "/bad")
-        return b"a\nb\n"[offset : offset + size]
+        yield b"a\nb\n"
 
-    async def size_of(path):
-        return 4
-
-    out, io = await tac(
-        [bad, good],
-        read_stream=_read_stream({}),
-        read_range=read_range,
-        size_of=size_of,
-    )
-    assert b"".join([c async for c in out]) == b"b\na\n"
+    out, io = await tac([bad, good], read_stream=read_stream)
+    assert await _drain(out) == ["b", "a"]
     assert io.exit_code == 1
     assert b"/bad" in io.stderr
+
+
+@pytest.mark.parametrize(
+    "flags,separator", [({}, "\n"), ({"separator": ""}, "\0")]
+)
+def test_an_empty_separator_is_nul(flags, separator):
+    assert parse_flags(flags).separator == separator
 
 
 @pytest.mark.asyncio

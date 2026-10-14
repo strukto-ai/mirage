@@ -1326,9 +1326,10 @@ async def transfer_file(
 
     A store-to-store copy goes first where the strategy has one: the
     destination's store copies from the source's without the bytes
-    passing through mirage. EXDEV from it says the stores cannot, and
-    the bytes move through a read and a write, the file materialized
-    in between.
+    passing through mirage. EXDEV from it says the stores cannot, and a
+    declined walk says a hide or rule wants the copy made by parts;
+    either way the bytes move through a read and a write, the file
+    materialized in between.
 
     Args:
         strategy (PrimitiveCopy | PrimitiveMove): the transfer
@@ -1343,7 +1344,9 @@ async def transfer_file(
             await strategy.copy(src, dst)
             return True
         except OSError as exc:
-            if classify(exc) is not FsCondition.EXDEV:
+            if isinstance(exc, WalkDeclinedError):
+                _logger.debug("copy %s declined: %s", src.virtual, exc)
+            elif classify(exc) is not FsCondition.EXDEV:
                 if not isinstance(exc, FS_ERRORS):
                     raise
                 errors.append(

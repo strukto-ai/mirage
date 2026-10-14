@@ -1345,22 +1345,45 @@ export class MountEntry {
   }
 
   /**
+   * The op entry's timeout for `name`, null for none. A file call is never
+   * cut: only the op entry's timeout applies, bounding the backend call
+   * itself. Mirrors Python's _op_timeout.
+   */
+  opTimeout(name: string): number | null {
+    return this.commandLimits.get(name)?.timeoutSeconds ?? null
+  }
+
+  /** `path` as this mount's VFS addresses it. Mirrors Python's _scope. */
+  private scope(path: string): PathSpec {
+    const lastSlash = path.lastIndexOf('/')
+    return new PathSpec({
+      virtual: path,
+      directory: lastSlash > 0 ? path.slice(0, lastSlash) : '/',
+      vfsPath: mountKey(path, rstripSlash(this.prefix)),
+    })
+  }
+
+  /**
    * Copy a file from `source`'s store into this mount's, store to store.
    *
    * For `cp` and `mv` between two mounts, once the dispatcher has judged
    * `src` as a read and `dst` as a create. Rejects EXDEV when this mount's VFS
-   * cannot copy from that one, and the caller moves the bytes itself. Mirrors
-   * Python's `copy_from`.
+   * cannot copy from that one, and when the store's object is not what the
+   * move's read and write would carry: a cached or pinned source reads other
+   * bytes, and a conditional mount on either end holds a version for the
+   * write or for `mv`'s delete. The caller then moves the bytes itself.
+   * Mirrors Python's `copy_from`.
    */
   async copyFrom(source: MountEntry, src: string, dst: string): Promise<void> {
-    if (!this.vfs.supports('copyFrom')) throw exdev(src)
-    const spec = (mount: MountEntry, path: string): PathSpec => {
-      const lastSlash = path.lastIndexOf('/')
-      return new PathSpec({
-        virtual: path,
-        directory: lastSlash > 0 ? path.slice(0, lastSlash + 1) : '/',
-        vfsPath: mountKey(path, rstripSlash(mount.prefix)),
-      })
+    const srcSpec = source.scope(src)
+    if (
+      !this.vfs.supports('copyFrom') ||
+      this.write === WritePolicy.CONDITIONAL ||
+      source.write === WritePolicy.CONDITIONAL ||
+      source.revisions.has(src) ||
+      (source.cacheManager !== null && (await source.cacheManager.isCached(srcSpec)))
+    ) {
+      throw exdev(src)
     }
     await this.use(() =>
       source.use(() =>
@@ -1368,7 +1391,11 @@ export class MountEntry {
           () =>
             this.runWithWriteRevisions(async () => {
               this.requireWritable('write', PathSpec.fromStrPath(dst), [])
-              await this.vfs.copyFrom(source.vfs, spec(source, src), spec(this, dst))
+              await runWithTimeout(
+                this.vfs.copyFrom(source.vfs, srcSpec, this.scope(dst)),
+                this.opTimeout('copy'),
+                'copy',
+              )
             }),
           this.mountId,
         ),

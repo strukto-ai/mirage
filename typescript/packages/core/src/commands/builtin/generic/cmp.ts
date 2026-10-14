@@ -209,7 +209,7 @@ class Operand {
   held: Uint8Array = new Uint8Array()
   private readonly source: AsyncIterator<Uint8Array>
 
-  constructor(source: AsyncIterable<Uint8Array>, signal?: AbortSignal) {
+  constructor(source: Uint8Array | AsyncIterable<Uint8Array>, signal?: AbortSignal) {
     this.source = chunks(source, signal)
   }
 
@@ -342,65 +342,63 @@ async function streamed(
   return [null, new IOResult()]
 }
 
-/** cmp's answer for two inputs already read past their skips. Mirrors
- * Python's _compared. */
-function compared(
-  first: Uint8Array,
-  second: Uint8Array,
+/** cmp's answer for two inputs past their skips: read to the first
+ * difference, or with -l, which lists every one, to the end. `piped` says
+ * whether each is stdin, which has no size to width -l's offset column.
+ * Mirrors Python's _answered. */
+async function answered(
+  first: Operand,
+  second: Operand,
+  names: readonly [string, string],
+  piped: readonly [boolean, boolean],
+  parsed: Compared,
+): Promise<[ByteSource | null, IOResult]> {
+  if (!parsed.verbose) return await streamed(first, second, names, parsed)
+  const data1 = await first.rest(parsed.limit)
+  const data2 = await second.rest(parsed.limit)
+  const sizes = [data1, data2].filter((_, i) => !piped[i]).map((data) => data.byteLength)
+  return listed(data1, data2, names, sizes, parsed)
+}
+
+/** cmp -l's answer for two inputs read past their skips and within `-n`: a
+ * row for every byte they differ on. Mirrors Python's _listed. */
+function listed(
+  data1: Uint8Array,
+  data2: Uint8Array,
   names: readonly [string, string],
   sizes: readonly number[],
   parsed: Compared,
 ): [ByteSource | null, IOResult] {
-  let data1 = first
-  let data2 = second
-  if (parsed.limit !== null) {
-    data1 = data1.slice(0, parsed.limit)
-    data2 = data2.slice(0, parsed.limit)
-  }
   const common = Math.min(data1.byteLength, data2.byteLength)
   let same = data1.byteLength === data2.byteLength
   for (let idx = 0; same && idx < common; idx++) if (data1[idx] !== data2[idx]) same = false
   if (same) return [null, new IOResult()]
   if (parsed.silent) return [null, new IOResult({ exitCode: 1 })]
-  const firstShorter = data1.byteLength < data2.byteLength
-  const shorter = firstShorter ? names[0] : names[1]
-  const held = firstShorter ? data1 : data2
-  const last = held[held.byteLength - 1] ?? -1
-  if (parsed.verbose) {
-    const width = offsetWidth(sizes, parsed.limit)
-    const outLines: string[] = []
-    for (let idx = 0; idx < common; idx++) {
-      const a = data1[idx] ?? 0
-      const b = data2[idx] ?? 0
-      if (a === b) continue
-      let row = `${String(idx + 1).padStart(width)} ${octal(a, 3)}`
-      if (parsed.printBytes) row += ` ${visible(a).padEnd(4)}`
-      row += ` ${octal(b, 3)}`
-      if (parsed.printBytes) row += ` ${visible(b)}`
-      outLines.push(row)
-    }
-    const io =
-      data1.byteLength === data2.byteLength
-        ? new IOResult({ exitCode: 1 })
-        : new IOResult({
-            exitCode: 1,
-            stderr: eofError(shorter, held.byteLength, 0, last, true),
-          })
-    return [formatRecords(outLines), io]
-  }
+  const width = offsetWidth(sizes, parsed.limit)
+  const outLines: string[] = []
   for (let idx = 0; idx < common; idx++) {
     const a = data1[idx] ?? 0
     const b = data2[idx] ?? 0
     if (a === b) continue
-    return differ(names, idx, 1 + newlines(data1.subarray(0, idx)), a, b, parsed.printBytes)
+    let row = `${String(idx + 1).padStart(width)} ${octal(a, 3)}`
+    if (parsed.printBytes) row += ` ${visible(a).padEnd(4)}`
+    row += ` ${octal(b, 3)}`
+    if (parsed.printBytes) row += ` ${visible(b)}`
+    outLines.push(row)
   }
-  return [
-    null,
-    new IOResult({
-      exitCode: 1,
-      stderr: eofError(shorter, held.byteLength, newlines(held), last, false),
-    }),
-  ]
+  if (data1.byteLength === data2.byteLength) {
+    return [formatRecords(outLines), new IOResult({ exitCode: 1 })]
+  }
+  const firstShorter = data1.byteLength < data2.byteLength
+  const held = firstShorter ? data1 : data2
+  const stderr = eofError(
+    firstShorter ? names[0] : names[1],
+    held.byteLength,
+    0,
+    held[held.byteLength - 1] ?? -1,
+    true,
+  )
+  return [formatRecords(outLines), new IOResult({ exitCode: 1, stderr })]
 }
 
 /**
@@ -434,11 +432,11 @@ async function oneStdinTwice(
       return [null, new IOResult({ exitCode: 1 })]
     }
   }
-  const [out, io] = compared(
-    data.slice(skip[0] + skip[1]),
-    new Uint8Array(),
+  const [out, io] = await answered(
+    new Operand(data.slice(skip[0] + skip[1])),
+    new Operand(new Uint8Array()),
     ['-', '-'],
-    [],
+    [true, true],
     parsed,
   )
   const held = io.stderr === null ? new Uint8Array() : await materialize(io.stderr)
@@ -513,13 +511,7 @@ export async function cmpGeneric(
     const [first, second] = operands as [Operand, Operand]
     await first.skip(skip[0])
     await second.skip(skip[1])
-    if (!parsed.verbose) return await streamed(first, second, names, parsed)
-    const data1 = await first.rest(parsed.limit)
-    const data2 = await second.rest(parsed.limit)
-    const sizes: number[] = []
-    if (!isStdin(p0)) sizes.push(data1.byteLength)
-    if (!isStdin(p1)) sizes.push(data2.byteLength)
-    return compared(data1, data2, names, sizes, parsed)
+    return await answered(first, second, names, [isStdin(p0), isStdin(p1)], parsed)
   } finally {
     for (const operand of operands) await operand.close()
   }

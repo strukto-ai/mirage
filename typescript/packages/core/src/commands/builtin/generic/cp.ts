@@ -1270,6 +1270,7 @@ export async function copyEntries(
  * words; false when it failed. A store-to-store copy goes first where the
  * strategy has one: the destination's store copies from the source's without
  * the bytes passing through mirage. EXDEV from it says the stores cannot, and
+ * a declined walk says a hide or rule wants the copy made by parts; either way
  * the bytes move through a read and a write, the file materialized in
  * between. Mirrors Python's transfer_file.
  */
@@ -1285,7 +1286,7 @@ export async function transferFile(
       await strategy.copy(src, dst)
       return true
     } catch (err) {
-      if (classify(err) !== 'EXDEV') {
+      if ((err as Partial<WalkDeclinedError>).declined !== true && classify(err) !== 'EXDEV') {
         if (!isFsError(err)) throw err
         errors.push(
           (err as { virtualPath?: unknown }).virtualPath === src.virtual

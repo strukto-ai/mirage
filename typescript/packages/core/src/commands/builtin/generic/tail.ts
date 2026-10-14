@@ -21,7 +21,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { abortable } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import { FileType, type FileStat, type PathSpec, type ReadRangeFn } from '../../../types.ts'
 import { argmatchError } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -47,7 +47,6 @@ import { posixPhrase } from '../../../errors/posix.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Stat = (p: PathSpec) => Promise<FileStat>
-type ReadRange = (p: PathSpec, offset: number, size: number) => Promise<Uint8Array>
 
 const DEFAULT_SLEEP_INTERVAL = 1
 // GNU's `follow_mode_string`, in declaration order.
@@ -155,7 +154,7 @@ async function pause(seconds: number, signal: AbortSignal | undefined): Promise<
 // start.
 async function catchUp(
   stream: Stream,
-  readRange: ReadRange | null,
+  readRange: ReadRangeFn | null,
   io: IOResult,
   p: PathSpec,
   size: number | null,
@@ -214,7 +213,7 @@ async function* polledFile(dispatch: DispatchFn, p: PathSpec): AsyncIterable<Uin
 
 async function window(
   stream: Stream,
-  readRange: ReadRange | null,
+  readRange: ReadRangeFn | null,
   p: PathSpec,
   offset: number,
   size: number,
@@ -257,7 +256,7 @@ async function* follow(
   stream: Stream,
   pollStream: Stream,
   stat: Stat,
-  readRange: ReadRange | null,
+  readRange: ReadRangeFn | null,
   counts: TailCounts,
   showHeaders: boolean,
   flags: FollowFlags,
@@ -523,7 +522,7 @@ export async function tailGeneric(
   opts: CommandOpts,
   stream: Stream,
   stat: Stat,
-  readRange: ReadRange | null = null,
+  readRange: ReadRangeFn | null = null,
   lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
   followOp?: (p: PathSpec, n: number) => Promise<AsyncIterable<Uint8Array> | null>,
 ): Promise<CommandFnResult> {

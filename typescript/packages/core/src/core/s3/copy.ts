@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../accessor/s3.ts'
-import { writesConditioned } from '../../cache/context.ts'
 import { enoent, exdev } from '../../errors/fs.ts'
+import { startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { rawPathOf } from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
-import { makeCopy } from '../object_store/copy.ts'
+import { makeCopy, settleCopy } from '../object_store/copy.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './client.ts'
 import { DRIVER } from './driver.ts'
 import { exists } from './exists.ts'
@@ -44,10 +44,8 @@ function service(config: S3Config): readonly unknown[] {
  * when one set of credentials reaches both, so it is tried only when both
  * mounts send their requests to the same endpoint with the same credentials;
  * otherwise, or when S3 refuses it, it is EXDEV, and the caller moves the
- * bytes. A conditional mount's write carries its condition, which the move's
- * write does, and a presigned mount signs only what its provider allows, so
- * it is EXDEV there too. A missing source is ENOENT. Mirrors Python's
- * `copy_from`.
+ * bytes. A presigned mount signs only what its provider allows, so it is
+ * EXDEV there too. A missing source is ENOENT. Mirrors Python's `copy_from`.
  */
 export async function copyFrom(
   accessor: S3Accessor,
@@ -58,7 +56,6 @@ export async function copyFrom(
   const { config } = accessor
   const theirs = service(source.config)
   if (
-    writesConditioned(dst) ||
     config.presignedUrlProvider !== undefined ||
     service(config).some((value, i) => value !== theirs[i])
   ) {
@@ -66,6 +63,7 @@ export async function copyFrom(
   }
   const { CopyObjectCommand } = await loadS3Module(config)
   const client = await createS3Client(config)
+  const timer = startOp()
   try {
     await (client as unknown as { send: (cmd: unknown) => Promise<unknown> }).send(
       new CopyObjectCommand({
@@ -81,4 +79,5 @@ export async function copyFrom(
   } finally {
     ;(client as unknown as { destroy?: () => void }).destroy?.()
   }
+  await settleCopy(dst, DRIVER.vfs, timer)
 }

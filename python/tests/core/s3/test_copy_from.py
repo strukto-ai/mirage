@@ -21,6 +21,7 @@ from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.copy import copy_from
 from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.s3 import S3Config
 
@@ -76,7 +77,12 @@ async def test_one_service_copies_across_buckets(monkeypatch):
     dst, src = _accessor("b2", key_prefix="p"), _accessor("b1")
     client = CopyClient()
     _client(dst, client, monkeypatch)
-    await copy_from(dst, src, SRC, DST)
+    scope = RecordingScope()
+    try:
+        await copy_from(dst, src, SRC, DST)
+    finally:
+        scope.close()
+    assert [(r.op, r.path) for r in scope.records] == [("copy", DST.virtual)]
     assert client.sent == [
         {
             "Bucket": "b2",

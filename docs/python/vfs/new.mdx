@@ -77,9 +77,9 @@ Only `readdir`, `read`, and `stat` are required. Mirage derives a stream from
 `read`, existence checks from `stat`, and treats the resource as remote and
 available. A window of a file is cut from the whole `read` unless the class sets
 `reads_ranges = True`; then `read` receives the window's `offset` and `size`
-(`size=None` means through EOF) and fetches only that, and `file`, `od -j`,
-`xxd -s` and `tac` then read only the bytes they show. A derived stream still
-fetches the entire file; define `read_stream` for large files.
+(`size=None` means through EOF) and fetches only that, and `file` then reads
+only the first bytes it sniffs. A derived stream still fetches the entire
+file; define `read_stream` for large files.
 
 `readdir` returns each child's full virtual path (the directory's
 `path.virtual` joined with the child's name), and `stat` sets `FileStat.name`

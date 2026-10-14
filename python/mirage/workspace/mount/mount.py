@@ -1303,21 +1303,9 @@ class MountEntry:
                 name, PathSpec.from_str_path(path), kwargs.values()
             )
 
-            mount_prefix = self.prefix.rstrip("/")
-            scope = PathSpec(
-                virtual=path,
-                directory=path.rsplit("/", 1)[0] or "/",
-                vfs_path=mount_key(path, mount_prefix),
-            )
+            scope = self._scope(path)
             kwargs.setdefault("index", self.index)
-            # A file call is never cut: only the op entry's timeout
-            # applies, bounding the backend call itself.
-            op_override = self.command_limits.get(name)
-            op_timeout = (
-                op_override.timeout_seconds
-                if op_override is not None
-                else None
-            )
+            op_timeout = self._op_timeout(name)
             recording_token = push_mount_context(self.mount_id)
             revs_token = push_revisions(self.revisions or None)
             prev_write = push_write_context(self.write_context())
@@ -1344,6 +1332,30 @@ class MountEntry:
                 reset_active_recorder(recording_token)
                 push_write_context(prev_write)
 
+    def _scope(self, path: str) -> PathSpec:
+        """``path`` as this mount's VFS addresses it.
+
+        Args:
+            path (str): virtual path.
+        """
+        return PathSpec(
+            virtual=path,
+            directory=path.rsplit("/", 1)[0] or "/",
+            vfs_path=mount_key(path, self.prefix.rstrip("/")),
+        )
+
+    def _op_timeout(self, name: str) -> float | None:
+        """The op entry's timeout for ``name``, None for none.
+
+        A file call is never cut: only the op entry's timeout applies,
+        bounding the backend call itself.
+
+        Args:
+            name (str): operation name.
+        """
+        override = self.command_limits.get(name)
+        return override.timeout_seconds if override is not None else None
+
     async def copy_from(
         self, source: "MountEntry", src: str, dst: str
     ) -> None:
@@ -1352,15 +1364,25 @@ class MountEntry:
 
         For ``cp`` and ``mv`` between two mounts, once the dispatcher
         has judged ``src`` as a read and ``dst`` as a create. Raises
-        EXDEV when this mount's VFS cannot copy from that one, and the
-        caller moves the bytes itself.
+        EXDEV when this mount's VFS cannot copy from that one, and when
+        the store's object is not what the move's read and write would
+        carry: a cached or pinned source reads other bytes, and a
+        conditional mount on either end holds a version for the write or
+        for ``mv``'s delete. The caller then moves the bytes itself.
 
         Args:
             source (MountEntry): the mount ``src`` is on.
             src (str): the source's virtual path, on ``source``.
             dst (str): the destination's virtual path, on this mount.
         """
-        if not self.vfs.supports("copy_from"):
+        src_spec = source._scope(src)
+        manager = source.cache_manager
+        if (
+            not self.vfs.supports("copy_from")
+            or WritePolicy.CONDITIONAL in (self.write, source.write)
+            or src in source.revisions
+            or (manager is not None and await manager.is_cached(src_spec))
+        ):
             raise exdev(src)
         async with self.use(), source.use():
             self.require_writable("write", PathSpec.from_str_path(dst), ())
@@ -1368,18 +1390,12 @@ class MountEntry:
             prev_write = push_write_context(self.write_context())
             try:
                 with host_io():
-                    await self.vfs.copy_from(
-                        source.vfs,
-                        PathSpec(
-                            virtual=src,
-                            directory=src.rsplit("/", 1)[0] or "/",
-                            vfs_path=mount_key(src, source.prefix.rstrip("/")),
+                    await run_with_timeout(
+                        self.vfs.copy_from(
+                            source.vfs, src_spec, self._scope(dst)
                         ),
-                        PathSpec(
-                            virtual=dst,
-                            directory=dst.rsplit("/", 1)[0] or "/",
-                            vfs_path=mount_key(dst, self.prefix.rstrip("/")),
-                        ),
+                        self._op_timeout("copy"),
+                        "copy",
                     )
             finally:
                 reset_active_recorder(recording_token)

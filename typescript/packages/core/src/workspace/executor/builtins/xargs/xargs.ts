@@ -46,7 +46,7 @@ import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { readScriptBytes } from '../script/script.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { concat } from '../../../../utils/bytes.ts'
+import { concat, findBytes } from '../../../../utils/bytes.ts'
 
 const SYNOPSIS = 'xargs [OPTION]... COMMAND [INITIAL-ARGS]...'
 const PROCS_MAX = 2147483647
@@ -191,15 +191,6 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   if (left.length !== right.length) return false
   for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) return false
   return true
-}
-
-function findBytes(haystack: Uint8Array, needle: Uint8Array): number {
-  if (needle.length === 0) return 0
-  outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
-    for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer
-    return i
-  }
-  return -1
 }
 
 function limits(envSize: number, posixMax: number, argMax: number): string {

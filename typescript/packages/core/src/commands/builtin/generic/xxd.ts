@@ -21,11 +21,12 @@ import type { ByteSource } from '../../../io/types.ts'
 import { parseBase0 } from '../utils/size_suffix.ts'
 import { singleChunk } from '../utils/operands.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { PathSpec, ReadRangeFn } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
-import { isStdin, rangedStream, resolveSource, stdinStream } from '../utils/stream.ts'
+import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
+import { asyncChain } from '../../../io/stream.ts'
 import { extraOperandError, readFailExitCode } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 
@@ -244,31 +245,6 @@ function patched(existing: Uint8Array, segments: [number, Uint8Array][]): Uint8A
   return buf
 }
 
-async function* applyLimits(
-  source: AsyncIterable<Uint8Array>,
-  skip: number,
-  limit: number,
-): AsyncIterable<Uint8Array> {
-  let pos = 0
-  let remaining = limit
-  for await (let chunk of source) {
-    const len = chunk.byteLength
-    if (pos + len <= skip) {
-      pos += len
-      continue
-    }
-    if (pos < skip) {
-      chunk = chunk.subarray(skip - pos)
-      pos = skip
-    }
-    if (remaining <= 0) break
-    if (chunk.byteLength > remaining) chunk = chunk.subarray(0, remaining)
-    yield chunk
-    remaining -= chunk.byteLength
-    pos += chunk.byteLength
-  }
-}
-
 void padLeft
 
 /** `text` as C's `strtol(text, NULL, 0)` reads it: 0 when it holds no number.
@@ -306,22 +282,6 @@ export function parseSeek(raw: string): XxdSeek {
   return { offset: strtol(back ? rest.slice(1) : rest), relative, back }
 }
 
-async function* resumed(
-  held: Uint8Array,
-  rest: AsyncIterator<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  try {
-    if (held.byteLength > 0) yield held
-    for (;;) {
-      const next = await rest.next()
-      if (next.done === true) return
-      yield next.value
-    }
-  } finally {
-    await rest.return?.()
-  }
-}
-
 /** `source` with its first `count` bytes read off, or null when it ends
  * first. Mirrors Python's _past. */
 async function past(
@@ -337,7 +297,7 @@ async function past(
     held = next.value.subarray(Math.min(left, next.value.byteLength))
     left -= next.value.byteLength - held.byteLength
   }
-  return resumed(held, iterator)
+  return asyncChain([held, iterator])
 }
 
 /** `source` cut at `limit` bytes, closed once they are out. Mirrors Python's
@@ -361,54 +321,34 @@ async function* limited(
 /**
  * INFILE from where `-s` puts it and within `-l`, and the offset its first
  * byte has; null when xxd cannot seek there. A file seeks: past its end it
- * dumps nothing, before its start it cannot, and a seek from its end needs its
- * size. Where the mount reads ranges and the size is known, the dump is one
- * ranged read. Stdin cannot seek, so it is read off, and ends too soon or
- * seeks from its end only to fail. Mirrors Python's _seeked.
+ * dumps nothing, before its start it cannot, and a seek from its end reads it
+ * whole for its size. Stdin cannot seek, so it is read off, and ends too soon
+ * or seeks from its end only to fail. Mirrors Python's _seeked.
  */
 async function seeked(
   path: PathSpec | null,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
   stdin: ByteSource | null,
-  readRange: ReadRangeFn | null,
-  sizeOf: ((p: PathSpec) => Promise<number | null>) | null,
   seek: XxdSeek,
   limit: number | null,
 ): Promise<[AsyncIterable<Uint8Array>, number] | null> {
-  const window = limit
-  if (path === null || isStdin(path)) {
-    let source = path === null ? resolveSource(stdin) : read(path)
-    if (seek.back) return null
-    if (seek.offset > 0) {
-      const after = await past(source, seek.offset)
-      if (after === null) return null
-      source = after
-    }
-    return [limited(source, window), Math.max(seek.offset, 0)]
+  const piped = path === null || isStdin(path)
+  let source = path === null ? resolveSource(stdin) : read(path)
+  if (piped && seek.back) return null
+  let start: number
+  if (!seek.back) {
+    start = seek.offset
+  } else if (seek.relative) {
+    start = -seek.offset
+  } else {
+    const data = await materialize(source)
+    start = data.byteLength - seek.offset
+    source = singleChunk(data)
   }
-  let size = sizeOf !== null ? await sizeOf(path) : null
-  let data: Uint8Array | null = null
-  if (seek.back && !seek.relative && size === null) {
-    data = await materialize(read(path))
-    size = data.byteLength
-  }
-  const start = seek.back ? (seek.relative ? -seek.offset : (size ?? 0) - seek.offset) : seek.offset
   if (start < 0) return null
-  if (data !== null) {
-    const end = window === null ? undefined : start + window
-    return [singleChunk(data.subarray(start, end)), start]
-  }
-  if (readRange !== null && size !== null && window === null && start > 0) {
-    return [rangedStream(readRange, path, start, size), start]
-  }
-  if (readRange !== null && size !== null && window !== null) {
-    const want = Math.min(Math.max(size - start, 0), window)
-    const got = want > 0 ? await readRange(path, start, want) : new Uint8Array()
-    return [singleChunk(got), start]
-  }
-  let source = read(path)
-  if (start > 0) source = (await past(source, start)) ?? singleChunk(new Uint8Array())
-  return [limited(source, window), start]
+  const after = await past(source, start)
+  if (after === null && piped) return null
+  return [limited(after ?? singleChunk(new Uint8Array()), limit), start]
 }
 
 /**
@@ -524,8 +464,6 @@ export async function xxdGeneric(
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
   writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null = null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
-  readRange: ReadRangeFn | null = null,
-  sizeOf: ((p: PathSpec) => Promise<number | null>) | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
   stream = stdinStream(stream, opts.stdin, true)
   const parsed = parseFlags(opts.flags)
@@ -536,14 +474,11 @@ export async function xxdGeneric(
   if (parsed.reverse) {
     source = paths[0] !== undefined ? stream(paths[0]) : resolveSource(opts.stdin)
     if (seek.offset !== 0 || (limit ?? 0) > 0) {
-      source = applyLimits(
-        source,
-        Math.max(seek.offset, 0),
-        limit !== null && limit > 0 ? limit : Number.MAX_SAFE_INTEGER,
-      )
+      const after = await past(source, Math.max(seek.offset, 0))
+      source = limited(after ?? singleChunk(new Uint8Array()), limit !== 0 ? limit : null)
     }
   } else {
-    const found = await seeked(paths[0] ?? null, stream, opts.stdin, readRange, sizeOf, seek, limit)
+    const found = await seeked(paths[0] ?? null, stream, opts.stdin, seek, limit)
     if (found === null) {
       return [null, new IOResult({ exitCode: CANNOT_SEEK_EXIT, stderr: ENC.encode(CANNOT_SEEK) })]
     }
