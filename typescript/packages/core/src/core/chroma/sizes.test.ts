@@ -98,13 +98,23 @@ describe('chroma ensureDirSizes', () => {
     expect(collection.calls).toHaveLength(1)
   })
 
-  it('leaves a page with no chunks unsized', async () => {
+  // Mirrors test_several_chunkless_pages_cost_one_scan.
+  it('sizes pages with no chunks as empty, with one scan for several', async () => {
     const collection = new FakeCollection({})
     const index = new RAMIndexCacheStore()
-    await index.setDir('/knowledge/guides', [['gone', fileEntry('gone', 'guides/gone')]])
+    const names = ['a', 'b', 'c']
+    await index.setDir(
+      '/knowledge/guides',
+      names.map((name) => [name, fileEntry(name, `guides/${name}`)]),
+    )
 
-    await ensureDirSizes(fakeAccessor(collection), '/knowledge/guides', index)
+    for (const _name of names) {
+      await ensureDirSizes(fakeAccessor(collection), '/knowledge/guides', index)
+    }
 
-    expect((await index.get('/knowledge/guides/gone')).entry?.size).toBeNull()
+    for (const name of names) {
+      expect((await index.get(`/knowledge/guides/${name}`)).entry?.size).toBe(0)
+    }
+    expect(collection.calls).toHaveLength(1)
   })
 })

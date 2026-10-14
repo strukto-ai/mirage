@@ -1,8 +1,11 @@
 import pytest
 
+from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.chroma.read import read
+from mirage.core.chroma.sizes import ensure_dir_sizes
 from mirage.core.chroma.stat import stat
 from mirage.core.chroma.tree import CHROMA_TREE
+from tests.core.chroma.conftest import FakeCollection, accessor_for
 
 
 @pytest.mark.asyncio
@@ -34,11 +37,43 @@ async def test_stat_sizes_the_whole_directory_in_one_scan(
 
 
 @pytest.mark.asyncio
-async def test_stat_leaves_chunkless_pages_unsized(
+async def test_stat_sizes_a_chunkless_page_as_empty(
     chroma_accessor, chroma_collection, chroma_index, quickstart_path
 ):
     chroma_collection.chunks["guides/quickstart"] = []
 
     result = await stat(chroma_accessor, quickstart_path, chroma_index)
+    body = await read(chroma_accessor, quickstart_path, chroma_index)
 
-    assert result.size is None
+    assert result.size == len(body) == 0
+
+
+@pytest.mark.asyncio
+async def test_several_chunkless_pages_cost_one_scan():
+    collection = FakeCollection()
+    accessor = accessor_for(collection)
+    index = RAMIndexCacheStore()
+    names = ["a", "b", "c"]
+    await index.set_dir(
+        "/knowledge/guides",
+        [
+            (
+                name,
+                IndexEntry(
+                    id=f"guides/{name}",
+                    name=name,
+                    resource_type="file",
+                    extra={"slug": f"guides/{name}"},
+                ),
+            )
+            for name in names
+        ],
+    )
+
+    for _ in names:
+        await ensure_dir_sizes(accessor, "/knowledge/guides", index)
+
+    for name in names:
+        lookup = await index.get(f"/knowledge/guides/{name}")
+        assert lookup.entry is not None and lookup.entry.size == 0
+    assert len(collection.get_calls) == 1

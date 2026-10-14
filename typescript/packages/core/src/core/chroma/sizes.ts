@@ -25,7 +25,8 @@ import { renderPage } from './render.ts'
  * The path tree's own `size` is producer-supplied and describes the source
  * document, not the chunk join mirage serves, so it cannot be trusted as a
  * byte length. This pays one scan per directory actually stat'd instead, and
- * only for files still missing a size.
+ * only for files still missing a size. A page with no chunks reads as nothing,
+ * so it is sized 0 and never scanned again.
  */
 export async function ensureDirSizes(
   accessor: ChromaAccessor,
@@ -50,8 +51,7 @@ export async function ensureDirSizes(
   }
   const grouped = await pagesChunks(accessor, slugs)
   for (const [child, entry] of pending) {
-    const chunks = grouped.get(scalarString(entry.extra.slug) ?? '')
-    if (chunks === undefined || chunks.length === 0) continue
+    const chunks = grouped.get(scalarString(entry.extra.slug) ?? '') ?? []
     await index.put(child, entry.copyWith({ size: renderPage(chunks).byteLength }))
   }
 }
