@@ -44,7 +44,7 @@ from mirage.runtime.types import (
     ScriptSource,
 )
 from mirage.shell.variable import ShellValue, VarAttr
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.view.types import MountView, NamespaceView, SessionView
 from mirage.workspace.dispatcher.constants import CALLS
 
@@ -341,6 +341,22 @@ def test_an_op_and_a_variable_write_read_as_their_fields():
         "AWS_KEY",
         "v",
     )
+
+
+def test_what_a_backend_returned_keeps_its_keys():
+    extra = {"reviewRequired": True, "session": "kept"}
+    stat = FileStat(name="f", type=FileType.FILE, extra=extra)
+    done = VfsResultContext(
+        call=CALLS["stat"],
+        path=_path("/scratch/f"),
+        write=False,
+        prefix="/scratch",
+        session_id="s",
+        result=stat,
+    )
+    data = script_context(done)
+    assert data["result"]["extra"] == extra
+    assert data["session_id"] == "s"
 
 
 @pytest.mark.asyncio

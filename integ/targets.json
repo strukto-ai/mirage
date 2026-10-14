@@ -1681,7 +1681,14 @@
           "vfs": "ram",
           "backend": "memory"
         }
-      ]
+      ],
+      "sessions": {
+        "reader": {
+          "mounts": {
+            "/scratch": "read"
+          }
+        }
+      }
     },
     {
       "id": "box",

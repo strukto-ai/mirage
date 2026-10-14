@@ -51,12 +51,28 @@ export class Boundary {
   }
 
   /** Fire postVfs on a finished call and hand its result back whole. */
-  async complete(call: VfsCall, path: PathSpec, write: boolean, result: unknown): Promise<unknown> {
-    await postVfsGate(this.policies, call, path, write, this.prefix, result, this.sessionId, {
-      ...(this.mode === undefined ? {} : { mode: this.mode }),
-      decisions: this.decisions,
-      ...(this.access === undefined ? {} : { access: this.access }),
-    })
+  async complete(
+    call: VfsCall,
+    path: PathSpec,
+    write: boolean,
+    result: unknown,
+    issuer?: symbol,
+  ): Promise<unknown> {
+    await postVfsGate(
+      this.policies,
+      call,
+      path,
+      write,
+      this.prefix,
+      result,
+      this.sessionId,
+      issuer,
+      {
+        ...(this.mode === undefined ? {} : { mode: this.mode }),
+        decisions: this.decisions,
+        ...(this.access === undefined ? {} : { access: this.access }),
+      },
+    )
     return result
   }
 }

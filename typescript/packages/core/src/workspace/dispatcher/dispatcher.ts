@@ -679,7 +679,7 @@ export class Dispatcher {
           call.kwargs?.parents === true,
           this.access,
         )
-        await boundary.complete(mark, call.path, call.write, null)
+        await boundary.complete(mark, call.path, call.write, null, call.issuer)
         return [null, new IOResult()]
       }
     }
@@ -718,7 +718,10 @@ export class Dispatcher {
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
     // carries the moved count.
-    return [await boundary.complete(mark, call.path, call.write, result), new IOResult()]
+    return [
+      await boundary.complete(mark, call.path, call.write, result, call.issuer),
+      new IOResult(),
+    ]
   }
 
   /**
@@ -1051,7 +1054,7 @@ export class Dispatcher {
       await bare.admit(mark, call.path, true, {}, call.issuer)
       const stored = await this.overlaySetattr(call.path, call.kwargs ?? {})
       memoryAnswered(call.report)
-      await bare.complete(mark, call.path, true, stored)
+      await bare.complete(mark, call.path, true, stored, call.issuer)
       return stored
     }
     let fallback = isMissingPath(err) ? this.namespaceResult(call.name, call.path.virtual) : null
@@ -1066,7 +1069,7 @@ export class Dispatcher {
     // against that backend. Stamped before the gate and the cap, so
     // whatever they throw cannot erase it.
     memoryAnswered(call.report)
-    return bare.complete(mark, call.path, call.write, fallback)
+    return bare.complete(mark, call.path, call.write, fallback, call.issuer)
   }
 
   /**
@@ -1168,7 +1171,7 @@ export class Dispatcher {
     // recorded against the backend and counted as traffic that never
     // happened.
     memoryAnswered(call.report, window.byteLength)
-    return (await boundary.complete(mark, call.path, call.write, window)) as Uint8Array
+    return (await boundary.complete(mark, call.path, call.write, window, call.issuer)) as Uint8Array
   }
 
   /**
@@ -2097,7 +2100,7 @@ export class Dispatcher {
     }
     record(name, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
     memoryAnswered(report)
-    return (await boundary.complete(mark, path, write, result)) as string | FileStat | null
+    return (await boundary.complete(mark, path, write, result, issuer)) as string | FileStat | null
   }
 
   /**
@@ -2311,7 +2314,7 @@ export class Dispatcher {
           ...(filetype !== null ? { filetype } : {}),
         }),
       )
-      return await boundary.complete(mark, scope, false, result)
+      return await boundary.complete(mark, scope, false, result, issuer)
     } catch (err) {
       // Final on every channel: a plain file above the path means nothing
       // can be at it or under it, and symlink(2) and readlink(2) answer
@@ -2387,7 +2390,7 @@ export class Dispatcher {
       timer,
     )
     report?.served(null, null)
-    return boundary.complete(mark, path, write, result)
+    return boundary.complete(mark, path, write, result, issuer)
   }
 
   /**
@@ -2419,7 +2422,7 @@ export class Dispatcher {
         : [mount.vfs.name, await mount.use(() => mount.vfs.capacity())]
     // A policy may deny the reply as it may any op's; a capacity is no bytes,
     // so a bound has nothing to cap.
-    await boundary.complete(statfs, path, false, answer)
+    await boundary.complete(statfs, path, false, answer, issuer)
     return answer
   }
 

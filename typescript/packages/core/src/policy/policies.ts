@@ -316,6 +316,7 @@ export async function postVfsGate(
   prefix: string,
   result: unknown,
   sessionId = '',
+  issuer?: symbol,
   access: Pick<VfsContext, 'mode' | 'access'> & {
     decisions?: Decisions | null
   } = {},
@@ -328,7 +329,16 @@ export async function postVfsGate(
     return
   }
   const { decisions = null, ...context } = access
-  const ctx: VfsResultContext = { call, path, write, prefix, sessionId, ...context, result }
+  const ctx: VfsResultContext = {
+    call,
+    path,
+    write,
+    prefix,
+    sessionId,
+    ...(issuer !== undefined ? { issuer } : {}),
+    ...context,
+    result,
+  }
   await refuseOp(ctx, await policies.postVfs(ctx), decisions)
 }
 

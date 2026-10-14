@@ -64,9 +64,12 @@ const LIVE = new Set(['session', 'ns', 'vfs'])
 /**
  * A value as a program reads it: JSON-shaped data, bytes as text, a path
  * as its virtual spelling, a record as its fields under the Python
- * names (the live handles left out). Mirrors the Python `_plain`.
+ * names (the live handles left out). Under `data` (what a backend
+ * returned) a plain object is a mapping whose keys stay as they are, as a
+ * Python dict's do; a record in it still names its own fields. Mirrors
+ * the Python `_plain`.
  */
-function plain(value: unknown): JsonValue {
+function plain(value: unknown, data = false): JsonValue {
   if (value === null || value === undefined) return null
   if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
     return value
@@ -74,27 +77,31 @@ function plain(value: unknown): JsonValue {
   if (typeof value === 'bigint') return Number(value)
   if (value instanceof Uint8Array) return DECODER.decode(value)
   if (value instanceof PathSpec) return value.virtual
-  if (Array.isArray(value) || value instanceof Set) return [...value].map(plain)
+  if (Array.isArray(value) || value instanceof Set) {
+    return [...value].map((item: unknown) => plain(item, data))
+  }
   if (value instanceof Map) {
-    return Object.fromEntries([...value].map(([key, item]) => [String(key), plain(item)]))
+    return Object.fromEntries([...value].map(([key, item]) => [String(key), plain(item, data)]))
   }
   if (typeof value === 'object') {
     const own = value as { toDict?: () => unknown; toJSON?: () => unknown }
-    if (typeof own.toDict === 'function') return plain(own.toDict())
-    if (typeof own.toJSON === 'function') return plain(own.toJSON())
+    if (typeof own.toDict === 'function') return plain(own.toDict(), data)
+    if (typeof own.toJSON === 'function') return plain(own.toJSON(), data)
+    const proto: unknown = Object.getPrototypeOf(value)
+    const named = !data || (proto !== Object.prototype && proto !== null)
     return Object.fromEntries(
       Object.entries(value)
         .filter(
           ([key, item]) =>
-            !LIVE.has(key) &&
+            !(named && LIVE.has(key)) &&
             item !== undefined &&
             typeof item !== 'function' &&
             typeof item !== 'symbol',
         )
         // Under the field names the document and the Python host spell.
         .map(([key, item]) => [
-          key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
-          plain(item),
+          named ? key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`) : key,
+          plain(item, data),
         ]),
     )
   }
@@ -112,6 +119,7 @@ export function scriptContext(
   ctx: CommandContext | RouteContext | VfsContext | SessionContext,
 ): Record<string, JsonValue> {
   const data = plain(ctx) as Record<string, JsonValue>
+  if ('result' in ctx) data.result = plain(ctx.result, true)
   const session = ctx.session
   if (session !== undefined) {
     data.cwd = session.cwd()

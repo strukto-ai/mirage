@@ -703,6 +703,32 @@ describe('the turf mode gates the node table', () => {
     }
   })
 
+  it("an op's issuer reaches postVfs as it reaches preVfs", async () => {
+    // A policy tells its own reads apart by the issuer on both sides of
+    // the call; without task isolation nothing else does.
+    const issuer = Symbol('policy read')
+    const seen: (symbol | undefined)[] = []
+    const marks: Policy = {
+      preVfs: (ctx: VfsContext) => {
+        seen.push(ctx.issuer)
+        return null
+      },
+      postVfs: (ctx: VfsResultContext) => {
+        seen.push(ctx.issuer)
+        return null
+      },
+    }
+    const ram = new RAMVFS()
+    ram.store.files.set('/f', new TextEncoder().encode('x'))
+    const ws = new Workspace({ '/data': ram }, { policies: [marks] })
+    try {
+      await ws.dispatch('read', '/data/f', [], { issuer })
+      expect(seen).toEqual([issuer, issuer])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a rename destination is judged on its own turf', async () => {
     // The endpoints need not share a turf, and each is scored against
     // its own prefix: a grant writing /rw but only reading /ro refuses,

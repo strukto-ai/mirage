@@ -376,6 +376,20 @@
         "stdout": "00000000",
         "stderr": ""
       }
+    },
+    {
+      "id": "hf_download_into_a_read_only_mount_names_the_file",
+      "seq": 960153,
+      "targets": [
+        "cli-hf"
+      ],
+      "session": "reader",
+      "command": "hf download integ/repo-cli one_byte.txt --local-dir /scratch/ro --quiet; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": "hf download: /scratch/ro: Read-only file system\n"
+      }
     }
   ]
 }

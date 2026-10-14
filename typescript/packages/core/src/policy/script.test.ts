@@ -349,6 +349,15 @@ describe('scriptContext', () => {
     const written = scriptContext(sessionCtx())
     expect([written.verb, written.key, written.value]).toEqual(['set', 'AWS_KEY', 'v'])
   })
+
+  it('keeps the keys of what a backend returned', () => {
+    const extra = { reviewRequired: true, session: 'kept' }
+    const stat = new FileStat({ name: 'f', type: FileType.FILE, extra })
+    const done: VfsResultContext = { ...opsCtx('stat', '/scratch/f', false), result: stat }
+    const data = scriptContext(done)
+    expect((data.result as Record<string, unknown>).extra).toEqual(extra)
+    expect(data.session_id).toBe('s')
+  })
 })
 
 describe('ScriptPolicy', () => {
