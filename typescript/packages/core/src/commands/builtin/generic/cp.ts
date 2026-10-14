@@ -1493,6 +1493,16 @@ export async function cpGeneric(
         errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
         continue
       }
+      // A whole-tree copy reads nothing here; any other copy goes file by
+      // file, so the source's mount is asked before the destination is
+      // touched.
+      const wholeTree =
+        !isPrimitiveCopy(strategy) &&
+        strategy.dirCopy !== undefined &&
+        !perEntryNative &&
+        !intoItself &&
+        !targetExists
+      if (!wholeTree) await beforeFullScan(dispatch, src, 'cp')
       if (
         targetExists &&
         !targetIsDir &&
@@ -1512,7 +1522,6 @@ export async function cpGeneric(
       const srcBase = rstripSlash(src.mountPath)
       const dstBase = rstripSlash(target.mountPath)
       if (isPrimitiveCopy(strategy)) {
-        await beforeFullScan(dispatch, src, 'cp')
         const walked = await cpWalk(strategy.readdir, stat, src, index, 'cp', errors, copies?.links)
         const entries = intoItself
           ? walked.filter((entry) => !within(entry.path, target.virtual))
@@ -1542,7 +1551,7 @@ export async function cpGeneric(
       // A whole-tree copy cannot honor a merge's per-entry rules (a Drive copy
       // adds a second entry of the same name, a Box one refuses the tree), so
       // only a fresh destination takes it.
-      if (strategy.dirCopy !== undefined && !perEntryNative && !intoItself && !targetExists) {
+      if (wholeTree && strategy.dirCopy !== undefined) {
         const tree = flags.verbose
           ? await treeLines(strategy, stat, src, target, srcBase, dstBase, index)
           : []
@@ -1573,7 +1582,7 @@ export async function cpGeneric(
       // dispatcher declines, so the tree's directories are recreated here: a
       // files-only pass would drop every directory that holds no files (GNU
       // keeps them).
-      await beforeFullScan(dispatch, src, 'cp')
+      if (wholeTree) await beforeFullScan(dispatch, src, 'cp')
       const mirrored = await mirrorDirs(
         strategy,
         stat,

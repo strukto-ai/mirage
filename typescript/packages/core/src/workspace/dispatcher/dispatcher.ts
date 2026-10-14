@@ -607,6 +607,13 @@ export class Dispatcher {
     const { stream, direct, ...own } = (kwargs ?? {}) as { stream?: unknown; direct?: unknown }
     if (name === 'read' && (stream !== undefined || direct !== undefined)) kwargs = own
     await this.prepare()
+    // With no scan guard on any mount, no path reaches one to ask.
+    if (
+      name === 'before_full_scan' &&
+      !this.namespace.mountPrefixes().some((p) => this.namespace.mountFor(p).vfs.supports(name))
+    ) {
+      return [null, new IOResult()]
+    }
     // A scan guard reads nothing: the rule judges each read it guards.
     const gate = name === 'before_full_scan' ? null : (ruleGate ?? null)
     const call = await this.walk(name, path, args, kwargs, gate, report, issuer)

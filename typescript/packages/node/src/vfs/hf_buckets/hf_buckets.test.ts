@@ -15,15 +15,16 @@
 import { describe, expect, it } from 'vitest'
 import { HfBucketsVFS } from './hf_buckets.ts'
 
+const location = (keyPrefix: string | undefined, token: string): string =>
+  new HfBucketsVFS({
+    bucket: 'org/bucket',
+    token,
+    ...(keyPrefix !== undefined ? { keyPrefix } : {}),
+  }).storageLocation()
+
 // Twin of test_a_bucket_prefix_is_one_store_whatever_its_token.
 describe('HfBucketsVFS storageLocation', () => {
   it('is one store for one bucket prefix whatever its token', () => {
-    const location = (keyPrefix: string | undefined, token: string): string =>
-      new HfBucketsVFS({
-        bucket: 'org/bucket',
-        token,
-        ...(keyPrefix !== undefined ? { keyPrefix } : {}),
-      }).storageLocation()
     expect(location('data', 'a')).toBe(location('/data/', 'b'))
     expect(location('data', 'a')).not.toBe(location(undefined, 'a'))
   })

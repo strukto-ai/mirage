@@ -780,19 +780,20 @@ async def test_workspace_execute_databricks_volume_recursive_grep_and_rg():
     assert not rg_io.stderr
 
 
-def test_a_volume_root_is_one_store_whatever_its_token():
-    def location(root: str, token: str) -> str | None:
-        config = DatabricksVolumeConfig(
-            catalog="main",
-            schema="default",
-            volume="agent_files",
-            root_path=root,
-            host="https://dbc.example.com",
-            token=token,
-        )
-        return DatabricksVolumeVFS(
-            config, client=FakeClient(FakeFiles())
-        ).storage_location()
+def _location(root: str, token: str) -> str | None:
+    config = DatabricksVolumeConfig(
+        catalog="main",
+        schema="default",
+        volume="agent_files",
+        root_path=root,
+        host="https://dbc.example.com",
+        token=token,
+    )
+    return DatabricksVolumeVFS(
+        config, client=FakeClient(FakeFiles())
+    ).storage_location()
 
-    assert location("/root", "a") == location("/root/", "b")
-    assert location("/root", "a") != location("/other", "a")
+
+def test_a_volume_root_is_one_store_whatever_its_token():
+    assert _location("/root", "a") == _location("/root/", "b")
+    assert _location("/root", "a") != _location("/other", "a")

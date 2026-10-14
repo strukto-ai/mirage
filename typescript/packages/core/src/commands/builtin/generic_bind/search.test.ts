@@ -348,6 +348,15 @@ it('keeps the search under a hide and loses its hits', async () => {
   expect(vfs.reads).not.toContain('d/sub/d.txt')
 })
 
+// Twin of test_a_hidden_operand_beside_a_visible_one_keeps_its_match: a mount
+// with no search asks the scan guard for every operand; the hidden one reaches
+// no directory, so the walk reports it as absent.
+it.each(['grep -r ada', 'rg ada'])('%s keeps a match beside a hidden operand', async (line) => {
+  const [out, err] = await run(new RAMVFS(), `${line} /d/a.txt /d/b.txt`, ['/d/b.txt'])
+  expect(out).toBe('/d/a.txt:ada here\n')
+  expect(err).toContain('/d/b.txt')
+})
+
 // Twin of test_a_path_rule_below_the_walk_keeps_greps_answer: the dispatcher
 // asks no search below the rule and judges each line search as a read of its
 // file, so a sealed file is reported as the plain walk reports it.

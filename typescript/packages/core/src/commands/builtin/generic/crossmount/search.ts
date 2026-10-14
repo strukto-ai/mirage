@@ -144,8 +144,8 @@ export async function runSearch(
   async function* scopes(): AsyncIterable<OwnedScope> {
     if (planned && walk !== null) {
       // The plan hands each file over alone, which no search narrows, so
-      // every directory walked is read whole.
-      for (const path of paths) {
+      // every directory walked is read whole; a listing reads none.
+      for (const path of rg.listFiles || rg.typeList ? [] : paths) {
         let info: FileStat
         try {
           info = await stat(path.virtual)

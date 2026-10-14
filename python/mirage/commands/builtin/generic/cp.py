@@ -1934,6 +1934,18 @@ async def cp_generic(
                     f"'{target.raw_path}' with '{src.raw_path}'"
                 )
                 continue
+            # A whole-tree copy reads nothing here; any other copy goes
+            # file by file, so the source's mount is asked before the
+            # destination is touched.
+            whole_tree = (
+                not isinstance(strategy, PrimitiveCopy)
+                and strategy.dir_copy is not None
+                and not per_entry_native
+                and not into_itself
+                and not target_exists
+            )
+            if not whole_tree:
+                await before_full_scan(dispatch, src, "cp")
             if (
                 target_exists
                 and not target_is_dir
@@ -1951,7 +1963,6 @@ async def cp_generic(
             src_base = src.mount_path.rstrip("/")
             dst_base = target.mount_path.rstrip("/")
             if isinstance(strategy, PrimitiveCopy):
-                await before_full_scan(dispatch, src, "cp")
                 entries = await walk(
                     strategy.readdir,
                     stat,
@@ -1995,12 +2006,7 @@ async def cp_generic(
             # A whole-tree copy cannot honor a merge's per-entry rules (a
             # Drive copy adds a second entry of the same name, a Box one
             # refuses the tree), so only a fresh destination takes it.
-            if (
-                strategy.dir_copy is not None
-                and not per_entry_native
-                and not into_itself
-                and not target_exists
-            ):
+            if whole_tree and strategy.dir_copy is not None:
                 tree = (
                     await _tree_lines(
                         strategy, stat, src, target, src_base, dst_base
@@ -2030,7 +2036,8 @@ async def cp_generic(
             # dispatcher declines, so the tree's directories are recreated
             # here: a files-only pass would drop every directory that
             # holds no files (GNU keeps them).
-            await before_full_scan(dispatch, src, "cp")
+            if whole_tree:
+                await before_full_scan(dispatch, src, "cp")
             blocked, made = await _mirror_dirs(
                 strategy,
                 stat,

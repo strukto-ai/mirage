@@ -162,7 +162,7 @@ class GuardedRAM extends RAMVFS {
   }
 }
 
-async function guarded(line: string): Promise<[GuardedRAM, string, number]> {
+async function guarded(line: string): Promise<[GuardedRAM, string, string, number]> {
   const vfs = new GuardedRAM()
   for (const dir of ['/d', '/d/sub', '/e']) vfs.store.dirs.add(dir)
   const enc = new TextEncoder()
@@ -175,7 +175,8 @@ async function guarded(line: string): Promise<[GuardedRAM, string, number]> {
   )
   try {
     const out = await ws.shell(line)
-    return [vfs, new TextDecoder().decode(out.stderr), out.exitCode]
+    const dec = new TextDecoder()
+    return [vfs, dec.decode(out.stdout), dec.decode(out.stderr), out.exitCode]
   } finally {
     await ws.close()
   }
@@ -195,11 +196,21 @@ describe('a whole-directory read asks the mount first', () => {
     'mv /g/d /out/m',
     'diff -r /g/d /g/e',
   ])('%s is refused before it reads', async (line) => {
-    const [vfs, stderr, code] = await guarded(line)
+    const [vfs, , stderr, code] = await guarded(line)
     expect(vfs.scans.length).toBeGreaterThan(0)
     expect(vfs.reads).toEqual([])
     expect(stderr).toBe(`${line.split(' ')[0] ?? ''}: 2 files in scope, narrow the path\n`)
     expect(code).not.toBe(0)
+  })
+
+  // Twin of test_a_refused_tree_copy_leaves_the_destination_alone.
+  it.each([
+    ['printf x > /out/t; cp -rb -T /g/d /out/t; cat /out/t; ls /out', 'xt\n'],
+    ['mkdir /out/t; mv -T /g/d /out/t; ls -d /out/t', '/out/t\n'],
+  ])('%s leaves the destination alone', async (line, out) => {
+    const [, stdout, stderr] = await guarded(line)
+    expect(stdout).toBe(out)
+    expect(stderr).toMatch(/2 files in scope, narrow the path\n$/)
   })
 
   // Twin of test_a_command_reading_named_files_asks_nothing.
@@ -211,8 +222,9 @@ describe('a whole-directory read asks the mount first', () => {
     'cp /g/d/a.txt /out/a.txt',
     'zip -q /out/a.zip /g/d/a.txt',
     'grep ada /g/d/a.txt',
+    'rg --files --sort path /g/d /out',
   ])('%s asks nothing', async (line) => {
-    const [vfs, stderr, code] = await guarded(line)
+    const [vfs, , stderr, code] = await guarded(line)
     expect([vfs.scans, stderr, code]).toEqual([[], '', 0])
   })
 })

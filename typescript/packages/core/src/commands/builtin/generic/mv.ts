@@ -571,6 +571,11 @@ export async function mvGeneric(
         continue
       }
     }
+    // Across mounts the tree is copied file by file, so the source's mount is
+    // asked before a backup or a removal touches the destination.
+    if (isPrimitiveMove(strategy) && srcIsDir && !sourceLink) {
+      await beforeFullScan(dispatch, src, 'mv')
+    }
     // A cross-mount move removes the target first, and a pipe cannot be
     // removed: GNU stops there, keeping the source (`mv f >(cat)`).
     if (
@@ -627,7 +632,6 @@ export async function mvGeneric(
       // Across mounts GNU copies and then removes, and -v says so entry by
       // entry instead of `renamed` (coreutils 9.7).
       const verbose = flags.verbose ? lines : undefined
-      if (srcIsDir) await beforeFullScan(dispatch, src, 'mv')
       const entries = await cpWalk(strategy.readdir, stat, src, index)
       const copiedAll = await copyEntries(
         'mv',

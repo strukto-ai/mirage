@@ -15,11 +15,12 @@
 import { describe, expect, it } from 'vitest'
 import { NextcloudVFS } from './nextcloud.ts'
 
+const location = (username: string): string =>
+  new NextcloudVFS({ url: 'https://cloud.example.com/', username }).storageLocation()
+
 // Twin of test_one_user_on_one_server_is_one_store.
 describe('NextcloudVFS storageLocation', () => {
   it('is one store for one user on one server', () => {
-    const location = (username: string): string =>
-      new NextcloudVFS({ url: 'https://cloud.example.com/', username }).storageLocation()
     expect(location('ada')).toBe(location('ada'))
     expect(location('ada')).not.toBe(location('bob'))
   })

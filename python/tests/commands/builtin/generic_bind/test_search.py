@@ -386,6 +386,15 @@ def test_a_hidden_path_keeps_the_search_and_loses_its_hits():
     assert "d/sub/d.txt" not in vfs.reads
 
 
+@pytest.mark.parametrize("line", ["grep -r ada", "rg ada"])
+def test_a_hidden_operand_beside_a_visible_one_keeps_its_match(line):
+    # A mount with no search asks the scan guard for every operand; the
+    # hidden one reaches no directory, so the walk reports it as absent.
+    out, err, _ = _run(RAMVFS(), f"{line} /d/a.txt /d/b.txt", ("/d/b.txt",))
+    assert out == b"/d/a.txt:ada here\n"
+    assert b"/d/b.txt" in err
+
+
 @pytest.mark.parametrize(
     "line", ["grep -r ada /d", "grep -rn ada /d", "grep -rl ada /d"]
 )

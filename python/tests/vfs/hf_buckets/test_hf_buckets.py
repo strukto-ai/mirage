@@ -37,12 +37,13 @@ def test_vfs_registers_commands():
     assert {"cat", "ls", "grep", "stat", "touch", "rm"} <= cmd_names
 
 
-def test_a_bucket_prefix_is_one_store_whatever_its_token():
-    def location(prefix: str | None, token: str) -> str | None:
-        config = HfBucketsConfig(
-            bucket="org/bucket", key_prefix=prefix, token=token
-        )
-        return HfBucketsVFS(config).storage_location()
+def _location(prefix: str | None, token: str) -> str | None:
+    config = HfBucketsConfig(
+        bucket="org/bucket", key_prefix=prefix, token=token
+    )
+    return HfBucketsVFS(config).storage_location()
 
-    assert location("data", "a") == location("/data/", "b")
-    assert location("data", "a") != location(None, "a")
+
+def test_a_bucket_prefix_is_one_store_whatever_its_token():
+    assert _location("data", "a") == _location("/data/", "b")
+    assert _location("data", "a") != _location(None, "a")

@@ -696,6 +696,15 @@ async def mv_generic(
                 )
                 continue
         if (
+            isinstance(strategy, PrimitiveMove)
+            and src_is_dir
+            and not source_link
+        ):
+            # Across mounts the tree is copied file by file, so the
+            # source's mount is asked before a backup or a removal
+            # touches the destination.
+            await before_full_scan(dispatch, src, "mv")
+        if (
             across
             and target_exists
             and not target_is_dir
@@ -754,8 +763,6 @@ async def mv_generic(
             # Across mounts GNU copies and then removes, and -v says so
             # entry by entry instead of `renamed` (coreutils 9.7).
             verbose = lines if flags.verbose else None
-            if src_is_dir:
-                await before_full_scan(dispatch, src, "mv")
             entries = await walk(strategy.readdir, stat, src)
             copied_all = await copy_entries(
                 "mv",

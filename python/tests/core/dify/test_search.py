@@ -3,6 +3,12 @@ from types import SimpleNamespace
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
+from mirage.core.dify import search, tree
+from mirage.core.dify.search import (
+    render_records,
+    response_records,
+    search_segments,
+)
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -60,7 +66,6 @@ async def record_empty_custom_slug_search(config, endpoint, body):
 
 @pytest.mark.asyncio
 async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
-    from mirage.core.dify import search, tree
 
     bodies: list[dict] = []
 
@@ -147,7 +152,6 @@ async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_segments_unions_slug_and_name_based_paths(monkeypatch):
-    from mirage.core.dify import search, tree
 
     bodies: list[dict] = []
 
@@ -202,7 +206,6 @@ async def test_search_segments_unions_slug_and_name_based_paths(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_segments_uses_configured_slug_metadata_name(monkeypatch):
-    from mirage.core.dify import search, tree
 
     custom_slug_search_bodies.clear()
     monkeypatch.setattr(
@@ -239,7 +242,6 @@ async def test_search_segments_uses_configured_slug_metadata_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_segments_empty_paths_searches_whole_dataset(monkeypatch):
-    from mirage.core.dify import search
 
     bodies: list[dict] = []
 
@@ -277,7 +279,6 @@ async def test_search_segments_empty_paths_searches_whole_dataset(monkeypatch):
 
 
 def test_render_records_formats_absolute_paths_and_scores():
-    from mirage.core.dify.search import render_records
 
     result = render_records(
         [
@@ -315,14 +316,12 @@ def test_render_records_formats_absolute_paths_and_scores():
 
 @pytest.mark.parametrize("value", [None, {}, ["invalid"]])
 def test_response_records_rejects_malformed_payload(value):
-    from mirage.core.dify.search import response_records
 
     with pytest.raises(ValueError, match="records must be"):
         response_records(value)
 
 
 def test_render_records_keeps_multiple_chunks_for_same_document():
-    from mirage.core.dify.search import render_records
 
     result = render_records(
         [
@@ -368,7 +367,6 @@ def test_render_records_keeps_multiple_chunks_for_same_document():
 
 
 def test_render_records_skips_records_with_invalid_slug():
-    from mirage.core.dify.search import render_records
 
     result = render_records(
         [
@@ -408,7 +406,6 @@ def test_render_records_skips_records_with_invalid_slug():
 
 
 def test_render_records_omits_score_for_non_numeric_values():
-    from mirage.core.dify.search import render_records
 
     result = render_records(
         [
@@ -436,7 +433,6 @@ def test_render_records_omits_score_for_non_numeric_values():
 
 @pytest.mark.asyncio
 async def test_search_segments_caps_top_k_at_dify_limit(monkeypatch):
-    from mirage.core.dify import search
 
     bodies: list[dict] = []
 
@@ -455,7 +451,6 @@ async def test_search_segments_caps_top_k_at_dify_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_segments_validates_arguments():
-    from mirage.core.dify.search import search_segments
 
     with pytest.raises(ValueError, match="search: query is required"):
         await search_segments(accessor(), "", [], RAMIndexCacheStore())

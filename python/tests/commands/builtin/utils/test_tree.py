@@ -167,7 +167,7 @@ class GuardedRAM(RAMVFS):
         raise ValueError(f"{files} files in scope, narrow the path")
 
 
-async def _guarded(line: str) -> tuple[GuardedRAM, bytes, int]:
+async def _guarded(line: str) -> tuple[GuardedRAM, bytes, bytes, int]:
     vfs = GuardedRAM()
     vfs._store.dirs.update({"/d", "/d/sub", "/e"})
     vfs._store.files.update(
@@ -176,7 +176,8 @@ async def _guarded(line: str) -> tuple[GuardedRAM, bytes, int]:
     ws = Workspace({"/g/": vfs, "/out/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         result = await ws.shell(line)
-        return vfs, result.stderr or b"", result.exit_code
+        stdout = await result.stdout_str()
+        return vfs, stdout.encode(), result.stderr or b"", result.exit_code
     finally:
         await ws.close()
 
@@ -198,11 +199,28 @@ async def _guarded(line: str) -> tuple[GuardedRAM, bytes, int]:
     ],
 )
 async def test_a_command_reading_a_whole_directory_asks_first(line):
-    vfs, stderr, code = await _guarded(line)
+    vfs, _, stderr, code = await _guarded(line)
     name = line.split()[0]
     assert vfs.scans and vfs.reads == []
     assert stderr == f"{name}: 2 files in scope, narrow the path\n".encode()
     assert code != 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, out",
+    [
+        (
+            "printf x > /out/t; cp -rb -T /g/d /out/t; cat /out/t; ls /out",
+            "xt\n",
+        ),
+        ("mkdir /out/t; mv -T /g/d /out/t; ls -d /out/t", "/out/t\n"),
+    ],
+)
+async def test_a_refused_tree_copy_leaves_the_destination_alone(line, out):
+    _, stdout, stderr, _ = await _guarded(line)
+    assert stdout == out.encode()
+    assert stderr.endswith(b"2 files in scope, narrow the path\n")
 
 
 @pytest.mark.asyncio
@@ -216,8 +234,9 @@ async def test_a_command_reading_a_whole_directory_asks_first(line):
         "cp /g/d/a.txt /out/a.txt",
         "zip -q /out/a.zip /g/d/a.txt",
         "grep ada /g/d/a.txt",
+        "rg --files --sort path /g/d /out",
     ],
 )
 async def test_a_command_reading_named_files_asks_nothing(line):
-    vfs, stderr, code = await _guarded(line)
+    vfs, _, stderr, code = await _guarded(line)
     assert (vfs.scans, stderr, code) == ([], b"", 0)

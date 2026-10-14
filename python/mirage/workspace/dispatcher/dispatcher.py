@@ -805,6 +805,11 @@ class Dispatcher:
         stream = name == "read" and bool(kwargs.pop("stream", False))
         direct = name == "read" and bool(kwargs.pop("direct", False))
         await self._prepare()
+        # With no scan guard on any mount, no path reaches one to ask.
+        if name == "before_full_scan" and not any(
+            m.vfs.supports(name) for m in self._namespace.registry.mounts()
+        ):
+            return None, IOResult()
         call = await self._walk(name, path, kwargs, rule_gate, report)
         call.stream = stream
         call.direct = direct

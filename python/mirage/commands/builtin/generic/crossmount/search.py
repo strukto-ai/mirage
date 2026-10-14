@@ -226,8 +226,9 @@ async def run_search(
         if planned:
             assert rg is not None and walk is not None
             # The plan hands each file over alone, which no search
-            # narrows, so every directory walked is read whole.
-            for path in paths:
+            # narrows, so every directory walked is read whole; a listing
+            # reads none.
+            for path in [] if rg.list_files or rg.type_list else paths:
                 try:
                     info = await stat(path.virtual)
                 except FS_ERRORS as exc:

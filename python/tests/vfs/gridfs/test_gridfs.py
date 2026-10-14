@@ -16,11 +16,12 @@ from mirage.vfs.gridfs.config import GridFSConfig
 from mirage.vfs.gridfs.gridfs import GridFSVFS
 
 
-def test_a_bucket_is_one_store_whatever_login_reaches_it():
-    def location(uri: str) -> str | None:
-        config = GridFSConfig(uri=uri, database="d", bucket="b")
-        return GridFSVFS(config).storage_location()
+def _location(uri: str) -> str | None:
+    config = GridFSConfig(uri=uri, database="d", bucket="b")
+    return GridFSVFS(config).storage_location()
 
-    one = location("mongodb://ada:secret@h1:27017,h2:27017/admin?tls=true")
-    assert one == location("mongodb://bob:other@h1:27017,h2:27017/")
+
+def test_a_bucket_is_one_store_whatever_login_reaches_it():
+    one = _location("mongodb://ada:secret@h1:27017,h2:27017/admin?tls=true")
+    assert one == _location("mongodb://bob:other@h1:27017,h2:27017/")
     assert "secret" not in (one or "")

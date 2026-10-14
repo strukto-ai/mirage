@@ -87,15 +87,16 @@ describe('DatabricksVolumeVFS', () => {
   })
 })
 
+const location = async (root: string, token: string): Promise<string | null> =>
+  (
+    await DatabricksVolumeVFS.create(
+      normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, root_path: root, token }),
+    )
+  ).storageLocation()
+
 // Twin of test_a_volume_root_is_one_store_whatever_its_token.
 describe('DatabricksVolumeVFS storageLocation', () => {
   it('is one store for one volume root whatever its token', async () => {
-    const location = async (root: string, token: string): Promise<string | null> =>
-      (
-        await DatabricksVolumeVFS.create(
-          normalizeDatabricksVolumeConfig({ ...BASE_CONFIG, root_path: root, token }),
-        )
-      ).storageLocation()
     expect(await location('/root', 'a')).toBe(await location('/root/', 'b'))
     expect(await location('/root', 'a')).not.toBe(await location('/other', 'a'))
   })

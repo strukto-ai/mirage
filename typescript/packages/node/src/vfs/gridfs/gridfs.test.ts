@@ -15,11 +15,12 @@
 import { describe, expect, it } from 'vitest'
 import { GridFSVFS } from './gridfs.ts'
 
+const location = (uri: string): string =>
+  new GridFSVFS({ uri, database: 'd', bucket: 'b' }).storageLocation()
+
 // Twin of test_a_bucket_is_one_store_whatever_login_reaches_it.
 describe('GridFSVFS storageLocation', () => {
   it('is one store whatever login reaches the bucket', () => {
-    const location = (uri: string): string =>
-      new GridFSVFS({ uri, database: 'd', bucket: 'b' }).storageLocation()
     const one = location('mongodb://ada:secret@h1:27017,h2:27017/admin?tls=true')
     expect(one).toBe(location('mongodb://bob:other@h1:27017,h2:27017/'))
     expect(one).not.toContain('secret')
