@@ -37,6 +37,7 @@ from mirage.types import (
     PathSpec,
     PrimitiveCopy,
 )
+from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.view.types import LinkView
 from mirage.workspace import Workspace
@@ -732,6 +733,23 @@ async def test_backup_moves_a_linked_destination_aside(source, after):
     shown = "readlink dst~ && ls dst" if source == "s/sub" else "ls dst"
     rest = await ws.shell(f"cd /data && cat f && test ! -L dst && {shown}")
     assert await rest.materialize_stdout() == after
+
+
+@pytest.mark.asyncio
+async def test_backup_onto_a_link_keeps_the_source_mode(tmp_path):
+    # The link's name is on the mount the copy runs on, so the mount's own
+    # copy writes it and keeps the mode GNU gives a new file.
+    ws = Workspace(
+        {"/d": (DiskVFS(root=str(tmp_path)), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+    )
+    await ws.shell(
+        "printf x > /d/src && chmod 755 /d/src && printf o > /d/f && "
+        "ln -s f /d/link"
+    )
+    r = await ws.shell("cp -b /d/src /d/link && readlink /d/link~")
+    assert (r.exit_code, r.stdout) == (0, b"f\n")
+    assert (tmp_path / "link").stat().st_mode & 0o777 == 0o755
 
 
 @pytest.mark.asyncio

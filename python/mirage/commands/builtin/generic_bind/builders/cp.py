@@ -28,7 +28,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     overlaid_stat,
     require_op,
 )
-from mirage.commands.builtin.utils.links import typed_link
+from mirage.commands.builtin.utils.links import serves, typed_link
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
@@ -169,6 +169,11 @@ async def cp(
                 opts.dispatch,
                 cwd,
                 opts.ns.visibility if opts.ns is not None else None,
+                partial(
+                    serves,
+                    opts.ns.mounts if opts.ns is not None else None,
+                    opts.mount_prefix,
+                ),
             )
             if links is not None and opts.dispatch is not None
             else None

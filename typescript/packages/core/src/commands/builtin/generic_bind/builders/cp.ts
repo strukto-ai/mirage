@@ -20,7 +20,7 @@ import type { FileStat, NativeCopy, PathSpec, PrimitiveCopy, StatFn } from '../.
 import { treeWalk } from '../../utils/tree.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
-import { typedLink } from '../../utils/links.ts'
+import { serves, typedLink } from '../../utils/links.ts'
 import type { GenericCommand } from '../adapter.ts'
 import type { CommandIO } from '../../../config.ts'
 import { requireOp, resolveGlobOf } from '../adapter.ts'
@@ -114,7 +114,9 @@ export const BUILDER: GenericCommand = {
       links === null ? undefined : (p: PathSpec) => typedLink(links, p, cwd),
       links === null || opts.dispatch === undefined
         ? undefined
-        : transferLinksOf(links, opts.dispatch, cwd, opts.ns?.visibility),
+        : transferLinksOf(links, opts.dispatch, cwd, opts.ns?.visibility, (virtual) =>
+            serves(opts.ns?.mounts, opts.mountPrefix ?? '', virtual),
+          ),
       opts.stdin,
       opts.dispatch,
     )

@@ -174,6 +174,7 @@ async function walkTree(
           // dangling one is (tree 2.2.1).
           const leads = await treeOpts.targetStat(childPath).catch((err: unknown) => {
             if (!isWalkError(err)) throw err
+            console.debug(`tree: cannot stat through ${childPath}: ${String(err)}`)
             return null
           })
           isDir = leads !== null && leads.type === FileType.DIRECTORY

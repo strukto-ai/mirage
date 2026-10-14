@@ -115,6 +115,9 @@ export interface TransferLinks {
   relayStat: StatFn
   /** The session's visibility; a link it hides is not copied. */
   visibility?: Visibility
+  /** Whether the mount the copy runs on serves a path; absent where every path
+   * is its own. */
+  owns?: (virtual: string) => boolean
 }
 
 // Each option of cp's link policy, and what it asks for; the last typed wins
@@ -331,8 +334,9 @@ export function destStat(stat: StatFn, copies: TransferLinks | undefined): StatF
  * router follows a destination to what its link leads to, which is what a plain
  * copy writes, through the link. GNU's backup renames the destination itself, a
  * link included, and the copy then lands at the name, so a backup is made of
- * this and the copy goes here, through the dispatcher: the name may sit on
- * another mount than the one the link leads into. Mirrors Python's link_name.
+ * this and the copy goes here: through the mount's own copy, which keeps the
+ * source's mode, or through the dispatcher where the name sits on another mount
+ * (`owns`). Mirrors Python's link_name.
  */
 export function linkName(copies: TransferLinks, target: PathSpec): PathSpec | null {
   const where = nameLocation(copies.links, target, copies.cwd)
@@ -1751,8 +1755,8 @@ export async function cpGeneric(
       const linked = linkName(copies, target)
       if (linked !== null) {
         target = linked
-        copier = copies.relay
         mover = { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
+        if (copies.owns !== undefined && !copies.owns(target.virtual)) copier = copies.relay
       }
     }
     const made = await makeBackup(

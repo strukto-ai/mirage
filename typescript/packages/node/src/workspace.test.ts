@@ -122,6 +122,18 @@ describe('@struktoai/mirage-node Workspace disk metadata', () => {
     cleanup()
   })
 
+  // The link's name is on the mount the copy runs on, so the mount's own copy
+  // writes it and keeps the mode GNU gives a new file.
+  it('cp -b onto a link keeps the source mode', async () => {
+    const { ws, root, cleanup } = makeDiskWs()
+    await ws.shell('printf x > /data/src && chmod 755 /data/src && ln -s f.txt /data/link')
+    const r = await ws.shell('cp -b /data/src /data/link && readlink /data/link~')
+    expect([r.exitCode, r.stdoutText]).toEqual([0, 'f.txt\n'])
+    expect(statSync(join(root, 'link')).mode & 0o777).toBe(0o755)
+    await ws.close()
+    cleanup()
+  })
+
   it('relaxing chmod drops the stale residual overlay', async () => {
     const { ws, cleanup } = makeDiskWs()
     await ws.shell('chmod 000 /data/f.txt')

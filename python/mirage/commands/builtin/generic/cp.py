@@ -119,6 +119,8 @@ class TransferLinks:
         relay_stat (StatFn): the dispatcher's stat, for the same walk.
         visibility (Visibility | None): the session's visibility; a link
             it hides is not copied.
+        owns (Callable[[str], bool] | None): whether the mount the copy
+            runs on serves a path; None where every path is its own.
     """
 
     links: LinkView
@@ -127,6 +129,7 @@ class TransferLinks:
     relay: PrimitiveCopy
     relay_stat: StatFn
     visibility: Visibility | None = None
+    owns: Callable[[str], bool] | None = None
 
 
 # Each option of cp's link policy, and what it asks for; the last typed
@@ -421,9 +424,9 @@ def link_name(copies: TransferLinks, target: PathSpec) -> PathSpec | None:
     The router follows a destination to what its link leads to, which is
     what a plain copy writes, through the link. GNU's backup renames the
     destination itself, a link included, and the copy then lands at the
-    name, so a backup is made of this and the copy goes here, through
-    the dispatcher: the name may sit on another mount than the one the
-    link leads into.
+    name, so a backup is made of this and the copy goes here: through
+    the mount's own copy, which keeps the source's mode, or through the
+    dispatcher where the name sits on another mount (``owns``).
 
     Args:
         copies (TransferLinks): Namespace facts and transfer calls.
@@ -2262,8 +2265,10 @@ async def cp_generic(
         if copies is not None and policy.backup is not None:
             linked = link_name(copies, target)
             if linked is not None:
-                target, copier = linked, copies.relay
+                target = linked
                 mover = NativeMove(rename=partial(rename_link, copies))
+                if copies.owns is not None and not copies.owns(target.virtual):
+                    copier = copies.relay
         backup, ok = await make_backup(
             policy, mover, stat, readdir, target, errors, copies
         )

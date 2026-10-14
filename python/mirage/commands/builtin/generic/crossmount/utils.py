@@ -16,7 +16,7 @@ import asyncio
 import dataclasses
 import functools
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from typing import Any, cast
 
@@ -223,6 +223,7 @@ def transfer_links_of(
     dispatch: DispatchFn,
     cwd: str,
     visibility: Visibility | None,
+    owns: Callable[[str], bool] | None = None,
 ) -> TransferLinks:
     """Namespace links with the dispatcher primitives shared by cp and mv.
 
@@ -231,6 +232,8 @@ def transfer_links_of(
         dispatch (DispatchFn): the dispatcher.
         cwd (str): the directory a typed operand resolves against.
         visibility (Visibility | None): the session's visibility.
+        owns (Callable[[str], bool] | None): whether the command's mount
+            serves a path; None where every path is its own.
     """
     prim = transfer_primitives(dispatch)
     return TransferLinks(
@@ -246,6 +249,7 @@ def transfer_links_of(
         ),
         relay_stat=prim["stat"],
         visibility=visibility,
+        owns=owns,
     )
 
 
