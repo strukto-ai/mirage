@@ -12,13 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.commands.errors import UsageError
-from mirage.errors.types import WalkDeclinedError
+from mirage.errors.classify import classify
+from mirage.errors.types import FsCondition, WalkDeclinedError
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
+
+logger = logging.getLogger(__name__)
+
+# The conditions under which a guard's path reaches no directory to scan.
+_NO_DIRECTORY = (FsCondition.ENOENT, FsCondition.ENOTDIR, FsCondition.ELOOP)
 
 ReadTree = Callable[..., Awaitable[dict[str, FileStat] | None]]
 WalkCall = Callable[..., Awaitable[Any]]
@@ -31,9 +38,10 @@ async def before_full_scan(
     every file under it.
 
     The mount is asked at the resolved path: the command already judged
-    the spelling it was typed in. It refuses with a ValueError, which
-    becomes the command's own error, ``command: message`` and exit 1, on
-    one mount or across several.
+    the spelling it was typed in, and reports a path that reaches no
+    directory (missing, not one, a link loop) itself. The mount refuses
+    with a ValueError, which becomes the command's own error,
+    ``command: message`` and exit 1, on one mount or across several.
 
     Args:
         dispatch (DispatchFn | None): the command's dispatcher; None
@@ -54,6 +62,10 @@ async def before_full_scan(
         raise
     except ValueError as exc:
         raise UsageError(f"{command}: {exc}", exit_code=1) from exc
+    except OSError as exc:
+        if classify(exc) not in _NO_DIRECTORY:
+            raise
+        logger.debug("scan guard at %s: %s", path.virtual, exc)
 
 
 def _listings(found: dict[str, FileStat]) -> dict[str, list[str]]:
