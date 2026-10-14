@@ -101,6 +101,41 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "mv_n_skips_a_type_mismatch_the_plain_move_refuses",
+      "seq": 16900001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r17mn/s/sub /data/r17mn/t/a && printf a > /data/r17mn/s/a && printf b > /data/r17mn/s/sub/b && printf z > /data/r17mn/t/a/z && printf x > /data/r17mn/t/sub && (cd /data/r17mn && mv -n s/a t; echo rc=$?; mv -n s/sub t; echo rc=$?; mv s/a s/sub t; echo rc=$?); find /data/r17mn | sort; rm -r /data/r17mn",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=0\nrc=1\n/data/r17mn\n/data/r17mn/s\n/data/r17mn/s/a\n/data/r17mn/s/sub\n/data/r17mn/s/sub/b\n/data/r17mn/t\n/data/r17mn/t/a\n/data/r17mn/t/a/z\n/data/r17mn/t/sub\n",
+        "stderr": "mv: cannot overwrite directory 't/a' with non-directory 's/a'\nmv: cannot overwrite non-directory 't/sub' with directory 's/sub'\n"
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

@@ -143,6 +143,40 @@
       "flags": [
         "exchange"
       ]
+    },
+    {
+      "id": "xm_mv_no_copy_lets_the_gates_go_first",
+      "seq": 16900006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/r17xn/sub /data2/r17xn/sub && printf a > /data/r17xn/a && printf b > /data/r17xn/sub/b && printf x > /data2/r17xn/a && printf z > /data2/r17xn/sub/z && (cd /data/r17xn && mv -n --no-copy a /data2/r17xn; echo rc=$?; mv --no-copy sub /data2/r17xn; echo rc=$?); find /data/r17xn /data2/r17xn | sort; rm -r /data/r17xn /data2/r17xn",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nrc=1\n/data/r17xn\n/data/r17xn/a\n/data/r17xn/sub\n/data/r17xn/sub/b\n/data2/r17xn\n/data2/r17xn/a\n/data2/r17xn/sub\n/data2/r17xn/sub/z\n",
+        "stderr": "mv: cannot move 'sub' to '/data2/r17xn/sub': Invalid cross-device link\n"
+      },
+      "flags": [
+        "no-copy"
+      ]
     }
   ]
 }

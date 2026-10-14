@@ -1072,6 +1072,10 @@
       "dropbox-root": "The case pins an object-store row: it mounts an S3 alias, MinIO or a custom S3 endpoint, which only object-storage-prefix and the s3 targets declare. The same behaviours on a drive (a stale rm, find -delete, a write over a file deleted since its read, rm -r and mv) run on box, dropbox and dropbox-root in integ/unix/write/drive/conditional.json, where a drive differs: rm -r walks file by file, and a mv within the mount moves a changed source whole.",
       "s3": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them.",
       "s3-prefix": "The case asks for a mount that gets every write condition (an S3 alias such as /seaweedfs) or the minio row, and only object-storage-prefix declares those; s3 and s3-prefix mount `vfs: s3` on a local endpoint, which gets the custom-endpoint row, and the rest of the file runs on them."
+    },
+    "integ/crossmount/mv/over.json :: xm_mv_b_moves_the_target_aside_on_the_other_mount": {
+      "hf": "hf has no rename op, so the backup that moves the occupied target aside on /data2 fails with `Operation not supported`, the same limit ln/flags.json, mv/backup.json and cp/backup.json omit hf for. hf still runs xm_mv_removes_the_target_before_it_copies beside it, where the target is removed instead of renamed.",
+      "hf-prefix": "hf has no rename op, so the backup that moves the occupied target aside on /data2 fails with `Operation not supported`, the same limit ln/flags.json, mv/backup.json and cp/backup.json omit hf for. hf still runs xm_mv_removes_the_target_before_it_copies beside it, where the target is removed instead of renamed."
     }
   }
 }

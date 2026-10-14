@@ -398,6 +398,19 @@ describe('mvGeneric primitive transfer errors', () => {
       err: '',
       after: { '/d/keep': 9, '/d/t/x.txt': 1 },
     },
+    {
+      name: 'an empty target directory that cannot be removed keeps the source',
+      files: { '/src/t/x.txt': 1 },
+      dirs: ['/src', '/src/t', '/d', '/d/t'],
+      paths: ['/src/t', '/d'],
+      fails: { rmdirFails: new Map([['/d/t', enotsup('hf', 'rmdir', '/d/t')]]) },
+      exit: 1,
+      out: null,
+      err:
+        "mv: inter-device move failed: '/src/t' to '/d/t'; " +
+        'unable to remove target: Operation not supported\n',
+      after: { '/src/t/x.txt': 1 },
+    },
   ])('$name', async ({ files, dirs, paths, fails, flags, exit, out, err, after }) => {
     const map = fileMap(files)
     const [stdout, io] = await runPrimitive(map, new Set(dirs), paths, fails, flags)

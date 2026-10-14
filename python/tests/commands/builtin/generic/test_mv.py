@@ -403,6 +403,17 @@ def _unsup(op: str, *paths: str) -> dict[str, OSError]:
             None,
             {"/d/keep": b"K", "/d/t/x.txt": b"X"},
         ),
+        (
+            {"/src/t/x.txt": b"X"},
+            {"/src", "/src/t", "/d", "/d/t"},
+            ["/src/t", "/d"],
+            {"rmdir_fails": _unsup("rmdir", "/d/t")},
+            1,
+            None,
+            b"mv: inter-device move failed: '/src/t' to '/d/t'; "
+            b"unable to remove target: Operation not supported\n",
+            {"/src/t/x.txt": b"X"},
+        ),
     ],
     ids=[
         "unlink-failure-continues",
@@ -411,6 +422,7 @@ def _unsup(op: str, *paths: str) -> dict[str, OSError]:
         "tree-unlink-reports-files-not-dirs",
         "tree-copy-failure-keeps-source",
         "rmdir-unsupported-on-emptied-dir",
+        "unremovable-empty-target-keeps-source",
     ],
 )
 async def test_primitive_faults(

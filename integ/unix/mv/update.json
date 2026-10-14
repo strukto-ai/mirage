@@ -244,6 +244,42 @@
       "flags": [
         "update"
       ]
+    },
+    {
+      "id": "mv_update_gates_a_type_mismatch_but_u_never_holds_a_directory_back",
+      "seq": 16900002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r17mu/s/sub /data/r17mu/t/a && printf a > /data/r17mu/s/a && printf b > /data/r17mu/s/sub/b && printf z > /data/r17mu/t/a/z && printf x > /data/r17mu/t/sub && (cd /data/r17mu && mv --update=none-fail s/a s/sub t; echo rc=$?; mv --update=none s/a s/sub t; echo rc=$?; mv -u s/sub t; echo rc=$?); find /data/r17mu | sort; rm -r /data/r17mu",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=0\nrc=1\n/data/r17mu\n/data/r17mu/s\n/data/r17mu/s/a\n/data/r17mu/s/sub\n/data/r17mu/s/sub/b\n/data/r17mu/t\n/data/r17mu/t/a\n/data/r17mu/t/a/z\n/data/r17mu/t/sub\n",
+        "stderr": "mv: not replacing 't/a'\nmv: not replacing 't/sub'\nmv: cannot overwrite non-directory 't/sub' with directory 's/sub'\n"
+      },
+      "flags": [
+        "update",
+        "u"
+      ]
     }
   ]
 }

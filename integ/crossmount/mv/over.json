@@ -33,6 +33,66 @@
         "stdout": "cross\nxm.txt\nxm_copy.txt\nxm_moved.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_mv_removes_the_target_before_it_copies",
+      "seq": 16900007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/r17xr/m/sub /data/r17xr/e /data2/r17xr/m/sub /data2/r17xr/e && printf g > /data/r17xr/m/sub/g && printf y > /data/r17xr/e/y && printf z > /data2/r17xr/m/sub/z && (cd /data/r17xr && mv m /data2/r17xr; echo rc=$?; mv -v e /data2/r17xr; echo rc=$?); find /data2/r17xr | sort; rm -r /data/r17xr /data2/r17xr",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ncreated directory '/data2/r17xr/e'\ncopied 'e/y' -> '/data2/r17xr/e/y'\nremoved 'e/y'\nremoved directory 'e'\nrc=0\n/data2/r17xr\n/data2/r17xr/e\n/data2/r17xr/e/y\n/data2/r17xr/m\n/data2/r17xr/m/sub\n/data2/r17xr/m/sub/z\n",
+        "stderr": "mv: inter-device move failed: 'm' to '/data2/r17xr/m'; unable to remove target: Directory not empty\n"
+      }
+    },
+    {
+      "id": "xm_mv_b_moves_the_target_aside_on_the_other_mount",
+      "seq": 16900008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "mkdir -p /data/r17xb/sub /data2/r17xb/a && printf a > /data/r17xb/a && printf b > /data/r17xb/sub/b && printf c > /data/r17xb/c && printf w > /data2/r17xb/a/w && printf x > /data2/r17xb/sub && printf y > /data2/r17xb/c && (cd /data/r17xb && mv -bv a sub /data2/r17xb; echo rc=$?; mv -b --no-copy c /data2/r17xb; echo rc=$?); find /data2/r17xb | sort; rm -r /data/r17xb /data2/r17xb",
+      "expect": {
+        "exit": 0,
+        "stdout": "copied 'a' -> '/data2/r17xb/a' (backup: '/data2/r17xb/a~')\nremoved 'a'\ncreated directory '/data2/r17xb/sub'\ncopied 'sub/b' -> '/data2/r17xb/sub/b'\nremoved 'sub/b'\nremoved directory 'sub'\nrc=0\nrc=1\n/data2/r17xb\n/data2/r17xb/a\n/data2/r17xb/a~\n/data2/r17xb/a~/w\n/data2/r17xb/c~\n/data2/r17xb/sub\n/data2/r17xb/sub/b\n/data2/r17xb/sub~\n",
+        "stderr": "mv: cannot move 'c' to '/data2/r17xb/c': Invalid cross-device link\n"
+      }
     }
   ]
 }

@@ -171,6 +171,17 @@ async function entryGone(
   return children.length === 0
 }
 
+// GNU's line for a target mv cannot replace. On one filesystem the rename
+// refuses the overwrite itself. Across filesystems GNU removes the target
+// before it copies, so the failed removal is what it reports (coreutils 9.7).
+// Mirrors Python's _replace_error.
+function replaceError(src: PathSpec, target: PathSpec, reason: string, across: boolean): string {
+  if (across) {
+    return `mv: inter-device move failed: '${src.rawPath}' to '${target.rawPath}'; unable to remove target: ${reason}`
+  }
+  return `mv: cannot overwrite '${target.rawPath}': ${reason}`
+}
+
 // Remove copied source entries children first, GNU rm style. A failed
 // removal is reported per entry ('mv: cannot remove ...') and the remaining
 // entries are still attempted; directories with a failed descendant are
@@ -430,42 +441,46 @@ export async function mvGeneric(
       )
       continue
     }
-    const mismatch = overwriteTypeError('mv', src, srcIsDir, target, targetExists, targetIsDir)
+    // GNU lets -n, --update and -i decide before it weighs a type mismatch,
+    // and -u never holds a directory back (coreutils 9.7).
+    const gate = srcIsDir && policy.update === 'older' ? { ...policy, update: null } : policy
+    if (!(await overwriteGate(gate, stat, src, target, errors))) continue
+    // A backup renames the target aside, whatever its kind.
+    const mismatch = !backupDisplaces(flags.backup)
+      ? overwriteTypeError('mv', src, srcIsDir, target, targetExists, targetIsDir)
+      : null
     if (mismatch !== null) {
       errors.push(mismatch)
       continue
     }
-    if (flags.noCopy && isPrimitiveMove(strategy)) {
-      errors.push(
-        `mv: cannot move '${src.rawPath}' to '${target.rawPath}': Invalid cross-device link`,
-      )
-      continue
-    }
     if (
-      !srcIsDir &&
       created.has(keyOf(target)) &&
       !(flags.noClobber || updateGates(flags.update) || flags.backup === 'numbered')
     ) {
-      // -i asks first: GNU only meets the just-created rule once the answer
-      // says to replace.
-      if (policy.ask && !(await policy.ask(target))) continue
       errors.push(`mv: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
       continue
     }
-    if (!(await overwriteGate(policy, stat, src, target, errors))) continue
     if (busy) {
       errors.push(
         `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase('EBUSY')}`,
       )
       continue
     }
+    const across = isPrimitiveMove(strategy)
     // GNU refuses to replace a non-empty directory whether the target was
     // named outright (-T) or mapped under an existing destination
     // directory, so this cannot be gated on noTargetDir. It runs after the
     // clobber gate because -n and --update=none skip such a target
     // silently at exit 0, and a backup renames the target aside first, so
-    // -b installs over it instead (all GNU 9.7).
-    if (srcIsDir && targetIsDir && versionReaddir !== undefined && !backupDisplaces(flags.backup)) {
+    // -b installs over it instead. With --no-copy a move across mounts meets
+    // the other device first (all GNU 9.7).
+    if (
+      srcIsDir &&
+      targetIsDir &&
+      versionReaddir !== undefined &&
+      !backupDisplaces(flags.backup) &&
+      !(across && flags.noCopy)
+    ) {
       let children: string[]
       try {
         children = await versionReaddir(target)
@@ -473,11 +488,11 @@ export async function mvGeneric(
         if (!isFsError(err)) throw err
         // Reading it as "empty" would clobber a directory whose contents
         // could not be verified.
-        errors.push(`mv: cannot overwrite '${target.rawPath}': ${String(fsStrerror(err))}`)
+        errors.push(replaceError(src, target, String(fsStrerror(err)), across))
         continue
       }
       if (children.length > 0) {
-        errors.push(`mv: cannot overwrite '${target.rawPath}': Directory not empty`)
+        errors.push(replaceError(src, target, 'Directory not empty', across))
         continue
       }
     }
@@ -495,6 +510,30 @@ export async function mvGeneric(
         continue
       }
     }
+    const backupStrategy =
+      copies !== undefined
+        ? { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
+        : strategy
+    if (across && flags.noCopy) {
+      // GNU renames the target aside before its rename meets the other
+      // device, and leaves it there (coreutils 9.7).
+      const made = await makeBackup(
+        policy,
+        backupStrategy,
+        stat,
+        versionReaddir,
+        target,
+        errors,
+        index,
+        copies,
+      )
+      if (made.ok) {
+        errors.push(
+          `mv: cannot move '${src.rawPath}' to '${target.rawPath}': Invalid cross-device link`,
+        )
+      }
+      continue
+    }
     const sourceLink = copies !== undefined && copies.links.statAt(src.virtual) !== null
     // Refuse an undeletable source before a backup moves the target aside.
     if (isPrimitiveMove(strategy) && !sourceLink) {
@@ -511,21 +550,15 @@ export async function mvGeneric(
     // A cross-mount move removes the target first, and a pipe cannot be
     // removed: GNU stops there, keeping the source (`mv f >(cat)`).
     if (
-      isPrimitiveMove(strategy) &&
+      across &&
       targetExists &&
       !targetIsDir &&
       !sourceLink &&
       (await targetIsFifo(stat, target))
     ) {
-      errors.push(
-        `mv: inter-device move failed: '${src.rawPath}' to '${target.rawPath}'; unable to remove target: ${posixPhrase('EPERM')}`,
-      )
+      errors.push(replaceError(src, target, posixPhrase('EPERM'), across))
       continue
     }
-    const backupStrategy =
-      copies !== undefined
-        ? { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
-        : strategy
     const made = await makeBackup(
       policy,
       backupStrategy,
@@ -555,6 +588,17 @@ export async function mvGeneric(
           `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${posixPhrase(targetErr)}`,
         )
         continue
+      }
+      if (targetIsDir && made.backup === null) {
+        // GNU removes the target before it copies across devices, so an
+        // empty directory there is made anew (-v: `created directory`).
+        try {
+          await strategy.rmdir(target)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          errors.push(replaceError(src, target, String(fsStrerror(err)), across))
+          continue
+        }
       }
       // Across mounts GNU copies and then removes, and -v says so entry by
       // entry instead of `renamed` (coreutils 9.7).

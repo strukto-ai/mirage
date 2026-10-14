@@ -281,6 +281,42 @@
         "T",
         "backup"
       ]
+    },
+    {
+      "id": "mv_b_moves_a_mismatched_target_aside",
+      "seq": 16900004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/r17mb/s/sub /data/r17mb/t/a /data/r17mb/x/a /data/r17mb/u && printf a > /data/r17mb/s/a && printf b > /data/r17mb/s/sub/b && printf z > /data/r17mb/t/a/z && printf x > /data/r17mb/t/sub && printf w > /data/r17mb/x/a/w && (cd /data/r17mb && mv -bv s/a s/sub t; echo rc=$?; mv -b t/a x/a u; echo rc=$?); find /data/r17mb/t /data/r17mb/u /data/r17mb/x | sort; rm -r /data/r17mb",
+      "expect": {
+        "exit": 0,
+        "stdout": "renamed 's/a' -> 't/a' (backup: 't/a~')\nrenamed 's/sub' -> 't/sub' (backup: 't/sub~')\nrc=0\nrc=1\n/data/r17mb/t\n/data/r17mb/t/a~\n/data/r17mb/t/a~/z\n/data/r17mb/t/sub\n/data/r17mb/t/sub/b\n/data/r17mb/t/sub~\n/data/r17mb/u\n/data/r17mb/u/a\n/data/r17mb/x\n/data/r17mb/x/a\n/data/r17mb/x/a/w\n",
+        "stderr": "mv: will not overwrite just-created 'u/a' with 'x/a'\n"
+      },
+      "flags": [
+        "b",
+        "v"
+      ]
     }
   ]
 }

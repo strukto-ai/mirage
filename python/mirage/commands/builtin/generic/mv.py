@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import Callable
 
@@ -177,6 +177,29 @@ async def _target_is_fifo(stat: StatFn, target: PathSpec) -> bool:
         _logger.debug("mv: target %s gave no stat: %s", target.virtual, exc)
         return False
     return is_fifo(info)
+
+
+def _replace_error(
+    src: PathSpec, target: PathSpec, reason: str | None, across: bool
+) -> str:
+    """GNU's line for a target mv cannot replace.
+
+    On one filesystem the rename refuses the overwrite itself. Across
+    filesystems GNU removes the target before it copies, so the failed
+    removal is what it reports (coreutils 9.7).
+
+    Args:
+        src (PathSpec): the source being moved.
+        target (PathSpec): the target standing in the way.
+        reason (str | None): the error's text, as ``fs_strerror`` gives it.
+        across (bool): whether the move crosses mounts.
+    """
+    if across:
+        return (
+            f"mv: inter-device move failed: '{src.raw_path}' to "
+            f"'{target.raw_path}'; unable to remove target: {reason}"
+        )
+    return f"mv: cannot overwrite '{target.raw_path}': {reason}"
 
 
 async def _remove_entries(
@@ -526,37 +549,35 @@ async def mv_generic(
                 f"{posix_phrase(target_err or FsCondition.ENOTDIR)}"
             )
             continue
-        mismatch = overwrite_type_error(
-            "mv", src, src_is_dir, target, target_exists, target_is_dir
+        # GNU lets -n, --update and -i decide before it weighs a type
+        # mismatch, and -u never holds a directory back (coreutils 9.7).
+        gate = (
+            replace(policy, update=None)
+            if src_is_dir and policy.update == "older"
+            else policy
+        )
+        if not await overwrite_gate(gate, stat, src, target, errors):
+            continue
+        # A backup renames the target aside, whatever its kind.
+        mismatch = (
+            overwrite_type_error(
+                "mv", src, src_is_dir, target, target_exists, target_is_dir
+            )
+            if not backup_displaces(flags.backup)
+            else None
         )
         if mismatch is not None:
             errors.append(mismatch)
             continue
-        if flags.no_copy and isinstance(strategy, PrimitiveMove):
-            errors.append(
-                f"mv: cannot move '{src.raw_path}' to "
-                f"'{target.raw_path}': Invalid cross-device link"
-            )
-            continue
-        if (
-            not src_is_dir
-            and key_of(target) in created
-            and not (
-                flags.no_clobber
-                or update_gates(flags.update)
-                or flags.backup == "numbered"
-            )
+        if key_of(target) in created and not (
+            flags.no_clobber
+            or update_gates(flags.update)
+            or flags.backup == "numbered"
         ):
-            # -i asks first: GNU only meets the just-created rule once
-            # the answer says to replace.
-            if policy.ask is not None and not await policy.ask(target):
-                continue
             errors.append(
                 f"mv: will not overwrite just-created '{target.raw_path}' "
                 f"with '{src.raw_path}'"
             )
-            continue
-        if not await overwrite_gate(policy, stat, src, target, errors):
             continue
         if busy:
             errors.append(
@@ -564,17 +585,20 @@ async def mv_generic(
                 f"'{target.raw_path}': {posix_phrase(FsCondition.EBUSY)}"
             )
             continue
+        across = isinstance(strategy, PrimitiveMove)
         # GNU refuses to replace a non-empty directory whether the target
         # was named outright (-T) or mapped under an existing destination
         # directory, so this cannot be gated on no_target_dir. It runs
         # after the clobber gate because -n and --update=none skip such a
         # target silently at exit 0, and a backup renames the target aside
-        # first, so -b installs over it instead (all GNU 9.7).
+        # first, so -b installs over it instead. With --no-copy a move
+        # across mounts meets the other device first (all GNU 9.7).
         if (
             src_is_dir
             and target_is_dir
             and readdir is not None
             and not backup_displaces(flags.backup)
+            and not (across and flags.no_copy)
         ):
             try:
                 children = await readdir(target)
@@ -582,14 +606,12 @@ async def mv_generic(
                 # Reading it as "empty" would clobber a directory whose
                 # contents could not be verified.
                 errors.append(
-                    f"mv: cannot overwrite '{target.raw_path}': "
-                    f"{fs_strerror(exc)}"
+                    _replace_error(src, target, fs_strerror(exc), across)
                 )
                 continue
             if children:
                 errors.append(
-                    f"mv: cannot overwrite '{target.raw_path}': "
-                    "Directory not empty"
+                    _replace_error(src, target, "Directory not empty", across)
                 )
                 continue
         # The reveal guard answers before the backup so a refused move
@@ -604,6 +626,29 @@ async def mv_generic(
                     f"'{target.raw_path}': {fs_strerror(exc)}"
                 )
                 continue
+        backup_strategy = (
+            NativeMove(rename=partial(rename_link, copies))
+            if copies is not None
+            else strategy
+        )
+        if across and flags.no_copy:
+            # GNU renames the target aside before its rename meets the
+            # other device, and leaves it there (coreutils 9.7).
+            _, ok = await make_backup(
+                policy,
+                backup_strategy,
+                stat,
+                readdir,
+                target,
+                errors,
+                copies,
+            )
+            if ok:
+                errors.append(
+                    f"mv: cannot move '{src.raw_path}' to "
+                    f"'{target.raw_path}': Invalid cross-device link"
+                )
+            continue
         source_link = (
             copies is not None
             and copies.links.stat_at(src.virtual) is not None
@@ -623,7 +668,7 @@ async def mv_generic(
                 )
                 continue
         if (
-            isinstance(strategy, PrimitiveMove)
+            across
             and target_exists
             and not target_is_dir
             and not source_link
@@ -633,16 +678,11 @@ async def mv_generic(
             # cannot be removed: GNU stops there, keeping the source (`mv
             # f >(cat)`).
             errors.append(
-                f"mv: inter-device move failed: '{src.raw_path}' to "
-                f"'{target.raw_path}'; unable to remove target: "
-                f"{posix_phrase(FsCondition.EPERM)}"
+                _replace_error(
+                    src, target, posix_phrase(FsCondition.EPERM), across
+                )
             )
             continue
-        backup_strategy = (
-            NativeMove(rename=partial(rename_link, copies))
-            if copies is not None
-            else strategy
-        )
         backup, ok = await make_backup(
             policy,
             backup_strategy,
@@ -672,6 +712,17 @@ async def mv_generic(
                     f"'{target.raw_path}': {posix_phrase(target_err)}"
                 )
                 continue
+            if target_is_dir and backup is None:
+                # GNU removes the target before it copies across devices,
+                # so an empty directory there is made anew (-v: `created
+                # directory`).
+                try:
+                    await strategy.rmdir(target)
+                except FS_ERRORS as exc:
+                    errors.append(
+                        _replace_error(src, target, fs_strerror(exc), across)
+                    )
+                    continue
             # Across mounts GNU copies and then removes, and -v says so
             # entry by entry instead of `renamed` (coreutils 9.7).
             verbose = lines if flags.verbose else None
