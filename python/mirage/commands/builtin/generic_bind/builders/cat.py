@@ -44,4 +44,6 @@ async def cat(
     )
 
 
-BUILDER = GenericCommand("cat", cat, aggregate=concat_aggregate, read=True)
+BUILDER = GenericCommand(
+    "cat", cat, aggregate=concat_aggregate, read=True, pass_through=True
+)

@@ -213,13 +213,15 @@ async def tail(
         target_c = abs(c)
         if target_c == 0:
             return
-        buf = b""
+        kept: deque[bytes] = deque()
+        held = 0
         async for chunk in ensure_stream(src):
-            buf += chunk
-            if len(buf) > target_c:
-                buf = buf[-target_c:]
-        if buf:
-            yield buf
+            kept.append(chunk)
+            held += len(chunk)
+            while held - len(kept[0]) >= target_c:
+                held -= len(kept.popleft())
+        if held:
+            yield b"".join(kept)[-target_c:]
         return
 
     target = abs(n) if n is not None else 10

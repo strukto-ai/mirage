@@ -527,6 +527,8 @@ async def test_python3_mount_limit_follows_script_path(restore_defaults):
         "cat /big | wc",
         "cat -s /blank",
         "head -n -1000000 /blank",
+        "uniq /blank",
+        "tail -n 1 /blank",
     ],
 )
 async def test_large_ram_command_honors_caller_cancel(command):

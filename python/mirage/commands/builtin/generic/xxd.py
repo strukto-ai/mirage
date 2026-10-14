@@ -127,10 +127,7 @@ async def _reverse_runs(
     Args:
         source (AsyncIterator[bytes]): The hexdump.
     """
-    buf = b""
-    async for chunk in source:
-        buf += chunk
-    text = buf.decode(errors="replace")
+    text = (await materialize(source)).decode(errors="replace")
     if ":" in text:
         for line in split_lines(text):
             if line:

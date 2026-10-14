@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.usage import usage_hint
+from mirage.io.types import materialize
 
 _OPEN_END = 2**31 - 1
 _BLANKS = re.compile(r"[ \t]+")
@@ -261,9 +262,7 @@ async def cut_stream(
     zero_terminated: bool,
 ) -> AsyncIterator[bytes]:
     separator = b"\x00" if zero_terminated else b"\n"
-    raw = b""
-    async for chunk in source:
-        raw += chunk
+    raw = await materialize(source)
     for rec in _split_records(raw, zero_terminated):
         output = _cut_record(
             rec,

@@ -16,7 +16,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
 from mirage.io.errors import PipeClosed
-from mirage.io.types import ByteSource, ClosedPipe, IOResult
+from mirage.io.types import ByteSource, ClosedPipe, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
 
@@ -111,8 +111,7 @@ async def write_one(
         return
     existing = b""
     try:
-        async for chunk in read_stream(path):
-            existing += chunk
+        existing = await materialize(read_stream(path))
     except FileNotFoundError:
         # GNU tee -a creates a missing file: append to empty.
         pass

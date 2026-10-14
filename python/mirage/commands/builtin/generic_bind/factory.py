@@ -36,6 +36,7 @@ from mirage.commands.config import (
 )
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
+from mirage.io.cooperative import chunks
 from mirage.types import PathSpec
 from mirage.view.types import NamespaceView
 
@@ -212,6 +213,8 @@ async def _run_with_namespace_globs(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
+    *,
+    split: bool = True,
 ) -> Any:
     """Run a builder over the mount's table, with the invocation's
     namespace facts stamped on below every guard.
@@ -246,6 +249,8 @@ async def _run_with_namespace_globs(
         paths (list[PathSpec]): the command's path operands.
         texts (list[str]): the command's text arguments.
         opts (CommandOpts): the per-invocation option bag.
+        split (bool): whether its input is cut into pieces; a
+            pass-through builder keeps the producer's chunks.
     """
     io = mount_io(opts)
     raw = table(io) if table is not None else io
@@ -267,6 +272,20 @@ async def _run_with_namespace_globs(
     # guards (`with_probe_answers` on the raw table), so they still judge
     # every path before it.
     bound = with_dir_guard(with_command_guards(finish(stamped)))
+    if split:
+        # A RAM or cache read arrives as one whole chunk, over which a
+        # scan that splits its buffer per line is quadratic and cannot be
+        # cancelled until it ends; each operand read and stdin is cut into
+        # pieces with a yield between them, as TypeScript's guardInput.
+        read = bound.read_stream
+        bound = replace(
+            bound,
+            read_stream=lambda acc, path, *args, **kwargs: chunks(
+                read(acc, path, *args, **kwargs)
+            ),
+        )
+        if opts.stdin is not None:
+            opts = replace(opts, stdin=chunks(opts.stdin))
     return await fn(bound, accessor, paths, texts, opts)
 
 
@@ -282,7 +301,12 @@ def _bind(
         _write_wraps if builder.write and not builder.read else _stat_wraps
     )
     bound = functools.partial(
-        _run_with_namespace_globs, finish, builder.fn, table, builder.write
+        _run_with_namespace_globs,
+        finish,
+        builder.fn,
+        table,
+        builder.write,
+        split=not builder.pass_through,
     )
     (registered,) = registered_commands(
         [

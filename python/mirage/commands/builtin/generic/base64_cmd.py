@@ -13,7 +13,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, ReadStreamFn, StatFn
 
@@ -21,10 +21,7 @@ from mirage.types import PathSpec, ReadStreamFn, StatFn
 async def _base64_encode_stream(
     source: AsyncIterator[bytes], wrap: int | None
 ) -> AsyncIterator[bytes]:
-    buf = b""
-    async for chunk in source:
-        buf += chunk
-    encoded = b64lib.b64encode(buf).decode()
+    encoded = b64lib.b64encode(await materialize(source)).decode()
     if not encoded:
         return
     if wrap is not None and wrap == 0:
@@ -40,10 +37,7 @@ async def _base64_encode_stream(
 async def _base64_decode_stream(
     source: AsyncIterator[bytes], ignore_garbage: bool
 ) -> AsyncIterator[bytes]:
-    buf = b""
-    async for chunk in source:
-        buf += chunk
-    text = b"".join(buf.split())
+    text = b"".join((await materialize(source)).split())
     yield b64lib.b64decode(text, validate=not ignore_garbage)
 
 
