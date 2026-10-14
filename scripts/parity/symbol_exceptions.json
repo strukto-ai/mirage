@@ -90,7 +90,6 @@
   },
   "execution/context": {
    "typescript_only": {
-    "captureExecutionContext": "Deferred TypeScript callbacks restore the execution async-local store explicitly; Python contextvars travel with the copied context."
    }
   },
   "workspace/abort": {
@@ -130,7 +129,6 @@
   },
   "policy/policies": {
    "typescript_only": {
-    "captureOpPolicies": "A deferred TypeScript callback restores each async-local store it needs, as captureSessionContext and captureRecordingContext do; a Python contextvar travels with the copied context."
    }
   },
   "core/github/tree": {

@@ -5,6 +5,7 @@ import json
 import pytest
 
 from mirage.commands.spec.types import WordKind
+from mirage.context import bind_caller, current_caller, reset_caller
 from mirage.policy.constants import (
     CTX_ENV,
     DEFAULT_ASK_REASON,
@@ -13,7 +14,6 @@ from mirage.policy.constants import (
 )
 from mirage.policy.policies import Policies
 from mirage.policy.script import (
-    _POLICY_READ,
     ScriptPolicy,
     script_action,
     script_context,
@@ -471,11 +471,13 @@ async def test_the_policys_own_read_is_not_judged_after_it_either():
         session_id="s",
         result=b"x",
     )
-    token = _POLICY_READ.set(True)
+    token = bind_caller(
+        dataclasses.replace(current_caller(), policy_read=True)
+    )
     try:
         assert await policy.post_vfs(done) is None
     finally:
-        _POLICY_READ.reset(token)
+        reset_caller(token)
     assert engine.requests == []
     assert await policy.post_vfs(done) == (Deny("frozen"),)
 
@@ -753,7 +755,7 @@ async def test_a_wired_policy_attaches_the_entry_points_to_its_runtime(
     marked: list[bool] = []
 
     async def backend(op, path, **kwargs):
-        marked.append(_POLICY_READ.get())
+        marked.append(current_caller().policy_read)
         return None, None
 
     policy = ScriptPolicy(
@@ -767,7 +769,7 @@ async def test_a_wired_policy_attaches_the_entry_points_to_its_runtime(
     assert attached is resolver
     await dispatch("read", _path("/repo/sealed/k"))
     assert marked == [True]
-    assert _POLICY_READ.get() is False
+    assert current_caller().policy_read is False
 
 
 @pytest.mark.asyncio
@@ -797,11 +799,13 @@ def test_dispatch_and_resolver_travel_together():
 async def test_the_policys_own_read_is_not_judged_by_its_vfs_program():
     engine = FakeProgram(_answer(kind="deny", reason="frozen"))
     policy = _policy("pre_vfs", engine)
-    token = _POLICY_READ.set(True)
+    token = bind_caller(
+        dataclasses.replace(current_caller(), policy_read=True)
+    )
     try:
         assert await policy.pre_vfs(_ops_ctx("read", write=False)) is None
     finally:
-        _POLICY_READ.reset(token)
+        reset_caller(token)
     assert engine.requests == []
     assert await policy.pre_vfs(_ops_ctx("read", write=False)) == (
         Deny("frozen"),

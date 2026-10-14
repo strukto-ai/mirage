@@ -14,7 +14,6 @@
 
 import type { ProcessView } from '../process/view.ts'
 import { captureSessionContext } from '../context/session_context.ts'
-import { captureOpPolicies } from '../policy/policies.ts'
 import { captureRecordingContext } from '../observe/context.ts'
 import type { NamespaceView, OpKwargs, SessionView } from '../view/types.ts'
 import { PathSpec } from '../types.ts'
@@ -77,7 +76,6 @@ export function captureBinding(
   } = {},
   scope = new ContextScope([
     ...captureSessionContext(),
-    ...captureOpPolicies(),
     ...captureRecordingContext(),
   ]),
 ): RuntimeContext {

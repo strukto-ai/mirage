@@ -26,7 +26,6 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -47,9 +46,12 @@ from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.concurrency.limiter import run_blocking
 from mirage.context import (
+    bind_caller,
+    current_caller,
     get_admission,
     get_current_session_for,
     get_current_session_unless_foreign,
+    reset_caller,
     reset_current_session,
     reset_explaining,
     reset_program_invocation,
@@ -223,17 +225,6 @@ from mirage.workspace.workspace.types import VFSMount
 from mirage.workspace.workspace.watch import WatchDelegate, WatchManager
 
 logger = logging.getLogger(__name__)
-
-# The stop event of the top-level line this context runs in, so a line
-# that cancels its own session does not wait on itself.
-LINE_STOP: ContextVar[asyncio.Event | None] = ContextVar(
-    "mirage_line_stop", default=None
-)
-
-# Set inside a write the capture gate let through, so the ops it runs
-# itself are not held behind it.
-WRITE_HELD: ContextVar[bool] = ContextVar("mirage_write_held", default=False)
-
 
 class Workspace:
     """Unified virtual filesystem over heterogeneous mounts.
@@ -2046,7 +2037,7 @@ class Workspace:
             int: how many lines were cancelled.
         """
         default = self._session_mgr.default_id
-        own = LINE_STOP.get()
+        own = current_caller().stop
         hit = [
             (stop, ended)
             for stop, (named, ended) in list(self._lines.items())
@@ -2076,7 +2067,7 @@ class Workspace:
             seconds (float): how long to wait for running lines.
         """
         async with self._capture_lock:
-            own = LINE_STOP.get()
+            own = current_caller().stop
             self._admitting.clear()
             try:
                 waiters = [
@@ -2127,18 +2118,18 @@ class Workspace:
         background job) waits for the capture to finish, and counts as
         under way until it ends, so a capture that starts waits it out.
         """
-        if WRITE_HELD.get() or LINE_STOP.get() in self._admitted:
+        if current_caller().write_held or current_caller().stop in self._admitted:
             yield
             return
         while not self._admitting.is_set():
             await self._admitting.wait()
         self._writes += 1
         self._writes_idle.clear()
-        token = WRITE_HELD.set(True)
+        token = bind_caller(replace(current_caller(), write_held=True))
         try:
             yield
         finally:
-            WRITE_HELD.reset(token)
+            reset_caller(token)
             self._writes -= 1
             if self._writes == 0:
                 self._writes_idle.set()
@@ -2615,7 +2606,7 @@ class Workspace:
         if handed is None:
             stop = asyncio.Event()
             self._lines[stop] = (session_id, ended)
-            token = LINE_STOP.set(stop)
+            token = bind_caller(replace(current_caller(), stop=stop))
 
         async def line() -> IOResult:
             result = await self._serialize_line(
@@ -2664,7 +2655,7 @@ class Workspace:
                 del self._lines[stop]
                 self._admitted.discard(stop)
                 ended.set()
-                LINE_STOP.reset(token)
+                reset_caller(token)
         return result
 
 

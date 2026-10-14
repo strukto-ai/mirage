@@ -13,12 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { operandExitCode } from '../commands/spec/usage.ts'
+import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
-  asyncContextIsolatesTasks,
-  createAsyncContext,
-  type ContextCall,
-} from '../utils/async_context.ts'
-import { explaining, lineRunning, noteRefusal, runExplaining } from '../context/session_context.ts'
+  currentCaller,
+  explaining,
+  lineRunning,
+  liveCallers,
+  noteRefusal,
+  runExplaining,
+  runWithCaller,
+} from '../context/session_context.ts'
 import { eacces, erofs } from '../errors/fs.ts'
 import { fsErrorLine } from '../errors/render.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
@@ -797,8 +801,6 @@ export class Policies {
   }
 }
 
-const opPoliciesStorage = createAsyncContext<Policies | null>()
-
 /**
  * Bind the workspace's admission policies for the duration of `fn`:
  * the run of one command.
@@ -810,7 +812,7 @@ const opPoliciesStorage = createAsyncContext<Policies | null>()
  * (a generic invoked directly in a test), where the guard is inert.
  */
 export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(opPoliciesStorage.run(policies, fn))
+  return runWithCaller({ ...currentCaller(), policies }, fn)
 }
 
 /**
@@ -826,13 +828,8 @@ export function runWithOpPolicies<T>(policies: Policies, fn: () => Promise<T>): 
  */
 export function getOpPolicies(): Policies | null {
   let armed: Policies | null = null
-  for (const policies of opPoliciesStorage.liveStores()) {
-    if (policies !== null) armed = policies
+  for (const caller of liveCallers()) {
+    if (caller.policies !== null) armed = caller.policies
   }
   return armed
-}
-
-/** Capture the running command's policies for a deferred workspace callback. */
-export function captureOpPolicies(): ContextCall[] {
-  return [opPoliciesStorage.capture()]
 }

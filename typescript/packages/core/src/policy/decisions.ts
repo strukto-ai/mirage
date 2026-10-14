@@ -12,8 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
-import { explaining } from '../context/session_context.ts'
+import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
+import {
+  currentCaller,
+  explaining,
+  liveCallers,
+  runWithCaller,
+} from '../context/session_context.ts'
 import { sha256Hex } from '../utils/hash.ts'
 import { PolicyDenied } from './errors.ts'
 import { Outcome } from './types.ts'
@@ -881,8 +886,6 @@ export class Decisions {
   }
 }
 
-const opCallStorage = createAsyncContext<readonly [Decisions, HandOff, string]>()
-
 /**
  * Run one call, the unit an op-level answer covers: a file tool's, or a
  * line's or a job's, whose session writes are its ops. A grant one of its
@@ -897,7 +900,7 @@ export function runWithOpCall<T>(
   sessionId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(opCallStorage.run([owner, handed, sessionId], fn))
+  return runWithCaller({ ...currentCaller(), call: [owner, handed, sessionId] }, fn)
 }
 
 /**
@@ -908,7 +911,8 @@ export function runWithOpCall<T>(
  * reach, so the newest of this ledger's and session's is taken.
  */
 export function getOpCall(owner: Decisions, sessionId: string): HandOff | null {
-  const call = [...opCallStorage.liveStores()]
+  const call = liveCallers()
+    .flatMap((caller) => (caller.call === null ? [] : [caller.call]))
     .reverse()
     .find(([ledger, , session]) => ledger === owner && session === sessionId)
   return call?.[1] ?? null

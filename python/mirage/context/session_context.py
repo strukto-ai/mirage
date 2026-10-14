@@ -12,14 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from __future__ import annotations
+
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
-from contextvars import ContextVar, Token
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any
 
 from mirage.errors.fs import eacces, enoent, erofs
-from mirage.policy.types import DryRun, EntryGate, VfsExplanation
 from mirage.types import (
     MOUNT_MODE_RANK,
     MountMode,
@@ -38,14 +40,17 @@ from mirage.utils.hidden import (
 )
 from mirage.utils.path import norm, parent
 from mirage.view.types import SessionAccess
-from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.session.session import SessionState
 
 if TYPE_CHECKING:
     from mirage.io.types import ByteSource, IOResult
+    from mirage.policy.decisions import Decisions, HandOff
+    from mirage.policy.policies import Policies
+    from mirage.policy.types import DryRun, EntryGate, VfsExplanation
     from mirage.shell.console import JobConsole
     from mirage.shell.types import Redirect
-    from mirage.workspace.types import ExecutionNode
+    from mirage.workspace.evaluation import EvaluationContext
+    from mirage.workspace.session.session import SessionState
+    from mirage.workspace.types import ExecutionNode, StatusWriter
 
 
 class SessionOwner(ABC):
@@ -60,31 +65,152 @@ class SessionOwner(ABC):
         """
 
 
-@dataclass(frozen=True, slots=True)
-class SessionBinding:
-    """The session bound to one async context, whose it is, and the
-    evaluation running on it.
+# Where a refusal an entry point raises is noted for the line running it.
+RefusalSink = Callable[[Refusal], None]
+
+# Runs a prepared command under ordered redirects, with a gate for
+# each target and the command identity for the single-output fast path.
+RedirectResult = tuple["ByteSource | None", "IOResult", "ExecutionNode"]
+RedirectRun = Callable[
+    ["ByteSource | None", "JobConsole | None", tuple[PathSpec, ...]],
+    Awaitable[RedirectResult],
+]
+RedirectGuard = Callable[
+    [tuple[PathSpec, ...], "ByteSource | None"],
+    Awaitable[RedirectResult | None],
+]
+RedirectRunner = Callable[
+    [RedirectRun, RedirectGuard | None, str, tuple[str, ...]],
+    Awaitable[RedirectResult],
+]
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class Caller:
+    """Who makes a call, and what every check on it needs to know: the
+    session, and the line, job, command and file call it runs in.
+
+    One record per call, never shared. Each layer is a copy of the one
+    above with its own fields set, so two calls running at once each
+    hold their own, and work that runs after its command returned (a
+    stream pulled later, a runtime's callback) keeps the record it was
+    made with.
 
     Args:
-        session (SessionState | None): the live session.
+        session (SessionState | None): the session the call acts as.
         owner (SessionOwner | None): the session manager the session
-            belongs to, which is one per workspace. None when the
-            binder did not name one.
-        evaluation (EvaluationContext | None): the evaluation running
-            on the session, None outside one. It is part of the
-            binding, so a scope bound to another session never carries
-            this one's evaluation, with its frame and cancellation.
+            belongs to, one per workspace; None when the binder did not
+            name one.
+        evaluation (EvaluationContext | None): the evaluation running on
+            the session, None outside one; a layer bound to another
+            session never carries it.
+        gate (EntryGate | None): the running command's admission gate.
+        mount (tuple[str, MountMode] | None): the prefix and configured
+            mode of the mount a command runs on.
+        refusals (RefusalSink | None): where the running line notes a
+            policy's refusal; None outside a line.
+        explaining (list[VfsExplanation] | DryRun | None): a dry run's
+            trace, DECIDING while its policies decide, None to run.
+        walk_probe (WalkProbe | None): what a command's dot walks read.
+        redirects (tuple | None): a statement's expanded redirect
+            targets, keyed by its command node.
+        program (SessionState | None): the session a program line (find
+            -exec) runs in.
+        call (tuple[Decisions, HandOff, str] | None): the call an
+            op-level answer covers: its ledger, hand-off and session.
+        policies (Policies | None): the policies a command's file calls
+            consult.
+        policy_read (bool): whether the call is a policy program's own
+            read.
+        stop (asyncio.Event | None): the running line's stop signal.
+        write_held (bool): whether the call already holds the
+            workspace's write admission.
+        line_writer (StatusWriter | None): the identity of the line
+            running on this task.
+        execution_id (str | None): the running execution's id.
     """
 
-    session: SessionState | None
-    owner: SessionOwner | None
+    session: SessionState | None = None
+    owner: "SessionOwner | None" = None
     evaluation: EvaluationContext | None = None
+    gate: EntryGate | None = None
+    mount: tuple[str, MountMode] | None = None
+    refusals: RefusalSink | None = None
+    explaining: list[VfsExplanation] | DryRun | None = None
+    walk_probe: WalkProbe | None = None
+    redirects: (
+        tuple[
+            int,
+            tuple[PathSpec, ...],
+            RedirectRunner | None,
+            tuple["Redirect", ...],
+        ]
+        | None
+    ) = None
+    program: SessionState | None = None
+    call: "tuple[Decisions, HandOff, str] | None" = None
+    policies: "Policies | None" = None
+    policy_read: bool = False
+    stop: asyncio.Event | None = None
+    write_held: bool = False
+    line_writer: "StatusWriter | None" = None
+    execution_id: str | None = None
 
 
-_current_session: ContextVar[SessionBinding | None] = ContextVar(
-    "mirage_current_session",
-    default=None,
-)
+@dataclass(frozen=True, slots=True)
+class CallerToken:
+    """What one binding changed, for its reset to put back.
+
+    A reset restores only the fields its binding set, so bindings undone
+    out of order leave each other's fields alone.
+
+    Args:
+        names (tuple[str, ...]): the fields the binding set.
+        before (Caller): the caller the binding replaced.
+    """
+
+    names: tuple[str, ...]
+    before: Caller
+
+
+_caller: ContextVar[Caller] = ContextVar("mirage_caller", default=Caller())
+
+
+def current_caller() -> Caller:
+    """The caller bound to the current async context."""
+    return _caller.get()
+
+
+def bind_caller(caller: Caller) -> CallerToken:
+    """Bind a caller to the current async context: a layer's own copy,
+    or the record a stream pulled or a callback run after its command
+    returned was made with.
+
+    Args:
+        caller (Caller): the caller to bind.
+    """
+    before = _caller.get()
+    _caller.set(caller)
+    names = tuple(
+        f.name
+        for f in fields(Caller)
+        if getattr(caller, f.name) is not getattr(before, f.name)
+    )
+    return CallerToken(names, before)
+
+
+def _bind(**changes: Any) -> CallerToken:
+    return bind_caller(replace(_caller.get(), **changes))
+
+
+def reset_caller(token: CallerToken) -> None:
+    """Put back the fields a binding set.
+
+    Args:
+        token (CallerToken): the binding's token.
+    """
+    restored = {name: getattr(token.before, name) for name in token.names}
+    _caller.set(replace(_caller.get(), **restored))
 
 
 def set_current_session(
@@ -92,7 +218,7 @@ def set_current_session(
     owner: SessionOwner | None = None,
     *,
     evaluation: EvaluationContext | None = None,
-) -> Token[Any]:
+) -> CallerToken:
     """Bind ``session`` to the current async context.
 
     Args:
@@ -105,34 +231,27 @@ def set_current_session(
             on the session. None keeps the one already bound when it
             runs on this same session; another session's is dropped.
     """
-    current = _current_session.get()
+    current = _caller.get()
     if owner is None:
-        owner = current.owner if current is not None else None
-    if (
-        evaluation is None
-        and current is not None
-        and current.session is session
-    ):
+        owner = current.owner
+    if evaluation is None and current.session is session:
         evaluation = current.evaluation
-    return _current_session.set(
-        SessionBinding(session=session, owner=owner, evaluation=evaluation)
-    )
+    return _bind(session=session, owner=owner, evaluation=evaluation)
 
 
-def reset_current_session(token: Token[Any]) -> None:
+def reset_current_session(token: CallerToken) -> None:
     """Restore the previous session binding."""
-    _current_session.reset(token)
+    reset_caller(token)
 
 
 def get_current_session() -> SessionState | None:
     """Return the session bound to the current async context, if any."""
-    binding = _current_session.get()
-    return binding.session if binding is not None else None
+    return _caller.get().session
 
 
 def set_current_evaluation(
     context: EvaluationContext, owner: SessionOwner | None = None
-) -> Token[Any]:
+) -> CallerToken:
     """Bind an evaluation with its session, as one binding; undone by
     :func:`reset_current_session`.
 
@@ -146,8 +265,7 @@ def set_current_evaluation(
 
 def get_current_evaluation() -> EvaluationContext | None:
     """Return the evaluation bound with the current session, if any."""
-    binding = _current_session.get()
-    return binding.evaluation if binding is not None else None
+    return _caller.get().evaluation
 
 
 def get_current_session_for(owner: SessionOwner) -> SessionState | None:
@@ -160,10 +278,10 @@ def get_current_session_for(owner: SessionOwner) -> SessionState | None:
     Args:
         owner (SessionOwner): the asking workspace's session manager.
     """
-    binding = _current_session.get()
-    if binding is None or binding.owner is not owner:
+    caller = _caller.get()
+    if caller.owner is not owner:
         return None
-    return binding.session
+    return caller.session
 
 
 def get_current_session_unless_foreign(
@@ -183,12 +301,10 @@ def get_current_session_unless_foreign(
     Args:
         owner (SessionOwner): the asking workspace's session manager.
     """
-    binding = _current_session.get()
-    if binding is None or (
-        binding.owner is not None and binding.owner is not owner
-    ):
+    caller = _caller.get()
+    if caller.owner is not None and caller.owner is not owner:
         return None
-    return binding.session
+    return caller.session
 
 
 def _session_mode(mount_prefix: str) -> MountMode:
@@ -289,13 +405,7 @@ def hidden_refusal(
     return enoent(virtual)
 
 
-_current_admission: ContextVar[EntryGate | None] = ContextVar(
-    "mirage_current_admission",
-    default=None,
-)
-
-
-def set_admission(gate: EntryGate) -> Token[Any]:
+def set_admission(gate: EntryGate) -> CallerToken:
     """Bind the admitted command's entry gate to the current async
     context, for the run of that one command.
 
@@ -308,28 +418,22 @@ def set_admission(gate: EntryGate) -> Token[Any]:
     Args:
         gate (EntryGate): the admitted command's gate.
     """
-    return _current_admission.set(gate)
+    return _bind(gate=gate)
 
 
-def reset_admission(token: Token[Any]) -> None:
+def reset_admission(token: CallerToken) -> None:
     """Restore the previous admission binding."""
-    _current_admission.reset(token)
+    reset_caller(token)
 
 
 def get_admission() -> EntryGate | None:
     """The entry gate of the command running in this context, None
     when no admitted command is bound (a command constructed outside
     the dispatcher, or a line no gate judged)."""
-    return _current_admission.get()
+    return _caller.get().gate
 
 
-_current_mount_gate: ContextVar[tuple[str, MountMode] | None] = ContextVar(
-    "mirage_current_mount_gate",
-    default=None,
-)
-
-
-def set_mount_gate(prefix: str, mode: MountMode) -> Token[Any]:
+def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
     """Bind the executing mount's prefix and configured mode to the
     current async context, for the run of one command.
 
@@ -344,31 +448,22 @@ def set_mount_gate(prefix: str, mode: MountMode) -> Token[Any]:
         prefix (str): the mount's prefix.
         mode (MountMode): the mount's configured mode.
     """
-    return _current_mount_gate.set((prefix, mode))
+    return _bind(mount=(prefix, mode))
 
 
-def reset_mount_gate(token: Token[Any]) -> None:
+def reset_mount_gate(token: CallerToken) -> None:
     """Restore the previous mount binding."""
-    _current_mount_gate.reset(token)
+    reset_caller(token)
 
 
 def get_mount_gate() -> tuple[str, MountMode] | None:
     """The executing mount's (prefix, configured mode), None outside a
     mount's command (a generic invoked directly in a test, or the
     scratch tier)."""
-    return _current_mount_gate.get()
+    return _caller.get().mount
 
 
-# Where a refusal an entry point raises is noted for the line running it.
-RefusalSink = Callable[[Refusal], None]
-
-_refusal_sink: ContextVar[RefusalSink | None] = ContextVar(
-    "mirage_refusal_sink",
-    default=None,
-)
-
-
-def set_refusal_sink(sink: RefusalSink) -> Token[Any]:
+def set_refusal_sink(sink: RefusalSink) -> CallerToken:
     """Bind where the entry points note a policy's refusal, for one line's run.
 
     Set by the workspace around a typed line: a command renders an op
@@ -381,36 +476,30 @@ def set_refusal_sink(sink: RefusalSink) -> Token[Any]:
     Args:
         sink (RefusalSink): takes each record as an entry point raises it.
     """
-    return _refusal_sink.set(sink)
+    return _bind(refusals=sink)
 
 
-def reset_refusal_sink(token: Token[Any]) -> None:
+def reset_refusal_sink(token: CallerToken) -> None:
     """Restore the previous refusal-sink binding."""
-    _refusal_sink.reset(token)
+    reset_caller(token)
 
 
 def refusal_sink() -> RefusalSink | None:
     """The sink the line running in this context bound, None outside a
     line."""
-    return _refusal_sink.get()
+    return _caller.get().refusals
 
 
 def line_running() -> bool:
     """Whether a typed line is running in this context: the entry point it
     reaches is inside a command, not a file tool's or the host's own
     call."""
-    return _refusal_sink.get() is not None
-
-
-_explaining: ContextVar[list[VfsExplanation] | DryRun | None] = ContextVar(
-    "mirage_explaining",
-    default=None,
-)
+    return _caller.get().refusals is not None
 
 
 def set_explaining(
     trace: list[VfsExplanation] | DryRun | None,
-) -> Token[Any]:
+) -> CallerToken:
     """Make the calls in this context a dry run: the op gate notes on
     ``trace`` what it would answer and stops the op before any backend
     or cache is touched. ``DryRun.DECIDING`` is what a policy does while
@@ -421,18 +510,18 @@ def set_explaining(
             its answers, DECIDING for a deciding policy's ops, None to
             run.
     """
-    return _explaining.set(trace)
+    return _bind(explaining=trace)
 
 
-def reset_explaining(token: Token[Any]) -> None:
+def reset_explaining(token: CallerToken) -> None:
     """Restore the previous dry-run binding."""
-    _explaining.reset(token)
+    reset_caller(token)
 
 
 def explaining() -> list[VfsExplanation] | DryRun | None:
     """The dry run's trace when the calls in this context only explain,
     DECIDING while its policies decide, None when they run."""
-    return _explaining.get()
+    return _caller.get().explaining
 
 
 def note_refusal(refusal: Refusal) -> None:
@@ -443,18 +532,12 @@ def note_refusal(refusal: Refusal) -> None:
     Args:
         refusal (Refusal): the policy's record.
     """
-    sink = _refusal_sink.get()
+    sink = _caller.get().refusals
     if sink is not None:
         sink(refusal)
 
 
-_current_walk_probe: ContextVar[WalkProbe | None] = ContextVar(
-    "mirage_current_walk_probe",
-    default=None,
-)
-
-
-def set_walk_probe(probe: WalkProbe) -> Token[Any]:
+def set_walk_probe(probe: WalkProbe) -> CallerToken:
     """Bind what a command's dot walks read, for the run of one command.
 
     Set by ``Mount.run_command`` around the handler, beside the mount
@@ -466,45 +549,18 @@ def set_walk_probe(probe: WalkProbe) -> Token[Any]:
     Args:
         probe (WalkProbe): the dispatcher's stat and the namespace's follow.
     """
-    return _current_walk_probe.set(probe)
+    return _bind(walk_probe=probe)
 
 
-def reset_walk_probe(token: Token[Any]) -> None:
+def reset_walk_probe(token: CallerToken) -> None:
     """Restore the previous walk-probe binding."""
-    _current_walk_probe.reset(token)
+    reset_caller(token)
 
 
 def get_walk_probe() -> WalkProbe | None:
     """The walk probe bound to the running command, None outside a
     mount's command (a generic invoked directly in a test)."""
-    return _current_walk_probe.get()
-
-
-# Runs a prepared command under ordered redirects, with a gate for
-# each target and the command identity for the single-output fast path.
-RedirectResult = tuple["ByteSource | None", "IOResult", "ExecutionNode"]
-RedirectRun = Callable[
-    ["ByteSource | None", "JobConsole | None", tuple[PathSpec, ...]],
-    Awaitable[RedirectResult],
-]
-RedirectGuard = Callable[
-    [tuple[PathSpec, ...], "ByteSource | None"],
-    Awaitable[RedirectResult | None],
-]
-RedirectRunner = Callable[
-    [RedirectRun, RedirectGuard | None, str, tuple[str, ...]],
-    Awaitable[RedirectResult],
-]
-
-_redirect_paths: ContextVar[
-    tuple[
-        int,
-        tuple[PathSpec, ...],
-        RedirectRunner | None,
-        tuple["Redirect", ...],
-    ]
-    | None
-] = ContextVar("mirage_redirect_paths", default=None)
+    return _caller.get().walk_probe
 
 
 def set_redirect_paths(
@@ -512,7 +568,7 @@ def set_redirect_paths(
     paths: tuple[PathSpec, ...],
     runner: RedirectRunner | None = None,
     syntax: tuple["Redirect", ...] = (),
-) -> Token[Any]:
+) -> CallerToken:
     """Bind a statement's expanded redirect targets to the command node
     they belong to, for that node's run.
 
@@ -533,12 +589,12 @@ def set_redirect_paths(
         runner (RedirectRunner | None): runs the command under its redirects.
         syntax (tuple[Redirect, ...]): pending redirects to carry through a rewrite.
     """
-    return _redirect_paths.set((node_id, paths, runner, syntax))
+    return _bind(redirects=(node_id, paths, runner, syntax))
 
 
-def reset_redirect_paths(token: Token[Any]) -> None:
+def reset_redirect_paths(token: CallerToken) -> None:
     """Restore the previous redirect-target binding."""
-    _redirect_paths.reset(token)
+    reset_caller(token)
 
 
 def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
@@ -548,7 +604,7 @@ def redirect_paths_for(node_id: int) -> tuple[PathSpec, ...]:
     Args:
         node_id (int): the command node about to be admitted.
     """
-    bound = _redirect_paths.get()
+    bound = _caller.get().redirects
     if bound is None or bound[0] != node_id:
         return ()
     return bound[1]
@@ -560,7 +616,7 @@ def redirect_syntax_for(node_id: int) -> tuple["Redirect", ...]:
     Args:
         node_id (int): the command or rewritten program holding the redirects.
     """
-    bound = _redirect_paths.get()
+    bound = _caller.get().redirects
     return bound[3] if bound is not None and bound[0] == node_id else ()
 
 
@@ -571,18 +627,13 @@ def redirect_runner_for(node_id: int) -> RedirectRunner | None:
     Args:
         node_id (int): the command node just admitted.
     """
-    bound = _redirect_paths.get()
+    bound = _caller.get().redirects
     if bound is None or bound[0] != node_id:
         return None
     return bound[2]
 
 
-_program_invocation: ContextVar[SessionState | None] = ContextVar(
-    "mirage_program_invocation", default=None
-)
-
-
-def set_program_invocation(session: SessionState) -> Token[Any]:
+def set_program_invocation(session: SessionState) -> CallerToken:
     """Mark the line about to run in a session as a program run.
 
     ``find -exec`` hands its words to ``execvp``, so the head it runs is
@@ -595,19 +646,19 @@ def set_program_invocation(session: SessionState) -> Token[Any]:
     Args:
         session (SessionState): the session the program line runs in.
     """
-    return _program_invocation.set(session)
+    return _bind(program=session)
 
 
-def clear_program_invocation() -> Token[Any]:
+def clear_program_invocation() -> CallerToken:
     """Mark the line about to run as a shell's own again: a nested shell
     (``-exec sh -c ...``) is a program, and the builtins it runs are its
     builtins, ``printf -v`` included."""
-    return _program_invocation.set(None)
+    return _bind(program=None)
 
 
-def reset_program_invocation(token: Token[Any]) -> None:
+def reset_program_invocation(token: CallerToken) -> None:
     """Restore the previous program-run marking."""
-    _program_invocation.reset(token)
+    reset_caller(token)
 
 
 def program_invocation(session: SessionState) -> bool:
@@ -616,15 +667,15 @@ def program_invocation(session: SessionState) -> bool:
     Args:
         session (SessionState): the session a builtin is answering in.
     """
-    marked = _program_invocation.get()
+    caller = _caller.get()
+    marked = caller.program
     if marked is None:
         return False
     if session is marked:
         return True
-    binding = _current_session.get()
-    if binding is None or binding.session is not session:
+    if caller.session is not session:
         return False
-    evaluation = binding.evaluation
+    evaluation = caller.evaluation
     parent = evaluation.parent if evaluation is not None else None
     while parent is not None:
         if parent.session is marked:
@@ -649,7 +700,7 @@ def redirect_target_judged(virtual: str) -> bool:
     Args:
         virtual (str): absolute virtual path of the op.
     """
-    bound = _redirect_paths.get()
+    bound = _caller.get().redirects
     return bound is not None and any(p.virtual == virtual for p in bound[1])
 
 

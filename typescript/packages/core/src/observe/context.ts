@@ -17,7 +17,7 @@ import type { ContextCall } from '../utils/async_context.ts'
 import { OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS } from './record.ts'
 import { underPath } from '../utils/key_prefix.ts'
 import type { PathSpec } from '../types.ts'
-import { captureExecutionContext, currentExecutionId } from '../execution/context.ts'
+import { currentExecutionId } from '../execution/context.ts'
 
 interface RecordingState {
   records: OpRecord[]
@@ -47,12 +47,7 @@ const commandSink = createAsyncContext<readonly [OpRecord[] | null, OpRecord[]]>
 
 /** Preserve attribution and revision pins when an operation crosses a worker boundary. */
 export function captureRecordingContext(): ContextCall[] {
-  return [
-    storage.capture(),
-    revisionsStorage.capture(),
-    commandSink.capture(),
-    captureExecutionContext(),
-  ]
+  return [storage.capture(), revisionsStorage.capture(), commandSink.capture()]
 }
 
 /**

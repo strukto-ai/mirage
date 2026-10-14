@@ -14,9 +14,13 @@
 
 from mirage.context.session_context import (
     DEFAULT_UMASK,
+    Caller,
+    CallerToken,
     RedirectRunner,
     RefusalSink,
+    bind_caller,
     clear_program_invocation,
+    current_caller,
     dotglob_active,
     effective_mount_mode,
     effective_path_mode,
@@ -41,6 +45,7 @@ from mirage.context.session_context import (
     require_mount_writable,
     require_paths_writable,
     reset_admission,
+    reset_caller,
     reset_current_session,
     reset_explaining,
     reset_mount_gate,
@@ -65,6 +70,11 @@ from mirage.context.session_context import (
 
 __all__ = [
     "DEFAULT_UMASK",
+    "Caller",
+    "CallerToken",
+    "bind_caller",
+    "current_caller",
+    "reset_caller",
     "dotglob_active",
     "extglob_active",
     "effective_mount_mode",

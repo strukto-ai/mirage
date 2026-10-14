@@ -16,10 +16,15 @@ import asyncio
 import dataclasses
 import hashlib
 from collections.abc import Awaitable, Callable, Sequence
-from contextvars import ContextVar, Token
 from typing import TypeVar
 
 from mirage.context import explaining
+from mirage.context.session_context import (
+    CallerToken,
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.policy.errors import PolicyDenied
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
@@ -1023,15 +1028,9 @@ class Decisions:
             await self._sessions.flush()
 
 
-_op_call: ContextVar[tuple[Decisions, HandOff, str] | None] = ContextVar(
-    "mirage_op_call",
-    default=None,
-)
-
-
 def set_op_call(
     owner: Decisions, handed: HandOff, session_id: str
-) -> Token[tuple[Decisions, HandOff, str] | None]:
+) -> CallerToken:
     """Bind one call, the unit an op-level answer covers: a file
     tool's, or a line's or a job's, whose session writes are its ops. A
     grant one of its ops is answered by is claimed on ``handed`` for the
@@ -1043,14 +1042,16 @@ def set_op_call(
         handed (HandOff): the call's hand-off, spent when it ends.
         session_id (str): the session the call runs as.
     """
-    return _op_call.set((owner, handed, session_id))
+    return bind_caller(
+        dataclasses.replace(
+            current_caller(), call=(owner, handed, session_id)
+        )
+    )
 
 
-def reset_op_call(
-    token: Token[tuple[Decisions, HandOff, str] | None],
-) -> None:
+def reset_op_call(token: CallerToken) -> None:
     """Restore the previous call binding."""
-    _op_call.reset(token)
+    reset_caller(token)
 
 
 def get_op_call(owner: Decisions, session_id: str) -> HandOff | None:
@@ -1063,7 +1064,7 @@ def get_op_call(owner: Decisions, session_id: str) -> HandOff | None:
         owner (Decisions): the ledger asking.
         session_id (str): the session asking.
     """
-    call = _op_call.get()
+    call = current_caller().call
     if call is None or call[0] is not owner or call[2] != session_id:
         return None
     return call[1]

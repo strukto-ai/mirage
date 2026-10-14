@@ -12,26 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from contextvars import ContextVar
+from dataclasses import replace
 
+from mirage.context import bind_caller, current_caller
 from mirage.workspace.types import StatusWriter
-
-# Set by ``execute_line``, which is the line's whole task, so every
-# statement and every nested evaluation the line spawns inherits it and
-# no other line can see it. TypeScript needs its own frame list here
-# because a promise has no task to hang this on.
-_line_writer: ContextVar[StatusWriter | None] = ContextVar(
-    "mirage_line_status_writer", default=None
-)
 
 
 def set_line_writer(writer: StatusWriter) -> None:
     """Mark the running task as this line's.
 
+    Set by ``execute_line``, which is the line's whole task, so every
+    statement and every nested evaluation the line spawns inherits it
+    and no other line can see it.
+
     Args:
         writer (StatusWriter): the line's identity.
     """
-    _line_writer.set(writer)
+    bind_caller(replace(current_caller(), line_writer=writer))
 
 
 def line_status_writer() -> StatusWriter | None:
@@ -40,4 +37,4 @@ def line_status_writer() -> StatusWriter | None:
     ``None`` outside a line (a background job, a test driving a handler
     directly): nothing is restoring there.
     """
-    return _line_writer.get()
+    return current_caller().line_writer

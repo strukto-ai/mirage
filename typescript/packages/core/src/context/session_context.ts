@@ -25,7 +25,10 @@ import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { norm, parent } from '../utils/path.ts'
-import type { DryRun, VfsExplanation, EntryGate } from '../policy/types.ts'
+import type { DryRun, VfsExplanation, EntryGate, HandOff } from '../policy/types.ts'
+import type { Decisions } from '../policy/decisions.ts'
+import type { Policies } from '../policy/policies.ts'
+import type { LineAbortFrame } from '../workspace/abort.ts'
 import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
 
@@ -35,20 +38,107 @@ export abstract class SessionOwner {
   abstract get(sessionId: string): SessionState
 }
 
+/** Where a refusal an entry point raises is noted for the line running it. */
+export type RefusalSink = (refusal: Refusal) => void
+
+/** Runs a prepared command under ordered redirects, gating each target. */
+export type RedirectResult = [ByteSource | null, IOResult, ExecutionNode]
+export type RedirectRun = (
+  stdin: ByteSource | null,
+  sink: JobConsole | undefined,
+  paths: readonly PathSpec[],
+) => Promise<RedirectResult>
+export type RedirectGuard = (
+  paths: readonly PathSpec[],
+  stdin: ByteSource | null,
+) => Promise<RedirectResult | null>
+export type RedirectRunner = (
+  run: RedirectRun,
+  guard: RedirectGuard | undefined,
+  name: string,
+  args: readonly string[],
+) => Promise<RedirectResult>
+
 /**
- * The session bound to one async context, whose it is, and the evaluation
- * running on it: `owner` is the session manager it belongs to, which is
- * one per workspace. The evaluation is part of the binding, so a scope
- * bound to another session never carries this one's evaluation, with its
- * frame and cancellation.
+ * Who makes a call, and what every check on it needs to know: the
+ * session, and the line, job, command and file call it runs in.
+ *
+ * One record per call, never shared. Each layer is a copy of the one
+ * above with its own fields set, so two calls running at once each hold
+ * their own, and work that runs after its command returned (a stream
+ * pulled later, a runtime's callback) keeps the record it was made with.
+ * `owner` is the session manager the session belongs to, one per
+ * workspace; `evaluation` the evaluation running on the session, which a
+ * layer bound to another session never carries. Mirrors Python's Caller.
  */
-interface SessionBinding {
-  session: SessionState
-  owner: SessionOwner | null
-  evaluation: EvaluationContext | null
+export interface Caller {
+  readonly session: SessionState | null
+  readonly owner: SessionOwner | null
+  readonly evaluation: EvaluationContext | null
+  readonly gate: EntryGate | null
+  readonly mount: readonly [string, MountMode] | null
+  readonly refusals: RefusalSink | null
+  readonly explaining: VfsExplanation[] | DryRun | null
+  readonly walkProbe: readonly [string, WalkProbe] | null
+  readonly redirects:
+    | readonly [object, readonly PathSpec[], RedirectRunner | null, readonly Redirect[]]
+    | null
+  readonly program: SessionState | null
+  readonly call: readonly [Decisions, HandOff, string] | null
+  readonly policies: Policies | null
+  readonly stop: AbortController | null
+  readonly writeHeld: boolean
+  readonly lineAbort: LineAbortFrame | null
+  readonly executionId: string | null
 }
 
-const sessionStorage = createAsyncContext<SessionBinding>()
+const UNBOUND: Caller = {
+  session: null,
+  owner: null,
+  evaluation: null,
+  gate: null,
+  mount: null,
+  refusals: null,
+  explaining: null,
+  walkProbe: null,
+  redirects: null,
+  program: null,
+  call: null,
+  policies: null,
+  stop: null,
+  writeHeld: false,
+  lineAbort: null,
+  executionId: null,
+}
+
+const callerStorage = createAsyncContext<Caller>()
+
+/** The caller bound to the current async context. */
+export function currentCaller(): Caller {
+  return callerStorage.getStore() ?? UNBOUND
+}
+
+/**
+ * Every caller live in this context, oldest first: on an isolating
+ * runtime the bound one alone, on the fallback storage every
+ * concurrently bound one.
+ */
+export function liveCallers(): readonly Caller[] {
+  return callerStorage.liveStores()
+}
+
+/**
+ * Run `fn` with `caller` bound: a layer's own copy, or the record a
+ * stream pulled or a callback run after its command returned was made
+ * with.
+ */
+export function runWithCaller<T>(caller: Caller, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(callerStorage.run(caller, fn))
+}
+
+function runChanged<T>(changes: Partial<Caller>, fn: () => Promise<T>): Promise<T> {
+  return runWithCaller({ ...currentCaller(), ...changes }, fn)
+}
 
 /**
  * Bind `session` for the duration of `fn`.
@@ -64,17 +154,19 @@ export function runWithSession<T>(
   fn: () => Promise<T>,
   options: { owner?: SessionOwner; evaluation?: EvaluationContext } = {},
 ): Promise<T> {
-  const bound = sessionStorage.getStore()
-  const binding: SessionBinding = {
-    session,
-    owner: options.owner ?? bound?.owner ?? null,
-    evaluation: options.evaluation ?? (bound?.session === session ? bound.evaluation : null),
-  }
-  return Promise.resolve(sessionStorage.run(binding, fn))
+  const bound = currentCaller()
+  return runChanged(
+    {
+      session,
+      owner: options.owner ?? bound.owner,
+      evaluation: options.evaluation ?? (bound.session === session ? bound.evaluation : null),
+    },
+    fn,
+  )
 }
 
 export function getCurrentSession(): SessionState | null {
-  return sessionStorage.getStore()?.session ?? null
+  return currentCaller().session
 }
 
 /** Bind an evaluation with its session, as one binding. */
@@ -99,9 +191,9 @@ export function runWithEvaluation<T>(
  * skip that line's abort checks. Mirrors Python's get_current_evaluation.
  */
 export function getCurrentEvaluation(): EvaluationContext | null {
-  const bindings = sessionStorage.liveStores()
-  for (let at = bindings.length - 1; at >= 0; at--) {
-    const evaluation = bindings[at]?.evaluation
+  const callers = liveCallers()
+  for (let at = callers.length - 1; at >= 0; at--) {
+    const evaluation = callers[at]?.evaluation
     if (evaluation !== undefined && evaluation !== null) return evaluation
   }
   return null
@@ -119,7 +211,7 @@ export function getCurrentEvaluation(): EvaluationContext | null {
  * settles past must keep counting while it is live.
  */
 export function liveSessions(): SessionState[] {
-  return sessionStorage.liveStores().map((binding) => binding.session)
+  return liveCallers().flatMap((caller) => (caller.session === null ? [] : [caller.session]))
 }
 
 /**
@@ -133,10 +225,10 @@ export function liveSessions(): SessionState[] {
  * this owner's own session.
  */
 export function getCurrentSessionFor(owner: SessionOwner): SessionState | null {
-  const bindings = sessionStorage.liveStores()
-  for (let at = bindings.length - 1; at >= 0; at--) {
-    const binding = bindings[at]
-    if (binding?.owner === owner) return binding.session
+  const callers = liveCallers()
+  for (let at = callers.length - 1; at >= 0; at--) {
+    const caller = callers[at]
+    if (caller?.owner === owner) return caller.session
   }
   return null
 }
@@ -153,10 +245,9 @@ export function getCurrentSessionFor(owner: SessionOwner): SessionState | null {
  * mount, a guest runtime, an embedder binding by hand) and is kept.
  */
 export function getCurrentSessionUnlessForeign(owner: SessionOwner): SessionState | null {
-  const binding = sessionStorage.getStore()
-  if (binding === undefined) return null
-  if (binding.owner !== null && binding.owner !== owner) return null
-  return binding.session
+  const caller = currentCaller()
+  if (caller.owner !== null && caller.owner !== owner) return null
+  return caller.session
 }
 
 /**
@@ -262,8 +353,6 @@ export function hiddenRefusal(vis: Visibility | null, virtual: string, create: b
   return enoent(virtual)
 }
 
-const admissionStorage = createAsyncContext<EntryGate>()
-
 /**
  * Bind the admitted command's entry gate for the duration of `fn`: the
  * run of that one command.
@@ -274,7 +363,7 @@ const admissionStorage = createAsyncContext<EntryGate>()
  * its own async context never sees a sibling's.
  */
 export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(admissionStorage.run(gate, fn))
+  return runChanged({ gate }, fn)
 }
 
 /**
@@ -293,7 +382,7 @@ export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Prom
  * paths.
  */
 export function getAdmission(): EntryGate | null {
-  const gates = admissionStorage.liveStores()
+  const gates = liveCallers().flatMap((caller) => (caller.gate === null ? [] : [caller.gate]))
   const first = gates[0]
   if (first === undefined) return null
   if (gates.every((gate) => gate === first)) return first
@@ -312,8 +401,6 @@ export function getAdmission(): EntryGate | null {
   }
 }
 
-const mountGateStorage = createAsyncContext<readonly [string, MountMode]>()
-
 /**
  * Bind the executing mount's prefix and configured mode for the
  * duration of `fn`: the run of one command.
@@ -330,7 +417,7 @@ export function runWithMountGate<T>(
   mode: MountMode,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(mountGateStorage.run([prefix, mode], fn))
+  return runChanged({ mount: [prefix, mode] }, fn)
 }
 
 /**
@@ -354,7 +441,9 @@ export function mountGateFor(virtual: string): readonly [string, MountMode] | nu
   let bestLen = -1
   let bestPrefix: string | null = null
   let bestMode: MountMode | null = null
-  for (const [rawPrefix, mode] of mountGateStorage.liveStores()) {
+  for (const [rawPrefix, mode] of liveCallers().flatMap((caller) =>
+    caller.mount === null ? [] : [caller.mount],
+  )) {
     const prefix = norm(rawPrefix)
     if (prefix !== '/' && v !== prefix && !v.startsWith(prefix + '/')) continue
     if (prefix.length > bestLen) {
@@ -368,11 +457,6 @@ export function mountGateFor(virtual: string): readonly [string, MountMode] | nu
   return bestPrefix === null || bestMode === null ? null : [bestPrefix, bestMode]
 }
 
-/** Where a refusal an entry point raises is noted for the line running it. */
-export type RefusalSink = (refusal: Refusal) => void
-
-const refusalSinkStorage = createAsyncContext<RefusalSink>()
-
 /**
  * Bind where the entry points note a policy's refusal, for the duration of `fn`:
  * one line's run.
@@ -385,7 +469,7 @@ const refusalSinkStorage = createAsyncContext<RefusalSink>()
  * Python's set_refusal_sink.
  */
 export function runWithRefusalSink<T>(sink: RefusalSink, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(refusalSinkStorage.run(sink, fn))
+  return runChanged({ refusals: sink }, fn)
 }
 
 /**
@@ -394,7 +478,7 @@ export function runWithRefusalSink<T>(sink: RefusalSink, fn: () => Promise<T>): 
  * Python's `line_running`.
  */
 export function lineRunning(): boolean {
-  return refusalSinkStorage.getStore() !== undefined
+  return currentCaller().refusals !== null
 }
 
 /**
@@ -402,10 +486,8 @@ export function lineRunning(): boolean {
  * Mirrors Python's `refusal_sink`.
  */
 export function refusalSink(): RefusalSink | null {
-  return refusalSinkStorage.getStore() ?? null
+  return currentCaller().refusals
 }
-
-const explainingStorage = createAsyncContext<VfsExplanation[] | DryRun | null>()
 
 /**
  * Run `fn` as a dry run: the op gate notes on `trace` what it would
@@ -418,7 +500,7 @@ export function runExplaining<T>(
   trace: VfsExplanation[] | DryRun | null,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(explainingStorage.run(trace, fn))
+  return runChanged({ explaining: trace }, fn)
 }
 
 /**
@@ -426,7 +508,7 @@ export function runExplaining<T>(
  * DECIDING while its policies decide, null when they run.
  */
 export function explaining(): VfsExplanation[] | DryRun | null {
-  return explainingStorage.getStore() ?? null
+  return currentCaller().explaining
 }
 
 /**
@@ -435,10 +517,8 @@ export function explaining(): VfsExplanation[] | DryRun | null {
  * the record rides the thrown error alone.
  */
 export function noteRefusal(refusal: Refusal): void {
-  refusalSinkStorage.getStore()?.(refusal)
+  currentCaller().refusals?.(refusal)
 }
-
-const walkProbeStorage = createAsyncContext<readonly [string, WalkProbe]>()
 
 /**
  * Bind what a command's dot walks read, for the duration of `fn`: the run
@@ -455,7 +535,7 @@ export function runWithWalkProbe<T>(
   probe: WalkProbe,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(walkProbeStorage.run([prefix, probe], fn))
+  return runChanged({ walkProbe: [prefix, probe] }, fn)
 }
 
 /**
@@ -470,7 +550,9 @@ export function walkProbeFor(virtual: string): WalkProbe | null {
   const v = norm(virtual)
   let bestLen = -1
   let best: WalkProbe | null = null
-  for (const [rawPrefix, probe] of walkProbeStorage.liveStores()) {
+  for (const [rawPrefix, probe] of liveCallers().flatMap((caller) =>
+    caller.walkProbe === null ? [] : [caller.walkProbe],
+  )) {
     const prefix = norm(rawPrefix)
     if (prefix !== '/' && v !== prefix && !v.startsWith(prefix + '/')) continue
     if (prefix.length > bestLen) {
@@ -480,27 +562,6 @@ export function walkProbeFor(virtual: string): WalkProbe | null {
   }
   return best
 }
-
-/** Runs a prepared command under ordered redirects, gating each target. */
-export type RedirectResult = [ByteSource | null, IOResult, ExecutionNode]
-export type RedirectRun = (
-  stdin: ByteSource | null,
-  sink: JobConsole | undefined,
-  paths: readonly PathSpec[],
-) => Promise<RedirectResult>
-export type RedirectGuard = (
-  paths: readonly PathSpec[],
-  stdin: ByteSource | null,
-) => Promise<RedirectResult | null>
-export type RedirectRunner = (
-  run: RedirectRun,
-  guard: RedirectGuard | undefined,
-  name: string,
-  args: readonly string[],
-) => Promise<RedirectResult>
-
-const redirectStorage =
-  createAsyncContext<[object, readonly PathSpec[], RedirectRunner | null, readonly Redirect[]]>()
 
 /**
  * Bind a statement's expanded redirect targets to the command node they
@@ -523,33 +584,22 @@ export function runWithRedirectPaths<T>(
   runner: RedirectRunner | null = null,
   syntax: readonly Redirect[] = [],
 ): Promise<T> {
-  return Promise.resolve(redirectStorage.run([node, paths, runner, syntax], fn))
+  return runChanged({ redirects: [node, paths, runner, syntax] }, fn)
 }
 
-const programStorage = createAsyncContext<SessionState | null>()
-
-/** Capture all command admission state for a deferred workspace callback,
- * bound to `session` when one is named: its evaluation comes along only
- * when it is the session bound now. */
+/** Capture the caller for a deferred workspace callback, bound to
+ * `session` when one is named: its evaluation comes along only when it
+ * is the session bound now. */
 export function captureSessionContext(session?: SessionState, owner?: SessionOwner): ContextCall[] {
-  let sessionScope: ContextCall = sessionStorage.capture()
-  if (session !== undefined) {
-    const bound = sessionStorage.getStore()
-    const binding: SessionBinding = {
-      session,
-      owner: owner ?? null,
-      evaluation: bound?.session === session ? bound.evaluation : null,
-    }
-    sessionScope = (fn) => sessionStorage.run(binding, fn)
+  if (session === undefined) return [callerStorage.capture()]
+  const bound = currentCaller()
+  const caller: Caller = {
+    ...bound,
+    session,
+    owner: owner ?? null,
+    evaluation: bound.session === session ? bound.evaluation : null,
   }
-  return [
-    sessionScope,
-    admissionStorage.capture(),
-    mountGateStorage.capture(),
-    walkProbeStorage.capture(),
-    redirectStorage.capture(),
-    programStorage.capture(),
-  ]
+  return [(fn) => callerStorage.run(caller, fn)]
 }
 
 /**
@@ -561,24 +611,24 @@ export function captureSessionContext(session?: SessionState, owner?: SessionOwn
  * (`-exec sh -c ...`), so that shell's builtins are its own.
  */
 export function runAsProgram<T>(session: SessionState, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(programStorage.run(session, fn))
+  return runChanged({ program: session }, fn)
 }
 
 /** Run a nested shell's script as the shell's own again: a nested shell
  * is a program, and the builtins it runs are its builtins, `printf -v`
  * included. */
 export function runAsShell<T>(fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(programStorage.run(null, fn))
+  return runChanged({ program: null }, fn)
 }
 
 /** Whether the line running in this session is a program run. */
 export function isProgramInvocation(session: SessionState): boolean {
-  const marked = programStorage.getStore()
-  if (marked == null) return false
+  const caller = currentCaller()
+  const marked = caller.program
+  if (marked === null) return false
   if (session === marked) return true
-  const binding = sessionStorage.getStore()
-  if (binding?.session !== session) return false
-  for (let parent = binding.evaluation?.parent ?? null; parent !== null; parent = parent.parent)
+  if (caller.session !== session) return false
+  for (let parent = caller.evaluation?.parent ?? null; parent !== null; parent = parent.parent)
     if (parent.session === marked) return true
   return false
 }
@@ -592,7 +642,9 @@ export function isProgramInvocation(session: SessionState): boolean {
  * shadowing the newest frame must not hide this node's own targets.
  */
 export function redirectPathsFor(node: object): readonly PathSpec[] {
-  const bindings = redirectStorage.liveStores()
+  const bindings = liveCallers().flatMap((caller) =>
+    caller.redirects === null ? [] : [caller.redirects],
+  )
   for (let at = bindings.length - 1; at >= 0; at--) {
     const bound = bindings[at]
     if (bound?.[0] === node) return bound[1]
@@ -602,7 +654,9 @@ export function redirectPathsFor(node: object): readonly PathSpec[] {
 
 /** Pending redirects, before a rewritten command reaches admission. */
 export function redirectSyntaxFor(node: object): readonly Redirect[] {
-  const bindings = redirectStorage.liveStores()
+  const bindings = liveCallers().flatMap((caller) =>
+    caller.redirects === null ? [] : [caller.redirects],
+  )
   for (let at = bindings.length - 1; at >= 0; at--) {
     const bound = bindings[at]
     if (bound?.[0] === node) return bound[3]
@@ -615,7 +669,9 @@ export function redirectSyntaxFor(node: object): readonly Redirect[] {
  * other node or when none is bound.
  */
 export function redirectRunnerFor(node: object): RedirectRunner | null {
-  const bindings = redirectStorage.liveStores()
+  const bindings = liveCallers().flatMap((caller) =>
+    caller.redirects === null ? [] : [caller.redirects],
+  )
   for (let at = bindings.length - 1; at >= 0; at--) {
     const bound = bindings[at]
     if (bound?.[0] === node) return bound[2]
@@ -640,7 +696,9 @@ export function redirectRunnerFor(node: object): RedirectRunner | null {
  * one's targets into a re-derived refusal.
  */
 export function redirectTargetJudged(virtual: string): boolean {
-  return redirectStorage.liveStores().some(([, paths]) => paths.some((p) => p.virtual === virtual))
+  return liveCallers().some(
+    (caller) => caller.redirects?.[1].some((p) => p.virtual === virtual) === true,
+  )
 }
 
 /**

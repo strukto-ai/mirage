@@ -17,12 +17,16 @@ import dataclasses
 import json
 import logging
 from collections.abc import Mapping
-from contextvars import ContextVar
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.io import IOResult, OpReport
 from mirage.policy.base import Policy
 from mirage.policy.constants import (
@@ -65,15 +69,6 @@ logger = logging.getLogger(__name__)
 # data instead: the session as its cwd, env and profile, the namespace
 # as the mounts it shows, the files through the program's own open().
 _LIVE = frozenset({"session", "ns", "vfs"})
-
-# Set for the duration of one op the policy's own engine dispatches, so
-# the policy's ``pre_vfs`` lets the read through: the policy is the one
-# asking, and judging its own read would re-enter the run that is
-# waiting on it.
-_POLICY_READ: ContextVar[bool] = ContextVar(
-    "mirage_policy_read", default=False
-)
-
 
 def _plain(value: Any) -> JsonValue:
     """A value as a program reads it: JSON-shaped data, bytes as text,
@@ -267,7 +262,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     async def pre_vfs(
         self, ctx: VfsContext
     ) -> tuple[Deny | Ask | Route, ...] | None:
-        if _POLICY_READ.get():
+        if current_caller().policy_read:
             return None
         return await self._judge("pre_vfs", ctx)
 
@@ -289,7 +284,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     async def post_vfs(
         self, ctx: VfsResultContext
     ) -> tuple[Deny | Ask | Route, ...] | None:
-        if _POLICY_READ.get():
+        if current_caller().policy_read:
             return None
         return await self._judge("post_vfs", ctx)
 
@@ -495,11 +490,16 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             **kwargs (Any): the op's own arguments.
         """
         assert self._dispatch is not None
-        token = _POLICY_READ.set(True)
+        # The policy's own read: its pre_vfs and post_vfs let it through,
+        # since the policy is the one asking and judging its own read
+        # would re-enter the run that is waiting on it.
+        token = bind_caller(
+            dataclasses.replace(current_caller(), policy_read=True)
+        )
         try:
             return await self._dispatch(name, path, report=report, **kwargs)
         finally:
-            _POLICY_READ.reset(token)
+            reset_caller(token)
 
     def _failed(self, entry: ProfileScript, detail: str) -> Deny:
         """The fail-closed refusal: one wording, logged.

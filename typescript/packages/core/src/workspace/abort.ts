@@ -13,10 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { makeAbortError, mergeSignals } from '../utils/abort.ts'
-import { getCurrentEvaluation, getCurrentSession } from '../context/session_context.ts'
+import {
+  currentCaller,
+  getCurrentEvaluation,
+  getCurrentSession,
+  liveCallers,
+  runWithCaller,
+} from '../context/session_context.ts'
 import type { StatusWriter } from './types.ts'
 import type { DispatchFn } from '../runtime/types.ts'
-import { createAsyncContext } from '../utils/async_context.ts'
 import type { SessionState } from './session/session.ts'
 
 /**
@@ -28,13 +33,11 @@ import type { SessionState } from './session/session.ts'
  * statement that settles after its caller was released still reads the
  * signal of the line that produced it.
  */
-interface LineAbortFrame {
+export interface LineAbortFrame {
   signal: AbortSignal | undefined
   sessions: readonly SessionState[]
   writer: StatusWriter
 }
-
-const lineAbortContext = createAsyncContext<LineAbortFrame>()
 
 /**
  * Run `fn` as the body of the line `signal` belongs to. Everything the
@@ -48,7 +51,7 @@ export function runWithLineAbort<T>(
   writer: StatusWriter,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return Promise.resolve(lineAbortContext.run({ signal, sessions, writer }, fn))
+  return runWithCaller({ ...currentCaller(), lineAbort: { signal, sessions, writer } }, fn)
 }
 
 /**
@@ -62,13 +65,13 @@ export function runWithLineAbort<T>(
  * line declines to restore rather than guess.
  */
 export function lineStatusWriter(session: SessionState): StatusWriter | null {
-  const frames = lineAbortContext.liveStores().filter((f) => f.sessions.includes(session))
+  const frames = lineFrames().filter((f) => f.sessions.includes(session))
   return frames.length === 1 ? (frames[0]?.writer ?? null) : null
 }
 
 /** The active line's cancellation channel, when it can be attributed to this session. */
 export function lineSignal(session: SessionState): AbortSignal | undefined {
-  const frames = lineAbortContext.liveStores().filter((frame) => frame.sessions.includes(session))
+  const frames = lineFrames().filter((frame) => frame.sessions.includes(session))
   return frames.length === 1 ? frames[0]?.signal : undefined
 }
 
@@ -101,7 +104,7 @@ export function callerSignal(): AbortSignal | undefined {
  * without task isolation, where the fallback cannot tell them apart.
  */
 export function abortedLine(session: SessionState): AbortSignal | undefined {
-  const frames = lineAbortContext.liveStores().filter((f) => f.sessions.includes(session))
+  const frames = lineFrames().filter((f) => f.sessions.includes(session))
   if (frames.length === 0) return undefined
   const aborted = frames.filter((f) => f.signal?.aborted === true)
   return aborted.length === frames.length ? aborted[0]?.signal : undefined
@@ -123,6 +126,11 @@ export function guardDispatch(dispatch: DispatchFn, signal: AbortSignal | undefi
     if (signal.aborted) return Promise.reject(makeAbortError(signal))
     return dispatch(op, path, args, kwargs, report)
   }
+}
+
+/** Every line frame live in this context, oldest first. */
+function lineFrames(): LineAbortFrame[] {
+  return liveCallers().flatMap((caller) => (caller.lineAbort === null ? [] : [caller.lineAbort]))
 }
 
 /** A fresh line identity. */

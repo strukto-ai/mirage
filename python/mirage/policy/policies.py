@@ -17,7 +17,6 @@ import errno
 import inspect
 import logging
 from collections.abc import Callable
-from contextvars import ContextVar, Token
 from dataclasses import fields, replace
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +27,12 @@ from mirage.context import (
     note_refusal,
     reset_explaining,
     set_explaining,
+)
+from mirage.context.session_context import (
+    CallerToken,
+    bind_caller,
+    current_caller,
+    reset_caller,
 )
 from mirage.errors.fs import eacces, erofs
 from mirage.errors.posix import posix_errno, posix_phrase
@@ -1023,13 +1028,7 @@ class Policies:
         return action, limit
 
 
-_op_policies: ContextVar[Policies | None] = ContextVar(
-    "mirage_op_policies",
-    default=None,
-)
-
-
-def set_op_policies(policies: Policies) -> Token[Policies | None]:
+def set_op_policies(policies: Policies) -> CallerToken:
     """Bind the workspace's admission policies to the current async
     context, for the run of one command.
 
@@ -1043,14 +1042,14 @@ def set_op_policies(policies: Policies) -> Token[Policies | None]:
     Args:
         policies (Policies): the workspace's admission policies.
     """
-    return _op_policies.set(policies)
+    return bind_caller(replace(current_caller(), policies=policies))
 
 
-def reset_op_policies(token: Token[Policies | None]) -> None:
+def reset_op_policies(token: CallerToken) -> None:
     """Restore the previous policies binding."""
-    _op_policies.reset(token)
+    reset_caller(token)
 
 
 def get_op_policies() -> Policies | None:
     """The policies bound to the running command, None outside one."""
-    return _op_policies.get()
+    return current_caller().policies

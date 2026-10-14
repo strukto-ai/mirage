@@ -98,9 +98,11 @@ import { ContextScope } from '../../utils/context_scope.ts'
 import { captureRecordingContext } from '../../observe/context.ts'
 import {
   captureSessionContext,
+  currentCaller,
   getAdmission,
   getCurrentSessionUnlessForeign,
   runExplaining,
+  runWithCaller,
   runWithRefusalSink,
   runWithSession,
   runAsProgram,
@@ -108,7 +110,7 @@ import {
 } from '../../context/session_context.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { namespaceViewOf } from '../mount/namespace/view.ts'
-import { asyncContextIsolatesTasks, createAsyncContext } from '../../utils/async_context.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
@@ -141,7 +143,6 @@ import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { WatchRuntime } from '../../watch/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
-import { captureOpPolicies } from '../../policy/policies.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
 import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
@@ -163,14 +164,6 @@ import { placementRefused } from './failure.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
-
-// The stop of the top-level line this context runs in, so a line that
-// cancels its own session does not wait on itself.
-const LINE_STOP = createAsyncContext<AbortController>()
-
-// Set inside a write the capture gate let through, so the ops it runs
-// itself are not held behind it.
-const WRITE_HELD = createAsyncContext<boolean>()
 
 // A method's session write where it cannot run as a policy deciding.
 function refuseWrite(name: string): Promise<void> {
@@ -665,7 +658,6 @@ export class Workspace {
       sessionId === undefined ? this.dispatcher : this.dispatcher.forSession(session)
     const scope = new ContextScope([
       ...captureSessionContext(session, this.sessionManager),
-      ...captureOpPolicies(),
       ...captureRecordingContext(),
     ])
     return captureBinding(
@@ -737,7 +729,6 @@ export class Workspace {
     child.terminalOutput = true
     const scope = new ContextScope([
       ...captureSessionContext(child, this.sessionManager),
-      ...captureOpPolicies(),
       ...captureRecordingContext(),
     ])
     const input = new ProcessInput(this.io.bufferBytes),
@@ -1685,7 +1676,9 @@ export class Workspace {
     try {
       while (this.capturing) await abortable(this.admitting, signal)
       this.admitted.add(stop)
-      return await LINE_STOP.run(stop, () => this.executeInternal(command, { ...options, signal }))
+      return await runWithCaller({ ...currentCaller(), stop }, () =>
+        this.executeInternal(command, { ...options, signal }),
+      )
     } finally {
       this.lines.delete(stop)
       this.admitted.delete(stop)
@@ -1703,7 +1696,7 @@ export class Workspace {
    * not waited for. Returns how many lines were cancelled.
    */
   async cancel(sessionId?: string): Promise<number> {
-    const own = LINE_STOP.getStore()
+    const own = currentCaller().stop
     const hit = [...this.lines].filter(
       ([, line]) =>
         sessionId === undefined || (line.sessionId ?? this.defaultSessionId) === sessionId,
@@ -1735,7 +1728,7 @@ export class Workspace {
     })
     this.capturing = true
     try {
-      const own = LINE_STOP.getStore()
+      const own = currentCaller().stop
       const waited = ([stop]: [AbortController, unknown]): boolean =>
         stop !== own && this.admitted.has(stop)
       const running = [...this.lines].filter(waited).map(([, line]) => line.ended)
@@ -1777,8 +1770,8 @@ export class Workspace {
     // anyone's, and holding it would stall the capture waiting on that
     // line; such hosts have no SFTP or FUSE entry point to hold, so writes pass.
     if (!asyncContextIsolatesTasks) return write()
-    const line = LINE_STOP.getStore()
-    if (WRITE_HELD.getStore() === true || (line !== undefined && this.admitted.has(line))) {
+    const { stop: line, writeHeld } = currentCaller()
+    if (writeHeld || (line !== null && this.admitted.has(line))) {
       return write()
     }
     while (this.capturing) await this.admitting
@@ -1788,7 +1781,7 @@ export class Workspace {
       })
     }
     try {
-      return await WRITE_HELD.run(true, write)
+      return await runWithCaller({ ...currentCaller(), writeHeld: true }, write)
     } finally {
       if (--this.writes === 0) this.settleWrites()
     }
