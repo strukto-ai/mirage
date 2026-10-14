@@ -20,7 +20,15 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-from mirage import Action, CommandContext, Deny, MountMode, Policy, Workspace
+from mirage import (
+    Action,
+    CLIInvocation,
+    CommandContext,
+    Deny,
+    MountMode,
+    Policy,
+    Workspace,
+)
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
 from mirage.io import IOResult
@@ -1469,6 +1477,77 @@ async def test_a_cli_the_allow_list_refuses_never_fetches():
         io = await ws.shell("mycli alpha")
         assert io.exit_code == 126
         assert calls == []
+    finally:
+        await ws.close()
+
+
+async def _print_token(inv: CLIInvocation[None]):
+    return f"{inv.flags.get('token')}\n".encode(), IOResult()
+
+
+def _probe_cli() -> CLI:
+    return CLI(
+        spec=CommandSpec(
+            name="probe",
+            arguments=(
+                Argument("--token", env="CLI_ROOT"),
+                Argument("texts", nargs="*", metavar=""),
+            ),
+        ),
+        handlers={"": CLIHandler(fn=_print_token)},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_glob_the_allow_list_may_admit_keeps_its_fetch():
+    # The allow list reads a glob unexpanded, and the run may expand it
+    # to the word a pattern names, so the command keeps its fetch.
+    calls, fetch = counting_source({"CLI_ROOT": "r0"})
+    register_secrets("fake", FakeConfig, fetch)
+    ws = _ws(
+        {"CLI_ROOT": {"from": "fake", "ref": "root"}},
+        profiles={"p": {"commands": {"allow": ["probe /open.txt"]}}},
+        profile="p",
+    )
+    try:
+        await ws.vfs.write("/open.txt", b"")
+        ws.register_cli("probe", _probe_cli())
+        io = await ws.shell("probe /o*.txt")
+        assert (io.exit_code, await io.stdout_str()) == (0, "r0\n")
+        assert calls == ["root"]
+    finally:
+        await ws.close()
+
+
+class NiceBox(Runtime, LineExecutorMixin):
+    name = "nicebox"
+    captures = ("nice",)
+
+    async def run_line(
+        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    ) -> RunResult:
+        return RunResult(
+            stdout=f"{env.get('TOKEN')}\n".encode(), stderr=None, exit_code=0
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_line_keeps_its_fetch_past_an_inner_refusal():
+    # A runtime that runs `nice env` whole never hands `env` to the gate,
+    # so only `nice`, which the list allows, decides whether it runs.
+    calls, fetch = counting_source({"TOKEN": "t0"})
+    register_secrets("fake", FakeConfig, fetch)
+    ws = _ws(
+        {"TOKEN": {"from": "fake", "ref": "r"}},
+        mode=MountMode.EXEC,
+        runtimes=[NiceBox(), "workspace"],
+        profiles={"p": {"commands": {"allow": ["nice"]}}},
+        profile="p",
+    )
+    try:
+        io = await ws.shell("nice env")
+        assert (io.exit_code, await io.stdout_str()) == (0, "t0\n")
+        assert calls == ["r"]
     finally:
         await ws.close()
 

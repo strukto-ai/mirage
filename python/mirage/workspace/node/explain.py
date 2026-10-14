@@ -1144,6 +1144,7 @@ async def _command_refused(
     agent_id: str,
     handed: HandOff,
     cancel: asyncio.Event | None,
+    line: bool = False,
 ) -> bool:
     """Whether one walked command is refused on its text, resolving an
     unanswered ask through the ledger the gate reads.
@@ -1157,6 +1158,8 @@ async def _command_refused(
         agent_id (str): the agent the line is attributed to.
         handed (HandOff): the line's hand-off.
         cancel (asyncio.Event | None): the run's kill channel.
+        line (bool): whether the command is the whole line, which runs
+            nothing at all once the allow list refuses it.
     """
     walked = item.session
     explained = await _judge_words(
@@ -1169,9 +1172,18 @@ async def _command_refused(
         stdin=item.stdin,
         lost=item.lost,
     )
+    # The allow list refusing the line's one command on words no glob
+    # can change means nothing runs. A line it hands on, or a line handed
+    # on to it, is not enough: what runs it may not ask the gate.
+    globbed = any(word.glob for word in (*item.words, *item.redirects))
+    if (
+        line
+        and explained
+        and not globbed
+        and _uncovered(explained[0].judgment)
+    ):
+        return True
     for judged in explained:
-        if _uncovered(judged.judgment):
-            return True
         # A question about a spelling the runtime completes is the
         # gate's (``_asks_for``); the node is kept, and over-keeping
         # only ever over-fetches.
@@ -1244,7 +1256,7 @@ async def unrefused_nodes(
             out.append(node)
             continue
         if await _command_refused(
-            item, registry, namespace, agent_id, handed, cancel
+            item, registry, namespace, agent_id, handed, cancel, position == 0
         ):
             if position == 0:
                 return []

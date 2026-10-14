@@ -17,11 +17,13 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
 import { Argument, type FlagValue } from '../../commands/spec/types.ts'
-import { CLI, type CLIVerbFn } from '../../commands/cli/types.ts'
+import { CLI, type CLIInvocation, type CLIVerbFn } from '../../commands/cli/types.ts'
+import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import type { Runtime } from '../../runtime/base.ts'
+import { Runtime } from '../../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
-import { ScriptSource } from '../../runtime/types.ts'
+import { ScriptSource, type RunResult } from '../../runtime/types.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ResolvedSecret } from '../../secrets/types.ts'
@@ -122,6 +124,46 @@ function envCliSpec(): CLI {
       ],
     }),
     handlers: { alpha: new CLIHandler({ fn: leaf }), beta: new CLIHandler({ fn: leaf }) },
+  })
+}
+
+class NiceBox extends Runtime implements LineExecutor {
+  readonly [LINE_EXECUTOR] = true as const
+  readonly name = 'nicebox'
+
+  constructor() {
+    super({ captures: ['nice'] })
+  }
+
+  runLine(
+    _line: string,
+    _stdin: Uint8Array | null,
+    env: Record<string, string>,
+    _cwd: string,
+  ): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new TextEncoder().encode(`${String(env.TOKEN)}\n`),
+      stderr: null,
+      exitCode: 0,
+    })
+  }
+}
+
+function printToken(inv: CLIInvocation): [Uint8Array, IOResult] {
+  const token = inv.flags.token as string | undefined
+  return [new TextEncoder().encode(`${String(token)}\n`), new IOResult()]
+}
+
+function probeCli(): CLI {
+  return new CLI({
+    spec: new CommandSpec({
+      name: 'probe',
+      arguments: [
+        new Argument('--token', { env: 'CLI_ROOT' }),
+        new Argument('texts', { metavar: '', nargs: '*' }),
+      ],
+    }),
+    handlers: { '': new CLIHandler({ fn: printToken }) },
   })
 }
 
@@ -1484,6 +1526,51 @@ describe('fillEnv through execute', () => {
       const io = await ws.shell('mycli alpha')
       expect(io.exitCode).toBe(126)
       expect(calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a glob the allow list may admit keeps its fetch', async () => {
+    // The allow list reads a glob unexpanded, and the run may expand it to
+    // the word a pattern names, so the command keeps its fetch.
+    const { calls, fetch } = countingSource({ CLI_ROOT: 'r0' })
+    registerSecrets('fake-cli-glob', FakeConfig, fetch)
+    const ws = await makeWs(
+      { CLI_ROOT: { from: 'fake-cli-glob', ref: 'root' } },
+      parseSessionProfile({ commands: { allow: ['probe /open.txt'] } }),
+    )
+    try {
+      await ws.vfs.write('/open.txt', new Uint8Array())
+      ws.registerCli('probe', probeCli())
+      const io = await ws.shell('probe /o*.txt')
+      expect([io.exitCode, stdoutStr(io)]).toEqual([0, 'r0\n'])
+      expect(calls).toEqual(['root'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a runtime line keeps its fetch past an inner refusal', async () => {
+    // A runtime that runs `nice env` whole never hands `env` to the gate,
+    // so only `nice`, which the list allows, decides whether it runs.
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-nice-box', FakeConfig, fetch)
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        runtimes: [new NiceBox(), 'workspace'],
+        env: { TOKEN: { from: 'fake-nice-box', ref: 'r' } },
+        profiles: { p: parseSessionProfile({ commands: { allow: ['nice'] } }) },
+        profile: 'p',
+      },
+    )
+    try {
+      const io = await ws.shell('nice env')
+      expect([io.exitCode, stdoutStr(io)]).toEqual([0, 't0\n'])
+      expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
     }

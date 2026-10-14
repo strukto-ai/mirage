@@ -949,7 +949,9 @@ function soleLiteralCommand(
 
 /**
  * Whether one walked command is refused on its text, resolving an
- * unanswered ask through the ledger the gate reads.
+ * unanswered ask through the ledger the gate reads. `line` says the
+ * command is the whole line, which runs nothing at all once the allow list
+ * refuses it.
  */
 async function commandRefused(
   item: Walked,
@@ -959,6 +961,7 @@ async function commandRefused(
   handed: HandOff,
   reparse: (line: string) => TSNodeLike,
   signal?: AbortSignal,
+  line = false,
 ): Promise<boolean> {
   const walked = item.session
   const explained = await judgeWords(
@@ -976,8 +979,13 @@ async function commandRefused(
     false,
     item.stdin,
   )
+  // The allow list refusing the line's one command on words no glob can
+  // change means nothing runs. A line it hands on, or a line handed on to
+  // it, is not enough: what runs it may not ask the gate.
+  const globbed = [...item.words, ...item.redirects].some((word) => word.glob === true)
+  const [own] = explained
+  if (line && own !== undefined && !globbed && uncovered(own.judgment)) return true
   for (const judged of explained) {
-    if (uncovered(judged.judgment)) return true
     // A question about a spelling the runtime completes is the gate's
     // (`asksFor`); the node is kept, and over-keeping only ever
     // over-fetches.
@@ -1043,7 +1051,18 @@ export async function unrefusedNodes(
       out.push(node)
       continue
     }
-    if (await commandRefused(item, registry, namespace, agentId, handed, reparse, signal)) {
+    if (
+      await commandRefused(
+        item,
+        registry,
+        namespace,
+        agentId,
+        handed,
+        reparse,
+        signal,
+        position === 0,
+      )
+    ) {
       if (position === 0) return []
       continue
     }
