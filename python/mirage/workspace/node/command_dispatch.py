@@ -743,17 +743,26 @@ async def _run_argv(
         if not watched:
             return result
         stdout, io, node = result
+        early = b"" if io.stderr is None else io.stderr
 
         # post_command judges the command once its result is final: a
-        # streamed output settles its exit code as it drains, so the method
-        # is asked when the stream ends or its reader stops, and at once
-        # for output already whole. A refusal leaves what was sent as
-        # sent: exit 126, the refusal line on stderr, the refusal record.
+        # streamed output settles its exit code and the stderr it adds as
+        # it drains, so the method is asked when the stream ends or its
+        # reader stops, and at once for output already whole. A refusal
+        # leaves what was sent as sent: exit 126, the refusal line on
+        # stderr, the refusal record.
         async def settle() -> None:
             # A function hands back its last command's node, which keeps
             # the records that command made.
             node.exit_code = io.exit_code
             node.records.extend(mine)
+            late = io.stderr
+            if (
+                isinstance(early, bytes)
+                and isinstance(late, bytes)
+                and late.startswith(early)
+            ):
+                node.stderr += late[len(early) :]
             if not judging:
                 return
             assert admitted is not None

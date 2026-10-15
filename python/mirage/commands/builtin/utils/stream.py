@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 
 from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, materialize
 from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 
@@ -91,6 +92,27 @@ def is_stdin(path: PathSpec, dash: bool = True) -> bool:
             as a file, so only ``/dev/stdin`` is stdin to them.
     """
     return (dash and path.raw_path == "-") or path.virtual == "/dev/stdin"
+
+
+def never_opened(
+    reader: AsyncLineIterator, path: PathSpec, exc: BaseException
+) -> bool:
+    """Whether a failed read means the operand never opened.
+
+    Nothing arrived from it, and it is neither stdin, which is always
+    open, nor a directory, which opens and then fails to read. GNU names
+    such an operand as it does a missing one, not as a read error.
+
+    Args:
+        reader (AsyncLineIterator): the operand's reader.
+        path (PathSpec): the operand.
+        exc (BaseException): what the read raised.
+    """
+    return (
+        not reader.loaded
+        and not is_stdin(path)
+        and not isinstance(exc, IsADirectoryError)
+    )
 
 
 def operand_label(path: PathSpec, stdin_name: str) -> str:

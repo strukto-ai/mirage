@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '../../../io/types.ts'
+import type { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { isEisdir } from '../../../errors/fs.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
 
@@ -45,6 +47,16 @@ export function resolveSource(stdin: ByteSource | null): AsyncIterable<Uint8Arra
  */
 export function isStdin(path: PathSpec, dash = true): boolean {
   return (dash && path.rawPath === '-') || path.virtual === '/dev/stdin'
+}
+
+/**
+ * Whether a failed read means the operand never opened: nothing arrived from
+ * it, and it is neither stdin, which is always open, nor a directory, which
+ * opens and then fails to read. GNU names such an operand as it does a
+ * missing one, not as a read error. Mirrors Python's never_opened.
+ */
+export function neverOpened(reader: AsyncLineIterator, path: PathSpec, error: unknown): boolean {
+  return reader.loaded === 0 && !isStdin(path) && !isEisdir(error)
 }
 
 /**

@@ -22,6 +22,8 @@ import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin } from '../utils/stream.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
@@ -70,8 +72,7 @@ export function commGeneric(
   const reader = (p: PathSpec): AsyncLineIterator =>
     isStdin(p) ? shared : new AsyncLineIterator(read(p))
   const io = new IOResult()
-  const twice = p1.rawPath === '-' && p2.rawPath === '-'
-  return [commStream([reader(p1), reader(p2)], io, parsed, twice), io]
+  return [commStream([reader(p1), reader(p2)], io, parsed, [p1, p2]), io]
 }
 
 /**
@@ -81,15 +82,15 @@ export function commGeneric(
  * under --check-order, where the first disorder ends the run, never under
  * --nocheck-order, and by default only once a line unique to one file has
  * printed, warning once per file and closing with `input is not in sorted
- * order`. Both exit 1. Two `-` operands share one stdin reader, and GNU,
- * closing stdin twice, ends with `comm: -: Bad file descriptor`, exit 1,
- * before --total.
+ * order`. Both exit 1. A failed read ends the run too, named for its
+ * operand; two `-` operands share one stdin reader, and GNU, closing stdin
+ * twice, ends with `comm: -: Bad file descriptor`, exit 1, before --total.
  */
 async function* commStream(
   readers: readonly [AsyncLineIterator, AsyncLineIterator],
   io: IOResult,
   flags: CommFlags,
-  closesStdinTwice: boolean,
+  paths: readonly [PathSpec, PathSpec],
 ): AsyncIterable<Uint8Array> {
   const separator = flags.zeroTerminated ? 0 : 10
   const lines: [string | null, string | null] = [null, null]
@@ -100,7 +101,16 @@ async function* commStream(
   let unpairable = false
   // Read file WHICH's next line; whether its order ends the run.
   async function pull(which: 0 | 1): Promise<boolean> {
-    const raw = await readers[which].readline(undefined, separator)
+    let raw: Uint8Array | null
+    try {
+      raw = await readers[which].readline(undefined, separator)
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      errors.push(fsErrorLine('comm', paths[which], error))
+      io.stderr = ENC.encode(errors.join(''))
+      io.exitCode = 1
+      return true
+    }
     const before = lines[which]
     const line = raw === null ? null : DEC.decode(raw)
     lines[which] = line
@@ -120,8 +130,7 @@ async function* commStream(
     return flags.checkOrder === true
   }
   try {
-    await pull(0)
-    await pull(1)
+    if ((await pull(0)) || (await pull(1))) return
     for (;;) {
       const [left, right] = lines
       if (left === null && right === null) break
@@ -145,7 +154,7 @@ async function* commStream(
       if (column !== 2 && (await pull(0))) return
       if (column !== 1 && (await pull(1))) return
     }
-    if (closesStdinTwice) {
+    if (paths.every((p) => p.rawPath === '-')) {
       errors.push('comm: -: Bad file descriptor\n')
       io.stderr = ENC.encode(errors.join(''))
       io.exitCode = 1

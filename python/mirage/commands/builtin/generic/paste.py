@@ -2,7 +2,13 @@ from collections.abc import AsyncIterator
 from itertools import cycle
 
 from mirage.commands.builtin.utils.operands import normalized_read
-from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.commands.builtin.utils.stream import (
+    is_stdin,
+    never_opened,
+    resolve_source,
+)
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
@@ -60,27 +66,61 @@ async def paste_generic(
 ) -> tuple[ByteSource | None, IOResult]:
     read = normalized_read(read_stream)
     shared = AsyncLineIterator(resolve_source(stdin))
-    readers = [
-        shared if is_stdin(p) else AsyncLineIterator(read(p)) for p in paths
-    ] or [shared]
+    operands = paths or [PathSpec.from_str_path("-")]
+    inputs = [
+        (p, shared if is_stdin(p) else AsyncLineIterator(read(p)))
+        for p in operands
+    ]
     chars = _decode_delimiters(
         delimiter if delimiter is not None else delimiters
     )
     separator = b"\0" if zero_terminated else b"\n"
-    return _paste_stream(readers, chars, serial, separator), IOResult()
+    io = IOResult()
+    return _paste_stream(inputs, chars, serial, separator, io), io
 
 
 async def _paste_stream(
-    readers: list[AsyncLineIterator],
+    inputs: list[tuple[PathSpec, AsyncLineIterator]],
     delimiters: list[str],
     serial: bool,
     separator: bytes,
+    io: IOResult,
 ) -> AsyncIterator[bytes]:
+    """Paste the operands' records, in rows or one operand per line.
+
+    A failed read is reported, exit 1, and its operand reads as ended, as
+    GNU's does; one that never opened stops the rows before any is
+    written, and under -s leaves that operand out.
+
+    Args:
+        inputs (list[tuple[PathSpec, AsyncLineIterator]]): each operand,
+            ``-`` for no operand, with its records; every stdin operand
+            shares one reader.
+        delimiters (list[str]): the -d list.
+        serial (bool): -s.
+        separator (bytes): the record terminator.
+        io (IOResult): where a failed read is reported.
+    """
+    errors: list[str] = []
+
+    async def line(
+        path: PathSpec, reader: AsyncLineIterator
+    ) -> tuple[bytes | None, bool]:
+        try:
+            return await reader.readline(separator), False
+        except FS_ERRORS as exc:
+            errors.append(fs_error_line("paste", path, exc))
+            io.stderr, io.exit_code = "".join(errors).encode(), 1
+            return None, never_opened(reader, path, exc)
+
     try:
         if serial:
-            for reader in readers:
+            for path, reader in inputs:
                 index = 0
-                while (record := await reader.readline(separator)) is not None:
+                while True:
+                    record, unopened = await line(path, reader)
+                    if record is None:
+                        break
                     prefix = (
                         ""
                         if index == 0
@@ -88,10 +128,16 @@ async def _paste_stream(
                     )
                     yield (prefix + record.decode(errors="replace")).encode()
                     index += 1
-                yield separator
+                if not unopened:
+                    yield separator
         else:
             while True:
-                row = [await reader.readline(separator) for reader in readers]
+                row: list[bytes | None] = []
+                for path, reader in inputs:
+                    record, unopened = await line(path, reader)
+                    if unopened:
+                        return
+                    row.append(record)
                 if all(record is None for record in row):
                     return
                 yield (
@@ -107,7 +153,7 @@ async def _paste_stream(
                     + separator
                 )
     finally:
-        for reader in dict.fromkeys(readers):
+        for reader in dict.fromkeys(reader for _, reader in inputs):
             await reader.discard()
 
 

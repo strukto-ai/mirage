@@ -10,7 +10,7 @@ from contextlib import aclosing
 from dataclasses import dataclass, field
 from enum import Enum
 
-from mirage.commands.builtin.utils.stream import stdin_stream
+from mirage.commands.builtin.utils.stream import never_opened, stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -22,6 +22,9 @@ from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
 )
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
+from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
@@ -474,6 +477,7 @@ class _Merge:
         flags (JoinFlags): the parsed options.
         names (tuple[bytes, bytes]): each operand as typed.
         inputs (tuple[AsyncLineIterator, AsyncLineIterator]): each file's records.
+        paths (tuple[PathSpec, PathSpec]): each operand, for a failed read.
     """
 
     def __init__(
@@ -481,10 +485,12 @@ class _Merge:
         flags: JoinFlags,
         names: tuple[bytes, bytes],
         inputs: tuple[AsyncLineIterator, AsyncLineIterator],
+        paths: tuple[PathSpec, PathSpec],
     ) -> None:
         self.flags = flags
         self.names = names
         self.inputs = inputs
+        self.paths = paths
         self.fields = (flags.field1, flags.field2)
         self.read = [0, 0]
         self.previous: list[_Line | None] = [None, None]
@@ -497,7 +503,18 @@ class _Merge:
     async def get_line(self, which: int) -> _Line | None:
         if self.fatal:
             return None
-        record = await self.inputs[which].readline(self.flags.eol)
+        reader = self.inputs[which]
+        try:
+            record = await reader.readline(self.flags.eol)
+        except FS_ERRORS as exc:
+            path = self.paths[which]
+            self.err.append(
+                fs_error_line("join", path, exc).encode()
+                if never_opened(reader, path, exc)
+                else f"join: read error: {fs_strerror(exc) or exc}\n".encode()
+            )
+            self.fatal = True
+            return None
         if record is None:
             return None
         self.read[which] += 1
@@ -716,6 +733,7 @@ async def join(
         flags,
         (_raw(_operand_word(file1)), _raw(_operand_word(file2))),
         readers,
+        (file1, file2),
     )
     io = IOResult()
     return _join_stream(merge, io), io

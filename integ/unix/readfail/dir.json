@@ -507,7 +507,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "join: /data/rfdir: Is a directory\n"
+        "stderr": "join: read error: Is a directory\n"
       }
     },
     {

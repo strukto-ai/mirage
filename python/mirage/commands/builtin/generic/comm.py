@@ -11,6 +11,8 @@ from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
 )
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
@@ -52,7 +54,7 @@ async def comm(
         output_delimiter,
         total,
         b"\0" if zero_terminated else b"\n",
-        all(p.raw_path == "-" for p in paths),
+        paths,
     ), io
 
 
@@ -64,7 +66,7 @@ async def _comm_stream(
     delimiter: str,
     total: bool,
     separator: bytes,
-    closes_stdin_twice: bool,
+    paths: list[PathSpec],
 ) -> AsyncIterator[bytes]:
     """Merge the two inputs, checking each one's order as GNU comm does.
 
@@ -72,7 +74,10 @@ async def _comm_stream(
     always under --check-order, where the first disorder ends the run,
     never under --nocheck-order, and by default only once a line unique
     to one file has printed, warning once per file and closing with
-    ``input is not in sorted order``. Both exit 1.
+    ``input is not in sorted order``. Both exit 1. A failed read ends the
+    run too, named for its operand; two ``-`` operands share one stdin
+    reader, and GNU, closing stdin twice, ends with ``comm: -: Bad file
+    descriptor``, exit 1, before --total.
 
     Args:
         readers (list[AsyncLineIterator]): file 1 and file 2.
@@ -83,9 +88,7 @@ async def _comm_stream(
         delimiter (str): the column separator.
         total (bool): --total.
         separator (bytes): the record terminator.
-        closes_stdin_twice (bool): both operands are ``-``, which share
-            one stdin reader; GNU closes stdin twice and ends with ``comm:
-            -: Bad file descriptor``, exit 1, before --total.
+        paths (list[PathSpec]): file 1 and file 2, as typed.
     """
     lines: list[str | None] = [None, None]
     warned = [False, False]
@@ -99,7 +102,12 @@ async def _comm_stream(
         Args:
             which (int): 0 for file 1, 1 for file 2.
         """
-        raw = await readers[which].readline(separator)
+        try:
+            raw = await readers[which].readline(separator)
+        except FS_ERRORS as exc:
+            errors.append(fs_error_line("comm", paths[which], exc))
+            io.stderr, io.exit_code = "".join(errors).encode(), 1
+            return True
         before = lines[which]
         line = lines[which] = (
             None if raw is None else raw.decode(errors="replace")
@@ -119,8 +127,8 @@ async def _comm_stream(
         return bool(check_order)
 
     try:
-        await pull(0)
-        await pull(1)
+        if await pull(0) or await pull(1):
+            return
         while lines[0] is not None or lines[1] is not None:
             left, right = lines
             column = (
@@ -143,7 +151,7 @@ async def _comm_stream(
                 return
             if column != 1 and await pull(1):
                 return
-        if closes_stdin_twice:
+        if all(p.raw_path == "-" for p in paths):
             errors.append("comm: -: Bad file descriptor\n")
             io.stderr, io.exit_code = "".join(errors).encode(), 1
             return

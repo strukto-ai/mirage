@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin } from '../utils/stream.ts'
+import { isStdin, neverOpened } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
+import { isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 
@@ -65,36 +67,65 @@ export function pasteGeneric(
   const serial = fl.asBool('serial')
   const zeroTerminated = fl.asBool('zero_terminated')
   const shared = new AsyncLineIterator(opts.stdin ?? new Uint8Array())
-  const readers =
-    paths.length === 0
-      ? [shared]
-      : paths.map((p) => (isStdin(p) ? shared : new AsyncLineIterator(stream(p))))
-  return [pasteStream(readers, delimiters, serial, zeroTerminated ? 0 : 10), new IOResult()]
+  const operands = paths.length === 0 ? [PathSpec.fromStrPath('-')] : paths
+  const inputs = operands.map(
+    (p) => [p, isStdin(p) ? shared : new AsyncLineIterator(stream(p))] as const,
+  )
+  const io = new IOResult()
+  return [pasteStream(inputs, delimiters, serial, zeroTerminated ? 0 : 10, io), io]
 }
 
+/**
+ * Paste the operands' records, in rows or one operand per line. A failed
+ * read is reported, exit 1, and its operand reads as ended, as GNU's does;
+ * one that never opened stops the rows before any is written, and under -s
+ * leaves that operand out. Mirrors Python's _paste_stream.
+ */
 async function* pasteStream(
-  readers: AsyncLineIterator[],
+  inputs: readonly (readonly [PathSpec, AsyncLineIterator])[],
   delimiters: string[],
   serial: boolean,
   separator: number,
+  io: IOResult,
 ): AsyncIterable<Uint8Array> {
+  const errors: string[] = []
+  const line = async (
+    path: PathSpec,
+    reader: AsyncLineIterator,
+  ): Promise<[Uint8Array | null, boolean]> => {
+    try {
+      return [await reader.readline(undefined, separator), false]
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      errors.push(fsErrorLine('paste', path, error))
+      io.stderr = ENC.encode(errors.join(''))
+      io.exitCode = 1
+      return [null, neverOpened(reader, path, error)]
+    }
+  }
   try {
     if (serial) {
-      for (const reader of readers) {
+      for (const [path, reader] of inputs) {
         let index = 0
+        let unopened = false
         for (;;) {
-          const record = await reader.readline(undefined, separator)
+          const [record, failed] = await line(path, reader)
+          unopened = failed
           if (record === null) break
           const prefix = index === 0 ? '' : (delimiters[(index - 1) % delimiters.length] ?? '')
           yield ENC.encode(prefix + DEC.decode(record))
           index += 1
         }
-        yield new Uint8Array([separator])
+        if (!unopened) yield new Uint8Array([separator])
       }
     } else {
       for (;;) {
         const row: (Uint8Array | null)[] = []
-        for (const reader of readers) row.push(await reader.readline(undefined, separator))
+        for (const [path, reader] of inputs) {
+          const [record, unopened] = await line(path, reader)
+          if (unopened) return
+          row.push(record)
+        }
         if (row.every((record) => record === null)) return
         yield ENC.encode(
           joinFields(
@@ -105,6 +136,6 @@ async function* pasteStream(
       }
     }
   } finally {
-    for (const reader of new Set(readers)) await reader.discard()
+    for (const reader of new Set(inputs.map(([, reader]) => reader))) await reader.discard()
   }
 }

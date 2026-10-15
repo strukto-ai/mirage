@@ -4921,6 +4921,15 @@
               "fail_after": 1,
               "fail_errno": "EACCES"
             }
+          },
+          "/more": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/good": "good,x\n"
+              },
+              "chunk_size": 8
+            }
           }
         },
         "mode": "read"
@@ -5037,6 +5046,50 @@
           }
         },
         {
+          "op": "exec",
+          "command": "comm /data/denied /data/good",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "first,x\n",
+              "stderr": "comm: /data/denied: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "comm /data/denied /more/good",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "first,x\n",
+              "stderr": "comm: /data/denied: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "paste /data/denied /more/good",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "first,x\tgood,x\n",
+              "stderr": "paste: /data/denied: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "join /data/denied /more/good",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "join: read error: Permission denied\n"
+            }
+          }
+        },
+        {
           "op": "drain_processes"
         },
         {
@@ -5044,7 +5097,7 @@
           "path": "/data",
           "expect": {
             "value": {
-              "closed": 11
+              "closed": 15
             }
           }
         },

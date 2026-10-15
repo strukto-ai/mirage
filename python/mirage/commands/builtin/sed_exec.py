@@ -25,6 +25,7 @@ from mirage.commands.builtin.sed_script import (
     SedRegex,
     sed_regex_flags,
 )
+from mirage.commands.builtin.utils.stream import never_opened
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -443,19 +444,12 @@ class SedMachine:
                 return await self._reader.peek()
             raw, chomped = await self._reader.read_until(b"\n")
         except FS_ERRORS as exc:
-            opened = (
-                self._reader.loaded > 0
-                or self._file_name == "-"
-                or isinstance(exc, IsADirectoryError)
-            )
+            path = PathSpec.from_str_path(self._file_name)
+            unopened = never_opened(self._reader, path, exc)
             await self._reader.discard()
             self._reader = None
-            if not opened:
-                self.stderr_lines.append(
-                    fs_error_line(
-                        "sed", PathSpec.from_str_path(self._file_name), exc
-                    )
-                )
+            if unopened:
+                self.stderr_lines.append(fs_error_line("sed", path, exc))
                 self.bad_code = max(
                     self.bad_code, read_fail_exit_code("sed", exc)
                 )

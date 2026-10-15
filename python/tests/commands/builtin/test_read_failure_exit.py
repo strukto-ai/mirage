@@ -97,10 +97,12 @@ GNU_READ_EXIT = {
 # warning to itself. jq 1.7 was silent too, but jq 1.8.2, which both
 # hosts follow, opens the directory, fails at its first read and says so
 # without naming it. glibc's iconv does the same: a directory opens and
-# the read fails as "error while reading the input".
+# the read fails as "error while reading the input", and join as "read
+# error".
 SILENT_HERE = {"zgrep x {p}"}
 BARE_HERE = {
     "jq . {p}": "jq: error: Is a directory\n",
+    "join {p} {p}": "join: read error: Is a directory\n",
     "iconv -f utf-8 -t utf-8 {p}": (
         "iconv: error while reading the input: Is a directory\n"
     ),

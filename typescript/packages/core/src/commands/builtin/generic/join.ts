@@ -23,8 +23,10 @@ import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { CommandName, type ParsedFlagValue } from '../../spec/types.ts'
-import { byteView, fromByteView } from '../../../shell/bytes.ts'
-import { stdinStream } from '../utils/stream.ts'
+import { byteView, encodeText, fromByteView } from '../../../shell/bytes.ts'
+import { neverOpened, stdinStream } from '../utils/stream.ts'
+import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 
 const IDX_MAX = (1n << 63n) - 1n
 const INTMAX_MIN = -(1n << 63n)
@@ -397,13 +399,27 @@ class Merge {
     private readonly flags: JoinFlags,
     private readonly names: readonly [string, string],
     readonly inputs: readonly [AsyncLineIterator, AsyncLineIterator],
+    private readonly paths: readonly [PathSpec, PathSpec],
   ) {
     this.fields = [flags.field1, flags.field2]
   }
 
   private async getLine(which: 0 | 1): Promise<Line | null> {
     if (this.fatal) return null
-    const raw = await this.inputs[which].readline(undefined, this.flags.eol.charCodeAt(0))
+    const reader = this.inputs[which]
+    let raw: Uint8Array | null
+    try {
+      raw = await reader.readline(undefined, this.flags.eol.charCodeAt(0))
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      const path = this.paths[which]
+      const line = neverOpened(reader, path, error)
+        ? fsErrorLine('join', path, error)
+        : `join: read error: ${fsStrerror(error) ?? String(error)}\n`
+      this.err.push(byteView(encodeText(line)))
+      this.fatal = true
+      return null
+    }
     if (raw === null) return null
     const record = byteView(raw)
     this.read[which] += 1
@@ -579,7 +595,7 @@ export function join(paths: PathSpec[], io: JoinIO): [ByteSource | null, IOResul
   }
   const stream = stdinStream(io.read, io.stdin)
   const readers = [new AsyncLineIterator(stream(p1)), new AsyncLineIterator(stream(p2))] as const
-  const merge = new Merge(io.flags, [byteView(p1.rawPath), byteView(p2.rawPath)], readers)
+  const merge = new Merge(io.flags, [byteView(p1.rawPath), byteView(p2.rawPath)], readers, [p1, p2])
   const result = new IOResult()
   return [joinStream(merge, result), result]
 }

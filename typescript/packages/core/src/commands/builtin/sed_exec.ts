@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fsStrerror, isFsError, isEisdir } from '../../errors/fs.ts'
+import { fsStrerror, isFsError } from '../../errors/fs.ts'
+import { neverOpened } from './utils/stream.ts'
 import { fsErrorLine } from '../../errors/render.ts'
 import { readFailExitCode } from '../spec/usage.ts'
 import { PathSpec } from '../../types.ts'
@@ -328,11 +329,12 @@ export class SedMachine {
       ;[raw, chomped] = await this.reader.readUntil(10, this.signal)
     } catch (error) {
       if (!isFsError(error)) throw error
-      const opened = this.reader.loaded > 0 || this.fileName === '-' || isEisdir(error)
+      const path = PathSpec.fromStrPath(this.fileName)
+      const unopened = neverOpened(this.reader, path, error)
       await this.reader.discard()
       this.reader = undefined
-      if (!opened) {
-        this.stderrLines.push(fsErrorLine('sed', PathSpec.fromStrPath(this.fileName), error))
+      if (unopened) {
+        this.stderrLines.push(fsErrorLine('sed', path, error))
         this.badCode = Math.max(this.badCode, readFailExitCode('sed', error))
         return false
       }
