@@ -219,10 +219,13 @@ describe('fetchRowsAfter', () => {
         100,
       ),
     ).toEqual(expected)
-    expect(query.mock.calls[0]?.[0]).toContain(
-      'SELECT *, "at"::text AS "__mirage_key0" FROM "public"."events" WHERE ("at") > ($2) ' +
-        'ORDER BY "at" LIMIT $1',
+    // The key's text is added past the budget, so it costs the page nothing.
+    const sql = String(query.mock.calls[0]?.[0])
+    expect(sql).toContain(
+      'WITH data AS MATERIALIZED (SELECT * FROM "public"."events" WHERE ("at") > ($2) ' +
+        'ORDER BY "at" LIMIT $1)',
     )
+    expect(sql).toContain('SELECT data.*, data."at"::text AS "__mirage_key0", budget.bytes')
     expect(query.mock.calls[0]?.[1]).toEqual([5, ...after, 100])
   })
 })

@@ -193,12 +193,16 @@ export async function fetchRows(
  * it came from, and the page after it would answer that row again; the text
  * is the exact key. asyncpg keeps exact values, so Python pages from the row.
  */
-function keyTexts(pk: readonly string[], columns: ReadonlySet<string>): [string, string[]] {
+function keyTexts(
+  pk: readonly string[],
+  columns: ReadonlySet<string>,
+  source = '',
+): [string, string[]] {
   let marker = '__mirage_key'
   while (pk.some((_, i) => columns.has(`${marker}${String(i)}`))) marker += '_'
   const names = pk.map((_, i) => `${marker}${String(i)}`)
   const select = pk.map(
-    (column, i) => `, ${quoteIdent(column)}::text AS ${quoteIdent(names[i] ?? '')}`,
+    (column, i) => `, ${source}${quoteIdent(column)}::text AS ${quoteIdent(names[i] ?? '')}`,
   )
   return [select.join(''), names]
 }
@@ -255,13 +259,14 @@ export async function fetchRowsAfter(
     where = ` WHERE (${key}) > (${marks})`
     params.push(...after)
   }
-  const [select, names] = keyTexts(pk, columns)
+  const [select, names] = keyTexts(pk, columns, 'data.')
   const rows = await fetchBoundedQuery(
     accessor,
-    `SELECT *${select} FROM ${qualified(schema, name)}${where}${keyOrder(pk)} LIMIT $1`,
+    `SELECT * FROM ${qualified(schema, name)}${where}${keyOrder(pk)} LIMIT $1`,
     params,
     new Set([...columns, ...names]),
     maxBytes,
+    select,
   )
   if (rows === null) return [null, after]
   const last = rows[rows.length - 1]
@@ -292,13 +297,18 @@ export async function fetchBoundedRows(
   )
 }
 
-/** Budget an internally generated, row-limited SELECT before transferring rows. */
+/**
+ * Budget an internally generated, row-limited SELECT before transferring rows.
+ * `extra` adds columns to each answered row past the budget, computed from the
+ * row (`data`), so they never count against `maxBytes` (`keyTexts`).
+ */
 export async function fetchBoundedQuery(
   accessor: PostgresAccessor,
   query: string,
   params: readonly unknown[],
   columns: ReadonlySet<string>,
   maxBytes: number,
+  extra = '',
 ): Promise<Record<string, unknown>[] | null> {
   let marker = '__mirage_bytes'
   while (columns.has(marker)) marker += '_'
@@ -308,7 +318,7 @@ export async function fetchBoundedQuery(
     `WITH data AS MATERIALIZED (${query}), ` +
       'budget AS (SELECT COALESCE(SUM(' +
       'octet_length(row_to_json(data)::text) + 1), 0) AS bytes FROM data) ' +
-      `SELECT data.*, budget.bytes AS ${quoteIdent(marker)} ` +
+      `SELECT data.*${extra}, budget.bytes AS ${quoteIdent(marker)} ` +
       `FROM budget LEFT JOIN data ON budget.bytes <= $${String(params.length + 1)}`,
     [...params, maxBytes],
   )
