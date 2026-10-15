@@ -214,6 +214,7 @@ export class GmailDeltaHook implements DeltaHook {
         raw = await getMessageRaw(tm, mid)
       } catch (err) {
         if ((err as { status?: unknown }).status !== 404) throw err
+        console.debug(`gmail message ${mid} is gone: ${String(err)}`)
         gone.push(mid)
         continue
       }

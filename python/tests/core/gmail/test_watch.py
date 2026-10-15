@@ -18,7 +18,7 @@ import aiohttp
 import pytest
 
 from mirage.core.gmail import watch
-from mirage.types import FileChangeKind, PathSpec
+from mirage.types import FileChangeKind, JsonValue, PathSpec
 from tests.core.gmail.conftest import LABELS, MESSAGES, _message
 
 pytestmark = pytest.mark.asyncio
@@ -41,7 +41,11 @@ class Mailbox:
     """Gmail's history and messages, scripted per pull."""
 
     def __init__(self) -> None:
-        self.history: dict[str, object] = {}
+        self.history: dict[
+            str,
+            tuple[list[dict[str, JsonValue]], str]
+            | aiohttp.ClientResponseError,
+        ] = {}
         self.now = "100"
         self.labels = LABELS
         self.messages = {m["id"]: m for m in (TRASHED, NEW, WORK)}

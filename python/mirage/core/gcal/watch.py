@@ -92,7 +92,8 @@ def event_paths(
         bucket = bucket_name(bucket_start(date.fromisoformat(day), size), size)
         try:
             in_scope = scoped_bucket(accessor, bucket, tz, base)
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
+            logger.debug("gcal watch leaves out %s/%s: %s", base, bucket, exc)
             continue
         lo, hi = day_bounds(in_scope[0], tz, len(in_scope))
         if day in in_scope and (

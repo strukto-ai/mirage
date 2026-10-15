@@ -252,6 +252,7 @@ class GmailDeltaHook:
             except aiohttp.ClientResponseError as exc:
                 if exc.status != HTTPStatus.NOT_FOUND:
                     raise
+                logger.debug("gmail message %s is gone: %s", mid, exc)
                 gone.append(mid)
                 continue
             now = list(raw.get("labelIds", []))

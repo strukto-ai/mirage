@@ -66,6 +66,7 @@ export function eventPaths(
       inScope = scopedBucket(accessor, bucket, tz, base)
     } catch (err) {
       if ((err as { code?: string }).code !== 'ENOENT') throw err
+      console.debug(`gcal watch leaves out ${base}/${bucket}: ${String(err)}`)
       continue
     }
     const [lo, hi] = dayBounds(inScope[0] ?? day, tz, inScope.length)

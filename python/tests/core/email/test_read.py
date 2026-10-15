@@ -20,12 +20,12 @@ import pytest
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.email.read import read_many
 from mirage.core.email.render import message_json_bytes
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 
 DAY = "/INBOX/2024-01-15"
 
 
-def _message(uid: str) -> dict[str, object]:
+def _message(uid: str) -> dict[str, JsonValue]:
     return {
         "from": {"name": "Alice", "email": "alice@example.com"},
         "to": [],
