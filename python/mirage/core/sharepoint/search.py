@@ -13,10 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.msgraph.drive import DriveLoc
 from mirage.core.msgraph.search import files_containing as graph_files
-from mirage.core.sharepoint.readdir import readdir
 from mirage.core.sharepoint.resolve import drive_loc, resolve
 from mirage.types import PathSpec
 
@@ -25,7 +23,6 @@ async def files_containing(
     accessor: SharePointAccessor,
     text: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     """The files under ``under`` Graph search names, within one library.
 
@@ -36,7 +33,6 @@ async def files_containing(
         accessor (SharePointAccessor): backend handle.
         text (str): the whole word searched for.
         under (list[PathSpec]): the directories walked.
-        index (IndexCacheStore): the mount's index.
     """
     scopes: list[tuple[PathSpec, DriveLoc]] = []
     for directory in under:
@@ -46,11 +42,5 @@ async def files_containing(
         loc = drive_loc(accessor.config, resolved, directory.vfs_path)
         scopes.append((directory, loc))
     return await graph_files(
-        accessor.config,
-        readdir,
-        accessor,
-        scopes,
-        text,
-        index,
-        session=accessor.pool,
+        accessor.config, scopes, text, session=accessor.pool
     )

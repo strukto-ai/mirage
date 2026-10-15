@@ -12,121 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { entryOrWarm } from '../../cache/index/warm.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { driveFingerprint, entryFingerprint } from './fingerprint.ts'
-import { DIRECTORY_RESOURCE_TYPES, readdir as coreReaddir, resourceTypeFor } from './readdir.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { type DriveFile, FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
-import { contentTypeForPath } from '../../utils/filetype.ts'
-import { resolveKey } from './resolve.ts'
 
 /**
- * The stat of one Drive file resource, as `files.get` returns it.
- *
- * Pure, so an upload's reply parses the same as a stat. A missing
- * `mimeType` reads as a plain file: natives are refused before any upload,
- * so a reply without one names bytes.
- *
- * @param item a Drive file resource with `ITEM_FIELDS`
+ * What is at `path`: the row its parent's listing named. Drive is
+ * id-addressed, so a path is only known through the listing of the folder
+ * holding it, which the mount lists when it holds none. Mirrors Python's
+ * `stat`.
  */
-export function statFromItem(item: DriveFile): FileStat {
-  const mime = item.mimeType ?? ''
-  const modified = item.modifiedTime ?? ''
-  if (mime === FOLDER_MIME) {
-    return new FileStat({
-      name: item.name,
-      type: FileType.DIRECTORY,
-      modified,
-      extra: { file_id: item.id },
-    })
-  }
-  const resourceType = resourceTypeFor(mime)
-  const ext = MIME_TO_EXT[mime]
-  const vfsName = ext !== undefined ? `${item.name}${ext}` : item.name
-  // Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
-  const size = ext === undefined && item.size !== undefined ? parseInt(item.size, 10) : null
-  return new FileStat({
-    name: vfsName,
-    size,
-    type: FileType.FILE,
-    content: contentTypeForPath(vfsName),
-    modified,
-    fingerprint: driveFingerprint(resourceType, item.md5Checksum, item.headRevisionId, modified),
-    extra: {
-      file_id: item.id,
-      resource_type: resourceType,
-    },
-  })
-}
-
-// Resolve a stat with direct Drive queries when the index can't answer.
-// Generic write commands (cp/mv/rm) stat without an index, and gdrive is
-// id-addressed, so a cold cache must not read as ENOENT.
-async function statFromApi(
-  accessor: GDriveAccessor,
-  key: string,
-  virtual: string,
-): Promise<FileStat> {
-  const node = await resolveKey(accessor, key)
-  if (node === null) throw enoent(virtual)
-  const item = await getFile(accessor.tokenManager, node.id)
-  // The resolved node names the path: a shared drive resolves to a
-  // synthesized folder whose Drive item says otherwise.
-  return statFromItem({ ...item, id: node.id, name: node.name, mimeType: node.mimeType })
-}
-
-export async function stat(
-  accessor: GDriveAccessor,
+export function stat(
+  _accessor: GDriveAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): Promise<FileStat> {
-  void accessor
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const key = path.vfsPath
-  if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
-
-  if (index === undefined) return statFromApi(accessor, key, path.virtual)
-  const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
-  const parentVirtual = virtualKey.includes('/')
-    ? virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
-    : '/'
-  // A parent that cannot be listed at all leaves the API probe as the
-  // authority; entryOrWarm decides which failures get that far.
-  const entry = await entryOrWarm(index, virtualKey, () =>
-    coreReaddir(
-      accessor,
-      new PathSpec({
-        virtual: parentVirtual,
-        directory: parentVirtual,
-        resolved: false,
-        vfsPath: mountKey(parentVirtual, prefix),
-      }),
-      index,
-    ),
-  )
-  if (entry === null) return statFromApi(accessor, key, path.virtual)
-  if (DIRECTORY_RESOURCE_TYPES.has(entry.resourceType)) {
-    return new FileStat({
-      name: entry.vfsName !== '' ? entry.vfsName : entry.name,
-      type: FileType.DIRECTORY,
-      modified: entry.remoteTime,
-      extra: { file_id: entry.id },
-    })
+  if (path.vfsPath.replace(/^\/+|\/+$/g, '') === '') {
+    return Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
   }
-  return new FileStat({
-    name: entry.vfsName !== '' ? entry.vfsName : entry.name,
-    size: entry.size,
-    type: FileType.FILE,
-    content: contentTypeForPath(entry.vfsName),
-    modified: entry.remoteTime,
-    fingerprint: entryFingerprint(entry),
-    extra: {
-      file_id: entry.id,
-      resource_type: entry.resourceType,
-    },
-  })
+  if (entry === null || entry === undefined) return Promise.reject(enoent(path.virtual))
+  return Promise.resolve(entry)
 }

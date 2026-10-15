@@ -10,7 +10,7 @@ import { PROMPT } from './prompt.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { buildDeltaHook } from '../../core/sharepoint/watch.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../types.ts'
 import { readdir } from '../../core/sharepoint/readdir.ts'
 import { read } from '../../core/sharepoint/read.ts'
 import { stat } from '../../core/sharepoint/stat.ts'
@@ -56,26 +56,28 @@ export class SharePointVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return readdir(this.accessor, path, index)
+  override readonly listsStats: boolean = true
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return readdir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return read(this.accessor, path, index)
-    return read(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return read(this.accessor, path)
+    return read(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return stat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return stat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return readStream(this.accessor, path, index)
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    return readStream(this.accessor, path)
   }
 
   override exists(path: PathSpec): Promise<boolean> {
@@ -98,7 +100,7 @@ export class SharePointVFS extends BaseVFS {
     return unlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return rmdir(this.accessor, path)
   }
 
@@ -126,10 +128,9 @@ export class SharePointVFS extends BaseVFS {
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
-    return filesContaining(this.accessor, text, [path], index)
+    return filesContaining(this.accessor, text, [path])
   }
 
   override deltaHook(): DeltaHook {

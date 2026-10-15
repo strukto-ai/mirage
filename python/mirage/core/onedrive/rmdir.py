@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.client import graph_delete
 from mirage.core.msgraph.drive import drive_root_empty
 from mirage.core.onedrive.client import drive_loc
@@ -24,7 +23,6 @@ from mirage.types import PathSpec
 async def rmdir(
     accessor: OneDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     """Remove an empty folder.
 
@@ -39,8 +37,6 @@ async def rmdir(
     Args:
         accessor (OneDriveAccessor): OneDrive accessor.
         path (PathSpec): folder to remove.
-        index (IndexCacheStore): the rmdir slot's shape (``RmdirOp``)
-            passes one; Graph needs none.
     """
     if not path.vfs_path:
         return

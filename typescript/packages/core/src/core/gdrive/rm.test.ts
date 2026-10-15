@@ -22,6 +22,8 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { rmR } from './rm.ts'
@@ -43,11 +45,13 @@ describe('gdrive rm -r', () => {
     const d = fake.folder('d')
     const s = fake.folder('s', d)
     fake.add('f.txt', s, undefined, ENC.encode('x'))
-    await rmR(accessor, spec('/d'))
+    await rmR(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d')))
     expect(fake.items.size).toBe(0)
   })
 
   it('missing target raises ENOENT', async () => {
-    await expect(rmR(accessor, spec('/missing'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      rmR(accessor, spec('/missing'), await handedAt(readdir, accessor, spec('/missing'))),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

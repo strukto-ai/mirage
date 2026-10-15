@@ -13,8 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { enotsup } from '../../errors/fs.ts'
-import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { buildTree, emitStartPath, keep, type PredNode } from '../generic/find_eval.ts'
 import {
   record,
@@ -499,7 +497,7 @@ export async function* streamItem(
   }
 }
 
-async function* iterTree(
+export async function* iterTree(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
 ): AsyncIterable<[string, Record<string, unknown>, boolean]> {
@@ -621,15 +619,12 @@ async function isDir(config: MsGraphConfigResolved, loc: DriveLoc, path: string)
   return item !== null && 'folder' in item
 }
 
+/** A folder's children, each as `stat` answers it. Mirrors Python's `readdir_items`. */
 export async function readdirItems(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
-  index: IndexCacheStore | undefined,
-  prefix: string,
-  stripped: string,
-  virtualKey: string,
   path: PathSpec,
-): Promise<string[]> {
+): Promise<FileStat[]> {
   let children: Record<string, unknown>[]
   try {
     children = await graphList(config, loc.item('/children'))
@@ -645,66 +640,15 @@ export async function readdirItems(
       (p) => isDir(config, loc, p),
     )
   }
-  const base = stripped !== '' ? `/${stripped}` : ''
-  const names: string[] = []
-  const entries: [string, IndexEntry][] = []
-  for (const child of children) {
-    const name = asString(child.name) ?? ''
-    const path = `${base}/${name}`
-    const folder = isFolder(child)
-    names.push(path)
-    entries.push([
-      name,
-      new IndexEntry({
-        id: path,
-        name,
-        resourceType: folder ? ResourceType.FOLDER : ResourceType.FILE,
-        // Folder `size` is aggregate storage metadata, never rendered
-        // content length: cache it as extra, not as the entry size.
-        size: folder ? null : asNumber(child.size),
-        remoteTime: asString(child.lastModifiedDateTime) ?? '',
-        extra: folder
-          ? {
-              ctag: child.cTag,
-              etag: child.eTag,
-              size_bytes: asNumber(child.size),
-              child_count: folderChildCount(child),
-            }
-          : { ctag: child.cTag, etag: child.eTag, id: child.id },
-      }),
-    ])
-  }
-  names.sort(compareCodePoints)
-  entries.sort((a, b) => compareCodePoints(a[0], b[0]))
-  if (index !== undefined) await index.setDir(virtualKey, entries)
-  return names.map((name) => (prefix !== '' ? prefix + name : name))
+  return children.map((child) => entryStat(child)).sort((a, b) => compareCodePoints(a.name, b.name))
 }
 
+/** One drive item's stat, from Graph. Mirrors Python's `stat_item`. */
 export async function statItem(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
   path: PathSpec,
-  virtualKey: string,
-  index?: IndexCacheStore,
 ): Promise<FileStat> {
-  if (index !== undefined) {
-    const lookup = await index.get(virtualKey)
-    if (lookup.entry !== undefined && lookup.entry !== null) {
-      const entry = lookup.entry
-      return new FileStat({
-        name: entry.name,
-        type: entry.resourceType === ResourceType.FOLDER ? FileType.DIRECTORY : FileType.FILE,
-        content: entry.resourceType === ResourceType.FOLDER ? null : contentTypeForPath(entry.name),
-        size: entry.size,
-        modified: entry.remoteTime || null,
-        fingerprint: entry.resourceType === ResourceType.FOLDER ? null : asString(entry.extra.ctag),
-        extra: entry.extra,
-      })
-    }
-    const parent = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
-    const listing = await index.listDir(parent)
-    if (listing.entries !== undefined && listing.entries !== null) throw enoent(path)
-  }
   try {
     return entryStat(await graphGet(config, loc.item()))
   } catch (error) {
@@ -717,11 +661,11 @@ export async function statItem(
 // ENOENT. Both drive backends address items differently but probe
 // identically, so only their stat is injected.
 export function makeExists<A>(
-  stat: (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<unknown>,
-): (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<boolean> {
-  return async (accessor, path, index) => {
+  stat: (accessor: A, path: PathSpec) => Promise<unknown>,
+): (accessor: A, path: PathSpec) => Promise<boolean> {
+  return async (accessor, path) => {
     try {
-      await stat(accessor, path, index)
+      await stat(accessor, path)
       return true
     } catch (error) {
       if ((error as { code?: unknown }).code === 'ENOENT') return false

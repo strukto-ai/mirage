@@ -4,7 +4,6 @@ import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.sharepoint.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -17,6 +16,10 @@ _SITES_RE = re.compile(r".*/sites\??.*")
 _DRIVES_RE = re.compile(r".*/sites/.*/drives\??.*")
 
 
+def _paths(path: PathSpec, rows) -> list[str]:
+    return [f"{path.virtual.rstrip('/')}/{row.name}" for row in rows]
+
+
 def _accessor() -> SharePointAccessor:
     accessor = SharePointAccessor(SharePointConfig(access_token="tok"))
     accessor.site_cache["Engineering"] = _SITE_ID
@@ -26,7 +29,6 @@ def _accessor() -> SharePointAccessor:
 
 @pytest.mark.asyncio
 async def test_readdir_root_lists_sites():
-    index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(
             _SITES_RE,
@@ -40,14 +42,13 @@ async def test_readdir_root_lists_sites():
         path = PathSpec(
             vfs_path=mount_key("/sp/", "/sp"), virtual="/sp/", directory="/sp/"
         )
-        names = await readdir(_accessor(), path, index)
+        names = _paths(path, await readdir(_accessor(), path))
     assert "/sp/Engineering" in names
     assert "/sp/Marketing" in names
 
 
 @pytest.mark.asyncio
 async def test_readdir_site_lists_drives():
-    index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(
             _DRIVES_RE,
@@ -63,14 +64,13 @@ async def test_readdir_site_lists_drives():
             virtual="/sp/Engineering",
             directory="/sp/Engineering",
         )
-        names = await readdir(_accessor(), path, index)
+        names = _paths(path, await readdir(_accessor(), path))
     assert "/sp/Engineering/Archives" in names
     assert "/sp/Engineering/Documents" in names
 
 
 @pytest.mark.asyncio
 async def test_readdir_drive_root_lists_children():
-    index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(
             f"{_BASE}/drives/{_DRIVE_ID}/root/children",
@@ -98,14 +98,13 @@ async def test_readdir_drive_root_lists_children():
             virtual="/sp/Engineering/Documents",
             directory="/sp/Engineering/Documents",
         )
-        names = await readdir(_accessor(), path, index)
+        names = _paths(path, await readdir(_accessor(), path))
     assert "/sp/Engineering/Documents/readme.md" in names
     assert "/sp/Engineering/Documents/src" in names
 
 
 @pytest.mark.asyncio
-async def test_readdir_populates_index_with_metadata():
-    index = RAMIndexCacheStore()
+async def test_readdir_rows_carry_metadata():
     with aioresponses() as m:
         m.get(
             f"{_BASE}/drives/{_DRIVE_ID}/root/children",
@@ -126,16 +125,13 @@ async def test_readdir_populates_index_with_metadata():
             virtual="/sp/Engineering/Documents",
             directory="/sp/Engineering/Documents",
         )
-        await readdir(_accessor(), path, index)
-    lookup = await index.get("/sp/Engineering/Documents/a.txt")
-    assert lookup.entry is not None
-    assert lookup.entry.size == 42
-    assert lookup.entry.remote_time == "2026-06-15T08:00:00Z"
+        rows = await readdir(_accessor(), path)
+    assert rows[0].size == 42
+    assert rows[0].modified == "2026-06-15T08:00:00Z"
 
 
 @pytest.mark.asyncio
 async def test_readdir_subfolder():
-    index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(
             f"{_BASE}/drives/{_DRIVE_ID}/root:/src:/children",
@@ -150,13 +146,12 @@ async def test_readdir_subfolder():
             virtual="/sp/Engineering/Documents/src",
             directory="/sp/Engineering/Documents/src",
         )
-        names = await readdir(_accessor(), path, index)
+        names = _paths(path, await readdir(_accessor(), path))
     assert "/sp/Engineering/Documents/src/main.py" in names
 
 
 @pytest.mark.asyncio
 async def test_readdir_of_file_raises_not_a_directory():
-    index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(
             f"{_BASE}/drives/{_DRIVE_ID}/root:/a.txt:/children",
@@ -173,27 +168,4 @@ async def test_readdir_of_file_raises_not_a_directory():
             directory="/sp/Engineering/Documents",
         )
         with pytest.raises(NotADirectoryError):
-            await readdir(_accessor(), path, index)
-
-
-@pytest.mark.asyncio
-async def test_readdir_cache_hit():
-    index = RAMIndexCacheStore()
-    with aioresponses() as m:
-        m.get(
-            f"{_BASE}/drives/{_DRIVE_ID}/root/children",
-            payload={
-                "value": [
-                    {"id": "1", "name": "cached.txt", "size": 10, "file": {}},
-                ]
-            },
-        )
-        path = PathSpec(
-            vfs_path=mount_key("/sp/Engineering/Documents", "/sp"),
-            virtual="/sp/Engineering/Documents",
-            directory="/sp/Engineering/Documents",
-        )
-        await readdir(_accessor(), path, index)
-        # Second call should hit cache, no extra HTTP call
-        names = await readdir(_accessor(), path, index)
-    assert "/sp/Engineering/Documents/cached.txt" in names
+            await readdir(_accessor(), path)

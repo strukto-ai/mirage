@@ -13,11 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import type { PathSpec } from '../../types.ts'
-import { resolveKey } from './resolve.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 
-export async function exists(accessor: GDriveAccessor, path: PathSpec): Promise<boolean> {
-  const key = path.vfsPath
-  if (key === '') return true
-  return (await resolveKey(accessor, key)) !== null
+/**
+ * Whether anything is at `path`: the mount root, or a row its parent's
+ * listing named. Mirrors Python's `exists`.
+ */
+export function exists(
+  _accessor: GDriveAccessor,
+  path: PathSpec,
+  entry?: FileStat | null,
+): Promise<boolean> {
+  return Promise.resolve(
+    (entry !== null && entry !== undefined) || path.vfsPath.replace(/^\/+|\/+$/g, '') === '',
+  )
 }

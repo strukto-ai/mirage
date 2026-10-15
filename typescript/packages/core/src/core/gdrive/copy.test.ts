@@ -22,6 +22,8 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { copy } from './copy.ts'
@@ -42,7 +44,13 @@ function spec(virtual: string): PathSpec {
 describe('gdrive copy', () => {
   it('copies a file', async () => {
     fake.add('src.txt', 'root', undefined, ENC.encode('data'))
-    await copy(accessor, spec('/src.txt'), spec('/dst.txt'))
+    await copy(
+      accessor,
+      spec('/src.txt'),
+      spec('/dst.txt'),
+      undefined,
+      await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
+    )
     expect(DEC.decode(fake.find('dst.txt')?.content)).toBe('data')
     expect(fake.find('src.txt')).not.toBeNull()
   })
@@ -50,7 +58,13 @@ describe('gdrive copy', () => {
   it('overwrites an existing file', async () => {
     fake.add('src.txt', 'root', undefined, ENC.encode('new'))
     fake.add('dst.txt', 'root', undefined, ENC.encode('old'))
-    await copy(accessor, spec('/src.txt'), spec('/dst.txt'))
+    await copy(
+      accessor,
+      spec('/src.txt'),
+      spec('/dst.txt'),
+      undefined,
+      await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
+    )
     expect(DEC.decode(fake.find('dst.txt')?.content)).toBe('new')
     expect(fake.items.size).toBe(2)
   })
@@ -58,7 +72,15 @@ describe('gdrive copy', () => {
   it('file onto dir raises EISDIR', async () => {
     fake.add('src.txt', 'root', undefined, ENC.encode('x'))
     fake.folder('d')
-    await expect(copy(accessor, spec('/src.txt'), spec('/d'))).rejects.toMatchObject({
+    await expect(
+      copy(
+        accessor,
+        spec('/src.txt'),
+        spec('/d'),
+        undefined,
+        await handedAt(readdir, accessor, spec('/src.txt'), spec('/d')),
+      ),
+    ).rejects.toMatchObject({
       code: 'EISDIR',
     })
   })
@@ -68,7 +90,13 @@ describe('gdrive copy', () => {
     const sub = fake.folder('sub', src)
     fake.add('f.txt', sub, undefined, ENC.encode('deep'))
     fake.add('top.txt', src, undefined, ENC.encode('top'))
-    await copy(accessor, spec('/src'), spec('/dst'))
+    await copy(
+      accessor,
+      spec('/src'),
+      spec('/dst'),
+      undefined,
+      await handedAt(readdir, accessor, spec('/src'), spec('/dst')),
+    )
     expect(fake.find('dst')).not.toBeNull()
     for (const name of ['sub', 'f.txt', 'top.txt']) {
       const copies = [...fake.items.values()].filter((i) => i.name === name)
@@ -81,7 +109,13 @@ describe('gdrive copy', () => {
     fake.add('f.txt', src, undefined, ENC.encode('x'))
     const dst = fake.folder('dst')
     fake.add('keep.txt', dst, undefined, ENC.encode('k'))
-    await copy(accessor, spec('/src'), spec('/dst'))
+    await copy(
+      accessor,
+      spec('/src'),
+      spec('/dst'),
+      undefined,
+      await handedAt(readdir, accessor, spec('/src'), spec('/dst')),
+    )
     const children = [...fake.items.values()].filter((i) => i.parents.includes(dst))
     expect(new Set(children.map((i) => i.name))).toEqual(new Set(['keep.txt', 'f.txt']))
   })
@@ -89,13 +123,29 @@ describe('gdrive copy', () => {
   it('dir onto file raises ENOTDIR', async () => {
     fake.folder('src')
     fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await expect(copy(accessor, spec('/src'), spec('/f.txt'))).rejects.toMatchObject({
+    await expect(
+      copy(
+        accessor,
+        spec('/src'),
+        spec('/f.txt'),
+        undefined,
+        await handedAt(readdir, accessor, spec('/src'), spec('/f.txt')),
+      ),
+    ).rejects.toMatchObject({
       code: 'ENOTDIR',
     })
   })
 
   it('missing src raises ENOENT', async () => {
-    await expect(copy(accessor, spec('/missing.txt'), spec('/dst.txt'))).rejects.toMatchObject({
+    await expect(
+      copy(
+        accessor,
+        spec('/missing.txt'),
+        spec('/dst.txt'),
+        undefined,
+        await handedAt(readdir, accessor, spec('/missing.txt'), spec('/dst.txt')),
+      ),
+    ).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })

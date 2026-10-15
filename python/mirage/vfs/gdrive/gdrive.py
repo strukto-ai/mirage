@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdrive.capacity import capacity as _capacity
 from mirage.core.gdrive.checksum import checksum as _checksum
 from mirage.core.gdrive.copy import copy as _copy
@@ -37,7 +36,7 @@ from mirage.core.gdrive.unlink import unlink as _unlink
 from mirage.core.gdrive.watch import build_delta_hook
 from mirage.core.gdrive.write import write as _write
 from mirage.core.google.client import TokenManager
-from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
+from mirage.types import CapacityResult, DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.prompt import PROMPT
@@ -65,75 +64,123 @@ class GoogleDriveVFS(BaseVFS):
         self.accessor = GDriveAccessor(self.config, self._token_manager)
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
     ) -> bytes:
-        if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read(self.accessor, path, index, offset, size)
+        return await _read(self.accessor, path, offset, size, entry)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
     async def checksum(
-        self,
-        path: PathSpec,
-        algorithm: str,
-        index: IndexCacheStore = NULL_INDEX,
+        self, path: PathSpec, algorithm: str, entry: FileStat | None = None
     ) -> str | None:
-        return await _checksum(self.accessor, path, algorithm, index)
+        return await _checksum(self.accessor, path, algorithm, entry)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+        return _read_stream(self.accessor, path, entry)
 
-    async def exists(self, path: PathSpec) -> bool:
-        return await _exists(self.accessor, path)
+    async def exists(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> bool:
+        return await _exists(self.accessor, path, entry)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        await _write(self.accessor, path, data)
+    async def write(
+        self,
+        path: PathSpec,
+        data: bytes,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
+    ) -> FileStat | None:
+        return await _write(self.accessor, path, data, entry, parent)
 
-    async def create(self, path: PathSpec) -> None:
-        await _create(self.accessor, path)
+    async def create(
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
+    ) -> FileStat | None:
+        return await _create(self.accessor, path, entry, parent)
 
-    async def unlink(self, path: PathSpec) -> None:
-        await _unlink(self.accessor, path)
+    async def unlink(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> None:
+        await _unlink(self.accessor, path, entry)
 
-    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
-        await _mkdir(self.accessor, path, parents=parents)
+    async def mkdir(
+        self,
+        path: PathSpec,
+        parents: bool = False,
+        parent: FileStat | None = None,
+    ) -> FileStat | None:
+        return await _mkdir(self.accessor, path, parents, parent)
 
     async def rmdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> None:
-        await _rmdir(self.accessor, path, index)
+        await _rmdir(self.accessor, path, entry)
 
-    async def rm_r(self, path: PathSpec) -> Any:
-        return await _rm_r(self.accessor, path)
+    async def rm_r(self, path: PathSpec, entry: FileStat | None = None) -> Any:
+        return await _rm_r(self.accessor, path, entry)
 
-    async def rename(self, src: PathSpec, dst: PathSpec) -> None:
-        await _rename(self.accessor, src, dst)
+    async def rename(
+        self,
+        src: PathSpec,
+        dst: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
+        dst_parent: FileStat | None = None,
+        dst_entry: FileStat | None = None,
+    ) -> FileStat | None:
+        return await _rename(
+            self.accessor, src, dst, entry, parent, dst_parent, dst_entry
+        )
 
-    async def copy(self, src: PathSpec, dst: PathSpec) -> None:
-        await _copy(self.accessor, src, dst)
+    async def copy(
+        self,
+        src: PathSpec,
+        dst: PathSpec,
+        entry: FileStat | None = None,
+        dst_parent: FileStat | None = None,
+        dst_entry: FileStat | None = None,
+    ) -> FileStat | None:
+        return await _copy(
+            self.accessor, src, dst, entry, dst_parent, dst_entry
+        )
 
-    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
-        await _copy(self.accessor, src, dst)
+    async def dir_copy(
+        self,
+        src: PathSpec,
+        dst: PathSpec,
+        entry: FileStat | None = None,
+        dst_parent: FileStat | None = None,
+        dst_entry: FileStat | None = None,
+    ) -> FileStat | None:
+        return await _copy(
+            self.accessor, src, dst, entry, dst_parent, dst_entry
+        )
 
     async def truncate(
-        self, path: PathSpec, length: int, no_create: bool = False
+        self,
+        path: PathSpec,
+        length: int,
+        no_create: bool = False,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> None:
-        await _truncate(self.accessor, path, length, no_create)
+        await _truncate(self.accessor, path, length, no_create, entry, parent)
 
     async def files_containing(
         self,
@@ -142,11 +189,11 @@ class GoogleDriveVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
     ) -> list[PathSpec] | None:
         if not whole_word or not self.config.content_search:
             return None
-        return await _files_containing(self.accessor, text, [path], index)
+        return await _files_containing(self.accessor, text, path, entry)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

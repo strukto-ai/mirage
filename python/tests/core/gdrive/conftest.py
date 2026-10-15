@@ -25,7 +25,6 @@ import mirage.core.gdrive.resolve as resolve_mod
 import mirage.core.gdrive.rm as rm_mod
 import mirage.core.gdrive.rmdir as rmdir_mod
 import mirage.core.gdrive.search as search_mod
-import mirage.core.gdrive.stat as stat_mod
 import mirage.core.gdrive.tree as tree_mod
 import mirage.core.gdrive.truncate as truncate_mod
 import mirage.core.gdrive.unlink as unlink_mod
@@ -222,7 +221,7 @@ class FakeDrive:
 
 
 _PATCH_TARGETS = {
-    resolve_mod: ("list_files", "list_shared_drives", "get_file"),
+    resolve_mod: ("get_file",),
     readdir_mod: ("list_files", "list_shared_drives"),
     write_mod: ("update_file_content", "upload_file"),
     mkdir_mod: ("create_folder",),
@@ -231,7 +230,6 @@ _PATCH_TARGETS = {
     rm_mod: ("delete_file",),
     rename_mod: ("delete_file", "get_file", "list_files", "patch_file"),
     tree_mod: ("list_files",),
-    stat_mod: ("get_file",),
     copy_mod: ("copy_file", "create_folder", "delete_file", "list_files"),
     truncate_mod: ("download_file",),
     search_mod: ("search_files",),

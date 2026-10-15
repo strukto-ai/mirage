@@ -12,13 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-DIRECTORY_RESOURCE_TYPES = frozenset(
-    {
-        "gdrive/folder",
-        "gdrive/shared_drive",
-    }
-)
-
 # Docs, Sheets and Slides: rendered to JSON rather than downloaded, and
 # carrying no content hash.
 NATIVE_RESOURCE_TYPES = frozenset(

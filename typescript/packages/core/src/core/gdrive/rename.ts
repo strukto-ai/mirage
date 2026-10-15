@@ -13,45 +13,61 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-
-import type { PathSpec } from '../../types.ts'
+import { type FileStat, FileType, type PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { enoent, enotempty } from '../../errors/fs.ts'
 import { deleteFile, getFile, listFiles, patchFile } from '../google/drive.ts'
-import { driveTargetName, eaccesOnDenied, isFolder, resolveKey, resolveParent } from './resolve.ts'
+import { statFromItem } from './readdir.ts'
+import { driveTargetName, eaccesOnDenied, parentFolder } from './resolve.ts'
 
-async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+/**
+ * Move an item, replacing what is at the destination, handed what is at
+ * `src` and its parent and at `dst` and its parent. Mirrors Python's
+ * `rename`.
+ */
+async function renameImpl(
+  accessor: GDriveAccessor,
+  src: PathSpec,
+  dst: PathSpec,
+  handed: Handed = {},
+): Promise<FileStat | null> {
   const tm = accessor.tokenManager
-  const srcNode = await resolveKey(accessor, src.vfsPath)
-  if (srcNode === null) throw enoent(src)
-  const dstNode = await resolveKey(accessor, dst.vfsPath)
-  if (dstNode !== null) {
+  const entry = handed.entry ?? null
+  if (entry === null) throw enoent(src)
+  const dstEntry = handed.dstEntry ?? null
+  if (dstEntry !== null) {
     // GNU mv overwrites the destination: drop a conflicting file (or empty
     // folder) before the move. A non-empty folder conflict is mv's
     // "Directory not empty", mirroring the msgraph rename_replace.
-    if (isFolder(dstNode)) {
+    if (dstEntry.type === FileType.DIRECTORY) {
+      const driveId = dstEntry.extra.drive_id
       const children = await listFiles(tm, {
-        folderId: dstNode.id,
-        driveId: dstNode.driveId,
+        folderId: dstEntry.extra.file_id as string,
+        driveId: typeof driveId === 'string' ? driveId : null,
         limit: 1,
       })
       if (children.length > 0) throw enotempty(dst)
     }
-    await deleteFile(tm, dstNode.id)
+    await deleteFile(tm, dstEntry.extra.file_id as string)
   }
-  const [srcParentId] = await resolveParent(accessor, src)
-  const [dstParentId] = await resolveParent(accessor, dst)
+  const [srcParentId] = await parentFolder(accessor, src, handed.parent)
+  const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
   const dstKey = dst.vfsPath
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
-  const name = driveTargetName(basename, srcNode)
+  const mime = entry.extra.mime_type
+  const name = driveTargetName(basename, typeof mime === 'string' ? mime : '')
   const move = dstParentId !== srcParentId
   // Drive stamps a rename as an edit, so the time goes back as rename(2)
   // keeps it. Drive has no conditional update; reading it just before leaves
   // one request for another writer's edit to land in.
-  const modified = (await getFile(tm, srcNode.id)).modifiedTime
-  await patchFile(tm, srcNode.id, {
+  const fileId = entry.extra.file_id as string
+  const modified = (await getFile(tm, fileId)).modifiedTime
+  const item = await patchFile(tm, fileId, {
     body: modified ? { name, modifiedTime: modified } : { name },
     ...(move ? { addParents: dstParentId, removeParents: srcParentId } : {}),
   })
+  const moved: unknown = item
+  return typeof moved === 'object' && moved !== null ? statFromItem(item) : null
 }
 
 export const rename = eaccesOnDenied(renameImpl)

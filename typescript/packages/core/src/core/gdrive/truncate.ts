@@ -14,10 +14,12 @@
 
 import { enotsup } from '../../errors/fs.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import type { PathSpec } from '../../types.ts'
+import { FileType, type PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { eisdir } from '../../errors/fs.ts'
 import { downloadFile } from '../google/drive.ts'
-import { eaccesOnDenied, isFolder, isNative, resolveKey } from './resolve.ts'
+import { NATIVE_RESOURCE_TYPES } from './fingerprint.ts'
+import { eaccesOnDenied } from './resolve.ts'
 import { write } from './write.ts'
 
 async function truncateImpl(
@@ -25,15 +27,16 @@ async function truncateImpl(
   path: PathSpec,
   length: number,
   noCreate = false,
+  handed: Handed = {},
 ): Promise<void> {
   if (noCreate) throw enotsup('gdrive', 'truncate --no-create', path)
-  const node = await resolveKey(accessor, path.vfsPath)
-  if (node !== null && isFolder(node)) throw eisdir(path)
+  const entry = handed.entry ?? null
+  if (entry !== null && entry.type === FileType.DIRECTORY) throw eisdir(path)
   let data: Uint8Array
-  if (node === null || isNative(node)) {
+  if (entry === null || NATIVE_RESOURCE_TYPES.has(entry.extra.resource_type as string)) {
     data = new Uint8Array(0)
   } else {
-    data = await downloadFile(accessor.tokenManager, node.id)
+    data = await downloadFile(accessor.tokenManager, entry.extra.file_id as string)
   }
   let out: Uint8Array
   if (length <= data.length) {
@@ -42,7 +45,7 @@ async function truncateImpl(
     out = new Uint8Array(length)
     out.set(data, 0)
   }
-  await write(accessor, path, out)
+  await write(accessor, path, out, handed)
 }
 
 export const truncate = eaccesOnDenied(truncateImpl)

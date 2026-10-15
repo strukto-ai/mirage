@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { streamItem } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'
@@ -21,7 +20,6 @@ import { driveLoc } from './client.ts'
 export async function* readStream(
   accessor: OneDriveAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
   yield* streamItem(
     accessor.config,

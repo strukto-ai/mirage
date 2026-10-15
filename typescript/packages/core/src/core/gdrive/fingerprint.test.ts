@@ -14,8 +14,8 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { driveFingerprint, entryFingerprint } from './fingerprint.ts'
+import { driveFingerprint } from './fingerprint.ts'
+import { statFromItem } from './readdir.ts'
 
 // Shared with the python suite, so the two hosts answer one table.
 const FIXTURE = new URL('../../../../../../integ/fixtures/gdrive/fingerprint.json', import.meta.url)
@@ -42,25 +42,26 @@ describe('driveFingerprint against the shared table', () => {
   }
 })
 
-describe('entryFingerprint', () => {
+describe('a listed row', () => {
   it('answers the md5 of a file with content', () => {
-    const entry = new IndexEntry({
+    const row = statFromItem({
       id: 'f',
       name: 'a.pdf',
-      resourceType: 'gdrive/file',
-      remoteTime: '2026-01-01T00:00:00Z',
-      extra: { md5_checksum: 'abc', head_revision_id: 'r3' },
+      mimeType: 'application/pdf',
+      modifiedTime: '2026-01-01T00:00:00Z',
+      md5Checksum: 'abc',
+      headRevisionId: 'r3',
     })
-    expect(entryFingerprint(entry)).toBe('abc')
+    expect(row.fingerprint).toBe('abc')
   })
 
   it('answers the stamp of a doc', () => {
-    const entry = new IndexEntry({
+    const row = statFromItem({
       id: 'd',
       name: 'notes',
-      resourceType: 'gdrive/gdoc',
-      remoteTime: '2026-01-01T00:00:00Z',
+      mimeType: 'application/vnd.google-apps.document',
+      modifiedTime: '2026-01-01T00:00:00Z',
     })
-    expect(entryFingerprint(entry)).toBe('2026-01-01T00:00:00Z')
+    expect(row.fingerprint).toBe('2026-01-01T00:00:00Z')
   })
 })

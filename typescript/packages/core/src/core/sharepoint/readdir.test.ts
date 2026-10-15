@@ -15,7 +15,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
 
@@ -24,7 +23,7 @@ afterEach(() => {
 })
 
 describe('SharePoint namespace listings', () => {
-  it('stamps site and drive entries with the mount prefix in output and index keys', async () => {
+  it('lists the sites, then the libraries of a site, as directories', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: unknown) => {
@@ -35,13 +34,9 @@ describe('SharePoint namespace listings', () => {
       }),
     )
     const accessor = new SharePointAccessor({ accessToken: 'token' })
-    const index = new RAMIndexCacheStore()
-
-    expect(await readdir(accessor, PathSpec.fromStrPath('/sp', ''), index)).toEqual(['/sp/Team'])
-    expect((await index.listDir('/sp')).entries).toEqual(['/sp/Team'])
-    expect(await readdir(accessor, PathSpec.fromStrPath('/sp/Team', 'Team'), index)).toEqual([
-      '/sp/Team/Documents',
-    ])
-    expect((await index.listDir('/sp/Team')).entries).toEqual(['/sp/Team/Documents'])
+    const sites = await readdir(accessor, PathSpec.fromStrPath('/sp', ''))
+    expect(sites.map((row) => [row.name, row.type])).toEqual([['Team', 'directory']])
+    const libraries = await readdir(accessor, PathSpec.fromStrPath('/sp/Team', 'Team'))
+    expect(libraries.map((row) => [row.name, row.type])).toEqual([['Documents', 'directory']])
   })
 })

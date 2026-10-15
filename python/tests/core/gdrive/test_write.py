@@ -15,9 +15,11 @@
 import pytest
 
 import mirage.core.gdrive.write as write_mod
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.write import write
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from tests.fixtures.handed import call
 
 DOC_MIME = "application/vnd.google-apps.document"
 
@@ -29,7 +31,7 @@ def spec(virtual: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_write_creates_in_existing_parent(fake_drive, gdrive_accessor):
     fake_drive.folder("a")
-    await write(gdrive_accessor, spec("/a/new.txt"), b"hello")
+    await call(write, readdir, gdrive_accessor, spec("/a/new.txt"), b"hello")
     item = fake_drive.find("new.txt")
     assert item is not None
     assert item["content"] == b"hello"
@@ -38,7 +40,7 @@ async def test_write_creates_in_existing_parent(fake_drive, gdrive_accessor):
 @pytest.mark.asyncio
 async def test_write_overwrites_same_id(fake_drive, gdrive_accessor):
     file_id = fake_drive.add("f.txt", content=b"old")
-    await write(gdrive_accessor, spec("/f.txt"), b"new")
+    await call(write, readdir, gdrive_accessor, spec("/f.txt"), b"new")
     assert fake_drive.items[file_id]["content"] == b"new"
     assert len(fake_drive.items) == 1
 
@@ -46,23 +48,25 @@ async def test_write_overwrites_same_id(fake_drive, gdrive_accessor):
 @pytest.mark.asyncio
 async def test_write_missing_parent_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
-        await write(gdrive_accessor, spec("/no/f.txt"), b"x")
+        await call(write, readdir, gdrive_accessor, spec("/no/f.txt"), b"x")
 
 
 @pytest.mark.asyncio
 async def test_write_to_folder_raises(fake_drive, gdrive_accessor):
     fake_drive.folder("d")
     with pytest.raises(IsADirectoryError):
-        await write(gdrive_accessor, spec("/d"), b"x")
+        await call(write, readdir, gdrive_accessor, spec("/d"), b"x")
     with pytest.raises(IsADirectoryError):
-        await write(gdrive_accessor, spec("/"), b"x")
+        await call(write, readdir, gdrive_accessor, spec("/"), b"x")
 
 
 @pytest.mark.asyncio
 async def test_write_to_native_raises(fake_drive, gdrive_accessor):
     fake_drive.add("Report", mime=DOC_MIME)
     with pytest.raises(PermissionError):
-        await write(gdrive_accessor, spec("/Report.gdoc.json"), b"x")
+        await call(
+            write, readdir, gdrive_accessor, spec("/Report.gdoc.json"), b"x"
+        )
 
 
 @pytest.mark.asyncio
@@ -74,7 +78,7 @@ async def test_write_records_the_virtual_path(fake_drive, gdrive_accessor):
     )
     scope = RecordingScope()
     try:
-        await write(gdrive_accessor, spec, b"hello")
+        await call(write, readdir, gdrive_accessor, spec, b"hello")
     finally:
         scope.close()
     assert fake_drive.find("k.txt")["content"] == b"hello"
@@ -116,7 +120,7 @@ def _replying(fn, overrides):
 async def _write_recorded(accessor, virtual: str, data: bytes, monkeypatch):
     scope = RecordingScope()
     try:
-        await write(accessor, spec(virtual), data)
+        await call(write, readdir, accessor, spec(virtual), data)
     finally:
         scope.close()
     rows = [

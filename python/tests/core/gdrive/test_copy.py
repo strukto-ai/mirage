@@ -16,7 +16,9 @@
 import pytest
 
 from mirage.core.gdrive.copy import copy
+from mirage.core.gdrive.readdir import readdir
 from mirage.types import PathSpec
+from tests.fixtures.handed import call
 
 
 def spec(virtual: str) -> PathSpec:
@@ -26,7 +28,9 @@ def spec(virtual: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_copy_file(fake_drive, gdrive_accessor):
     fake_drive.add("src.txt", content=b"data")
-    await copy(gdrive_accessor, spec("/src.txt"), spec("/dst.txt"))
+    await call(
+        copy, readdir, gdrive_accessor, spec("/src.txt"), dst=spec("/dst.txt")
+    )
     dst = fake_drive.find("dst.txt")
     assert dst is not None
     assert dst["content"] == b"data"
@@ -37,7 +41,9 @@ async def test_copy_file(fake_drive, gdrive_accessor):
 async def test_copy_overwrites_existing_file(fake_drive, gdrive_accessor):
     fake_drive.add("src.txt", content=b"new")
     fake_drive.add("dst.txt", content=b"old")
-    await copy(gdrive_accessor, spec("/src.txt"), spec("/dst.txt"))
+    await call(
+        copy, readdir, gdrive_accessor, spec("/src.txt"), dst=spec("/dst.txt")
+    )
     dst = fake_drive.find("dst.txt")
     assert dst is not None
     assert dst["content"] == b"new"
@@ -49,7 +55,9 @@ async def test_copy_file_onto_dir_raises(fake_drive, gdrive_accessor):
     fake_drive.add("src.txt", content=b"x")
     fake_drive.folder("d")
     with pytest.raises(IsADirectoryError):
-        await copy(gdrive_accessor, spec("/src.txt"), spec("/d"))
+        await call(
+            copy, readdir, gdrive_accessor, spec("/src.txt"), dst=spec("/d")
+        )
 
 
 @pytest.mark.asyncio
@@ -58,7 +66,7 @@ async def test_copy_tree_creates_missing_dir(fake_drive, gdrive_accessor):
     sub = fake_drive.folder("sub", parent=src)
     fake_drive.add("f.txt", parent=sub, content=b"deep")
     fake_drive.add("top.txt", parent=src, content=b"top")
-    await copy(gdrive_accessor, spec("/src"), spec("/dst"))
+    await call(copy, readdir, gdrive_accessor, spec("/src"), dst=spec("/dst"))
     dst = fake_drive.find("dst")
     assert dst is not None
     for name in ("sub", "f.txt", "top.txt"):
@@ -74,7 +82,7 @@ async def test_copy_tree_merges_existing_dir(fake_drive, gdrive_accessor):
     fake_drive.add("f.txt", parent=src, content=b"x")
     dst = fake_drive.folder("dst")
     fake_drive.add("keep.txt", parent=dst, content=b"k")
-    await copy(gdrive_accessor, spec("/src"), spec("/dst"))
+    await call(copy, readdir, gdrive_accessor, spec("/src"), dst=spec("/dst"))
     dst_children = [
         i for i in fake_drive.items.values() if dst in i["parents"]
     ]
@@ -86,10 +94,18 @@ async def test_copy_dir_onto_file_raises(fake_drive, gdrive_accessor):
     fake_drive.folder("src")
     fake_drive.add("f.txt", content=b"x")
     with pytest.raises(NotADirectoryError):
-        await copy(gdrive_accessor, spec("/src"), spec("/f.txt"))
+        await call(
+            copy, readdir, gdrive_accessor, spec("/src"), dst=spec("/f.txt")
+        )
 
 
 @pytest.mark.asyncio
 async def test_copy_missing_src_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
-        await copy(gdrive_accessor, spec("/missing.txt"), spec("/dst.txt"))
+        await call(
+            copy,
+            readdir,
+            gdrive_accessor,
+            spec("/missing.txt"),
+            dst=spec("/dst.txt"),
+        )

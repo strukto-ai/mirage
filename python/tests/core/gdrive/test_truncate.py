@@ -14,8 +14,10 @@
 
 import pytest
 
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.truncate import truncate
 from mirage.types import PathSpec
+from tests.fixtures.handed import call
 
 
 def spec(virtual: str) -> PathSpec:
@@ -25,20 +27,20 @@ def spec(virtual: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_truncate_shrinks(fake_drive, gdrive_accessor):
     file_id = fake_drive.add("f.txt", content=b"abcdef")
-    await truncate(gdrive_accessor, spec("/f.txt"), 3)
+    await call(truncate, readdir, gdrive_accessor, spec("/f.txt"), 3)
     assert fake_drive.items[file_id]["content"] == b"abc"
 
 
 @pytest.mark.asyncio
 async def test_truncate_pads(fake_drive, gdrive_accessor):
     file_id = fake_drive.add("f.txt", content=b"ab")
-    await truncate(gdrive_accessor, spec("/f.txt"), 4)
+    await call(truncate, readdir, gdrive_accessor, spec("/f.txt"), 4)
     assert fake_drive.items[file_id]["content"] == b"ab\x00\x00"
 
 
 @pytest.mark.asyncio
 async def test_truncate_creates_missing(fake_drive, gdrive_accessor):
-    await truncate(gdrive_accessor, spec("/new.txt"), 2)
+    await call(truncate, readdir, gdrive_accessor, spec("/new.txt"), 2)
     item = fake_drive.find("new.txt")
     assert item is not None
     assert item["content"] == b"\x00\x00"
@@ -48,4 +50,4 @@ async def test_truncate_creates_missing(fake_drive, gdrive_accessor):
 async def test_truncate_folder_raises(fake_drive, gdrive_accessor):
     fake_drive.folder("d")
     with pytest.raises(IsADirectoryError):
-        await truncate(gdrive_accessor, spec("/d"), 0)
+        await call(truncate, readdir, gdrive_accessor, spec("/d"), 0)

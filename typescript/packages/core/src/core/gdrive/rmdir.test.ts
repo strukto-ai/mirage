@@ -22,6 +22,8 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { rmdir } from './rmdir.ts'
@@ -41,23 +43,29 @@ function spec(virtual: string): PathSpec {
 describe('gdrive rmdir', () => {
   it('removes a dir', async () => {
     fake.folder('d')
-    await rmdir(accessor, spec('/d'))
+    await rmdir(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d')))
     expect(fake.find('d')).toBeNull()
   })
 
   it('missing target raises ENOENT', async () => {
-    await expect(rmdir(accessor, spec('/missing'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      rmdir(accessor, spec('/missing'), await handedAt(readdir, accessor, spec('/missing'))),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('file target raises ENOTDIR', async () => {
     fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await expect(rmdir(accessor, spec('/f.txt'))).rejects.toMatchObject({ code: 'ENOTDIR' })
+    await expect(
+      rmdir(accessor, spec('/f.txt'), await handedAt(readdir, accessor, spec('/f.txt'))),
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 
   it('refuses a folder holding a file and keeps both', async () => {
     const folder = fake.folder('d')
     fake.add('a.txt', folder, undefined, ENC.encode('a'))
-    await expect(rmdir(accessor, spec('/d'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    await expect(
+      rmdir(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d'))),
+    ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
     expect(fake.find('d')).not.toBeNull()
     expect(fake.find('a.txt')).not.toBeNull()
   })
@@ -65,7 +73,9 @@ describe('gdrive rmdir', () => {
   it('refuses a folder holding a subfolder', async () => {
     const folder = fake.folder('d')
     fake.folder('sub', folder)
-    await expect(rmdir(accessor, spec('/d'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    await expect(
+      rmdir(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d'))),
+    ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
     expect(fake.find('d')).not.toBeNull()
     expect(fake.find('sub')).not.toBeNull()
   })

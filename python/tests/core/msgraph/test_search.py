@@ -19,10 +19,8 @@ import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
 from mirage.core.msgraph.search import files_containing
 from mirage.core.onedrive.client import drive_loc
-from mirage.core.onedrive.readdir import readdir
 from mirage.types import PathSpec
 
 _BASE = "https://graph.microsoft.com/v1.0/me/drive"
@@ -31,20 +29,11 @@ DOCS = {"value": [{"id": "3", "name": "b.txt", "size": 7, "file": {}}]}
 ACCESSOR = OneDriveAccessor(OneDriveConfig(access_token="tok"))
 
 
-async def ask(
-    text: str, vfs_path: str = "", index: IndexCacheStore | None = None
-) -> list[PathSpec] | None:
+async def ask(text: str, vfs_path: str = "") -> list[PathSpec] | None:
     virtual = "/od/" + vfs_path if vfs_path else "/od"
     scope = PathSpec(vfs_path=vfs_path, virtual=virtual, directory=virtual)
     loc = drive_loc(ACCESSOR.config, vfs_path)
-    return await files_containing(
-        ACCESSOR.config,
-        readdir,
-        ACCESSOR,
-        [(scope, loc)],
-        text,
-        index or RAMIndexCacheStore(),
-    )
+    return await files_containing(ACCESSOR.config, [(scope, loc)], text)
 
 
 @pytest.mark.asyncio
@@ -86,20 +75,11 @@ async def test_the_text_is_quoted_and_searched_from_the_scope():
 
 @pytest.mark.asyncio
 async def test_a_file_listed_without_an_id_answers_none():
-    index = RAMIndexCacheStore()
-    two = {"value": DOCS["value"] + [{"id": "4", "name": "d.txt", "file": {}}]}
+    two = {"value": DOCS["value"] + [{"name": "d.txt", "file": {}}]}
     with aioresponses() as m:
         m.get(_BASE + "/root:/Docs:/children", payload=two)
-        await readdir(
-            ACCESSOR, PathSpec.from_str_path("/od/Docs", "Docs"), index
-        )
-    entry = (await index.get("/od/Docs/d.txt")).entry
-    assert entry is not None
-    entry.extra.pop("id")
-    await index.put("/od/Docs/d.txt", entry)
-    with aioresponses() as m:
         m.get(_SEARCH, payload={"value": [{"id": "3"}]})
-        assert await ask("wombat", "Docs", index) is None
+        assert await ask("wombat", "Docs") is None
 
 
 @pytest.mark.asyncio

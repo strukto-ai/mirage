@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
 import type { DriveFile } from '../google/drive.ts'
 import { FOLDER_MIME, MIME_TO_EXT, listFiles } from '../google/drive.ts'
-import { resolveDir } from './resolve.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 // The rendered vfs filename for a Drive item.
@@ -25,15 +24,17 @@ function vfsName(item: DriveFile): string {
   return ext !== undefined ? `${item.name}${ext}` : item.name
 }
 
-// Walk a folder subtree, yielding [mount-relative path, item, isDir].
-// Children are visited in vfs-name order so every traversal-based command
-// (find, du) is deterministic, mirroring the python iter_tree contract.
+// Walk the subtree of the folder `folderId` (in shared drive `driveId`) at
+// `path`, yielding [mount-relative path, item, isDir]. Children are visited
+// in vfs-name order so every traversal-based command (find, du) is
+// deterministic, mirroring the python iter_tree contract.
 export async function* iterTree(
   accessor: GDriveAccessor,
   path: PathSpec,
+  folderId: string,
+  driveId: string | null,
 ): AsyncIterable<[string, DriveFile, boolean]> {
   const base = path.vfsPath
-  const [folderId, driveId] = await resolveDir(accessor, base, path.virtual)
   const stack: [string, string, string | null][] = [[base, folderId, driveId]]
   for (let head = stack.shift(); head !== undefined; head = stack.shift()) {
     const [rel, fid, did] = head

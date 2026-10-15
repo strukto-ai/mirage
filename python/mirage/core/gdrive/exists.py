@@ -13,17 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.gdrive.resolve import resolve_key
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def exists(
-    accessor: GDriveAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: GDriveAccessor, path: PathSpec, entry: FileStat | None = None
 ) -> bool:
-    key = path.vfs_path
-    if not key:
-        return True
-    return await resolve_key(accessor, key) is not None
+    """Whether anything is at ``path``: the mount root, or a row its
+    parent's listing named.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        path (PathSpec): the path.
+        entry (FileStat | None): what is at the path.
+    """
+    return entry is not None or not path.vfs_path.strip("/")

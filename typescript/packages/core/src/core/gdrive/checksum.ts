@@ -13,13 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { driveBase, googleGet } from '../google/client.ts'
-import { driveFingerprint } from './fingerprint.ts'
+import { NATIVE_RESOURCE_TYPES, driveFingerprint } from './fingerprint.ts'
 import { fileEntry } from './read.ts'
-import { NATIVE_RESOURCE_TYPES } from './readdir.ts'
 
 // The digests Drive keeps for a file's content, by hashlib name.
 const DIGEST_FIELDS: Readonly<Record<string, string>> = {
@@ -42,16 +40,17 @@ export async function checksum(
   accessor: GDriveAccessor,
   path: PathSpec,
   algorithm: string,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): Promise<string | null> {
   const field = DIGEST_FIELDS[algorithm]
   if (field === undefined || revisionFor(path.virtual) !== null) return null
-  const entry = await fileEntry(accessor, path, index)
-  if (NATIVE_RESOURCE_TYPES.has(entry.resourceType)) return null
+  const row = fileEntry(path, entry)
+  const resourceType = row.extra.resource_type as string
+  if (NATIVE_RESOURCE_TYPES.has(resourceType)) return null
   const tm = accessor.tokenManager
   const timer = startOp()
   const fields = [...new Set([field, 'md5Checksum', 'headRevisionId'])]
-  const item = (await googleGet(tm, `${driveBase(tm)}/files/${entry.id}`, {
+  const item = (await googleGet(tm, `${driveBase(tm)}/files/${row.extra.file_id as string}`, {
     fields: fields.join(','),
     supportsAllDrives: 'true',
   })) as Record<string, unknown>
@@ -59,7 +58,7 @@ export async function checksum(
   if (typeof found !== 'string' || found === '') return null
   const revision = item.headRevisionId
   record('read', path.virtual, 'gdrive', 0, timer, {
-    fingerprint: driveFingerprint(entry.resourceType, item.md5Checksum, revision, entry.remoteTime),
+    fingerprint: driveFingerprint(resourceType, item.md5Checksum, revision, row.modified),
     revision: typeof revision === 'string' ? revision : null,
   })
   return found.toLowerCase()

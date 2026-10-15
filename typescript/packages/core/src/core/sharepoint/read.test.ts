@@ -114,7 +114,7 @@ describe('an unrecorded SharePoint read', () => {
       [ITEM]: itemJson('i'),
       [DOWNLOAD]: () => new Response(new TextEncoder().encode('llo'), { status: 206 }),
     })
-    const data = await read(scoped(), path, undefined, { offset: 2, size: 3 })
+    const data = await read(scoped(), path, { offset: 2, size: 3 })
     expect(new TextDecoder().decode(data)).toBe('llo')
     expect(calls.at(-1)).toEqual([DOWNLOAD, undefined, 'bytes=2-4'])
   })

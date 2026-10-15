@@ -21,10 +21,8 @@ vi.mock('../google/client.ts', async () => {
 })
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import * as client from '../google/client.ts'
 import type { TokenManager } from '../google/client.ts'
 import { checksum } from './checksum.ts'
@@ -34,12 +32,12 @@ const accessor = new GDriveAccessor({
   tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
 })
 
-async function indexed(resourceType: string): Promise<RAMIndexCacheStore> {
-  const index = new RAMIndexCacheStore()
-  await index.setDir('/', [
-    ['r.pdf', new IndexEntry({ id: 'f1', name: 'r.pdf', resourceType, vfsName: 'r.pdf' })],
-  ])
-  return index
+function row(resourceType: string): FileStat {
+  return new FileStat({
+    name: 'r.pdf',
+    type: FileType.FILE,
+    extra: { file_id: 'f1', resource_type: resourceType },
+  })
 }
 
 beforeEach(() => {
@@ -55,9 +53,8 @@ describe('Drive checksum', () => {
   ])('answers the %s Drive keeps', async (algorithm, field) => {
     const reply = { md5Checksum: 'm5', headRevisionId: 'h1', [field]: 'ABC123' }
     vi.mocked(client.googleGet).mockResolvedValue(reply)
-    const index = await indexed('gdrive/file')
     const [found, records] = await runWithRecording(() =>
-      checksum(accessor, SCOPE, algorithm, index),
+      checksum(accessor, SCOPE, algorithm, row('gdrive/file')),
     )
     expect(found).toBe('abc123')
     const params = vi.mocked(client.googleGet).mock.calls[0]?.[2] as { fields: string }
@@ -71,16 +68,15 @@ describe('Drive checksum', () => {
 
   // Mirrors python's test_a_native_file_or_another_algorithm_reads.
   it('reads a native file or another algorithm', async () => {
-    expect(await checksum(accessor, SCOPE, 'md5', await indexed('gdrive/gdoc'))).toBeNull()
-    expect(await checksum(accessor, SCOPE, 'sha512', await indexed('gdrive/file'))).toBeNull()
+    expect(await checksum(accessor, SCOPE, 'md5', row('gdrive/gdoc'))).toBeNull()
+    expect(await checksum(accessor, SCOPE, 'sha512', row('gdrive/file'))).toBeNull()
     expect(client.googleGet).not.toHaveBeenCalled()
   })
 
   // Mirrors python's test_a_pinned_revision_reads.
   it('reads a pinned revision', async () => {
-    const index = await indexed('gdrive/file')
     const found = await runWithRevisions(new Map([[SCOPE.virtual, 'r7']]), () =>
-      checksum(accessor, SCOPE, 'md5', index),
+      checksum(accessor, SCOPE, 'md5', row('gdrive/file')),
     )
     expect(found).toBeNull()
     expect(client.googleGet).not.toHaveBeenCalled()

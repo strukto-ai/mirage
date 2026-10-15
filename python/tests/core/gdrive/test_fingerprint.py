@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from mirage.cache.index import IndexEntry
-from mirage.core.gdrive.fingerprint import drive_fingerprint, entry_fingerprint
+from mirage.core.gdrive.fingerprint import drive_fingerprint
+from mirage.core.gdrive.readdir import stat_from_item
 
 # Shared with the TypeScript suite, so the two hosts answer one table.
 _FIXTURE = (
@@ -50,22 +50,27 @@ def test_drive_fingerprint_matches_the_shared_table(name):
     )
 
 
-def test_an_entry_of_a_file_with_content_answers_its_md5():
-    entry = IndexEntry(
-        id="f",
-        name="a.pdf",
-        resource_type="gdrive/file",
-        remote_time="2026-01-01T00:00:00Z",
-        extra={"md5_checksum": "abc", "head_revision_id": "r3"},
+def test_a_listed_file_with_content_answers_its_md5():
+    row = stat_from_item(
+        {
+            "id": "f",
+            "name": "a.pdf",
+            "mimeType": "application/pdf",
+            "modifiedTime": "2026-01-01T00:00:00Z",
+            "md5Checksum": "abc",
+            "headRevisionId": "r3",
+        }
     )
-    assert entry_fingerprint(entry) == "abc"
+    assert row.fingerprint == "abc"
 
 
-def test_an_entry_of_a_doc_answers_its_stamp():
-    entry = IndexEntry(
-        id="d",
-        name="notes",
-        resource_type="gdrive/gdoc",
-        remote_time="2026-01-01T00:00:00Z",
+def test_a_listed_doc_answers_its_stamp():
+    row = stat_from_item(
+        {
+            "id": "d",
+            "name": "notes",
+            "mimeType": "application/vnd.google-apps.document",
+            "modifiedTime": "2026-01-01T00:00:00Z",
+        }
     )
-    assert entry_fingerprint(entry) == "2026-01-01T00:00:00Z"
+    assert row.fingerprint == "2026-01-01T00:00:00Z"

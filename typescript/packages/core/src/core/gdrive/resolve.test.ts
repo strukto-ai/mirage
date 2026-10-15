@@ -28,16 +28,10 @@ import {
   makeScopedGDriveAccessor,
   resetFakeDrive,
 } from './_test_util.ts'
-import { PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
 import { GoogleApiError } from '../google/client.ts'
-import {
-  driveTargetName,
-  eaccesOnDenied,
-  queryCandidates,
-  resolveDir,
-  resolveKey,
-  resolveParent,
-} from './resolve.ts'
+import { readdir } from './readdir.ts'
+import { driveTargetName, eaccesOnDenied, parentFolder, rootContext } from './resolve.ts'
 
 const FOLDER_MIME_TEST = 'application/vnd.google-apps.folder'
 
@@ -49,74 +43,30 @@ beforeEach(() => {
   fake = resetFakeDrive()
 })
 
+async function rows(
+  listed: Promise<readonly FileStat[] | DirListing>,
+): Promise<readonly FileStat[]> {
+  const found = await listed
+  return found instanceof DirListing ? found.entries : found
+}
+
 describe('gdrive resolve', () => {
-  it('resolves nested paths', async () => {
-    const a = fake.folder('a')
-    const b = fake.folder('b', a)
-    const id = fake.add('f.txt', b, undefined, ENC.encode('x'))
-    const node = await resolveKey(accessor, 'a/b/f.txt')
-    expect(node?.id).toBe(id)
-  })
-
-  it('returns null for missing paths', async () => {
-    fake.folder('a')
-    expect(await resolveKey(accessor, 'a/missing.txt')).toBeNull()
-    expect(await resolveKey(accessor, 'nope/f.txt')).toBeNull()
-  })
-
-  it('file in the middle raises ENOTDIR', async () => {
-    fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await expect(resolveKey(accessor, 'f.txt/child')).rejects.toMatchObject({ code: 'ENOTDIR' })
-  })
-
-  it('resolves native suffixes', async () => {
-    const id = fake.add('Report', 'root', DOC_MIME)
-    const node = await resolveKey(accessor, 'Report.gdoc.json')
-    expect(node?.id).toBe(id)
-  })
-
-  it('prefers a literal name over the native interpretation', async () => {
-    const literal = fake.add('x.gdoc.json', 'root', undefined, ENC.encode('raw'))
-    fake.add('x', 'root', DOC_MIME)
-    const node = await resolveKey(accessor, 'x.gdoc.json')
-    expect(node?.id).toBe(literal)
-  })
-
-  it('resolveDir handles root and error cases', async () => {
-    expect(await resolveDir(accessor, '', '/')).toEqual(['root', null])
-    const d = fake.folder('d')
-    expect((await resolveDir(accessor, 'd', '/d'))[0]).toBe(d)
-    fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await expect(resolveDir(accessor, 'f.txt', '/f.txt')).rejects.toMatchObject({
-      code: 'ENOTDIR',
-    })
-    await expect(resolveDir(accessor, 'missing', '/missing')).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
-
-  it('queryCandidates and driveTargetName', () => {
-    expect(queryCandidates('plain.txt')).toEqual([['plain.txt', null]])
-    const cands = queryCandidates('r.gdoc.json')
-    expect(cands[0]).toEqual(['r.gdoc.json', null])
-    expect(cands).toContainEqual(['r', DOC_MIME])
-    const doc = { id: '1', name: 'r', mimeType: DOC_MIME, driveId: null }
-    const plain = { id: '2', name: 'f', mimeType: 'text/plain', driveId: null }
-    expect(driveTargetName('new.gdoc.json', doc)).toBe('new')
-    expect(driveTargetName('new.gdoc.json', plain)).toBe('new.gdoc.json')
-    expect(driveTargetName('new.txt', doc)).toBe('new.txt')
+  it('names a native file without its rendered suffix', () => {
+    expect(driveTargetName('new.gdoc.json', DOC_MIME)).toBe('new')
+    expect(driveTargetName('new.gdoc.json', 'text/plain')).toBe('new.gdoc.json')
+    expect(driveTargetName('new.txt', DOC_MIME)).toBe('new.txt')
   })
 })
 
 describe('gdrive resolve with a folder scope', () => {
-  it('resolves relative to the configured folder', async () => {
+  it('lists the configured folder', async () => {
     const scope = fake.folder('scope')
     const inner = fake.add('f.txt', scope, undefined, ENC.encode('in'))
     fake.add('f.txt', 'root', undefined, ENC.encode('out'))
     const scoped = makeScopedGDriveAccessor(scope)
-    const node = await resolveKey(scoped, 'f.txt')
-    expect(node?.id).toBe(inner)
-    expect(await resolveDir(scoped, '', '/')).toEqual([scope, null])
+    expect(await rootContext(scoped)).toEqual([scope, null])
+    const listed = await rows(readdir(scoped, PathSpec.fromStrPath('/')))
+    expect(listed.map((row) => row.extra.file_id)).toEqual([inner])
   })
 })
 
@@ -125,11 +75,10 @@ describe('gdrive resolve with a shared-drive scope', () => {
     const scope = fake.add('team', 'root', FOLDER_MIME_TEST, new Uint8Array(0), 'd1')
     const inner = fake.add('f.txt', scope, undefined, ENC.encode('in'), 'd1')
     const scoped = makeScopedGDriveAccessor(scope)
-    expect(await resolveDir(scoped, '', '/')).toEqual([scope, 'd1'])
-    expect(await resolveDir(scoped, '', '/')).toEqual([scope, 'd1'])
-    const node = await resolveKey(scoped, 'f.txt')
-    expect(node?.id).toBe(inner)
-    expect(node?.driveId).toBe('d1')
+    expect(await rootContext(scoped)).toEqual([scope, 'd1'])
+    expect(await rootContext(scoped)).toEqual([scope, 'd1'])
+    const listed = await rows(readdir(scoped, PathSpec.fromStrPath('/')))
+    expect(listed.map((row) => [row.extra.file_id, row.extra.drive_id])).toEqual([[inner, 'd1']])
   })
 })
 
@@ -152,14 +101,31 @@ describe('eaccesOnDenied', () => {
   })
 })
 
-it.each(['missing', 'file', 'file/sub'])(
-  'resolveParent names the full operand for %s parents',
-  async (parent) => {
-    fake.add('file', 'root', undefined, ENC.encode('x'))
-    const path = PathSpec.fromStrPath(`/drive/${parent}/child`, `${parent}/child`)
-    await expect(resolveParent(accessor, path)).rejects.toMatchObject({
-      code: parent === 'missing' ? 'ENOENT' : 'ENOTDIR',
+describe('parentFolder', () => {
+  it('lands a create at the root in the root folder', async () => {
+    const path = PathSpec.fromStrPath('/drive/new.txt', 'new.txt')
+    expect(await parentFolder(accessor, path, null)).toEqual(['root', null])
+  })
+
+  it('lands a create in the folder its parent names', async () => {
+    const folder = new FileStat({
+      name: 'a',
+      type: FileType.DIRECTORY,
+      extra: { file_id: 'f1', drive_id: 'd1' },
+    })
+    const path = PathSpec.fromStrPath('/drive/a/new.txt', 'a/new.txt')
+    expect(await parentFolder(accessor, path, folder)).toEqual(['f1', 'd1'])
+  })
+
+  it.each(['missing', 'file'])('names the operand for a %s parent', async (kind) => {
+    const parent =
+      kind === 'missing'
+        ? null
+        : new FileStat({ name: 'a', type: FileType.FILE, extra: { file_id: 'f1' } })
+    const path = PathSpec.fromStrPath('/drive/a/child', 'a/child')
+    await expect(parentFolder(accessor, path, parent)).rejects.toMatchObject({
+      code: kind === 'missing' ? 'ENOENT' : 'ENOTDIR',
       virtualPath: path.virtual,
     })
-  },
-)
+  })
+})

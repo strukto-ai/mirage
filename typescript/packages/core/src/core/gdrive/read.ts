@@ -12,12 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { entryOrWarm } from '../../cache/index/warm.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import {
   record,
   recordStream,
@@ -31,10 +27,8 @@ import { captureFileMetadata, downloadRevision, downloadRevisionStream } from '.
 import { readSpreadsheet } from '../gsheets/read.ts'
 import { readPresentation } from '../gslides/read.ts'
 import type { TokenManager } from '../google/client.ts'
-import { driveFingerprint, entryFingerprint } from './fingerprint.ts'
+import { NATIVE_RESOURCE_TYPES, driveFingerprint } from './fingerprint.ts'
 import { Md5, md5HexAsync } from '../../utils/hash.ts'
-import { DIRECTORY_RESOURCE_TYPES, NATIVE_RESOURCE_TYPES, readdir } from './readdir.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { sliceWindow, windowFor } from '../../utils/ranges.ts'
 
@@ -54,15 +48,15 @@ async function staleMd5(md5: unknown, data: Uint8Array): Promise<boolean> {
 
 // Download a binary file honouring snapshot revision pins. A pinned path
 // reads that revision's content. Otherwise the token comes from a capture when
-// a recorder is bound and from the index entry when none is, so it never
-// depends on the recorder; the entry's revision is not pinned, since it can be
-// a TTL old. Either md5 is checked against the bytes, and a stale one drops
-// the token and the revision with it.
+// a recorder is bound and from the listed row when none is, so it never
+// depends on the recorder; the row's revision is not pinned, since it can be a
+// TTL old. Either md5 is checked against the bytes, and a stale one drops the
+// token and the revision with it.
 export async function readFileVersioned(
   tm: TokenManager,
   fileId: string,
   virtual: string,
-  entry: IndexEntry,
+  entry: FileStat,
   offset = 0,
   size: number | null = null,
 ): Promise<Uint8Array> {
@@ -81,14 +75,29 @@ export async function readFileVersioned(
     data = await downloadFile(tm, fileId, window)
     if (whole && (await staleMd5(md5, data))) revision = null
     else if (whole)
-      fingerprint = driveFingerprint(entry.resourceType, md5, revision, entry.remoteTime)
+      fingerprint = driveFingerprint(
+        entry.extra.resource_type as string,
+        md5,
+        revision,
+        entry.modified,
+      )
   } else {
     data = await downloadFile(tm, fileId, window)
-    if (whole && !(await staleMd5(entry.extra.md5_checksum, data)))
-      fingerprint = entryFingerprint(entry)
+    if (whole && !(await staleMd5(entry.extra.md5_checksum, data))) fingerprint = entry.fingerprint
   }
   record('read', virtual, 'gdrive', data.length, timer, { fingerprint, revision })
   return data
+}
+
+/**
+ * What is at the file `path`, as its parent's listing named it. Rejects
+ * ENOENT when nothing is there and EISDIR when a folder is. Mirrors Python's
+ * `file_entry`.
+ */
+export function fileEntry(path: PathSpec, entry: FileStat | null | undefined): FileStat {
+  if (entry === null || entry === undefined) throw enoent(path.virtual)
+  if (entry.type === FileType.DIRECTORY) throw eisdir(path.virtual)
+  return entry
 }
 
 /**
@@ -101,57 +110,31 @@ export async function readFileVersioned(
  * Args:
  *   accessor: Drive accessor.
  *   path: the path to read.
- *   index: listing cache, consulted for the file id.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
+ *   entry: what is at the path.
  */
-/**
- * The index entry of the file at `path`, listing its parent when the index
- * does not hold it. Rejects ENOENT when nothing is there and EISDIR when a
- * folder is. Mirrors Python's `file_entry`.
- */
-export async function fileEntry(
-  accessor: GDriveAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<IndexEntry> {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const key = path.vfsPath
-  if (index === undefined) throw enoent(path.virtual)
-  const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
-  const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-  const entry = await entryOrWarm(
-    index,
-    virtualKey,
-    parentKey !== virtualKey
-      ? () => readdir(accessor, PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix)), index)
-      : null,
-  )
-  if (entry === null) throw enoent(path.virtual)
-  if (DIRECTORY_RESOURCE_TYPES.has(entry.resourceType)) throw eisdir(path.virtual)
-  return entry
-}
-
 export async function read(
   accessor: GDriveAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
+  entry?: FileStat | null,
 ): Promise<Uint8Array> {
   const offset = options?.offset ?? 0
   const size = options?.size ?? null
-  const entry = await fileEntry(accessor, path, index)
-  const rt = entry.resourceType
+  const found = fileEntry(path, entry)
+  const fileId = found.extra.file_id as string
+  const rt = found.extra.resource_type as string
   if (!NATIVE_RESOURCE_TYPES.has(rt))
-    return readFileVersioned(accessor.tokenManager, entry.id, path.virtual, entry, offset, size)
+    return readFileVersioned(accessor.tokenManager, fileId, path.virtual, found, offset, size)
   const timer = startOp()
   let rendered: Uint8Array
-  if (rt === 'gdrive/gdoc') rendered = await readDoc(accessor.tokenManager, entry.id)
-  else if (rt === 'gdrive/gsheet') rendered = await readSpreadsheet(accessor.tokenManager, entry.id)
-  else rendered = await readPresentation(accessor.tokenManager, entry.id)
+  if (rt === 'gdrive/gdoc') rendered = await readDoc(accessor.tokenManager, fileId)
+  else if (rt === 'gdrive/gsheet') rendered = await readSpreadsheet(accessor.tokenManager, fileId)
+  else rendered = await readPresentation(accessor.tokenManager, fileId)
   const sliced = sliceWindow(rendered, offset, size)
   // No revision: a pin would replace the drift check a render relies on.
   record('read', path.virtual, 'gdrive', sliced.length, timer, {
-    fingerprint: wholeFile(offset, size) ? entryFingerprint(entry) : null,
+    fingerprint: wholeFile(offset, size) ? found.fingerprint : null,
     revision: null,
   })
   return sliced
@@ -167,11 +150,12 @@ export async function read(
 export async function* readStream(
   accessor: GDriveAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): AsyncGenerator<Uint8Array, void> {
-  const entry = await fileEntry(accessor, path, index)
-  if (NATIVE_RESOURCE_TYPES.has(entry.resourceType)) {
-    yield await read(accessor, path, index)
+  const found = fileEntry(path, entry)
+  const fileId = found.extra.file_id as string
+  if (NATIVE_RESOURCE_TYPES.has(found.extra.resource_type as string)) {
+    yield await read(accessor, path, undefined, found)
     return
   }
   const tm = accessor.tokenManager
@@ -181,10 +165,10 @@ export async function* readStream(
   let revision: string | null = null
   let chunks: AsyncGenerator<Uint8Array, void>
   if (pinned !== null) {
-    chunks = downloadRevisionStream(tm, entry.id, pinned)
+    chunks = downloadRevisionStream(tm, fileId, pinned)
   } else {
-    if (rec !== null) [md5, revision] = await captureFileMetadata(tm, entry.id)
-    chunks = downloadFileStream(tm, entry.id)
+    if (rec !== null) [md5, revision] = await captureFileMetadata(tm, fileId)
+    chunks = downloadFileStream(tm, fileId)
   }
   const digest = md5 !== null && md5 !== '' ? new Md5() : null
   for await (const chunk of chunks) {
@@ -195,5 +179,10 @@ export async function* readStream(
   if (rec === null || pinned !== null) return
   if (digest !== null && digest.digest() !== md5) return
   rec.revision = revision
-  rec.fingerprint = driveFingerprint(entry.resourceType, md5, revision, entry.remoteTime)
+  rec.fingerprint = driveFingerprint(
+    found.extra.resource_type as string,
+    md5,
+    revision,
+    found.modified,
+  )
 }

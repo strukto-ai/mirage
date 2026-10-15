@@ -13,18 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
+from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.google.drive import delete_file, list_files
 from mirage.errors.fs import enoent, enotdir, enotempty
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 @eacces_on_denied
 async def rmdir(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
 ) -> None:
     """Remove an empty folder.
 
@@ -40,24 +39,21 @@ async def rmdir(
     Args:
         accessor (GDriveAccessor): Google Drive accessor.
         path (PathSpec): folder to remove.
-        index (IndexCacheStore): accepted for the rmdir slot's shape;
-            unused.
+        entry (FileStat | None): what is at the path.
     """
     virtual = path.virtual
-    key = path.vfs_path
-    if not key:
+    if not path.vfs_path:
         return
-    node = await resolve_key(accessor, key)
-    if node is None:
+    if entry is None:
         raise enoent(virtual)
-    if not node.is_folder:
+    if entry.type is not FileType.DIRECTORY:
         raise enotdir(virtual)
     children = await list_files(
         accessor.token_manager,
-        folder_id=node.id,
-        drive_id=node.drive_id,
+        folder_id=entry.extra["file_id"],
+        drive_id=entry.extra.get("drive_id"),
         limit=1,
     )
     if children:
         raise enotempty(path)
-    await delete_file(accessor.token_manager, node.id)
+    await delete_file(accessor.token_manager, entry.extra["file_id"])

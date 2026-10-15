@@ -13,11 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import type { DriveLoc } from '../msgraph/drive.ts'
 import { filesContaining as graphFiles } from '../msgraph/search.ts'
-import { readdir } from './readdir.ts'
 import { driveLoc, resolve } from './resolve.ts'
 
 /**
@@ -29,7 +27,6 @@ export async function filesContaining(
   accessor: SharePointAccessor,
   text: string,
   under: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const scopes: [PathSpec, DriveLoc][] = []
   for (const directory of under) {
@@ -37,5 +34,5 @@ export async function filesContaining(
     if ((resolved.level !== 'drive' && resolved.level !== 'item') || !resolved.driveId) return null
     scopes.push([directory, driveLoc(accessor.config, resolved, directory.vfsPath)])
   }
-  return graphFiles(accessor.config, readdir, accessor, scopes, text, index)
+  return graphFiles(accessor.config, scopes, text)
 }

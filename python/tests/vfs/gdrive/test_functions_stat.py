@@ -12,16 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.types import FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
 from tests.fixtures.vfs_io import call_over
@@ -48,56 +44,28 @@ def accessor():
     return GDriveAccessor(config=config, token_manager=TokenManager(config))
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_stat_root_is_directory(accessor, index):
-    result = await stat(accessor, _scope("/"), index=index)
+async def test_stat_root_is_directory(accessor):
+    result = await stat(accessor, _scope("/"))
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_indexed_file(accessor, index):
-    await index.set_dir(
-        "/docs",
-        [
-            (
-                "readme.txt",
-                IndexEntry(
-                    id="file123",
-                    name="readme",
-                    resource_type="gdrive/file",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="readme.txt",
-                    size=7,
-                ),
-            )
-        ],
+async def test_stat_answers_the_listed_row(accessor):
+    row = FileStat(
+        name="readme.txt",
+        type=FileType.FILE,
+        size=7,
+        extra={"file_id": "file123", "resource_type": "gdrive/file"},
     )
-    result = await stat(accessor, _scope("/docs/readme.txt"), index=index)
+    result = await stat(accessor, _scope("/docs/readme.txt"), entry=row)
     assert result.name == "readme.txt"
     assert result.size == 7
     assert result.extra["file_id"] == "file123"
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor, index):
-    await index.set_dir("/", [])
-    with (
-        patch(
-            "mirage.core.gdrive.resolve.list_files",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-        patch(
-            "mirage.core.gdrive.resolve.list_shared_drives",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
-    ):
-        with pytest.raises(FileNotFoundError):
-            await stat(accessor, _scope("/nonexistent.txt"), index=index)
+async def test_stat_not_found(accessor):
+    with pytest.raises(FileNotFoundError):
+        await stat(accessor, _scope("/nonexistent.txt"))

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.drive import read_item
 from mirage.core.onedrive.client import drive_loc
 from mirage.types import PathSpec
@@ -22,7 +21,6 @@ from mirage.types import PathSpec
 async def read(
     accessor: OneDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -31,8 +29,6 @@ async def read(
     Args:
         accessor (OneDriveAccessor): OneDrive accessor.
         path (PathSpec): the path to read.
-        index (IndexCacheStore): unused; Graph resolves the item from the
-            path itself.
         offset (int): first byte of the window.
         size (int | None): window length, or None for the rest.
     """

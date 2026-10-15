@@ -15,10 +15,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
-import { stat } from './stat.ts'
 
 const NOT_FOUND = (): Response =>
   new Response(JSON.stringify({ error: { code: 'itemNotFound' } }), { status: 404 })
@@ -30,7 +28,7 @@ afterEach(() => {
 })
 
 describe('OneDrive readdir', () => {
-  it('indexes a listing so a stat below it is answered with its cTag', async () => {
+  it('answers each child as stat does, with its cTag', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -51,12 +49,10 @@ describe('OneDrive readdir', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const index = new RAMIndexCacheStore()
     const folder = PathSpec.fromStrPath('/od/folder', 'folder')
-    const file = PathSpec.fromStrPath('/od/folder/a.txt', 'folder/a.txt')
-
-    expect(await readdir(accessor, folder, index)).toEqual(['/od/folder/a.txt'])
-    expect(await stat(accessor, file, index)).toMatchObject({ size: 3, fingerprint: 'ctag-1' })
+    const rows = await readdir(accessor, folder)
+    expect(rows.map((row) => row.name)).toEqual(['a.txt'])
+    expect(rows[0]).toMatchObject({ size: 3, fingerprint: 'ctag-1' })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -76,13 +72,13 @@ describe('OneDrive readdir', () => {
     )
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
     const path = PathSpec.fromStrPath(`/od/${key}`, key)
-    await expect(readdir(accessor, path, new RAMIndexCacheStore())).rejects.toMatchObject({ code })
+    await expect(readdir(accessor, path)).rejects.toMatchObject({ code })
   })
 
-  it('keeps the cold order in a cached listing', async () => {
+  it('lists in code-point order', async () => {
     // Graph may answer in UTF-16 order, which puts an astral name before a
-    // private-use one; the index must hand back the code-point order the
-    // cold listing returned, or a second walk reorders grep's output.
+    // private-use one; the rows come back in code-point order, or a walk
+    // reorders grep's output.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -98,10 +94,7 @@ describe('OneDrive readdir', () => {
       ),
     )
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const index = new RAMIndexCacheStore()
-    const root = PathSpec.fromStrPath('/od', '')
-    const cold = await readdir(accessor, root, index)
-    expect(cold).toEqual(['/od/\uE000.txt', '/od/\u{1F600}.txt'])
-    expect(await readdir(accessor, root, index)).toEqual(cold)
+    const rows = await readdir(accessor, PathSpec.fromStrPath('/od', ''))
+    expect(rows.map((row) => row.name)).toEqual(['\uE000.txt', '\u{1F600}.txt'])
   })
 })

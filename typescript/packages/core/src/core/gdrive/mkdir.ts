@@ -13,47 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-
-import type { PathSpec } from '../../types.ts'
-import { eexist, enotdir } from '../../errors/fs.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
+import { eexist } from '../../errors/fs.ts'
 import { createFolder } from '../google/drive.ts'
-import {
-  eaccesOnDenied,
-  isFolder,
-  nodeFromItem,
-  resolveParent,
-  resolveSegment,
-  rootContext,
-} from './resolve.ts'
+import { statFromItem } from './readdir.ts'
+import { eaccesOnDenied, parentFolder } from './resolve.ts'
 
-async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = false): Promise<void> {
+/**
+ * Make one folder inside the folder its parent path names. `mkdir -p`
+ * reaches here one level at a time, each handed the level above as its
+ * parent. Mirrors Python's `mkdir`.
+ */
+async function mkdirImpl(
+  accessor: GDriveAccessor,
+  path: PathSpec,
+  parents = false,
+  handed: Handed = {},
+): Promise<FileStat | null> {
   const key = path.vfsPath
-  const tm = accessor.tokenManager
   if (key === '') {
-    if (parents) return
+    if (parents) return null
     throw eexist(path)
   }
-  if (!parents) {
-    const [parentId] = await resolveParent(accessor, path)
-    const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-    await createFolder(tm, basename, parentId)
-    return
-  }
-  let [parentId, driveId] = await rootContext(accessor)
-  const segments = key.split('/').filter((s) => s !== '')
-  for (const [i, segment] of segments.entries()) {
-    let node = await resolveSegment(tm, parentId, segment, driveId, i === 0 && parentId === 'root')
-    if (node === null) {
-      node = nodeFromItem(await createFolder(tm, segment, parentId), driveId)
-    } else if (!isFolder(node)) {
-      // -p only silences EEXIST for directories: a file at the leaf is
-      // File exists, a file in the middle is Not a directory.
-      if (i === segments.length - 1) throw eexist(path)
-      throw enotdir(path)
-    }
-    parentId = node.id
-    driveId = node.driveId
-  }
+  const [parentId] = await parentFolder(accessor, path, handed.parent)
+  const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
+  return statFromItem(await createFolder(accessor.tokenManager, basename, parentId))
 }
 
 export const mkdir = eaccesOnDenied(mkdirImpl)

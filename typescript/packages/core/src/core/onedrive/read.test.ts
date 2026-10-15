@@ -105,7 +105,7 @@ describe('an unrecorded OneDrive read', () => {
       [ITEM]: () => itemJson(),
       [DOWNLOAD]: () => new Response(new TextEncoder().encode('hello'), { status: 200 }),
     })
-    const data = await read(accessor(), path, undefined, { offset: 2, size: 3 })
+    const data = await read(accessor(), path, { offset: 2, size: 3 })
     expect(new TextDecoder().decode(data)).toBe('llo')
     expect(calls[1]).toEqual([DOWNLOAD, undefined, 'bytes=2-4'])
   })

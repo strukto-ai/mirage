@@ -18,7 +18,6 @@ import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.sharepoint.search import files_containing
 from mirage.types import PathSpec
 
@@ -60,7 +59,6 @@ async def test_a_library_scope_searches_from_the_library_root():
             _accessor(),
             "wombat",
             [scope("Engineering/Documents")],
-            RAMIndexCacheStore(),
         )
     assert out is not None
     assert [p.virtual for p in out] == ["/sp/Engineering/Documents/b.txt"]
@@ -71,6 +69,6 @@ async def test_a_scope_above_a_library_answers_none():
     for vfs_path in ("", "Engineering"):
         with aioresponses():
             out = await files_containing(
-                _accessor(), "wombat", [scope(vfs_path)], RAMIndexCacheStore()
+                _accessor(), "wombat", [scope(vfs_path)]
             )
         assert out is None

@@ -13,23 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.client import GraphError, graph_get
-from mirage.core.msgraph.drive import (
-    folder_child_count,
-    stat_item,
-    virtual_key,
-)
+from mirage.core.msgraph.drive import folder_child_count, stat_item
 from mirage.core.onedrive.client import drive_loc
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 
 
-async def stat(
-    accessor: OneDriveAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
+async def stat(accessor: OneDriveAccessor, path: PathSpec) -> FileStat:
     if not path.vfs_path:
         # The mount root is a real Graph item (`/drive/root` or the
         # key_prefix folder); fetch it so modified is populated instead of
@@ -59,7 +50,5 @@ async def stat(
         accessor.config,
         drive_loc(accessor.config, path.vfs_path),
         path.virtual,
-        virtual_key(path),
-        index,
         session=accessor.pool,
     )

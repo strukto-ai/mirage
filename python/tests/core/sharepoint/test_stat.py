@@ -2,7 +2,6 @@ import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.sharepoint.read import read
 from mirage.core.sharepoint.readdir import readdir
 from mirage.core.sharepoint.stat import stat
@@ -142,8 +141,7 @@ async def test_stat_missing_raises_file_not_found():
 
 
 @pytest.mark.asyncio
-async def test_stat_from_index_after_readdir():
-    index = RAMIndexCacheStore()
+async def test_a_listed_row_is_the_stat():
     with aioresponses() as m:
         m.get(
             f"{_BASE}/drives/{_DRIVE_ID}/root/children",
@@ -164,23 +162,17 @@ async def test_stat_from_index_after_readdir():
             virtual="/sp/Engineering/Documents",
             directory="/sp/Engineering/Documents",
         )
-        await readdir(_accessor(), parent, index)
-    path = PathSpec(
-        vfs_path=mount_key("/sp/Engineering/Documents/notes.txt", "/sp"),
-        virtual="/sp/Engineering/Documents/notes.txt",
-        directory="/sp/Engineering/Documents/notes.txt",
-    )
-    result = await stat(_accessor(), path, index)
+        result = (await readdir(_accessor(), parent))[0]
     assert result.name == "notes.txt"
     assert result.size == 42
     assert result.modified == "2026-06-19T09:28:00Z"
 
 
 @pytest.mark.asyncio
-async def test_stat_from_index_carries_the_ctag():
-    # A listing already names each file's cTag, so a stat served from it
-    # carries the same token a network stat does; a folder carries none.
-    index = RAMIndexCacheStore()
+async def test_a_listed_row_carries_the_ctag():
+    # A listing already names each file's cTag, so the row the mount
+    # answers a stat with carries the same token a network stat does; a
+    # folder carries none.
     with aioresponses() as m:
         m.get(
             f"{_BASE}/drives/{_DRIVE_ID}/root/children",
@@ -206,13 +198,8 @@ async def test_stat_from_index_carries_the_ctag():
                 ]
             },
         )
-        await readdir(_accessor(), _ps("/sp/Engineering/Documents"), index)
-    notes = await stat(
-        _accessor(), _ps("/sp/Engineering/Documents/notes.txt"), index
-    )
-    docs = await stat(
-        _accessor(), _ps("/sp/Engineering/Documents/Docs"), index
-    )
+        rows = await readdir(_accessor(), _ps("/sp/Engineering/Documents"))
+    docs, notes = rows
     assert notes.fingerprint == "c1"
     assert (notes.extra["ctag"], notes.extra["etag"]) == ("c1", "e1")
     assert docs.type == FileType.DIRECTORY
@@ -251,7 +238,6 @@ async def test_stat_size_matches_read_for_every_file():
         "/Docs/report.docx": b"docx bytes",
     }
     drive = f"{_BASE}/drives/{_DRIVE_ID}"
-    index = RAMIndexCacheStore()
     accessor = _accessor()
     with aioresponses() as m:
         m.get(
@@ -307,9 +293,9 @@ async def test_stat_size_matches_read_for_every_file():
         stack = ["/sp/Engineering/Documents"]
         while stack:
             current = stack.pop()
-            listing = await readdir(accessor, _ps(current), index)
-            for child in listing:
-                info = await stat(accessor, _ps(child), index)
+            listing = await readdir(accessor, _ps(current))
+            for info in listing:
+                child = f"{current}/{info.name}"
                 if info.type == FileType.DIRECTORY:
                     stack.append(child)
                 else:

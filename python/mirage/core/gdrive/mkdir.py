@@ -15,51 +15,38 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.resolve import (
-    eacces_on_denied,
-    node_from_item,
-    resolve_parent,
-    resolve_segment,
-    root_context,
-)
+from mirage.core.gdrive.readdir import stat_from_item
+from mirage.core.gdrive.resolve import eacces_on_denied, parent_folder
 from mirage.core.google.drive import create_folder
-from mirage.errors.fs import eexist, enotdir
-from mirage.types import PathSpec
+from mirage.errors.fs import eexist
+from mirage.types import FileStat, PathSpec
 
 
 @eacces_on_denied
 async def mkdir(
-    accessor: GDriveAccessor, path: PathSpec, parents: bool = False
-) -> None:
-    virtual = path.virtual
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    parents: bool = False,
+    parent: FileStat | None = None,
+) -> FileStat | None:
+    """Make one folder inside the folder its parent path names.
+
+    ``mkdir -p`` reaches here one level at a time, each handed the
+    level above as its parent.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        path (PathSpec): the folder to make.
+        parents (bool): whether the mount root is already enough.
+        parent (FileStat | None): what is at the parent path.
+    """
     key = path.vfs_path
-    token_manager = accessor.token_manager
     if not key:
         if parents:
-            return
-        raise eexist(virtual)
-    if not parents:
-        parent_id, _ = await resolve_parent(accessor, path)
-        await create_folder(token_manager, posixpath.basename(key), parent_id)
-        return
-    parent_id, drive_id = await root_context(accessor)
-    segments = [s for s in key.split("/") if s]
-    for i, segment in enumerate(segments):
-        node = await resolve_segment(
-            token_manager,
-            parent_id,
-            segment,
-            drive_id,
-            at_root=i == 0 and parent_id == "root",
-        )
-        if node is None:
-            item = await create_folder(token_manager, segment, parent_id)
-            node = node_from_item(item, drive_id)
-        elif not node.is_folder:
-            # -p only silences EEXIST for directories: a file at the leaf is
-            # File exists, a file in the middle is Not a directory.
-            if i == len(segments) - 1:
-                raise eexist(virtual)
-            raise enotdir(virtual)
-        parent_id = node.id
-        drive_id = node.drive_id
+            return None
+        raise eexist(path.virtual)
+    parent_id, _ = await parent_folder(accessor, path, parent)
+    item = await create_folder(
+        accessor.token_manager, posixpath.basename(key), parent_id
+    )
+    return stat_from_item(item)

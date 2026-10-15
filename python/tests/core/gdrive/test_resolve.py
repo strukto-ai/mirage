@@ -18,111 +18,35 @@ from multidict import CIMultiDict, CIMultiDictProxy
 from yarl import URL
 
 import mirage.core.gdrive.resolve as resolve_mod
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.resolve import (
-    DriveNode,
     drive_target_name,
     eacces_on_denied,
-    query_candidates,
-    resolve_dir,
-    resolve_key,
-    resolve_parent,
+    parent_folder,
+    root_context,
 )
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 DOC_MIME = "application/vnd.google-apps.document"
 
 
-@pytest.mark.asyncio
-async def test_resolve_key_nested(fake_drive, gdrive_accessor):
-    folder = fake_drive.folder("a")
-    sub = fake_drive.folder("b", parent=folder)
-    file_id = fake_drive.add("f.txt", parent=sub, content=b"x")
-    node = await resolve_key(gdrive_accessor, "a/b/f.txt")
-    assert node is not None
-    assert node.id == file_id
-    assert not node.is_folder
-
-
-@pytest.mark.asyncio
-async def test_resolve_key_missing_returns_none(fake_drive, gdrive_accessor):
-    fake_drive.folder("a")
-    assert await resolve_key(gdrive_accessor, "a/missing.txt") is None
-    assert await resolve_key(gdrive_accessor, "nope/f.txt") is None
-
-
-@pytest.mark.asyncio
-async def test_resolve_key_file_in_middle_raises(fake_drive, gdrive_accessor):
-    fake_drive.add("f.txt", content=b"x")
-    with pytest.raises(NotADirectoryError):
-        await resolve_key(gdrive_accessor, "f.txt/child")
-
-
-@pytest.mark.asyncio
-async def test_resolve_key_native_suffix(fake_drive, gdrive_accessor):
-    doc_id = fake_drive.add("Report", mime=DOC_MIME)
-    node = await resolve_key(gdrive_accessor, "Report.gdoc.json")
-    assert node is not None
-    assert node.id == doc_id
-    assert node.is_native
-
-
-@pytest.mark.asyncio
-async def test_resolve_key_prefers_literal_name(fake_drive, gdrive_accessor):
-    literal = fake_drive.add("x.gdoc.json", content=b"raw")
-    fake_drive.add("x", mime=DOC_MIME)
-    node = await resolve_key(gdrive_accessor, "x.gdoc.json")
-    assert node is not None
-    assert node.id == literal
-
-
-@pytest.mark.asyncio
-async def test_resolve_dir_root_and_errors(fake_drive, gdrive_accessor):
-    assert await resolve_dir(gdrive_accessor, "", "/") == ("root", None)
-    folder = fake_drive.folder("d")
-    assert (await resolve_dir(gdrive_accessor, "d", "/d"))[0] == folder
-    fake_drive.add("f.txt")
-    with pytest.raises(NotADirectoryError):
-        await resolve_dir(gdrive_accessor, "f.txt", "/f.txt")
-    with pytest.raises(FileNotFoundError):
-        await resolve_dir(gdrive_accessor, "missing", "/missing")
-
-
-@pytest.mark.asyncio
-async def test_resolve_parent(fake_drive, gdrive_accessor):
-    folder = fake_drive.folder("a")
-    path = PathSpec(virtual="/a/new.txt", directory="/a", vfs_path="a/new.txt")
-    assert (await resolve_parent(gdrive_accessor, path))[0] == folder
-
-
-def test_query_candidates():
-    assert query_candidates("plain.txt") == [("plain.txt", None)]
-    cands = query_candidates("r.gdoc.json")
-    assert cands[0] == ("r.gdoc.json", None)
-    assert ("r", DOC_MIME) in cands
-    # A bare suffix is not a native candidate.
-    assert query_candidates(".gdoc.json") == [(".gdoc.json", None)]
-
-
 def test_drive_target_name():
-    doc = DriveNode(id="1", name="r", mime_type=DOC_MIME)
-    plain = DriveNode(id="2", name="f", mime_type="text/plain")
-    assert drive_target_name("new.gdoc.json", doc) == "new"
-    assert drive_target_name("new.gdoc.json", plain) == "new.gdoc.json"
-    assert drive_target_name("new.txt", doc) == "new.txt"
+    assert drive_target_name("new.gdoc.json", DOC_MIME) == "new"
+    assert drive_target_name("new.gdoc.json", "text/plain") == "new.gdoc.json"
+    assert drive_target_name("new.txt", DOC_MIME) == "new.txt"
 
 
 @pytest.mark.asyncio
-async def test_resolve_scoped_to_folder(fake_drive, scoped_accessor):
+async def test_a_scoped_mount_lists_its_folder(fake_drive, scoped_accessor):
     scope = fake_drive.folder("scope")
     inner = fake_drive.add("f.txt", parent=scope, content=b"in")
     fake_drive.add("f.txt", content=b"out")
     accessor = scoped_accessor(scope)
-    node = await resolve_key(accessor, "f.txt")
-    assert node is not None
-    assert node.id == inner
-    assert await resolve_dir(accessor, "", "/") == (scope, None)
+    assert await root_context(accessor) == (scope, None)
+    rows = await readdir(accessor, PathSpec.from_str_path("/"))
+    assert [row.extra["file_id"] for row in rows] == [inner]
 
 
 @pytest.mark.asyncio
@@ -130,11 +54,11 @@ async def test_root_context_shared_drive_scope(fake_drive, scoped_accessor):
     scope = fake_drive.add("team", mime=FOLDER_MIME, drive_id="d1")
     inner = fake_drive.add("f.txt", parent=scope, drive_id="d1")
     accessor = scoped_accessor(scope)
-    assert await resolve_dir(accessor, "", "/") == (scope, "d1")
-    node = await resolve_key(accessor, "f.txt")
-    assert node is not None
-    assert node.id == inner
-    assert node.drive_id == "d1"
+    assert await root_context(accessor) == (scope, "d1")
+    rows = await readdir(accessor, PathSpec.from_str_path("/"))
+    assert [(row.extra["file_id"], row.extra["drive_id"]) for row in rows] == [
+        (inner, "d1")
+    ]
 
 
 @pytest.mark.asyncio
@@ -151,8 +75,8 @@ async def test_root_context_memoizes_drive_lookup(
         return await fake_drive.get_file(token_manager, file_id)
 
     monkeypatch.setattr(resolve_mod, "get_file", counting_get_file)
-    assert await resolve_dir(accessor, "", "/") == (scope, "d1")
-    assert await resolve_dir(accessor, "", "/") == (scope, "d1")
+    assert await root_context(accessor) == (scope, "d1")
+    assert await root_context(accessor) == (scope, "d1")
     assert calls == 1
 
 
@@ -181,15 +105,38 @@ async def test_eacces_on_denied_maps_403():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("parent", ["missing", "file", "file/sub"])
-async def test_resolve_parent_error_names_full_operand(
-    fake_drive, gdrive_accessor, parent
+async def test_a_create_at_the_root_lands_in_the_root_folder(
+    fake_drive, gdrive_accessor
 ):
-    fake_drive.add("file", content=b"x")
-    path = PathSpec.from_str_path(
-        f"/drive/{parent}/child", vfs_path=f"{parent}/child"
+    path = PathSpec.from_str_path("/drive/new.txt", vfs_path="new.txt")
+    assert await parent_folder(gdrive_accessor, path, None) == ("root", None)
+
+
+@pytest.mark.asyncio
+async def test_a_create_lands_in_the_folder_its_parent_names(
+    fake_drive, gdrive_accessor
+):
+    folder = FileStat(
+        name="a",
+        type=FileType.DIRECTORY,
+        extra={"file_id": "f1", "drive_id": "d1"},
     )
-    error = FileNotFoundError if parent == "missing" else NotADirectoryError
+    path = PathSpec.from_str_path("/drive/a/new.txt", vfs_path="a/new.txt")
+    assert await parent_folder(gdrive_accessor, path, folder) == ("f1", "d1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["missing", "file"])
+async def test_a_parent_that_is_no_folder_names_the_operand(
+    fake_drive, gdrive_accessor, kind
+):
+    parent = (
+        None
+        if kind == "missing"
+        else FileStat(name="a", type=FileType.FILE, extra={"file_id": "f1"})
+    )
+    path = PathSpec.from_str_path("/drive/a/child", vfs_path="a/child")
+    error = FileNotFoundError if kind == "missing" else NotADirectoryError
     with pytest.raises(error) as raised:
-        await resolve_parent(gdrive_accessor, path)
+        await parent_folder(gdrive_accessor, path, parent)
     assert raised.value.filename == path.virtual

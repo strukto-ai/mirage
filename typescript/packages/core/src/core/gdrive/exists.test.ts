@@ -22,6 +22,8 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { exists } from './exists.ts'
@@ -41,8 +43,22 @@ function spec(virtual: string): PathSpec {
 describe('gdrive exists', () => {
   it('root, present and missing paths', async () => {
     fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    expect(await exists(accessor, spec('/'))).toBe(true)
-    expect(await exists(accessor, spec('/f.txt'))).toBe(true)
-    expect(await exists(accessor, spec('/missing.txt'))).toBe(false)
+    expect(
+      await exists(accessor, spec('/'), (await handedAt(readdir, accessor, spec('/'))).entry),
+    ).toBe(true)
+    expect(
+      await exists(
+        accessor,
+        spec('/f.txt'),
+        (await handedAt(readdir, accessor, spec('/f.txt'))).entry,
+      ),
+    ).toBe(true)
+    expect(
+      await exists(
+        accessor,
+        spec('/missing.txt'),
+        (await handedAt(readdir, accessor, spec('/missing.txt'))).entry,
+      ),
+    ).toBe(false)
   })
 })

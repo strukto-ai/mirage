@@ -19,7 +19,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.index import IndexCacheStore
-from mirage.cache.index.config import IndexEntry
+from mirage.types import FileStat, FileType
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace.files import Files
 
@@ -41,12 +41,14 @@ async def test_read_gdoc_via_filetype_cascade():
         [
             (
                 "report.gdoc.json",
-                IndexEntry(
-                    id="doc123",
-                    name="Report",
-                    resource_type="gdrive/gdoc",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="report.gdoc.json",
+                FileStat(
+                    name="report.gdoc.json",
+                    type=FileType.FILE,
+                    modified="2026-04-01T00:00:00Z",
+                    extra={
+                        "file_id": "doc123",
+                        "resource_type": "gdrive/gdoc",
+                    },
                 ),
             )
         ],
@@ -70,12 +72,14 @@ async def test_read_plain_file_falls_through():
         [
             (
                 "notes.txt",
-                IndexEntry(
-                    id="file789",
-                    name="notes",
-                    resource_type="gdrive/file",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="notes.txt",
+                FileStat(
+                    name="notes.txt",
+                    type=FileType.FILE,
+                    modified="2026-04-01T00:00:00Z",
+                    extra={
+                        "file_id": "file789",
+                        "resource_type": "gdrive/file",
+                    },
                 ),
             )
         ],
@@ -106,12 +110,14 @@ async def test_readdir():
         [
             (
                 "report.gdoc.json",
-                IndexEntry(
-                    id="doc123",
-                    name="Report",
-                    resource_type="gdrive/gdoc",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="report.gdoc.json",
+                FileStat(
+                    name="report.gdoc.json",
+                    type=FileType.FILE,
+                    modified="2026-04-01T00:00:00Z",
+                    extra={
+                        "file_id": "doc123",
+                        "resource_type": "gdrive/gdoc",
+                    },
                 ),
             )
         ],

@@ -13,30 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { directoryPath, readdirItems, virtualKey } from '../msgraph/drive.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { directoryPath, readdirItems } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'
 
-export async function readdir(
-  accessor: OneDriveAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
+export async function readdir(accessor: OneDriveAccessor, path: PathSpec): Promise<FileStat[]> {
   const target = directoryPath(path)
-  const key = virtualKey(path)
-  if (index !== undefined) {
-    const cached = await index.listDir(key)
-    if (cached.entries !== undefined && cached.entries !== null) return cached.entries
-  }
-  return readdirItems(
-    accessor.config,
-    driveLoc(accessor.config, target.vfsPath),
-    index,
-    mountPrefixOf(target.virtual, target.vfsPath),
-    target.vfsPath,
-    key,
-    target,
-  )
+  return readdirItems(accessor.config, driveLoc(accessor.config, target.vfsPath), target)
 }

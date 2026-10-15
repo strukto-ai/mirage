@@ -15,18 +15,13 @@
 import posixpath
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.msgraph.drive import stat_item, virtual_key
+from mirage.core.msgraph.drive import stat_item
 from mirage.core.sharepoint.resolve import drive_loc, require_item, resolve
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 
 
-async def stat(
-    accessor: SharePointAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
+async def stat(accessor: SharePointAccessor, path: PathSpec) -> FileStat:
     if not path.vfs_path:
         return FileStat(name="/", type=FileType.DIRECTORY)
     resolved = await resolve(accessor, path)
@@ -45,7 +40,5 @@ async def stat(
         accessor.config,
         drive_loc(accessor.config, resolved, path.vfs_path),
         path.virtual,
-        virtual_key(path),
-        index,
         session=accessor.pool,
     )

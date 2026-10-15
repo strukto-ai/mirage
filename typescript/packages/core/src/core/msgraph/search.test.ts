@@ -15,11 +15,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { driveLoc } from '../onedrive/client.ts'
-import { readdir } from '../onedrive/readdir.ts'
 import { filesContaining } from './search.ts'
 
 const BASE = 'https://graph.microsoft.com/v1.0/me/drive'
@@ -54,18 +51,10 @@ function graph(routes: Record<string, () => Promise<Response>>): string[] {
 
 const ok = (body: unknown) => (): Promise<Response> => Promise.resolve(json(body))
 
-function ask(text: string, vfsPath = '', index?: IndexCacheStore): Promise<PathSpec[] | null> {
+function ask(text: string, vfsPath = ''): Promise<PathSpec[] | null> {
   const virtual = vfsPath === '' ? '/od' : `/od/${vfsPath}`
   const scope = new PathSpec({ virtual, directory: virtual, vfsPath, resolved: false })
-  const scopes = [[scope, driveLoc(ACCESSOR.config, vfsPath)] as const]
-  return filesContaining(
-    ACCESSOR.config,
-    readdir,
-    ACCESSOR,
-    scopes,
-    text,
-    index ?? new RAMIndexCacheStore(),
-  )
+  return filesContaining(ACCESSOR.config, [[scope, driveLoc(ACCESSOR.config, vfsPath)]], text)
 }
 
 describe('msgraph filesContaining', () => {
@@ -95,19 +84,13 @@ describe('msgraph filesContaining', () => {
   })
 
   it('answers null when a listed file has no id', async () => {
-    const index = new RAMIndexCacheStore()
     graph({
       [`${BASE}/root:/Docs:/children`]: ok({
-        value: [...DOCS, { id: '4', name: 'd.txt', file: {} }],
+        value: [...DOCS, { name: 'd.txt', file: {} }],
       }),
       search: ok({ value: [{ id: '3' }] }),
     })
-    await readdir(ACCESSOR, PathSpec.fromStrPath('/od/Docs', 'Docs'), index)
-    const entry = (await index.get('/od/Docs/d.txt')).entry
-    if (entry === null || entry === undefined) throw new Error('d.txt not indexed')
-    delete entry.extra.id
-    await index.put('/od/Docs/d.txt', entry)
-    expect(await ask('wombat', 'Docs', index)).toBeNull()
+    expect(await ask('wombat', 'Docs')).toBeNull()
   })
 
   it.each([

@@ -13,18 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import type { PathSpec } from '../../types.ts'
+import { type FileStat, FileType, type PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import type { TokenManager } from '../google/client.ts'
-import { FOLDER_MIME, copyFile, createFolder, deleteFile, listFiles } from '../google/drive.ts'
+import { copyFile, createFolder, deleteFile, listFiles } from '../google/drive.ts'
+import { statFromItem } from './readdir.ts'
 import type { DriveNode } from './resolve.ts'
 import {
   driveTargetName,
   eaccesOnDenied,
   isFolder,
   nodeFromItem,
-  resolveKey,
-  resolveParent,
+  nodeOf,
+  parentFolder,
 } from './resolve.ts'
 
 async function copyChildren(tm: TokenManager, src: DriveNode, dstFolderId: string): Promise<void> {
@@ -40,43 +42,53 @@ async function copyChildren(tm: TokenManager, src: DriveNode, dstFolderId: strin
   }
 }
 
-async function copyNode(
+/**
+ * Copy a file or folder server-side, handed what is at `src` and at `dst`
+ * and its parent. `cp -r` merges into an existing folder and creates a
+ * missing one, mirroring the msgraph copy_tree. Answers the stat of what the
+ * copy made, null when it merged into a folder already there. Mirrors
+ * Python's `copy`.
+ */
+async function copyImpl(
   accessor: GDriveAccessor,
-  srcNode: DriveNode,
+  src: PathSpec,
   dst: PathSpec,
-): Promise<void> {
+  _signal?: AbortSignal,
+  handed: Handed = {},
+): Promise<FileStat | null> {
+  const entry = handed.entry ?? null
+  if (entry === null) throw enoent(src)
   const tm = accessor.tokenManager
-  let dstNode = await resolveKey(accessor, dst.vfsPath)
+  const srcNode = nodeOf(entry)
+  const dstEntry = handed.dstEntry ?? null
   const dstKey = dst.vfsPath
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
   if (isFolder(srcNode)) {
-    if (dstNode !== null && !isFolder(dstNode)) throw enotdir(dst)
-    if (dstNode === null) {
-      // cp -r merges into an existing directory and creates a missing one,
-      // mirroring the msgraph copy_tree.
-      const [dstParentId] = await resolveParent(accessor, dst)
+    if (dstEntry !== null && dstEntry.type !== FileType.DIRECTORY) throw enotdir(dst)
+    let made: FileStat | null = null
+    let dstId: string
+    if (dstEntry === null) {
+      const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
       const created = await createFolder(tm, basename, dstParentId)
-      dstNode = {
-        id: created.id,
-        name: basename,
-        mimeType: FOLDER_MIME,
-        driveId: srcNode.driveId,
-      }
+      dstId = created.id
+      made = statFromItem(created)
+    } else {
+      dstId = dstEntry.extra.file_id as string
     }
-    await copyChildren(tm, srcNode, dstNode.id)
-  } else {
-    if (dstNode !== null && isFolder(dstNode)) throw eisdir(dst)
-    if (dstNode !== null) await deleteFile(tm, dstNode.id)
-    const [dstParentId] = await resolveParent(accessor, dst)
-    await copyFile(tm, srcNode.id, driveTargetName(basename, srcNode), dstParentId)
+    await copyChildren(tm, srcNode, dstId)
+    return made
   }
-}
-
-/** Copy a file or folder server-side. */
-async function copyImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const srcNode = await resolveKey(accessor, src.vfsPath)
-  if (srcNode === null) throw enoent(src)
-  await copyNode(accessor, srcNode, dst)
+  if (dstEntry !== null && dstEntry.type === FileType.DIRECTORY) throw eisdir(dst)
+  if (dstEntry !== null) await deleteFile(tm, dstEntry.extra.file_id as string)
+  const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
+  const item = await copyFile(
+    tm,
+    srcNode.id,
+    driveTargetName(basename, srcNode.mimeType),
+    dstParentId,
+  )
+  const copied: unknown = item
+  return typeof copied === 'object' && copied !== null ? statFromItem(item) : null
 }
 
 export const copy = eaccesOnDenied(copyImpl)

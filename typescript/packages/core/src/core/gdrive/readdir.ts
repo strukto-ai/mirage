@@ -12,30 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { entryOrWarm } from '../../cache/index/warm.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { PathSpec } from '../../types.ts'
-import { MIME_TO_EXT, listFiles, listSharedDrives } from '../google/drive.ts'
+import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
+import {
+  type DriveFile,
+  FOLDER_MIME,
+  MIME_TO_EXT,
+  listFiles,
+  listSharedDrives,
+} from '../google/drive.ts'
+import { driveFingerprint } from './fingerprint.ts'
 import { rootContext } from './resolve.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { enotdir, enoent } from '../../errors/fs.ts'
-
-export const DIRECTORY_RESOURCE_TYPES: ReadonlySet<string> = new Set([
-  'gdrive/folder',
-  'gdrive/shared_drive',
-])
-
-// Docs, Sheets and Slides: rendered to JSON rather than downloaded, and
-// carrying no content hash.
-export const NATIVE_RESOURCE_TYPES: ReadonlySet<string> = new Set([
-  'gdrive/gdoc',
-  'gdrive/gsheet',
-  'gdrive/gslide',
-])
 
 const RESOURCE_TYPES: Readonly<Record<string, string>> = {
   'application/vnd.google-apps.folder': 'gdrive/folder',
@@ -59,92 +49,86 @@ export function uniqueSharedDriveName(name: string, existingNames: Set<string>):
   return filename
 }
 
+/**
+ * The stat of one Drive file resource, as a listing, `files.get` or an
+ * upload's reply returns it.
+ *
+ * Pure, so an upload's reply parses the same as a stat. A missing `mimeType`
+ * reads as a plain file: natives are refused before any upload, so a reply
+ * without one names bytes. `extra` carries what the functions handed the stat
+ * act on: the file id, its shared drive, its MIME type, and the md5 and head
+ * revision a read checks. Mirrors Python's `stat_from_item`.
+ *
+ * @param item a Drive file resource with `ITEM_FIELDS`
+ */
+export function statFromItem(item: DriveFile): FileStat {
+  const mime = item.mimeType ?? ''
+  const modified = item.modifiedTime ?? ''
+  const extra: Record<string, unknown> = { file_id: item.id, mime_type: mime }
+  if (item.driveId !== undefined && item.driveId !== '') extra.drive_id = item.driveId
+  if (mime === FOLDER_MIME) {
+    return new FileStat({ name: item.name, type: FileType.DIRECTORY, modified, extra })
+  }
+  const resourceType = resourceTypeFor(mime)
+  const ext = MIME_TO_EXT[mime]
+  const vfsName = ext !== undefined ? `${item.name}${ext}` : item.name
+  if (typeof item.md5Checksum === 'string' && item.md5Checksum !== '') {
+    extra.md5_checksum = item.md5Checksum
+  }
+  if (typeof item.headRevisionId === 'string' && item.headRevisionId !== '') {
+    extra.head_revision_id = item.headRevisionId
+  }
+  // Binary files download raw, so Drive's size is the rendered byte length.
+  // Google-apps files render to JSON, so Drive's source size must not become
+  // FileStat.size (see the CLAUDE.md FUSE rules); it lives in extra instead.
+  const sourceSize = Number.parseInt(item.size ?? item.quotaBytesUsed ?? '0', 10)
+  if (ext !== undefined && Number.isFinite(sourceSize) && sourceSize > 0) {
+    extra.source_size = sourceSize
+  }
+  const size = ext === undefined && item.size !== undefined ? parseInt(item.size, 10) : null
+  return new FileStat({
+    name: vfsName,
+    size,
+    type: FileType.FILE,
+    content: contentTypeForPath(vfsName),
+    modified,
+    fingerprint: driveFingerprint(resourceType, item.md5Checksum, item.headRevisionId, modified),
+    extra: { ...extra, resource_type: resourceType },
+  })
+}
+
+/**
+ * A folder's children, each as `stat` answers it. The mount root lists the
+ * scoped folder, or My Drive and the Shared Drives the account sees; any
+ * other folder is listed by the id its parent's listing named.
+ */
 export async function readdir(
   accessor: GDriveAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const key = (path.pattern !== null ? path.dir : path).vfsPath
-  const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
-
-  if (index !== undefined) {
-    const cached = await index.listDir(virtualKey)
-    // Cached entries are slash-less, while the cold path below marks folders
-    // with a trailing slash. Callers must not infer dir-ness from the slash
-    // alone (see find's stat fallback).
-    if (cached.entries !== undefined && cached.entries !== null) return cached.entries
-  }
-
+  entry?: FileStat | null,
+): Promise<FileStat[] | DirListing> {
+  const target = path.pattern !== null ? path.dir : path
+  const atRoot = target.vfsPath.replace(/^\/+|\/+$/g, '') === ''
   let folderId: string
   let driveId: string | null = null
-  if (key === '') {
+  if (atRoot) {
     ;[folderId, driveId] = await rootContext(accessor)
+  } else if (entry === null || entry === undefined) {
+    throw enoent(path.virtual)
+  } else if (entry.type !== FileType.DIRECTORY) {
+    // Listing a file's id answers with an empty child set rather than an
+    // error, so the listing that named it decides: opendir(2) says ENOTDIR
+    // for `ls /data/a.txt/x`.
+    throw enotdir(path.virtual)
   } else {
-    if (index === undefined) {
-      throw enoent(path.virtual)
-    }
-    const parentOriginal = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-    const parentPath = PathSpec.fromStrPath(parentOriginal, mountKey(parentOriginal, prefix))
-    const entry = await entryOrWarm(index, virtualKey, () => readdir(accessor, parentPath, index))
-    if (entry === null) {
-      throw enoent(path.virtual)
-    }
-    if (!DIRECTORY_RESOURCE_TYPES.has(entry.resourceType)) {
-      // Listing a file's id answers with an empty child set rather than an
-      // error, so without this the recursion above reported
-      // `ls /data/a.txt/x` as ENOENT where opendir(2) says ENOTDIR. The
-      // index walk that resolved the path IS the ancestor walk readdirError
-      // performs, already done and already paid for, so the errno falls out
-      // of it with no extra request.
-      throw enotdir(path.virtual)
-    }
-    folderId = entry.id
+    folderId = entry.extra.file_id as string
     const entryDriveId = entry.extra.drive_id
     driveId = typeof entryDriveId === 'string' ? entryDriveId : null
   }
-
   const files = await listFiles(accessor.tokenManager, { folderId, driveId })
-  const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
-  for (const f of files) {
-    const mime = f.mimeType ?? ''
-    const ext = MIME_TO_EXT[mime] ?? ''
-    const filename = ext !== '' ? `${f.name}${ext}` : f.name
-    const resourceType = resourceTypeFor(mime)
-    const isDir = resourceType === 'gdrive/folder'
-    const sizeRaw = f.size ?? f.quotaBytesUsed ?? '0'
-    const sizeNum = Number.parseInt(sizeRaw, 10)
-    const sourceSize = Number.isFinite(sizeNum) && sizeNum > 0 ? sizeNum : null
-    // Binary files download raw, so Drive's size is the rendered byte length
-    // and stays. Google-apps files (gdoc/gsheet/gslide) render to JSON, so
-    // Drive's source size must not become FileStat.size (render-derived or
-    // null, see the CLAUDE.md FUSE rules); it lives in extra instead.
-    const extra: Record<string, unknown> = f.driveId !== undefined ? { drive_id: f.driveId } : {}
-    // Carried so stat answers the read's token without a request.
-    if (typeof f.md5Checksum === 'string' && f.md5Checksum !== '')
-      extra.md5_checksum = f.md5Checksum
-    if (typeof f.headRevisionId === 'string' && f.headRevisionId !== '')
-      extra.head_revision_id = f.headRevisionId
-    let size: number | null = null
-    if (resourceType === 'gdrive/file') {
-      size = f.size !== undefined ? Number.parseInt(f.size, 10) : null
-    } else if (sourceSize !== null) {
-      extra.source_size = sourceSize
-    }
-    const entry = new IndexEntry({
-      id: f.id,
-      name: f.name,
-      resourceType,
-      remoteTime: f.modifiedTime ?? '',
-      vfsName: filename,
-      size,
-      extra,
-    })
-    entries.push({ name: filename, entry, isDir })
-  }
-
+  const rows = files.map((f) => statFromItem(f))
   let complete = true
-  if (key === '' && folderId === 'root') {
+  if (atRoot && folderId === 'root') {
     // Shared Drive enumeration is best-effort: if the account can't list
     // them (missing scope, API error), still return My Drive contents.
     // A folder-scoped mount lists only the folder's children, so shared
@@ -156,48 +140,31 @@ export async function readdir(
       sharedDrives = []
       complete = false
     }
-    const existingNames = new Set(entries.map((e) => e.name))
+    const existingNames = new Set(rows.map((row) => row.name))
     for (const d of sharedDrives) {
       const filename = uniqueSharedDriveName(d.name, existingNames)
       existingNames.add(filename)
-      const entry = new IndexEntry({
-        id: d.id,
-        name: d.name,
-        resourceType: 'gdrive/shared_drive',
-        vfsName: filename,
-        extra: { drive_id: d.id },
-      })
-      entries.push({ name: filename, entry, isDir: true })
+      rows.push(
+        new FileStat({
+          name: filename,
+          type: FileType.DIRECTORY,
+          extra: {
+            file_id: d.id,
+            mime_type: FOLDER_MIME,
+            drive_id: d.id,
+            resource_type: 'gdrive/shared_drive',
+          },
+        }),
+      )
     }
   }
-
   // Deterministic vfs order: glob expansion and walkers follow readdir
   // order, so sort by rendered filename (Drive returns modifiedTime desc).
   // Codepoint compare, not localeCompare: python sorts by codepoint and the
   // two runners must list identically.
-  entries.sort((a, b) => compareCodePoints(a.name, b.name))
-  if (index !== undefined) {
-    if (complete) {
-      await index.setDir(
-        virtualKey,
-        entries.map((e) => [e.name, e.entry] as [string, IndexEntry]),
-      )
-    } else {
-      // Caching a listing we know is short would pin a My-Drive-only root
-      // until the entry expires, so the mount would keep hiding Shared
-      // Drives after the cause clears (a just-granted scope) with no way to
-      // force a refresh. Retain the returned metadata, but leave the
-      // directory uncached: subsequent child lookups and readdir both
-      // retry enumeration before trusting the entries.
-      const childPrefix = virtualKey === '/' ? '/' : `${virtualKey}/`
-      for (const e of entries) await index.put(childPrefix + e.name, e.entry)
-    }
-  }
-  const pathPrefix = key !== '' ? `/${key}/` : '/'
-  const out: string[] = []
-  for (const e of entries) {
-    if (e.isDir) out.push(`${prefix}${pathPrefix}${e.name}/`)
-    else out.push(`${prefix}${pathPrefix}${e.name}`)
-  }
-  return out
+  rows.sort((a, b) => compareCodePoints(a.name, b.name))
+  // A root whose Shared Drives could not be listed is short: kept as rows,
+  // it would pin a My-Drive-only root as the whole listing until it
+  // expired, hiding Shared Drives after the cause clears.
+  return complete ? rows : new DirListing({ entries: rows, partial: true })
 }

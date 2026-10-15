@@ -13,12 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from functools import partial
+from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.cache.index.warm import entry_or_warm
-from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES
+from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.resolve import root_context
 from mirage.core.google.drive import (
     FOLDER_MIME,
@@ -27,8 +25,8 @@ from mirage.core.google.drive import (
     list_shared_drives,
 )
 from mirage.errors.fs import enoent, enotdir
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.types import DirListing, FileStat, FileType, PathSpec
+from mirage.utils.filetype import content_type_for_path
 
 logger = logging.getLogger(__name__)
 
@@ -60,92 +58,97 @@ def resource_type_for(mime: str) -> str:
     return _RESOURCE_TYPES.get(mime, "gdrive/file")
 
 
+def stat_from_item(item: dict[str, Any]) -> FileStat:
+    """The stat of one Drive file resource, as a listing, ``files.get``
+    or an upload's reply returns it.
+
+    Pure, so an upload's reply parses the same as a stat. A missing
+    ``mimeType`` reads as a plain file: natives are refused before any
+    upload, so a reply without one names bytes. ``extra`` carries what
+    the functions handed the stat act on: the file id, its shared drive,
+    its MIME type, and the md5 and head revision a read checks.
+
+    Args:
+        item (dict[str, Any]): a Drive file resource with ``ITEM_FIELDS``.
+    """
+    name = item.get("name", "")
+    mime = item.get("mimeType") or ""
+    modified = item.get("modifiedTime", "")
+    extra: dict[str, Any] = {"file_id": item.get("id"), "mime_type": mime}
+    if item.get("driveId"):
+        extra["drive_id"] = item["driveId"]
+    if mime == FOLDER_MIME:
+        return FileStat(
+            name=name, type=FileType.DIRECTORY, modified=modified, extra=extra
+        )
+    resource_type = resource_type_for(mime)
+    ext = MIME_TO_EXT.get(mime)
+    vfs_name = f"{name}{ext}" if ext else name
+    if item.get("md5Checksum"):
+        extra["md5_checksum"] = item["md5Checksum"]
+    if item.get("headRevisionId"):
+        extra["head_revision_id"] = item["headRevisionId"]
+    # Binary files download raw, so Drive's size is the rendered byte
+    # length. Google-apps files render to JSON, so Drive's source size
+    # must not become FileStat.size (see the CLAUDE.md FUSE rules); it
+    # lives in extra instead.
+    source_size = int(item.get("size") or item.get("quotaBytesUsed") or 0)
+    if ext and source_size:
+        extra["source_size"] = source_size
+    size = (
+        int(item["size"]) if not ext and item.get("size") is not None else None
+    )
+    return FileStat(
+        name=vfs_name,
+        size=size,
+        type=FileType.FILE,
+        content=content_type_for_path(vfs_name),
+        modified=modified,
+        fingerprint=drive_fingerprint(
+            resource_type,
+            item.get("md5Checksum"),
+            item.get("headRevisionId"),
+            modified,
+        ),
+        extra={**extra, "resource_type": resource_type},
+    )
+
+
 async def readdir(
     accessor: GDriveAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    virtual = path_spec.virtual
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
-    path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
-    key = path.strip("/")
-    virtual_key = prefix + "/" + key if key else prefix or "/"
+    entry: FileStat | None = None,
+) -> list[FileStat] | DirListing:
+    """A folder's children, each as ``stat`` answers it.
 
-    cached = await index.list_dir(virtual_key)
-    # Cached entries are slash-less, while the cold path below marks
-    # folders with a trailing slash. Callers must not infer dir-ness
-    # from the slash alone (see find's stat fallback).
-    if cached.entries is not None:
-        return cached.entries
+    The mount root lists the scoped folder, or My Drive and the Shared
+    Drives the account sees; any other folder is listed by the id its
+    parent's listing named.
 
-    if not key:
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        path_spec (PathSpec): the folder.
+        entry (FileStat | None): what is at the folder.
+    """
+    target = path_spec.dir if path_spec.pattern else path_spec
+    if not target.vfs_path.strip("/"):
         folder_id, drive_id = await root_context(accessor)
+    elif entry is None:
+        raise enoent(path_spec.virtual)
+    elif entry.type is not FileType.DIRECTORY:
+        # Listing a file's id answers with an empty child set rather than
+        # an error, so the listing that named it decides: opendir(2) says
+        # ENOTDIR for `ls /data/a.txt/x`.
+        raise enotdir(path_spec.virtual)
     else:
-        parent_virtual = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"
-        parent_path = PathSpec.from_str_path(
-            parent_virtual, mount_key(parent_virtual, prefix)
-        )
-        entry = await entry_or_warm(
-            index, virtual_key, partial(readdir, accessor, parent_path, index)
-        )
-        if entry is None:
-            raise enoent(virtual)
-        if entry.resource_type not in DIRECTORY_RESOURCE_TYPES:
-            # Listing a file's id answers with an empty child set rather
-            # than an error, so without this the recursion above reported
-            # `ls /data/a.txt/x` as ENOENT where opendir(2) says ENOTDIR.
-            # The index walk that resolved the path IS the ancestor walk
-            # `readdir_error` performs, already done and already paid for,
-            # so the errno falls out of it with no extra request.
-            raise enotdir(virtual)
-        folder_id = entry.id
+        folder_id = entry.extra["file_id"]
         drive_id = entry.extra.get("drive_id")
-
     files = await list_files(
         accessor.token_manager, folder_id=folder_id, drive_id=drive_id
     )
-    entries = []
-    for f in files:
-        mime = f.get("mimeType", "")
-        name = f["name"]
-        ext = MIME_TO_EXT.get(mime)
-        if ext:
-            filename = f"{name}{ext}"
-        else:
-            filename = name
-        rt = resource_type_for(mime)
-        is_dir = rt == "gdrive/folder"
-        source_size = int(f.get("size") or f.get("quotaBytesUsed") or 0)
-        extra = {"drive_id": f.get("driveId")} if f.get("driveId") else {}
-        # Carried so stat answers the read's token without a request.
-        if f.get("md5Checksum"):
-            extra["md5_checksum"] = f["md5Checksum"]
-        if f.get("headRevisionId"):
-            extra["head_revision_id"] = f["headRevisionId"]
-        # Binary files download raw, so Drive's size is the rendered byte
-        # length and stays. Google-apps files (gdoc/gsheet/gslide) render to
-        # JSON, so Drive's source size must not become FileStat.size
-        # (render-derived or None, see the CLAUDE.md FUSE rules); it lives in
-        # extra instead.
-        if rt == "gdrive/file":
-            size = int(f["size"]) if f.get("size") is not None else None
-        else:
-            size = None
-            if source_size:
-                extra["source_size"] = source_size
-        entry = IndexEntry(
-            id=f["id"],
-            name=name,
-            resource_type=rt,
-            remote_time=f.get("modifiedTime", ""),
-            vfs_name=filename,
-            size=size,
-            extra=extra,
-        )
-        entries.append((filename, entry, is_dir))
-
+    rows = [stat_from_item(f) for f in files]
     complete = True
-    if not key and folder_id == "root":
+    if folder_id == "root" and not target.vfs_path.strip("/"):
         # Shared Drive enumeration is best-effort: if the account can't list
         # them (missing scope, API error), still return My Drive contents.
         # A folder-scoped mount lists only the folder's children, so shared
@@ -156,40 +159,26 @@ async def readdir(
             logger.debug("Unable to list Google Shared Drives", exc_info=True)
             shared_drives = []
             complete = False
-        existing_names = {name for name, _, _ in entries}
+        existing_names = {row.name for row in rows}
         for d in shared_drives:
-            name = d["name"]
-            filename = unique_shared_drive_name(name, existing_names)
+            filename = unique_shared_drive_name(d["name"], existing_names)
             existing_names.add(filename)
-            entry = IndexEntry(
-                id=d["id"],
-                name=name,
-                resource_type="gdrive/shared_drive",
-                vfs_name=filename,
-                extra={"drive_id": d["id"]},
+            rows.append(
+                FileStat(
+                    name=filename,
+                    type=FileType.DIRECTORY,
+                    extra={
+                        "file_id": d["id"],
+                        "mime_type": FOLDER_MIME,
+                        "drive_id": d["id"],
+                        "resource_type": "gdrive/shared_drive",
+                    },
+                )
             )
-            entries.append((filename, entry, True))
-
     # Deterministic vfs order: glob expansion and walkers follow readdir
     # order, so sort by rendered filename (Drive returns modifiedTime desc).
-    entries.sort(key=lambda e: e[0])
-    if complete:
-        await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
-    else:
-        # Caching a listing we know is short would pin a My-Drive-only root
-        # until the entry expires, so the mount would keep hiding Shared
-        # Drives after the cause clears (a just-granted scope) with no way to
-        # force a refresh. The entries are still real, so cache those and
-        # leave the directory uncached. Child lookups must refresh until a
-        # complete parent listing can prove the cached metadata is current.
-        child_prefix = "/" if virtual_key == "/" else virtual_key + "/"
-        for name, entry, _ in entries:
-            await index.put(child_prefix + name, entry)
-    path_prefix = f"/{key}/" if key else "/"
-    result_paths = []
-    for name, _, is_folder in entries:
-        if is_folder:
-            result_paths.append(f"{prefix}{path_prefix}{name}/")
-        else:
-            result_paths.append(f"{prefix}{path_prefix}{name}")
-    return result_paths
+    rows.sort(key=lambda row: row.name)
+    # A root whose Shared Drives could not be listed is short: kept as
+    # rows, it would pin a My-Drive-only root as the whole listing until
+    # it expired, hiding Shared Drives after the cause clears.
+    return rows if complete else DirListing(rows, partial=True)

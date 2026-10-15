@@ -14,11 +14,16 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { eaccesOnDenied } from './resolve.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { write } from './write.ts'
 
-async function createImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
-  await write(accessor, path, new Uint8Array(0))
+async function createImpl(
+  accessor: GDriveAccessor,
+  path: PathSpec,
+  handed: Handed = {},
+): Promise<FileStat | null> {
+  return write(accessor, path, new Uint8Array(0), handed)
 }
 
 export const create = eaccesOnDenied(createImpl)

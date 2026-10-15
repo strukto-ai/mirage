@@ -15,11 +15,11 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.readdir import stat_from_item
 from mirage.core.gdrive.resolve import (
     drive_target_name,
     eacces_on_denied,
-    resolve_key,
-    resolve_parent,
+    parent_folder,
 )
 from mirage.core.google.drive import (
     delete_file,
@@ -28,48 +28,68 @@ from mirage.core.google.drive import (
     patch_file,
 )
 from mirage.errors.fs import enoent, enotempty
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 @eacces_on_denied
 async def rename(
-    accessor: GDriveAccessor, src: PathSpec, dst: PathSpec
-) -> None:
+    accessor: GDriveAccessor,
+    src: PathSpec,
+    dst: PathSpec,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+    dst_parent: FileStat | None = None,
+    dst_entry: FileStat | None = None,
+) -> FileStat | None:
+    """Move an item, replacing what is at the destination.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        src (PathSpec): the item to move.
+        dst (PathSpec): where it lands.
+        entry (FileStat | None): what is at ``src``.
+        parent (FileStat | None): what is at ``src``'s parent path.
+        dst_parent (FileStat | None): what is at ``dst``'s parent path.
+        dst_entry (FileStat | None): what is at ``dst``.
+    """
     token_manager = accessor.token_manager
-    src_node = await resolve_key(accessor, src.vfs_path)
-    if src_node is None:
+    if entry is None:
         raise enoent(src.virtual)
-    dst_node = await resolve_key(accessor, dst.vfs_path)
-    if dst_node is not None:
+    if dst_entry is not None:
         # GNU mv overwrites the destination: drop a conflicting file (or
         # empty folder) before the move. A non-empty folder conflict is mv's
         # "Directory not empty", mirroring the msgraph rename_replace.
-        if dst_node.is_folder:
+        if dst_entry.type is FileType.DIRECTORY:
             children = await list_files(
                 token_manager,
-                folder_id=dst_node.id,
-                drive_id=dst_node.drive_id,
+                folder_id=dst_entry.extra["file_id"],
+                drive_id=dst_entry.extra.get("drive_id"),
                 limit=1,
             )
             if children:
                 raise enotempty(dst)
-        await delete_file(token_manager, dst_node.id)
-    src_parent_id, _ = await resolve_parent(accessor, src)
-    dst_parent_id, _ = await resolve_parent(accessor, dst)
-    name = drive_target_name(posixpath.basename(dst.vfs_path), src_node)
+        await delete_file(token_manager, dst_entry.extra["file_id"])
+    src_parent_id, _ = await parent_folder(accessor, src, parent)
+    dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
+    name = drive_target_name(
+        posixpath.basename(dst.vfs_path), entry.extra.get("mime_type", "")
+    )
     add_parents = dst_parent_id if dst_parent_id != src_parent_id else None
     remove_parents = src_parent_id if add_parents else None
     # Drive stamps a rename as an edit, so the time goes back as rename(2)
     # keeps it. Drive has no conditional update; reading it just before
     # leaves one request for another writer's edit to land in.
     body = {"name": name}
-    modified = (await get_file(token_manager, src_node.id)).get("modifiedTime")
+    modified = (await get_file(token_manager, entry.extra["file_id"])).get(
+        "modifiedTime"
+    )
     if modified:
         body["modifiedTime"] = modified
-    await patch_file(
+    item = await patch_file(
         token_manager,
-        src_node.id,
+        entry.extra["file_id"],
         body,
         add_parents=add_parents,
         remove_parents=remove_parents,
     )
+    return stat_from_item(item) if isinstance(item, dict) else None

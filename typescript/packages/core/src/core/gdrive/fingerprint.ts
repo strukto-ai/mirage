@@ -12,12 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '../../cache/index/config.ts'
-import { NATIVE_RESOURCE_TYPES } from './readdir.ts'
-
 function token(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null
 }
+
+// Docs, Sheets and Slides: rendered to JSON rather than downloaded, and
+// carrying no content hash.
+export const NATIVE_RESOURCE_TYPES: ReadonlySet<string> = new Set([
+  'gdrive/gdoc',
+  'gdrive/gsheet',
+  'gdrive/gslide',
+])
 
 // The token a Drive file's stat and read both stamp, chosen by kind. Drive
 // gives every file with content an md5 and a head revision. A Doc, Sheet or
@@ -32,14 +37,4 @@ export function driveFingerprint(
 ): string | null {
   if (NATIVE_RESOURCE_TYPES.has(resourceType)) return token(modified)
   return token(md5) ?? token(headRevision)
-}
-
-// The token of the file an index entry lists.
-export function entryFingerprint(entry: IndexEntry): string | null {
-  return driveFingerprint(
-    entry.resourceType,
-    entry.extra.md5_checksum,
-    entry.extra.head_revision_id,
-    entry.remoteTime,
-  )
 }

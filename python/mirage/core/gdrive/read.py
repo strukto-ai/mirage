@@ -13,18 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
-import posixpath
 from collections.abc import AsyncIterator
 from contextlib import aclosing
-from functools import partial
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.cache.index.warm import entry_or_warm
 from mirage.core.gdocs.read import read_doc
-from mirage.core.gdrive import DIRECTORY_RESOURCE_TYPES, NATIVE_RESOURCE_TYPES
-from mirage.core.gdrive.fingerprint import drive_fingerprint, entry_fingerprint
-from mirage.core.gdrive.readdir import readdir
+from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
+from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.versions import (
     capture_file_metadata,
     download_revision,
@@ -42,8 +37,7 @@ from mirage.observe.context import (
     revision_for,
     start_op,
 )
-from mirage.types import JsonValue, PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.types import FileStat, FileType, JsonValue, PathSpec
 from mirage.utils.ranges import slice_window, window_for
 
 
@@ -81,25 +75,25 @@ async def read_file_versioned(
     token_manager: TokenManager,
     file_id: str,
     virtual: str,
-    entry: IndexEntry,
+    entry: FileStat,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
     """Download a binary file honouring snapshot revision pins.
 
     A pinned path reads that revision's content. Otherwise the token
-    comes from a capture when a recorder is bound and from the index
-    entry when none is, so it never depends on the recorder; the
-    entry's revision is not pinned, since it can be a TTL old. Either
-    md5 is checked against the bytes, and a stale one drops the token
-    and the revision with it.
+    comes from a capture when a recorder is bound and from the listed
+    row when none is, so it never depends on the recorder; the row's
+    revision is not pinned, since it can be a TTL old. Either md5 is
+    checked against the bytes, and a stale one drops the token and the
+    revision with it.
 
     Args:
         token_manager (TokenManager): OAuth2 token manager.
         file_id (str): file ID.
         virtual (str): full virtual path, the pin lookup key and the
             recorded path.
-        entry (IndexEntry): the index entry the file was resolved from.
+        entry (FileStat): the listed row the file was resolved from.
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
     """
@@ -118,12 +112,12 @@ async def read_file_versioned(
             revision = None
         elif whole:
             fingerprint = drive_fingerprint(
-                entry.resource_type, md5, revision, entry.remote_time
+                entry.extra["resource_type"], md5, revision, entry.modified
             )
     else:
         data = await download_file(token_manager, file_id, window)
         if whole and not _stale_md5(entry.extra.get("md5_checksum"), data):
-            fingerprint = entry_fingerprint(entry)
+            fingerprint = entry.fingerprint
     record(
         "read",
         virtual,
@@ -136,50 +130,30 @@ async def read_file_versioned(
     return data
 
 
-async def file_entry(
-    accessor: GDriveAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> IndexEntry:
-    """The index entry of the file at ``path``, listing its parent when
-    the index does not hold it.
+def file_entry(path: PathSpec, entry: FileStat | None) -> FileStat:
+    """What is at the file ``path``, as its parent's listing named it.
 
     Args:
-        accessor (GDriveAccessor): Drive accessor.
         path (PathSpec): the file.
-        index (IndexCacheStore): listing cache, consulted for the file id.
+        entry (FileStat | None): what is at the path.
 
     Raises:
         FileNotFoundError: nothing is there.
         IsADirectoryError: a folder is.
     """
-    virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    key = path.vfs_path
-    virtual_key = prefix + "/" + key if prefix else "/" + key
-    parent_key = posixpath.dirname(virtual_key) or "/"
-    parent_path = PathSpec.from_str_path(
-        parent_key, mount_key(parent_key, prefix)
-    )
-    warm = (
-        partial(readdir, accessor, parent_path, index)
-        if parent_key != virtual_key
-        else None
-    )
-    entry = await entry_or_warm(index, virtual_key, warm)
     if entry is None:
-        raise enoent(virtual)
-    if entry.resource_type in DIRECTORY_RESOURCE_TYPES:
-        raise eisdir(virtual)
+        raise enoent(path.virtual)
+    if entry.type is FileType.DIRECTORY:
+        raise eisdir(path.virtual)
     return entry
 
 
 async def read(
     accessor: GDriveAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
+    entry: FileStat | None = None,
 ) -> bytes:
     """Read a Drive file, optionally only a byte range of it.
 
@@ -190,28 +164,28 @@ async def read(
     Args:
         accessor (GDriveAccessor): Drive accessor.
         path (PathSpec): the path to read.
-        index (IndexCacheStore): listing cache, consulted for the file id.
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
+        entry (FileStat | None): what is at the path.
     """
     virtual = path.virtual
-    entry = await file_entry(accessor, path, index)
-    if entry.resource_type not in NATIVE_RESOURCE_TYPES:
+    found = file_entry(path, entry)
+    file_id = found.extra["file_id"]
+    resource_type = found.extra["resource_type"]
+    if resource_type not in NATIVE_RESOURCE_TYPES:
         return await read_file_versioned(
-            accessor.token_manager, entry.id, virtual, entry, offset, size
+            accessor.token_manager, file_id, virtual, found, offset, size
         )
     timer = start_op()
-    if entry.resource_type == "gdrive/gdoc":
-        rendered = await read_doc(accessor.token_manager, entry.id)
-    elif entry.resource_type == "gdrive/gsheet":
-        rendered = await read_spreadsheet(accessor.token_manager, entry.id)
+    if resource_type == "gdrive/gdoc":
+        rendered = await read_doc(accessor.token_manager, file_id)
+    elif resource_type == "gdrive/gsheet":
+        rendered = await read_spreadsheet(accessor.token_manager, file_id)
     else:
-        rendered = await read_presentation(accessor.token_manager, entry.id)
+        rendered = await read_presentation(accessor.token_manager, file_id)
     sliced = slice_window(rendered, offset, size)
     # No revision: a pin would replace the drift check a render relies on.
-    fingerprint = (
-        entry_fingerprint(entry) if _whole_file(offset, size) else None
-    )
+    fingerprint = found.fingerprint if _whole_file(offset, size) else None
     record(
         "read",
         virtual,
@@ -225,9 +199,7 @@ async def read(
 
 
 async def read_stream(
-    accessor: GDriveAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: GDriveAccessor, path: PathSpec, entry: FileStat | None = None
 ) -> AsyncIterator[bytes]:
     """Stream a Drive file as it downloads.
 
@@ -240,11 +212,12 @@ async def read_stream(
     Args:
         accessor (GDriveAccessor): Drive accessor.
         path (PathSpec): the path to read.
-        index (IndexCacheStore): listing cache, consulted for the file id.
+        entry (FileStat | None): what is at the path.
     """
-    entry = await file_entry(accessor, path, index)
-    if entry.resource_type in NATIVE_RESOURCE_TYPES:
-        yield await read(accessor, path, index)
+    found = file_entry(path, entry)
+    file_id = found.extra["file_id"]
+    if found.extra["resource_type"] in NATIVE_RESOURCE_TYPES:
+        yield await read(accessor, path, entry=found)
         return
     tm = accessor.token_manager
     pinned = revision_for(path.virtual)
@@ -252,11 +225,11 @@ async def read_stream(
     md5: str | None = None
     revision = None
     if pinned:
-        chunks = download_revision_stream(tm, entry.id, pinned)
+        chunks = download_revision_stream(tm, file_id, pinned)
     else:
         if rec is not None:
-            md5, revision = await capture_file_metadata(tm, entry.id)
-        chunks = download_file_stream(tm, entry.id)
+            md5, revision = await capture_file_metadata(tm, file_id)
+        chunks = download_file_stream(tm, file_id)
     digest = hashlib.md5() if md5 else None
     async with aclosing(chunks) as source:
         async for chunk in source:
@@ -271,5 +244,5 @@ async def read_stream(
         return
     rec.revision = revision
     rec.fingerprint = drive_fingerprint(
-        entry.resource_type, md5, revision, entry.remote_time
+        found.extra["resource_type"], md5, revision, found.modified
     )

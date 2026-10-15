@@ -16,7 +16,7 @@ import asyncio
 import datetime
 import functools
 import hashlib
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from types import ModuleType
@@ -52,6 +52,7 @@ from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO
+from mirage.core.gdrive.readdir import readdir as gdrive_readdir
 from mirage.core.hf_hub.client import etag_value
 from mirage.observe.context import OpTimer, active_recorder
 from mirage.observe.record import OpRecord
@@ -74,6 +75,7 @@ from tests.fixtures.dropbox_api import FakeDropbox
 from tests.fixtures.dropbox_api import serve as serve_dropbox
 from tests.fixtures.github_api import FakeGitHub, blob_sha
 from tests.fixtures.github_api import serve as serve_github
+from tests.fixtures.handed import ListFn, entry_at
 from tests.fixtures.hf_buckets_opendal import FakeAsyncOperator
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
 from tests.fixtures.msgraph_api import (
@@ -229,10 +231,14 @@ class Fake:
     # Whether that index is the one the mount runs under (github's), which
     # only exists once a workspace places the driver.
     mount_index: bool = False
-    # False where stat answers from its own request (gdrive): it then takes
-    # no index, so the unrecorded row compares two independent reads of the
-    # object rather than one index entry with itself.
+    # False where stat answers from its own request (the Google apps): it
+    # then takes no index, so the unrecorded row compares two independent
+    # reads of the object rather than one index entry with itself.
     stat_indexed: bool = True
+    # The listing that names the row each function is handed, where the
+    # backend reads one (gdrive): the direct calls are handed it, as the
+    # mount hands it.
+    readdir: ListFn | None = None
 
     @property
     def io(self) -> CommandIO:
@@ -248,6 +254,33 @@ class Fake:
 
     def stat_args(self) -> tuple:
         return self.args() if self.stat_indexed else ()
+
+    async def handed(self, path: PathSpec) -> dict[str, FileStat | None]:
+        if self.readdir is None:
+            return {}
+        return {"entry": await entry_at(self.readdir, self.vfs.accessor, path)}
+
+    async def read_bytes(self, path: PathSpec) -> bytes:
+        handed = await self.handed(path)
+        if handed:
+            return await self.vfs.read(path, **handed)
+        return await self.io.read_bytes(self.vfs.accessor, path, *self.args())
+
+    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        handed = await self.handed(path)
+        stream = (
+            self.vfs.read_stream(path, **handed)
+            if handed
+            else self.io.read_stream(self.vfs.accessor, path, *self.args())
+        )
+        async for chunk in stream:
+            yield chunk
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        handed = await self.handed(path)
+        if handed:
+            return await self.vfs.stat(path, **handed)
+        return await self.io.stat(self.vfs.accessor, path, *self.stat_args())
 
 
 # The store each driver's mount runs under, filled when a fresh workspace
@@ -503,8 +536,7 @@ def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
             reach=[],
             read_mod=gdrive_read,
             stream_mod=gdrive_read,
-            index=RAMIndexCacheStore(),
-            stat_indexed=False,
+            readdir=gdrive_readdir,
         )
 
 
@@ -1052,19 +1084,10 @@ def test_an_unrecorded_read_stamps_the_stat_token(
             unrecorded = active_recorder() is None
             try:
                 if row == "bytes":
-                    data = await fake.io.read_bytes(
-                        accessor, spec, *fake.args()
-                    )
+                    data = await fake.read_bytes(spec)
                 else:
-                    data = b"".join(
-                        [
-                            c
-                            async for c in fake.io.read_stream(
-                                accessor, spec, *fake.args()
-                            )
-                        ]
-                    )
-                stat = await fake.io.stat(accessor, spec, *fake.stat_args())
+                    data = b"".join([c async for c in fake.read_stream(spec)])
+                stat = await fake.stat(spec)
             finally:
                 await accessor.close()
             return unrecorded, data, stat

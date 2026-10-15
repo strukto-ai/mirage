@@ -22,6 +22,8 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { rename } from './rename.ts'
@@ -41,7 +43,12 @@ function spec(virtual: string): PathSpec {
 describe('gdrive rename', () => {
   it('renames in place', async () => {
     const id = fake.add('old.txt', 'root', undefined, ENC.encode('x'))
-    await rename(accessor, spec('/old.txt'), spec('/new.txt'))
+    await rename(
+      accessor,
+      spec('/old.txt'),
+      spec('/new.txt'),
+      await handedAt(readdir, accessor, spec('/old.txt'), spec('/new.txt')),
+    )
     expect(fake.items.get(id)?.name).toBe('new.txt')
     expect(fake.items.get(id)?.parents).toEqual(['root'])
     expect(fake.items.get(id)?.modifiedTime).toBe('2026-01-01T00:00:00Z')
@@ -51,7 +58,12 @@ describe('gdrive rename', () => {
     const a = fake.folder('a')
     const b = fake.folder('b')
     const id = fake.add('f.txt', a, undefined, ENC.encode('x'))
-    await rename(accessor, spec('/a/f.txt'), spec('/b/g.txt'))
+    await rename(
+      accessor,
+      spec('/a/f.txt'),
+      spec('/b/g.txt'),
+      await handedAt(readdir, accessor, spec('/a/f.txt'), spec('/b/g.txt')),
+    )
     expect(fake.items.get(id)?.name).toBe('g.txt')
     expect(fake.items.get(id)?.parents).toEqual([b])
   })
@@ -59,7 +71,12 @@ describe('gdrive rename', () => {
   it('replaces an existing file', async () => {
     const src = fake.add('src.txt', 'root', undefined, ENC.encode('new'))
     fake.add('dst.txt', 'root', undefined, ENC.encode('old'))
-    await rename(accessor, spec('/src.txt'), spec('/dst.txt'))
+    await rename(
+      accessor,
+      spec('/src.txt'),
+      spec('/dst.txt'),
+      await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
+    )
     expect(fake.items.get(src)?.name).toBe('dst.txt')
     expect(fake.items.size).toBe(1)
   })
@@ -68,7 +85,14 @@ describe('gdrive rename', () => {
     fake.add('src.txt', 'root', undefined, ENC.encode('x'))
     const d = fake.folder('d')
     fake.add('f.txt', d, undefined, ENC.encode('y'))
-    await expect(rename(accessor, spec('/src.txt'), spec('/d'))).rejects.toMatchObject({
+    await expect(
+      rename(
+        accessor,
+        spec('/src.txt'),
+        spec('/d'),
+        await handedAt(readdir, accessor, spec('/src.txt'), spec('/d')),
+      ),
+    ).rejects.toMatchObject({
       code: 'ENOTEMPTY',
     })
     // The conflict probe is bounded, not a full listing: listFiles follows
@@ -80,20 +104,37 @@ describe('gdrive rename', () => {
   it('replaces an empty dir', async () => {
     const src = fake.add('src.txt', 'root', undefined, ENC.encode('x'))
     fake.folder('d')
-    await rename(accessor, spec('/src.txt'), spec('/d'))
+    await rename(
+      accessor,
+      spec('/src.txt'),
+      spec('/d'),
+      await handedAt(readdir, accessor, spec('/src.txt'), spec('/d')),
+    )
     expect(fake.items.get(src)?.name).toBe('d')
     expect(fake.items.size).toBe(1)
   })
 
   it('missing src raises ENOENT', async () => {
-    await expect(rename(accessor, spec('/missing.txt'), spec('/x.txt'))).rejects.toMatchObject({
+    await expect(
+      rename(
+        accessor,
+        spec('/missing.txt'),
+        spec('/x.txt'),
+        await handedAt(readdir, accessor, spec('/missing.txt'), spec('/x.txt')),
+      ),
+    ).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
 
   it('strips the native suffix from the Drive name', async () => {
     const id = fake.add('Report', 'root', DOC_MIME)
-    await rename(accessor, spec('/Report.gdoc.json'), spec('/Plan.gdoc.json'))
+    await rename(
+      accessor,
+      spec('/Report.gdoc.json'),
+      spec('/Plan.gdoc.json'),
+      await handedAt(readdir, accessor, spec('/Report.gdoc.json'), spec('/Plan.gdoc.json')),
+    )
     expect(fake.items.get(id)?.name).toBe('Plan')
   })
 })

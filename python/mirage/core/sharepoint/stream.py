@@ -15,7 +15,6 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.drive import stream_item
 from mirage.core.sharepoint.resolve import drive_loc, resolve_item
 from mirage.types import PathSpec
@@ -24,7 +23,6 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: SharePointAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     resolved = await resolve_item(accessor, path)

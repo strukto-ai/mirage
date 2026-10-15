@@ -15,8 +15,12 @@
 import pytest
 
 from mirage.core.gdrive.mkdir import mkdir
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.google.drive import FOLDER_MIME
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.workspace import Workspace
+from tests.fixtures.handed import call
 
 
 def spec(virtual: str) -> PathSpec:
@@ -25,7 +29,7 @@ def spec(virtual: str) -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_mkdir_creates(fake_drive, gdrive_accessor):
-    await mkdir(gdrive_accessor, spec("/d"))
+    await call(mkdir, readdir, gdrive_accessor, spec("/d"))
     item = fake_drive.find("d")
     assert item is not None
     assert item["mimeType"] == FOLDER_MIME
@@ -34,27 +38,45 @@ async def test_mkdir_creates(fake_drive, gdrive_accessor):
 @pytest.mark.asyncio
 async def test_mkdir_missing_parent_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
-        await mkdir(gdrive_accessor, spec("/no/d"))
+        await call(mkdir, readdir, gdrive_accessor, spec("/no/d"))
+
+
+def _workspace(accessor) -> Workspace:
+    vfs = GoogleDriveVFS(
+        config=GoogleDriveConfig(client_id="x", refresh_token="y")
+    )
+    vfs.accessor = accessor
+    return Workspace({"/d/": vfs}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_mkdir_parents_builds_chain(fake_drive, gdrive_accessor):
-    await mkdir(gdrive_accessor, spec("/a/b/c"), parents=True)
-    a = fake_drive.find("a")
-    b = fake_drive.find("b")
-    c = fake_drive.find("c")
-    assert a and b and c
-    assert b["parents"] == [a["id"]]
-    assert c["parents"] == [b["id"]]
-    # Idempotent under -p.
-    await mkdir(gdrive_accessor, spec("/a/b/c"), parents=True)
-    assert len(fake_drive.items) == 3
+    # -p is the mount's: it makes one level at a time, each handed the
+    # folder the level above answered.
+    ws = _workspace(gdrive_accessor)
+    try:
+        await ws.dispatch("mkdir", spec("/d/a/b/c"), parents=True)
+        a = fake_drive.find("a")
+        b = fake_drive.find("b")
+        c = fake_drive.find("c")
+        assert a and b and c
+        assert b["parents"] == [a["id"]]
+        assert c["parents"] == [b["id"]]
+        # Idempotent under -p.
+        await ws.dispatch("mkdir", spec("/d/a/b/c"), parents=True)
+        assert len(fake_drive.items) == 3
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
 async def test_mkdir_parents_over_file(fake_drive, gdrive_accessor):
     fake_drive.add("f.txt", content=b"x")
-    with pytest.raises(FileExistsError):
-        await mkdir(gdrive_accessor, spec("/f.txt"), parents=True)
-    with pytest.raises(NotADirectoryError):
-        await mkdir(gdrive_accessor, spec("/f.txt/sub"), parents=True)
+    ws = _workspace(gdrive_accessor)
+    try:
+        with pytest.raises(FileExistsError):
+            await ws.dispatch("mkdir", spec("/d/f.txt"), parents=True)
+        with pytest.raises(NotADirectoryError):
+            await ws.dispatch("mkdir", spec("/d/f.txt/sub"), parents=True)
+    finally:
+        await ws.close()

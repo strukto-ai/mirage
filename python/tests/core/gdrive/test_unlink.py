@@ -14,8 +14,10 @@
 
 import pytest
 
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.unlink import unlink
 from mirage.types import PathSpec
+from tests.fixtures.handed import call
 
 
 def spec(virtual: str) -> PathSpec:
@@ -25,18 +27,18 @@ def spec(virtual: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_unlink_removes_file(fake_drive, gdrive_accessor):
     fake_drive.add("f.txt", content=b"x")
-    await unlink(gdrive_accessor, spec("/f.txt"))
+    await call(unlink, readdir, gdrive_accessor, spec("/f.txt"))
     assert fake_drive.find("f.txt") is None
 
 
 @pytest.mark.asyncio
 async def test_unlink_missing_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
-        await unlink(gdrive_accessor, spec("/missing.txt"))
+        await call(unlink, readdir, gdrive_accessor, spec("/missing.txt"))
 
 
 @pytest.mark.asyncio
 async def test_unlink_folder_raises(fake_drive, gdrive_accessor):
     fake_drive.folder("d")
     with pytest.raises(IsADirectoryError):
-        await unlink(gdrive_accessor, spec("/d"))
+        await call(unlink, readdir, gdrive_accessor, spec("/d"))

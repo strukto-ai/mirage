@@ -26,6 +26,7 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig
 from mirage.cache.index.factory import build_index
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.cache.types import WriteContext
@@ -1446,12 +1447,14 @@ class MountEntry:
         return self.prefix.rstrip("/") or "/"
 
     def _folder(self, scope: PathSpec) -> PathSpec:
-        """The directory holding ``scope``, keyed below this mount.
+        """The directory holding ``scope``, keyed below this mount; a glob
+        word stands for the directory it lists.
 
         Args:
             scope (PathSpec): a path below the mount root.
         """
-        return self._scope(scope.virtual.rstrip("/").rsplit("/", 1)[0] or "/")
+        target = scope.dir if scope.pattern else scope
+        return self._scope(target.virtual.rstrip("/").rsplit("/", 1)[0] or "/")
 
     @property
     def _lists(self) -> bool:
@@ -1590,6 +1593,37 @@ class MountEntry:
             folder_of(key)
         )
         return row if trusted else None
+
+    def _note_live(
+        self,
+        scope: PathSpec,
+        index: IndexCacheStore,
+        fn: Callable[..., Any],
+        result: Any,
+    ) -> None:
+        """Under ``fresh``, keep a stat the backend answered as the
+        running command's probe answer: the cache gate would ask the
+        backend the same question again. Only a stat that asked the
+        backend counts: one that takes neither an index of its own nor a
+        row the mount hands it, either of which a listing filled.
+
+        Args:
+            scope (PathSpec): the stat's path, keyed below the mount.
+            index (IndexCacheStore): the index the stat ran under; a
+                probe's own store records through the probe.
+            fn (Callable[..., Any]): the function that answered.
+            result (Any): what the backend answered.
+        """
+        manager = self.cache_manager
+        if (
+            manager is not None
+            and self.read.policy is ReadPolicy.FRESH
+            and isinstance(result, FileStat)
+            and not isinstance(index, ListingCheckStore)
+            and self._lists
+            and not _wants(self._backend_fn(fn))
+        ):
+            manager.note_probed(scope, result)
 
     @property
     def _names_only(self) -> bool:
@@ -1784,6 +1818,8 @@ class MountEntry:
                             result = await self._kept(
                                 name, scope, index, result
                             )
+                        if name == "stat":
+                            self._note_live(scope, index, fn, result)
                         return _wrap_stream(
                             result, self.mount_id, self.activity
                         )

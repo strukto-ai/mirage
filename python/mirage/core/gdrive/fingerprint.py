@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.index import IndexEntry
 from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
 from mirage.types import JsonValue
 
@@ -43,17 +42,3 @@ def drive_fingerprint(
     if resource_type in NATIVE_RESOURCE_TYPES:
         return _token(modified)
     return _token(md5) or _token(head_revision)
-
-
-def entry_fingerprint(entry: IndexEntry) -> str | None:
-    """The token of the file an index entry lists.
-
-    Args:
-        entry (IndexEntry): the file's index entry.
-    """
-    return drive_fingerprint(
-        entry.resource_type,
-        entry.extra.get("md5_checksum"),
-        entry.extra.get("head_revision_id"),
-        entry.remote_time,
-    )

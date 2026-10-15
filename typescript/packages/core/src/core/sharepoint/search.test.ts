@@ -15,7 +15,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { filesContaining } from './search.ts'
 
@@ -59,12 +58,7 @@ describe('sharepoint filesContaining', () => {
         )
       }),
     )
-    const out = await filesContaining(
-      accessor(),
-      'wombat',
-      [scope('Team/Documents')],
-      new RAMIndexCacheStore(),
-    )
+    const out = await filesContaining(accessor(), 'wombat', [scope('Team/Documents')])
     expect(out?.map((p) => p.virtual)).toEqual(['/sp/Team/Documents/b.txt'])
   })
 
@@ -72,9 +66,7 @@ describe('sharepoint filesContaining', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     for (const vfsPath of ['', 'Team']) {
-      expect(
-        await filesContaining(accessor(), 'wombat', [scope(vfsPath)], new RAMIndexCacheStore()),
-      ).toBeNull()
+      expect(await filesContaining(accessor(), 'wombat', [scope(vfsPath)])).toBeNull()
     }
     expect(fetchMock).not.toHaveBeenCalled()
   })

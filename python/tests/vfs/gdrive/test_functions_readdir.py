@@ -12,12 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
 from tests.fixtures.vfs_io import call_over
@@ -43,20 +43,24 @@ def accessor():
     return GDriveAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_readdir_serves_cached_listing(accessor, index):
-    entry = IndexEntry(
-        id="file123",
-        name="readme",
-        resource_type="gdrive/file",
-        remote_time="2026-04-01T00:00:00Z",
-        vfs_name="readme.txt",
+async def test_readdir_lists_the_folder_its_row_names(accessor):
+    folder = FileStat(
+        name="docs", type=FileType.DIRECTORY, extra={"file_id": "folder1"}
     )
-    await index.set_dir("/docs", [("readme.txt", entry)])
-    result = await readdir(accessor, _scope("/docs"), index=index)
-    assert result == ["/docs/readme.txt"]
+    files = [
+        {
+            "id": "file123",
+            "name": "readme.txt",
+            "mimeType": "text/plain",
+            "modifiedTime": "2026-04-01T00:00:00Z",
+        }
+    ]
+    with patch(
+        "mirage.core.gdrive.readdir.list_files",
+        new_callable=AsyncMock,
+        return_value=files,
+    ) as lister:
+        result = await readdir(accessor, _scope("/docs"), entry=folder)
+    assert [row.name for row in result] == ["readme.txt"]
+    assert lister.await_args.kwargs["folder_id"] == "folder1"

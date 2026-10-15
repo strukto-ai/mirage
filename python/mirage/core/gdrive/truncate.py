@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
+from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
+from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.gdrive.write import write
 from mirage.core.google.drive import download_file
 from mirage.errors.fs import eisdir, enotsup
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 @eacces_on_denied
@@ -26,18 +27,24 @@ async def truncate(
     path: PathSpec,
     length: int,
     no_create: bool = False,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> None:
     if no_create:
         raise enotsup("gdrive", "truncate --no-create", path)
-    node = await resolve_key(accessor, path.vfs_path)
-    if node is not None and node.is_folder:
+    if entry is not None and entry.type is FileType.DIRECTORY:
         raise eisdir(path.virtual)
-    if node is None or node.is_native:
+    if (
+        entry is None
+        or entry.extra.get("resource_type") in NATIVE_RESOURCE_TYPES
+    ):
         data = b""
     else:
-        data = await download_file(accessor.token_manager, node.id)
+        data = await download_file(
+            accessor.token_manager, entry.extra["file_id"]
+        )
     if length <= len(data):
         new = data[:length]
     else:
         new = data + b"\x00" * (length - len(data))
-    await write(accessor, path, new)
+    await write(accessor, path, new, entry=entry, parent=parent)

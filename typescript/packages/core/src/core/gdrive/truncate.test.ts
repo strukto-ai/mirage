@@ -22,6 +22,8 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { truncate } from './truncate.ts'
@@ -42,23 +44,43 @@ function spec(virtual: string): PathSpec {
 describe('gdrive truncate', () => {
   it('shrinks', async () => {
     const id = fake.add('f.txt', 'root', undefined, ENC.encode('abcdef'))
-    await truncate(accessor, spec('/f.txt'), 3)
+    await truncate(
+      accessor,
+      spec('/f.txt'),
+      3,
+      false,
+      await handedAt(readdir, accessor, spec('/f.txt')),
+    )
     expect(DEC.decode(fake.items.get(id)?.content)).toBe('abc')
   })
 
   it('pads with NULs', async () => {
     const id = fake.add('f.txt', 'root', undefined, ENC.encode('ab'))
-    await truncate(accessor, spec('/f.txt'), 4)
+    await truncate(
+      accessor,
+      spec('/f.txt'),
+      4,
+      false,
+      await handedAt(readdir, accessor, spec('/f.txt')),
+    )
     expect(fake.items.get(id)?.content).toEqual(new Uint8Array([97, 98, 0, 0]))
   })
 
   it('creates a missing file', async () => {
-    await truncate(accessor, spec('/new.txt'), 2)
+    await truncate(
+      accessor,
+      spec('/new.txt'),
+      2,
+      false,
+      await handedAt(readdir, accessor, spec('/new.txt')),
+    )
     expect(fake.find('new.txt')?.content).toEqual(new Uint8Array([0, 0]))
   })
 
   it('folder raises EISDIR', async () => {
     fake.folder('d')
-    await expect(truncate(accessor, spec('/d'), 0)).rejects.toMatchObject({ code: 'EISDIR' })
+    await expect(
+      truncate(accessor, spec('/d'), 0, false, await handedAt(readdir, accessor, spec('/d'))),
+    ).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })

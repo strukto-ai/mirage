@@ -164,7 +164,7 @@ describe('onedrive under read: fresh', () => {
     const graph = await graphOf(OLD)
     const accessor = (await vfsOf(graph)).accessor as OneDriveAccessor
     const [data, records] = await runWithRecording(() =>
-      read(accessor, SPEC, undefined, { offset: 2, size: 3 }),
+      read(accessor, SPEC, { offset: 2, size: 3 }),
     )
     expect(DEC.decode(data)).toBe(DEC.decode(OLD.slice(2, 5)))
     expect(records.map((r) => r.fingerprint)).toEqual(['c1'])

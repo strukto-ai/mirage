@@ -13,17 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { baseName, statItem, virtualKey } from '../msgraph/drive.ts'
+import { baseName, statItem } from '../msgraph/drive.ts'
 import { driveLoc, requireItem, resolve } from './resolve.ts'
 
-export async function stat(
-  accessor: SharePointAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
+export async function stat(accessor: SharePointAccessor, path: PathSpec): Promise<FileStat> {
   if (path.vfsPath === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
   const resolved = await resolve(accessor, path)
   if (resolved.level === 'site') {
@@ -35,11 +30,5 @@ export async function stat(
     return new FileStat({ name: baseName(path.vfsPath), type: FileType.DIRECTORY })
   }
   requireItem(path, resolved)
-  return statItem(
-    accessor.config,
-    driveLoc(accessor.config, resolved, path.vfsPath),
-    path,
-    virtualKey(path),
-    index,
-  )
+  return statItem(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath), path)
 }

@@ -16,8 +16,10 @@ import errno
 
 import pytest
 
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.rename import rename
 from mirage.types import PathSpec
+from tests.fixtures.handed import call
 
 DOC_MIME = "application/vnd.google-apps.document"
 
@@ -29,7 +31,13 @@ def spec(virtual: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_rename_in_place(fake_drive, gdrive_accessor):
     file_id = fake_drive.add("old.txt", content=b"x")
-    await rename(gdrive_accessor, spec("/old.txt"), spec("/new.txt"))
+    await call(
+        rename,
+        readdir,
+        gdrive_accessor,
+        spec("/old.txt"),
+        dst=spec("/new.txt"),
+    )
     assert fake_drive.items[file_id]["name"] == "new.txt"
     assert fake_drive.items[file_id]["parents"] == ["root"]
     assert fake_drive.items[file_id]["modifiedTime"] == "2026-01-01T00:00:00Z"
@@ -40,7 +48,13 @@ async def test_rename_moves_between_folders(fake_drive, gdrive_accessor):
     src_dir = fake_drive.folder("a")
     dst_dir = fake_drive.folder("b")
     file_id = fake_drive.add("f.txt", parent=src_dir, content=b"x")
-    await rename(gdrive_accessor, spec("/a/f.txt"), spec("/b/g.txt"))
+    await call(
+        rename,
+        readdir,
+        gdrive_accessor,
+        spec("/a/f.txt"),
+        dst=spec("/b/g.txt"),
+    )
     item = fake_drive.items[file_id]
     assert item["name"] == "g.txt"
     assert item["parents"] == [dst_dir]
@@ -50,7 +64,13 @@ async def test_rename_moves_between_folders(fake_drive, gdrive_accessor):
 async def test_rename_replaces_existing_file(fake_drive, gdrive_accessor):
     src_id = fake_drive.add("src.txt", content=b"new")
     fake_drive.add("dst.txt", content=b"old")
-    await rename(gdrive_accessor, spec("/src.txt"), spec("/dst.txt"))
+    await call(
+        rename,
+        readdir,
+        gdrive_accessor,
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
     assert fake_drive.find("src.txt") is None
     assert fake_drive.items[src_id]["name"] == "dst.txt"
     assert len(fake_drive.items) == 1
@@ -62,7 +82,9 @@ async def test_rename_over_nonempty_dir_raises(fake_drive, gdrive_accessor):
     folder = fake_drive.folder("d")
     fake_drive.add("f.txt", parent=folder, content=b"y")
     with pytest.raises(OSError) as exc_info:
-        await rename(gdrive_accessor, spec("/src.txt"), spec("/d"))
+        await call(
+            rename, readdir, gdrive_accessor, spec("/src.txt"), dst=spec("/d")
+        )
     assert exc_info.value.errno == errno.ENOTEMPTY
     # The conflict probe is bounded, not a full listing: `list_files`
     # follows every page token, so asking it with a small `page_size`
@@ -74,7 +96,9 @@ async def test_rename_over_nonempty_dir_raises(fake_drive, gdrive_accessor):
 async def test_rename_replaces_empty_dir(fake_drive, gdrive_accessor):
     src_id = fake_drive.add("src.txt", content=b"x")
     fake_drive.folder("d")
-    await rename(gdrive_accessor, spec("/src.txt"), spec("/d"))
+    await call(
+        rename, readdir, gdrive_accessor, spec("/src.txt"), dst=spec("/d")
+    )
     assert fake_drive.items[src_id]["name"] == "d"
     assert len(fake_drive.items) == 1
 
@@ -82,13 +106,23 @@ async def test_rename_replaces_empty_dir(fake_drive, gdrive_accessor):
 @pytest.mark.asyncio
 async def test_rename_missing_src_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
-        await rename(gdrive_accessor, spec("/missing.txt"), spec("/x.txt"))
+        await call(
+            rename,
+            readdir,
+            gdrive_accessor,
+            spec("/missing.txt"),
+            dst=spec("/x.txt"),
+        )
 
 
 @pytest.mark.asyncio
 async def test_rename_native_strips_suffix(fake_drive, gdrive_accessor):
     doc_id = fake_drive.add("Report", mime=DOC_MIME)
-    await rename(
-        gdrive_accessor, spec("/Report.gdoc.json"), spec("/Plan.gdoc.json")
+    await call(
+        rename,
+        readdir,
+        gdrive_accessor,
+        spec("/Report.gdoc.json"),
+        dst=spec("/Plan.gdoc.json"),
     )
     assert fake_drive.items[doc_id]["name"] == "Plan"

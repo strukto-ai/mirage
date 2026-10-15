@@ -20,8 +20,8 @@ import { VFSName } from '../../types.ts'
 import { redactGDriveConfig, type GDriveConfig, type GDriveConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/gdrive/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
-import type { CapacityResult, PathSpec, FileStat, SetAttrFields } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { CapacityResult, DirListing, FileStat, PathSpec, SetAttrFields } from '../../types.ts'
+import type { Handed } from '../types.ts'
 import { readdir as gdriveReaddir } from '../../core/gdrive/readdir.ts'
 import { read as gdriveRead, readStream as gdriveStream } from '../../core/gdrive/read.ts'
 import { capacity as gdriveCapacity } from '../../core/gdrive/capacity.ts'
@@ -51,6 +51,26 @@ export class GDriveVFS extends BaseVFS {
   override readonly supportsSnapshot: boolean = true
   override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry'],
+    stat: ['entry'],
+    checksum: ['entry'],
+    readStream: ['entry'],
+    exists: ['entry'],
+    write: ['entry', 'parent'],
+    create: ['entry', 'parent'],
+    mkdir: ['parent'],
+    unlink: ['entry'],
+    rmdir: ['entry'],
+    rmR: ['entry'],
+    rename: ['entry', 'parent', 'dstParent', 'dstEntry'],
+    copy: ['entry', 'dstParent', 'dstEntry'],
+    dirCopy: ['entry', 'dstParent', 'dstEntry'],
+    truncate: ['entry', 'parent'],
+    filesContaining: ['entry'],
+  } as const
   override readonly prompt: string = PROMPT
   readonly config: GDriveConfig
   override readonly accessor: GDriveAccessor
@@ -64,88 +84,106 @@ export class GDriveVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return gdriveReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return gdriveReaddir(this.accessor, path, handed?.entry)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return gdriveRead(this.accessor, path, index)
-    return gdriveRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) {
+      return gdriveRead(this.accessor, path, undefined, handed?.entry)
+    }
+    return gdriveRead(
+      this.accessor,
+      path,
+      size === null ? { offset } : { offset, size },
+      handed?.entry,
+    )
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return gdriveStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return gdriveStat(this.accessor, path, handed?.entry)
   }
 
-  override checksum(
+  override checksum(path: PathSpec, algorithm: string, handed?: Handed): Promise<string | null> {
+    return gdriveChecksum(this.accessor, path, algorithm, handed?.entry)
+  }
+
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return gdriveStream(this.accessor, path, handed?.entry)
+  }
+
+  override exists(path: PathSpec, handed?: Handed): Promise<boolean> {
+    return gdriveExists(this.accessor, path, handed?.entry)
+  }
+
+  override write(
     path: PathSpec,
-    algorithm: string,
-    index?: IndexCacheStore,
-  ): Promise<string | null> {
-    return gdriveChecksum(this.accessor, path, algorithm, index)
+    data: Uint8Array,
+    _signal?: AbortSignal,
+    handed: Handed = {},
+  ): Promise<FileStat | null> {
+    return gdriveWrite(this.accessor, path, data, handed)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return gdriveStream(this.accessor, path, index)
+  override create(path: PathSpec, handed: Handed = {}): Promise<FileStat | null> {
+    return gdriveCreate(this.accessor, path, handed)
   }
 
-  override exists(path: PathSpec): Promise<boolean> {
-    return gdriveExists(this.accessor, path)
+  override mkdir(path: PathSpec, parents = false, handed: Handed = {}): Promise<FileStat | null> {
+    return gdriveMkdir(this.accessor, path, parents, handed)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return gdriveWrite(this.accessor, path, data)
+  override unlink(path: PathSpec, handed?: Handed): Promise<void> {
+    return gdriveUnlink(this.accessor, path, handed)
   }
 
-  override create(path: PathSpec): Promise<void> {
-    return gdriveCreate(this.accessor, path)
+  override rmdir(path: PathSpec, handed?: Handed): Promise<void> {
+    return gdriveRmdir(this.accessor, path, handed)
   }
 
-  override mkdir(path: PathSpec, parents = false): Promise<void> {
-    return gdriveMkdir(this.accessor, path, parents)
+  override rmR(path: PathSpec, handed: Handed = {}): Promise<void> {
+    return gdriveRmR(this.accessor, path, handed)
   }
 
-  override unlink(path: PathSpec): Promise<void> {
-    return gdriveUnlink(this.accessor, path)
+  override rename(src: PathSpec, dst: PathSpec, handed: Handed = {}): Promise<FileStat | null> {
+    return gdriveRename(this.accessor, src, dst, handed)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
-    return gdriveRmdir(this.accessor, path)
+  override copy(
+    src: PathSpec,
+    dst: PathSpec,
+    signal?: AbortSignal,
+    handed: Handed = {},
+  ): Promise<FileStat | null> {
+    return gdriveCopy(this.accessor, src, dst, signal, handed)
   }
 
-  override rmR(path: PathSpec): Promise<void> {
-    return gdriveRmR(this.accessor, path)
+  override dirCopy(src: PathSpec, dst: PathSpec, handed: Handed = {}): Promise<FileStat | null> {
+    return gdriveCopy(this.accessor, src, dst, undefined, handed)
   }
 
-  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    return gdriveRename(this.accessor, src, dst)
-  }
-
-  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return gdriveCopy(this.accessor, src, dst)
-  }
-
-  override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return gdriveCopy(this.accessor, src, dst)
-  }
-
-  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    return gdriveTruncate(this.accessor, path, length, noCreate)
+  override truncate(
+    path: PathSpec,
+    length: number,
+    noCreate = false,
+    handed: Handed = {},
+  ): Promise<void> {
+    return gdriveTruncate(this.accessor, path, length, noCreate, handed)
   }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
+    handed?: Handed,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
-    return gdriveFilesContaining(this.accessor, text, [path], index)
+    return gdriveFilesContaining(this.accessor, text, path, handed?.entry)
   }
 
   override setattr(

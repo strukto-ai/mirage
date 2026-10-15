@@ -13,63 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { directoryPath, readdirItems, virtualKey } from '../msgraph/drive.ts'
+import { directoryPath, readdirItems } from '../msgraph/drive.ts'
 import { driveLoc, listDrives, listSites, resolve } from './resolve.ts'
 
-// A namespace level (the sites, or one site's libraries) is a listing of
-// folders the index files like any other, so a stat below reads from it.
-async function cacheNamespace(
-  names: string[],
-  key: string,
-  base: string,
-  prefix: string,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  if (index !== undefined) {
-    await index.setDir(
-      key,
-      names.map((name) => [
-        name,
-        new IndexEntry({ id: `${base}/${name}`, name, resourceType: ResourceType.FOLDER }),
-      ]),
-    )
-  }
-  return names.map((name) => `${prefix}${base}/${name}`).sort(compareCodePoints)
+// A namespace level (the sites, or one site's libraries) as rows. Mirrors
+// Python's `_folders`.
+function folders(names: readonly string[]): FileStat[] {
+  return [...names]
+    .sort(compareCodePoints)
+    .map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
 }
 
-export async function readdir(
-  accessor: SharePointAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
+export async function readdir(accessor: SharePointAccessor, path: PathSpec): Promise<FileStat[]> {
   const target = directoryPath(path)
-  const key = virtualKey(path)
-  if (index !== undefined) {
-    const cached = await index.listDir(key)
-    if (cached.entries !== undefined && cached.entries !== null) return cached.entries
-  }
   const resolved = await resolve(accessor, target)
-  const prefix = mountPrefixOf(target.virtual, target.vfsPath)
-  if (resolved.level === 'root') {
-    return cacheNamespace(await listSites(accessor), key, '', prefix, index)
-  }
+  if (resolved.level === 'root') return folders(await listSites(accessor))
   if (resolved.level === 'site' && resolved.siteId !== null) {
-    const drives = await listDrives(accessor, resolved.siteId)
-    return cacheNamespace(drives, key, `/${target.vfsPath}`, prefix, index)
+    return folders(await listDrives(accessor, resolved.siteId))
   }
   if (resolved.driveId === null) return []
-  return readdirItems(
-    accessor.config,
-    driveLoc(accessor.config, resolved, target.vfsPath),
-    index,
-    prefix,
-    target.vfsPath,
-    key,
-    target,
-  )
+  return readdirItems(accessor.config, driveLoc(accessor.config, resolved, target.vfsPath), target)
 }

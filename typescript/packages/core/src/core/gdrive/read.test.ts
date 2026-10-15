@@ -41,7 +41,13 @@ vi.mock('../../observe/context.ts', async () => {
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listFiles: vi.fn(), downloadFile: vi.fn(), getFile: vi.fn() }
+  return {
+    ...actual,
+    listFiles: vi.fn(),
+    listSharedDrives: vi.fn(),
+    downloadFile: vi.fn(),
+    getFile: vi.fn(),
+  }
 })
 
 vi.mock('./versions.ts', async () => {
@@ -54,13 +60,16 @@ vi.mock('../gsheets/read.ts', () => ({ readSpreadsheet: vi.fn() }))
 vi.mock('../gslides/read.ts', () => ({ readPresentation: vi.fn() }))
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
+import { GDriveVFS } from '../../vfs/gdrive/gdrive.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TokenManager } from '../google/client.ts'
 import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import * as drive from '../google/drive.ts'
+import { driveFingerprint } from './fingerprint.ts'
 import { read, readFileVersioned } from './read.ts'
+import { statFromItem } from './readdir.ts'
 import { stat } from './stat.ts'
 import * as versions from './versions.ts'
 import * as gdocs from '../gdocs/read.ts'
@@ -68,12 +77,33 @@ import * as gsheets from '../gsheets/read.ts'
 import * as gslides from '../gslides/read.ts'
 import { md5Hex } from '../../utils/hash.ts'
 
-const VERSIONED_ENTRY = new IndexEntry({
-  id: 'f1',
-  name: 'f.txt',
-  resourceType: 'gdrive/file',
-  vfsName: 'f.txt',
-})
+// A row as a Drive listing names it, odd token shapes kept as given.
+// Mirrors python's `_row`.
+function row(
+  fileId: string,
+  name: string,
+  resourceType = 'gdrive/file',
+  modified = '',
+  extra: Record<string, unknown> = {},
+): FileStat {
+  if (resourceType === 'gdrive/folder' || resourceType === 'gdrive/shared_drive') {
+    return new FileStat({ name, type: FileType.DIRECTORY, extra: { file_id: fileId, ...extra } })
+  }
+  return new FileStat({
+    name,
+    type: FileType.FILE,
+    modified,
+    fingerprint: driveFingerprint(
+      resourceType,
+      extra.md5_checksum,
+      extra.head_revision_id,
+      modified,
+    ),
+    extra: { file_id: fileId, resource_type: resourceType, ...extra },
+  })
+}
+
+const VERSIONED_ENTRY = row('f1', 'f.txt')
 
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
@@ -86,10 +116,20 @@ function makeAccessor(): GDriveAccessor {
 beforeEach(() => {
   vi.clearAllMocks()
   UNRECORDED.records.length = 0
+  vi.mocked(drive.listSharedDrives).mockResolvedValue([])
 })
 
-describe('gdrive read auto-bootstrap', () => {
-  it('refetches root listing when entry is evicted from index', async () => {
+async function workspace(): Promise<Workspace> {
+  const vfs = new GDriveVFS({ clientId: 'x', refreshToken: 'y' })
+  Object.assign(vfs, { accessor: makeAccessor() })
+  return new Workspace(
+    { '/drive/': vfs },
+    { mode: MountMode.READ, shellParser: await getTestParser() },
+  )
+}
+
+describe('a cold gdrive read through a mount', () => {
+  it('lists its parent first', async () => {
     vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
       if (opts?.folderId === 'root') {
         return Promise.resolve([
@@ -104,19 +144,17 @@ describe('gdrive read auto-bootstrap', () => {
       throw new Error(`unexpected folderId=${String(opts?.folderId)}`)
     })
     vi.mocked(drive.downloadFile).mockResolvedValue(new TextEncoder().encode('pdf-bytes'))
-
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const path = new PathSpec({
-      vfsPath: 'report.pdf',
-      virtual: '/report.pdf',
-      directory: '/report.pdf',
-    })
-    const out = await read(accessor, path, index)
-    expect(new TextDecoder().decode(out)).toBe('pdf-bytes')
+    vi.mocked(versions.captureFileMetadata).mockResolvedValue([null, null])
+    const ws = await workspace()
+    try {
+      const out = (await ws.dispatch('read', '/drive/report.pdf')) as Uint8Array
+      expect(new TextDecoder().decode(out)).toBe('pdf-bytes')
+    } finally {
+      await ws.close()
+    }
   })
 
-  it('throws ENOENT when file missing even after recursion', async () => {
+  it('never downloads a name its parent does not list', async () => {
     vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
       if (opts?.folderId === 'root') {
         return Promise.resolve([
@@ -131,48 +169,39 @@ describe('gdrive read auto-bootstrap', () => {
       throw new Error(`unexpected folderId=${String(opts?.folderId)}`)
     })
     vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
-
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const path = new PathSpec({
-      vfsPath: 'missing.txt',
-      virtual: '/missing.txt',
-      directory: '/missing.txt',
-    })
-    await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
+    const ws = await workspace()
+    try {
+      await expect(ws.dispatch('read', '/drive/missing.txt')).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+    } finally {
+      await ws.close()
+    }
   })
 
-  // Mirrors test_read_propagates_parent_refresh_failure: only an absent
+  // Mirrors test_read_propagates_parent_listing_failure: only an absent
   // parent may collapse into the operand's ENOENT.
   it('propagates a failed parent listing instead of reporting ENOENT', async () => {
     vi.mocked(drive.listFiles).mockRejectedValue(new Error('drive unavailable'))
     vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const path = new PathSpec({
-      vfsPath: 'missing.txt',
-      virtual: '/missing.txt',
-      directory: '/missing.txt',
-    })
-    await expect(read(accessor, path, index)).rejects.toThrow(/drive unavailable/)
+    const ws = await workspace()
+    try {
+      await expect(ws.dispatch('read', '/drive/missing.txt')).rejects.toThrow(/drive unavailable/)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('gdrive read', () => {
+  it('answers ENOENT for nothing', async () => {
+    await expect(
+      read(makeAccessor(), PathSpec.fromStrPath('/missing/file.txt')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('throws EISDIR when reading a shared drive root', async () => {
     vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [
-      [
-        'Team Drive',
-        new IndexEntry({
-          id: 'drive1',
-          name: 'Team Drive',
-          resourceType: 'gdrive/shared_drive',
-          vfsName: 'Team Drive',
-          extra: { drive_id: 'drive1' },
-        }),
-      ],
-    ])
     const path = new PathSpec({
       vfsPath: 'Team Drive',
       virtual: '/Team Drive',
@@ -181,10 +210,14 @@ describe('gdrive read auto-bootstrap', () => {
     // The stamped code is the signal, not the message: the message is the
     // bare operand, which is what the shell renders (`cat: /Team Drive: Is a
     // directory`) and what Python's IsADirectoryError(virtual) carries.
-    await expect(read(accessor, path, index)).rejects.toMatchObject({
-      code: 'EISDIR',
-      virtualPath: '/Team Drive',
-    })
+    await expect(
+      read(
+        makeAccessor(),
+        path,
+        undefined,
+        row('drive1', 'Team Drive', 'gdrive/shared_drive', '', { drive_id: 'drive1' }),
+      ),
+    ).rejects.toMatchObject({ code: 'EISDIR', virtualPath: '/Team Drive' })
     expect(vi.mocked(drive.downloadFile)).not.toHaveBeenCalled()
   })
 })
@@ -220,20 +253,10 @@ describe('gdrive read record path', () => {
   it('records the virtual path for a binary file', async () => {
     vi.mocked(versions.captureFileMetadata).mockResolvedValue([null, null])
     vi.mocked(drive.downloadFile).mockResolvedValue(new TextEncoder().encode('live'))
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/m/m', [
-      [
-        'k.txt',
-        new IndexEntry({
-          id: 'f1',
-          name: 'k.txt',
-          resourceType: 'gdrive/file',
-          vfsName: 'k.txt',
-        }),
-      ],
-    ])
     const path = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
-    const [data, records] = await runWithRecording(() => read(makeAccessor(), path, index))
+    const [data, records] = await runWithRecording(() =>
+      read(makeAccessor(), path, undefined, row('f1', 'k.txt')),
+    )
     expect(new TextDecoder().decode(data)).toBe('live')
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })
@@ -244,14 +267,10 @@ const DIGEST = md5Hex(CONTENT)
 const REVISION = 'file123-r1'
 const STAMP = '2026-04-01T00:00:00.000Z'
 
-function binaryEntry(): IndexEntry {
-  return new IndexEntry({
-    id: 'file123',
-    name: 'report',
-    resourceType: 'gdrive/file',
-    remoteTime: STAMP,
-    vfsName: 'report.pdf',
-    extra: { md5_checksum: DIGEST, head_revision_id: REVISION },
+function binaryRow(): FileStat {
+  return row('file123', 'report.pdf', 'gdrive/file', STAMP, {
+    md5_checksum: DIGEST,
+    head_revision_id: REVISION,
   })
 }
 
@@ -271,11 +290,11 @@ describe('the gdrive read record', () => {
     // same unchanged file. The literal md5 is asserted too, because equality
     // alone still holds under a chain mutated to md5-only while every native
     // file silently loses its token.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [['report.pdf', binaryEntry()]])
     const path = specFor()
-    const [, records] = await runWithRecording(async () => read(makeAccessor(), path, index))
-    const st = await stat(makeAccessor(), path, index)
+    const [, records] = await runWithRecording(async () =>
+      read(makeAccessor(), path, undefined, binaryRow()),
+    )
+    const st = await stat(makeAccessor(), path, binaryRow())
     expect(records[0]?.fingerprint).toBe(DIGEST)
     expect(st.fingerprint).toBe(records[0]?.fingerprint)
   })
@@ -283,9 +302,9 @@ describe('the gdrive read record', () => {
   it('records the virtual path on a root mount too', async () => {
     // On a root mount the virtual and mount paths agree, so this is the
     // control for the /gd row: only that one tells them apart.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [['report.pdf', binaryEntry()]])
-    const [, records] = await runWithRecording(async () => read(makeAccessor(), specFor(), index))
+    const [, records] = await runWithRecording(async () =>
+      read(makeAccessor(), specFor(), undefined, binaryRow()),
+    )
     expect(records[0]?.path).toBe('/report.pdf')
   })
 
@@ -293,21 +312,14 @@ describe('the gdrive read record', () => {
     // A mount at /gd holding 'gd-report.pdf': the index key is derived from
     // the mount prefix, and a name sharing its leading text must still
     // resolve under /gd, or the read throws ENOENT before it records.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/gd', [['gd-report.pdf', binaryEntry()]])
     const [, records] = await runWithRecording(async () =>
-      read(makeAccessor(), specFor('gd-report.pdf', '/gd'), index),
+      read(makeAccessor(), specFor('gd-report.pdf', '/gd'), undefined, binaryRow()),
     )
     expect(records[0]?.path).toBe('/gd/gd-report.pdf')
   })
 
-  it('stamps the same token through the API stat function', async () => {
-    // stat has two paths and the index arm is only one of them: a cold cache
-    // that cannot list the parent falls to statFromApi, which reads its own
-    // getFile. Fixing the index arm alone leaves this one on a timestamp.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [['report.pdf', binaryEntry()]])
-    vi.mocked(drive.getFile).mockResolvedValue({
+  it('stamps the token the row a listing builds from the Drive item names', async () => {
+    const item = {
       id: 'file123',
       name: 'report.pdf',
       mimeType: 'application/pdf',
@@ -315,30 +327,21 @@ describe('the gdrive read record', () => {
       size: String(CONTENT.length),
       md5Checksum: DIGEST,
       headRevisionId: REVISION,
-    })
-    vi.mocked(drive.listFiles).mockResolvedValue([
-      {
-        id: 'file123',
-        name: 'report.pdf',
-        mimeType: 'application/pdf',
-        modifiedTime: STAMP,
-      },
-    ])
-    const [, records] = await runWithRecording(async () => read(makeAccessor(), specFor(), index))
-    // `undefined` index is statFromApi's own path, taken before any warm.
-    const apiStat = await stat(makeAccessor(), specFor(), undefined)
-    expect(apiStat.fingerprint).toBe(DIGEST)
-    expect(apiStat.fingerprint).toBe(records[0]?.fingerprint)
+    }
+    const listed = statFromItem(item)
+    const [, records] = await runWithRecording(async () =>
+      read(makeAccessor(), specFor(), undefined, listed),
+    )
+    expect(listed.fingerprint).toBe(DIGEST)
+    expect(listed.fingerprint).toBe(records[0]?.fingerprint)
   })
 
   it('keeps the captured revision on a windowed read', async () => {
     // A window proves nothing about the revision: the bytes are a slice of
     // the object the capture named, so the pin is still true even though the
     // fingerprint cannot be stamped.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [['report.pdf', binaryEntry()]])
     const [, records] = await runWithRecording(async () =>
-      read(makeAccessor(), specFor(), index, { offset: 1, size: 4 }),
+      read(makeAccessor(), specFor(), { offset: 1, size: 4 }, binaryRow()),
     )
     expect(records[0]?.fingerprint).toBeNull()
     expect(records[0]?.revision).toBe(REVISION)
@@ -348,13 +351,13 @@ describe('the gdrive read record', () => {
     // The capture and the download are two separate requests, so a writer
     // that changes the file between them caches bytes B under md5(A). A later
     // revert to A then reads as FRESH and serves B, silently.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [['report.pdf', binaryEntry()]])
     vi.mocked(versions.captureFileMetadata).mockResolvedValue([
       md5Hex(new TextEncoder().encode('the previous content')),
       REVISION,
     ])
-    const [, records] = await runWithRecording(async () => read(makeAccessor(), specFor(), index))
+    const [, records] = await runWithRecording(async () =>
+      read(makeAccessor(), specFor(), undefined, binaryRow()),
+    )
     expect(records[0]?.fingerprint).toBeNull()
     // And the revision goes with it: it came from the same capture, so the
     // disagreement is proof it describes the old content too. Keeping it
@@ -365,10 +368,8 @@ describe('the gdrive read record', () => {
 
   it('stamps no token on a size-capped read from zero', async () => {
     // `head -c N`: offset 0 alone does not make a read whole.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [['report.pdf', binaryEntry()]])
     const [, records] = await runWithRecording(async () =>
-      read(makeAccessor(), specFor(), index, { offset: 0, size: 4 }),
+      read(makeAccessor(), specFor(), { offset: 0, size: 4 }, binaryRow()),
     )
     expect(records[0]?.fingerprint).toBeNull()
     expect(records[0]?.revision).toBe(REVISION)
@@ -378,10 +379,10 @@ describe('the gdrive read record', () => {
     // Drive withholds md5Checksum for some binary files. There is nothing to
     // verify, and dropping the token would leave the read at null against
     // stat's head revision -- the mismatch this change removes.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [['report.pdf', binaryEntry()]])
     vi.mocked(versions.captureFileMetadata).mockResolvedValue([null, REVISION])
-    const [, records] = await runWithRecording(async () => read(makeAccessor(), specFor(), index))
+    const [, records] = await runWithRecording(async () =>
+      read(makeAccessor(), specFor(), undefined, binaryRow()),
+    )
     expect(records[0]?.fingerprint).toBe(REVISION)
   })
 
@@ -392,8 +393,6 @@ describe('the gdrive read record', () => {
     // later op with `Device not configured`. Big enough to span several
     // chunks, small enough to stay fast.
     const BIG = new Uint8Array(4 * 1024 * 1024).fill(7)
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [['report.pdf', binaryEntry()]])
     vi.mocked(drive.downloadFile).mockResolvedValue(BIG)
     vi.mocked(versions.captureFileMetadata).mockResolvedValue([md5Hex(BIG), REVISION])
     // Order, not eventual firing: `await timer` resolves only after the
@@ -409,12 +408,12 @@ describe('the gdrive read record', () => {
         resolve()
       }, 0),
     )
-    const reading = runWithRecording(async () => read(makeAccessor(), specFor(), index)).then(
-      (v) => {
-        order.push('read')
-        return v
-      },
-    )
+    const reading = runWithRecording(async () =>
+      read(makeAccessor(), specFor(), undefined, binaryRow()),
+    ).then((v) => {
+      order.push('read')
+      return v
+    })
     const [, [, records]] = await Promise.all([timer, reading])
     expect(order[0]).toBe('timer')
     expect(records[0]?.fingerprint).toBe(md5Hex(BIG))
@@ -427,19 +426,18 @@ const NATIVE: [string, string, () => { mockResolvedValue: (v: Uint8Array) => voi
   ['gdrive/gslide', 'deck.gslide.json', () => vi.mocked(gslides.readPresentation)],
 ]
 
-function nativeEntry(resourceType: string, vfsName: string, headRevision?: string): IndexEntry {
+function nativeRow(resourceType: string, vfsName: string, headRevision?: string): FileStat {
   // Drive gives a native file neither md5Checksum nor headRevisionId, so the
   // default carries neither and the stamp is the only token -- the case the
   // chain's third step exists for. The revision test seeds one deliberately,
   // because its assertion would hold whatever the code did otherwise.
-  return new IndexEntry({
-    id: 'doc123',
-    name: 'doc',
-    resourceType,
-    remoteTime: STAMP,
+  return row(
+    'doc123',
     vfsName,
-    extra: headRevision === undefined ? {} : { head_revision_id: headRevision },
-  })
+    resourceType,
+    STAMP,
+    headRevision === undefined ? {} : { head_revision_id: headRevision },
+  )
 }
 
 describe('the native gdrive read record', () => {
@@ -447,11 +445,14 @@ describe('the native gdrive read record', () => {
     it(`records no revision for ${vfsName}`, async () => {
       // A revision pin REPLACES the drift check and the native branch can
       // never honour one, so recording it would kill the check it displaced.
-      const index = new RAMIndexCacheStore()
-      await index.setDir('/gd', [[vfsName, nativeEntry(resourceType, vfsName, 'doc123-r1')]])
       renderer().mockResolvedValue(new TextEncoder().encode('{}'))
       const [, records] = await runWithRecording(async () =>
-        read(makeAccessor(), specFor(vfsName, '/gd'), index),
+        read(
+          makeAccessor(),
+          specFor(vfsName, '/gd'),
+          undefined,
+          nativeRow(resourceType, vfsName, 'doc123-r1'),
+        ),
       )
       expect(records[0]?.revision).toBeNull()
     })
@@ -461,11 +462,14 @@ describe('the native gdrive read record', () => {
       // does: the chain describes the whole render, so a window stamped with
       // it would cache a partial body that reads FRESH for the life of the
       // entry.
-      const index = new RAMIndexCacheStore()
-      await index.setDir('/gd', [[vfsName, nativeEntry(resourceType, vfsName)]])
       renderer().mockResolvedValue(new TextEncoder().encode('{"tabs": [1,2,3]}'))
       const [, records] = await runWithRecording(async () =>
-        read(makeAccessor(), specFor(vfsName, '/gd'), index, { offset: 2, size: 5 }),
+        read(
+          makeAccessor(),
+          specFor(vfsName, '/gd'),
+          { offset: 2, size: 5 },
+          nativeRow(resourceType, vfsName),
+        ),
       )
       expect(records[0]?.bytes).toBe(5)
       expect(records[0]?.fingerprint).toBeNull()
@@ -482,29 +486,19 @@ async function readUnrecorded(
   extra: Record<string, unknown>,
   options?: { offset?: number; size?: number },
 ): Promise<[string, ContextModule.RecordOptions][]> {
-  // Seeded straight into the index rather than warmed through readdir:
-  // readdir drops an empty or missing md5, so a warmed entry could not carry
-  // the odd shapes these rows need.
-  const index = new RAMIndexCacheStore()
-  await index.setDir('/gd', [
-    [
-      'a.txt',
-      new IndexEntry({
-        id: 'file123',
-        name: 'a.txt',
-        resourceType: 'gdrive/file',
-        remoteTime: UNRECORDED_STAMP,
-        vfsName: 'a.txt',
-        extra,
-      }),
-    ],
-  ])
+  // Built rather than listed: a listing drops an empty or missing md5, so a
+  // listed row could not carry the odd shapes these rows need.
   const offset = options?.offset ?? 0
   vi.mocked(drive.downloadFile).mockResolvedValue(
     BODY.slice(offset, options?.size === undefined ? undefined : offset + options.size),
   )
   vi.mocked(versions.captureFileMetadata).mockResolvedValue([null, null])
-  await read(makeAccessor(), UNRECORDED_SPEC, index, options)
+  await read(
+    makeAccessor(),
+    UNRECORDED_SPEC,
+    options,
+    row('file123', 'a.txt', 'gdrive/file', UNRECORDED_STAMP, extra),
+  )
   return UNRECORDED.records
 }
 
@@ -568,23 +562,14 @@ describe('an unrecorded gdrive read', () => {
 
   it('stamps no entry token on a pinned read', async () => {
     // Pinned bytes are an old revision; the entry's md5 describes head.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/gd', [
-      [
-        'a.txt',
-        new IndexEntry({
-          id: 'file123',
-          name: 'a.txt',
-          resourceType: 'gdrive/file',
-          remoteTime: UNRECORDED_STAMP,
-          vfsName: 'a.txt',
-          extra: { md5_checksum: BODY_MD5 },
-        }),
-      ],
-    ])
     vi.mocked(versions.downloadRevision).mockResolvedValue(BODY)
     await runWithRevisions(new Map([['/gd/a.txt', 'r1']]), () =>
-      read(makeAccessor(), UNRECORDED_SPEC, index),
+      read(
+        makeAccessor(),
+        UNRECORDED_SPEC,
+        undefined,
+        row('file123', 'a.txt', 'gdrive/file', UNRECORDED_STAMP, { md5_checksum: BODY_MD5 }),
+      ),
     )
     expect(UNRECORDED.records).toEqual([['/gd/a.txt', { fingerprint: null, revision: 'r1' }]])
     expect(drive.downloadFile).not.toHaveBeenCalled()
@@ -593,23 +578,16 @@ describe('an unrecorded gdrive read', () => {
 
   it('a recorded read prefers the capture over the entry', async () => {
     // The capture is the fresher of the two; the entry can be a TTL old.
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/gd', [
-      [
-        'a.txt',
-        new IndexEntry({
-          id: 'file123',
-          name: 'a.txt',
-          resourceType: 'gdrive/file',
-          remoteTime: UNRECORDED_STAMP,
-          vfsName: 'a.txt',
-          extra: { md5_checksum: '0'.repeat(32) },
-        }),
-      ],
-    ])
     vi.mocked(drive.downloadFile).mockResolvedValue(BODY)
     vi.mocked(versions.captureFileMetadata).mockResolvedValue([BODY_MD5, 'r9'])
-    const [, records] = await runWithRecording(() => read(makeAccessor(), UNRECORDED_SPEC, index))
+    const [, records] = await runWithRecording(() =>
+      read(
+        makeAccessor(),
+        UNRECORDED_SPEC,
+        undefined,
+        row('file123', 'a.txt', 'gdrive/file', UNRECORDED_STAMP, { md5_checksum: '0'.repeat(32) }),
+      ),
+    )
     expect(records.map((r) => [r.fingerprint, r.revision])).toEqual([[BODY_MD5, 'r9']])
   })
 })
@@ -620,11 +598,14 @@ describe('the native gdrive read record path', () => {
       it(`records ${mount}/${vfsName} for a mount at '${mount || '/'}'`, async () => {
         // The cache fill matches on the virtual path; the mount path names
         // nothing under a mount at /gd.
-        const index = new RAMIndexCacheStore()
-        await index.setDir(mount || '/', [[vfsName, nativeEntry(resourceType, vfsName)]])
         renderer().mockResolvedValue(new TextEncoder().encode('{}'))
         const [, records] = await runWithRecording(() =>
-          read(makeAccessor(), specFor(vfsName, mount), index),
+          read(
+            makeAccessor(),
+            specFor(vfsName, mount),
+            undefined,
+            nativeRow(resourceType, vfsName),
+          ),
         )
         expect(records.map((r) => [r.path, r.fingerprint])).toEqual([
           [`${mount}/${vfsName}`, STAMP],

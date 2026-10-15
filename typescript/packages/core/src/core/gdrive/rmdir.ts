@@ -14,10 +14,11 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 
-import type { PathSpec } from '../../types.ts'
+import { FileType, type PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { deleteFile, listFiles } from '../google/drive.ts'
-import { eaccesOnDenied, isFolder, resolveKey } from './resolve.ts'
+import { eaccesOnDenied } from './resolve.ts'
 
 /**
  * Remove an empty folder.
@@ -30,19 +31,23 @@ import { eaccesOnDenied, isFolder, resolveKey } from './resolve.ts'
  * runtimes all reach the op directly. The probe is the one `rename` already
  * makes before it overwrites a directory, bounded to a single entry.
  */
-async function rmdirImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
-  const key = path.vfsPath
-  if (key === '') return
-  const node = await resolveKey(accessor, key)
-  if (node === null) throw enoent(path)
-  if (!isFolder(node)) throw enotdir(path)
+async function rmdirImpl(
+  accessor: GDriveAccessor,
+  path: PathSpec,
+  handed: Handed = {},
+): Promise<void> {
+  if (path.vfsPath === '') return
+  const entry = handed.entry ?? null
+  if (entry === null) throw enoent(path)
+  if (entry.type !== FileType.DIRECTORY) throw enotdir(path)
+  const driveId = entry.extra.drive_id
   const children = await listFiles(accessor.tokenManager, {
-    folderId: node.id,
-    driveId: node.driveId,
+    folderId: entry.extra.file_id as string,
+    driveId: typeof driveId === 'string' ? driveId : null,
     limit: 1,
   })
   if (children.length > 0) throw enotempty(path)
-  await deleteFile(accessor.tokenManager, node.id)
+  await deleteFile(accessor.tokenManager, entry.extra.file_id as string)
 }
 
 export const rmdir = eaccesOnDenied(rmdirImpl)

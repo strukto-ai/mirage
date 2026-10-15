@@ -15,11 +15,12 @@
 import aiohttp
 import pytest
 
-import mirage.core.gdrive.readdir as readdir_mod
 import mirage.core.gdrive.search as search_mod
-from mirage.cache.index import RAMIndexCacheStore
+import mirage.core.gdrive.tree as tree_mod
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.search import PARENTS_PER_QUERY, files_containing
 from mirage.types import PathSpec
+from tests.fixtures.handed import entry_at
 
 
 def scope(vfs_path: str = "") -> PathSpec:
@@ -35,9 +36,7 @@ async def test_hits_are_the_walked_files_drive_names(
     fake_drive.add("a.txt", content=b"the wombat")
     fake_drive.add("b.txt", parent=sub, content=b"wombat here")
     fake_drive.add("c.txt", content=b"nothing")
-    out = await files_containing(
-        gdrive_accessor, "wombat", [scope()], RAMIndexCacheStore()
-    )
+    out = await files_containing(gdrive_accessor, "wombat", scope(), None)
     assert out is not None
     assert sorted(p.virtual for p in out) == ["/gd/a.txt", "/gd/sub/b.txt"]
     assert fake_drive.searches == [["root", sub]]
@@ -50,8 +49,12 @@ async def test_a_subfolder_scope_searches_from_its_folder(
     sub = fake_drive.folder("sub")
     fake_drive.add("a.txt", content=b"wombat")
     fake_drive.add("b.txt", parent=sub, content=b"wombat")
+    under = scope("sub")
     out = await files_containing(
-        gdrive_accessor, "wombat", [scope("sub")], RAMIndexCacheStore()
+        gdrive_accessor,
+        "wombat",
+        under,
+        await entry_at(readdir, gdrive_accessor, under),
     )
     assert out is not None
     assert [(p.virtual, p.vfs_path) for p in out] == [
@@ -67,9 +70,7 @@ async def test_many_folders_are_searched_in_batches(
     for i in range(PARENTS_PER_QUERY + 5):
         fake_drive.folder(f"d{i:02d}")
     fake_drive.add("a.txt", content=b"wombat")
-    out = await files_containing(
-        gdrive_accessor, "wombat", [scope()], RAMIndexCacheStore()
-    )
+    out = await files_containing(gdrive_accessor, "wombat", scope(), None)
     assert out is not None
     assert [len(s) for s in fake_drive.searches] == [PARENTS_PER_QUERY, 6]
 
@@ -99,8 +100,6 @@ async def test_a_search_that_cannot_answer_answers_none(
     if case == "timeout":
         monkeypatch.setattr(search_mod, "search_files", _raise(TimeoutError()))
     if case == "listing fails":
-        monkeypatch.setattr(readdir_mod, "list_files", _raise(TimeoutError()))
-    out = await files_containing(
-        gdrive_accessor, "wombat", [scope()], RAMIndexCacheStore()
-    )
+        monkeypatch.setattr(tree_mod, "list_files", _raise(TimeoutError()))
+    out = await files_containing(gdrive_accessor, "wombat", scope(), None)
     assert out is None

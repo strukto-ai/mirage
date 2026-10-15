@@ -14,8 +14,10 @@
 
 import pytest
 
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.rm import rm_r
 from mirage.types import PathSpec
+from tests.fixtures.handed import call
 
 
 def spec(virtual: str) -> PathSpec:
@@ -27,11 +29,11 @@ async def test_rm_r_removes_tree(fake_drive, gdrive_accessor):
     folder = fake_drive.folder("d")
     sub = fake_drive.folder("s", parent=folder)
     fake_drive.add("f.txt", parent=sub, content=b"x")
-    await rm_r(gdrive_accessor, spec("/d"))
+    await call(rm_r, readdir, gdrive_accessor, spec("/d"))
     assert fake_drive.items == {}
 
 
 @pytest.mark.asyncio
 async def test_rm_r_missing_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
-        await rm_r(gdrive_accessor, spec("/missing"))
+        await call(rm_r, readdir, gdrive_accessor, spec("/missing"))

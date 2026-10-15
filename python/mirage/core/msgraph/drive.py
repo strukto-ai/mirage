@@ -19,12 +19,6 @@ from functools import partial
 from typing import Any, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    ResourceType,
-)
 from mirage.core.api.client import SessionArg
 from mirage.core.generic.find_eval import (
     FindEntry,
@@ -130,7 +124,7 @@ def directory_path(path: PathSpec) -> PathSpec:
 
 
 def virtual_key(path: PathSpec) -> str:
-    """The mount-absolute key the index files a listing or entry under.
+    """The mount-absolute path of a listing or an entry.
 
     Args:
         path (PathSpec): the path, a glob standing for its folder.
@@ -800,12 +794,17 @@ async def _is_dir(
 async def readdir_items(
     config: MsGraphConfig,
     loc: DriveLoc,
-    index: IndexCacheStore,
-    prefix: str,
-    stripped: str,
     virtual_key: str,
     session: SessionArg = None,
-) -> list[str]:
+) -> list[FileStat]:
+    """A folder's children, each as ``stat`` answers it.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        loc (DriveLoc): the folder.
+        virtual_key (str): its mount-absolute path, which an error names.
+        session (SessionArg): pool or live session to ride.
+    """
     try:
         children = await graph_list(
             config, loc.item("/children"), session=session
@@ -823,80 +822,25 @@ async def readdir_items(
             partial(_is_file, config, loc, session=session),
             partial(_is_dir, config, loc, session=session),
         ) from exc
-    base = "/" + stripped if stripped else ""
-    names: list[str] = []
-    index_entries: list[tuple[str, IndexEntry]] = []
-    for child in children:
-        cname = child.get("name", "")
-        key = f"{base}/{cname}"
-        names.append(key)
-        is_dir = "folder" in child
-        rtype = ResourceType.FOLDER if is_dir else ResourceType.FILE
-        # Folder `size` is aggregate storage metadata, never rendered
-        # content length: cache it as extra, not as the entry size.
-        extra: dict[str, Any] = {
-            "ctag": child.get("cTag"),
-            "etag": child.get("eTag"),
-        }
-        if is_dir:
-            extra.update(
-                size_bytes=child.get("size"),
-                child_count=folder_child_count(child),
-            )
-        else:
-            extra["id"] = child.get("id")
-        index_entries.append(
-            (
-                cname,
-                IndexEntry(
-                    id=key,
-                    name=cname,
-                    resource_type=rtype,
-                    size=None if is_dir else child.get("size"),
-                    remote_time=child.get("lastModifiedDateTime", ""),
-                    extra=extra,
-                ),
-            )
-        )
-    names = sorted(names)
-    virtual_entries = sorted((prefix + e if prefix else e) for e in names)
-    index_entries.sort(key=lambda named: named[0])
-    await index.set_dir(virtual_key, index_entries)
-    return virtual_entries
+    rows = [entry_stat(child) for child in children]
+    rows.sort(key=lambda row: row.name)
+    return rows
 
 
 async def stat_item(
     config: MsGraphConfig,
     loc: DriveLoc,
     virtual: str,
-    virtual_key: str,
-    index: IndexCacheStore,
     session: SessionArg = None,
 ) -> FileStat:
-    lookup = await index.get(virtual_key)
-    if lookup.entry is not None:
-        entry = lookup.entry
-        if entry.resource_type == ResourceType.FOLDER:
-            return FileStat(
-                name=entry.name,
-                type=FileType.DIRECTORY,
-                size=entry.size,
-                modified=entry.remote_time or None,
-                extra=dict(entry.extra),
-            )
-        return FileStat(
-            name=entry.name,
-            size=entry.size,
-            modified=entry.remote_time or None,
-            type=FileType.FILE,
-            content=content_type_for_path(entry.name),
-            fingerprint=entry.extra.get("ctag"),
-            extra=dict(entry.extra),
-        )
-    parent = virtual_key.rsplit("/", 1)[0] or "/"
-    parent_listing = await index.list_dir(parent)
-    if parent_listing.entries is not None:
-        raise enoent(virtual)
+    """One drive item's stat, from Graph.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        loc (DriveLoc): the item.
+        virtual (str): its virtual path, which an error names.
+        session (SessionArg): pool or live session to ride.
+    """
     try:
         item = await graph_get(config, loc.item(), session=session)
     except GraphError as exc:
@@ -912,13 +856,13 @@ A_contra = TypeVar("A_contra", bound=Accessor, contravariant=True)
 
 class StatFn(Protocol[A_contra]):
     def __call__(
-        self, accessor: A_contra, path: PathSpec, index: IndexCacheStore = ...
+        self, accessor: A_contra, path: PathSpec
     ) -> Awaitable[FileStat]: ...
 
 
 class ExistsFn(Protocol[A_contra]):
     def __call__(
-        self, accessor: A_contra, path: PathSpec, index: IndexCacheStore = ...
+        self, accessor: A_contra, path: PathSpec
     ) -> Awaitable[bool]: ...
 
 
@@ -927,7 +871,6 @@ class ReadFn(Protocol[A_contra]):
         self,
         accessor: A_contra,
         path: PathSpec,
-        index: IndexCacheStore = ...,
         offset: int = ...,
         size: int | None = ...,
     ) -> Awaitable[bytes]: ...
@@ -963,11 +906,9 @@ def make_exists(stat: StatFn[A]) -> ExistsFn[A]:
         ExistsFn: the probe.
     """
 
-    async def exists(
-        accessor: A, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> bool:
+    async def exists(accessor: A, path: PathSpec) -> bool:
         try:
-            await stat(accessor, path, index)
+            await stat(accessor, path)
             return True
         except FileNotFoundError:
             return False
@@ -995,7 +936,7 @@ def make_truncate(read: ReadFn[A], write: WriteFn[A]) -> TruncateFn[A]:
         if no_create:
             raise enotsup("msgraph", "truncate --no-create", path)
         try:
-            data = await read(accessor, path, index=NULL_INDEX)
+            data = await read(accessor, path)
         except FileNotFoundError:
             data = b""
         await write(accessor, path, data[:length].ljust(length, b"\0"))

@@ -17,8 +17,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdrive.checksum import checksum
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
@@ -27,7 +25,7 @@ from mirage.observe.context import (
     push_revisions,
     reset_revisions,
 )
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 SCOPE = PathSpec(vfs_path="r.pdf", virtual="/r.pdf", directory="/")
 
@@ -43,23 +41,12 @@ def accessor():
     return GDriveAccessor(config=config, token_manager=manager)
 
 
-async def _index(resource_type: str) -> RAMIndexCacheStore:
-    index = RAMIndexCacheStore()
-    await index.set_dir(
-        "/",
-        [
-            (
-                "r.pdf",
-                IndexEntry(
-                    id="f1",
-                    name="r.pdf",
-                    resource_type=resource_type,
-                    vfs_name="r.pdf",
-                ),
-            )
-        ],
+def _row(resource_type: str) -> FileStat:
+    return FileStat(
+        name="r.pdf",
+        type=FileType.FILE,
+        extra={"file_id": "f1", "resource_type": resource_type},
     )
-    return index
 
 
 @pytest.mark.asyncio
@@ -72,7 +59,6 @@ async def _index(resource_type: str) -> RAMIndexCacheStore:
     ],
 )
 async def test_drive_answers_the_digest_it_keeps(accessor, algorithm, field):
-    index = await _index("gdrive/file")
     reply = {"md5Checksum": "m5", "headRevisionId": "h1", field: "ABC123"}
     scope = RecordingScope()
     try:
@@ -81,7 +67,9 @@ async def test_drive_answers_the_digest_it_keeps(accessor, algorithm, field):
             new_callable=AsyncMock,
             return_value=reply,
         ) as get:
-            got = await checksum(accessor, SCOPE, algorithm, index)
+            got = await checksum(
+                accessor, SCOPE, algorithm, _row("gdrive/file")
+            )
     finally:
         scope.close()
     assert got == "abc123"
@@ -98,9 +86,9 @@ async def test_a_native_file_or_another_algorithm_reads(accessor):
     with patch(
         "mirage.core.gdrive.checksum.google_get", new_callable=AsyncMock
     ) as get:
-        doc = await _index("gdrive/gdoc")
+        doc = _row("gdrive/gdoc")
         assert await checksum(accessor, SCOPE, "md5", doc) is None
-        binary = await _index("gdrive/file")
+        binary = _row("gdrive/file")
         assert await checksum(accessor, SCOPE, "sha512", binary) is None
     get.assert_not_awaited()
 
@@ -112,8 +100,8 @@ async def test_a_pinned_revision_reads(accessor):
         with patch(
             "mirage.core.gdrive.checksum.google_get", new_callable=AsyncMock
         ) as get:
-            index = await _index("gdrive/file")
-            assert await checksum(accessor, SCOPE, "md5", index) is None
+            row = _row("gdrive/file")
+            assert await checksum(accessor, SCOPE, "md5", row) is None
         get.assert_not_awaited()
     finally:
         reset_revisions(token)

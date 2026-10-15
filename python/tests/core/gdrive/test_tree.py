@@ -36,7 +36,9 @@ def seed_tree(fake_drive) -> None:
 async def test_iter_tree_walks_sorted(fake_drive, gdrive_accessor):
     seed_tree(fake_drive)
     walked = []
-    async for rel, item, is_dir in iter_tree(gdrive_accessor, spec("/")):
+    async for rel, item, is_dir in iter_tree(
+        gdrive_accessor, spec("/"), "root", None
+    ):
         walked.append((rel, is_dir))
     assert walked == [
         ("Report.gdoc.json", False),
@@ -45,13 +47,6 @@ async def test_iter_tree_walks_sorted(fake_drive, gdrive_accessor):
         ("sub/big.bin", False),
         ("sub/small.bin", False),
     ]
-
-
-@pytest.mark.asyncio
-async def test_iter_tree_missing_root_raises(fake_drive, gdrive_accessor):
-    walker = iter_tree(gdrive_accessor, spec("/missing"))
-    with pytest.raises(FileNotFoundError):
-        await anext(walker)
 
 
 def test_vfs_name_renders_native_suffix():

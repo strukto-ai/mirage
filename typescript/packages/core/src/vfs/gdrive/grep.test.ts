@@ -6,50 +6,51 @@ vi.mock('../../core/google/client.ts', async (importOriginal) => ({
 }))
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { googleGet, type TokenManager } from '../../core/google/client.ts'
-import { materialize } from '../../io/types.ts'
-import { PathSpec } from '../../types.ts'
-import { generic } from '../../commands/builtin/generic_bind/factory.ts'
-import { ioFor } from '../../test-utils.ts'
+import { FileStat, FileType, MountMode } from '../../types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { GDriveVFS } from './gdrive.ts'
 
 const DEC = new TextDecoder()
 const TM = { config: { clientId: 'test', refreshToken: 'test' } } as TokenManager
 
-async function run(kind: string, flags: Record<string, boolean> = {}) {
-  const name = `Report.${kind}.json`
-  const index = new RAMIndexCacheStore()
-  const p = new PathSpec({
-    virtual: `/drive/${name}`,
-    directory: `/drive/${name}`,
-    vfsPath: name,
-    resolved: true,
-  })
-  await index.setDir('/drive', [
-    [name, new IndexEntry({ id: 'file1', name, resourceType: `gdrive/${kind}`, vfsName: name })],
-  ])
-  const cmd = generic('grep')
-  const accessor = new GDriveAccessor({ tokenManager: TM })
-  const result = await cmd.fn(accessor, [p], ['needle'], {
-    stdin: null,
-    flags,
-    io: ioFor(GDriveVFS, accessor),
-    cwd: '/',
-    index,
-  })
-  if (result === null) throw new Error('no grep result')
-  return { out: await materialize(result[0]), io: result[1] }
-}
-
-describe('Drive grep through registered mount commands', () => {
+// Mirrors python's test_grep_i_keeps_rendered_google_json: an id-addressed
+// file is reached through a mount, which hands the read the row its listing
+// named.
+describe('Drive grep through a mount', () => {
   it.each(['gdoc', 'gsheet', 'gslide'])('-I keeps rendered %s JSON', async (kind) => {
     vi.mocked(googleGet).mockResolvedValue({ title: 'needle\0tail' })
-    const { out, io } = await run(kind, { args_I: true })
-    expect(io.exitCode).toBe(0)
-    expect(DEC.decode(out)).toContain('needle')
-    expect(out.includes(0)).toBe(false)
-    expect(io.stderr).toBeNull()
+    const vfs = new GDriveVFS({ clientId: 'test', refreshToken: 'test' })
+    Object.assign(vfs, { accessor: new GDriveAccessor({ tokenManager: TM }) })
+    const ws = new Workspace(
+      { '/drive/': vfs },
+      { mode: MountMode.READ, shellParser: await getTestParser() },
+    )
+    const name = `Report.${kind}.json`
+    try {
+      await ws.mount('/drive/').indexStore.setDir(
+        '/drive',
+        [
+          [
+            name,
+            new FileStat({
+              name,
+              type: FileType.FILE,
+              extra: { file_id: 'file1', resource_type: `gdrive/${kind}` },
+            }),
+          ],
+        ],
+        new Date(Date.now() + 3_600_000),
+      )
+      const io = await ws.shell(`grep -I needle /drive/${name}`)
+      const out = io.stdout
+      expect(io.exitCode).toBe(0)
+      expect(DEC.decode(out)).toContain('needle')
+      expect(out.includes(0)).toBe(false)
+      expect(DEC.decode(io.stderr)).toBe('')
+    } finally {
+      await ws.close()
+    }
   })
 })

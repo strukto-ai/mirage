@@ -13,21 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
+from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.google.drive import delete_file
 from mirage.errors.fs import eisdir, enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 @eacces_on_denied
-async def unlink(accessor: GDriveAccessor, path: PathSpec) -> None:
+async def unlink(
+    accessor: GDriveAccessor, path: PathSpec, entry: FileStat | None = None
+) -> None:
     virtual = path.virtual
-    key = path.vfs_path
-    if not key:
+    if not path.vfs_path:
         raise eisdir(virtual)
-    node = await resolve_key(accessor, key)
-    if node is None:
+    if entry is None:
         raise enoent(virtual)
-    if node.is_folder:
+    if entry.type is FileType.DIRECTORY:
         raise eisdir(virtual)
-    await delete_file(accessor.token_manager, node.id)
+    await delete_file(accessor.token_manager, entry.extra["file_id"])

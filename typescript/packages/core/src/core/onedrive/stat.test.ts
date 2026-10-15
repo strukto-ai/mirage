@@ -15,7 +15,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
@@ -47,15 +46,13 @@ describe('OneDrive stat', () => {
     expect(info.extra).toMatchObject({ size_bytes: 4096, child_count: 2 })
   })
 
-  it('serves a folder from the index without a fingerprint', async () => {
+  it('lists a folder without a fingerprint', async () => {
     answer({
       value: [{ id: 'dir', name: 'Docs', cTag: 'ctag-dir', folder: { childCount: 1 } }],
     })
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const index = new RAMIndexCacheStore()
-    await readdir(accessor, PathSpec.fromStrPath('/od', ''), index)
-    const docs = await stat(accessor, PathSpec.fromStrPath('/od/Docs', 'Docs'), index)
-    expect(docs.type).toBe('directory')
-    expect(docs.fingerprint).toBeNull()
+    const [docs] = await readdir(accessor, PathSpec.fromStrPath('/od', ''))
+    expect(docs?.type).toBe('directory')
+    expect(docs?.fingerprint).toBeNull()
   })
 })

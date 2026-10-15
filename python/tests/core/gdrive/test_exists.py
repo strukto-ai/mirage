@@ -15,7 +15,9 @@
 import pytest
 
 from mirage.core.gdrive.exists import exists
+from mirage.core.gdrive.readdir import readdir
 from mirage.types import PathSpec
+from tests.fixtures.handed import call
 
 
 def spec(virtual: str) -> PathSpec:
@@ -25,6 +27,8 @@ def spec(virtual: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_exists(fake_drive, gdrive_accessor):
     fake_drive.add("f.txt", content=b"x")
-    assert await exists(gdrive_accessor, spec("/"))
-    assert await exists(gdrive_accessor, spec("/f.txt"))
-    assert not await exists(gdrive_accessor, spec("/missing.txt"))
+    assert await call(exists, readdir, gdrive_accessor, spec("/"))
+    assert await call(exists, readdir, gdrive_accessor, spec("/f.txt"))
+    assert not await call(
+        exists, readdir, gdrive_accessor, spec("/missing.txt")
+    )

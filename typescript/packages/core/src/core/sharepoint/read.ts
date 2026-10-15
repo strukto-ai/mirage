@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { readItem } from '../msgraph/drive.ts'
 import { driveLoc, resolveItem } from './resolve.ts'
@@ -24,13 +23,11 @@ import { driveLoc, resolveItem } from './resolve.ts'
  * Args:
  *   accessor: SharePoint accessor.
  *   path: the path to read.
- *   _index: unused; Graph resolves the item from the path itself.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
 export async function read(
   accessor: SharePointAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
   const resolved = await resolveItem(accessor, path)

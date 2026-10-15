@@ -47,17 +47,16 @@ def _is_native(mime: str) -> bool:
 _PATCH_TARGETS = {
     # Every module that imports the function by value needs its own
     # binding: patching one leaves the others pointing at the real Drive
-    # API, which 401s mid-test. `find` reaches Drive through resolve and
-    # tree, neither of which readdir's binding covers (#684).
+    # API, which 401s mid-test. `find` reaches Drive through tree, which
+    # readdir's binding does not cover (#684).
     "list_files": [
         "mirage.core.gdrive.readdir.list_files",
-        "mirage.core.gdrive.resolve.list_files",
         "mirage.core.gdrive.tree.list_files",
         "mirage.core.gdrive.rename.list_files",
+        "mirage.core.gdrive.rmdir.list_files",
     ],
     "list_shared_drives": [
         "mirage.core.gdrive.readdir.list_shared_drives",
-        "mirage.core.gdrive.resolve.list_shared_drives",
     ],
     "list_all_files": [
         "mirage.core.google.readdir.list_all_files",
@@ -84,13 +83,11 @@ _PATCH_TARGETS = {
         "mirage.core.gdrive.mkdir.create_folder",
         "mirage.core.gdrive.copy.create_folder",
     ],
-    # `stat_from_api` answers a stat made with no index, which is how the
-    # read-token contract's unrecorded rows stat. The guard below catches
-    # only a target that no longer resolves, so an unlisted binding would
-    # keep pointing at the real Drive API (#684's shape).
+    # The configured root folder's drive, and an app file by id. The guard
+    # below catches only a target that no longer resolves, so an unlisted
+    # binding would keep pointing at the real Drive API (#684's shape).
     "get_file": [
         "mirage.core.google.entry.get_file",
-        "mirage.core.gdrive.stat.get_file",
         "mirage.core.gdrive.resolve.get_file",
     ],
     # A native file's bytes do not exist until Docs, Sheets or Slides

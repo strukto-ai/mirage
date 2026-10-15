@@ -34,6 +34,7 @@ import { coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type {
   CommandFnResult,
@@ -924,9 +925,10 @@ export class MountEntry {
     return rstripSlash(this.prefix) || '/'
   }
 
-  /** The directory holding `scope`, keyed below this mount. */
+  /** The directory holding `scope`, keyed below this mount; a glob word stands for the directory it lists. */
   private folder(scope: PathSpec): PathSpec {
-    const virtual = rstripSlash(scope.virtual)
+    const target = scope.pattern !== null ? scope.dir : scope
+    const virtual = rstripSlash(target.virtual)
     return this.scope(virtual.slice(0, virtual.lastIndexOf('/')) || '/')
   }
 
@@ -1107,9 +1109,33 @@ export class MountEntry {
     for (const call of levels) {
       const result = await this.run(name, call, scope, args, kwargs, index)
       if (result === null || result === undefined) continue
-      return vfs.listsStats ? this.kept(name, scope, index, result) : result
+      const kept = vfs.listsStats ? await this.kept(name, scope, index, result) : result
+      if (name === 'stat') this.noteLive(scope, index, kept)
+      return kept
     }
     return null
+  }
+
+  /**
+   * Under `fresh`, keep a stat the backend answered as the running command's
+   * probe answer: the cache gate would ask the backend the same question
+   * again. Only a stat that asked the backend counts: one that takes neither
+   * an index of its own nor a row the mount hands it, either of which a
+   * listing filled. A probe's own store records through the probe. Mirrors
+   * Python's `_note_live`.
+   */
+  private noteLive(scope: PathSpec, index: IndexCacheStore, result: unknown): void {
+    const manager = this.cacheManager
+    if (
+      manager !== null &&
+      this.read.policy === ReadPolicy.FRESH &&
+      result instanceof FileStat &&
+      !(index instanceof ListingCheckStore) &&
+      this.vfs.listsStats &&
+      this.wants('stat').length === 0
+    ) {
+      manager.noteProbed(scope, result)
+    }
   }
 
   /**

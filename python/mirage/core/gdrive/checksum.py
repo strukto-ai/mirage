@@ -13,13 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
 from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.read import file_entry
 from mirage.core.google.client import drive_base, google_get
 from mirage.observe.context import record, revision_for, start_op
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 # The digests Drive keeps for a file's content, by hashlib name.
 DIGEST_FIELDS = {
@@ -33,7 +32,7 @@ async def checksum(
     accessor: GDriveAccessor,
     path: PathSpec,
     algorithm: str,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
 ) -> str | None:
     """The digest Drive keeps for a file's content.
 
@@ -49,20 +48,20 @@ async def checksum(
         accessor (GDriveAccessor): Drive accessor.
         path (PathSpec): the file.
         algorithm (str): the hashlib name asked for.
-        index (IndexCacheStore): listing cache, consulted for the file id.
+        entry (FileStat | None): what is at the path.
     """
     field = DIGEST_FIELDS.get(algorithm)
     if field is None or revision_for(path.virtual) is not None:
         return None
-    entry = await file_entry(accessor, path, index)
-    if entry.resource_type in NATIVE_RESOURCE_TYPES:
+    row = file_entry(path, entry)
+    if row.extra["resource_type"] in NATIVE_RESOURCE_TYPES:
         return None
     token_manager = accessor.token_manager
     timer = start_op()
     fields = dict.fromkeys([field, "md5Checksum", "headRevisionId"])
     item = await google_get(
         token_manager,
-        f"{drive_base(token_manager)}/files/{entry.id}",
+        f"{drive_base(token_manager)}/files/{row.extra['file_id']}",
         params={"fields": ",".join(fields), "supportsAllDrives": "true"},
     )
     found = item.get(field)
@@ -76,10 +75,10 @@ async def checksum(
         0,
         timer,
         fingerprint=drive_fingerprint(
-            entry.resource_type,
+            row.extra["resource_type"],
             item.get("md5Checksum"),
             revision,
-            entry.remote_time,
+            row.modified,
         ),
         revision=revision if isinstance(revision, str) else None,
     )

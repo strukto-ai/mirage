@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.resolve import resolve_dir
 from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, list_files
 from mirage.types import PathSpec
 
@@ -35,6 +34,8 @@ def vfs_name(item: dict[str, Any]) -> str:
 async def iter_tree(
     accessor: GDriveAccessor,
     path: PathSpec,
+    folder_id: str,
+    drive_id: str | None,
 ) -> AsyncIterator[tuple[str, dict[str, Any], bool]]:
     """Walk a folder subtree, yielding (mount-relative path, item, is_dir).
 
@@ -45,9 +46,10 @@ async def iter_tree(
     Args:
         accessor (GDriveAccessor): backend accessor.
         path (PathSpec): directory to walk (mount-relative root allowed).
+        folder_id (str): the directory's folder id.
+        drive_id (str | None): its shared drive, if any.
     """
     base = path.vfs_path
-    folder_id, drive_id = await resolve_dir(accessor, base, path.virtual)
     stack: list[tuple[str, str, str | None]] = [(base, folder_id, drive_id)]
     while stack:
         rel, fid, did = stack.pop(0)

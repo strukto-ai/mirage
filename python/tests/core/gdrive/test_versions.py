@@ -16,16 +16,18 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.index import IndexEntry
 from mirage.core.gdrive.read import read_file_versioned
 from mirage.core.gdrive.versions import (
     capture_file_metadata,
     download_revision,
 )
 from mirage.observe.context import push_revisions, reset_revisions
+from mirage.types import FileStat, FileType
 
-ENTRY = IndexEntry(
-    id="f1", name="f.txt", resource_type="gdrive/file", vfs_name="f.txt"
+ENTRY = FileStat(
+    name="f.txt",
+    type=FileType.FILE,
+    extra={"file_id": "f1", "resource_type": "gdrive/file"},
 )
 
 

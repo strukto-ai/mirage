@@ -40,6 +40,8 @@ vi.mock('../google/drive.ts', async () => {
 
 import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { write } from './write.ts'
@@ -61,7 +63,12 @@ function spec(virtual: string): PathSpec {
 describe('gdrive write', () => {
   it('creates a file in an existing parent', async () => {
     fake.folder('a')
-    await write(accessor, spec('/a/new.txt'), ENC.encode('hello'))
+    await write(
+      accessor,
+      spec('/a/new.txt'),
+      ENC.encode('hello'),
+      await handedAt(readdir, accessor, spec('/a/new.txt')),
+    )
     const item = fake.find('new.txt')
     expect(item).not.toBeNull()
     expect(DEC.decode(item?.content)).toBe('hello')
@@ -69,29 +76,48 @@ describe('gdrive write', () => {
 
   it('overwrites the same id', async () => {
     const id = fake.add('f.txt', 'root', undefined, ENC.encode('old'))
-    await write(accessor, spec('/f.txt'), ENC.encode('new'))
+    await write(
+      accessor,
+      spec('/f.txt'),
+      ENC.encode('new'),
+      await handedAt(readdir, accessor, spec('/f.txt')),
+    )
     expect(DEC.decode(fake.items.get(id)?.content)).toBe('new')
     expect(fake.items.size).toBe(1)
   })
 
   it('missing parent raises ENOENT', async () => {
-    await expect(write(accessor, spec('/no/f.txt'), ENC.encode('x'))).rejects.toMatchObject({
+    await expect(
+      write(
+        accessor,
+        spec('/no/f.txt'),
+        ENC.encode('x'),
+        await handedAt(readdir, accessor, spec('/no/f.txt')),
+      ),
+    ).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
 
   it('writing a folder raises EISDIR', async () => {
     fake.folder('d')
-    await expect(write(accessor, spec('/d'), ENC.encode('x'))).rejects.toMatchObject({
+    await expect(
+      write(accessor, spec('/d'), ENC.encode('x'), await handedAt(readdir, accessor, spec('/d'))),
+    ).rejects.toMatchObject({
       code: 'EISDIR',
     })
   })
 
   it('writing a google-native file raises EACCES', async () => {
     fake.add('Report', 'root', DOC_MIME)
-    await expect(write(accessor, spec('/Report.gdoc.json'), ENC.encode('x'))).rejects.toMatchObject(
-      { code: 'EACCES' },
-    )
+    await expect(
+      write(
+        accessor,
+        spec('/Report.gdoc.json'),
+        ENC.encode('x'),
+        await handedAt(readdir, accessor, spec('/Report.gdoc.json')),
+      ),
+    ).rejects.toMatchObject({ code: 'EACCES' })
   })
 })
 
@@ -136,8 +162,9 @@ function replyWith(build: (reply: DriveFile) => unknown): void {
 }
 
 async function writeRecorded(): Promise<unknown[][]> {
+  const handed = await handedAt(readdir, accessor, spec('/f.txt'))
   const [, records] = await runWithRecording(() =>
-    write(accessor, spec('/f.txt'), ENC.encode('hello')),
+    write(accessor, spec('/f.txt'), ENC.encode('hello'), handed),
   )
   return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
 }

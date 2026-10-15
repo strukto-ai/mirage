@@ -22,6 +22,8 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { unlink } from './unlink.ts'
@@ -41,16 +43,24 @@ function spec(virtual: string): PathSpec {
 describe('gdrive unlink', () => {
   it('removes a file', async () => {
     fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await unlink(accessor, spec('/f.txt'))
+    await unlink(accessor, spec('/f.txt'), await handedAt(readdir, accessor, spec('/f.txt')))
     expect(fake.find('f.txt')).toBeNull()
   })
 
   it('missing target raises ENOENT', async () => {
-    await expect(unlink(accessor, spec('/missing.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      unlink(
+        accessor,
+        spec('/missing.txt'),
+        await handedAt(readdir, accessor, spec('/missing.txt')),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('folder target raises EISDIR', async () => {
     fake.folder('d')
-    await expect(unlink(accessor, spec('/d'))).rejects.toMatchObject({ code: 'EISDIR' })
+    await expect(
+      unlink(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d'))),
+    ).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })

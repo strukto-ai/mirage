@@ -2,7 +2,6 @@ import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.onedrive.read import read
 from mirage.core.onedrive.readdir import readdir
 from mirage.core.onedrive.stat import stat
@@ -108,8 +107,7 @@ async def test_stat_missing_raises_file_not_found():
 
 
 @pytest.mark.asyncio
-async def test_stat_from_index_returns_modified():
-    index = RAMIndexCacheStore()
+async def test_a_listed_row_carries_modified():
     with aioresponses() as m:
         m.get(
             "https://graph.microsoft.com/v1.0/me/drive/root/children",
@@ -125,21 +123,17 @@ async def test_stat_from_index_returns_modified():
                 ]
             },
         )
-        await readdir(_accessor(), PathSpec.from_str_path("/"), index)
-    result = await stat(
-        _accessor(), PathSpec.from_str_path("/notes.txt"), index
-    )
+        result = (await readdir(_accessor(), PathSpec.from_str_path("/")))[0]
     assert result.name == "notes.txt"
     assert result.size == 42
     assert result.modified == "2026-06-19T09:28:00Z"
 
 
 @pytest.mark.asyncio
-async def test_stat_from_index_carries_the_ctag():
-    # A listing already names each file's cTag, so a stat served from it
-    # carries the same token a network stat does; a watch walk stats this
-    # way and fingerprints on what it returns.
-    index = RAMIndexCacheStore()
+async def test_a_listed_row_carries_the_ctag():
+    # A listing already names each file's cTag, so the row the mount
+    # answers a stat with carries the same token a network stat does; a
+    # watch walk fingerprints on the rows it lists.
     with aioresponses() as m:
         m.get(
             "https://graph.microsoft.com/v1.0/me/drive/root/children",
@@ -157,19 +151,15 @@ async def test_stat_from_index_carries_the_ctag():
                 ]
             },
         )
-        await readdir(_accessor(), PathSpec.from_str_path("/"), index)
-    result = await stat(
-        _accessor(), PathSpec.from_str_path("/notes.txt"), index
-    )
+        result = (await readdir(_accessor(), PathSpec.from_str_path("/")))[0]
     assert result.fingerprint == "c1"
     assert (result.extra["ctag"], result.extra["etag"]) == ("c1", "e1")
 
 
 @pytest.mark.asyncio
-async def test_stat_folder_from_index_has_no_fingerprint():
+async def test_a_listed_folder_has_no_fingerprint():
     # A folder's cTag describes no bytes anyone reads, and a network stat
     # gives a folder none either.
-    index = RAMIndexCacheStore()
     with aioresponses() as m:
         m.get(
             "https://graph.microsoft.com/v1.0/me/drive/root/children",
@@ -186,8 +176,7 @@ async def test_stat_folder_from_index_has_no_fingerprint():
                 ]
             },
         )
-        await readdir(_accessor(), PathSpec.from_str_path("/"), index)
-    result = await stat(_accessor(), PathSpec.from_str_path("/Docs"), index)
+        result = (await readdir(_accessor(), PathSpec.from_str_path("/")))[0]
     assert result.type == FileType.DIRECTORY
     assert result.fingerprint is None
 
@@ -203,7 +192,6 @@ async def test_stat_size_matches_read_for_every_file():
         "/Docs/report.docx": b"docx bytes",
     }
     base = "https://graph.microsoft.com/v1.0/me/drive"
-    index = RAMIndexCacheStore()
     accessor = _accessor()
     with aioresponses() as m:
         m.get(
@@ -259,13 +247,9 @@ async def test_stat_size_matches_read_for_every_file():
         stack = ["/"]
         while stack:
             current = stack.pop()
-            listing = await readdir(
-                accessor, PathSpec.from_str_path(current), index
-            )
-            for child in listing:
-                info = await stat(
-                    accessor, PathSpec.from_str_path(child), index
-                )
+            listing = await readdir(accessor, PathSpec.from_str_path(current))
+            for info in listing:
+                child = f"{current.rstrip('/')}/{info.name}"
                 if info.type == FileType.DIRECTORY:
                     stack.append(child)
                 else:
@@ -277,8 +261,7 @@ async def test_stat_size_matches_read_for_every_file():
 
 
 @pytest.mark.asyncio
-async def test_stat_from_index_folder_returns_modified():
-    index = RAMIndexCacheStore()
+async def test_a_listed_folder_carries_modified():
     with aioresponses() as m:
         m.get(
             "https://graph.microsoft.com/v1.0/me/drive/root/children",
@@ -294,8 +277,7 @@ async def test_stat_from_index_folder_returns_modified():
                 ]
             },
         )
-        await readdir(_accessor(), PathSpec.from_str_path("/"), index)
-    result = await stat(_accessor(), PathSpec.from_str_path("/Docs"), index)
+        result = (await readdir(_accessor(), PathSpec.from_str_path("/")))[0]
     assert result.type == FileType.DIRECTORY
     assert result.modified == "2026-05-28T02:10:00Z"
     assert result.size is None

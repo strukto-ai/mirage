@@ -15,9 +15,14 @@
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.gdrive.write import write
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 @eacces_on_denied
-async def create(accessor: GDriveAccessor, path: PathSpec) -> None:
-    await write(accessor, path, b"")
+async def create(
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+) -> FileStat | None:
+    return await write(accessor, path, b"", entry=entry, parent=parent)

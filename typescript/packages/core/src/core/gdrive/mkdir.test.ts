@@ -21,7 +21,12 @@ vi.mock('../google/drive.ts', async () => {
   return driveModuleMock(actual)
 })
 
-import { PathSpec } from '../../types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
+import { GDriveVFS } from '../../vfs/gdrive/gdrive.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { FOLDER_MIME } from '../google/drive.ts'
@@ -35,37 +40,62 @@ beforeEach(() => {
   fake = resetFakeDrive()
 })
 
+async function workspace(): Promise<Workspace> {
+  const vfs = new GDriveVFS({ clientId: 'x', refreshToken: 'y' })
+  Object.assign(vfs, { accessor })
+  return new Workspace(
+    { '/d/': vfs },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+}
+
 function spec(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
 }
 
 describe('gdrive mkdir', () => {
   it('creates a folder', async () => {
-    await mkdir(accessor, spec('/d'))
+    await mkdir(accessor, spec('/d'), false, await handedAt(readdir, accessor, spec('/d')))
     expect(fake.find('d')?.mimeType).toBe(FOLDER_MIME)
   })
 
   it('missing parent raises ENOENT', async () => {
-    await expect(mkdir(accessor, spec('/no/d'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(
+      mkdir(accessor, spec('/no/d'), false, await handedAt(readdir, accessor, spec('/no/d'))),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('-p builds the chain and is idempotent', async () => {
-    await mkdir(accessor, spec('/a/b/c'), true)
-    const a = fake.find('a')
-    const b = fake.find('b')
-    const c = fake.find('c')
-    expect(a && b && c).toBeTruthy()
-    expect(b?.parents).toEqual([a?.id])
-    expect(c?.parents).toEqual([b?.id])
-    await mkdir(accessor, spec('/a/b/c'), true)
-    expect(fake.items.size).toBe(3)
+  it('-p builds the chain one level at a time and is idempotent', async () => {
+    // -p is the mount's: it makes one level at a time, each handed the folder
+    // the level above answered.
+    const ws = await workspace()
+    try {
+      await ws.dispatch('mkdir', '/d/a/b/c', [], { parents: true })
+      const a = fake.find('a')
+      const b = fake.find('b')
+      const c = fake.find('c')
+      expect(a && b && c).toBeTruthy()
+      expect(b?.parents).toEqual([a?.id])
+      expect(c?.parents).toEqual([b?.id])
+      await ws.dispatch('mkdir', '/d/a/b/c', [], { parents: true })
+      expect(fake.items.size).toBe(3)
+    } finally {
+      await ws.close()
+    }
   })
 
   it('-p over a file raises EEXIST at the leaf and ENOTDIR mid-path', async () => {
     fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await expect(mkdir(accessor, spec('/f.txt'), true)).rejects.toMatchObject({ code: 'EEXIST' })
-    await expect(mkdir(accessor, spec('/f.txt/sub'), true)).rejects.toMatchObject({
-      code: 'ENOTDIR',
-    })
+    const ws = await workspace()
+    try {
+      await expect(ws.dispatch('mkdir', '/d/f.txt', [], { parents: true })).rejects.toMatchObject({
+        code: 'EEXIST',
+      })
+      await expect(
+        ws.dispatch('mkdir', '/d/f.txt/sub', [], { parents: true }),
+      ).rejects.toMatchObject({ code: 'ENOTDIR' })
+    } finally {
+      await ws.close()
+    }
   })
 })

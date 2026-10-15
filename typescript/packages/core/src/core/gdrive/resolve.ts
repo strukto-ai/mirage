@@ -13,15 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import type { PathSpec } from '../../types.ts'
+import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import { eacces, enoent, enotdir } from '../../errors/fs.ts'
-import { GoogleApiError, type TokenManager } from '../google/client.ts'
-import { FOLDER_MIME, MIME_TO_EXT, getFile, listFiles, listSharedDrives } from '../google/drive.ts'
+import { GoogleApiError } from '../google/client.ts'
+import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
-
-const SUFFIX_TO_MIME: Readonly<Record<string, string>> = Object.freeze(
-  Object.fromEntries(Object.entries(MIME_TO_EXT).map(([mime, ext]) => [ext, mime])),
-)
 
 // A resolved Drive item: enough identity to mutate it.
 export interface DriveNode {
@@ -74,33 +70,11 @@ export function isFolder(node: DriveNode): boolean {
   return node.mimeType === FOLDER_MIME
 }
 
-export function isNative(node: DriveNode): boolean {
-  return node.mimeType in MIME_TO_EXT
-}
-
-// Mutations resolve paths with direct Drive queries instead of the read-side
-// index: Drive is id-addressed and allows duplicate sibling names, so GNU
-// check-then-act semantics (EEXIST, replace-on-rename) need the server's
-// current state, not a possibly stale cache.
-//
-// A google-native file renders as `<name><suffix>` (e.g. `Report.gdoc.json`),
-// so a suffixed segment is looked up both as a literal name and as the
-// stripped native document, literal first.
-export function queryCandidates(segment: string): [string, string | null][] {
-  const candidates: [string, string | null][] = [[segment, null]]
-  for (const [ext, mime] of Object.entries(SUFFIX_TO_MIME)) {
-    if (segment.endsWith(ext) && segment.length > ext.length) {
-      candidates.push([segment.slice(0, -ext.length), mime])
-    }
-  }
-  return candidates
-}
-
-// Destination Drive name for moving/copying a node to a vfs basename: a
+// Destination Drive name for moving/copying an item to a vfs basename: a
 // google-native file's Drive name has no rendered suffix, so the suffix
-// matching the node's MIME type is stripped.
-export function driveTargetName(basename: string, node: DriveNode): string {
-  const ext = MIME_TO_EXT[node.mimeType]
+// matching the item's MIME type is stripped.
+export function driveTargetName(basename: string, mimeType: string): string {
+  const ext = MIME_TO_EXT[mimeType]
   if (ext !== undefined && basename.endsWith(ext) && basename.length > ext.length) {
     return basename.slice(0, -ext.length)
   }
@@ -116,89 +90,32 @@ export function nodeFromItem(item: DriveFile, driveId: string | null): DriveNode
   }
 }
 
-export async function resolveSegment(
-  tm: TokenManager,
-  parentId: string,
-  segment: string,
-  driveId: string | null,
-  atRoot: boolean,
-): Promise<DriveNode | null> {
-  for (const [name, mime] of queryCandidates(segment)) {
-    const matches = await listFiles(tm, {
-      folderId: parentId,
-      driveId,
-      name,
-      mimeType: mime,
-    })
-    const first = matches[0]
-    if (first !== undefined) return nodeFromItem(first, driveId)
+/** The Drive item a listed row names. Mirrors Python's `node_of`. */
+export function nodeOf(row: FileStat): DriveNode {
+  const driveId = row.extra.drive_id
+  const mimeType = row.extra.mime_type
+  return {
+    id: row.extra.file_id as string,
+    name: row.name,
+    mimeType: typeof mimeType === 'string' ? mimeType : '',
+    driveId: typeof driveId === 'string' ? driveId : null,
   }
-  if (atRoot) {
-    // Shared Drive enumeration is best-effort, mirroring readdir: a missing
-    // scope must not break resolution of My Drive paths.
-    let shared: Awaited<ReturnType<typeof listSharedDrives>>
-    try {
-      shared = await listSharedDrives(tm)
-    } catch {
-      shared = []
-    }
-    for (const d of shared) {
-      if (d.name === segment) {
-        return { id: d.id, name: segment, mimeType: FOLDER_MIME, driveId: d.id }
-      }
-    }
-  }
-  return null
 }
 
-// Resolve a mount-relative key ("a/b/c"; "" is the mount root) to its Drive
-// item, or null.
-export async function resolveKey(accessor: GDriveAccessor, key: string): Promise<DriveNode | null> {
-  const tm = accessor.tokenManager
-  let [parentId, driveId] = await rootContext(accessor)
-  let node: DriveNode | null = null
-  const segments = key.split('/').filter((s) => s !== '')
-  for (const [i, segment] of segments.entries()) {
-    // Shared drive names are only directories at the real Drive root,
-    // never inside a folder-scoped mount.
-    node = await resolveSegment(tm, parentId, segment, driveId, i === 0 && parentId === 'root')
-    if (node === null) return null
-    if (i < segments.length - 1) {
-      if (!isFolder(node)) throw enotdir('/' + segments.slice(0, i + 1).join('/'))
-      parentId = node.id
-      driveId = node.driveId
-    }
-  }
-  return node
-}
-
-// Resolve a mount-relative key that must be a directory; returns
-// [folderId, sharedDriveId | null].
-export async function resolveDir(
-  accessor: GDriveAccessor,
-  key: string,
-  virtual: string,
-): Promise<[string, string | null]> {
-  if (key === '') return rootContext(accessor)
-  let node: DriveNode | null
-  try {
-    node = await resolveKey(accessor, key)
-  } catch (error) {
-    if ((error as { code?: string }).code === 'ENOTDIR') throw enotdir(virtual)
-    throw error
-  }
-  if (node === null) throw enoent(virtual)
-  if (!isFolder(node)) throw enotdir(virtual)
-  return [node.id, node.driveId]
-}
-
-// Resolve the parent directory of a path for a create-style op. A missing or
-// non-directory parent, at any depth, names the operand, as mkdir(2) does.
-export async function resolveParent(
+/**
+ * The folder a create at `path` lands in: the mount root's, or what is at the
+ * parent path. A missing or non-directory parent names the operand, as
+ * mkdir(2) does. Answers [parent folder id, shared drive id | null]. Mirrors
+ * Python's `parent_folder`.
+ */
+export async function parentFolder(
   accessor: GDriveAccessor,
   path: PathSpec,
+  parent: FileStat | null | undefined,
 ): Promise<[string, string | null]> {
-  const key = path.vfsPath
-  const parentKey = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : ''
-  return resolveDir(accessor, parentKey, path.virtual)
+  if (!path.vfsPath.replace(/^\/+|\/+$/g, '').includes('/')) return rootContext(accessor)
+  if (parent === null || parent === undefined) throw enoent(path.virtual)
+  if (parent.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
+  const driveId = parent.extra.drive_id
+  return [parent.extra.file_id as string, typeof driveId === 'string' ? driveId : null]
 }

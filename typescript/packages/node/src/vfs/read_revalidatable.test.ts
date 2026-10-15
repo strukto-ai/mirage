@@ -38,7 +38,9 @@ import type { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
 import type { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive } from '@struktoai/mirage-core/observe/context'
-import { type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types'
+import { DirListing, type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
+import { readdir as gdriveReaddir } from '@struktoai/mirage-core/core/gdrive/readdir'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { GridFSAccessor } from '../accessor/gridfs.ts'
@@ -685,6 +687,27 @@ let s3: S3Mock
 let hubs: FakeHub[] = []
 let graphs: FakeGraph[] = []
 
+// What is at `path` on a Drive mount, found by listing each folder from the
+// root down, each handed the row its parent's listing named, as the mount
+// finds it. Mirrors python's tests/fixtures/handed.py entry_at.
+async function gdriveEntry(accessor: GDriveAccessor, path: PathSpec): Promise<FileStat | null> {
+  const names = path.vfsPath.split('/').filter((name) => name !== '')
+  let found: FileStat | null = null
+  for (const [depth, name] of names.entries()) {
+    const key = names.slice(0, depth).join('/')
+    const virtual = key === '' ? '/m' : `/m/${key}`
+    const listed = await gdriveReaddir(
+      accessor,
+      new PathSpec({ virtual, directory: virtual, vfsPath: key }),
+      found,
+    )
+    const rows = listed instanceof DirListing ? listed.entries : listed
+    found = rows.find((row) => row.name === name) ?? null
+    if (found === null) return null
+  }
+  return found
+}
+
 let gdriveIds = 0
 
 function gdriveAdd(
@@ -890,12 +913,14 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
   }
   if (HARNESSES[name] === 'gdrive') {
     const item = gdriveAdd(key, data)
-    const vfs = await buildVfs('gdrive', GDRIVE_CONFIG)
-    const accessor = vfs.accessor as GDriveAccessor
+    const vfs = (await buildVfs('gdrive', GDRIVE_CONFIG)) as GDriveVFS
+    const accessor = vfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
-    // An id-addressed backend resolves a path only through an index, so its
-    // raw reads take one; stat takes none and answers from its own request.
-    const index = new RAMIndexCacheStore()
+    // An id-addressed backend reads the row its parent's listing names, so
+    // each direct call is handed that row, as the mount hands it.
+    const handed = async (p: PathSpec): Promise<Handed> => ({
+      entry: await gdriveEntry(accessor, p),
+    })
     const before = H.gdriveDownloads
     return {
       vfs,
@@ -905,9 +930,11 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         item.content = next
       },
-      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
-      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
-      stat: (p) => commandIo(vfs).stat(accessor, p),
+      readBytes: async (p) => vfs.read(p, await handed(p)),
+      readStream: async function* (p) {
+        yield* vfs.readStream(p, await handed(p))
+      },
+      stat: async (p) => vfs.stat(p, await handed(p)),
       streamSlot: 'stream',
     }
   }

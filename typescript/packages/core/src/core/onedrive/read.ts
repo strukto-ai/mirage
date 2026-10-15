@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { readItem } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'
@@ -24,13 +23,11 @@ import { driveLoc } from './client.ts'
  * Args:
  *   accessor: OneDrive accessor.
  *   path: the path to read.
- *   _index: unused; Graph resolves the item from the path itself.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
 export async function read(
   accessor: OneDriveAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
   return readItem(

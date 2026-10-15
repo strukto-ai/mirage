@@ -13,18 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { GraphError, graphGet } from '../msgraph/client.ts'
-import { asNumber, folderChildCount, statItem, virtualKey } from '../msgraph/drive.ts'
+import { asNumber, folderChildCount, statItem } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'
 
-export async function stat(
-  accessor: OneDriveAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
+export async function stat(accessor: OneDriveAccessor, path: PathSpec): Promise<FileStat> {
   if (path.vfsPath === '') {
     // The mount root is a real Graph item (`/drive/root` or the keyPrefix
     // folder); fetch it so modified is populated instead of synthesizing a
@@ -44,11 +39,5 @@ export async function stat(
       throw error
     }
   }
-  return statItem(
-    accessor.config,
-    driveLoc(accessor.config, path.vfsPath),
-    path,
-    virtualKey(path),
-    index,
-  )
+  return statItem(accessor.config, driveLoc(accessor.config, path.vfsPath), path)
 }

@@ -15,24 +15,24 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.readdir import stat_from_item
 from mirage.core.gdrive.resolve import (
     DriveNode,
     drive_target_name,
     eacces_on_denied,
     node_from_item,
-    resolve_key,
-    resolve_parent,
+    node_of,
+    parent_folder,
 )
 from mirage.core.google.client import TokenManager
 from mirage.core.google.drive import (
-    FOLDER_MIME,
     copy_file,
     create_folder,
     delete_file,
     list_files,
 )
 from mirage.errors.fs import eisdir, enoent, enotdir
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 async def copy_children(
@@ -59,47 +59,58 @@ async def copy_children(
             await copy_file(token_manager, child.id, child.name, dst_folder_id)
 
 
-async def _copy_node(
-    accessor: GDriveAccessor, src_node: DriveNode, dst: PathSpec
-) -> None:
-    token_manager = accessor.token_manager
-    dst_node = await resolve_key(accessor, dst.vfs_path)
-    if src_node.is_folder:
-        if dst_node is not None and not dst_node.is_folder:
-            raise enotdir(dst.virtual)
-        if dst_node is None:
-            # cp -r merges into an existing directory and creates a missing
-            # one, mirroring the msgraph copy_tree.
-            dst_parent_id, _ = await resolve_parent(accessor, dst)
-            name = posixpath.basename(dst.vfs_path)
-            created = await create_folder(token_manager, name, dst_parent_id)
-            dst_node = DriveNode(
-                id=created["id"],
-                name=name,
-                mime_type=FOLDER_MIME,
-                drive_id=src_node.drive_id,
-            )
-        await copy_children(token_manager, src_node, dst_node.id)
-    else:
-        if dst_node is not None and dst_node.is_folder:
-            raise eisdir(dst.virtual)
-        if dst_node is not None:
-            await delete_file(token_manager, dst_node.id)
-        dst_parent_id, _ = await resolve_parent(accessor, dst)
-        name = drive_target_name(posixpath.basename(dst.vfs_path), src_node)
-        await copy_file(token_manager, src_node.id, name, dst_parent_id)
-
-
 @eacces_on_denied
-async def copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec) -> None:
+async def copy(
+    accessor: GDriveAccessor,
+    src: PathSpec,
+    dst: PathSpec,
+    entry: FileStat | None = None,
+    dst_parent: FileStat | None = None,
+    dst_entry: FileStat | None = None,
+) -> FileStat | None:
     """Copy a file or folder server-side.
+
+    ``cp -r`` merges into an existing folder and creates a missing one,
+    mirroring the msgraph copy_tree.
 
     Args:
         accessor (GDriveAccessor): Drive accessor.
         src (PathSpec): the item to copy.
         dst (PathSpec): where the copy lands.
+        entry (FileStat | None): what is at ``src``.
+        dst_parent (FileStat | None): what is at ``dst``'s parent path.
+        dst_entry (FileStat | None): what is at ``dst``.
+
+    Returns:
+        FileStat | None: the stat of what the copy made, None when it
+            merged into a folder already there.
     """
-    src_node = await resolve_key(accessor, src.vfs_path)
-    if src_node is None:
+    if entry is None:
         raise enoent(src.virtual)
-    await _copy_node(accessor, src_node, dst)
+    token_manager = accessor.token_manager
+    src_node = node_of(entry)
+    if src_node.is_folder:
+        if dst_entry is not None and dst_entry.type is not FileType.DIRECTORY:
+            raise enotdir(dst.virtual)
+        made = None
+        if dst_entry is None:
+            dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
+            created = await create_folder(
+                token_manager, posixpath.basename(dst.vfs_path), dst_parent_id
+            )
+            dst_id = created["id"]
+            made = stat_from_item(created)
+        else:
+            dst_id = dst_entry.extra["file_id"]
+        await copy_children(token_manager, src_node, dst_id)
+        return made
+    if dst_entry is not None and dst_entry.type is FileType.DIRECTORY:
+        raise eisdir(dst.virtual)
+    if dst_entry is not None:
+        await delete_file(token_manager, dst_entry.extra["file_id"])
+    dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
+    name = drive_target_name(
+        posixpath.basename(dst.vfs_path), src_node.mime_type
+    )
+    item = await copy_file(token_manager, src_node.id, name, dst_parent_id)
+    return stat_from_item(item) if isinstance(item, dict) else None

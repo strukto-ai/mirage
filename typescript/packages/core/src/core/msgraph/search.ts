@@ -12,51 +12,39 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Accessor } from '../../accessor/base.ts'
-import { ResourceType, type IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
-import { entriesUnder, type ReaddirFn } from '../hierarchy/probe.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
 import { GraphError, graphList } from './client.ts'
 import type { MsGraphConfigResolved } from './config.ts'
-import type { DriveLoc } from './drive.ts'
-
-function isFolder(entry: IndexEntry): boolean {
-  return entry.resourceType === ResourceType.FOLDER
-}
+import { type DriveLoc, iterTree } from './drive.ts'
 
 /**
- * The files under each scope Graph search names. Each scope is walked through
- * the index (the listings grep reads next) and searched from its folder; a hit
- * counts when its id is a walked file. Null when a listing or the search fails
- * or times out, nothing is found, or a walked file has no id.
+ * The files under each scope Graph search names. Each scope is walked and
+ * searched from its folder; a hit counts when its id is a walked file. Null
+ * when a listing or the search fails or times out, nothing is found, or a
+ * walked file has no id.
  *
  * Graph searches the text it extracted, not the bytes grep reads, so the
  * answer can leave out a file that holds the text: an office file, PDF or
  * archive, the end of a large file, a word Graph splits differently
  * (`foo.bar`), or a recent write. Mirrors Python's `files_containing`.
  */
-export async function filesContaining<A extends Accessor>(
+export async function filesContaining(
   config: MsGraphConfigResolved,
-  readdir: ReaddirFn<A>,
-  accessor: A,
   scopes: readonly (readonly [PathSpec, DriveLoc])[],
   text: string,
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const quoted = encodeURIComponent(text.replaceAll("'", "''"))
   const found: PathSpec[] = []
   try {
     for (const [directory, loc] of scopes) {
-      const walked = await entriesUnder(readdir, accessor, directory, index, isFolder)
-      if (walked === null) return null
       const files = new Map<string, PathSpec[]>()
-      for (const [path, entry] of walked) {
-        if (isFolder(entry)) continue
-        const id = entry.extra.id
+      for await (const [virtual, item, folder] of iterTree(config, loc)) {
+        if (folder) continue
+        const id = item.id
         if (typeof id !== 'string' || id === '') return null
-        files.set(id, [...(files.get(id) ?? []), path])
+        files.set(id, [...(files.get(id) ?? []), mountedPath(directory, `/${virtual}`)])
       }
       const items = await graphList(config, loc.item(`/search(q='${quoted}')`), { $select: 'id' })
       for (const item of items) {

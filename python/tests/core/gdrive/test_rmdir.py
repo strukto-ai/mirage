@@ -16,8 +16,10 @@ import errno
 
 import pytest
 
+from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.rmdir import rmdir
 from mirage.types import PathSpec
+from tests.fixtures.handed import call
 
 
 def spec(virtual: str) -> PathSpec:
@@ -27,21 +29,21 @@ def spec(virtual: str) -> PathSpec:
 @pytest.mark.asyncio
 async def test_rmdir_removes_dir(fake_drive, gdrive_accessor):
     fake_drive.folder("d")
-    await rmdir(gdrive_accessor, spec("/d"))
+    await call(rmdir, readdir, gdrive_accessor, spec("/d"))
     assert fake_drive.find("d") is None
 
 
 @pytest.mark.asyncio
 async def test_rmdir_missing_raises(fake_drive, gdrive_accessor):
     with pytest.raises(FileNotFoundError):
-        await rmdir(gdrive_accessor, spec("/missing"))
+        await call(rmdir, readdir, gdrive_accessor, spec("/missing"))
 
 
 @pytest.mark.asyncio
 async def test_rmdir_file_raises(fake_drive, gdrive_accessor):
     fake_drive.add("f.txt", content=b"x")
     with pytest.raises(NotADirectoryError):
-        await rmdir(gdrive_accessor, spec("/f.txt"))
+        await call(rmdir, readdir, gdrive_accessor, spec("/f.txt"))
 
 
 @pytest.mark.asyncio
@@ -51,7 +53,7 @@ async def test_rmdir_refuses_a_folder_holding_a_file(
     folder = fake_drive.folder("d")
     fake_drive.add("a.txt", parent=folder, content=b"a")
     with pytest.raises(OSError) as excinfo:
-        await rmdir(gdrive_accessor, spec("/d"))
+        await call(rmdir, readdir, gdrive_accessor, spec("/d"))
     assert excinfo.value.errno == errno.ENOTEMPTY
     assert fake_drive.find("d") is not None
     assert fake_drive.find("a.txt") is not None
@@ -64,7 +66,7 @@ async def test_rmdir_refuses_a_folder_holding_a_subfolder(
     folder = fake_drive.folder("d")
     fake_drive.folder("sub", parent=folder)
     with pytest.raises(OSError) as excinfo:
-        await rmdir(gdrive_accessor, spec("/d"))
+        await call(rmdir, readdir, gdrive_accessor, spec("/d"))
     assert excinfo.value.errno == errno.ENOTEMPTY
     assert fake_drive.find("d") is not None
     assert fake_drive.find("sub") is not None
