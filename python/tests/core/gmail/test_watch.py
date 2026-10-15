@@ -158,10 +158,29 @@ async def test_a_watch_follows_the_label_folders(mailbox):
         (FileChangeKind.CREATE, f"/gmail/INBOX/{plan}"),
         (FileChangeKind.UPDATE, f"/gmail/Projects/{plan}"),
     ]
-    mailbox.labels = LABELS[:2]
-    mailbox.history["120"] = ([], "130")
-    removed = await hook.pull(ROOT, renamed.checkpoint)
-    assert _pairs(removed) == [
+    # One label takes the name another gives up: each path moves once.
+    mailbox.labels = [
+        *LABELS[:2],
+        {"id": "Label_1", "name": "Empty", "type": "user"},
+        {"id": "Label_2", "name": "Archive", "type": "user"},
+    ]
+    mailbox.history["120"] = (
+        [{"messagesDeleted": [{"message": {"id": "w1"}}]}],
+        "130",
+    )
+    swapped = await hook.pull(ROOT, renamed.checkpoint)
+    assert _pairs(swapped) == [
         (FileChangeKind.DELETE, "/gmail/Projects"),
         (FileChangeKind.DELETE, "/gmail/Empty"),
+        (FileChangeKind.CREATE, "/gmail/Empty"),
+        (FileChangeKind.CREATE, "/gmail/Archive"),
+        (FileChangeKind.DELETE, f"/gmail/Empty/{plan}"),
+        (FileChangeKind.DELETE, f"/gmail/INBOX/{plan}"),
+    ]
+    mailbox.labels = LABELS[:2]
+    mailbox.history["130"] = ([], "140")
+    removed = await hook.pull(ROOT, swapped.checkpoint)
+    assert _pairs(removed) == [
+        (FileChangeKind.DELETE, "/gmail/Empty"),
+        (FileChangeKind.DELETE, "/gmail/Archive"),
     ]

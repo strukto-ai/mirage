@@ -99,10 +99,13 @@ def _folders_moved(
     before: dict[str, str],
     after: dict[str, str],
 ) -> None:
-    """Record each label folder that appeared, left or was renamed, and
-    move the known paths below a renamed one (or forget them below one
-    that left), so a later change to one of its messages starts where
-    the message now is.
+    """Record each label folder that left or was renamed, then each that
+    appeared or took a new name, and move the known paths below a renamed
+    one (or forget them below one that left), so a later change to one of
+    its messages starts where the message now is.
+
+    Every path moves once, by the folder it was in: one label can take
+    the name another gave up in the same pull.
 
     Args:
         changes (list[tuple[FileChangeKind, str]]): The changes so far.
@@ -111,37 +114,40 @@ def _folders_moved(
         before (dict[str, str]): The folders the last pull saw, by id.
         after (dict[str, str]): The folders now, by id.
     """
-    for label_id, name in before.items():
-        now = after.get(label_id)
-        if now == name:
-            continue
-        old = f"{prefix}/{name}"
-        changes.append((FileChangeKind.DELETE, old))
-        new = None if now is None else f"{prefix}/{now}"
-        if new is not None:
-            changes.append((FileChangeKind.CREATE, new))
-        for mid, paths in known.items():
-            known[mid] = _moved(paths, old, new)
+    moves = {
+        f"{prefix}/{name}": (
+            None if label_id not in after else f"{prefix}/{after[label_id]}"
+        )
+        for label_id, name in before.items()
+        if after.get(label_id) != name
+    }
+    changes.extend((FileChangeKind.DELETE, old) for old in moves)
     changes.extend(
         (FileChangeKind.CREATE, f"{prefix}/{name}")
         for label_id, name in after.items()
-        if label_id not in before
+        if before.get(label_id) != name
     )
+    for mid, paths in known.items():
+        known[mid] = _moved(paths, moves)
 
 
-def _moved(paths: list[str], old: str, new: str | None) -> list[str]:
-    """``paths`` with each one below the folder ``old`` moved below
-    ``new``, or dropped when the folder left.
+def _moved(paths: list[str], moves: dict[str, str | None]) -> list[str]:
+    """``paths`` with each one in a moved folder put in its new one, or
+    dropped when its folder left.
 
     Args:
-        paths (list[str]): A message's paths.
-        old (str): The folder it was below.
-        new (str | None): Where that folder is now, None when it left.
+        paths (list[str]): A message's paths, each ``folder/day/name``.
+        moves (dict[str, str | None]): Each moved folder's new place, None
+            for one that left.
     """
-    under = old + "/"
-    if new is None:
-        return [p for p in paths if not p.startswith(under)]
-    return [new + p[len(old) :] if p.startswith(under) else p for p in paths]
+    moved: list[str] = []
+    for path in paths:
+        folder, day, name = path.rsplit("/", 2)
+        if folder not in moves:
+            moved.append(path)
+        elif (new := moves[folder]) is not None:
+            moved.append(f"{new}/{day}/{name}")
+    return moved
 
 
 def _changed(

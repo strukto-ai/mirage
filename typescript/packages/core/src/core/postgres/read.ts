@@ -57,7 +57,9 @@ export interface ReadOptions {
  * cannot know a table's size before it has paged through it, and a reader that
  * stops first (`head -c`, `grep -l`) never reaches it. Each page asks for one
  * row past what the row cap leaves and is sent only when it fits what the byte
- * cap leaves, so no page holds more than the caps allow. Mirrors Python's
+ * cap leaves, so no page holds more than the caps allow; a page that does not
+ * fit is asked again at half its rows, down to one row past the cap, so the
+ * rows that fit still come out before the refusal. Mirrors Python's
  * `read_stream`.
  */
 export async function* readStream(
@@ -85,9 +87,10 @@ export async function* readStream(
   const encoder = new TextEncoder()
   let rowsOut = 0
   let bytesOut = 0
+  let size = cfg.defaultRowLimit
   let after: readonly unknown[] | null = null
   for (;;) {
-    const limit = Math.min(cfg.defaultRowLimit, cfg.maxReadRows - rowsOut + 1)
+    const limit = Math.min(size, cfg.maxReadRows - rowsOut + 1)
     const [rows, last] = await fetchRowsAfter(
       accessor,
       schema,
@@ -98,7 +101,11 @@ export async function* readStream(
       columns,
       cfg.maxReadBytes - bytesOut,
     )
-    if (rows === null) throw efbig(spec)
+    if (rows === null) {
+      if (limit === 1) throw efbig(spec)
+      size = Math.floor(limit / 2)
+      continue
+    }
     after = last
     const page: string[] = []
     for (const row of rows) {

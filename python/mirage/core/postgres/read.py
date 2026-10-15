@@ -313,7 +313,9 @@ async def read_stream(
     and a reader that stops first (``head -c``, ``grep -l``) never
     reaches it. Each page asks for one row past what the row cap leaves
     and is sent only when it fits what the byte cap leaves, so no page
-    holds more than the caps allow.
+    holds more than the caps allow; a page that does not fit is asked
+    again at half its rows, down to one row past the cap, so the rows
+    that fit still come out before the refusal.
 
     Args:
         accessor (PostgresAccessor): backend handle.
@@ -334,9 +336,10 @@ async def read_stream(
         return
     cfg = accessor.config
     rows_out = bytes_out = 0
+    size = cfg.default_row_limit
     after: tuple[Any, ...] | None = None
     while True:
-        limit = min(cfg.default_row_limit, cfg.max_read_rows - rows_out + 1)
+        limit = min(size, cfg.max_read_rows - rows_out + 1)
         async with pool.acquire() as conn:
             rows, after = await client.fetch_rows_after(
                 conn,
@@ -349,7 +352,10 @@ async def read_stream(
                 cfg.max_read_bytes - bytes_out,
             )
         if rows is None:
-            raise efbig(path)
+            if limit == 1:
+                raise efbig(path)
+            size = limit // 2
+            continue
         page = bytearray()
         for row in rows:
             line = (row_line(row) + "\n").encode()

@@ -154,11 +154,27 @@ it('follows the label folders', async () => {
     [FileChangeKind.CREATE, `/gmail/INBOX/${plan}`],
     [FileChangeKind.UPDATE, `/gmail/Projects/${plan}`],
   ])
-  box.labels = box.LABELS.slice(0, 2)
-  box.history.set('120', [[], '130'])
-  const removed = await hook.pull(ROOT, renamed.checkpoint)
-  expect(pairs(removed)).toEqual([
+  // One label takes the name another gives up: each path moves once.
+  box.labels = [
+    ...box.LABELS.slice(0, 2),
+    { id: 'Label_1', name: 'Empty', type: 'user' },
+    { id: 'Label_2', name: 'Archive', type: 'user' },
+  ]
+  box.history.set('120', [[{ messagesDeleted: [{ message: { id: 'w1' } }] }], '130'])
+  const swapped = await hook.pull(ROOT, renamed.checkpoint)
+  expect(pairs(swapped)).toEqual([
     [FileChangeKind.DELETE, '/gmail/Projects'],
     [FileChangeKind.DELETE, '/gmail/Empty'],
+    [FileChangeKind.CREATE, '/gmail/Empty'],
+    [FileChangeKind.CREATE, '/gmail/Archive'],
+    [FileChangeKind.DELETE, `/gmail/Empty/${plan}`],
+    [FileChangeKind.DELETE, `/gmail/INBOX/${plan}`],
+  ])
+  box.labels = box.LABELS.slice(0, 2)
+  box.history.set('130', [[], '140'])
+  const removed = await hook.pull(ROOT, swapped.checkpoint)
+  expect(pairs(removed)).toEqual([
+    [FileChangeKind.DELETE, '/gmail/Empty'],
+    [FileChangeKind.DELETE, '/gmail/Archive'],
   ])
 })

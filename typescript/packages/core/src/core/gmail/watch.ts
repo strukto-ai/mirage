@@ -71,10 +71,12 @@ export function labelFolders(labels: readonly GmailLabel[]): Map<string, string>
 }
 
 /**
- * Record each label folder that appeared, left or was renamed, and move the
- * known paths below a renamed one (or forget them below one that left), so a
- * later change to one of its messages starts where the message now is.
- * Mirrors Python's `_folders_moved`.
+ * Record each label folder that left or was renamed, then each that appeared or
+ * took a new name, and move the known paths below a renamed one (or forget them
+ * below one that left), so a later change to one of its messages starts where
+ * the message now is. Every path moves once, by the folder it was in: one label
+ * can take the name another gave up in the same pull. Mirrors Python's
+ * `_folders_moved`.
  */
 function foldersMoved(
   changes: [FileChangeKind, string][],
@@ -83,28 +85,32 @@ function foldersMoved(
   before: ReadonlyMap<string, string>,
   after: ReadonlyMap<string, string>,
 ): void {
+  const moves = new Map<string, string | null>()
   for (const [labelId, name] of before) {
     const now = after.get(labelId)
-    if (now === name) continue
-    const old = `${prefix}/${name}`
-    changes.push([FileChangeKind.DELETE, old])
-    const next = now === undefined ? null : `${prefix}/${now}`
-    if (next !== null) changes.push([FileChangeKind.CREATE, next])
-    for (const [mid, paths] of known) known.set(mid, moved(paths, old, next))
+    if (now !== name) moves.set(`${prefix}/${name}`, now === undefined ? null : `${prefix}/${now}`)
   }
+  for (const old of moves.keys()) changes.push([FileChangeKind.DELETE, old])
   for (const [labelId, name] of after) {
-    if (!before.has(labelId)) changes.push([FileChangeKind.CREATE, `${prefix}/${name}`])
+    if (before.get(labelId) !== name) changes.push([FileChangeKind.CREATE, `${prefix}/${name}`])
   }
+  for (const [mid, paths] of known) known.set(mid, moved(paths, moves))
 }
 
 /**
- * `paths` with each one below the folder `old` moved below `next`, or dropped
- * when the folder left. Mirrors Python's `_moved`.
+ * `paths` with each one in a moved folder put in its new one, or dropped when
+ * its folder left. Mirrors Python's `_moved`.
  */
-function moved(paths: readonly string[], old: string, next: string | null): string[] {
-  const under = `${old}/`
-  if (next === null) return paths.filter((p) => !p.startsWith(under))
-  return paths.map((p) => (p.startsWith(under) ? next + p.slice(old.length) : p))
+function moved(paths: readonly string[], moves: ReadonlyMap<string, string | null>): string[] {
+  const out: string[] = []
+  for (const path of paths) {
+    const cut = path.lastIndexOf('/', path.lastIndexOf('/') - 1)
+    const folder = path.slice(0, cut)
+    const next = moves.get(folder)
+    if (next === undefined) out.push(path)
+    else if (next !== null) out.push(next + path.slice(cut))
+  }
+  return out
 }
 
 /**

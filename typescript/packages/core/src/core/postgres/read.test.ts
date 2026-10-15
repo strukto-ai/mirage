@@ -394,15 +394,35 @@ describe('read stand-ins', () => {
     ])
   })
 
-  // Twin of test_a_page_past_the_byte_cap_is_refused_before_it_is_sent.
-  it('refuses a page past the byte cap before it is sent', async () => {
+  // Twin of test_a_page_past_the_byte_cap_is_asked_again_smaller: the database
+  // refuses a page past what the byte cap leaves before sending it; half the
+  // page is asked next, so the rows that fit come out, and one row that does
+  // not fit is the refusal.
+  it('asks a page past the byte cap again smaller', async () => {
     vi.mocked(client.fetchRowKey).mockResolvedValue(['id'])
-    vi.mocked(client.fetchRowsAfter).mockReset().mockResolvedValue([null, null])
+    const after = vi
+      .mocked(client.fetchRowsAfter)
+      .mockReset()
+      .mockResolvedValueOnce([null, null])
+      .mockResolvedValueOnce([[{ id: 1 }], [1]])
+      .mockResolvedValueOnce([null, [1]])
+    const got: string[] = []
     await expect(
       (async () => {
-        for await (const _ of readStream(makeAccessor(), ROWS)) void _
+        for await (const chunk of readStream(
+          makeAccessor({ dsn: 'postgres://h/db', defaultRowLimit: 2 }),
+          ROWS,
+        )) {
+          got.push(decode(chunk))
+        }
       })(),
     ).rejects.toMatchObject({ code: 'EFBIG' })
+    expect(got).toEqual(['{"id":1}\n'])
+    expect(after.mock.calls.map((call) => [call[4], call[5]])).toEqual([
+      [null, 2],
+      [null, 1],
+      [[1], 1],
+    ])
   })
 
   // Twin of test_a_followed_table_prints_rows_past_the_last_key.

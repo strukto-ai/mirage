@@ -535,14 +535,25 @@ async def test_a_keyed_table_streams_in_pages_up_to_its_ceiling():
 
 
 @pytest.mark.asyncio
-async def test_a_page_past_the_byte_cap_is_refused_before_it_is_sent():
+async def test_a_page_past_the_byte_cap_is_asked_again_smaller():
+    # The database refuses a page past what the byte cap leaves before
+    # sending it; half the page is asked next, so the rows that fit come
+    # out, and one row that does not fit is the refusal.
+    pages = [(None, None), ([{"id": 1}], (1,)), (None, (1,))]
     with patch("mirage.core.postgres.read.client") as mc:
         mc.fetch_row_key = AsyncMock(return_value=["id"])
         mc.fetch_columns = AsyncMock(return_value=[{"name": "id"}])
-        mc.fetch_rows_after = AsyncMock(return_value=(None, None))
+        mc.fetch_rows_after = AsyncMock(side_effect=pages)
+        got: list[bytes] = []
         with pytest.raises(FileTooLargeError, match="rows.jsonl"):
-            async for _ in read_stream(_accessor(), ROWS):
-                pass
+            async for chunk in read_stream(
+                _accessor(default_row_limit=2), ROWS
+            ):
+                got.append(chunk)
+    assert got == [b'{"id":1}\n']
+    assert [
+        (c.args[4], c.args[5]) for c in mc.fetch_rows_after.await_args_list
+    ] == [(None, 2), (None, 1), ((1,), 1)]
 
 
 @pytest.mark.asyncio
