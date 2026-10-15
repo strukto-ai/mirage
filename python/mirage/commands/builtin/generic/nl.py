@@ -1,19 +1,17 @@
 import re
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 
 from mirage.commands.builtin.constants import C_SPACE
 from mirage.commands.builtin.utils.bre import BreError, search_bre
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     normalized_read,
+    per_operand,
     split_readable,
 )
-from mirage.commands.builtin.utils.stream import (
-    resolve_source,
-    stdin_stat,
-    stdin_stream,
-)
+from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -519,7 +517,7 @@ def _render_line(line: str, config: NlConfig, state: NlState) -> bytes | None:
 
 
 async def _nl_stream(
-    source: AsyncIterator[bytes],
+    source: ByteSource,
     config: NlConfig,
     state: NlState,
     io: IOResult | None = None,
@@ -543,7 +541,7 @@ async def _nl_stream(
     every option refusal in this module.
 
     Args:
-        source (AsyncIterator[bytes]): the raw byte stream to number.
+        source (ByteSource): the raw bytes to number.
         config (NlConfig): the resolved options.
         state (NlState): the counter and section, carried across
             sources so a second operand continues the numbering.
@@ -551,30 +549,22 @@ async def _nl_stream(
             no caller is watching, which keeps the stream usable from a
             unit test that only wants the bytes.
     """
-    async for raw_line in AsyncLineIterator(source):
-        line = raw_line.decode(errors="replace")
-        rendered = _render_line(line, config, state)
-        if rendered is None:
-            if io is not None:
-                io.exit_code = 1
-                io.stderr = b"nl: line number overflow\n"
-            state.aborted = True
-            return
-        yield rendered
-
-
-async def _nl_multi(
-    paths: list[PathSpec],
-    read_stream: Callable[..., AsyncIterator[bytes]],
-    config: NlConfig,
-    io: IOResult | None = None,
-) -> AsyncIterator[bytes]:
-    state = NlState(config.start)
-    for p in paths:
-        async for rendered in _nl_stream(read_stream(p), config, state, io):
+    if state.aborted:
+        return
+    reader = AsyncLineIterator(source)
+    try:
+        async for raw_line in reader:
+            line = raw_line.decode(errors="replace")
+            rendered = _render_line(line, config, state)
+            if rendered is None:
+                if io is not None:
+                    io.exit_code = 1
+                    io.stderr = b"nl: line number overflow\n"
+                state.aborted = True
+                return
             yield rendered
-        if state.aborted:
-            return
+    finally:
+        await reader.discard()
 
 
 def _parse_numbering(raw: str) -> tuple[str, re.Pattern[str] | None]:
@@ -657,10 +647,8 @@ async def nl(
     # overflow abort reports by mutating it as it goes -- the shape
     # `truncate_stream` uses for the same reason.
     io = IOResult()
-    if paths:
-        return _nl_multi(paths, read_stream, config, io), io
-    source = resolve_source(stdin)
-    return _nl_stream(source, config, NlState(start), io), io
+    each = partial(_nl_stream, config=config, state=NlState(start), io=io)
+    return per_operand(paths, read_stream, stdin, io, "nl", each), io
 
 
 async def nl_generic(

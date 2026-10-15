@@ -5,7 +5,7 @@ from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 
-async def _unused_read_bytes(path):
+async def _unused_read_stream(path):
     raise AssertionError(f"iconv read {path} although stdin was given")
 
 
@@ -19,26 +19,11 @@ def _store():
 
 
 @pytest.mark.asyncio
-async def test_iconv_encoding_conversion():
-    _, write_bytes = _store()
-    output, _ = await iconv(
-        [],
-        read_stream=_unused_read_bytes,
-        write_bytes=write_bytes,
-        stdin="café".encode(),
-        from_enc="utf-8",
-        to_enc="ascii",
-        ignore_errors=True,
-    )
-    assert await materialize(output) == b"caf"
-
-
-@pytest.mark.asyncio
 async def test_iconv_writes_to_output_path():
     store, write_bytes = _store()
     output, io = await iconv(
         [],
-        read_stream=_unused_read_bytes,
+        read_stream=_unused_read_stream,
         write_bytes=write_bytes,
         stdin=b"hello",
         from_enc="utf-8",
@@ -69,7 +54,7 @@ async def test_iconv_closes_a_stateful_target(stdin, omit, expected, code):
     _, write_bytes = _store()
     output, io = await iconv(
         [],
-        read_stream=_unused_read_bytes,
+        read_stream=_unused_read_stream,
         write_bytes=write_bytes,
         stdin=stdin,
         from_enc="utf-8",
@@ -87,6 +72,9 @@ async def test_iconv_closes_a_stateful_target(stdin, omit, expected, code):
         (b"\xff\xfeh\x00\xe9\x00", "UTF-16", "UTF-8", "hé".encode(), 0),
         (b"a\xe2\x82", "UTF-8", "UTF-8", b"a", 1),
         (b"a\xffb", "UTF-8", "UTF-8", b"a", 1),
+        (b"a\0\0\0", "UTF-32", "UTF-8", b"a", 0),
+        (b"\0\0\xfe\xff\0\0\0a", "UTF-32", "UTF-8", b"a", 0),
+        (b"a\0\0\0\0\0\x11\0b\0\0\0", "UTF-32", "UTF-8", b"a", 1),
     ],
 )
 async def test_iconv_preserves_decoding_state_between_single_byte_chunks(
@@ -104,7 +92,7 @@ async def test_iconv_preserves_decoding_state_between_single_byte_chunks(
     _, write = _store()
     out, io = await iconv(
         [],
-        read_stream=_unused_read_bytes,
+        read_stream=_unused_read_stream,
         write_bytes=write,
         stdin=input_chunks(),
         from_enc=source,

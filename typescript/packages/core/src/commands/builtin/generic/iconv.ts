@@ -17,14 +17,14 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
-import { chunks } from '../../../io/cooperative.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import type { PathSpec } from '../../../types.ts'
 import { strverscmp } from '../../../utils/strverscmp.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { stdinStream } from '../utils/stream.ts'
+import { neverOpened, stdinStream } from '../utils/stream.ts'
 import {
   CUT,
   ILLEGAL,
@@ -349,40 +349,38 @@ export async function iconvGeneric(
       : [{ path: null, source: opts.stdin ?? new Uint8Array() }]
   const io = new IOResult()
   const inputCharset = fromCharset
+  const report = async (line: string): Promise<void> => {
+    io.exitCode = 1
+    io.stderr = concat([await materialize(io.stderr), encodeText(`iconv: ${line}\n`)])
+  }
   async function* output(): AsyncIterable<Uint8Array> {
     for (const { path, source } of operands) {
+      const reader = new AsyncLineIterator(source)
       try {
         for await (const result of convertStream(
-          source,
+          reader,
           inputCharset,
           encoder,
           parsed.ignoreErrors,
         )) {
           if (result.dropped) io.exitCode = 1
-          if (result.error !== null) {
-            io.exitCode = 1
-            io.stderr = concat([
-              await materialize(io.stderr),
-              encodeText('iconv: ' + result.error + '\n'),
-            ])
-          }
+          if (result.error !== null) await report(result.error)
           if (result.data.length > 0) yield result.data
           if (result.error !== null) return
         }
       } catch (err) {
         if (!isFsError(err)) throw err
-        io.exitCode = 1
         const code = (err as { code?: string }).code
-        const reading = path === null || (code !== undefined && READ_FAILURES.has(code))
-        const message = reading
-          ? 'iconv: error while reading the input: ' + String(fsStrerror(err))
-          : 'iconv: cannot open input file ' +
-            String.fromCharCode(96) +
-            path.rawPath +
-            "': " +
-            String(fsStrerror(err))
-        io.stderr = concat([await materialize(io.stderr), encodeText(message + '\n')])
-        if (reading) break
+        const strerror = String(fsStrerror(err))
+        if (
+          path === null ||
+          (code !== undefined && READ_FAILURES.has(code)) ||
+          !neverOpened(reader, path, err)
+        ) {
+          await report(`error while reading the input: ${strerror}`)
+          break
+        }
+        await report(`cannot open input file \`${path.rawPath}': ${strerror}`)
       }
     }
   }
@@ -395,7 +393,7 @@ export async function iconvGeneric(
 }
 
 async function* convertStream(
-  source: ByteSource,
+  reader: AsyncLineIterator,
   charset: Charset,
   encoder: Encoder,
   omit: boolean,
@@ -405,47 +403,51 @@ async function* convertStream(
   let little = typeof charset !== 'string' || !charset.endsWith('be')
   let first = true
   const table = typeof charset === 'string' ? new Map<number, number>() : multibyteTable(charset)
-  for await (const part of chunks(source)) {
-    const raw = pending.length > 0 ? concat([pending, part]) : part
-    let at = 0
-    if (first && charset === 'utf-16') {
-      if (raw.length < 2) {
-        pending = raw
-        continue
-      }
-      if (raw[0] === 0xff && raw[1] === 0xfe) at = 2
-      else if (raw[0] === 0xfe && raw[1] === 0xff) {
-        at = 2
-        little = false
-      }
-    }
-    first = false
-    const out = new Uint8Array(raw.length * 4 + 2)
-    let n = 0
-    let dropped = false
-    while (at < raw.length) {
-      const [cp, length] =
-        typeof charset === 'string'
-          ? decodeAt(raw, at, charset, little)
-          : charset.step(raw, at, table)
-      if (cp === CUT) break
-      const next = cp === ILLEGAL ? -1 : encoder.put(cp, out, n)
-      if (next < 0) {
-        if (!omit) {
-          yield {
-            data: out.subarray(0, n),
-            dropped,
-            error: 'illegal input sequence at position ' + String(offset + at),
-          }
-          return
+  try {
+    for (let part = await reader.readChunk(); part !== null; part = await reader.readChunk()) {
+      const raw = pending.length > 0 ? concat([pending, part]) : part
+      let at = 0
+      if (first && charset === 'utf-16') {
+        if (raw.length < 2) {
+          pending = raw
+          continue
         }
-        dropped = true
-      } else n = next
-      at += length
+        if (raw[0] === 0xff && raw[1] === 0xfe) at = 2
+        else if (raw[0] === 0xfe && raw[1] === 0xff) {
+          at = 2
+          little = false
+        }
+      }
+      first = false
+      const out = new Uint8Array(raw.length * 4 + 2)
+      let n = 0
+      let dropped = false
+      while (at < raw.length) {
+        const [cp, length] =
+          typeof charset === 'string'
+            ? decodeAt(raw, at, charset, little)
+            : charset.step(raw, at, table)
+        if (cp === CUT) break
+        const next = cp === ILLEGAL ? -1 : encoder.put(cp, out, n)
+        if (next < 0) {
+          if (!omit) {
+            yield {
+              data: out.subarray(0, n),
+              dropped,
+              error: 'illegal input sequence at position ' + String(offset + at),
+            }
+            return
+          }
+          dropped = true
+        } else n = next
+        at += length
+      }
+      pending = raw.slice(at)
+      offset += at
+      yield { data: out.subarray(0, n), dropped, error: null }
     }
-    pending = raw.slice(at)
-    offset += at
-    yield { data: out.subarray(0, n), dropped, error: null }
+  } finally {
+    await reader.discard()
   }
   if (pending.length > 0) yield { data: new Uint8Array(), dropped: false, error: INCOMPLETE }
 }

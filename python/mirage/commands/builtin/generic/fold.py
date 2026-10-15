@@ -5,19 +5,14 @@ from functools import partial
 from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
-    reported_stream,
+    per_operand,
     split_readable,
 )
-from mirage.commands.builtin.utils.stream import (
-    resolve_source,
-    stdin_stat,
-    stdin_stream,
-)
+from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -82,19 +77,14 @@ async def fold(
 ) -> tuple[ByteSource | None, IOResult]:
     io = IOResult()
     read = stdin_stream(read_stream, stdin)
-    sources = [reported_stream(read(p), io, p, "fold") for p in paths]
     transform = partial(
         _fold_record,
         width=width,
         break_spaces=break_spaces,
         count_bytes=count_bytes,
     )
-    output = (
-        async_chain([map_stream(source, transform) for source in sources])
-        if paths
-        else map_stream(resolve_source(stdin), transform)
-    )
-    return output, io
+    each = partial(map_stream, transform=transform)
+    return per_operand(paths, read, stdin, io, "fold", each), io
 
 
 async def fold_generic(

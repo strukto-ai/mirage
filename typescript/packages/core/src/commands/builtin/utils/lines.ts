@@ -40,16 +40,6 @@ export function splitLinesKeepends(text: string): string[] {
   return lines
 }
 
-// Apply `fn` to each line of `text`, keeping its line ends. A GNU line
-// filter (rev, fold) writes a newline where its input had one and nowhere
-// else, so a last line with none ends the output without one too: `rev` of
-// `ab` is `ba`. It runs per file, so a second file starts from a fresh line
-// of its own. Mirrors Python's map_lines.
-export function mapLines(text: string, fn: (line: string) => string): string {
-  const out = splitLines(text).map(fn).join('\n')
-  return text.endsWith('\n') ? `${out}\n` : out
-}
-
 // joinFileLines for readers that keep raw bytes (column). Mirrors Python's
 // join_file_lines over bytes.
 export function joinFileBytes(chunks: readonly Uint8Array[], sep: number): Uint8Array {

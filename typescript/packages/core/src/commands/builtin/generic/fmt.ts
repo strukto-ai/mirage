@@ -15,13 +15,12 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { asyncChain } from '../../../io/stream.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { reportedStream } from '../utils/operands.ts'
+import { perOperand } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 
@@ -74,6 +73,8 @@ class Formatter {
   private readonly prefixFullLength: number
   private readonly prefix: Uint8Array
   out: number[] = []
+  private input: Uint8Array | null = new Uint8Array()
+  private pos = 0
   private outColumn = 0
   private inColumn = 0
   private nextPrefixIndent = 0
@@ -113,8 +114,15 @@ class Formatter {
     }
   }
 
+  /** The next chunk to read, or null at end of input. */
+  feed(input: Uint8Array | null): void {
+    this.input = input
+    this.pos = 0
+  }
+
   private *getc(): Generator<void, number, number> {
-    return yield
+    while (this.input !== null && this.pos >= this.input.length) yield
+    return this.input === null ? EOF : (this.input[this.pos++] ?? EOF)
   }
 
   private *getParagraph(): Generator<void, boolean, number> {
@@ -448,30 +456,11 @@ export function fmtGeneric(
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   const [maxWidth, goalWidth] = widths(parsed.width, parsed.goal)
+  const { prefix, splitOnly, tagged, crown, uniform } = parsed
+  const each = (source: ByteSource) =>
+    fmtStream(source, new Formatter(maxWidth, goalWidth, prefix, splitOnly, tagged, crown, uniform))
   const io = new IOResult()
-  const sources =
-    paths.length > 0
-      ? paths.map((p) => reportedStream(stream(p), io, p, 'fmt'))
-      : [opts.stdin ?? new Uint8Array()]
-  return [
-    asyncChain(
-      sources.map((source) =>
-        fmtStream(
-          source,
-          new Formatter(
-            maxWidth,
-            goalWidth,
-            parsed.prefix,
-            parsed.splitOnly,
-            parsed.tagged,
-            parsed.crown,
-            parsed.uniform,
-          ),
-        ),
-      ),
-    ),
-    io,
-  ]
+  return [perOperand(paths, stream, opts.stdin, io, 'fmt', each), io]
 }
 
 async function* fmtStream(source: ByteSource, formatter: Formatter): AsyncIterable<Uint8Array> {
@@ -479,15 +468,15 @@ async function* fmtStream(source: ByteSource, formatter: Formatter): AsyncIterab
   machine.next()
   try {
     for await (const part of chunks(source)) {
-      for (const byte of part) machine.next(byte)
+      formatter.feed(part)
+      machine.next()
       if (formatter.out.length > 0) {
         yield Uint8Array.from(formatter.out)
         formatter.out.length = 0
       }
     }
-    while (machine.next(EOF).done !== true) {
-      // Flush the formatter's remaining paragraph at EOF.
-    }
+    formatter.feed(null)
+    machine.next()
     if (formatter.out.length > 0) yield Uint8Array.from(formatter.out)
   } finally {
     machine.return()

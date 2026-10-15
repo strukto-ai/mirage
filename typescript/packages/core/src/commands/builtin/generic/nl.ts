@@ -13,20 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { BreError, searchBre } from '../utils/bre.ts'
 import { quoteText } from '../../quote.ts'
-import { resolveSource, stdinStream } from '../utils/stream.ts'
-import { reportedStream } from '../utils/operands.ts'
+import { stdinStream } from '../utils/stream.ts'
+import { perOperand } from '../utils/operands.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { C_SPACE } from '../constants.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
 function shouldNumber(line: string, numbering: string, pattern: RegExp | null): boolean {
   if (numbering === 'n') return false
@@ -172,21 +172,20 @@ function renderLine(line: string, config: NlConfig, state: NlState): Uint8Array 
 // means errnum 0, so there is no colon clause here -- unlike every option
 // refusal in this module.
 async function* nlStream(
-  source: AsyncIterable<Uint8Array>,
+  source: ByteSource,
   config: NlConfig,
   state: NlState,
-  io?: IOResult,
+  io: IOResult,
 ): AsyncIterable<Uint8Array> {
+  if (state.aborted) return
   const iter = new AsyncLineIterator(source)
   try {
     for await (const raw of iter) {
       const line = DEC.decode(raw)
       const rendered = renderLine(line, config, state)
       if (rendered === null) {
-        if (io !== undefined) {
-          io.exitCode = 1
-          io.stderr = ENC.encode('nl: line number overflow\n')
-        }
+        io.exitCode = 1
+        io.stderr = ENC.encode('nl: line number overflow\n')
         state.aborted = true
         return
       }
@@ -194,24 +193,6 @@ async function* nlStream(
     }
   } finally {
     await iter.discard()
-  }
-}
-
-async function* nlMulti(
-  sources: readonly AsyncIterable<Uint8Array>[],
-  config: NlConfig,
-  io?: IOResult,
-): AsyncIterable<Uint8Array> {
-  const state: NlState = {
-    number: config.start,
-    section: 'body',
-    blankRun: 0,
-    overflowed: false,
-    aborted: false,
-  }
-  for (const source of sources) {
-    for await (const rendered of nlStream(source, config, state, io)) yield rendered
-    if (state.aborted) return
   }
 }
 
@@ -547,33 +528,16 @@ export function nlGeneric(
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
   const config = buildConfig(parsed)
-  if (paths.length > 0) {
-    const io = new IOResult()
-    const sources = paths.map((p) => reportedStream(stream(p), io, p, 'nl'))
-    return [nlMulti(sources, config, io), io]
+  // The IOResult is handed back before the stream is drained, so the
+  // overflow abort reports by mutating it as it goes.
+  const io = new IOResult()
+  const state: NlState = {
+    number: config.start,
+    section: 'body',
+    blankRun: 0,
+    overflowed: false,
+    aborted: false,
   }
-  try {
-    const source = resolveSource(opts.stdin)
-    // The IOResult is handed back before the stream is drained, so the
-    // overflow abort reports by mutating it as it goes.
-    const io = new IOResult()
-    return [
-      nlStream(
-        source,
-        config,
-        {
-          number: config.start,
-          section: 'body',
-          blankRun: 0,
-          overflowed: false,
-          aborted: false,
-        },
-        io,
-      ),
-      io,
-    ]
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-  }
+  const each = (source: ByteSource) => nlStream(source, config, state, io)
+  return [perOperand(paths, stream, opts.stdin, io, 'nl', each), io]
 }

@@ -24,22 +24,6 @@ def split_lines_keepends(text: str) -> list[str]:
     return out
 
 
-def map_lines(text: str, fn: Callable[[str], str]) -> str:
-    """Apply ``fn`` to each line of ``text``, keeping its line ends.
-
-    A GNU line filter (``rev``, ``fold``) writes a newline where its
-    input had one and nowhere else, so a last line with none ends the
-    output without one too: ``rev`` of ``ab`` is ``ba``. It runs per
-    file, so a second file starts from a fresh line of its own.
-
-    Args:
-        text (str): one file's text.
-        fn (Callable[[str], str]): what each line becomes.
-    """
-    out = "\n".join(fn(line) for line in split_lines(text))
-    return out + "\n" if text.endswith("\n") else out
-
-
 def join_file_lines(chunks: Sequence[AnyStr], sep: AnyStr) -> AnyStr:
     """Several files' contents as one, each file's last line ended.
 
@@ -83,7 +67,6 @@ async def map_stream(
 
 __all__ = [
     "join_file_lines",
-    "map_lines",
     "map_stream",
     "split_lines",
     "split_lines_keepends",

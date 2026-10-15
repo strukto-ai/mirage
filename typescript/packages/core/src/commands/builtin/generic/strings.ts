@@ -19,8 +19,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { reportedStream } from '../utils/operands.ts'
-import { asyncChain } from '../../../io/stream.ts'
+import { perOperand } from '../utils/operands.ts'
 import { chunks } from '../../../io/cooperative.ts'
 
 async function* stringsStream(source: ByteSource, minLen: number): AsyncIterable<Uint8Array> {
@@ -68,11 +67,6 @@ export function stringsGeneric(
   stream = stdinStream(stream, opts.stdin, false, false)
   const { minLen } = parseFlags(opts.flags)
   const io = new IOResult()
-  const sources = paths.map((p) =>
-    stringsStream(reportedStream(stream(p), io, p, 'strings'), minLen),
-  )
-  return [
-    paths.length > 0 ? asyncChain(sources) : stringsStream(opts.stdin ?? new Uint8Array(), minLen),
-    io,
-  ]
+  const each = (source: ByteSource) => stringsStream(source, minLen)
+  return [perOperand(paths, stream, opts.stdin, io, 'strings', each), io]
 }

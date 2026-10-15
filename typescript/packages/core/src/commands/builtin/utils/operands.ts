@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { asyncChain } from '../../../io/stream.ts'
 import type { LinkView, MountView, StatPath } from '../../../view/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import { FileType } from '../../../types.ts'
@@ -257,4 +258,17 @@ export async function* reportedStream(
     io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine(cmdName, path, err))])
     io.exitCode = 1
   }
+}
+
+/** `each` over every operand in turn, or over stdin without one. Mirrors Python's per_operand. */
+export function perOperand(
+  paths: readonly PathSpec[],
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  stdin: ByteSource | null,
+  io: IOResult,
+  cmdName: string,
+  each: (source: ByteSource) => AsyncIterable<Uint8Array>,
+): AsyncIterable<Uint8Array> {
+  if (paths.length === 0) return each(stdin ?? new Uint8Array())
+  return asyncChain(paths.map((p) => each(reportedStream(stream(p), io, p, cmdName))))
 }

@@ -4,20 +4,15 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
-    reported_stream,
+    per_operand,
     split_readable,
 )
-from mirage.commands.builtin.utils.stream import (
-    resolve_source,
-    stdin_stat,
-    stdin_stream,
-)
+from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.cooperative import chunks
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -117,6 +112,8 @@ class _Formatter:
         self.crown = crown
         self.uniform = uniform
         self.out = bytearray()
+        self.input: bytes | None = b""
+        self.pos = 0
         self.out_column = 0
         self.in_column = 0
         self.next_prefix_indent = 0
@@ -138,8 +135,22 @@ class _Formatter:
             self.fmt_paragraph()
             self.put_paragraph(len(self.words))
 
+    def feed(self, data: bytes | None) -> None:
+        """Hand over the next chunk to read.
+
+        Args:
+            data (bytes | None): the chunk, or None at end of input.
+        """
+        self.input = data
+        self.pos = 0
+
     def getc(self) -> Generator[None, int, int]:
-        return (yield)
+        while self.input is not None and self.pos >= len(self.input):
+            yield
+        if self.input is None:
+            return EOF
+        self.pos += 1
+        return self.input[self.pos - 1]
 
     def get_paragraph(self) -> Generator[None, int, bool]:
         self.last_line_length = 0
@@ -441,28 +452,15 @@ async def fmt(
 ) -> tuple[ByteSource | None, IOResult]:
     max_width, goal_width = _widths(width, goal)
 
+    def each(source: ByteSource) -> AsyncIterator[bytes]:
+        formatter = _Formatter(
+            max_width, goal_width, prefix, split_only, tagged, crown, uniform
+        )
+        return _fmt_stream(source, formatter)
+
     io = IOResult()
     read = stdin_stream(read_stream, stdin)
-    sources = [reported_stream(read(p), io, p, "fmt") for p in paths]
-    if not paths:
-        sources = [resolve_source(stdin)]
-    return async_chain(
-        [
-            _fmt_stream(
-                source,
-                _Formatter(
-                    max_width,
-                    goal_width,
-                    prefix,
-                    split_only,
-                    tagged,
-                    crown,
-                    uniform,
-                ),
-            )
-            for source in sources
-        ]
-    ), io
+    return per_operand(paths, read, stdin, io, "fmt", each), io
 
 
 async def _fmt_stream(
@@ -473,16 +471,13 @@ async def _fmt_stream(
     try:
         async with aclosing(chunks(source)) as bounded:
             async for part in bounded:
-                for byte in part:
-                    machine.send(byte)
+                formatter.feed(part)
+                next(machine)
                 if formatter.out:
                     yield bytes(formatter.out)
                     formatter.out.clear()
-        while True:
-            try:
-                machine.send(EOF)
-            except StopIteration:
-                break
+        formatter.feed(None)
+        next(machine, None)
         if formatter.out:
             yield bytes(formatter.out)
     finally:
@@ -507,7 +502,6 @@ async def fmt_generic(
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    stream = stdin_stream(stream, opts.stdin)
     parsed = parse_flags(opts.flags)
     readable, err = await split_readable(paths, stat, "fmt")
     if err and not readable:

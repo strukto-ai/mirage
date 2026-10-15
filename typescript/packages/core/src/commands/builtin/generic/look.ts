@@ -23,7 +23,7 @@ import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
 interface LookFlags {
   readonly foldCase: boolean

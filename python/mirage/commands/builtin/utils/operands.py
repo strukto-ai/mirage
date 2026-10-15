@@ -22,7 +22,7 @@ from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkError
-from mirage.io.stream import close_quietly, ensure_stream
+from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -383,6 +383,34 @@ async def reported_stream(
         io.exit_code = 1
     finally:
         await close_quietly(source)
+
+
+def per_operand(
+    paths: list[PathSpec],
+    read: Callable[[PathSpec], AsyncIterator[bytes]],
+    stdin: ByteSource | None,
+    io: IOResult,
+    cmd_name: str,
+    each: Callable[[ByteSource], AsyncIterator[bytes]],
+) -> AsyncIterator[bytes]:
+    """``each`` over every operand in turn, or over stdin without one.
+
+    Mirrors TypeScript's ``perOperand``.
+
+    Args:
+        paths (list[PathSpec]): the operands.
+        read (Callable[[PathSpec], AsyncIterator[bytes]]): opens one.
+        stdin (ByteSource | None): the input when there is no operand.
+        io (IOResult): where a failed operand is reported.
+        cmd_name (str): the command the report names.
+        each (Callable[[ByteSource], AsyncIterator[bytes]]): what one
+            input becomes.
+    """
+    if not paths:
+        return each(stdin or b"")
+    return async_chain(
+        [each(reported_stream(read(p), io, p, cmd_name)) for p in paths]
+    )
 
 
 async def _awaited_stream(

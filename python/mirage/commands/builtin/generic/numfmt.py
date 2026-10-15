@@ -10,7 +10,7 @@ from mirage.io.types import ByteSource, IOResult
 _SUFFIX_ORDER = ("", "K", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q")
 # SI spells kilo lowercase; every larger unit and all of IEC stay uppercase.
 _SI_DISPLAY = ("", "k", *_SUFFIX_ORDER[2:])
-_FIRST_FIELD_RE = re.compile(r"(\s*)(\S+)([\s\S]*)")
+_FIRST_FIELD_RE = re.compile(r"([ \t]*)([^ \t]+)([\s\S]*)")
 # GNU accepts no leading '+' and no bare trailing '.', and it reads no
 # exponent: `1e3` is a number followed by the unknown suffix 'e3'.
 _NUMBER_RE = re.compile(r"(-?(?:[0-9]*\.[0-9]+|[0-9]+))(.*)", re.DOTALL)
@@ -217,7 +217,7 @@ def _convert_line(line: str, to_mode: str, from_mode: str, suffix: str) -> str:
     """Reformat the first field of a record, preserving the rest verbatim.
 
     GNU ``numfmt`` converts only ``--field`` (1 by default) and copies the
-    remaining fields and their separating whitespace through untouched.
+    remaining fields and the blanks (space, tab) between them untouched.
 
     Args:
         line (str): One input record, without its terminator.
@@ -259,9 +259,9 @@ async def _numfmt_stream(
     suffix: str,
     io: IOResult,
 ) -> AsyncIterator[bytes]:
-    reader = AsyncLineIterator(stdin or b"")
+    reader = None if texts else AsyncLineIterator(stdin or b"")
     try:
-        if texts:
+        if reader is None:
             for value in texts:
                 yield (
                     _convert_field(value, to_mode, from_mode, suffix) + "\n"
@@ -276,7 +276,8 @@ async def _numfmt_stream(
         io.exit_code = exc.exit_code
         io.stderr = f"{exc}\n".encode()
     finally:
-        await reader.discard()
+        if reader is not None:
+            await reader.discard()
 
 
 __all__ = ["numfmt_generic"]

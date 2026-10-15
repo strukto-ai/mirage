@@ -1,23 +1,19 @@
 from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
+from functools import partial
 
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
-    reported_stream,
+    per_operand,
     split_readable,
 )
-from mirage.commands.builtin.utils.stream import (
-    resolve_source,
-    stdin_stat,
-    stdin_stream,
-)
+from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.cooperative import chunks
-from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -71,15 +67,8 @@ async def strings(
 ) -> tuple[ByteSource | None, IOResult]:
     io = IOResult()
     read = stdin_stream(read_stream, stdin, dash=False)
-    sources = [
-        _strings_stream(reported_stream(read(p), io, p, "strings"), min_len)
-        for p in paths
-    ]
-    return (
-        async_chain(sources)
-        if paths
-        else _strings_stream(resolve_source(stdin), min_len)
-    ), io
+    each = partial(_strings_stream, min_len=min_len)
+    return per_operand(paths, read, stdin, io, "strings", each), io
 
 
 async def strings_generic(

@@ -85,6 +85,21 @@
         "stdout": "1234B\nrc=0\nrc=1\n1000\nrc=0\n",
         "stderr": "numfmt: grouping cannot be combined with --to\n"
       }
+    },
+    {
+      "id": "numfmt_splits_fields_on_blanks_only",
+      "seq": 16160002,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf '1\\n\\357\\273\\2772\\n' | numfmt; echo rc=$?; printf '\\v1000\\n' | numfmt --to=si; echo rc=$?; printf '\\302\\2401000\\n' | numfmt --to=si; echo rc=$?; printf '\\034 1000\\n' | numfmt --to=si; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\nrc=2\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "numfmt: invalid number: '\\357\\273\\2772'\nnumfmt: invalid number: '\\v1000'\nnumfmt: invalid number: '\\302\\2401000'\nnumfmt: invalid number: '\\034'\n"
+      }
     }
   ]
 }

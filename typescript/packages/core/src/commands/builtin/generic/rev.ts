@@ -12,12 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { reportedStream } from '../utils/operands.ts'
-import { asyncChain } from '../../../io/stream.ts'
+import { perOperand } from '../utils/operands.ts'
 import { mapStream } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
@@ -34,10 +33,6 @@ export function revGeneric(
 ): CommandFnResult {
   stream = stdinStream(stream, opts.stdin, false, false)
   const io = new IOResult()
-  const sources = paths.map((p) => reportedStream(stream(p), io, p, 'rev'))
-  const output =
-    paths.length > 0
-      ? asyncChain(sources.map((source) => mapStream(source, reversed)))
-      : mapStream(opts.stdin ?? new Uint8Array(), reversed)
-  return [output, io]
+  const each = (source: ByteSource) => mapStream(source, reversed)
+  return [perOperand(paths, stream, opts.stdin, io, 'rev', each), io]
 }

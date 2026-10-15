@@ -7,7 +7,7 @@ import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { quoteText } from '../../quote.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 const SUFFIXES = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q'] as const
 // SI spells kilo lowercase; every larger unit and all of IEC stay uppercase.
 const SI_DISPLAY: readonly string[] = ['', 'k', ...SUFFIXES.slice(2)]
@@ -204,9 +204,9 @@ function convertField(value: string, toMode: string, fromMode: string, suffix: s
 }
 
 // GNU numfmt converts only --field (1 by default) and copies the remaining
-// fields and their separating whitespace through untouched.
+// fields and the blanks (space, tab) between them untouched.
 function convertLine(line: string, toMode: string, fromMode: string, suffix: string): string {
-  const match = /^(\s*)(\S+)([\s\S]*)$/.exec(line)
+  const match = /^([ \t]*)([^ \t]+)([\s\S]*)$/.exec(line)
   if (match === null) return line
   const [, lead = '', field = '', rest = ''] = match
   return lead + convertField(field, toMode, fromMode, suffix) + rest
@@ -230,9 +230,9 @@ export function numfmtGeneric(texts: readonly string[], opts: CommandOpts): Comm
   }
   const io = new IOResult()
   async function* output(): AsyncIterable<Uint8Array> {
-    const reader = new AsyncLineIterator(opts.stdin ?? new Uint8Array())
+    const reader = texts.length > 0 ? null : new AsyncLineIterator(opts.stdin ?? new Uint8Array())
     try {
-      if (texts.length > 0) {
+      if (reader === null) {
         for (const value of texts)
           yield ENC.encode(convertField(value, toMode, fromMode, suffix) + '\n')
       } else {
@@ -244,7 +244,7 @@ export function numfmtGeneric(texts: readonly string[], opts: CommandOpts): Comm
       io.exitCode = err.exitCode
       io.stderr = ENC.encode(err.message + '\n')
     } finally {
-      await reader.discard()
+      await reader?.discard()
     }
   }
   return [output(), io]

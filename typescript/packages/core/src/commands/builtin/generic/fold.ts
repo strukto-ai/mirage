@@ -15,12 +15,11 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { reportedStream } from '../utils/operands.ts'
-import { asyncChain } from '../../../io/stream.ts'
+import { perOperand } from '../utils/operands.ts'
 import { mapStream } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
@@ -103,12 +102,8 @@ export function foldGeneric(
   stream = stdinStream(stream, opts.stdin)
   const { width, breakSpaces, countBytes } = parseFlags(opts.flags)
   const io = new IOResult()
-  const sources = paths.map((p) => reportedStream(stream(p), io, p, 'fold'))
   const transform = (line: Uint8Array): Uint8Array =>
     foldRecord(line, width, breakSpaces, countBytes)
-  const output =
-    paths.length > 0
-      ? asyncChain(sources.map((source) => mapStream(source, transform)))
-      : mapStream(opts.stdin ?? new Uint8Array(), transform)
-  return [output, io]
+  const each = (source: ByteSource) => mapStream(source, transform)
+  return [perOperand(paths, stream, opts.stdin, io, 'fold', each), io]
 }
