@@ -17,6 +17,7 @@ import { tailGeneric } from '../../generic/tail.ts'
 import {
   type GenericCommand,
   boundUncached,
+  dirAwareStat,
   dirAwareStream,
   resolveGlobOf,
   type GenericCommandFn,
@@ -32,7 +33,7 @@ const tail: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     texts,
     opts,
     dirAwareStream(ops, accessor, opts),
-    (p) => ops.stat(accessor, p, idx),
+    dirAwareStat(ops, accessor, opts),
     readRange === undefined ? null : (p, offset, size) => readRange(accessor, p, idx, offset, size),
     boundUncached(lastLines && ((p: PathSpec, n: number) => lastLines(accessor, p, n, idx))),
     follow && ((p: PathSpec, n: number, interval: number) => follow(accessor, p, n, interval, idx)),
