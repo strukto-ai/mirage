@@ -21,7 +21,6 @@ import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { defaultPaths } from '../utils/paths.ts'
-import { pathsScoped } from '../../../view/namespace_view.ts'
 
 const ENC = new TextEncoder()
 
@@ -60,21 +59,11 @@ export function makeSearch(
     const query = texts[0]
     if (query === undefined || query === '') throw new UsageError('search: query is required')
     const fl = new FlagView(opts.flags, specOf('search'))
-    const targets = defaultPaths(paths, opts.cwd, opts.mountPrefix ?? '')
-    // A batch ranking answers for every scope in one call past the
-    // dispatcher; where a hide or a path rule reaches the scopes each is
-    // searched at the dispatcher, which drops the hits the session hides and
-    // declines a scope a path rule reaches.
-    let capability = opts.io?.search
-    if (capability !== undefined && pathsScoped(opts.ns, targets, opts.mountPrefix ?? '')) {
-      capability = { ...capability }
-      delete capability.searchMany
-    }
     try {
       const out = await searchResources(
-        capability,
+        opts.io?.search,
         accessor,
-        targets,
+        defaultPaths(paths, opts.cwd, opts.mountPrefix ?? ''),
         { query, options: options(fl) },
         opts.index ?? undefined,
       )

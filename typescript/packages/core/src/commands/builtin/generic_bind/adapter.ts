@@ -358,6 +358,22 @@ export async function dispatchedCall(
   return result
 }
 
+/**
+ * A batch ranking, sent to the dispatcher as one search over every scope.
+ * Mirrors Python's `_dispatched_search_many`.
+ */
+async function dispatchedSearchMany(
+  dispatch: DispatchFn,
+  paths: PathSpec[],
+  query: SearchQuery,
+): Promise<[string, string][] | null> {
+  const [first, ...scopes] = paths
+  if (first === undefined) throw new Error('search: at least one scope is required')
+  return (await dispatchedCall(dispatch, 'search', first, [query], { scopes })) as
+    | [string, string][]
+    | null
+}
+
 // Each slot the dispatcher answers: the dispatcher function it sends and how
 // a command's arguments travel there. Mirrors Python's `_DISPATCHED_SLOTS`.
 const DISPATCHED_SLOTS = {
@@ -545,6 +561,12 @@ export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): 
               (await dispatchedCall(dispatch, 'search', path, [query])) as
                 | [string, string][]
                 | null,
+            ...(ops.search.searchMany === undefined
+              ? {}
+              : {
+                  searchMany: (_accessor: Accessor, paths: PathSpec[], query: SearchQuery) =>
+                    dispatchedSearchMany(dispatch, paths, query),
+                }),
           },
         }),
     readBytes: (_accessor, path) => dispatchedBytes(dispatch, path),

@@ -76,7 +76,7 @@ import { ebusy, isMissingPath } from '../../errors/fs.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
-import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
+import { Effect, type SearchQuery, Target, type VfsCall } from '../../vfs/types.ts'
 import {
   type CacheFacts,
   type CapacityResult,
@@ -679,6 +679,14 @@ export class Dispatcher {
     }
     if (name === 'read' && (stream !== undefined || direct !== undefined)) kwargs = own
     if (name === 'stat' && fresh !== undefined) kwargs = own
+    const { scopes, ...searched } = (kwargs ?? {}) as { scopes?: PathSpec[] }
+    if (name === 'search' && scopes !== undefined) {
+      kwargs = searched
+      if (scopes.length > 0) {
+        const hits = await this.searchTogether([path, ...scopes], args, searched, report, issuer)
+        return [hits, new IOResult()]
+      }
+    }
     await this.prepare()
     // With no scan guard on any mount, no path reaches one to ask.
     if (
@@ -823,6 +831,71 @@ export class Dispatcher {
       await boundary.complete(mark, call.path, call.write, result, call.issuer),
       new IOResult(),
     ]
+  }
+
+  /**
+   * Rank several scopes as one query, as a store's `searchMany` does. One
+   * call answers for them all where one mount serves every scope and its VFS
+   * ranks a batch, past the same checks each scope's own search meets: each
+   * is walked and followed, a path rule or a coded preVfs policy reaching
+   * below any of them declines the batch (null), and every hit the session
+   * hides is dropped. Otherwise each scope is searched on its own and the
+   * hits joined in scope order. Mirrors Python's Dispatcher._search_together.
+   */
+  private async searchTogether(
+    scopes: readonly PathSpec[],
+    args: readonly unknown[] | undefined,
+    kwargs: Record<string, unknown>,
+    report: OpReport | undefined,
+    issuer: symbol | undefined,
+  ): Promise<[string, string][] | null> {
+    await this.prepare()
+    const gate = this.caller?.ruleGate ?? null
+    const calls: Call[] = []
+    for (const typed of scopes) {
+      const call = await this.walk('search', typed, args, { ...kwargs }, gate, report, issuer)
+      this.follow(call)
+      calls.push(call)
+    }
+    const first = calls[0]
+    const owner = first === undefined ? null : this.namespace.tryMountFor(first.path.virtual)
+    if (
+      first === undefined ||
+      owner === null ||
+      !owner.vfs.supports('searchMany') ||
+      calls.some((call) => this.namespace.tryMountFor(call.path.virtual) !== owner)
+    ) {
+      const hits: [string, string][] = []
+      for (const typed of scopes) {
+        const [answer] = await this.dispatchAdmitted(
+          'search',
+          typed,
+          args,
+          issuer === undefined ? kwargs : { ...kwargs, issuer },
+          report,
+        )
+        if (answer === null) return null
+        hits.push(...(answer as [string, string][]))
+      }
+      return hits
+    }
+    for (const call of calls) {
+      if (await this.declines(call)) return null
+    }
+    const mark = declared(owner.vfs.constructor, 'search') ?? CALLS.get('search') ?? null
+    if (mark === null) throw enotsup(owner.vfs.name, 'search', first.path)
+    const boundary = this.boundary(owner)
+    for (const call of calls) await this.admit(call, owner, boundary, mark)
+    await owner.ensureReady()
+    const result = await owner.searchMany(
+      calls.map((call) => call.path.virtual),
+      args?.[0] as SearchQuery,
+    )
+    served(report, result)
+    const visible = result === null ? null : result.filter(([hit]) => pathVisible(first.vis, hit))
+    return (await boundary.complete(mark, first.path, false, visible, issuer)) as
+      | [string, string][]
+      | null
   }
 
   /**
@@ -1631,11 +1704,14 @@ export class Dispatcher {
     if (call.name === 'stat' && result instanceof FileStat) {
       return mergeOverlayStat(this.namespace.metaFor(call.path.virtual), result)
     }
+    // A tree read keys its entries below the path; a search names each hit
+    // itself, and a store can rank a hit from outside the scope (a whole
+    // table, a filter it ignores), so every hit is checked.
     if (
       HIDE_FILTERED_OPS.has(call.name) &&
       result !== null &&
       result !== undefined &&
-      hiddenUnder(call.vis, call.path.virtual)
+      (call.name !== 'read_tree' || hiddenUnder(call.vis, call.path.virtual))
     ) {
       return visibleAnswer(call.name, call.vis, call.path, result)
     }

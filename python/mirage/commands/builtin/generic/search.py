@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from dataclasses import replace
 from typing import Any
 
 from mirage.accessor.base import Accessor
@@ -12,7 +11,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 from mirage.vfs.search import search_resources
 from mirage.vfs.types import SearchQuery
-from mirage.view.namespace_view import paths_scoped
 
 
 def semantic_options(fl: FlagView) -> dict[str, JsonValue]:
@@ -64,20 +62,10 @@ def make_search(
         if not texts or not texts[0]:
             raise UsageError("search: query is required")
         fl = FlagView(opts.flags, spec=SPECS["search"])
-        capability = opts.io.search if opts.io is not None else None
-        scopes = default_paths(paths, opts.cwd)
-        # A batch ranking answers for every scope in one call past the
-        # dispatcher; where a hide or a path rule reaches the scopes each
-        # is searched at the dispatcher, which drops the hits the session
-        # hides and declines a scope a path rule reaches.
-        if capability is not None and paths_scoped(
-            opts.ns, scopes, opts.mount_prefix
-        ):
-            capability = replace(capability, search_many=None)
         output = await search_resources(
-            capability,
+            opts.io.search if opts.io is not None else None,
             accessor,
-            scopes,
+            default_paths(paths, opts.cwd),
             SearchQuery(texts[0], options=options(fl)),
             opts.index,
         )

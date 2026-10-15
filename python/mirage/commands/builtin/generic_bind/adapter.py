@@ -61,6 +61,7 @@ from mirage.vfs.types import (
     Effect,
     OperationFn,
     SearchOps,
+    SearchQuery,
     Target,
     VfsCall,
 )
@@ -535,6 +536,29 @@ async def _slot_call(
     return await dispatched_call(dispatch, name, path, **named)
 
 
+async def _dispatched_search_many(
+    dispatch: DispatchFn,
+    accessor: Accessor | None,
+    paths: list[PathSpec],
+    query: SearchQuery,
+    index: IndexCacheStore = NULL_INDEX,
+) -> list[tuple[str, str]] | None:
+    """A batch ranking, sent to the dispatcher as one search over every
+    scope.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        accessor (Accessor | None): unused; the dispatcher finds the mount.
+        paths (list[PathSpec]): the scopes, at least one.
+        query (SearchQuery): the query and its options.
+        index (IndexCacheStore): unused; the mount's own is used.
+    """
+    hits: list[tuple[str, str]] | None = await dispatched_call(
+        dispatch, "search", paths[0], query=query, scopes=paths[1:]
+    )
+    return hits
+
+
 def dispatched_slots(
     dispatch: DispatchFn, slots: Collection[str]
 ) -> dict[str, Any]:
@@ -603,6 +627,11 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
                 ops.search,
                 search=functools.partial(
                     _slot_call, dispatch, "search", ("query", "index")
+                ),
+                search_many=(
+                    functools.partial(_dispatched_search_many, dispatch)
+                    if ops.search.search_many is not None
+                    else None
                 ),
             )
             if ops.search is not None

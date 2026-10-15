@@ -95,7 +95,7 @@ from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
-from mirage.vfs.types import Effect
+from mirage.vfs.types import Effect, SearchQuery
 from mirage.view.types import StatPath
 from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.read_policy import coerce_read_policy
@@ -1417,6 +1417,38 @@ class MountEntry:
                         ),
                         self._op_timeout("copy"),
                         "copy",
+                    )
+            finally:
+                reset_caller(token)
+
+    async def search_many(
+        self, paths: list[str], query: SearchQuery
+    ) -> list[tuple[str, str]] | None:
+        """Rank several scopes on this mount as one query, under the
+        mount's ``search`` timeout.
+
+        For the dispatcher, once it has walked, followed and admitted
+        each scope as it does a ``search``'s one.
+
+        Args:
+            paths (list[str]): the scopes, as virtual paths.
+            query (SearchQuery): the query and its options.
+        """
+        async with self.use():
+            token = bind_caller(
+                dataclasses.replace(
+                    self._on_mount(current_caller()),
+                    revisions=self.revisions or None,
+                )
+            )
+            try:
+                with host_io():
+                    return await run_with_timeout(
+                        self.vfs.search_many(
+                            [self._scope(p) for p in paths], query, self.index
+                        ),
+                        self._op_timeout("search"),
+                        "search",
                     )
             finally:
                 reset_caller(token)

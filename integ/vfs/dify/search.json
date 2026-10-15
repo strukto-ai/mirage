@@ -61,6 +61,29 @@
           }
         }
       }
+    },
+    {
+      "id": "df_search_ranks_scopes_once_under_a_hide",
+      "seq": 580034,
+      "targets": [
+        "dify"
+      ],
+      "command": "search \"money back\" /knowledge/policies /knowledge/guides; search \"how am I throttled\" /knowledge/policies; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/knowledge/policies/refunds:0.91\nRefunds are available within 30 days of purchase.\n/knowledge/policies/refunds:0.84\nApproved refunds are processed within five business days.\nrc=0\n",
+        "stderr": ""
+      },
+      "session": "dify-hide-auth",
+      "session_profiles": {
+        "dify-hide-auth": {
+          "paths": {
+            "hide": [
+              "/knowledge/guides/auth"
+            ]
+          }
+        }
+      }
     }
   ]
 }

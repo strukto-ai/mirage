@@ -1399,6 +1399,35 @@ export class MountEntry {
       ),
     )
   }
+
+  /**
+   * Rank several scopes on this mount as one query, under the mount's
+   * `search` timeout. For the dispatcher, once it has walked, followed and
+   * admitted each scope as it does a `search`'s one. Mirrors Python's
+   * `search_many`.
+   */
+  async searchMany(
+    paths: readonly string[],
+    query: SearchQuery,
+  ): Promise<[string, string][] | null> {
+    return this.use(() =>
+      runWithMountContext(
+        () =>
+          this.runWithWriteRevisions(() =>
+            runWithTimeout(
+              this.vfs.searchMany(
+                paths.map((p) => this.scope(p)),
+                query,
+                this.index,
+              ),
+              this.opTimeout('search'),
+              'search',
+            ),
+          ),
+        this.mountId,
+      ),
+    )
+  }
 }
 
 async function* commandOutput(

@@ -882,6 +882,12 @@ class Dispatcher:
         stream = name == "read" and bool(kwargs.pop("stream", False))
         direct = name == "read" and bool(kwargs.pop("direct", False))
         fresh = name == "stat" and bool(kwargs.pop("fresh", False))
+        scopes = kwargs.pop("scopes", ()) if name == "search" else ()
+        if scopes:
+            hits = await self._search_together(
+                [path, *scopes], caller, report, kwargs
+            )
+            return hits, IOResult()
         await self._prepare(caller)
         # With no scan guard on any mount, no path reaches one to ask.
         if name == "before_full_scan" and not any(
@@ -993,6 +999,75 @@ class Dispatcher:
             await self._settle_write(mount, name, call.path, kwargs, call.vis)
         result = await boundary.complete(mark, call.path, call.write, result)
         return result, IOResult()
+
+    async def _search_together(
+        self,
+        scopes: list[PathSpec],
+        caller: Caller,
+        report: OpReport | None,
+        kwargs: dict[str, Any],
+    ) -> list[tuple[str, str]] | None:
+        """Rank several scopes as one query, as a store's ``search_many``
+        does.
+
+        One call answers for them all where one mount serves every scope
+        and its VFS ranks a batch, past the same checks each scope's own
+        search meets: each is walked and followed, a path rule or a coded
+        pre_vfs policy reaching below any of them declines the batch
+        (None), and every hit the session hides is dropped. Otherwise each
+        scope is searched on its own and the hits joined in scope order.
+
+        Args:
+            scopes (list[PathSpec]): the scopes, as the caller named them.
+            caller (Caller): who makes the search.
+            report (OpReport | None): the caller's report.
+            kwargs (dict[str, Any]): the search's own arguments.
+        """
+        await self._prepare(caller)
+        calls: list[_Call] = []
+        for typed in scopes:
+            call = await self._walk(
+                "search", typed, dict(kwargs), caller.rule_gate, report, caller
+            )
+            self._follow(call)
+            calls.append(call)
+        mount = self._namespace.try_mount_for(calls[0].path.virtual)
+        if (
+            mount is None
+            or not mount.vfs.supports("search_many")
+            or any(
+                self._namespace.try_mount_for(call.path.virtual) is not mount
+                for call in calls
+            )
+        ):
+            hits: list[tuple[str, str]] = []
+            for typed in scopes:
+                answer, _ = await self._dispatch(
+                    "search", typed, caller, report=report, **kwargs
+                )
+                if answer is None:
+                    return None
+                hits.extend(answer)
+            return hits
+        for call in calls:
+            if await self._declines(call):
+                return None
+        mark = declared(type(mount.vfs), "search") or CALLS["search"]
+        boundary = self._boundary(mount, caller)
+        for call in calls:
+            boundary = await self._admit(call, mount, mark)
+        await mount.ensure_ready()
+        result = await mount.search_many(
+            [call.path.virtual for call in calls], **kwargs
+        )
+        _served(report, result)
+        if result is not None:
+            result = [
+                hit
+                for hit in result
+                if path_visible(caller.visibility, hit[0])
+            ]
+        return await boundary.complete(mark, calls[0].path, False, result)
 
     async def _prepare(self, caller: Caller) -> None:
         """Load the namespace and run what a snapshot restore left owed.
@@ -1849,10 +1924,16 @@ class Dispatcher:
             return merge_overlay_stat(
                 self._namespace.meta_for(call.path.virtual), result
             )
+        # A tree read keys its entries below the path; a search names each
+        # hit itself, and a store can rank a hit from outside the scope (a
+        # whole table, a filter it ignores), so every hit is checked.
         if (
             call.name in HIDE_FILTERED_OPS
             and result is not None
-            and hidden_under(call.vis, call.path.virtual)
+            and (
+                call.name != "read_tree"
+                or hidden_under(call.vis, call.path.virtual)
+            )
         ):
             return _visible_answer(call.name, call.vis, call.path, result)
         return result

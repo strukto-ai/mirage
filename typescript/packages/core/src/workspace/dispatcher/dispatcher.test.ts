@@ -2119,6 +2119,7 @@ describe('a whole write keeps its bytes', () => {
 // keeps the count it is handed. Twin of Python's SearchedRAM.
 class SearchedRAM extends RAMVFS {
   readonly counted: (number | null)[] = []
+  readonly batches: string[][] = []
 
   override filesContaining(path: PathSpec): Promise<PathSpec[] | null> {
     return Promise.resolve([...this.store.files.keys()].map((key) => mountedPath(path, key)))
@@ -2131,6 +2132,12 @@ class SearchedRAM extends RAMVFS {
         return [hit, `${hit}\nabout ${key}`]
       }),
     )
+  }
+
+  override searchMany(paths: PathSpec[]): Promise<[string, string][] | null> {
+    this.batches.push(paths.map((path) => path.virtual))
+    const [first] = paths
+    return first === undefined ? Promise.resolve([]) : this.search(first)
   }
 
   override beforeFullScan(_path: PathSpec, files: number | null): Promise<void> {
@@ -2183,7 +2190,8 @@ describe('a hide filters a one-call read', () => {
 
   // Twin of test_a_hide_drops_its_files_from_a_search.
   it('drops the hidden files from a search', async () => {
-    const ws = new Workspace({ '/ram': searched() })
+    const vfs = searched()
+    const ws = new Workspace({ '/ram': vfs })
     try {
       await runWithSession(secretHidden(), async () => {
         const hits = (await ws.dispatch('files_containing', '/ram/d', ['a'], {
@@ -2191,9 +2199,39 @@ describe('a hide filters a one-call read', () => {
           ignore_case: false,
         })) as PathSpec[]
         expect(hits.map((hit) => hit.virtual)).toEqual(['/ram/d/a.txt'])
-        const records = await ws.dispatch('search', '/ram/d', [{ query: 'a', options: {} }])
-        expect(records).toEqual([['/ram/d/a.txt', '/ram/d/a.txt\nabout /d/a.txt']])
+        for (const [scope, scopes] of [
+          ['/ram/d', []],
+          ['/ram/d/a.txt', []],
+          ['/ram/d/a.txt', [PathSpec.fromStrPath('/ram/d')]],
+        ] as const) {
+          const records = await ws.dispatch('search', scope, [{ query: 'a', options: {} }], {
+            scopes,
+          })
+          expect(records).toEqual([['/ram/d/a.txt', '/ram/d/a.txt\nabout /d/a.txt']])
+        }
+        expect(vfs.batches).toEqual([['/ram/d/a.txt', '/ram/d']])
       })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_scopes_on_two_mounts_are_searched_one_by_one.
+  it('searches scopes on two mounts one by one', async () => {
+    const one = searched()
+    const two = searched()
+    const ws = new Workspace({ '/one': one, '/two': two })
+    try {
+      const records = (await ws.dispatch('search', '/one/d', [{ query: 'a', options: {} }], {
+        scopes: [PathSpec.fromStrPath('/two/d')],
+      })) as [string, string][]
+      expect(records.map(([hit]) => hit)).toEqual([
+        '/one/d/a.txt',
+        '/one/d/secret/b.txt',
+        '/two/d/a.txt',
+        '/two/d/secret/b.txt',
+      ])
+      expect([one.batches, two.batches]).toEqual([[], []])
     } finally {
       await ws.close()
     }

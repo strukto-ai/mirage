@@ -2163,6 +2163,7 @@ class SearchedRAM(RAMVFS):
     def __init__(self) -> None:
         super().__init__()
         self.counted: list[int | None] = []
+        self.batches: list[list[str]] = []
 
     async def files_containing(
         self, path, text, *, whole_word, ignore_case, index=NULL_INDEX
@@ -2175,6 +2176,10 @@ class SearchedRAM(RAMVFS):
             for key in self._store.files
             for hit in [mounted_path(path, key).virtual]
         ]
+
+    async def search_many(self, paths, query, index=NULL_INDEX):
+        self.batches.append([path.virtual for path in paths])
+        return await self.search(paths[0], query, index)
 
     async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
         self.counted.append(files)
@@ -2208,7 +2213,8 @@ async def test_a_hide_filters_a_tree_read_instead_of_declining(secret_hidden):
 
 @pytest.mark.asyncio
 async def test_a_hide_drops_its_files_from_a_search(secret_hidden):
-    with Workspace({"/ram/": _searched()}) as ws:
+    vfs = _searched()
+    with Workspace({"/ram/": vfs}) as ws:
         hits, _ = await ws.dispatch(
             "files_containing",
             _path("/ram/d"),
@@ -2217,10 +2223,37 @@ async def test_a_hide_drops_its_files_from_a_search(secret_hidden):
             ignore_case=False,
         )
         assert [hit.virtual for hit in hits] == ["/ram/d/a.txt"]
+        for scope, scopes in [
+            ("/ram/d", []),
+            ("/ram/d/a.txt", []),
+            ("/ram/d/a.txt", [_path("/ram/d")]),
+        ]:
+            records, _ = await ws.dispatch(
+                "search", _path(scope), query=SearchQuery("a"), scopes=scopes
+            )
+            assert records == [
+                ("/ram/d/a.txt", "/ram/d/a.txt\nabout /d/a.txt")
+            ]
+        assert vfs.batches == [["/ram/d/a.txt", "/ram/d"]]
+
+
+@pytest.mark.asyncio
+async def test_scopes_on_two_mounts_are_searched_one_by_one():
+    one, two = _searched(), _searched()
+    with Workspace({"/one/": one, "/two/": two}) as ws:
         records, _ = await ws.dispatch(
-            "search", _path("/ram/d"), query=SearchQuery("a")
+            "search",
+            _path("/one/d"),
+            query=SearchQuery("a"),
+            scopes=[_path("/two/d")],
         )
-        assert records == [("/ram/d/a.txt", "/ram/d/a.txt\nabout /d/a.txt")]
+    assert [hit for hit, _ in records] == [
+        "/one/d/a.txt",
+        "/one/d/secret/b.txt",
+        "/two/d/a.txt",
+        "/two/d/secret/b.txt",
+    ]
+    assert one.batches == two.batches == []
 
 
 @pytest.mark.asyncio
