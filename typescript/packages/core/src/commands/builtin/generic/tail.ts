@@ -316,12 +316,12 @@ async function* tailMulti(
     } catch (err) {
       if (!isFsError(err)) throw err
       const code = (err as { code?: string }).code
+      note(io, fsErrorLine('tail', p, err))
+      io.exitCode = 1
       if (pending !== null && code !== undefined && READ_FAILURES.has(code)) {
         yield pending
         printed++
       }
-      note(io, fsErrorLine('tail', p, err))
-      io.exitCode = 1
     } finally {
       await closeQuietly(source)
     }

@@ -338,12 +338,13 @@ async def _tail_multi(
                 raise
             # A read that fails once the stat passed (a table past its
             # read cap) is reported, and the next operand still prints.
-            # The open succeeded, so a read failure still heads it.
+            # The open succeeded, so a read failure still heads it; the
+            # report lands first, as a reader may stop at the header.
+            _note(io, fs_error_line("tail", p, exc))
+            io.exit_code = 1
             if pending and isinstance(exc, READ_FAILURES):
                 yield pending
                 pending = b""
-            _note(io, fs_error_line("tail", p, exc))
-            io.exit_code = 1
         else:
             if pending:
                 yield pending

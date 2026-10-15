@@ -800,31 +800,44 @@ describe('tail asks the mount for the last lines', () => {
   })
 
   // Mirrors test_tail_reports_a_failed_operand_and_prints_the_next.
-  it('reports a failed operand and prints the next', async () => {
-    const fs = new Growing(new Map())
-    for (const name of ['/big', '/gone', '/small']) fs.set(name, '')
-    const result = await tailGeneric(
-      [spec('/big'), spec('/gone'), spec('/small')],
-      [],
-      opts({ n: '1' }),
-      fs.stream,
-      fs.stat,
-      null,
-      (p) =>
-        p.virtual === '/big'
-          ? Promise.reject(efbig(p))
-          : p.virtual === '/gone'
-            ? Promise.reject(enoent(p))
-            : Promise.resolve(ENC.encode('ok\n')),
-    )
-    const [out, io] = result as [ByteSource, IOResult]
-    expect(DEC.decode(await materialize(out))).toBe('==> /big <==\n\n==> /small <==\nok\n')
-    expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr as Uint8Array)).toBe(
-      "tail: error reading '/big': File too large\n" +
-        "tail: cannot open '/gone' for reading: No such file or directory\n",
-    )
-  })
+  it.each([false, true])(
+    'reports a failed operand and prints the next (stop at header: %s)',
+    async (stop) => {
+      const fs = new Growing(new Map())
+      for (const name of ['/big', '/gone', '/small']) fs.set(name, '')
+      const result = await tailGeneric(
+        [spec('/big'), spec('/gone'), spec('/small')],
+        [],
+        opts({ n: '1' }),
+        fs.stream,
+        fs.stat,
+        null,
+        (p) =>
+          p.virtual === '/big'
+            ? Promise.reject(efbig(p))
+            : p.virtual === '/gone'
+              ? Promise.reject(enoent(p))
+              : Promise.resolve(ENC.encode('ok\n')),
+      )
+      const [out, io] = result as [ByteSource, IOResult]
+      if (stop) {
+        const it = (out as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+        expect(DEC.decode((await it.next()).value as Uint8Array)).toBe('==> /big <==\n')
+        await it.return?.()
+        expect([io.exitCode, DEC.decode(io.stderr as Uint8Array)]).toEqual([
+          1,
+          "tail: error reading '/big': File too large\n",
+        ])
+        return
+      }
+      expect(DEC.decode(await materialize(out))).toBe('==> /big <==\n\n==> /small <==\nok\n')
+      expect(io.exitCode).toBe(1)
+      expect(DEC.decode(io.stderr as Uint8Array)).toBe(
+        "tail: error reading '/big': File too large\n" +
+          "tail: cannot open '/gone' for reading: No such file or directory\n",
+      )
+    },
+  )
 
   it('streams what the mount hands over under -f, first print included', async () => {
     const fs = new Growing(new Map())

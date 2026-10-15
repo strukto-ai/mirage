@@ -249,7 +249,10 @@ async def test_tail_heads_no_operand_whose_open_is_refused():
 
 
 @pytest.mark.asyncio
-async def test_tail_reports_a_failed_operand_and_prints_the_next():
+@pytest.mark.parametrize("stop_at_header", [False, True])
+async def test_tail_reports_a_failed_operand_and_prints_the_next(
+    stop_at_header,
+):
     async def last_lines(p: PathSpec, n: int) -> bytes:
         if p.virtual == "/big":
             raise efbig(p)
@@ -266,6 +269,14 @@ async def test_tail_reports_a_failed_operand_and_prints_the_next():
         fs.read,
         last_lines=last_lines,
     )
+    if stop_at_header:
+        assert await anext(stream) == b"==> /big <==\n"
+        await stream.aclose()
+        assert (io.exit_code, io.stderr) == (
+            1,
+            b"tail: error reading '/big': File too large\n",
+        )
+        return
     assert await _drain(stream) == b"==> /big <==\n\n==> /small <==\nok\n"
     assert io.exit_code == 1
     assert io.stderr == (
