@@ -18,6 +18,7 @@ import {
   type JsonValue,
   type PathSpec,
 } from '@struktoai/mirage-core/types'
+import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { eventAt, field, textField } from '@struktoai/mirage-core/watch/index'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 
@@ -63,7 +64,7 @@ export class NextcloudEventHook {
   private relative(node: string | undefined): string | null {
     const root = this.root
     if (node === undefined || root === null) return null
-    const path = node.replace(/\/+$/, '')
+    const path = rstripSlash(node)
     if (path === root) return ''
     return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null
   }
@@ -91,7 +92,7 @@ export class NextcloudEventHook {
  */
 function filesRoot(accessor: NextcloudAccessor): string | null {
   const config = accessor.config
-  const path = decodeURIComponent(new URL(config.url).pathname).replace(/\/+$/, '')
+  const path = rstripSlash(decodeURIComponent(new URL(config.url).pathname))
   let user: string
   let folder: string
   if (`${path}/`.includes(DAV)) {
@@ -105,5 +106,5 @@ function filesRoot(accessor: NextcloudAccessor): string | null {
   } else {
     return null
   }
-  return `/${user}/files/${folder.replace(/^\/+|\/+$/g, '')}`.replace(/\/+$/, '')
+  return rstripSlash(`/${user}/files/${stripSlash(folder)}`)
 }

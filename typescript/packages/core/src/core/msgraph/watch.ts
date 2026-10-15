@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Delta, FileChangeKind, type PathSpec } from '../../types.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { changesUnder, folderPath, justMade, movedBelow, settle } from '../../watch/delta.ts'
@@ -178,7 +179,7 @@ export class GraphDeltaHook implements DeltaHook {
 
   /** The id of the folder the mount root is. */
   private async top(target: DeltaTarget): Promise<string> {
-    const folder = target.folder.replace(/^\/+|\/+$/g, '')
+    const folder = stripSlash(target.folder)
     const url =
       folder !== '' ? `${target.drive}/root:/${encodedPath(folder)}` : `${target.drive}/root`
     const data = await graphGet(this.config, url, { $select: 'id' })
@@ -208,7 +209,7 @@ export class GraphDeltaHook implements DeltaHook {
 /** The virtual path of a path below a mount root. Mirrors Python's `_join`. */
 function join(virtual: string, relative: string): string {
   if (relative === '') return virtual
-  return `${virtual.replace(/\/+$/, '')}/${relative}`
+  return `${rstripSlash(virtual)}/${relative}`
 }
 
 function encode(drives: Record<string, DriveState>): string {

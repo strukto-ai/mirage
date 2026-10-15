@@ -19,6 +19,7 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core/types'
 import { normalize } from '@struktoai/mirage-core/utils/key_prefix'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { eventAt, field, textField } from '@struktoai/mirage-core/watch/index'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { filesColl } from './client.ts'
@@ -68,7 +69,7 @@ export class GridFSEventHook {
     if (relative === null) return []
     if (relative.endsWith('/')) {
       const kind = made ? FileChangeKind.CREATE : FileChangeKind.UNKNOWN
-      return [eventAt(root, relative.replace(/\/+$/, ''), kind)]
+      return [eventAt(root, rstripSlash(relative), kind)]
     }
     const files = await filesColl(this.accessor)
     const left = await files.countDocuments({ filename }, { limit: 2 })

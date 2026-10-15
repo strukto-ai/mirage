@@ -15,6 +15,7 @@
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
 import { normalize } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { eventAt, field, textField } from '../../watch/events.ts'
 
 // The eventName families a record carries: a write (Put, Post, Copy,
@@ -63,7 +64,7 @@ export class S3EventHook {
     if (prefix !== '' && !key.startsWith(prefix)) return []
     const relative = key.slice(prefix.length)
     if (relative.endsWith('/')) {
-      const place = relative.replace(/\/+$/, '')
+      const place = rstripSlash(relative)
       if (place === '') return []
       const kind = eventName.startsWith(WRITTEN) ? FileChangeKind.CREATE : FileChangeKind.UNKNOWN
       return [eventAt(root, place, kind)]

@@ -14,6 +14,7 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { Delta, FileChangeKind, type PathSpec } from '../../types.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { changesUnder } from '../../watch/delta.ts'
@@ -43,7 +44,7 @@ function relativeOf(accessor: DropboxAccessor, entry: DropboxEntry): string | nu
     base !== '' && display.toLowerCase().startsWith(base.toLowerCase())
       ? display.slice(base.length)
       : display
-  const stripped = relative.replace(/^\/+|\/+$/g, '')
+  const stripped = stripSlash(relative)
   return stripped === '' ? null : stripped
 }
 
