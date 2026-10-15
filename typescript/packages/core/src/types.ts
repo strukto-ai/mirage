@@ -646,6 +646,7 @@ export interface FileStatInit {
   atime?: string | null
   ctime?: string | null
   birthtime?: string | null
+  dev?: number | null
   extra?: Record<string, unknown>
 }
 
@@ -663,6 +664,7 @@ export class FileStat {
   readonly atime: string | null
   readonly ctime: string | null
   readonly birthtime: string | null
+  readonly dev: number | null
   readonly extra: Record<string, unknown>
 
   constructor(init: FileStatInit) {
@@ -685,6 +687,7 @@ export class FileStat {
     this.atime = init.atime ?? null
     this.ctime = init.ctime ?? null
     this.birthtime = init.birthtime ?? null
+    this.dev = init.dev ?? null
     this.extra = init.extra ?? {}
     Object.freeze(this)
   }
@@ -711,6 +714,7 @@ export class FileStat {
       atime: this.atime,
       ctime: this.ctime,
       birthtime: this.birthtime,
+      dev: this.dev,
       extra: this.extra,
       ...update,
     })

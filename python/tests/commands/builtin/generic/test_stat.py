@@ -221,6 +221,19 @@ async def test_character_device_number_directives():
 
 
 @pytest.mark.asyncio
+async def test_device_directives_split_the_mount_device():
+    # glibc's major(3) and minor(3) split, with high bits in both halves.
+    fs = _fs(dev=0x123456789ABC)
+    assert (
+        await _render("%d %D %Hd %Ld %08Ld", fs)
+        == "20015998343868 123456789abc 6298 591751100 591751100"
+    )
+    assert (await _default(fs))[2] == (
+        "Device: 6298,591751100\tInode: ?           Links: ?"
+    )
+
+
+@pytest.mark.asyncio
 async def test_unbacked_directives_render_question_mark():
     fs = _fs()
     for spec in ("%i", "%d", "%D", "%h", "%b", "%o", "%m", "%C"):

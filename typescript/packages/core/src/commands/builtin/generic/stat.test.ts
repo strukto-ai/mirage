@@ -210,6 +210,17 @@ describe('stat -c directive formatting', () => {
     expect(await render('%r %R %t %T %Hr %Lr', device)).toBe('259 103 1 3 1 3')
   })
 
+  it('splits the mount device as glibc major(3) and minor(3) do', async () => {
+    // High bits in both halves, past the 32 a bitwise operator keeps.
+    const onMount = fs({ dev: 0x123456789abc })
+    expect(await render('%d %D %Hd %Ld %08Ld', onMount)).toBe(
+      '20015998343868 123456789abc 6298 591751100 591751100',
+    )
+    expect((await defaultLines(onMount))[2]).toBe(
+      'Device: 6298,591751100\tInode: ?           Links: ?',
+    )
+  })
+
   it('renders "?" for unbacked and unknown directives', async () => {
     for (const spec of ['%i', '%d', '%D', '%h', '%b', '%o', '%m', '%C', '%q']) {
       expect(await render(spec, fs())).toBe('?')

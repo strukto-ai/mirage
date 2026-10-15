@@ -100,6 +100,7 @@ import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { Reconciler } from '../reconcile.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { ident } from '../../utils/stat_view.ts'
 import {
   CALLS,
   COPY_OPS,
@@ -796,7 +797,11 @@ export class Dispatcher {
     }
     if (this.tableAnswers(name, call.path.virtual, call.kwargs)) {
       return [
-        await this.tableCall(name, call.path, call.args ?? [], call.kwargs ?? {}, report, issuer),
+        this.onDevice(
+          name,
+          call.path.virtual,
+          await this.tableCall(name, call.path, call.args ?? [], call.kwargs ?? {}, report, issuer),
+        ),
         new IOResult(),
       ]
     }
@@ -868,7 +873,10 @@ export class Dispatcher {
     try {
       resolved = await this.namespace.resolve(call.path.virtual, false)
     } catch (err) {
-      return [await this.answerUnmounted(call, err), new IOResult()]
+      return [
+        this.onDevice(name, call.path.virtual, await this.answerUnmounted(call, err)),
+        new IOResult(),
+      ]
     }
     const [vfs, scope, mode] = resolved
     // resolve() above already threw for a path outside every mount, so
@@ -1932,10 +1940,18 @@ export class Dispatcher {
       // A mount's root answers as the backend's own root; in the namespace
       // it is the name it is mounted at.
       const row = result.name === '/' && name !== '' ? result.with({ name }) : result
-      return mergeOverlayStat(this.namespace.metaFor(call.path.virtual), row)
+      return this.onDevice(
+        call.name,
+        call.path.virtual,
+        mergeOverlayStat(this.namespace.metaFor(call.path.virtual), row),
+      )
     }
     if (call.name === 'read_tree' && result instanceof Map) {
-      result = this.withLinks(call.path, result as Map<string, FileStat>)
+      result = this.onDevice(
+        call.name,
+        call.path.virtual,
+        this.withLinks(call.path, result as Map<string, FileStat>),
+      )
     }
     // A tree read keys its entries below the path; a search names each hit
     // itself, and a store can rank a hit from outside the scope (a whole
@@ -1949,6 +1965,27 @@ export class Dispatcher {
       return visibleAnswer(call.name, call.vis, call.path, result)
     }
     return result
+  }
+
+  /**
+   * A stat, or a subtree's stats, on the device of the mount serving
+   * `virtual`. The device is the id a runtime reports as a guest's st_dev,
+   * so `stat %d` and `fs.stat` name one device, and a walk tells a mount
+   * boundary by it. A path no mount serves is on the namespace's own, the
+   * one a root mount would have. Anything but a stat or a subtree's stats
+   * passes unchanged.
+   */
+  private onDevice(name: string, virtual: string, result: unknown): unknown {
+    if (name !== 'stat' && name !== 'read_tree') return result
+    if (!(result instanceof FileStat) && !(result instanceof Map)) return result
+    const mount = this.namespace.tryMountFor(virtual)
+    const dev = ident(mount === null ? '/' : mount.prefix)
+    if (result instanceof FileStat) return result.with({ dev })
+    const stamped = new Map<unknown, unknown>()
+    for (const [key, row] of result as Map<unknown, unknown>) {
+      stamped.set(key, row instanceof FileStat ? row.with({ dev }) : row)
+    }
+    return stamped
   }
 
   /**

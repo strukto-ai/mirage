@@ -304,6 +304,10 @@ def _directive_value(
         return _epoch(s.birthtime)
     if spec == "B":
         return "512"
+    if spec == "d":
+        return "?" if s.dev is None else str(s.dev)
+    if spec == "D":
+        return "?" if s.dev is None else f"{s.dev:x}"
     dev = s.extra.get(DEVICE_NUMBERS_KEY) if s.extra else None
     if spec == "t":
         # rdev major in hex; a non-device has none, so 0 like GNU.
@@ -315,11 +319,24 @@ def _directive_value(
         return str(rdev) if spec == "r" else f"{rdev:x}"
     if len(spec) == 2 and spec[0] in "HL":
         # %Hr/%Lr are rdev major/minor in decimal; %Hd/%Ld are the device
-        # the file resides on, which a VFS has no truthful value for.
+        # the file resides on: its mount's.
+        half = 0 if spec[0] == "H" else 1
         if spec[1] in "rR":
-            return str(dev[0 if spec[0] == "H" else 1]) if dev else "0"
-        return "?"
+            return str(dev[half]) if dev else "0"
+        return "?" if s.dev is None else str(_device_halves(s.dev)[half])
     return "?"
+
+
+def _device_halves(dev: int) -> tuple[int, int]:
+    """A device number's major and minor, split as glibc's ``major(3)``
+    and ``minor(3)`` split a ``dev_t``.
+
+    Args:
+        dev (int): the device number.
+    """
+    major = ((dev >> 8) & 0xFFF) | ((dev >> 32) & 0xFFFFF000)
+    minor = (dev & 0xFF) | ((dev >> 12) & 0xFFFFFF00)
+    return major, minor
 
 
 def _name_parts(s: FileStat, name: str, quoted: bool) -> list[str]:
@@ -539,11 +556,11 @@ def _stat_time(value: str | None) -> str:
 def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
     """GNU coreutils 9.7's default layout, with unknown fields marked.
 
-    A VFS has rendered bytes, modes and logical owners, but no device,
-    inode, allocation blocks, IO block size or link count: those print
-    '?'. An absent size, owner number or time prints '-'. Each time is
-    the one its directive prints (``%x %y %z %w``), the name is unquoted
-    as GNU's default prints it, and times are UTC.
+    A VFS has rendered bytes, modes, logical owners and its mount's
+    device, but no inode, allocation blocks, IO block size or link
+    count: those print '?'. An absent size, owner number or time prints
+    '-'. Each time is the one its directive prints (``%x %y %z %w``),
+    the name is unquoted as GNU's default prints it, and times are UTC.
 
     Args:
         s (FileStat): the backend and namespace stat.
@@ -561,11 +578,12 @@ def _render_stat(s: FileStat, name: str, identity: Identity | None) -> str:
         minor = _directive_value("Lr", s, name, identity)
         links = f"Links: {'?':<5} Device type: {major},{minor}"
     shown = " -> ".join(_name_parts(s, name, False))
+    device = "?" if s.dev is None else "{},{}".format(*_device_halves(s.dev))
     return (
         f"  File: {shown}\n"
         f"  Size: {size:<10}\tBlocks: {'?':<10} "
         f"IO Block: {'?':<6} {_type_label(s)}\n"
-        f"Device: ?\tInode: {'?':<10}  {links}\n"
+        f"Device: {device}\tInode: {'?':<10}  {links}\n"
         f"Access: ({_effective_mode(s):04o}/{ls_mode_string(s)})  "
         f"Uid: ({uid:>5}/{owner:>8})   Gid: ({gid:>5}/{group:>8})\n"
         f"Access: {_stat_time(s.atime or s.modified)}\n"

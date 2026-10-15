@@ -98,7 +98,7 @@
       "command": "stat /data | head -3",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /data\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: ?\tInode: ?           Links: ?\n",
+        "stdout": "  File: /data\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: 42358,2210976247\tInode: ?           Links: ?\n",
         "stderr": ""
       },
       "note": "A VFS keeps no device, inode, block or link counts, so those fields are `?` in GNU's layout; a directory's size is 4096 as `%s` prints it."

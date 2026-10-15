@@ -34,6 +34,7 @@ import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts
 import { followedDay } from '../../core/time_range.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
+import { ident } from '../../utils/stat_view.ts'
 import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
@@ -2125,6 +2126,35 @@ describe('a link at the final name', () => {
         ws.dispatch('readdir', '/data/dlink', [], { nofollow: true }),
       ).rejects.toMatchObject({ code: 'ENOTDIR' })
       expect(await ws.dispatch('readdir', '/data/dlink')).toEqual(['/data/dlink/f.txt'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a stat names the device of the mount serving it', async () => {
+    // The id a runtime reports as st_dev: one per mount, the namespace's
+    // own for a directory no mount serves, and a link's is its mount's.
+    const ws = await linked({
+      '/base/': new RAMVFS(),
+      '/base/inner/': new RAMVFS(),
+      '/far/deep/': new RAMVFS(),
+    })
+    try {
+      await ws.shell('echo hi > /base/f.txt')
+      await ws.shell('ln -s /base/inner /base/lnk')
+      const dev = async (path: string, nofollow = false): Promise<number | null> =>
+        ((await ws.dispatch('stat', path, [], nofollow ? { nofollow } : {})) as FileStat).dev
+      expect(await dev('/base/f.txt')).toBe(ident('/base/'))
+      expect(await dev('/base')).toBe(ident('/base/'))
+      expect(await dev('/base/inner')).toBe(ident('/base/inner/'))
+      expect(await dev('/far')).toBe(ident('/'))
+      expect(await dev('/base/lnk', true)).toBe(ident('/base/'))
+      expect(await dev('/base/lnk')).toBe(ident('/base/inner/'))
+      const tree = (await ws.dispatch('read_tree', '/base', [], { nofollow: true })) as Map<
+        string,
+        FileStat
+      >
+      expect(new Set([...tree.values()].map((row) => row.dev))).toEqual(new Set([ident('/base/')]))
     } finally {
       await ws.close()
     }

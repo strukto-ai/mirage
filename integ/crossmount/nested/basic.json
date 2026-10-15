@@ -309,7 +309,7 @@
       "command": "stat /ghost",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /ghost\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: ?\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    -/       -)   Gid: (    -/       -)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
+        "stdout": "  File: /ghost\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: 44166,4131005441\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    -/       -)   Gid: (    -/       -)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
         "stderr": ""
       }
     },
@@ -361,7 +361,7 @@
       "command": "stat /data/inner",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /data/inner\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: ?\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    -/       -)   Gid: (    -/       -)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
+        "stdout": "  File: /data/inner\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: 62676,3919759232\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    -/       -)   Gid: (    -/       -)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
         "stderr": ""
       }
     },
@@ -374,7 +374,7 @@
       "command": "stat /ghost/deep",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /ghost/deep\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: ?\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    -/       -)   Gid: (    -/       -)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
+        "stdout": "  File: /ghost/deep\n  Size: 4096      \tBlocks: ?          IO Block: ?      directory\nDevice: 42659,980895000\tInode: ?           Links: ?\nAccess: (0755/drwxr-xr-x)  Uid: (    -/       -)   Gid: (    -/       -)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
         "stderr": ""
       }
     },

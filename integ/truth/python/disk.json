@@ -42,7 +42,7 @@
     {
       "re": "  Size: \\d+ +\\tBlocks: \\? +IO Block: \\? +regular file"
     },
-    "Device: ?\tInode: ?           Links: ?",
+    "Device: 42358,2210976247\tInode: ?           Links: ?",
     {
       "re": "Access: \\(0[0-7]{3}/[-rwxstST]{10}\\)  Uid: \\(.*\\)   Gid: \\(.*\\)"
     },

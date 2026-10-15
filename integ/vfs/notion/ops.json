@@ -152,7 +152,7 @@
       "command": "stat /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json",
       "expect": {
         "exit": 0,
-        "stdout": "  File: /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json\n  Size: 3254      \tBlocks: ?          IO Block: ?      regular file\nDevice: ?\tInode: ?           Links: ?\nAccess: (0644/-rw-r--r--)  Uid: (    -/       -)   Gid: (    -/       -)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
+        "stdout": "  File: /notion/pages/Project_Roadmap__aaaa1111-2222-3333-4444-555566667777/page.json\n  Size: 3254      \tBlocks: ?          IO Block: ?      regular file\nDevice: 44531,3768249566\tInode: ?           Links: ?\nAccess: (0644/-rw-r--r--)  Uid: (    -/       -)   Gid: (    -/       -)\nAccess: -\nModify: -\nChange: -\n Birth: -\n",
         "stderr": ""
       }
     },

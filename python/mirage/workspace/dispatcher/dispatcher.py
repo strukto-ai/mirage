@@ -104,6 +104,7 @@ from mirage.utils.key_prefix import mount_key, under_path
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent
 from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
+from mirage.utils.stat_view import ident
 from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect, Target, VfsCall
@@ -1004,8 +1005,12 @@ class Dispatcher:
             return None, IOResult()
         if self._table_answers(name, call.path.virtual, kwargs):
             return (
-                await self._table_call(
-                    name, call.path, kwargs, report, caller
+                self._on_device(
+                    name,
+                    call.path.virtual,
+                    await self._table_call(
+                        name, call.path, kwargs, report, caller
+                    ),
                 ),
                 IOResult(),
             )
@@ -1030,7 +1035,12 @@ class Dispatcher:
         ):
             return None, IOResult()
         if mount is None:
-            return await self._answer_unmounted(call), IOResult()
+            return (
+                self._on_device(
+                    name, call.path.virtual, await self._answer_unmounted(call)
+                ),
+                IOResult(),
+            )
         across = self._copy_target(call, mount)
         if across is None:
             await self._refuse_cross_mount(call, mount)
@@ -2169,11 +2179,19 @@ class Dispatcher:
                 # A mount's root answers as the backend's own root; in
                 # the namespace it is the name it is mounted at.
                 result = result.model_copy(update={"name": name})
-            return merge_overlay_stat(
-                self._namespace.meta_for(call.path.virtual), result
+            return self._on_device(
+                call.name,
+                call.path.virtual,
+                merge_overlay_stat(
+                    self._namespace.meta_for(call.path.virtual), result
+                ),
             )
         if call.name == "read_tree" and isinstance(result, dict):
-            result = self._with_links(call.path, result)
+            result = self._on_device(
+                call.name,
+                call.path.virtual,
+                self._with_links(call.path, result),
+            )
         # A tree read keys its entries below the path; a search names each
         # hit itself, and a store can rank a hit from outside the scope (a
         # whole table, a filter it ignores), so every hit is checked.
@@ -2187,6 +2205,38 @@ class Dispatcher:
         ):
             return _visible_answer(call.name, call.vis, call.path, result)
         return result
+
+    def _on_device(self, name: str, virtual: str, result: Any) -> Any:
+        """A stat, or a subtree's stats, on the device of the mount
+        serving ``virtual``.
+
+        The device is the id a runtime reports as a guest's st_dev, so
+        ``stat %d`` and ``os.stat`` name one device, and a walk tells a
+        mount boundary by it. A path no mount serves is on the
+        namespace's own, the one a root mount would have.
+
+        Args:
+            name (str): the op that answered.
+            virtual (str): the path the answer is for.
+            result (Any): the answer; anything but a stat or a subtree's
+                stats passes unchanged.
+        """
+        if name not in ("stat", "read_tree") or not isinstance(
+            result, (FileStat, dict)
+        ):
+            return result
+        mount = self._namespace.try_mount_for(virtual)
+        dev = ident("/" if mount is None else mount.prefix)
+        if isinstance(result, FileStat):
+            return result.model_copy(update={"dev": dev})
+        return {
+            key: (
+                row.model_copy(update={"dev": dev})
+                if isinstance(row, FileStat)
+                else row
+            )
+            for key, row in result.items()
+        }
 
     def _with_links(
         self, path: PathSpec, tree: dict[str, FileStat]

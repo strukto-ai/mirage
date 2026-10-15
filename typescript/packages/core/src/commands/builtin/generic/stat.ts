@@ -230,6 +230,8 @@ function directiveValue(
   if (spec === 'w') return statTime(s.birthtime)
   if (spec === 'W') return epoch(s.birthtime)
   if (spec === 'B') return '512'
+  if (spec === 'd') return s.dev === null ? '?' : String(s.dev)
+  if (spec === 'D') return s.dev === null ? '?' : s.dev.toString(16)
   const device = s.extra[DEVICE_NUMBERS_KEY]
   const numbers = Array.isArray(device) && device.length === 2 ? (device as [number, number]) : null
   if (spec === 't') return numbers !== null ? numbers[0].toString(16) : '0'
@@ -239,13 +241,28 @@ function directiveValue(
     return spec === 'r' ? String(rdev) : rdev.toString(16)
   }
   if (spec.length === 2 && (spec.startsWith('H') || spec.startsWith('L'))) {
+    // %Hr/%Lr are rdev major/minor in decimal; %Hd/%Ld are the device the
+    // file resides on: its mount's.
+    const half = spec.startsWith('H') ? 0 : 1
     if (spec[1] === 'r' || spec[1] === 'R') {
       if (numbers === null) return '0'
-      return String(spec.startsWith('H') ? numbers[0] : numbers[1])
+      return String(numbers[half])
     }
-    return '?'
+    return s.dev === null ? '?' : String(deviceHalves(s.dev)[half])
   }
   return '?'
+}
+
+/**
+ * A device number's major and minor, split as glibc's `major(3)` and
+ * `minor(3)` split a `dev_t`. The id is up to 48 bits, past the 32 a
+ * bitwise operator keeps, so the shifts are divisions.
+ */
+function deviceHalves(dev: number): [number, number] {
+  const major =
+    ((Math.floor(dev / 2 ** 8) & 0xfff) | (Math.floor(dev / 2 ** 32) & 0xfffff000)) >>> 0
+  const minor = ((dev % 2 ** 8) | (Math.floor(dev / 2 ** 12) & 0xffffff00)) >>> 0
+  return [major, minor]
 }
 
 // The fields %N renders: the name, plus a symlink's target. GNU shell-quotes
@@ -404,8 +421,8 @@ function statTime(value: string | null): string {
 }
 
 /** GNU coreutils 9.7's default layout, with unknown fields marked. A VFS has
- * rendered bytes, modes and logical owners, but no device, inode, allocation
- * blocks, IO block size or link count: those print '?'. An absent size,
+ * rendered bytes, modes, logical owners and its mount's device, but no inode,
+ * allocation blocks, IO block size or link count: those print '?'. An absent size,
  * owner number or time prints '-'. Each time is the one its directive
  * prints (`%x %y %z %w`), the name is unquoted as GNU's default prints it,
  * and times are UTC. */
@@ -419,10 +436,11 @@ function renderStat(s: FileStat, name: string, identity: Identity | null): strin
     s.type === FileType.CHAR_DEVICE
       ? `Links: ${'?'.padEnd(5)} Device type: ${directiveValue('Hr', s, name, identity)},${directiveValue('Lr', s, name, identity)}`
       : 'Links: ?'
+  const device = s.dev === null ? '?' : deviceHalves(s.dev).join(',')
   return [
     `  File: ${nameParts(s, name, false).join(' -> ')}`,
     `  Size: ${size.padEnd(10)}\tBlocks: ${'?'.padEnd(10)} IO Block: ${'?'.padEnd(6)} ${typeLabel(s)}`,
-    `Device: ?\tInode: ${'?'.padEnd(10)}  ${links}`,
+    `Device: ${device}\tInode: ${'?'.padEnd(10)}  ${links}`,
     `Access: (${effectiveMode(s).toString(8).padStart(4, '0')}/${lsModeString(s)})  Uid: (${uid}/${owner})   Gid: (${gid}/${group})`,
     `Access: ${statTime(s.atime ?? s.modified)}`,
     `Modify: ${statTime(s.modified)}`,

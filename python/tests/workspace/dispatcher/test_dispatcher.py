@@ -61,6 +61,7 @@ from mirage.types import (
 )
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.ranges import slice_window, splice_window
+from mirage.utils.stat_view import ident
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -2153,6 +2154,35 @@ async def test_a_listing_that_does_not_follow_stops_at_a_link():
         await ws.dispatch("readdir", link, nofollow=True)
     listed, _ = await ws.dispatch("readdir", link)
     assert listed == ["/data/dlink/f.txt"]
+
+
+@pytest.mark.asyncio
+async def test_a_stat_names_the_device_of_the_mount_serving_it():
+    # The id a runtime reports as st_dev: one per mount, the namespace's
+    # own for a directory no mount serves, and a link's is its mount's.
+    ws = Workspace(
+        {"/base/": RAMVFS(), "/base/inner/": RAMVFS(), "/far/deep/": RAMVFS()},
+        mode=MountMode.WRITE,
+    )
+    await ws.shell("echo hi > /base/f.txt")
+    await ws.shell("ln -s /base/inner /base/lnk")
+
+    async def dev(path: str, **kwargs: bool) -> int | None:
+        row, _ = await ws.dispatch(
+            "stat", PathSpec.from_str_path(path), **kwargs
+        )
+        return row.dev
+
+    assert await dev("/base/f.txt") == ident("/base/")
+    assert await dev("/base") == ident("/base/")
+    assert await dev("/base/inner") == ident("/base/inner/")
+    assert await dev("/far") == ident("/")
+    assert await dev("/base/lnk", nofollow=True) == ident("/base/")
+    assert await dev("/base/lnk") == ident("/base/inner/")
+    tree, _ = await ws.dispatch(
+        "read_tree", PathSpec.from_str_path("/base"), nofollow=True
+    )
+    assert {row.dev for row in tree.values()} == {ident("/base/")}
 
 
 class _LostReply(Tape):
