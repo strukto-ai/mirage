@@ -19,8 +19,8 @@ import type { VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 
-import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as hubReaddir } from '../../core/hf_hub/readdir.ts'
 import { read as hubRead } from '../../core/hf_hub/read.ts'
 import { stat as hubStat } from '../../core/hf_hub/stat.ts'
@@ -59,38 +59,47 @@ export abstract class HfHubVFS extends BaseVFS {
   // could take the name, and mirage does not assume which one the Hub
   // resolves.
   override readonly listingVersion: ListingVersion = ListingVersion.MOUNT
-  // The index is not a cache in front of a listing, it IS the listing: one
-  // recursive fetch seeds it whole. A long TTL therefore spares the Hub a
-  // full re-walk rather than risking a stale row.
+  // One recursive fetch lists the whole repository, every folder at the head
+  // it was walked at, and the version check catches a moved head. A long TTL
+  // therefore spares the Hub a full re-walk rather than risking a stale row.
   override readonly indexTtl: number = 86_400
 
   override readonly readsRanges: boolean = true
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return hubReaddir(this.accessor, path, index)
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    read: ['entry'],
+    readStream: ['entry'],
+    stat: ['entry', 'index'],
+    exists: ['entry'],
+  } as const
+
+  override readdir(path: PathSpec): Promise<DirListing> {
+    return hubReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return hubRead(this.accessor, path, index)
-    return hubRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    const window =
+      offset === 0 && size === null ? {} : size === null ? { offset } : { offset, size }
+    return hubRead(this.accessor, path, window, handed?.entry)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return hubStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return hubStat(this.accessor, path, handed?.entry, handed?.index)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return hubStream(this.accessor, path, index)
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return hubStream(this.accessor, path, handed?.entry)
   }
 
-  override exists(path: PathSpec): Promise<boolean> {
-    return hubExists(this.accessor, path)
+  override exists(path: PathSpec, handed?: Handed): Promise<boolean> {
+    return hubExists(this.accessor, path, handed?.entry)
   }
 }

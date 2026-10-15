@@ -13,107 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GitHubAccessor } from '../../accessor/github.ts'
-import { LookupStatus } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { runWithRecording } from '../../observe/context.ts'
-import { PathSpec } from '../../types.ts'
-import { populateIndex, refillSnapshot } from './tree.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { entryAt } from '../../workspace/fixtures/handed.ts'
 import { read, readStream } from './read.ts'
+import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
-import type { GitHubTransport } from './client.ts'
-import { FakeGitHub, blobSha, raceIndex, servedAccessor } from './_test_util.ts'
+import { FakeGitHub, blobSha, servedAccessor } from './_test_util.ts'
 
-const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-
-interface Probe {
-  trees: number
-  blobs: string[]
-}
-
-// The blob a given sha holds, so a read that used a stale row is visible as
-// the wrong bytes rather than as an error.
-const BLOBS: Record<string, string> = { bbb: 'one\n', ccc: 'two\n' }
-
-function accessorFor(sha: string, probe: Probe): GitHubAccessor {
-  const transport = {
-    get: (path: string) => {
-      if (path.includes('/git/trees/')) {
-        probe.trees += 1
-        return Promise.resolve({
-          tree: [
-            { path: 'src', type: 'tree' as const, sha: 'aaa' },
-            { path: 'src/main.py', type: 'blob' as const, sha, size: 4 },
-          ],
-          truncated: false,
-        })
-      }
-      const blobSha = path.slice(path.lastIndexOf('/') + 1)
-      probe.blobs.push(blobSha)
-      return Promise.resolve({
-        content: Buffer.from(ENC.encode(BLOBS[blobSha] ?? '')).toString('base64'),
-        encoding: 'base64',
-      })
-    },
-  } as unknown as GitHubTransport
-  return new GitHubAccessor({
-    transport,
-    owner: 'acme',
-    repo: 'proj',
-    ref: 'main',
-    defaultBranch: 'main',
-  })
-}
-
-async function seeded(sha: string): Promise<RAMIndexCacheStore> {
-  const index = new RAMIndexCacheStore()
-  await populateIndex(
-    index,
-    {
-      src: { path: 'src', type: 'tree', sha: 'aaa', size: null },
-      'src/main.py': { path: 'src/main.py', type: 'blob', sha, size: 4 },
-    },
-    '',
-  )
-  return index
-}
-
-function spec(p: string): PathSpec {
-  return new PathSpec({ vfsPath: p.slice(1), virtual: p, directory: '/src' })
-}
-
-describe('github read freshness', () => {
-  // The row survives an invalidation carrying the *pre-write* blob sha, so
-  // trusting it served the old bytes. Freshness is tracked per directory,
-  // so the parent listing is what says the row aged out.
-  it('refetches the tree when the parent listing expired', async () => {
-    const index = await seeded('bbb')
-    await index.invalidate()
-    const probe: Probe = { trees: 0, blobs: [] }
-    const out = await read(accessorFor('ccc', probe), spec('/src/main.py'), index)
-    expect(new TextDecoder().decode(out)).toBe('two\n')
-    expect(probe.trees).toBe(1)
-    expect(probe.blobs).toEqual(['ccc'])
-  })
-
-  it('trusts a live listing without refetching', async () => {
-    const index = await seeded('bbb')
-    const probe: Probe = { trees: 0, blobs: [] }
-    const out = await read(accessorFor('ccc', probe), spec('/src/main.py'), index)
-    expect(new TextDecoder().decode(out)).toBe('one\n')
-    expect(probe.trees).toBe(0)
-  })
-
-  // A miss against a live index is a real absence. Refilling here would
-  // spend a full recursive-tree fetch on every ENOENT.
-  it('does not refetch on a real miss', async () => {
-    const index = await seeded('bbb')
-    const probe: Probe = { trees: 0, blobs: [] }
-    await expect(read(accessorFor('ccc', probe), spec('/src/gone.py'), index)).rejects.toThrow()
-    expect(probe.trees).toBe(0)
-  })
-})
 
 function at(rel: string, prefix: string): PathSpec {
   const virtual = prefix === '/' ? `/${rel}` : `${prefix}/${rel}`
@@ -136,6 +45,17 @@ describe('a read against the wire', () => {
     return gh
   }
 
+  // A read is handed its row; with none, or a folder's, it asks nothing.
+  it.each<[string, FileStat | null, string]>([
+    ['src/gone.py', null, 'ENOENT'],
+    ['src', new FileStat({ name: 'src', type: FileType.DIRECTORY }), 'EISDIR'],
+    ['', null, 'EISDIR'],
+  ])('asks nothing without a file row (%s)', async (rel, entry, code) => {
+    const gh = serve({ 'src/a.txt': 'x' })
+    await expect(read(servedAccessor(), at(rel, '/gh'), entry)).rejects.toMatchObject({ code })
+    expect(gh.log).toEqual([])
+  })
+
   // A mount at the root, one at /gh, and one named like a directory inside
   // the repository, so a record labelled with anything but the virtual path
   // lands on a key the cache never asks for.
@@ -143,9 +63,9 @@ describe('a read against the wire', () => {
     it(`records the blob sha under the virtual path (${prefix})`, async () => {
       const gh = serve({ 'src/a.txt': 'payload' })
       const path = at('src/a.txt', prefix)
-      const [data, records] = await runWithRecording(() =>
-        read(servedAccessor(), path, new RAMIndexCacheStore()),
-      )
+      const accessor = servedAccessor()
+      const row = await entryAt(readdir, accessor, path)
+      const [data, records] = await runWithRecording(() => read(accessor, path, row))
       expect(DEC.decode(data)).toBe('payload')
       const sha = await blobSha('payload')
       expect(records.map((r) => [r.op, r.path, r.source, r.bytes, r.fingerprint])).toEqual([
@@ -158,81 +78,36 @@ describe('a read against the wire', () => {
 
   it('records a stream once', async () => {
     serve({ 'a.txt': 'streamed' })
+    const accessor = servedAccessor()
+    const path = at('a.txt', '/gh')
+    const row = await entryAt(readdir, accessor, path)
     const [chunks, records] = await runWithRecording(async () => {
       const out: Uint8Array[] = []
-      for await (const chunk of readStream(
-        servedAccessor(),
-        at('a.txt', '/gh'),
-        new RAMIndexCacheStore(),
-      ))
-        out.push(chunk)
+      for await (const chunk of readStream(accessor, path, row)) out.push(chunk)
       return out
     })
     expect(chunks.map((c) => DEC.decode(c)).join('')).toBe('streamed')
     expect(records.map((r) => [r.op, r.fingerprint])).toEqual([['read', await blobSha('streamed')]])
   })
 
-  for (const kind of ['list', 'stale', 'get', 'reseed'] as const) {
-    it(`retries when the index changes under it (${kind})`, async () => {
-      const gh = serve({ 'docs/sub/b.txt': 'bravo' })
-      const index = raceIndex(kind)
-      const accessor = servedAccessor()
-      await refillSnapshot(accessor, index, '/gh')
-      index.accessor = accessor
-      index.fired = false
-      gh.log.length = 0
-      expect(DEC.decode(await read(accessor, at('docs/sub/b.txt', '/gh'), index))).toBe('bravo')
-      expect(gh.counts()).toEqual([0, 1, 1])
-    })
-  }
-
-  it('refills the mount index after a clear', async () => {
-    const gh = serve({ 'docs/a.txt': 'alpha' })
-    const index = new RAMIndexCacheStore()
-    const accessor = servedAccessor()
-    await refillSnapshot(accessor, index, '/gh')
-    await index.clear()
-    gh.log.length = 0
-    expect(DEC.decode(await read(accessor, at('docs/a.txt', '/gh'), index))).toBe('alpha')
-    // A read reseeds the listing rather than asking one directory, so the
-    // stats after it are answered from the index again.
-    expect(gh.counts()).toEqual([0, 1, 1])
-    expect((await index.listDir('/gh')).status).not.toBe(LookupStatus.NOT_FOUND)
-  })
-
-  it('refuses a directory without fetching a blob', async () => {
-    const gh = serve({ 'docs/a.txt': 'alpha' })
-    await expect(
-      read(servedAccessor(), at('docs', '/gh'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
-    expect(gh.count('blob')).toBe(0)
-  })
-
-  it('answers ENOENT without an index', async () => {
-    serve({ 'docs/a.txt': 'alpha' })
-    await expect(read(servedAccessor(), at('docs/a.txt', '/gh'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
-
   it('stamps the sha it fetched, not a newer one', async () => {
     const gh = serve({ 'a.txt': 'old' })
     const accessor = servedAccessor()
-    const index = new RAMIndexCacheStore()
-    await refillSnapshot(accessor, index, '/gh')
+    const path = at('a.txt', '/gh')
+    const row = await entryAt(readdir, accessor, path)
     gh.set('a.txt', 'reseated')
-    // A refill on some other index reseats the accessor's tree only.
-    await refillSnapshot(accessor, new RAMIndexCacheStore(), '/gh')
+    // A later listing reseats the accessor's tree only.
+    await readdir(accessor, at('', '/gh'))
     expect(accessor.tree['a.txt']?.sha).toBe(await blobSha('reseated'))
     gh.set('a.txt', 'live')
-    const [data, records] = await runWithRecording(() => read(accessor, at('a.txt', '/gh'), index))
-    // Three shas are in play: the mount index's, the accessor tree's and the
+    const [data, records] = await runWithRecording(() => read(accessor, path, row))
+    // Three shas are in play: the handed row's, the accessor tree's and the
     // live one. Only the first names the bytes this read returned.
     expect(DEC.decode(data)).toBe('old')
     expect(records.map((r) => r.fingerprint)).toEqual([await blobSha('old')])
-    // The probe that follows sees the live sha, which is not the one the read
+    // The check that follows sees the live sha, which is not the one the read
     // stamped, so the copy it left is stale rather than fresh.
-    const probe = await stat(accessor, at('a.txt', '/gh'), new RAMIndexCacheStore())
+    const probe = await stat(accessor, path, null, new ListingCheckStore())
     expect(probe.fingerprint).toBe(await blobSha('live'))
     expect(probe.fingerprint).not.toBe(records[0]?.fingerprint)
   })

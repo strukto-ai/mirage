@@ -12,14 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { withIndexLock } from '@struktoai/mirage-core/cache/index/lock'
-import { IndexEntry, type IndexSnapshot } from '@struktoai/mirage-core/cache/index/config'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { departed } from '@struktoai/mirage-core/cache/index/diff'
-import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { fnmatchcase } from '@struktoai/mirage-core/utils/fnmatch'
-import type { HfHubAccessor, RowTables } from '../../accessor/hf_hub.ts'
+import { enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
+import { DirListing, FileStat, FileType } from '@struktoai/mirage-core/types'
+import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
+import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { HfHubError, apiUrl, hubGetResponse, hubPost, revSegment } from './client.ts'
 import {
   GITATTRIBUTES,
@@ -27,7 +25,6 @@ import {
   TREE_PAGE_SIZE,
   TREE_PAGE_SIZE_EXPANDED,
 } from './constants.ts'
-import { headCommit, mountVersion } from './repo.ts'
 import type { TreeEntry } from './tree_entry.ts'
 import { isDirEntry } from './tree_entry.ts'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -268,247 +265,106 @@ export async function fetchTree(
 }
 
 /**
- * Bucket a Hub tree by parent directory.
+ * The row for one tree row, the same from every route.
  *
- * Keyed by mount-absolute path, the way every other backend keys its index,
- * so the shared cache machinery can spell an eviction without knowing which
- * backend it is talking to. The tree itself stays mount-relative; `prefix` is
- * what lifts it. This is the one shape both storage paths are built from, so
- * the seeded index and the derived tables cannot disagree.
+ * Size is the row's, which is the Hub's *content* length even for an LFS
+ * file; the 135-byte pointer never reaches here. `modified` is null unless the
+ * mount asked for commit expansion: a Hub file's only mtime is the commit that
+ * last touched it. git is content-addressed, so the object id is the file's
+ * fingerprint. Mirrors Python's `row_of`.
  */
-export function indexDirs(
-  tree: Map<string, TreeEntry>,
-  prefix: string,
-): Map<string, [string, IndexEntry][]> {
-  const stem = rstripSlash(prefix)
-  const dirs = new Map<string, [string, IndexEntry][]>()
-  // The repository root always exists, so it gets a row even when the tree is
-  // empty. Without it an empty repo is byte for byte a dropped index and every
-  // read would refetch.
-  dirs.set(stem === '' ? '/' : stem, [])
+export function rowOf(entry: TreeEntry, name: string): FileStat {
+  const modified = entry.lastModified === '' ? null : entry.lastModified
+  if (isDirEntry(entry)) return new FileStat({ name, type: FileType.DIRECTORY, modified })
+  const extra: Record<string, unknown> = { oid: entry.oid }
+  if (entry.lastCommit !== '') extra.last_commit = entry.lastCommit
+  if (entry.lfsOid !== '') extra.lfs_oid = entry.lfsOid
+  if (entry.xetHash !== '') extra.xet_hash = entry.xetHash
+  return new FileStat({
+    name,
+    size: entry.size ?? null,
+    modified,
+    type: FileType.FILE,
+    content: contentTypeForPath(name),
+    fingerprint: entry.oid === '' ? null : entry.oid,
+    extra,
+  })
+}
+
+/**
+ * Each folder's rows, keyed by its mount-relative path ('' the root).
+ *
+ * The mount root always has a listing, even when the tree is empty, so an
+ * empty repository lists as empty rather than missing. A tree row names its
+ * parent folders implicitly, and a page boundary can deliver a child before
+ * its parent's own row, so every folder above a path gets a listing and a row
+ * in its parent; the folder's own row, when the tree has one, takes that
+ * place. Mirrors Python's `tree_rows`.
+ */
+export function treeRows(tree: ReadonlyMap<string, TreeEntry>): Map<string, FileStat[]> {
+  const folders = new Map<string, Map<string, FileStat>>([['', new Map()]])
+  const rowsAt = (folder: string): Map<string, FileStat> => {
+    let rows = folders.get(folder)
+    if (rows === undefined) {
+      rows = new Map()
+      folders.set(folder, rows)
+    }
+    return rows
+  }
   for (const [path, entry] of tree) {
     const cut = path.lastIndexOf('/')
-    const parent = cut === -1 ? (stem === '' ? '/' : stem) : `${stem}/${path.slice(0, cut)}`
-    const name = cut === -1 ? path : path.slice(cut + 1)
-    const extra: Record<string, unknown> = { oid: entry.oid }
-    if (entry.lastCommit !== '') extra.last_commit = entry.lastCommit
-    if (entry.lfsOid !== '') extra.lfs_oid = entry.lfsOid
-    if (entry.xetHash !== '') extra.xet_hash = entry.xetHash
-    const row = new IndexEntry({
-      id: entry.oid,
-      name,
-      resourceType: isDirEntry(entry) ? 'folder' : 'file',
-      remoteTime: entry.lastModified,
-      size: isDirEntry(entry) ? null : (entry.size ?? null),
-      extra,
-    })
-    const bucket = dirs.get(parent)
-    if (bucket === undefined) dirs.set(parent, [[name, row]])
-    else bucket.push([name, row])
-    // A tree row names its parent directories implicitly. The Hub's recursive
-    // listing does emit a row per directory, but a page boundary can deliver a
-    // child before its parent, so the parent's bucket is created here too and
-    // merged with its own row's.
-    let head = cut === -1 ? '' : path.slice(0, cut)
-    while (head !== '') {
-      const key = `${stem}/${head}`
-      if (!dirs.has(key)) dirs.set(key, [])
-      const up = head.lastIndexOf('/')
-      head = up === -1 ? '' : head.slice(0, up)
+    let parent = cut === -1 ? '' : path.slice(0, cut)
+    const name = path.slice(cut + 1)
+    rowsAt(parent).set(name, rowOf(entry, name))
+    if (isDirEntry(entry)) rowsAt(path)
+    while (parent !== '') {
+      const up = parent.lastIndexOf('/')
+      const above = up === -1 ? '' : parent.slice(0, up)
+      const folder = parent.slice(up + 1)
+      const rows = rowsAt(above)
+      if (!rows.has(folder))
+        rows.set(folder, new FileStat({ name: folder, type: FileType.DIRECTORY }))
+      parent = above
     }
   }
-  listImplied(dirs, stem === '' ? '/' : stem)
-  return dirs
-}
-
-/**
- * Give every directory the tree only implies a row in its parent.
- *
- * A directory seen only as some path's parent has a listing of its own but no
- * row naming it, so its parent would not list it and a stat of it would find
- * no entry. Every listed path must have a row: a lookup that finds a listed
- * name with none takes it as evicted and refills.
- */
-function listImplied(dirs: Map<string, [string, IndexEntry][]>, root: string): void {
-  const named = new Set<string>()
-  for (const [parent, rows] of dirs) {
-    const base = rstripSlash(parent)
-    for (const [name] of rows) named.add(`${base}/${name}`)
-  }
-  for (const key of [...dirs.keys()].sort(compareCodePoints)) {
-    if (key === root || named.has(key)) continue
-    const cut = key.lastIndexOf('/')
-    const name = key.slice(cut + 1)
-    const parent = dirs.get(key.slice(0, cut) || '/')
-    parent?.push([name, new IndexEntry({ id: '', name, resourceType: 'folder' })])
-  }
-}
-
-/** The entry and children tables a no-index mount reads, from the buckets. */
-export function indexRows(tree: Map<string, TreeEntry>, prefix: string): RowTables {
-  return rowsOf(indexDirs(tree, prefix))
-}
-
-/** The entry and child tables of directories `indexDirs` built. */
-function rowsOf(dirs: ReadonlyMap<string, readonly [string, IndexEntry][]>): RowTables {
-  const entries = new Map<string, IndexEntry>()
-  const children = new Map<string, string[]>()
-  for (const [parent, rows] of dirs) {
-    const base = rstripSlash(parent)
-    for (const [name, row] of rows) entries.set(`${base}/${name}`, row)
-    children.set(parent, rows.map(([name]) => `${base}/${name}`).sort(compareCodePoints))
-  }
-  return { entries, children }
-}
-
-/**
- * Write one fetched tree into `index` under `prefix`, and return the rows
- * written, built from the same walk.
- *
- * The tree is the caller's own fetch, never `accessor.tree` re-read after an
- * await: the watcher replaces that with no lock, and its rows may be at
- * another head than the `version` stamped here.
- *
- * One `setDir` per directory, the way the shared store spells a whole
- * listing; the year-long expiry is what makes the index the listing rather
- * than a cache in front of one.
- */
-export async function seedIndex(
-  tree: Map<string, TreeEntry>,
-  index: IndexCacheStore,
-  prefix: string,
-  version: string | null = null,
-): Promise<RowTables> {
-  const dirs = indexDirs(tree, prefix)
-  const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
-  // Every folder carries the head the tree was walked at, not just the root:
-  // a nested listing is served on that version as much as the root is.
-  await Promise.all(
-    [...dirs].map(([parent, rows]) => index.setDir(parent, rows, expires, { version })),
+  return new Map(
+    [...folders].map(([folder, rows]) => [
+      folder,
+      [...rows.values()].sort((a, b) => compareCodePoints(a.name, b.name)),
+    ]),
   )
-  return rowsOf(dirs)
 }
 
 /**
- * Refetch the tree and re-seed the index from it.
+ * The listing of the folder `rel` out of the whole tree, with every folder
+ * below it as seeds, all at `version`. Mirrors Python's `tree_listing`.
  *
- * The mount fetches the whole tree once and seeds the index with it, so the
- * index *is* the listing rather than a cache in front of one. That makes a
- * cleared or expired index indistinguishable from an empty repository, which
- * is why dropping the index has to mean "refetch".
+ * Throws:
+ *   NotADirectoryError: a file is at `rel` or above it.
+ *   FileNotFoundError: nothing is.
  */
-export async function refillIndex(
-  accessor: HfHubAccessor,
-  index: IndexCacheStore,
-  prefix: string,
-): Promise<boolean> {
-  await refillSnapshot(accessor, index, prefix)
-  return true
-}
-
-/**
- * `refillIndex`, returning the rows it wrote: a reader answers from them
- * when its re-read of the store has already expired. Mirrors Python's
- * `refill_snapshot`.
- */
-export async function refillSnapshot(
-  accessor: HfHubAccessor,
-  index: IndexCacheStore,
-  prefix: string,
-): Promise<IndexSnapshot> {
-  const previous = accessor.treeLoaded ? new Map(accessor.tree) : null
-  // The head first, and the tree walked at the commit it names: the version
-  // stored is then the one these rows are at, never a later one a commit
-  // landing between the two requests would give. The head failing is the
-  // refill failing. '' (a Hub that names none) walks the branch and stores
-  // no version. Mirrors Python's `refill_snapshot`.
-  const head = (await headCommit(accessor)) || null
-  const tree = await fetchTree(accessor, head ?? undefined)
-  accessor.tree = tree
-  accessor.treeLoaded = true
-  accessor.rowsCache = null
-  accessor.refills += 1
-  // Refilling replaces the snapshot; merging would retain deleted paths.
-  await index.invalidatePrefix(rstripSlash(prefix) || '/')
-  const snapshot = await seedIndex(tree, index, prefix, mountVersion(head, accessor.keyPrefix))
-  if (previous !== null) await index.reportGone(departed(previous, tree.keys(), prefix, isDirEntry))
-  return snapshot
-}
-
-/**
- * Refetch when the root listing is missing or expired, returning the rows of
- * the refill it made.
- *
- * Every reader treats a missing listing as a real absence, which is right
- * against a *live* index and wrong against one that was never filled or has
- * been dropped. The root listing is what tells the two apart, in one lookup
- * and no request: the tree is written whole, so while the index is live the
- * mount root always has a row. Mirrors Python's `ensure_live_snapshot`.
- */
-export async function ensureLiveSnapshot(
-  accessor: HfHubAccessor,
-  index: IndexCacheStore,
-  prefix: string,
-): Promise<IndexSnapshot | null> {
-  const root = rstripSlash(prefix)
-  const listing = await index.listDir(root === '' ? '/' : root)
-  if (listing.status !== LookupStatus.NOT_FOUND && listing.status !== LookupStatus.EXPIRED)
-    return null
-  return refillSnapshot(accessor, index, prefix)
-}
-
-/**
- * Fetch the tree if this mount has not got one yet.
- *
- * Hydration is tracked by `treeLoaded`, never by whether the tree holds
- * anything: an empty repository hydrates to an empty map, and reading that as
- * "not hydrated" refetches it on every call forever.
- */
-export async function ensureTree(
-  accessor: HfHubAccessor,
-  index?: IndexCacheStore,
-  prefix = '',
-): Promise<void> {
-  if (accessor.treeLoaded) return
-  if (accessor.hydrating !== null) {
-    await accessor.hydrating
-    return
-  }
-  const run = (async () => {
-    if (index !== undefined) {
-      await withIndexLock(index, rstripSlash(prefix) || '/', async () => {
-        if (!accessor.treeLoaded) await refillIndex(accessor, index, prefix)
-      })
-      return
+export function treeListing(
+  tree: ReadonlyMap<string, TreeEntry>,
+  rel: string,
+  version: string | null,
+  virtual: string,
+): DirListing {
+  const folders = treeRows(tree)
+  const entries = folders.get(rel)
+  if (entries === undefined) {
+    const parts = rel.split('/')
+    for (let depth = parts.length; depth > 0; depth--) {
+      const found = tree.get(parts.slice(0, depth).join('/'))
+      if (found !== undefined && !isDirEntry(found)) throw enotdir(virtual)
     }
-    accessor.tree = await fetchTree(accessor)
-    accessor.treeLoaded = true
-    accessor.rowsCache = null
-  })()
-  accessor.hydrating = run
-  try {
-    await run
-  } finally {
-    accessor.hydrating = null
+    throw enoent(virtual)
   }
-}
-
-/**
- * The index tables built straight from the accessor's tree.
- *
- * What a mount with no index wired reads instead. Every reader has an index
- * inside a workspace, but a backend constructed on its own has NULL_INDEX,
- * whose every lookup is a miss -- so without this, readdir answered ENOENT for
- * a repository it could list perfectly well. Built by the same `indexRows` the
- * seeded path uses, so the two cannot disagree.
- */
-export async function localRows(accessor: HfHubAccessor, prefix: string): Promise<RowTables> {
-  await ensureTree(accessor)
-  const cached = accessor.rowsCache
-  if (cached !== null && cached.prefix === prefix) return cached.rows
-  const rows = indexRows(accessor.tree, prefix)
-  accessor.rowsCache = { prefix, rows }
-  return rows
+  const lead = rel === '' ? '' : `${rel}/`
+  const seeds = new Map<string, FileStat[]>()
+  for (const [folder, rows] of folders) {
+    if (folder !== rel && folder.startsWith(lead)) seeds.set(folder.slice(lead.length), rows)
+  }
+  return new DirListing({ entries, seeds, version })
 }
 
 /** The file paths of a tree, sorted, its directories left out. */

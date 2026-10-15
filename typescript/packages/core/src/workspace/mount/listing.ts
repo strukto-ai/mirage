@@ -68,7 +68,8 @@ export async function beyondWindow(index: IndexCacheStore, key: string): Promise
  * Keep what a backend listed, and answer the children's paths. A plain list is
  * the directory's whole listing. A `DirListing` may also prove descendant
  * listings (`seeds`), be a view rather than the whole directory (`partial`),
- * or prove nothing absent (`window`); each is kept for what it proves.
+ * or prove nothing absent (`window`); each is kept for what it proves, and a
+ * seed at the version its listing was read at.
  */
 export async function keepListing(
   index: IndexCacheStore,
@@ -84,6 +85,7 @@ export async function keepListing(
     const seeded: [string, IndexRow][] = children.map((row) => [row.name, row])
     await index.setDir(`${stem}/${relative.replace(/^\/+|\/+$/g, '')}`, seeded, null, {
       window: listing.window,
+      version: listing.version,
     })
   }
   return listing.entries.map((row) => `${stem}/${row.name}`)

@@ -13,65 +13,58 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
-import { FileStat, FileType } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { contentTypeForPath } from '../../utils/filetype.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { GitHubApiError } from './client.ts'
-import { ensureTree, fetchHead } from './tree.ts'
-import { indexEntryFromTree } from './tree_entry.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { locate, lookupRetrying, pointLookup } from './lookup.ts'
-
-// Render one tree row as a FileStat, the same from either route.
-function statOf(entry: IndexEntry): FileStat {
-  if (entry.resourceType === 'folder') {
-    return new FileStat({ name: entry.name, type: FileType.DIRECTORY })
-  }
-  return new FileStat({
-    name: entry.name,
-    size: entry.size,
-    type: FileType.FILE,
-    content: contentTypeForPath(entry.name),
-    fingerprint: entry.id,
-    extra: { sha: entry.id },
-  })
-}
+import { fetchDirTree, fetchHead, pointRow, refreshTree, rowOf } from './tree.ts'
+import { makeTreeEntry } from './tree_entry.ts'
 
 /**
- * Every entry under a directory of the repository, each as `stat` renders it,
- * from the git tree the mount fetches once. Null when GitHub truncated that
- * tree, which then names only some paths, or when `path` is no directory in
- * it, so the walk's readdir and stat report what is there. Mirrors `tree` in
- * `mirage/core/github/stat.py`.
+ * Every entry under a directory of the repository, each as its row, from one
+ * recursive tree. Null when GitHub truncates that tree, which then names only
+ * some paths, or when `path` is no directory in it, so the walk's readdir and
+ * stat report what is there. Mirrors `tree` in `mirage/core/github/stat.py`.
  */
 export async function tree(
   accessor: GitHubAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
 ): Promise<Map<string, FileStat> | null> {
-  await ensureTree(accessor, index, mountPrefixOf(path.virtual, path.vfsPath))
   if (accessor.truncated) return null
-  const base = path.mountPath.replace(/^\/+|\/+$/g, '')
-  if (base !== '' && accessor.tree[base]?.type !== 'tree') return null
+  const fetched = await refreshTree(accessor)
+  if (fetched === null) return null
+  const base = stripSlash(path.mountPath)
+  if (base !== '' && fetched[base]?.type !== 'tree') return null
   const lead = base === '' ? '' : `${base}/`
   const found = new Map<string, FileStat>()
-  for (const [key, entry] of Object.entries(accessor.tree)) {
+  for (const [key, entry] of Object.entries(fetched)) {
     if (key === base || !key.startsWith(lead)) continue
-    found.set(key.slice(lead.length), statOf(indexEntryFromTree(entry)))
+    found.set(key.slice(lead.length), rowOf(entry, key.slice(key.lastIndexOf('/') + 1)))
   }
   return found
 }
 
+/**
+ * Stat one path in the repository.
+ *
+ * A path answers with its row, as its folder's listing names it. The gate's
+ * check is handed no listed row, so it asks for the one path with one
+ * directory listing, its parent's; a parent it cannot see, and a truncated
+ * listing without the name, are no answer, so the whole tree is asked
+ * instead, and one GitHub truncates is walked down from the ref one directory
+ * at a time.
+ *
+ * Mirrors Python's `stat`.
+ */
 export async function stat(
   accessor: GitHubAccessor,
   path: PathSpec,
+  entry?: FileStat | null,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const { prefix, rel, key } = locate(path)
+  const rel = stripSlash(path.mountPath)
   if (rel === '') {
     return new FileStat({
       name: '/',
@@ -79,14 +72,42 @@ export async function stat(
       fingerprint: await rootVersion(accessor, index),
     })
   }
-  if (index === undefined) throw enoent(path)
-  // A probe through a throwaway index asks for this one path; everything
-  // else answers from the mount's listing, filling it if need be.
-  const found =
-    (await pointLookup(accessor, index, prefix, rel)) ??
-    (await lookupRetrying(accessor, index, prefix, key))
-  if (found.entry === null) throw enoent(path)
-  return statOf(found.entry)
+  if (entry !== undefined && entry !== null) return entry
+  if (!(index instanceof ListingCheckStore)) throw enoent(path.virtual)
+  const answer = await pointRow(accessor, rel)
+  if (answer !== null) {
+    if (answer.entry !== null) return rowOf(answer.entry, answer.entry.path)
+    if (!answer.truncated) throw enoent(path.virtual)
+  }
+  if (!accessor.truncated) {
+    const whole = await refreshTree(accessor)
+    if (whole !== null) {
+      const row = whole[rel]
+      if (row === undefined) throw enoent(path.virtual)
+      return rowOf(row, rel.slice(rel.lastIndexOf('/') + 1))
+    }
+  }
+  const found = await walked(accessor, rel)
+  if (found === null) throw enoent(path.virtual)
+  return found
+}
+
+/**
+ * The row at `rel`, walked down from the ref one directory at a time; null
+ * when a level does not name it. Mirrors Python's `_walked`.
+ */
+async function walked(accessor: GitHubAccessor, rel: string): Promise<FileStat | null> {
+  let sha = accessor.ref
+  const names = rel.split('/')
+  for (const [depth, name] of names.entries()) {
+    const rows = await fetchDirTree(accessor.transport, accessor.owner, accessor.repo, sha)
+    const found = rows.find((row) => row.path === name)
+    if (found === undefined) return null
+    if (depth === names.length - 1) return rowOf(makeTreeEntry(found), name)
+    if (found.type !== 'tree') return null
+    sha = found.sha
+  }
+  return null
 }
 
 /**

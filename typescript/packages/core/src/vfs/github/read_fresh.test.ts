@@ -183,9 +183,9 @@ describe('github under read: fresh', () => {
       gh.set('docs/a.txt', NEW)
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(NEW)
-      // The probe finds a new sha; cat's own stat serves the probe's answer;
-      // the read refills and downloads.
-      expect(gh.counts()).toEqual([1, 1, 1])
+      // The probe finds a new sha; cat's own stat serves the probe's answer,
+      // and the read is handed it and downloads.
+      expect(gh.counts()).toEqual([1, 0, 1])
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(NEW)
       // Warm now: the routing probe, and nothing else.
@@ -227,15 +227,17 @@ describe('github under read: fresh', () => {
     }
   })
 
-  it('asks a bounded mount one directory per stat until it lists', async () => {
+  // A bounded mount lists its way to the first stat with one tree, which
+  // names every folder, so every stat and listing after it is free.
+  it('lists a bounded mount once for its stats', async () => {
     const w = await ws(await vfsOf(), ReadPolicy.BOUNDED)
     try {
       await out(w, `stat ${PATH}`)
+      expect(gh.counts()).toEqual([0, 1, 0])
       await out(w, `stat ${PATH}`)
       await out(w, 'ls /gh/docs')
-      expect(gh.counts()).toEqual([2, 1, 0])
       await out(w, `stat ${PATH}`)
-      expect(gh.counts()).toEqual([2, 1, 0])
+      expect(gh.counts()).toEqual([0, 1, 0])
     } finally {
       await w.close()
     }
@@ -333,12 +335,11 @@ describe('github cannot-see versus gone', () => {
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
-      // Only the one-directory route refuses: deferring on 401 would walk the
-      // tree, which answers, and hide the refusal.
+      // A refused token refuses every route: the read fails with the refusal,
+      // and the refusal never reads as the file gone.
       gh.fail.set('dir', [401, 'Bad credentials'])
-      gh.log.length = 0
+      gh.fail.set('recursive', [401, 'Bad credentials'])
       expect(await fails(w, `cat ${PATH}`)).toBe('cat: Bad credentials\n')
-      expect(gh.count('recursive')).toBe(0)
       expect(kept(w)).toBe(true)
     } finally {
       await w.close()
@@ -369,11 +370,10 @@ describe('github cannot-see versus gone', () => {
       gh.log.length = 0
       expect(await fails(w, `cat ${PATH}`)).toBe(`cat: ${PATH}: No such file or directory\n`)
       expect(w.namespace.metaFor(PATH) ?? null).toBeNull()
-      // The probe and cat's own stat each answer absent from one listing of
-      // docs/; the single walk is the generic adapter asking whether the path
-      // is an implicit directory after that ENOENT. A probe that deferred on
-      // the complete listing would walk once more.
-      expect(gh.counts()).toEqual([2, 1, 0])
+      // The probe answers absent from one listing of docs/ and drops the
+      // stale row; cat's own stat then lists its way there once, and that
+      // tree names the file absent too.
+      expect(gh.counts()).toEqual([1, 1, 0])
     } finally {
       await w.close()
     }

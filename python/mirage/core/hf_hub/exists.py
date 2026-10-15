@@ -13,28 +13,23 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.hf_hub import HfHubAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.hf_hub.stat import stat
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def exists(
     accessor: HfHubAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
 ) -> bool:
-    """Whether anything exists at a path.
+    """Whether anything exists at a path: the mount root, or a path its
+    folder's listing names.
 
     Args:
         accessor (HfHubAccessor): backend handle.
         path (PathSpec): the path to probe.
-        index (IndexCacheStore): the mount's index.
+        entry (FileStat | None): the path's row.
 
     Returns:
         bool: True for a file or a directory, False for an absence.
     """
-    try:
-        await stat(accessor, path, index)
-    except FileNotFoundError:
-        return False
-    return True
+    return not path.mount_path.strip("/") or entry is not None

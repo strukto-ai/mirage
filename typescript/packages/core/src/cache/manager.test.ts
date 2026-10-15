@@ -591,6 +591,33 @@ describe('which version check a mount remembers', () => {
     expect(asked).toEqual(['V4'])
   })
 
+  // A listing stored at V1 that the backend answered V2 for stays refused
+  // inside the window: nothing about that listing changed, so asking again
+  // would only repeat the answer. Another stored version, or the same one
+  // past the window, is asked.
+  it('refuses a listing a recent answer refused without asking', async () => {
+    const clock = shiftPerformanceNow()
+    const manager = new CacheManager(
+      new RAMFileCacheStore(),
+      new RAMIndexCacheStore({ ttl: 600 }),
+      '/data/',
+      true,
+    )
+    const asked: string[] = []
+    const answer = (version: string) => (): Promise<string> => {
+      asked.push(version)
+      return Promise.resolve(version)
+    }
+    expect(await manager.checkedVersion('/data', 'V1', answer('V2'))).toBe('V2')
+    expect(await manager.checkedVersion('/data', 'V1', answer('V3'))).toBe('V2')
+    expect(asked).toEqual(['V2'])
+    expect(await manager.checkedVersion('/data', 'V0', answer('V4'))).toBe('V4')
+    expect(asked).toEqual(['V2', 'V4'])
+    clock.advance(LISTING_TRUST_WINDOW * 1000 + 10)
+    expect(await manager.checkedVersion('/data', 'V0', answer('V5'))).toBe('V5')
+    expect(asked).toEqual(['V2', 'V4', 'V5'])
+  })
+
   // A check serves only a caller inside its window, so once the map is full
   // the stale entries are dead weight; dropping one costs at most another
   // check, never a stale listing.

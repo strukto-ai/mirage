@@ -198,7 +198,9 @@ async def test_a_glob_arriving_mid_refill_still_answers(monkeypatch):
             assert globbed == b"/gh/docs/a.txt /gh/docs/b.txt\n"
             release.set()
             assert await asyncio.wait_for(first, 5) == LISTED
-            assert hub.counts() == (0, 2, 0)
+            # The first ls kept its listing before the wipe it waits in, so
+            # the glob answers from it.
+            assert hub.counts() == (0, 1, 0)
         finally:
             release.set()
             await asyncio.gather(

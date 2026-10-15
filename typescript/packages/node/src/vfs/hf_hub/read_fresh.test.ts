@@ -21,7 +21,7 @@ import { ContentDriftError } from '@struktoai/mirage-core/workspace/snapshot/dri
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
-import { FakeHub, blobOid, serveHub } from '../../core/hf_hub/_test_util.ts'
+import { FakeHub, blobOid, rowAt, serveHub } from '../../core/hf_hub/_test_util.ts'
 import { read } from '../../core/hf_hub/read.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
@@ -75,7 +75,6 @@ describe('hf_hub under read: fresh', () => {
       expect(await out(w, 'cat /m/a.txt')).toEqual(NEW)
       // The fixture held: the listing was OLD's, and the cached copy carries
       // no token rather than OLD's oid.
-      expect((vfs.accessor as HfHubAccessor).treeLoaded).toBe(true)
       expect(await w.cache.isFresh('/m/a.txt', blobOid(OLD))).toBe(false)
       fake.files().set('a.txt', OLD)
       let before = fake.count('resolve')
@@ -235,10 +234,10 @@ describe('hf_hub snapshot pins', () => {
     const fake = await hub({ 'a.txt': OLD })
     const state = await pinnedState(fake)
     fake.files().set('a.txt', NEW)
-    const walks = fake.count('tree')
+    fake.log.length = 0
     await expect(load(state, await vfsOf(fake))).rejects.toBeInstanceOf(ContentDriftError)
-    // A restored mount has not loaded its tree, so the check walks it.
-    expect(fake.count('tree')).toBeGreaterThan(walks)
+    // The check asks for the one path rather than walking the tree.
+    expect([fake.count('paths_info'), fake.count('tree')]).toEqual([1, 0])
   })
 
   it('pins nothing for an unverified read', async () => {
@@ -254,7 +253,7 @@ describe('hf_hub snapshot pins', () => {
   it('does not call a refused drift check drift', async () => {
     const fake = await hub({ 'a.txt': OLD })
     const state = await pinnedState(fake)
-    fake.fail.set('tree', [401, ''])
+    fake.fail.set('paths_info', [401, ''])
     const err = await load(state, await vfsOf(fake)).catch((e: unknown) => e)
     expect((err as { code?: string }).code).toBe('EACCES')
   })
@@ -266,8 +265,7 @@ describe('hf_hub snapshot pins', () => {
     try {
       await out(w, 'cat /m/a.txt')
       const state = await toStateDict(w)
-      // The live mount is handed over, so it has loaded its tree and the check
-      // asks for the one path rather than walking again.
+      // The check asks for the one path rather than walking again.
       fake.files().set('a.txt', NEW)
       fake.log.length = 0
       await expect(load(state, vfs)).rejects.toBeInstanceOf(ContentDriftError)
@@ -342,8 +340,10 @@ describe('hf_hub ranged read', () => {
     let data: Uint8Array
     let records: { fingerprint: string | null }[]
     try {
+      const accessor = vfs.accessor as HfHubAccessor
+      const row = await rowAt(accessor, spec)
       ;[data, records] = await runWithRecording(() =>
-        read(vfs.accessor as HfHubAccessor, spec, undefined, { offset: 2, size: 3 }),
+        read(accessor, spec, { offset: 2, size: 3 }, row),
       )
     } finally {
       await vfs.close()

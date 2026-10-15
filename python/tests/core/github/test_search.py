@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.api.client import ApiResponse
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.search import (
@@ -658,9 +657,7 @@ async def test_a_binary_the_walk_skips_does_not_count_to_the_cap(monkeypatch):
         assert hub.count("search") == 1
 
 
-async def _load_truncated(
-    accessor: GitHubAccessor, index: RAMIndexCacheStore, prefix: str
-) -> None:
+async def _load_truncated(accessor: GitHubAccessor) -> None:
     accessor.tree = {"src/a.py": _blob("src/a.py", 10)}
     accessor.truncated = True
 
@@ -677,7 +674,7 @@ async def test_files_containing_judges_the_tree_it_loads(
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
     accessor = _accessor(config, {})
     out = await files_containing(
-        accessor, RAMIndexCacheStore(), "needle", [PathSpec.from_str_path("/")]
+        accessor, "needle", [PathSpec.from_str_path("/")]
     )
     assert out is None
     mock_search.assert_not_awaited()

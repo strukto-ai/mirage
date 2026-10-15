@@ -12,38 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { listingError } from '@struktoai/mirage-core/errors/fs'
-import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import type { DirListing, PathSpec } from '@struktoai/mirage-core/types'
+import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
-import { keyOf, lookup, probeDir, probeFile, refusalsDenied } from './lookup.ts'
+import { refusalsDenied } from './lookup.ts'
+import { headCommit, mountVersion } from './repo.ts'
+import { fetchTree, treeListing } from './tree.ts'
 
 /**
- * List one directory of the repository.
+ * A folder's listing, with every folder below it as seeds.
  *
- * Answers in mount-absolute paths, the way the index keys them.
+ * One paged walk answers the whole repository, at the commit the revision's
+ * head names: the head first, and the tree walked at that commit, so the
+ * version the listing carries is the one its rows are at, never a later one a
+ * commit landing between the two requests would give. A Hub that names no
+ * head walks the branch and versions nothing. Mirrors Python's `readdir`.
  */
-export async function readdir(
-  accessor: HfHubAccessor,
-  pathSpec: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.vfsPath)
-  const target = pathSpec.pattern === null ? pathSpec : pathSpec.dir
-  const path = target.mountPath
-  return refusalsDenied(pathSpec, async () => {
-    const found = await lookup(accessor, index, prefix, keyOf(prefix, path))
-    if (found.children !== null) return found.children
-    // A git tree implies every directory above a path it holds, so this store
-    // cannot hold an orphan and the one-probe form is the right one; both
-    // probes are map lookups against a listing already in memory, so the walk
-    // costs no requests.
-    throw await listingError(
-      pathSpec,
-      path,
-      (p: string) => probeFile(accessor, index, prefix, p),
-      (p: string) => probeDir(accessor, index, prefix, p),
-    )
+export async function readdir(accessor: HfHubAccessor, pathSpec: PathSpec): Promise<DirListing> {
+  const rel = stripSlash((pathSpec.pattern === null ? pathSpec : pathSpec.dir).mountPath)
+  const [head, tree] = await refusalsDenied(pathSpec, async () => {
+    const found = (await headCommit(accessor)) || null
+    return [found, await fetchTree(accessor, found ?? undefined)] as const
   })
+  return treeListing(tree, rel, mountVersion(head, accessor.keyPrefix), pathSpec.virtual)
 }

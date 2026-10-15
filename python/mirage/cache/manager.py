@@ -112,6 +112,7 @@ class CacheManager:
         self._may_serve_listing = may_serve_listing
         self._written: dict[str, tuple[int, float, int | None]] = {}
         self._checked: dict[str, tuple[str, int, float]] = {}
+        self._refused: dict[str, tuple[str, int]] = {}
         self._checking: dict[
             str, tuple[int, float, asyncio.Task[str | None]]
         ] = {}
@@ -257,6 +258,11 @@ class CacheManager:
             for key, checked in self._checked.items()
             if self._sent_recently(checked[1], checked[2])
         }
+        self._refused = {
+            key: refused
+            for key, refused in self._refused.items()
+            if key in self._checked and self._checked[key][1] == refused[1]
+        }
         self._check_bound = max(CHECKED_LIMIT, 2 * len(self._checked))
 
     def _forget_checks(self) -> None:
@@ -264,6 +270,7 @@ class CacheManager:
         # none of them says anything about the new one. The first view has
         # no old store, and a check may be what builds it.
         self._checked.clear()
+        self._refused.clear()
         self._checking.clear()
         self._check_epoch += 1
 
@@ -296,9 +303,10 @@ class CacheManager:
         that is recent enough is shared, and only then is a new one sent;
         the newest in flight is the one later callers find. A remembered
         answer that differs from ``stored`` is asked again rather than
-        trusted, since the listing may have been written since. The shared
-        check is shielded, so one caller's cancellation never reaches the
-        others.
+        trusted, since the listing may have been written since, unless that
+        answer already refused this same ``stored``: nothing about that
+        listing changed. The shared check is shielded, so one caller's
+        cancellation never reaches the others.
 
         Args:
             key (str): what the version covers: the mount root, or a folder.
@@ -309,14 +317,21 @@ class CacheManager:
         checked = self._checked.get(key)
         if (
             checked is not None
-            and checked[0] == stored
             and self._sent_recently(checked[1], checked[2])
+            and (
+                checked[0] == stored
+                or self._refused.get(key) == (stored, checked[1])
+            )
         ):
             return checked[0]
         flight = self._checking.get(key)
         if flight is None or not self._sent_recently(flight[0], flight[1]):
             flight = self._send_check(key, check)
-        return await asyncio.shield(flight[2])
+        version = await asyncio.shield(flight[2])
+        checked = self._checked.get(key)
+        if version != stored and checked is not None and checked[0] == version:
+            self._refused[key] = (stored, checked[1])
+        return version
 
     def _send_check(
         self, key: str, check: Callable[[], Awaitable[str | None]]

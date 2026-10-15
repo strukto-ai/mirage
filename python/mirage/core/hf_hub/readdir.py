@@ -12,55 +12,39 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.hf_hub import HfHubAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.hf_hub.lookup import (
-    key_of,
-    lookup,
-    probe_dir,
-    probe_file,
-    refusals_denied,
-)
-from mirage.errors.fs import listing_error
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.core.hf_hub.lookup import refusals_denied
+from mirage.core.hf_hub.repo import head_commit, mount_version
+from mirage.core.hf_hub.tree import fetch_tree, tree_listing
+from mirage.types import DirListing, PathSpec
 
 
-async def readdir(
-    accessor: HfHubAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    """List one directory of the repository.
+async def readdir(accessor: HfHubAccessor, path_spec: PathSpec) -> DirListing:
+    """A folder's listing, with every folder below it as seeds.
+
+    One paged walk answers the whole repository, at the commit the
+    revision's head names: the head first, and the tree walked at that
+    commit, so the version the listing carries is the one its rows are
+    at, never a later one a commit landing between the two requests
+    would give. A Hub that names no head walks the branch and versions
+    nothing.
 
     Args:
         accessor (HfHubAccessor): backend handle.
-        path_spec (PathSpec): the directory to list.
-        index (IndexCacheStore): the mount's index, which holds the whole
-            listing rather than a cache in front of one.
-
-    Returns:
-        list[str]: mount-absolute paths of the directory's children.
+        path_spec (PathSpec): the folder, or a glob word in it.
 
     Raises:
-        FileNotFoundError: no component of the path exists.
-        NotADirectoryError: the path, or a component of it, is a file.
+        FileNotFoundError: nothing is at the path.
+        NotADirectoryError: the path, or a folder above it, is a file.
+        PermissionError: the Hub declined to show the repository.
     """
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
-    path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
+    rel = (path_spec.dir if path_spec.pattern else path_spec).mount_path
     with refusals_denied(path_spec):
-        found = await lookup(accessor, index, prefix, key_of(prefix, path))
-        if found.children is not None:
-            return found.children
-        # A git tree implies every directory above a path it holds, so this
-        # store cannot hold an orphan and the one-probe form is the right
-        # one; both probes are dictionary lookups against a listing
-        # already in memory, so the walk costs no requests.
-        raise await listing_error(
-            path_spec,
-            path,
-            partial(probe_file, accessor, index, prefix),
-            partial(probe_dir, accessor, index, prefix),
-        )
+        head = await head_commit(accessor) or None
+        tree = await fetch_tree(accessor, head)
+    return tree_listing(
+        tree,
+        rel.strip("/"),
+        mount_version(head, accessor.key_prefix),
+        path_spec.virtual,
+    )

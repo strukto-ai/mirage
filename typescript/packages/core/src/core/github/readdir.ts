@@ -12,171 +12,43 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { listingRefreshed } from '../../cache/context.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import { LookupStatus } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
-import { type GitHubTreeItem } from './client.ts'
-import { fetchDirTree } from './tree.ts'
-import { ensureLiveSnapshot, refillSnapshot } from './tree.ts'
-import { withIndexLock } from '../../cache/index/lock.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { enoent } from '../../errors/fs.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import { enoent, enotdir } from '../../errors/fs.ts'
+import { DirListing, FileType, type FileStat, type PathSpec } from '../../types.ts'
+import { stripSlash } from '../../utils/slash.ts'
+import { fetchDirTree, refreshTree, rowOf, treeListing } from './tree.ts'
+import { makeTreeEntry } from './tree_entry.ts'
 
-function stripPrefix(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  let p = path.pattern !== null ? path.directory : path.virtual
-  if (prefix !== '' && p.startsWith(prefix)) {
-    p = p.slice(prefix.length) || '/'
-  }
-  return p
-}
-
+/**
+ * A folder's listing, with every folder below it as seeds.
+ *
+ * One recursive tree answers the whole repository at the head it names, so
+ * the listing carries that head as its version. A tree GitHub truncated names
+ * only some paths; the folder is then read from its own tree, by the sha its
+ * row carries, and once a mount has seen its tree truncated it asks no
+ * recursive tree again.
+ *
+ * Mirrors Python's `readdir`.
+ *
+ * Throws:
+ *   NotADirectoryError: a file is at the path.
+ *   FileNotFoundError: nothing is.
+ */
 export async function readdir(
   accessor: GitHubAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  if (index === undefined) return readdirUnlocked(accessor, path, index)
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  return withIndexLock(index, rstripSlash(prefix) || '/', () =>
-    readdirUnlocked(accessor, path, index),
-  )
-}
-
-/** Caller holds the mount's index lock through its final lookup. */
-export async function readdirUnlocked(
-  accessor: GitHubAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  if (index === undefined) {
-    throw enoent(path.virtual)
+  entry?: FileStat | null,
+): Promise<DirListing> {
+  const rel = stripSlash((path.pattern !== null ? path.dir : path).mountPath)
+  if (!accessor.truncated) {
+    const tree = await refreshTree(accessor)
+    if (tree !== null) return treeListing(tree, rel, accessor.treeVersion, path.virtual)
   }
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const rel = stripSlash(stripPrefix(path))
-  const key =
-    rel === '' ? (prefix === '' ? '/' : rstripSlash(prefix)) : `${rstripSlash(prefix)}/${rel}`
-
-  let refilled = await ensureLiveSnapshot(accessor, index, prefix)
-  let listing = await index.listDir(key)
-  // The index is the whole listing here, not a cache in front of one, so an
-  // *expired* answer means the tree aged out, not that the path is gone.
-  // Refetch once and ask again. A NOT_FOUND against a live index is a real
-  // absence and must not cost a tree fetch: refilling on any miss spends a
-  // recursive-tree call on every ENOENT.
-  if (listing.status === LookupStatus.EXPIRED && !accessor.truncated && refilled === null) {
-    refilled = await refillSnapshot(accessor, index, prefix)
-    if (refilled !== null) listing = await index.listDir(key)
-  }
-  if (listing.entries !== undefined && listing.entries !== null) {
-    return listing.entries
-  }
-  if (
-    accessor.truncated &&
-    (listing.status === LookupStatus.NOT_FOUND || listing.status === LookupStatus.EXPIRED)
-  ) {
-    return fallbackReaddir(accessor, key, index, prefix)
-  }
-  // A lock wait can outlast the TTL; use this refill only on EXPIRED.
-  if (refilled !== null && listing.status === LookupStatus.EXPIRED) {
-    refilled = index.scopeSnapshot(refilled)
-    const children = refilled.children.get(key)
-    if (children === undefined) throw enoent(path)
-    return [...children]
-  }
-  if (listing.status === LookupStatus.NOT_FOUND) throw enoent(path)
-  return []
-}
-
-async function fallbackReaddir(
-  accessor: GitHubAccessor,
-  key: string,
-  index: IndexCacheStore,
-  prefix: string,
-): Promise<string[]> {
-  const parentSha = await resolveDirSha(accessor, key, index, prefix)
-  if (parentSha === null) throw enoent(key)
-  const entries = await fetchDirTree(accessor.transport, accessor.owner, accessor.repo, parentSha)
-  return cacheDir(index, key, entries)
-}
-
-// Cache one complete tree listing, including each traversed parent.
-async function cacheDir(
-  index: IndexCacheStore,
-  key: string,
-  entries: GitHubTreeItem[],
-): Promise<string[]> {
-  const childKeys: string[] = []
-  const childEntries: [string, IndexEntry][] = []
-  for (const e of entries) {
-    const childKey = `${key === '/' ? '' : key}/${e.path}`
-    childKeys.push(childKey)
-    // setDir composes the child key as parent + '/' + name, so the tuple
-    // carries the bare entry name, not the full path (mirrors python).
-    childEntries.push([
-      e.path,
-      new IndexEntry({
-        id: e.sha,
-        name: e.path,
-        vfsName: e.path,
-        resourceType: e.type === 'tree' ? 'folder' : 'file',
-        size: e.size ?? null,
-      }),
-    ])
-  }
-  childKeys.sort(compareCodePoints)
-  await index.setDir(key, childEntries)
-  return childKeys
-}
-
-async function resolveDirSha(
-  accessor: GitHubAccessor,
-  key: string,
-  index: IndexCacheStore,
-  prefix: string,
-): Promise<string | null> {
-  // Cached directory SHAs may belong to an older branch head, even when
-  // their parent listing is still fresh. Resolve the path from the ref.
-  const stem = rstripSlash(prefix)
-  const rest = stem !== '' && key.startsWith(stem) ? key.slice(stem.length) : key
-  const parts = stripSlash(rest)
-    .split('/')
-    .filter((p) => p !== '')
-  let currentSha = accessor.ref
-  let currentPath = stem || '/'
-  for (const part of parts) {
-    const childPath = `${currentPath === '/' ? '' : currentPath}/${part}`
-    if (listingRefreshed(currentPath)) {
-      const listing = await index.listDir(currentPath)
-      if (listing.entries?.includes(childPath)) {
-        const cached = (await index.get(childPath)).entry
-        if (cached?.resourceType === 'folder') {
-          currentSha = cached.id
-          currentPath = childPath
-          continue
-        }
-      }
-    }
-    const entries = await fetchDirTree(
-      accessor.transport,
-      accessor.owner,
-      accessor.repo,
-      currentSha,
-    )
-    const found = entries.find((e) => e.path === part)
-    if (found?.type !== 'tree') {
-      // Remove the former directory before caching a replacement blob.
-      await index.invalidatePrefix(childPath)
-    }
-    await cacheDir(index, currentPath, entries)
-    if (found?.type !== 'tree') return null
-    currentSha = found.sha
-    currentPath = childPath
-  }
-  return currentSha
+  let sha: string
+  if (rel === '') sha = accessor.ref
+  else if (entry === undefined || entry === null) throw enoent(path.virtual)
+  else if (entry.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
+  else sha = entry.extra.sha as string
+  const rows = await fetchDirTree(accessor.transport, accessor.owner, accessor.repo, sha)
+  return new DirListing({ entries: rows.map((row) => rowOf(makeTreeEntry(row), row.path)) })
 }

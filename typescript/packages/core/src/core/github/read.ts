@@ -13,23 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, recordStream, startOp } from '../../observe/context.ts'
-import { type PathSpec, VFSName } from '../../types.ts'
+import { FileType, type FileStat, type PathSpec, VFSName } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { fetchBlob, streamBlob } from './client.ts'
-import { locate, lookupRetrying } from './lookup.ts'
 
 /**
  * Read a file's blob and record the sha it was fetched by.
  *
- * The sha comes from the mount's listing, filling it if a verdict cleared
- * it, never from a one-directory probe: a read reseeds the listing so the
- * stats after it answer from the index again. The blob endpoint is
- * content-addressed, so the recorded sha names exactly the bytes returned
- * however old the listing is. That is also the documented limit of
- * `read: fresh` here: a file read for the first time comes from the
+ * The sha comes from the file's row, as its folder's listing names it. The
+ * blob endpoint is content-addressed, so the recorded sha names exactly the
+ * bytes returned however old the listing is. That is also the documented
+ * limit of `read: fresh` here: a file read for the first time comes from the
  * listing, and the next read's probe corrects it.
  *
  * Mirrors Python's `read`.
@@ -37,51 +33,39 @@ import { locate, lookupRetrying } from './lookup.ts'
 export async function read(
   accessor: GitHubAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): Promise<Uint8Array> {
-  const entry = await blobEntry(accessor, path, index)
+  const sha = blobSha(path, entry)
   const timer = startOp()
-  const data = await fetchBlob(accessor.transport, accessor.owner, accessor.repo, entry.id)
-  record('read', path.virtual, VFSName.GITHUB, data.length, timer, { fingerprint: entry.id })
+  const data = await fetchBlob(accessor.transport, accessor.owner, accessor.repo, sha)
+  record('read', path.virtual, VFSName.GITHUB, data.length, timer, { fingerprint: sha })
   return data
 }
 
 /**
  * Stream a file's blob as it downloads, recorded by its sha. The blob comes
  * as GitHub's raw media type, the bytes themselves rather than base64 inside
- * JSON. The sha is found as `read` finds it and recorded up front: the blob
- * endpoint is content-addressed, so it names the bytes however far the stream
- * is read. Mirrors Python's `read_stream`.
+ * JSON. The sha is the row's, as `read` takes it, and recorded up front: the
+ * blob endpoint is content-addressed, so it names the bytes however far the
+ * stream is read. Mirrors Python's `read_stream`.
  */
 export async function* readStream(
   accessor: GitHubAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): AsyncGenerator<Uint8Array, void> {
-  const entry = await blobEntry(accessor, path, index)
-  const rec = recordStream('read', path.virtual, VFSName.GITHUB, { fingerprint: entry.id })
-  for await (const chunk of streamBlob(
-    accessor.transport,
-    accessor.owner,
-    accessor.repo,
-    entry.id,
-  )) {
+  const sha = blobSha(path, entry)
+  const rec = recordStream('read', path.virtual, VFSName.GITHUB, { fingerprint: sha })
+  for await (const chunk of streamBlob(accessor.transport, accessor.owner, accessor.repo, sha)) {
     if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }
 }
 
-/** The listing entry of the file at `path`. Mirrors Python's `_blob_entry`. */
-async function blobEntry(
-  accessor: GitHubAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<IndexEntry> {
-  const { prefix, rel, key } = locate(path)
-  if (rel === '') throw eisdir(path.virtual)
-  if (index === undefined) throw enoent(path)
-  const { entry } = await lookupRetrying(accessor, index, prefix, key)
-  if (entry === null) throw enoent(path)
-  if (entry.resourceType === 'folder') throw eisdir(path.virtual)
-  return entry
+/** The blob sha of the file at `path`, off its row. Mirrors Python's `_blob_sha`. */
+function blobSha(path: PathSpec, entry: FileStat | null | undefined): string {
+  if (stripSlash(path.mountPath) === '') throw eisdir(path.virtual)
+  if (entry === undefined || entry === null) throw enoent(path.virtual)
+  if (entry.type === FileType.DIRECTORY) throw eisdir(path.virtual)
+  return entry.extra.sha as string
 }

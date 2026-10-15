@@ -12,59 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
 import { ListingCheckStore } from '@struktoai/mirage-core/cache/index/ram'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
-import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
-import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { HfHubError } from './client.ts'
-import { dirStatEntry, keyOf, lookupRetrying, pointLookup, refusalsDenied } from './lookup.ts'
+import { refusalsDenied } from './lookup.ts'
 import { headCommit, mountVersion } from './repo.ts'
+import { fetchPath, rowOf } from './tree.ts'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /**
- * Render one tree row as a FileStat.
+ * Stat one path in the repository.
  *
- * Size is the row's, which is the Hub's *content* length even for an LFS
- * file; the 135-byte pointer never reaches here. Reporting the pointer would
- * make `wc -c` and `ls -l` lie and risk truncated copies over FUSE.
- *
- * `modified` is null unless the mount asked for commit expansion: a Hub file's
- * only mtime is the commit that last touched it, and stamping the
- * repository's own lastModified onto every file would be a confident lie about
- * files that commit never touched.
+ * A path answers with its row, as its folder's listing names it. The gate's
+ * check is handed no listed row, so it asks for the one path with one
+ * paths-info request rather than walking the whole tree; its row carries the
+ * oid a tree row does. Mirrors Python's `stat`.
  */
-function statOf(entry: IndexEntry): FileStat {
-  const modified = entry.remoteTime === '' ? null : entry.remoteTime
-  if (entry.resourceType === 'folder') {
-    return new FileStat({ name: entry.name, type: FileType.DIRECTORY, modified })
-  }
-  return new FileStat({
-    name: entry.name,
-    size: entry.size ?? null,
-    modified,
-    // A file's FileType *is* its content type here; there is no FILE member,
-    // so the extension decides, exactly as every other backend spells it.
-    type: FileType.FILE,
-    content: contentTypeForPath(entry.name),
-    // git is content-addressed, so the object id is the strongest fingerprint
-    // any backend here has: identical bytes carry an identical oid, and a
-    // rewrite that changed nothing correctly reports nothing.
-    fingerprint: entry.id || null,
-    extra: { ...entry.extra },
-  })
-}
-
 export async function stat(
   accessor: HfHubAccessor,
   pathSpec: PathSpec,
+  entry?: FileStat | null,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.vfsPath)
   const rel = stripSlash(pathSpec.mountPath)
   if (rel === '') {
     return new FileStat({
@@ -73,20 +46,11 @@ export async function stat(
       fingerprint: await rootVersion(accessor, index),
     })
   }
-  const key = keyOf(prefix, rel)
-  // A probe through a throwaway index asks for this one path; everything else
-  // answers from the mount's listing, loading it if need be.
-  const found = await refusalsDenied(
-    pathSpec,
-    async () =>
-      (await pointLookup(accessor, index, prefix, rel)) ??
-      (await lookupRetrying(accessor, index, prefix, key)),
-  )
-  if (found.entry !== null) return statOf(found.entry)
-  // A directory the tree implies but has no row of its own for still exists,
-  // which is what a listing at the key proves.
-  if (found.children !== null) return statOf(dirStatEntry(key))
-  throw enoent(pathSpec.virtual)
+  if (entry !== undefined && entry !== null) return entry
+  if (!(index instanceof ListingCheckStore)) throw enoent(pathSpec.virtual)
+  const found = (await refusalsDenied(pathSpec, () => fetchPath(accessor, rel))).get(rel)
+  if (found === undefined) throw enoent(pathSpec.virtual)
+  return rowOf(found, rel.slice(rel.lastIndexOf('/') + 1))
 }
 
 /**

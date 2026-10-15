@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.cache.index.config import IndexEntry
+from mirage.cache.index.config import IndexEntry, IndexRow
 from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.observe.record import (
     CONTENT_CHANGING_OPS,
@@ -423,8 +423,8 @@ def test_an_empty_fingerprint_beside_a_revision_still_pins():
 
 
 def test_a_drift_check_offers_no_hints():
-    # A restored index's ids are no lead for drift: the scratch store it
-    # stats through is not a hinting ListingCheckStore.
+    # A restored index's ids are no lead for drift: the check store it
+    # stats through offers no hint.
     restored = RAMIndexCacheStore()
     asyncio.run(
         restored.set_dir(
@@ -437,12 +437,12 @@ def test_a_drift_check_offers_no_hints():
             ],
         )
     )
-    seen: list[bool] = []
+    seen: list[IndexRow | None] = []
 
     async def call(op, path, index):
         assert (await restored.get("/m/a.txt")).entry is not None
-        assert isinstance(index, RAMIndexCacheStore)
-        seen.append(isinstance(index, ListingCheckStore))
+        assert isinstance(index, ListingCheckStore)
+        seen.append(await index.hint("/m/a.txt"))
         return FileStat(name="a.txt", type=FileType.FILE, fingerprint="t")
 
     mount = SimpleNamespace(
@@ -453,4 +453,4 @@ def test_a_drift_check_offers_no_hints():
         call=call,
     )
     asyncio.run(check_drift(lambda _p: mount, "/m/a.txt", "t"))
-    assert seen == [False]
+    assert seen == [None]

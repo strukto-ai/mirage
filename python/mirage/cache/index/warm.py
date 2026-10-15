@@ -94,9 +94,13 @@ async def entry_or_listed_miss(
             return hit.entry
         if warm is None:
             return None
-        if listing.status == LookupStatus.EXPIRED:
+        if listing.status == LookupStatus.EXPIRED or (
+            listing.entries is not None and hit.entry is None
+        ):
             # Retained metadata is not proof of existence. Drop old children
-            # before warming, even when a partial listing only puts rows.
+            # before warming, even when a partial listing only puts rows. A
+            # live listing that names the key with no row lost it to
+            # eviction, so it is listed again too.
             await index.invalidate_dir(parent)
         if hit.entry is not None:
             # Partial listings can leave untracked rows that invalidate_dir

@@ -28,27 +28,29 @@ import type * as GoogleClientModule from '@struktoai/mirage-core/core/google/cli
 import type * as JsonRenderModule from '@struktoai/mirage-core/core/render/json'
 import type { Accessor } from '@struktoai/mirage-core/accessor/base'
 import type { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
+import { ListingCheckStore, RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
 import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive } from '@struktoai/mirage-core/observe/context'
 import { DirListing, type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as boxReaddir } from '@struktoai/mirage-core/core/box/readdir'
+import { readdir as githubReaddir } from '@struktoai/mirage-core/core/github/readdir'
 import { readdir as dropboxReaddir } from '@struktoai/mirage-core/core/dropbox/readdir'
 import type { DropboxVFS } from '@struktoai/mirage-core/vfs/dropbox/dropbox'
 import { readdir as gdriveReaddir } from '@struktoai/mirage-core/core/gdrive/readdir'
 import type { BoxVFS } from '@struktoai/mirage-core/vfs/box/box'
+import type { GitHubVFS } from '@struktoai/mirage-core/vfs/github/github'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { GridFSAccessor } from '../accessor/gridfs.ts'
 import type { HfBucketsAccessor } from '../accessor/hf_buckets.ts'
-import type { HfHubAccessor } from '../accessor/hf_hub.ts'
 import { fakeHfOperator } from '../core/hf_buckets/mock.ts'
 import { FakeHub, blobOid, serveHub, xetHash } from '../core/hf_hub/_test_util.ts'
+import { readdir as hfReaddir } from '../core/hf_hub/readdir.ts'
+import type { HfHubVFS } from './hf_hub/base.ts'
 import {
   DRIVE_ID,
   DRIVE_NAME,
@@ -649,15 +651,24 @@ interface Fake {
 // workspace reads it here rather than off the driver.
 const OWN_INDEX = new WeakMap<BaseVFS, IndexCacheStore>()
 
-// The store `vfs`'s mount runs under, or one kept for direct calls made
-// before any workspace placed it.
-function ownIndex(vfs: BaseVFS): IndexCacheStore {
-  let store = OWN_INDEX.get(vfs)
-  if (store === undefined) {
-    store = new RAMIndexCacheStore({ ttl: vfs.indexTtl })
-    OWN_INDEX.set(vfs, store)
-  }
-  return store
+// What a tree walk on a throwaway store reached, for a backend whose one
+// listing is the whole tree. A listing kept is the one sign of a walk: in the
+// mount's own index a cold read keeps one legitimately; in any other store it
+// is the reconcile probe walking the tree. Mirrors python's `_watch_walks`.
+function watchWalks(vfs: BaseVFS): void {
+  // The original, taken before the spy replaces it and typed with its `this`,
+  // so the spy can forward to it for every store.
+  const setDir = Object.getOwnPropertyDescriptor(RAMIndexCacheStore.prototype, 'setDir')?.value as (
+    this: RAMIndexCacheStore,
+    ...args: Parameters<RAMIndexCacheStore['setDir']>
+  ) => ReturnType<RAMIndexCacheStore['setDir']>
+  vi.spyOn(RAMIndexCacheStore.prototype, 'setDir').mockImplementation(function (
+    this: RAMIndexCacheStore,
+    ...args: Parameters<RAMIndexCacheStore['setDir']>
+  ) {
+    if (this !== OWN_INDEX.get(vfs)) H.reach.push('tree walk on a throwaway index')
+    return setDir.apply(this, args)
+  })
 }
 
 function slotOf(fake: Fake, row: Row): string {
@@ -851,23 +862,17 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       ref: 'main',
       base_url: gh.url,
     })
-    const accessor = vfs.accessor as GitHubAccessor
+    const ghVfs = vfs as GitHubVFS
+    const accessor = ghVfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
-    const invalidate = Object.getOwnPropertyDescriptor(
-      RAMIndexCacheStore.prototype,
-      'invalidatePrefix',
-    )?.value as (this: RAMIndexCacheStore, path: string) => Promise<void>
-    vi.spyOn(RAMIndexCacheStore.prototype, 'invalidatePrefix').mockImplementation(function (
-      this: RAMIndexCacheStore,
-      path: string,
-    ) {
-      if (this !== OWN_INDEX.get(vfs)) H.reach.push('tree walk on a throwaway index')
-      return invalidate.call(this, path)
-    })
+    watchWalks(vfs)
     const blobs = (): number => gh.log.filter((r) => r === 'blob').length
     const before = blobs()
-    // github's stat has nothing to answer from without an index, so the
-    // direct calls pass the mount's.
+    // The tree's rows carry each blob sha, so each direct call is handed the
+    // row its parent's listing names, as the mount hands it.
+    const handed = async (p: PathSpec): Promise<Handed> => ({
+      entry: await entryAt(githubReaddir, accessor, p),
+    })
     return {
       vfs,
       accessor,
@@ -876,9 +881,11 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         gh.files.set(key, next)
       },
-      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, ownIndex(vfs)),
-      readStream: (p) => commandIo(vfs).readStream(accessor, p, ownIndex(vfs)),
-      stat: (p) => commandIo(vfs).stat(accessor, p, ownIndex(vfs)),
+      readBytes: async (p) => ghVfs.read(p, await handed(p)),
+      readStream: async function* (p) {
+        yield* ghVfs.readStream(p, await handed(p))
+      },
+      stat: async (p) => ghVfs.stat(p, await handed(p)),
       streamSlot: 'stream',
     }
   }
@@ -1042,26 +1049,17 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       endpoint: hub.url,
       ...(prefix === null ? {} : { key_prefix: prefix }),
     })
-    const accessor = vfs.accessor as HfHubAccessor
+    const hfVfs = vfs as HfHubVFS
+    const accessor = hfVfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
     expect(accessor.keyPrefix).toBe(prefix ?? '')
-    // A whole-tree refill is the one thing that invalidates a store's prefix.
-    // On the mount's own index a cold read does it legitimately; on any other
-    // store it is the reconcile probe walking the tree.
-    // The original, taken before the spy replaces it and typed with its `this`,
-    // so the spy can forward to it for every store.
-    const invalidate = Object.getOwnPropertyDescriptor(
-      RAMIndexCacheStore.prototype,
-      'invalidatePrefix',
-    )?.value as (this: RAMIndexCacheStore, path: string) => Promise<void>
-    vi.spyOn(RAMIndexCacheStore.prototype, 'invalidatePrefix').mockImplementation(function (
-      this: RAMIndexCacheStore,
-      path: string,
-    ) {
-      if (this !== OWN_INDEX.get(vfs)) H.reach.push('tree walk on a throwaway index')
-      return invalidate.call(this, path)
-    })
+    watchWalks(vfs)
     const before = hub.count('resolve')
+    // The tree's rows carry each oid, so each direct call is handed the row
+    // its parent's listing names, as the mount hands it.
+    const handed = async (p: PathSpec): Promise<Handed> => ({
+      entry: await entryAt(hfReaddir, accessor, p),
+    })
     return {
       vfs,
       accessor,
@@ -1070,9 +1068,11 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         files.set(stored, next)
       },
-      readBytes: (p) => commandIo(vfs).readBytes(accessor, p),
-      readStream: (p) => commandIo(vfs).readStream(accessor, p),
-      stat: (p) => commandIo(vfs).stat(accessor, p),
+      readBytes: async (p) => hfVfs.read(p, await handed(p)),
+      readStream: async function* (p) {
+        yield* hfVfs.readStream(p, await handed(p))
+      },
+      stat: async (p) => hfVfs.stat(p, await handed(p)),
       streamSlot: 'stream',
     }
   }
@@ -1233,12 +1233,12 @@ async function line(ws: Workspace, command: string): Promise<Uint8Array> {
   return result.stdout
 }
 
-// Reconcile stats through a fresh index (workspace/reconcile.ts), so a
+// Reconcile stats through its own check store (workspace/reconcile.ts), so a
 // listing's index row, which carries no token, cannot answer for it.
 async function reconcileStat(ws: Workspace, fake: Fake, virtual: string): Promise<FileStat> {
   const stat = await ws.namespace
     .mountFor(virtual)
-    .callKeyed('stat', specFor(virtual, fake.key), [], { index: new RAMIndexCacheStore() })
+    .callKeyed('stat', specFor(virtual, fake.key), [], { index: new ListingCheckStore() })
   return stat as FileStat
 }
 

@@ -12,294 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from fakeredis.aioredis import FakeRedis
 
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
-from mirage.cache.index.redis import RedisIndexCacheStore
+import mirage.core.github.stat as stat_module
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.read import read
 from mirage.core.github.readdir import readdir
 from mirage.core.github.stat import stat
 from mirage.core.github.stat import tree as subtree
-from mirage.core.github.tree import index_rows
-from mirage.core.github.tree_entry import TreeEntry
-from mirage.types import ContentType, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.github import GitHubVFS
-from tests.fixtures.github_api import FakeGitHub, serve
-
-
-def _index_from_tree(tree: dict[str, TreeEntry]) -> RAMIndexCacheStore:
-    index = RAMIndexCacheStore()
-    dirs: dict[str, list[tuple[str, IndexEntry]]] = defaultdict(list)
-    for path, entry in tree.items():
-        parts = path.rsplit("/", 1)
-        if len(parts) == 2:
-            parent, name = "/" + parts[0], parts[1]
-        else:
-            parent, name = "/", parts[0]
-        resource_type = "folder" if entry.type == "tree" else "file"
-        idx_entry = IndexEntry(
-            id=entry.sha,
-            name=name,
-            resource_type=resource_type,
-            size=entry.size,
-        )
-        dirs[parent].append((name, idx_entry))
-    for parent, entries in dirs.items():
-        index._entries.update(
-            {
-                ("/" + parent.strip("/") + "/" + name).replace("//", "/"): e
-                for name, e in entries
-            }
-        )
-        child_keys = sorted(
-            ("/" + parent.strip("/") + "/" + name).replace("//", "/")
-            for name, _ in entries
-        )
-        index._children[parent] = child_keys
-        index._expiry[parent] = datetime.now(timezone.utc) + timedelta(
-            days=365
-        )
-    return index
-
-
-@pytest.fixture
-def tree():
-    return {
-        "src": TreeEntry(path="src", type="tree", sha="aaa", size=None),
-        "src/main.py": TreeEntry(
-            path="src/main.py", type="blob", sha="bbb", size=120
-        ),
-        "README.md": TreeEntry(
-            path="README.md", type="blob", sha="ccc", size=50
-        ),
-    }
-
-
-@pytest.mark.asyncio
-async def test_stat_file(tree):
-    index = _index_from_tree(tree)
-    result = await stat(
-        None,
-        PathSpec(
-            vfs_path="src/main.py",
-            virtual="/src/main.py",
-            directory="/src/main.py",
-        ),
-        index,
-    )
-    assert result.name == "main.py"
-    assert result.size == 120
-    assert result.content == ContentType.TEXT
-    assert result.extra == {"sha": "bbb"}
-
-
-@pytest.mark.asyncio
-async def test_stat_directory(tree):
-    index = _index_from_tree(tree)
-    result = await stat(
-        None, PathSpec(vfs_path="src", virtual="/src", directory="/src"), index
-    )
-    assert result.name == "src"
-    assert result.type == FileType.DIRECTORY
-
-
-@pytest.mark.asyncio
-async def test_stat_root(tree):
-    index = _index_from_tree(tree)
-    result = await stat(
-        None, PathSpec(vfs_path="", virtual="/", directory="/"), index
-    )
-    assert result.name == "/"
-    assert result.type == FileType.DIRECTORY
-
-
-@pytest.mark.asyncio
-async def test_stat_not_found(tree):
-    index = _index_from_tree(tree)
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            None,
-            PathSpec(
-                vfs_path="nonexistent.py",
-                virtual="/nonexistent.py",
-                directory="/nonexistent.py",
-            ),
-            index,
-        )
-
-
-@pytest.mark.asyncio
-async def test_stat_strip_slashes(tree):
-    index = _index_from_tree(tree)
-    result = await stat(
-        None,
-        PathSpec(
-            vfs_path="README.md", virtual="/README.md", directory="/README.md"
-        ),
-        index,
-    )
-    assert result.name == "README.md"
-    assert result.size == 50
-
-
-@pytest.mark.asyncio
-async def test_stat_propagates_parent_refresh_failure():
-    failure = RuntimeError("github unavailable")
-    index = RAMIndexCacheStore()
-    # A live root keeps the one-directory route out, so the failure comes
-    # from the listing lookup itself.
-    await index.set_dir("/", [])
-    with patch(
-        "mirage.core.github.lookup._readdir",
-        new_callable=AsyncMock,
-        side_effect=failure,
-    ):
-        with pytest.raises(RuntimeError, match="github unavailable"):
-            await stat(None, PathSpec.from_str_path("/missing.py"), index)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("backend", ["ram", "redis"])
-@pytest.mark.parametrize("truncated", [False, True])
-@pytest.mark.parametrize("deleted", [False, True])
-@pytest.mark.parametrize("reader", [stat, read])
-async def test_direct_lookup_after_invalidation(
-    backend, truncated, deleted, reader, monkeypatch
-):
-    client = FakeRedis()
-    index = (
-        RAMIndexCacheStore()
-        if backend == "ram"
-        else RedisIndexCacheStore(client=client)
-    )
-    accessor = MagicMock()
-    accessor.ref = "main"
-    accessor.truncated = truncated
-    old_tree = {
-        "src": TreeEntry(path="src", type="tree", sha="old-tree", size=None),
-        "src/main.py": TreeEntry(
-            path="src/main.py", type="blob", sha="old-blob", size=3
-        ),
-    }
-    entries, children = index_rows(old_tree, "/repo")
-    index.seed(
-        entries, children, datetime.now(timezone.utc) + timedelta(days=1)
-    )
-    new_tree = {
-        "src": TreeEntry(path="src", type="tree", sha="new-tree", size=None)
-    }
-    new_files = (
-        []
-        if deleted
-        else [TreeEntry(path="main.py", type="blob", sha="new-blob", size=9)]
-    )
-    if not deleted:
-        new_tree["src/main.py"] = TreeEntry(
-            path="src/main.py", type="blob", sha="new-blob", size=9
-        )
-    tree_fetch = AsyncMock(return_value=(new_tree, False, None))
-    dir_fetch = AsyncMock(side_effect=[[new_tree["src"]], new_files])
-    blob_fetch = AsyncMock(return_value=b"new bytes")
-    monkeypatch.setattr("mirage.core.github.tree.fetch_tree", tree_fetch)
-    monkeypatch.setitem(readdir.__globals__, "fetch_dir_tree", dir_fetch)
-    monkeypatch.setitem(read.__globals__, "read_bytes", blob_fetch)
-    path = PathSpec(
-        vfs_path="src/main.py",
-        virtual="/repo/src/main.py",
-        directory="/repo/src",
-    )
-    try:
-        await index.invalidate()
-        for _ in range(2):
-            if deleted:
-                with pytest.raises(FileNotFoundError):
-                    await reader(accessor, path, index)
-            elif reader is stat:
-                result = await stat(accessor, path, index)
-                assert result.size == 9
-                assert result.fingerprint == "new-blob"
-                assert result.extra == {"sha": "new-blob"}
-            else:
-                assert await read(accessor, path, index) == b"new bytes"
-        if reader is read and not deleted:
-            assert all(
-                call.args[3] == "new-blob"
-                for call in blob_fetch.await_args_list
-            )
-        else:
-            blob_fetch.assert_not_awaited()
-        assert tree_fetch.await_count == (0 if truncated else 1)
-        assert dir_fetch.await_count == (2 if truncated else 0)
-        if truncated:
-            assert [call.args[3] for call in dir_fetch.await_args_list] == [
-                "main",
-                "new-tree",
-            ]
-    finally:
-        await index.close()
-        await client.aclose()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("backend", ["ram", "redis"])
-async def test_parallel_snapshot_readers_share_one_replacement(
-    backend, monkeypatch
-):
-    import asyncio
-
-    from mirage.accessor.github import GitHubAccessor
-    from mirage.core.github.config import GitHubConfig
-
-    client = FakeRedis()
-    index = (
-        RAMIndexCacheStore()
-        if backend == "ram"
-        else RedisIndexCacheStore(client=client)
-    )
-    accessor = GitHubAccessor(
-        GitHubConfig(token="test"), "acme", "repo", ref="main"
-    )
-    fresh = {"a.txt": TreeEntry(path="a.txt", type="blob", sha="new", size=9)}
-
-    async def fetch(*args):
-        await asyncio.sleep(0)
-        return fresh, False, None
-
-    fetch_mock = AsyncMock(side_effect=fetch)
-    monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_mock)
-    path = PathSpec(virtual="/repo/a.txt", directory="/repo", vfs_path="a.txt")
-    root = PathSpec(virtual="/repo", directory="/repo", vfs_path="")
-    try:
-        await index.set_dir(
-            "/repo",
-            [
-                (
-                    "a.txt",
-                    IndexEntry(id="old", name="a.txt", resource_type="file"),
-                )
-            ],
-        )
-        await index.invalidate()
-        results = await asyncio.gather(
-            *(stat(accessor, path, index) for _ in range(8)),
-            readdir(accessor, root, index),
-        )
-        assert [row.fingerprint for row in results[:-1]] == ["new"] * 8
-        assert results[-1] == ["/repo/a.txt"]
-        fetch_mock.assert_awaited_once()
-    finally:
-        await index.close()
-        await client.aclose()
-
+from mirage.workspace import Workspace
+from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
 
 ROOT = PathSpec(virtual="/gh", directory="/gh", vfs_path="")
+FILES = {"src/main.py": b"x" * 120, "README.md": b"y" * 50}
 
 
 def _three() -> FakeGitHub:
@@ -316,56 +45,157 @@ def _vfs(hub: FakeGitHub) -> GitHubVFS:
     )
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status", [404, 500])
-async def test_a_refused_head_names_no_version_and_refills_nothing(status):
-    with serve(_three()) as hub:
-        vfs = _vfs(hub)
-        hub.fail["dir"] = (status, "refused")
-        found = await stat(vfs.accessor, ROOT, ListingCheckStore())
-        assert found.fingerprint is None
-        assert hub.count("recursive") == 0
-        assert (vfs.accessor.tree, vfs.accessor.tree_loaded) == ({}, False)
-
-
-# With no index at all the root names no version and asks nothing (it used
-# to ask the head once; only the gate's check store wants that request).
-@pytest.mark.asyncio
-async def test_a_root_stat_with_no_index_asks_nothing():
-    with serve(_three()) as hub:
-        vfs = _vfs(hub)
-        found = await stat(vfs.accessor, ROOT)
-        assert found.fingerprint is None
-        assert hub.counts() == (0, 0, 0)
-
-
 def _under(virtual: str) -> PathSpec:
     return PathSpec(
         virtual=virtual, directory=virtual, vfs_path=virtual[len("/gh") :]
     )
 
 
+async def _stat_at(hub: FakeGitHub, path: str) -> FileStat:
+    ws = Workspace({"/gh": _vfs(hub)}, mode=MountMode.READ)
+    try:
+        row, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+        return row
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
-async def test_tree_answers_each_entry_as_stat_does():
+async def test_stat_file():
+    with serve(FakeGitHub(files=FILES)) as hub:
+        result = await _stat_at(hub, "/gh/src/main.py")
+    assert result.name == "main.py"
+    assert result.size == 120
+    assert result.content == ContentType.TEXT
+    assert result.fingerprint == blob_sha(b"x" * 120)
+    assert result.extra == {"sha": blob_sha(b"x" * 120)}
+
+
+@pytest.mark.asyncio
+async def test_stat_directory_and_root():
+    with serve(FakeGitHub(files=FILES)) as hub:
+        found = await _stat_at(hub, "/gh/src")
+        root = await stat(_vfs(hub).accessor, ROOT)
+    assert (found.name, found.type, found.fingerprint) == (
+        "src",
+        FileType.DIRECTORY,
+        None,
+    )
+    assert (root.name, root.type, root.fingerprint) == (
+        "/",
+        FileType.DIRECTORY,
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stat_not_found():
+    with serve(FakeGitHub(files=FILES)) as hub:
+        with pytest.raises(FileNotFoundError):
+            await _stat_at(hub, "/gh/nonexistent.py")
+
+
+@pytest.mark.asyncio
+async def test_stat_propagates_a_listing_failure():
+    # A tree the backend refuses is no answer about the path, so the
+    # refusal surfaces rather than ENOENT.
+    with serve(FakeGitHub(files=FILES)) as hub:
+        hub.fail["recursive"] = (500, "boom")
+        with pytest.raises(Exception, match="500"):
+            await _stat_at(hub, "/gh/missing.py")
+
+
+@pytest.mark.asyncio
+async def test_a_check_asks_the_parent_directory():
+    with serve(FakeGitHub(files=FILES)) as hub:
+        vfs = _vfs(hub)
+        found = await stat(
+            vfs.accessor, _under("/gh/src/main.py"), None, ListingCheckStore()
+        )
+        assert found.fingerprint == blob_sha(b"x" * 120)
+        with pytest.raises(FileNotFoundError):
+            await stat(
+                vfs.accessor,
+                _under("/gh/src/nope.py"),
+                None,
+                ListingCheckStore(),
+            )
+        assert hub.counts() == (2, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_check_asks_the_whole_tree_past_a_cut_listing():
+    with serve(FakeGitHub(files=FILES)) as hub:
+        hub.truncated_dirs["src"] = 0
+        vfs = _vfs(hub)
+        found = await stat(
+            vfs.accessor, _under("/gh/src/main.py"), None, ListingCheckStore()
+        )
+        assert found.size == 120
+        assert hub.counts() == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_check_walks_a_truncated_tree_by_its_folders(monkeypatch):
+    files = {"top.txt": b"t", "docs/sub/b.txt": b"b"}
+    monkeypatch.setattr(stat_module, "point_row", AsyncMock(return_value=None))
+    with serve(FakeGitHub(files=files, truncated_recursive=True)) as hub:
+        vfs = _vfs(hub)
+        found = await stat(
+            vfs.accessor,
+            _under("/gh/docs/sub/b.txt"),
+            None,
+            ListingCheckStore(),
+        )
+        assert found.size == 1
+        assert (hub.count("recursive"), hub.count("sha_dir")) == (1, 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [404, 500])
+async def test_a_refused_head_names_no_version_and_refills_nothing(status):
+    with serve(_three()) as hub:
+        vfs = _vfs(hub)
+        hub.fail["dir"] = (status, "refused")
+        found = await stat(vfs.accessor, ROOT, None, ListingCheckStore())
+        assert found.fingerprint is None
+        assert hub.count("recursive") == 0
+        assert (vfs.accessor.tree, vfs.accessor.tree_loaded) == ({}, False)
+
+
+# Through any store but the gate's check the root names no version and asks
+# nothing; only the check wants that request.
+@pytest.mark.asyncio
+async def test_a_root_stat_outside_a_check_asks_nothing():
+    with serve(_three()) as hub:
+        vfs = _vfs(hub)
+        found = await stat(vfs.accessor, ROOT)
+        assert found.fingerprint is None
+        assert hub.counts() == (0, 0, 0)
+        checked = await stat(vfs.accessor, ROOT, None, ListingCheckStore())
+        assert checked.fingerprint == hub.head()
+
+
+@pytest.mark.asyncio
+async def test_tree_answers_each_entry_as_its_listing_does():
     files = {"docs/a.txt": b"alpha", "docs/sub/b.txt": b"bb", "top.txt": b"t"}
     with serve(FakeGitHub(files=files)) as hub:
         vfs = _vfs(hub)
-        index = RAMIndexCacheStore()
-        found = await subtree(vfs.accessor, _under("/gh/docs"), index)
+        found = await subtree(vfs.accessor, _under("/gh/docs"))
         assert found is not None
         assert sorted(found) == ["a.txt", "sub", "sub/b.txt"]
-        for rel, entry in found.items():
-            assert entry == await stat(
-                vfs.accessor, _under(f"/gh/docs/{rel}"), index
-            )
-        assert sorted(await subtree(vfs.accessor, ROOT, index) or {}) == [
+        listing = await readdir(vfs.accessor, _under("/gh/docs"))
+        assert {row.name: row for row in listing.entries} == {
+            "a.txt": found["a.txt"],
+            "sub": found["sub"],
+        }
+        assert sorted(await subtree(vfs.accessor, ROOT) or {}) == [
             "docs",
             "docs/a.txt",
             "docs/sub",
             "docs/sub/b.txt",
             "top.txt",
         ]
-        assert hub.count("recursive") == 1
 
 
 @pytest.mark.asyncio
@@ -373,11 +203,10 @@ async def test_tree_leaves_a_file_and_a_truncated_tree_to_the_walk():
     files = {"docs/a.txt": b"alpha", "top.txt": b"t"}
     with serve(FakeGitHub(files=files)) as hub:
         vfs = _vfs(hub)
-        index = RAMIndexCacheStore()
-        assert (
-            await subtree(vfs.accessor, _under("/gh/top.txt"), index) is None
-        )
-        assert await subtree(vfs.accessor, _under("/gh/nope"), index) is None
+        assert await subtree(vfs.accessor, _under("/gh/top.txt")) is None
+        assert await subtree(vfs.accessor, _under("/gh/nope")) is None
     with serve(FakeGitHub(files=files, truncated_recursive=True)) as hub:
         vfs = _vfs(hub)
-        assert await subtree(vfs.accessor, ROOT, RAMIndexCacheStore()) is None
+        assert await subtree(vfs.accessor, ROOT) is None
+        assert await subtree(vfs.accessor, ROOT) is None
+        assert hub.count("recursive") == 1

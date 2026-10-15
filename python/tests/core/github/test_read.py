@@ -13,26 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import mirage.core.github.read
-import mirage.core.github.tree
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexEntry, LookupStatus
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.read import read, read_bytes
+from mirage.core.github.read import read, read_bytes, read_stream
+from mirage.core.github.readdir import readdir
 from mirage.core.github.stat import stat
-from mirage.core.github.tree import refill_snapshot
-from mirage.core.github.tree_entry import TreeEntry
 from mirage.observe.context import RecordingScope
-from mirage.types import PathSpec
-from mirage.vfs.github import GitHubVFS
-from tests.fixtures.github_api import FakeGitHub, blob_sha, race_index, serve
-from tests.fixtures.vfs_io import io_for
+from mirage.types import FileStat, FileType, PathSpec
+from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
+from tests.fixtures.handed import entry_at
 
 
 @pytest.fixture
@@ -59,87 +53,25 @@ async def test_read_bytes_binary(mock_get, config):
     assert result == content
 
 
-def _index() -> RAMIndexCacheStore:
-    index = RAMIndexCacheStore()
-    entry = IndexEntry(id="bbb", name="main.py", resource_type="file", size=3)
-    index._entries["/src/main.py"] = entry
-    index._children["/src"] = ["/src/main.py"]
-    index._expiry["/src"] = datetime.now(timezone.utc) + timedelta(days=365)
-    # The root row is what makes this a live index rather than a dropped
-    # one; without it every read here would be a refill, which is the
-    # distinction ensure_live_snapshot draws.
-    index._entries["/src"] = IndexEntry(
-        id="aaa", name="src", resource_type="folder"
-    )
-    index._children["/"] = ["/src"]
-    index._expiry["/"] = datetime.now(timezone.utc) + timedelta(days=365)
-    return index
-
-
-# Same rule readdir follows: an expired index is a tree that aged out, so
-# `cat` refetches once rather than reporting the file gone.
+# A read is handed its row; with none, or a folder's, it asks nothing.
 @pytest.mark.asyncio
-async def test_read_refills_an_expired_index(monkeypatch):
-    index = _index()
-    await index.invalidate()
-    calls = []
-
-    async def fake_fetch_tree(config, owner, repo, ref, session=None):
-        calls.append(ref)
-        return (
-            {
-                "src": TreeEntry(
-                    path="src", type="tree", sha="aaa", size=None
-                ),
-                "src/main.py": TreeEntry(
-                    path="src/main.py", type="blob", sha="bbb", size=3
-                ),
-            },
-            False,
-            None,
-        )
-
-    async def fake_read_bytes(config, owner, repo, sha, session=None):
-        return b"hi\n"
-
-    monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", fake_fetch_tree)
-    monkeypatch.setattr(mirage.core.github.read, "read_bytes", fake_read_bytes)
-    accessor = MagicMock()
-    accessor.truncated = False
-    out = await read(
-        accessor,
-        PathSpec(
-            vfs_path="src/main.py", virtual="/src/main.py", directory="/src"
+@pytest.mark.parametrize(
+    "rel, entry, error",
+    [
+        ("src/gone.py", None, FileNotFoundError),
+        (
+            "src",
+            FileStat(name="src", type=FileType.DIRECTORY),
+            IsADirectoryError,
         ),
-        index,
-    )
-    assert out == b"hi\n"
-    assert len(calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_read_does_not_refill_on_a_real_miss(monkeypatch):
-    index = _index()
-    calls = []
-
-    async def fake_fetch_tree(config, owner, repo, ref, session=None):
-        calls.append(ref)
-        return {}, False, None
-
-    monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", fake_fetch_tree)
-    accessor = MagicMock()
-    accessor.truncated = False
-    with pytest.raises(FileNotFoundError):
-        await read(
-            accessor,
-            PathSpec(
-                vfs_path="src/gone.py",
-                virtual="/src/gone.py",
-                directory="/src",
-            ),
-            index,
-        )
-    assert calls == []
+        ("", None, IsADirectoryError),
+    ],
+)
+async def test_a_read_without_a_file_row_asks_nothing(rel, entry, error):
+    with serve(FakeGitHub(files={"src/a.txt": b"x"})) as gh:
+        with pytest.raises(error):
+            await read(_served(gh), _at(rel, "/gh"), entry)
+        assert gh.log == []
 
 
 def _served(gh: FakeGitHub) -> GitHubAccessor:
@@ -167,8 +99,10 @@ async def test_a_read_records_the_blob_sha_under_the_virtual_path(prefix):
     with serve(FakeGitHub(files={"src/a.txt": data})) as gh:
         path = _at("src/a.txt", prefix)
         scope = RecordingScope()
+        accessor = _served(gh)
+        row = await entry_at(readdir, accessor, path)
         try:
-            assert await read(_served(gh), path, RAMIndexCacheStore()) == data
+            assert await read(accessor, path, row) == data
         finally:
             scope.close()
         (rec,) = scope.records
@@ -187,15 +121,12 @@ async def test_a_read_records_the_blob_sha_under_the_virtual_path(prefix):
 async def test_the_synthesized_stream_records_once():
     data = b"streamed"
     with serve(FakeGitHub(files={"a.txt": data})) as gh:
-        scope = RecordingScope()
         accessor = _served(gh)
+        path = _at("a.txt", "/gh")
+        row = await entry_at(readdir, accessor, path)
+        scope = RecordingScope()
         try:
-            chunks = [
-                c
-                async for c in io_for(GitHubVFS, accessor).read_stream(
-                    accessor, _at("a.txt", "/gh"), RAMIndexCacheStore()
-                )
-            ]
+            chunks = [c async for c in read_stream(accessor, path, row)]
         finally:
             scope.close()
         assert b"".join(chunks) == data
@@ -205,62 +136,28 @@ async def test_the_synthesized_stream_records_once():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["list", "stale", "get", "reseed"])
-async def test_a_read_retries_when_the_index_changes_under_it(kind):
-    with serve(FakeGitHub(files={"docs/sub/b.txt": b"bravo"})) as gh:
-        index = race_index(kind)
-        accessor = _served(gh)
-        await refill_snapshot(accessor, index, "/gh")
-        index.accessor = accessor
-        index.fired = False
-        gh.log.clear()
-        assert (
-            await read(accessor, _at("docs/sub/b.txt", "/gh"), index)
-            == b"bravo"
-        )
-        assert gh.counts() == (0, 1, 1)
-
-
-@pytest.mark.asyncio
-async def test_a_read_after_a_clear_refills_the_mount_index():
-    with serve(FakeGitHub(files={"docs/a.txt": b"alpha"})) as gh:
-        index = RAMIndexCacheStore()
-        accessor = _served(gh)
-        await refill_snapshot(accessor, index, "/gh")
-        await index.clear()
-        gh.log.clear()
-        assert (
-            await read(accessor, _at("docs/a.txt", "/gh"), index) == b"alpha"
-        )
-        # A read reseeds the listing rather than asking one directory, so
-        # the stats after it are answered from the index again.
-        assert gh.counts() == (0, 1, 1)
-        assert (await index.list_dir("/gh")).status != LookupStatus.NOT_FOUND
-
-
-@pytest.mark.asyncio
 async def test_a_read_stamps_the_sha_it_fetched_not_a_newer_one():
     old, reseated, live = b"old", b"reseated", b"live"
     with serve(FakeGitHub(files={"a.txt": old})) as gh:
         accessor = _served(gh)
-        index = RAMIndexCacheStore()
-        await refill_snapshot(accessor, index, "/gh")
+        path = _at("a.txt", "/gh")
+        row = await entry_at(readdir, accessor, path)
         gh.files["a.txt"] = reseated
-        # A refill on some other index reseats the accessor's tree only.
-        await refill_snapshot(accessor, RAMIndexCacheStore(), "/gh")
+        # A later listing reseats the accessor's tree only.
+        await readdir(accessor, _at("", "/gh"))
         assert accessor.tree["a.txt"].sha == blob_sha(reseated)
         gh.files["a.txt"] = live
         scope = RecordingScope()
         try:
-            data = await read(accessor, _at("a.txt", "/gh"), index)
+            data = await read(accessor, path, row)
         finally:
             scope.close()
-        # Three shas are in play: the mount index's, the accessor tree's and
+        # Three shas are in play: the handed row's, the accessor tree's and
         # the live one. Only the first names the bytes this read returned.
         assert data == old
         assert [r.fingerprint for r in scope.records] == [blob_sha(old)]
-        # The probe that follows sees the live sha, which is not the one the
+        # The check that follows sees the live sha, which is not the one the
         # read stamped, so the copy it left is stale rather than fresh.
-        probe = await stat(accessor, _at("a.txt", "/gh"), RAMIndexCacheStore())
+        probe = await stat(accessor, path, None, ListingCheckStore())
         assert probe.fingerprint == blob_sha(live)
         assert probe.fingerprint != scope.records[0].fingerprint

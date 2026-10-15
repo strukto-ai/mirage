@@ -28,7 +28,7 @@ from mirage.core.hf_hub.read import read as _read
 from mirage.core.hf_hub.readdir import readdir as _readdir
 from mirage.core.hf_hub.stat import stat as _stat
 from mirage.core.hf_hub.stream import read_stream as _read_stream
-from mirage.types import FileStat, ListingVersion, PathSpec
+from mirage.types import DirListing, FileStat, ListingVersion, PathSpec
 from mirage.vfs.base import BaseVFS
 
 A = TypeVar("A", bound=HfHubAccessor)
@@ -51,11 +51,12 @@ class HfHubVFS(BaseVFS, Generic[A]):
     # file that is the object's own size rather than the pointer's, so
     # no read can be short.
     sizes_always_known: bool = True
-    # The index is not a cache in front of a listing, it IS the listing:
-    # one recursive fetch seeds it whole. A long TTL therefore spares the
-    # Hub a full re-walk rather than risking a stale row. Written as a
-    # literal, the way every other VFS writes it: the spec dump reads
-    # this off the source, and an imported name reads as unresolvable.
+    # One recursive fetch lists the whole repository, every folder at the
+    # head it was walked at, and the version check catches a moved head.
+    # A long TTL therefore spares the Hub a full re-walk rather than
+    # risking a stale row. Written as a literal, the way every other VFS
+    # writes it: the spec dump reads this off the source, and an imported
+    # name reads as unresolvable.
     index_ttl: float = 86_400
     supports_snapshot: bool = True
     read_revalidatable: bool = True
@@ -75,34 +76,35 @@ class HfHubVFS(BaseVFS, Generic[A]):
         self.config = config
         self.accessor = self.ACCESSOR(self.config)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> DirListing:
+        return await _readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
     ) -> bytes:
-        if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read(self.accessor, path, index, offset, size)
+        return await _read(self.accessor, path, offset, size, entry)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry, index)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+        return _read_stream(self.accessor, path, entry)
 
-    async def exists(self, path: PathSpec) -> bool:
-        return await _exists(self.accessor, path)
+    async def exists(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> bool:
+        return await _exists(self.accessor, path, entry)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

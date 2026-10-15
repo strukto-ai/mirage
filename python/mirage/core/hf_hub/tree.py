@@ -14,20 +14,9 @@
 
 import logging
 import re
-from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from mirage.accessor.hf_hub import HfHubAccessor
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    LookupStatus,
-)
-from mirage.cache.index.config import IndexSnapshot
-from mirage.cache.index.diff import departed
-from mirage.cache.index.lock import index_lock
 from mirage.core.hf_hub.client import (
     HfHubError,
     api_url,
@@ -41,9 +30,11 @@ from mirage.core.hf_hub.constants import (
     TREE_PAGE_SIZE,
     TREE_PAGE_SIZE_EXPANDED,
 )
-from mirage.core.hf_hub.repo import head_commit, mount_version
 from mirage.core.hf_hub.tree_entry import TreeEntry
+from mirage.errors.fs import enoent, enotdir
+from mirage.types import DirListing, FileStat, FileType
 from mirage.utils import key_prefix as kp
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.fnmatch import fnmatchcase
 
 log = logging.getLogger(__name__)
@@ -56,8 +47,8 @@ _NEXT_LINK = re.compile(r'<([^>]{1,4096})>\s*;\s*rel="next"')
 # The one refusal that means "nothing to list": the mount's key_prefix names
 # no folder. Every other refusal (401 for a bad token or an unknown repo, 403
 # for a gated one, 404 for a missing repo or revision) is an error, because
-# this listing is seeded as the mount's whole index and an empty one would
-# read every file as deleted.
+# this listing is the mount's whole listing and an empty one would read
+# every file as deleted.
 _MISSING_SUBTREE = "EntryNotFound"
 
 
@@ -246,11 +237,10 @@ def collect(rows: Any, prefix: str, into: dict[str, TreeEntry]) -> None:
 def truncated(repo_id: str) -> HfHubError:
     """The refusal for a listing the page ceiling cut short.
 
-    Raised rather than returned because this listing is not a cache in
-    front of the Hub, it is seeded as the mount's whole index: a partial
-    one reads as a complete one, so every file past the ceiling becomes
-    a confident false absence and `hf download` silently omits it. An
-    error the caller can see is the lesser failure.
+    Raised rather than returned because this listing is the mount's whole
+    listing: a partial one reads as a complete one, so every file past the
+    ceiling becomes a confident false absence and `hf download` silently
+    omits it. An error the caller can see is the lesser failure.
 
     Args:
         repo_id (str): the repository being walked.
@@ -375,310 +365,114 @@ async def fetch_tree(
     return result
 
 
-def index_rows(
-    tree: dict[str, TreeEntry], prefix: str
-) -> tuple[dict[str, IndexEntry], dict[str, list[str]]]:
-    """Turn a Hub tree into the index's entry and children tables.
+def row_of(entry: TreeEntry, name: str) -> FileStat:
+    """The row for one tree row, the same from every route.
 
-    Keyed by mount-absolute path, the way every other backend keys its
-    index, so the shared cache machinery can spell an eviction without
-    knowing which backend it is talking to. The tree itself stays
-    mount-relative; ``prefix`` is what lifts it.
+    Size is the row's, which is the Hub's *content* length even for an
+    LFS file; the 135-byte pointer never reaches here. Reporting the
+    pointer would make `wc -c` and `ls -l` lie and risk truncated copies
+    over FUSE, which is the rule ``FileStat.size`` exists to keep.
+
+    ``modified`` is None unless the mount asked for commit expansion:
+    a Hub file's only mtime is the commit that last touched it, and
+    stamping the repository's own lastModified onto every file would be
+    a confident lie about files that commit never touched.
+
+    Args:
+        entry (TreeEntry): the tree row.
+        name (str): the row's last path segment.
+    """
+    modified = entry.last_modified or None
+    if entry.is_dir:
+        return FileStat(name=name, type=FileType.DIRECTORY, modified=modified)
+    extra: dict[str, Any] = {"oid": entry.oid}
+    if entry.last_commit:
+        extra["last_commit"] = entry.last_commit
+    if entry.lfs_oid:
+        extra["lfs_oid"] = entry.lfs_oid
+    if entry.xet_hash:
+        extra["xet_hash"] = entry.xet_hash
+    return FileStat(
+        name=name,
+        size=entry.size,
+        modified=modified,
+        type=FileType.FILE,
+        content=content_type_for_path(name),
+        # git is content-addressed, so the object id is the strongest
+        # fingerprint any backend here has: identical bytes carry an
+        # identical oid, and a rewrite that changed nothing correctly
+        # reports nothing.
+        fingerprint=entry.oid or None,
+        extra=extra,
+    )
+
+
+def tree_rows(tree: dict[str, TreeEntry]) -> dict[str, list[FileStat]]:
+    """Each folder's rows, keyed by its mount-relative path ("" the root).
+
+    The mount root always has a listing, even when the tree is empty, so
+    an empty repository lists as empty rather than missing. A tree row
+    names its parent folders implicitly, and a page boundary can deliver
+    a child before its parent's own row, so every folder above a path
+    gets a listing and a row in its parent; the folder's own row, when
+    the tree has one, takes that place.
 
     Args:
         tree (dict[str, TreeEntry]): the recursive tree, keyed by
             mount-relative path.
-        prefix (str): the mount prefix ("/m"), or "" for a root mount.
-
-    Returns:
-        tuple[dict[str, IndexEntry], dict[str, list[str]]]: entries keyed
-        by mount-absolute path, and each directory's sorted children.
     """
-    stem = prefix.rstrip("/")
-    dirs: dict[str, list[tuple[str, IndexEntry]]] = defaultdict(list)
-    # The repository root always exists, so it gets a row even when the
-    # tree is empty. Without it an empty repo is byte for byte a dropped
-    # index and every read would refetch.
-    dirs[stem or "/"] = []
+    folders: dict[str, dict[str, FileStat]] = {"": {}}
     for path, entry in tree.items():
-        parts = path.rsplit("/", 1)
-        if len(parts) == 2:
-            parent, name = stem + "/" + parts[0], parts[1]
-        else:
-            parent, name = stem or "/", parts[0]
-        extra: dict[str, Any] = {"oid": entry.oid}
-        if entry.last_commit:
-            extra["last_commit"] = entry.last_commit
-        if entry.lfs_oid:
-            extra["lfs_oid"] = entry.lfs_oid
-        if entry.xet_hash:
-            extra["xet_hash"] = entry.xet_hash
-        dirs[parent].append(
-            (
-                name,
-                IndexEntry(
-                    id=entry.oid,
-                    name=name,
-                    resource_type=("folder" if entry.is_dir else "file"),
-                    remote_time=entry.last_modified,
-                    size=None if entry.is_dir else entry.size,
-                    extra=extra,
-                ),
+        parent, _, name = path.rpartition("/")
+        folders.setdefault(parent, {})[name] = row_of(entry, name)
+        if entry.is_dir:
+            folders.setdefault(path, {})
+        while parent:
+            above, _, folder = parent.rpartition("/")
+            folders.setdefault(above, {}).setdefault(
+                folder, FileStat(name=folder, type=FileType.DIRECTORY)
             )
-        )
-        # A tree row names its parent directories implicitly. The Hub's
-        # recursive listing does emit a row per directory, but a page
-        # boundary can deliver a child before its parent, so the parent's
-        # bucket is created here too and merged with its own row's.
-        head = parts[0] if len(parts) == 2 else ""
-        while head:
-            dirs.setdefault(stem + "/" + head, [])
-            head = head.rsplit("/", 1)[0] if "/" in head else ""
-    _list_implied(dirs, stem or "/")
-    entries = {
-        (parent.rstrip("/") + "/" + name): entry
-        for parent, rows in dirs.items()
-        for name, entry in rows
+            parent = above
+    return {
+        folder: sorted(rows.values(), key=lambda row: row.name)
+        for folder, rows in folders.items()
     }
-    children = {
-        parent: sorted(parent.rstrip("/") + "/" + name for name, _ in rows)
-        for parent, rows in dirs.items()
-    }
-    return entries, children
 
 
-def _list_implied(
-    dirs: dict[str, list[tuple[str, IndexEntry]]], root: str
-) -> None:
-    """Give every directory the tree only implies a row in its parent.
-
-    A directory seen only as some path's parent has a listing of its own
-    but no row naming it, so its parent would not list it and a stat of it
-    would find no entry. Every listed path must have a row: a lookup that
-    finds a listed name with none takes it as evicted and refills.
+def tree_listing(
+    tree: dict[str, TreeEntry], rel: str, version: str | None, virtual: str
+) -> DirListing:
+    """The listing of the folder ``rel`` out of the whole tree, with every
+    folder below it as seeds, all at ``version``.
 
     Args:
-        dirs (dict[str, list[tuple[str, IndexEntry]]]): each directory's
-            rows, keyed by mount-absolute path; completed in place.
-        root (str): the mount root's key, which no parent lists.
+        tree (dict[str, TreeEntry]): the recursive tree.
+        rel (str): the folder, mount-relative ("" the root).
+        version (str | None): the mount version the tree was walked at.
+        virtual (str): the path asked, for the error.
+
+    Raises:
+        NotADirectoryError: a file is at ``rel`` or above it.
+        FileNotFoundError: nothing is.
     """
-    named = {
-        parent.rstrip("/") + "/" + name
-        for parent, rows in dirs.items()
-        for name, _ in rows
-    }
-    for key in sorted(dirs):
-        if key == root or key in named:
-            continue
-        parent, name = key.rsplit("/", 1)
-        dirs[parent or "/"].append(
-            (name, IndexEntry(id="", name=name, resource_type="folder"))
-        )
-
-
-def seed_index(
-    tree: dict[str, TreeEntry],
-    index: IndexCacheStore,
-    prefix: str,
-    version: str | None = None,
-) -> IndexSnapshot:
-    """Write one fetched tree into ``index`` under ``prefix``.
-
-    The tree is the caller's own fetch, never ``accessor.tree`` re-read
-    after an await: the watcher replaces that with no lock, and its rows
-    may be at another head than the ``version`` stamped here.
-
-    Args:
-        tree (dict[str, TreeEntry]): the tree, walked at ``version``.
-        index (IndexCacheStore): the index to seed.
-        prefix (str): the mount prefix the keys are built against.
-        version (str | None): the mount version of the head the tree was
-            walked at (``mount_version``), stamped on every listing; None
-            stores them unversioned.
-
-    Returns:
-        IndexSnapshot: the rows it wrote.
-    """
-    entries, children = index_rows(tree, prefix)
-    index.seed(
-        entries,
-        children,
-        datetime.now(timezone.utc) + timedelta(days=365),
+    folders = tree_rows(tree)
+    if rel not in folders:
+        parts = rel.split("/")
+        for depth in range(len(parts), 0, -1):
+            found = tree.get("/".join(parts[:depth]))
+            if found is not None and not found.is_dir:
+                raise enotdir(virtual)
+        raise enoent(virtual)
+    lead = rel + "/" if rel else ""
+    return DirListing(
+        entries=folders[rel],
+        seeds={
+            folder[len(lead) :]: rows
+            for folder, rows in folders.items()
+            if folder != rel and folder.startswith(lead)
+        },
         version=version,
     )
-    return IndexSnapshot(entries=entries, children=children)
-
-
-async def refill_index(
-    accessor: HfHubAccessor,
-    index: IndexCacheStore,
-    prefix: str,
-) -> bool:
-    """Refetch the tree and re-seed the index from it.
-
-    The mount fetches the whole tree once and seeds the index with it, so
-    the index *is* the listing rather than a cache in front of one. That
-    makes a cleared or expired index indistinguishable from an empty
-    repository, which is why dropping the index has to mean "refetch".
-
-    Args:
-        accessor (HfHubAccessor): the mount's accessor.
-        index (IndexCacheStore): the index to re-seed.
-        prefix (str): the mount prefix the index keys are built against.
-
-    Returns:
-        bool: whether a refill happened; False when there is no index to
-        seed, so a caller does not retry a lookup that cannot change.
-    """
-    return await refill_snapshot(accessor, index, prefix) is not None
-
-
-async def refill_snapshot(
-    accessor: HfHubAccessor,
-    index: IndexCacheStore,
-    prefix: str,
-) -> IndexSnapshot | None:
-    """``refill_index``, returning the rows it wrote.
-
-    A reader answers from these when its re-read of the store has already
-    expired (it waited on the mutation lock past the mount's ttl).
-
-    Args:
-        accessor (HfHubAccessor): the mount's accessor.
-        index (IndexCacheStore): the index to re-seed.
-        prefix (str): the mount prefix the index keys are built against.
-
-    Returns:
-        IndexSnapshot | None: the rows seeded; None when there is no index.
-    """
-    # The caller holds index_lock through replacement and its final lookup.
-    if index is NULL_INDEX:
-        return None
-    previous = dict(accessor.tree) if accessor.tree_loaded else None
-    # The head first, and the tree walked at the commit it names: the
-    # version stored is then the one these rows are at, never a later one
-    # a commit landing between the two requests would give. The head
-    # failing is the refill failing. "" (a Hub that names none) walks the
-    # branch and stores no version.
-    head = await head_commit(accessor) or None
-    tree = await fetch_tree(accessor, head)
-    accessor.tree = tree
-    accessor.tree_loaded = True
-    accessor.rows_cache = None
-    accessor.refills += 1
-    # Refilling replaces the snapshot; merging would retain deleted paths.
-    await index.invalidate_prefix(prefix.rstrip("/") or "/")
-    snapshot = seed_index(
-        tree, index, prefix, mount_version(head, accessor.key_prefix)
-    )
-    if previous is not None:
-        await index.report_gone(
-            departed(previous.items(), tree, prefix, _is_folder)
-        )
-    return snapshot
-
-
-def _is_folder(entry: TreeEntry) -> bool:
-    return entry.is_dir
-
-
-async def ensure_live_snapshot(
-    accessor: HfHubAccessor,
-    index: IndexCacheStore,
-    prefix: str,
-) -> IndexSnapshot | None:
-    """Refetch when the root listing is missing or expired.
-
-    Every reader treats a missing listing as a real absence, which is
-    right against a *live* index and wrong against one that was never
-    filled or has been dropped. The root listing is what tells the two
-    apart, in one lookup and no request: the tree is written whole, so
-    while the index is live the mount root always has a row.
-
-    Args:
-        accessor (HfHubAccessor): the mount's accessor.
-        index (IndexCacheStore): the index to check and fill.
-        prefix (str): the mount prefix the index keys are built against.
-
-    Returns:
-        IndexSnapshot | None: the refill's rows, or None when none was
-        needed or possible.
-    """
-    if index is NULL_INDEX:
-        return None
-    if (await index.list_dir(prefix.rstrip("/") or "/")).status not in (
-        LookupStatus.NOT_FOUND,
-        LookupStatus.EXPIRED,
-    ):
-        return None
-    return await refill_snapshot(accessor, index, prefix)
-
-
-async def ensure_tree(
-    accessor: HfHubAccessor,
-    index: IndexCacheStore = NULL_INDEX,
-    prefix: str = "",
-) -> None:
-    """Fetch the tree if this mount has not got one yet.
-
-    The mount is constructed without touching the network, so readers
-    that consult ``accessor.tree`` directly rather than through the index
-    -- find and du -- have to hydrate it first. Readers that go through
-    the index do not call this; :func:`ensure_live_snapshot` refetches for
-    them.
-
-    Hydration is tracked by ``tree_loaded``, never by whether the tree
-    holds anything: an empty repository hydrates to ``{}``, and reading
-    that as "not hydrated" refetches it on every call forever.
-
-    Args:
-        accessor (HfHubAccessor): the mount's accessor.
-        index (IndexCacheStore): the mount's index, when it has one.
-        prefix (str): the mount prefix the index keys are built against.
-    """
-    if accessor.tree_loaded:
-        return
-    async with accessor.tree_lock:
-        if accessor.tree_loaded:
-            return
-        if index is not NULL_INDEX:
-            async with index_lock(index, prefix.rstrip("/") or "/"):
-                if not accessor.tree_loaded:
-                    await refill_index(accessor, index, prefix)
-                return
-        accessor.tree = await fetch_tree(accessor)
-        accessor.tree_loaded = True
-        accessor.rows_cache = None
-
-
-async def local_rows(
-    accessor: HfHubAccessor,
-    prefix: str,
-) -> tuple[dict[str, IndexEntry], dict[str, list[str]]]:
-    """The index tables built straight from the accessor's tree.
-
-    What a mount with no index wired reads instead. Every reader has an
-    index inside a workspace, but a backend constructed on its own (a
-    unit test, a command built outside a workspace) has NULL_INDEX, whose
-    every lookup is a miss -- so without this, readdir answered ENOENT for
-    a repository it could list perfectly well. Built by the same
-    :func:`index_rows` the seeded path uses, so the two cannot disagree.
-
-    Args:
-        accessor (HfHubAccessor): the mount's accessor.
-        prefix (str): the mount prefix the keys are built against.
-
-    Returns:
-        tuple[dict[str, IndexEntry], dict[str, list[str]]]: entries keyed
-        by mount-absolute path, and each directory's sorted children.
-    """
-    await ensure_tree(accessor)
-    cached = accessor.rows_cache
-    if cached is not None and cached[0] == prefix:
-        return cached[1], cached[2]
-    entries, children = index_rows(accessor.tree, prefix)
-    accessor.rows_cache = (prefix, entries, children)
-    return entries, children
 
 
 def repo_files(tree: dict[str, TreeEntry]) -> list[str]:

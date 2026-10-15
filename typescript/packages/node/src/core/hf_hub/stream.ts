@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { recordStream } from '@struktoai/mirage-core/observe/context'
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { hubStream, resolveUrl } from './client.ts'
 import { REFUSED_STATUSES } from './constants.ts'
@@ -24,9 +23,9 @@ import { resolveEntry, rowToken } from './read.ts'
 export async function* readStream(
   accessor: HfHubAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): AsyncIterable<Uint8Array> {
-  const entry = await resolveEntry(accessor, path, index)
+  const row = resolveEntry(path, entry)
   const raw = path.mountPath
   const url = resolveUrl(
     accessor.endpoint,
@@ -37,7 +36,7 @@ export async function* readStream(
   )
   const rec = recordStream('read', path.virtual, accessor.vfsName)
   const stamp = (headers: Record<string, string>): void => {
-    if (rec !== null) rec.fingerprint = rowToken(entry, headers.etag ?? '')
+    if (rec !== null) rec.fingerprint = rowToken(row, headers.etag ?? '')
   }
   try {
     for await (const chunk of hubStream(accessor.token, url, stamp, accessor.timeoutMs)) {

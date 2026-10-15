@@ -80,9 +80,11 @@ export async function entryOrListedMiss(
     )
       return hit.entry
     if (warm === null) return null
-    if (listing.status === LookupStatus.EXPIRED) {
+    if (listing.status === LookupStatus.EXPIRED || (listing.entries != null && hit.entry == null)) {
       // Retained metadata is not proof of existence. Drop the old children
       // before warming, including when a best-effort listing only puts rows.
+      // A live listing that names the key with no row lost it to eviction,
+      // so it is listed again too.
       await index.invalidateDir(parent)
     }
     if (hit.entry != null) {

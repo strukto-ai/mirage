@@ -229,8 +229,8 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     },
   )
 
-  // A restored index's ids are no lead for drift: each drift check stats
-  // through a plain index, not a hinting ListingCheckStore.
+  // A restored index's ids are no lead for drift: the check store each drift
+  // check stats through offers no hint.
   it.each(['shell', 'dispatch'])('a drift check via %s offers no hints', async (surface) => {
     const accessor = new FakeRemoteAccessor()
     accessor.put('/remote/a.txt', new TextEncoder().encode('v1'))
@@ -247,12 +247,12 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     const { writeFileSync } = await import('node:fs')
     writeFileSync(snap, await writeSnapshotTar(manifest, blobs))
 
-    const seen: boolean[] = []
+    const seen: (IndexEntry | null)[] = []
     const hinting = new FakeRemoteVFS(accessor)
     const stat = hinting.stat.bind(hinting)
-    hinting.stat = (scope, index) => {
-      if (index === undefined) throw new Error('the drift check passed no index')
-      seen.push(index instanceof ListingCheckStore)
+    hinting.stat = async (scope, index) => {
+      if (!(index instanceof ListingCheckStore)) throw new Error('the drift check passed no check')
+      seen.push(await index.hint('/remote/a.txt'))
       return stat(scope, index)
     }
     const loaded = await Workspace.load(
@@ -269,7 +269,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
       expect((await index.get('/remote/a.txt')).entry).toBeDefined()
       if (surface === 'shell') await loaded.shell('cat /remote/a.txt')
       else await loaded.dispatch('read', '/remote/a.txt')
-      expect(seen[0]).toBe(false)
+      expect(seen[0]).toBeNull()
     } finally {
       await ws.close()
       await loaded.close()

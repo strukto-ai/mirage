@@ -22,14 +22,14 @@ export class GitHubAccessor extends Accessor {
   readonly repo: string
   readonly ref: string
   readonly defaultBranch: string
-  // Reseated by GitHubVFS.refresh: the tree is the mount's whole
-  // listing, so a refetch after a write replaces it wholesale.
+  // The recursive git tree, which is this mount's whole listing. grep's
+  // scope counter and code search read it straight. Reseated by every
+  // listing, so it is as fresh as the last one.
   truncated: boolean
   tree: Record<string, TreeEntry>
   // The head commit that tree was fetched at, as the response named it, or
-  // null when it is not known (a truncated or sha-less response). A tree
-  // walker compares it with the version its index listing was served at and
-  // refills on a difference, since another mount can refill a shared index.
+  // null when it is not known (a truncated or sha-less response). Every
+  // listing out of the tree carries it as its version.
   treeVersion: string | null
 
   constructor(opts: {

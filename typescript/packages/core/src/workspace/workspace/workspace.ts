@@ -19,7 +19,7 @@ import { ExecutionScope } from '../execution.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 
 import { indexConfigDump } from '../snapshot/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { checkCliVerbs } from '../session/validate.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -1608,7 +1608,7 @@ export class Workspace {
       parser: () => this.getShellParser(),
       meta: this.meta,
       drift: this.drift,
-      statFn: (p) => this.dispatchInternal('stat', p, [], { index: new RAMIndexCacheStore() }),
+      statFn: (p) => this.dispatchInternal('stat', p, [], { index: new ListingCheckStore() }),
       namespace: this.namespace,
       sessions: this.sessionManager,
       registry: this.registry,

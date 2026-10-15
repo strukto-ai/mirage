@@ -13,49 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
-import type { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { HF_ENDPOINT, HF_TIMEOUT_MS, type HfRepoConfig } from '../vfs/hf_buckets/config.ts'
 import { DEFAULT_REVISION } from '../core/hf_hub/constants.ts'
-import type { TreeEntry } from '../core/hf_hub/tree_entry.ts'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
-
-export interface RowTables {
-  entries: Map<string, IndexEntry>
-  children: Map<string, string[]>
-}
 
 /**
  * A mount onto one Hugging Face Hub repository.
  *
- * Holds the whole repository tree: the Hub's listing endpoint is recursive,
- * so one paged walk is the mount's entire listing and every read after it is
- * a lookup. find and du read that tree directly; everything else goes through
- * the index it seeds.
+ * The Hub's listing endpoint is recursive, so one paged walk is the mount's
+ * entire listing, which the mount keeps; every stat and read after it is
+ * handed its row.
  *
  * Constructed without touching the network. A constructor cannot await, so
  * fetching here would mean a blocking client stalling whatever loop the
- * caller is on; the tree hydrates on first use instead.
+ * caller is on.
  */
 export class HfHubAccessor extends Accessor {
-  /** The recursive tree, keyed mount-relative with no leading slash and with
-   * keyPrefix already stripped. Reseated by every refill. */
-  tree = new Map<string, TreeEntry>()
-  /** Whether that tree is an answer or just the empty default, which is a
-   * different question from whether it holds anything: an empty repository
-   * hydrates to an empty map, and reading that as "not hydrated" refetches it
-   * forever. */
-  treeLoaded = false
-  /** The index tables derived from that tree, for a mount with no index
-   * wired. Derivation is O(tree), so a readdir loop over a large repo would
-   * be quadratic without a memo; every reseat of `tree` clears it. */
-  rowsCache: { prefix: string; rows: RowTables } | null = null
-  refills = 0
-  /** Guards the lazy hydration so concurrent first reads make one request
-   * rather than one per caller. */
-  hydrating: Promise<void> | null = null
-
   constructor(
     readonly config: HfRepoConfig,
     private readonly kind = 'model',

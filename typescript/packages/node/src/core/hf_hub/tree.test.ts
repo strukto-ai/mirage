@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { RAMFileCacheStore } from '@struktoai/mirage-core/cache/file/ram'
 import type { Evicted } from '@struktoai/mirage-core/cache/index/config'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
@@ -23,15 +23,18 @@ import {
   collect,
   deletionsFor,
   filterRepoPaths,
-  refillSnapshot,
   fetchPath,
   fetchTree,
-  indexRows,
   nextCursor,
   parseEntry,
   pathsInfoUrl,
+  rowOf,
+  treeRows,
   treeUrl,
 } from './tree.ts'
+import { readdir } from './readdir.ts'
+import { FileType, PathSpec } from '@struktoai/mirage-core/types'
+import { keepListing } from '@struktoai/mirage-core/workspace/mount/listing'
 import * as client from './client.ts'
 import * as repo from './repo.ts'
 import type { TreeEntry } from './tree_entry.ts'
@@ -264,42 +267,56 @@ describe('fetchTree', () => {
   })
 })
 
-describe('indexRows', () => {
+describe('treeRows', () => {
   it('gives the root a listing for an empty repo', () => {
-    // Without it an empty repository is byte for byte a dropped index.
-    const { entries, children } = indexRows(new Map(), '')
-    expect(entries.size).toBe(0)
-    expect(children.get('/')).toEqual([])
-  })
-
-  it('keys mount-absolute under a prefix', () => {
-    const tree = new Map([['a.txt', parseEntry(fileRow('a.txt', 7))]])
-    const { entries, children } = indexRows(tree, '/m')
-    expect(entries.get('/m/a.txt')?.size).toBe(7)
-    expect(children.get('/m')).toEqual(['/m/a.txt'])
+    // Without it an empty repository lists as missing.
+    expect(treeRows(new Map())).toEqual(new Map([['', []]]))
   })
 
   // The implied folder gets a row of its own and a place in its parent's
-  // listing, so every listed path has an entry: a versioned listing on Redis
-  // reads EXPIRED when one of its children has none.
+  // listing, so every folder lists and every listed name has a row.
   it('implies a parent a page boundary split off', () => {
-    const tree = new Map([['d/e/a.txt', parseEntry(fileRow('d/e/a.txt'))]])
-    const { entries, children } = indexRows(tree, '/m')
-    expect(children.get('/m/d/e')).toEqual(['/m/d/e/a.txt'])
-    expect(children.get('/m/d')).toEqual(['/m/d/e'])
-    expect(children.get('/m')).toEqual(['/m/d'])
-    for (const key of ['/m/d', '/m/d/e']) {
-      expect(entries.get(key)?.resourceType).toBe('folder')
-      expect(entries.get(key)?.name).toBe(key.slice(key.lastIndexOf('/') + 1))
-    }
-    expect(new Set(entries.keys())).toEqual(new Set([...children.values()].flat()))
+    const rows = treeRows(new Map([['d/e/a.txt', parseEntry(fileRow('d/e/a.txt'))]]))
+    expect(Object.fromEntries([...rows].map(([k, v]) => [k, v.map((r) => r.name)]))).toEqual({
+      '': ['d'],
+      d: ['e'],
+      'd/e': ['a.txt'],
+    })
+    expect(rows.get('')?.[0]?.type).toBe(FileType.DIRECTORY)
   })
 
+  it("lets a folder's own row replace the one its child implied", () => {
+    const rows = treeRows(
+      new Map([
+        ['d/b.txt', parseEntry(fileRow('d/b.txt'))],
+        ['d', parseEntry({ ...dirRow('d'), lastCommit: { date: '2025-01-01' } })],
+      ]),
+    )
+    expect(rows.get('')?.map((r) => [r.name, r.modified])).toEqual([['d', '2025-01-01']])
+  })
+})
+
+describe('rowOf', () => {
   it('leaves a directory size unset', () => {
-    const tree = new Map([['d', parseEntry(dirRow('d'))]])
-    const { entries } = indexRows(tree, '')
-    expect(entries.get('/d')?.size).toBeNull()
-    expect(entries.get('/d')?.resourceType).toBe('folder')
+    const row = rowOf(parseEntry(dirRow('d')), 'd')
+    expect([row.type, row.size]).toEqual([FileType.DIRECTORY, null])
+  })
+
+  it('leaves mtime null when the row carries none', () => {
+    // A Hub file's only mtime is its last commit, and a bare listing carries
+    // none. Null is honest; a repo-wide timestamp on every file would not be.
+    expect(rowOf(parseEntry(fileRow('f')), 'f').modified).toBeNull()
+  })
+
+  it('carries no token for an empty oid', () => {
+    expect(
+      rowOf(parseEntry({ type: 'file', oid: '', path: 'a.txt' }), 'a.txt').fingerprint,
+    ).toBeNull()
+  })
+
+  it('keeps the ids a read stamps by', () => {
+    const row = rowOf(parseEntry(fileRow('a.txt', 10, { lfs: { oid: 'L' } })), 'a.txt')
+    expect([row.fingerprint, row.extra.lfs_oid]).toEqual(['oid-a.txt', 'L'])
   })
 })
 
@@ -377,33 +394,13 @@ describe('fetchPath', () => {
   })
 })
 
-it('returns the snapshot it wrote if another refill replaces the accessor tree', async () => {
-  const acc = accessor()
-  const index = new RAMIndexCacheStore()
-  const write = index.setDir.bind(index)
-  vi.spyOn(client, 'hubGetResponse').mockResolvedValue(page([fileRow('a.txt')]))
-  vi.spyOn(index, 'setDir').mockImplementation(async (...args) => {
-    const gone = await write(...args)
-    acc.tree = new Map([['other.txt', parseEntry(fileRow('other.txt'))]])
-    return gone
-  })
-  try {
-    const snapshot = await refillSnapshot(acc, index, '/m')
-    expect(snapshot.children.get('/m')).toEqual(['/m/a.txt'])
-    expect(snapshot.entries.get('/m/a.txt')?.id).toBe('oid-a.txt')
-    expect((await index.listDir('/m')).entries).toEqual(['/m/a.txt'])
-  } finally {
-    vi.restoreAllMocks()
-  }
-})
-
 function treeOf(...rows: Record<string, unknown>[]): Record<string, unknown>[] {
   return rows
 }
 
-describe('refillSnapshot reports what left the repository', () => {
-  // The refill wipes the index before seeding the new tree, so without the
-  // diff a file removed upstream keeps its cached bytes and overlay.
+describe('a relisting reports what left the repository', () => {
+  // The seeds replace each folder's listing, so without the diff a file
+  // removed upstream keeps its cached bytes and overlay.
   it.each([
     [
       'a removed file',
@@ -426,89 +423,19 @@ describe('refillSnapshot reports what left the repository', () => {
       },
     )
     const acc = accessor()
+    const root = new PathSpec({ virtual: '/m', directory: '/m', vfsPath: '' })
     const spy = vi
       .spyOn(client, 'hubGetResponse')
       .mockResolvedValue(page([fileRow('a.txt'), fileRow('d/b.txt'), dirRow('d')]))
     try {
-      await refillSnapshot(acc, index, '/m')
+      await keepListing(index, '/m', await readdir(acc, root))
       expect(gone).toEqual([])
       spy.mockResolvedValue(page(after))
-      await refillSnapshot(acc, index, '/m')
+      await keepListing(index, '/m', await readdir(acc, root))
       expect(gone).toEqual(reported)
     } finally {
       vi.restoreAllMocks()
     }
-  })
-})
-
-// The watcher sets accessor.tree with no lock, so a walk at an older head can
-// land while the refill awaits its invalidation. The refill seeds the tree it
-// fetched itself, stamped with the head it walked at, never the accessor's
-// tree re-read after an await.
-it('seeds its own tree when the watcher swaps the accessor tree', async () => {
-  const acc = accessor()
-  const index = new RAMIndexCacheStore()
-  const invalidate = index.invalidatePrefix.bind(index)
-  vi.spyOn(repo, 'headCommit').mockResolvedValue('c'.repeat(40))
-  vi.spyOn(client, 'hubGetResponse').mockResolvedValue(page([fileRow('new.txt')]))
-  vi.spyOn(index, 'invalidatePrefix').mockImplementation(async (...args) => {
-    acc.tree = new Map([['old.txt', parseEntry(fileRow('old.txt'))]])
-    await invalidate(...args)
-  })
-  try {
-    const snapshot = await refillSnapshot(acc, index, '/m')
-    const listing = await index.listDir('/m')
-    expect(listing.entries).toEqual(['/m/new.txt'])
-    expect(listing.version).toBe('c'.repeat(40))
-    expect((await index.get('/m/new.txt')).entry?.id).toBe('oid-new.txt')
-    expect((await index.get('/m/old.txt')).entry ?? null).toBeNull()
-    expect(snapshot.children.get('/m')).toEqual(['/m/new.txt'])
-  } finally {
-    vi.restoreAllMocks()
-  }
-})
-
-const HEAD = 'c'.repeat(40)
-
-describe('refillSnapshot at the head', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  // The refill walks the tree at the commit the head named, passed to the walk
-  // rather than written to the accessor, and stamps every folder with it.
-  it('walks and stamps the head it resolved', async () => {
-    vi.spyOn(repo, 'headCommit').mockResolvedValue(HEAD)
-    const get = vi
-      .spyOn(client, 'hubGetResponse')
-      .mockResolvedValue(page([fileRow('a.txt'), fileRow('d/b.txt'), dirRow('d')]))
-    const acc = accessor()
-    const index = new RAMIndexCacheStore()
-    await refillSnapshot(acc, index, '/m')
-    expect(String(get.mock.calls[0]?.[1])).toMatch(new RegExp(`/tree/${HEAD}$`))
-    expect(acc.revision).toBe('main')
-    expect((await index.listDir('/m')).version).toBe(HEAD)
-    expect((await index.listDir('/m/d')).version).toBe(HEAD)
-  })
-
-  // A head the Hub names as '' walks the branch and stores no version.
-  it('walks the branch unversioned when the Hub names no head', async () => {
-    const get = vi.spyOn(client, 'hubGetResponse').mockResolvedValue(page([fileRow('a.txt')]))
-    const index = new RAMIndexCacheStore()
-    await refillSnapshot(accessor(), index, '/m')
-    expect(String(get.mock.calls[0]?.[1])).toMatch(/\/tree\/main$/)
-    const listing = await index.listDir('/m')
-    expect(listing.entries).toEqual(['/m/a.txt'])
-    expect(listing.version ?? null).toBeNull()
-  })
-
-  // The head failing is the refill failing: a transient error is not hidden
-  // behind a branch walk that would store rows of an unknown commit.
-  it('raises when the head fails', async () => {
-    vi.spyOn(repo, 'headCommit').mockRejectedValue(new HfHubError('boom', 500))
-    const get = vi.spyOn(client, 'hubGetResponse')
-    await expect(refillSnapshot(accessor(), new RAMIndexCacheStore(), '/m')).rejects.toThrow('boom')
-    expect(get).not.toHaveBeenCalled()
   })
 })
 

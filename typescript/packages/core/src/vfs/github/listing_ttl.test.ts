@@ -188,7 +188,9 @@ describe('github listings under a shared view', () => {
       expect(await glob).toBe('/gh/docs/a.txt /gh/docs/b.txt\n')
       gate.release()
       expect(await first).toBe(OLD_LS)
-      expect(delta(before)).toEqual([0, 2, 0])
+      // The first ls kept its listing before the wipe it waits in, so the
+      // glob answers from it.
+      expect(delta(before)).toEqual([0, 1, 0])
     } finally {
       gate?.release()
       await Promise.allSettled([first, glob])

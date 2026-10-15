@@ -13,17 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GitHubAccessor } from '../../accessor/github.ts'
-import type {
-  Evicted,
-  IndexEntry,
-  ListResult,
-  LookupResult,
-  SetDirOptions,
-} from '../../cache/index/config.ts'
+import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { HttpGitHubTransport } from './client.ts'
 import { CODE_SEARCH_SIZE_LIMIT } from './constants.ts'
-import { refillSnapshot } from './tree.ts'
 import { sha1Hex } from '../../utils/hash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -441,83 +434,6 @@ export function servedAccessor(ref = 'main'): GitHubAccessor {
     ref,
     defaultBranch: ref,
   })
-}
-
-// Each hook fires once, on the first listing of the nested parent, so the
-// retry sees real data; a root child would let ensureLiveSnapshot's root probe
-// consume it instead.
-class ClearedAtList extends RAMIndexCacheStore {
-  fired = false
-  constructor(private readonly parent: string) {
-    super()
-  }
-  override async listDir(path: string): Promise<ListResult> {
-    if (!this.fired && path === this.parent) {
-      this.fired = true
-      await this.clear()
-    }
-    return super.listDir(path)
-  }
-}
-
-class StaleListing extends RAMIndexCacheStore {
-  fired = false
-  accessor: GitHubAccessor | null = null
-  constructor(
-    private readonly parent: string,
-    private readonly key: string,
-  ) {
-    super()
-  }
-  override async listDir(path: string): Promise<ListResult> {
-    const result = await super.listDir(path)
-    if (this.fired || path !== this.parent || this.accessor === null) return result
-    this.fired = true
-    const stale = (result.entries ?? []).filter((k) => k !== this.key)
-    // Another op refills while this lookup holds the stale listing.
-    await refillSnapshot(this.accessor, this, '/gh')
-    return { ...result, entries: stale }
-  }
-}
-
-class ClearedMidLookup extends RAMIndexCacheStore {
-  fired = false
-  override async get(path: string): Promise<LookupResult> {
-    if (!this.fired) {
-      this.fired = true
-      await this.clear()
-    }
-    return super.get(path)
-  }
-}
-
-class ClearedAndReseeded extends RAMIndexCacheStore {
-  fired = false
-  accessor: GitHubAccessor | null = null
-  override async get(path: string): Promise<LookupResult> {
-    if (this.fired || this.accessor === null) return super.get(path)
-    this.fired = true
-    await this.clear()
-    const missed = await super.get(path)
-    await refillSnapshot(this.accessor, this, '/gh')
-    return missed
-  }
-}
-
-export type RaceIndex = RAMIndexCacheStore & { fired: boolean; accessor?: GitHubAccessor | null }
-
-/**
- * An index that changes under the lookup it serves, once.
- *
- * `list` clears at the parent listing, `stale` hands back a listing without
- * the key while another op refills, `get` clears at the entry read,
- * `reseed` clears and refills there so the root reads live.
- */
-export function raceIndex(kind: 'list' | 'stale' | 'get' | 'reseed'): RaceIndex {
-  if (kind === 'list') return new ClearedAtList('/gh/docs/sub')
-  if (kind === 'stale') return new StaleListing('/gh/docs/sub', '/gh/docs/sub/b.txt')
-  if (kind === 'get') return new ClearedMidLookup()
-  return new ClearedAndReseeded()
 }
 
 /** Expire every listing immediately except the optional live key. */

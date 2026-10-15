@@ -15,19 +15,18 @@
 from collections.abc import AsyncIterator, Mapping
 
 from mirage.accessor.hf_hub import HfHubAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hf_hub.client import hub_stream, resolve_url
 from mirage.core.hf_hub.constants import DEFAULT_CHUNK_SIZE, REFUSED_STATUSES
 from mirage.core.hf_hub.lookup import refusals_denied
 from mirage.core.hf_hub.read import resolve_entry, row_token
 from mirage.observe.context import record_stream
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def read_stream(
     accessor: HfHubAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> AsyncIterator[bytes]:
     """Stream a file's content.
@@ -35,13 +34,13 @@ async def read_stream(
     Args:
         accessor (HfHubAccessor): backend handle.
         path (PathSpec): the file to read.
-        index (IndexCacheStore): the mount's index.
+        entry (FileStat | None): the file's row.
         chunk_size (int): bytes per yielded chunk.
 
     Yields:
         bytes: the next chunk of content.
     """
-    entry = await resolve_entry(accessor, path, index)
+    row = resolve_entry(path, entry)
     raw = path.mount_path
     url = resolve_url(
         accessor.endpoint,
@@ -54,7 +53,7 @@ async def read_stream(
 
     def stamp(headers: Mapping[str, str]) -> None:
         if rec is not None:
-            rec.fingerprint = row_token(entry, headers.get("etag", ""))
+            rec.fingerprint = row_token(row, headers.get("etag", ""))
 
     with refusals_denied(path, REFUSED_STATUSES):
         async for chunk in hub_stream(

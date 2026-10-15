@@ -19,13 +19,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.repo import ensure_default_branch
 from mirage.core.github.stat import stat
 from mirage.core.github.tree import ensure_tree
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.types import (
+    FileStat,
     HiddenPaths,
     MountMode,
     PathSpec,
@@ -34,7 +35,6 @@ from mirage.types import (
 )
 from mirage.vfs.github.github import GitHubVFS
 from mirage.workspace import Workspace
-from tests.fixtures.driver_ops import ops
 
 CONFIG = GitHubConfig(token="test-token")
 OWNER = "test-owner"
@@ -190,6 +190,15 @@ async def test_is_default_branch_answers_once_hydrated() -> None:
     assert vfs.is_default_branch is True
 
 
+async def _stat_at(vfs: GitHubVFS, path: str) -> FileStat:
+    ws = Workspace({"/gh": vfs}, mode=MountMode.READ)
+    try:
+        row, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+        return row
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_stat_returns_sha_fingerprint() -> None:
     tree = {
@@ -197,18 +206,13 @@ async def test_stat_returns_sha_fingerprint() -> None:
             path="src/main.py", type="blob", sha="abc123", size=100
         ),
     }
-    vfs = _make_vfs(tree=tree)
     with _offline(tree):
-        result = await stat(
-            vfs.accessor,
-            PathSpec.from_str_path("/src/main.py"),
-            ops(vfs).index,
-        )
+        result = await _stat_at(_make_vfs(tree=tree), "/gh/src/main.py")
     assert result.fingerprint == "abc123"
 
 
 @pytest.mark.asyncio
-async def test_replacing_index_still_serves_the_tree() -> None:
+async def test_a_check_store_asks_the_parent_directory() -> None:
     tree = {
         "src/main.py": TreeEntry(
             path="src/main.py", type="blob", sha="abc123", size=100
@@ -216,26 +220,23 @@ async def test_replacing_index_still_serves_the_tree() -> None:
     }
     vfs = _make_vfs(tree=tree)
 
-    # The fresh store is empty, which reads as not-live, so the stat asks
-    # the parent directory rather than reporting the path gone.
+    # A check's private store holds no listing and is handed no row, so
+    # the stat asks the parent directory rather than reporting the path
+    # gone.
     with _offline(tree):
         result = await stat(
             vfs.accessor,
             PathSpec.from_str_path("/src/main.py"),
-            RAMIndexCacheStore(),
+            None,
+            ListingCheckStore(),
         )
     assert result.fingerprint == "abc123"
 
 
 @pytest.mark.asyncio
 async def test_stat_raises_when_path_not_in_tree() -> None:
-    vfs = _make_vfs()
     with _offline({}), pytest.raises(FileNotFoundError):
-        await stat(
-            vfs.accessor,
-            PathSpec.from_str_path("/nonexistent.py"),
-            ops(vfs).index,
-        )
+        await _stat_at(_make_vfs(), "/gh/nonexistent.py")
 
 
 def test_the_constructor_reaches_no_network() -> None:

@@ -141,7 +141,7 @@ def mock_github_api(monkeypatch):
 
     # Both are patched in the module that fetches, because the mount is
     # built without touching the network and hydrates on first use:
-    # `ensure_tree` and `refill_snapshot` call fetch_tree in tree.py, and
+    # `refresh_tree` calls fetch_tree in tree.py, and
     # `ensure_default_branch` calls fetch_default_branch in repo.py.
     monkeypatch.setattr(
         "mirage.core.github.repo.fetch_default_branch", _fetch_default_branch

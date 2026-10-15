@@ -34,8 +34,8 @@ import {
   type GitHubConfig,
   type GitHubConfigRedacted,
 } from '../../core/github/config.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { DirListing, PathSpec, FileStat } from '../../types.ts'
+import type { Handed } from '../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { read as githubRead, readStream as githubStream } from '../../core/github/read.ts'
@@ -123,52 +123,51 @@ export class GitHubVFS extends BaseVFS {
   }
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry'],
+    readStream: ['entry'],
+    stat: ['entry', 'index'],
+  } as const
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return githubReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<DirListing> {
+    return githubReaddir(this.accessor, path, handed?.entry)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await githubRead(this.accessor, path, index)
+    const data = await githubRead(this.accessor, path, handed?.entry)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return githubStream(this.accessor, path, index)
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return githubStream(this.accessor, path, handed?.entry)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return githubStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return githubStat(this.accessor, path, handed?.entry, handed?.index)
   }
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
-    return githubTree(this.accessor, path, index)
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return githubTree(this.accessor, path)
   }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord) return Promise.resolve(null)
-    return githubFilesContaining(this.accessor, text, [path], index)
+    return githubFilesContaining(this.accessor, text, [path])
   }
 
-  override beforeFullScan(
-    path: PathSpec,
-    files: number | null,
-    index?: IndexCacheStore,
-  ): Promise<void> {
-    return githubBeforeFullScan(this.accessor, path, files, index)
+  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {
+    return githubBeforeFullScan(this.accessor, path, files)
   }
 
   override getState(): Promise<GitHubVFSState> {

@@ -17,14 +17,12 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.api.client import SessionArg
 from mirage.core.github.client import blob_path, github_get, stream_blob
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.lookup import locate, lookup_retrying
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, record_stream, start_op
-from mirage.types import PathSpec, VFSName
+from mirage.types import FileStat, FileType, PathSpec, VFSName
 
 
 async def read_bytes(
@@ -46,22 +44,21 @@ async def read_bytes(
 async def read(
     accessor: GitHubAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
 ) -> bytes:
     """Read a file's blob and record the sha it was fetched by.
 
-    The sha comes from the mount's listing, filling it if a verdict cleared
-    it, never from a one-directory probe: a read reseeds the listing so the
-    stats after it answer from the index again. The blob endpoint is
-    content-addressed, so the recorded sha names exactly the bytes returned
-    however old the listing is. That is also the documented limit of
-    ``read: fresh`` here: a file read for the first time comes from the
-    listing, and the next read's probe corrects it.
+    The sha comes from the file's row, as its folder's listing names it.
+    The blob endpoint is content-addressed, so the recorded sha names
+    exactly the bytes returned however old the listing is. That is also
+    the documented limit of ``read: fresh`` here: a file read for the
+    first time comes from the listing, and the next read's probe corrects
+    it.
 
     Args:
         accessor (GitHubAccessor): backend handle.
         path_spec (PathSpec): the file to read.
-        index (IndexCacheStore): the mount's index.
+        entry (FileStat | None): the file's row.
 
     Returns:
         bytes: the blob's content.
@@ -70,14 +67,18 @@ async def read(
         IsADirectoryError: the path is a directory.
         FileNotFoundError: nothing exists at the path.
     """
-    virtual = path_spec.virtual
-    entry = await _blob_entry(accessor, path_spec, index)
+    sha = _blob_sha(path_spec, entry)
     timer = start_op()
     data = await read_bytes(
-        accessor.config, accessor.owner, accessor.repo, entry.id, accessor.pool
+        accessor.config, accessor.owner, accessor.repo, sha, accessor.pool
     )
     record(
-        "read", virtual, VFSName.GITHUB, len(data), timer, fingerprint=entry.id
+        "read",
+        path_spec.virtual,
+        VFSName.GITHUB,
+        len(data),
+        timer,
+        fingerprint=sha,
     )
     return data
 
@@ -85,34 +86,34 @@ async def read(
 async def read_stream(
     accessor: GitHubAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
 ) -> AsyncIterator[bytes]:
     """Stream a file's blob as it downloads, recorded by its sha.
 
     The blob comes as GitHub's raw media type, the bytes themselves rather
-    than base64 inside JSON. The sha is found as :func:`read` finds it and
-    recorded up front: the blob endpoint is content-addressed, so it names
-    the bytes however far the stream is read.
+    than base64 inside JSON. The sha is the row's, as :func:`read` takes
+    it, and recorded up front: the blob endpoint is content-addressed, so
+    it names the bytes however far the stream is read.
 
     Args:
         accessor (GitHubAccessor): backend handle.
         path_spec (PathSpec): the file to read.
-        index (IndexCacheStore): the mount's index.
+        entry (FileStat | None): the file's row.
 
     Raises:
         IsADirectoryError: the path is a directory.
         FileNotFoundError: nothing exists at the path.
     """
-    entry = await _blob_entry(accessor, path_spec, index)
+    sha = _blob_sha(path_spec, entry)
     rec = record_stream(
-        "read", path_spec.virtual, VFSName.GITHUB, fingerprint=entry.id
+        "read", path_spec.virtual, VFSName.GITHUB, fingerprint=sha
     )
     async with aclosing(
         stream_blob(
             accessor.config,
             accessor.owner,
             accessor.repo,
-            entry.id,
+            sha,
             accessor.pool,
         )
     ) as source:
@@ -122,27 +123,21 @@ async def read_stream(
             yield chunk
 
 
-async def _blob_entry(
-    accessor: GitHubAccessor, path_spec: PathSpec, index: IndexCacheStore
-) -> IndexEntry:
-    """The listing entry of the file at ``path_spec``.
+def _blob_sha(path_spec: PathSpec, entry: FileStat | None) -> str:
+    """The blob sha of the file at ``path_spec``, off its row.
 
     Args:
-        accessor (GitHubAccessor): backend handle.
         path_spec (PathSpec): the file.
-        index (IndexCacheStore): the mount's index.
+        entry (FileStat | None): the file's row.
 
     Raises:
         IsADirectoryError: the path is a directory.
         FileNotFoundError: nothing exists at the path.
     """
-    virtual = path_spec.virtual
-    prefix, rel, key = locate(path_spec)
-    if not rel:
-        raise eisdir(virtual)
-    entry = (await lookup_retrying(accessor, index, prefix, key)).entry
+    if not path_spec.mount_path.strip("/"):
+        raise eisdir(path_spec.virtual)
     if entry is None:
-        raise enoent(virtual)
-    if entry.resource_type == "folder":
-        raise eisdir(virtual)
-    return entry
+        raise enoent(path_spec.virtual)
+    if entry.type is FileType.DIRECTORY:
+        raise eisdir(path_spec.virtual)
+    return str(entry.extra["sha"])

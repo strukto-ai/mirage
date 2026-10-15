@@ -12,14 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from unittest.mock import patch
 
 import pytest
 
 from mirage.core.hf_hub.client import HfHubError
+from mirage.core.hf_hub.readdir import readdir
 from mirage.core.hf_hub.stream import read_stream
 from mirage.observe.context import RecordingScope
+from mirage.types import PathSpec
 from tests.core.hf_hub.conftest import file_row, ps, seed
+from tests.fixtures.handed import entry_at
+
+
+async def _stream(accessor, path: PathSpec) -> AsyncIterator[bytes]:
+    row = await entry_at(readdir, accessor, path)
+    async for chunk in read_stream(accessor, path, row):
+        yield chunk
 
 
 async def _chunks(*payload):
@@ -31,7 +41,7 @@ async def _chunks(*payload):
 @patch("mirage.core.hf_hub.stream.hub_stream")
 async def test_read_stream_yields_every_chunk(mock_stream, loaded):
     mock_stream.return_value = _chunks(b"ab", b"cd")
-    got = [c async for c in read_stream(loaded, ps("a.txt"))]
+    got = [c async for c in _stream(loaded, ps("a.txt"))]
     assert got == [b"ab", b"cd"]
     assert mock_stream.call_args.args[1].endswith("/resolve/main/a.txt")
 
@@ -40,19 +50,19 @@ async def test_read_stream_yields_every_chunk(mock_stream, loaded):
 @patch("mirage.core.hf_hub.stream.hub_stream")
 async def test_read_stream_of_a_directory_is_eisdir(mock_stream, loaded):
     with pytest.raises(IsADirectoryError):
-        [c async for c in read_stream(loaded, ps("d"))]
+        [c async for c in _stream(loaded, ps("d"))]
     mock_stream.assert_not_called()
 
 
 @pytest.mark.asyncio
 @patch("mirage.core.hf_hub.stream.hub_stream")
-async def test_stream_records_the_virtual_path(mock_stream, accessor):
+async def test_stream_records_the_virtual_path(mock_stream, accessor, tree):
     # A repo folder named like its mount keeps /m/k.txt off the virtual path.
-    seed(accessor, file_row("m/k.txt", 4))
+    seed(tree, file_row("m/k.txt", 4))
     mock_stream.return_value = _chunks(b"ab", b"cd")
     scope = RecordingScope()
     try:
-        got = [c async for c in read_stream(accessor, ps("m/k.txt", "/m"))]
+        got = [c async for c in _stream(accessor, ps("m/k.txt", "/m"))]
     finally:
         scope.close()
     assert got == [b"ab", b"cd"]
@@ -76,16 +86,16 @@ def _answering(etag: str, *payload: bytes):
 
 @pytest.mark.asyncio
 async def test_stream_stamps_the_oid_when_the_etag_names_the_row(
-    accessor, monkeypatch
+    accessor, tree, monkeypatch
 ):
-    seed(accessor, file_row("a.txt", 4))
+    seed(tree, file_row("a.txt", 4))
     monkeypatch.setattr(
         "mirage.core.hf_hub.stream.hub_stream",
         _answering('"oid-a.txt"', b"ab", b"cd"),
     )
     scope = RecordingScope()
     try:
-        stream = read_stream(accessor, ps("a.txt"))
+        stream = _stream(accessor, ps("a.txt"))
         first = await stream.__anext__()
         # Stamped as soon as the response arrived, so a reader that stops
         # after one chunk (head -c 1) still leaves a token behind.
@@ -98,29 +108,31 @@ async def test_stream_stamps_the_oid_when_the_etag_names_the_row(
 
 @pytest.mark.asyncio
 async def test_stream_stamps_nothing_when_the_bytes_are_another_version(
-    accessor, monkeypatch
+    accessor, tree, monkeypatch
 ):
-    seed(accessor, file_row("a.txt", 4))
+    seed(tree, file_row("a.txt", 4))
     monkeypatch.setattr(
         "mirage.core.hf_hub.stream.hub_stream",
         _answering('"another-version"', b"newr"),
     )
     scope = RecordingScope()
     try:
-        [c async for c in read_stream(accessor, ps("a.txt"))]
+        [c async for c in _stream(accessor, ps("a.txt"))]
     finally:
         scope.close()
     assert [r.fingerprint for r in scope.records] == [None]
 
 
 @pytest.mark.asyncio
-async def test_stream_with_no_recorder_still_reads(accessor, monkeypatch):
-    seed(accessor, file_row("a.txt", 4))
+async def test_stream_with_no_recorder_still_reads(
+    accessor, tree, monkeypatch
+):
+    seed(tree, file_row("a.txt", 4))
     monkeypatch.setattr(
         "mirage.core.hf_hub.stream.hub_stream",
         _answering('"oid-a.txt"', b"ab"),
     )
-    assert [c async for c in read_stream(accessor, ps("a.txt"))] == [b"ab"]
+    assert [c async for c in _stream(accessor, ps("a.txt"))] == [b"ab"]
 
 
 def _refusing(status: int):
@@ -139,4 +151,4 @@ async def test_a_stream_the_hub_refuses_is_permission_denied(
 ):
     monkeypatch.setattr("mirage.core.hf_hub.stream.hub_stream", _refusing(403))
     with pytest.raises(PermissionError):
-        [c async for c in read_stream(loaded, ps("a.txt"))]
+        [c async for c in _stream(loaded, ps("a.txt"))]

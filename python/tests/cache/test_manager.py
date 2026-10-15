@@ -677,6 +677,35 @@ async def test_a_late_older_check_never_replaces_a_newer_memo(clock):
     assert asked == ["V4"]
 
 
+@pytest.mark.asyncio
+async def test_a_recent_answer_refuses_the_listing_it_refused_without_asking(
+    clock,
+):
+    # A listing stored at V1 that the backend answered V2 for stays
+    # refused inside the window: nothing about that listing changed, so
+    # asking again would only repeat the answer. Another stored version,
+    # or the same one past the window, is asked.
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    asked: list[str] = []
+
+    def answer(version: str):
+        async def check() -> str:
+            asked.append(version)
+            return version
+
+        return check
+
+    assert await manager.checked_version("/data", "V1", answer("V2")) == "V2"
+    assert await manager.checked_version("/data", "V1", answer("V3")) == "V2"
+    assert asked == ["V2"]
+    assert await manager.checked_version("/data", "V0", answer("V4")) == "V4"
+    assert asked == ["V2", "V4"]
+    clock.now += LISTING_TRUST_WINDOW + 0.01
+    assert await manager.checked_version("/data", "V0", answer("V5")) == "V5"
+    assert asked == ["V2", "V4", "V5"]
+
+
 def _probed() -> FileStat:
     return FileStat(name="h.txt", size=4, type=FileType.FILE)
 

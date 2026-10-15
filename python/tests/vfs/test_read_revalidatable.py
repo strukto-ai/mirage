@@ -51,13 +51,16 @@ import mirage.core.msgraph.drive as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO
 from mirage.core.box.readdir import readdir as box_readdir
 from mirage.core.dropbox.readdir import readdir as dropbox_readdir
 from mirage.core.gdrive.readdir import readdir as gdrive_readdir
+from mirage.core.github.readdir import readdir as github_readdir
 from mirage.core.hf_hub.client import etag_value
+from mirage.core.hf_hub.readdir import readdir as hf_readdir
 from mirage.observe.context import OpTimer, active_recorder
 from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
@@ -229,19 +232,15 @@ class Fake:
     # None when the stream is synthesized from the whole read, which then
     # records through read_mod's record; the slot it lands in is "bytes".
     stream_mod: ModuleType | None
-    # Passed to direct IO calls when the backend resolves through its index;
-    # github's stat has nothing to answer from without one.
+    # Passed to direct IO calls when the backend resolves through its index.
     index: IndexCacheStore | None = None
-    # Whether that index is the one the mount runs under (github's), which
-    # only exists once a workspace places the driver.
-    mount_index: bool = False
     # False where stat answers from its own request (the Google apps): it
     # then takes no index, so the unrecorded row compares two independent
     # reads of the object rather than one index entry with itself.
     stat_indexed: bool = True
     # The listing that names the row each function is handed, where the
-    # backend reads one (gdrive, box, dropbox): the direct calls are handed
-    # it, as the mount hands it.
+    # backend reads one (gdrive, box, dropbox, github, the Hub): the direct
+    # calls are handed it, as the mount hands it.
     readdir: ListFn | None = None
 
     @property
@@ -252,8 +251,6 @@ class Fake:
         return SLOTS[row] if self.stream_mod is not None else "bytes"
 
     def args(self) -> tuple:
-        if self.mount_index:
-            return (own_index(self.vfs),)
         return () if self.index is None else (self.index,)
 
     def stat_args(self) -> tuple:
@@ -289,19 +286,8 @@ class Fake:
 
 
 # The store each driver's mount runs under, filled when a fresh workspace
-# places it. The index is the mount's, so a harness built before the
-# workspace reads it here rather than off the driver.
+# places it.
 _OWN_INDEX: WeakKeyDictionary[BaseVFS, IndexCacheStore] = WeakKeyDictionary()
-
-
-def own_index(vfs: BaseVFS) -> IndexCacheStore:
-    """The store ``vfs``'s mount runs under, or one kept for direct calls
-    made before any workspace placed it."""
-    store = _OWN_INDEX.get(vfs)
-    if store is None:
-        store = RAMIndexCacheStore(ttl=vfs.index_ttl)
-        _OWN_INDEX[vfs] = store
-    return store
 
 
 class _Download:
@@ -437,6 +423,30 @@ def _gridfs_fake(
     )
 
 
+def _watch_walks(vfs: BaseVFS, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """What a tree walk on a throwaway store reached, for a backend whose
+    one listing is the whole tree.
+
+    A listing kept is the one sign of a walk. In the mount's own index a
+    cold read keeps one legitimately; in any other store it is the
+    reconcile probe walking the tree.
+
+    Args:
+        vfs (BaseVFS): the backend whose mount owns the index.
+        monkeypatch (pytest.MonkeyPatch): undoes the watch.
+    """
+    reach: list[str] = []
+    set_dir = RAMIndexCacheStore.set_dir
+
+    async def watched(store, vfs_path, entries, *args, **kwargs):
+        if store is not _OWN_INDEX.get(vfs):
+            reach.append("tree walk on a throwaway index")
+        return await set_dir(store, vfs_path, entries, *args, **kwargs)
+
+    monkeypatch.setattr(RAMIndexCacheStore, "set_dir", watched)
+    return reach
+
+
 @contextmanager
 def _hf_fake(
     name: str, shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch
@@ -457,20 +467,7 @@ def _hf_fake(
     with serve(hub):
         vfs = build_vfs(name, {**config, "endpoint": hub.url})
         assert vfs.accessor.key_prefix == (prefix or "")
-        reach: list[str] = []
-        invalidate = RAMIndexCacheStore.invalidate_prefix
-
-        # A whole-tree refill is the one thing that invalidates a store's
-        # prefix. On the mount's own index a cold read does it legitimately;
-        # on any other store it is the reconcile probe walking the tree.
-        async def watched(
-            store, prefix_: str, *, excluded: tuple[str, ...] = ()
-        ) -> None:
-            if store is not _OWN_INDEX.get(vfs):
-                reach.append("tree walk on a throwaway index")
-            await invalidate(store, prefix_, excluded=excluded)
-
-        monkeypatch.setattr(RAMIndexCacheStore, "invalidate_prefix", watched)
+        reach = _watch_walks(vfs, monkeypatch)
 
         def rewrite(new: bytes) -> None:
             files[stored] = new
@@ -483,6 +480,7 @@ def _hf_fake(
             reach=reach,
             read_mod=hf_read,
             stream_mod=hf_stream,
+            readdir=hf_readdir,
         )
 
 
@@ -627,17 +625,7 @@ def _github_fake(
                 "base_url": hub.url,
             },
         )
-        reach: list[str] = []
-        invalidate = RAMIndexCacheStore.invalidate_prefix
-
-        async def watched(
-            store, prefix_: str, *, excluded: tuple[str, ...] = ()
-        ) -> None:
-            if store is not _OWN_INDEX.get(vfs):
-                reach.append("tree walk on a throwaway index")
-            await invalidate(store, prefix_, excluded=excluded)
-
-        monkeypatch.setattr(RAMIndexCacheStore, "invalidate_prefix", watched)
+        reach = _watch_walks(vfs, monkeypatch)
 
         def rewrite(new: bytes) -> None:
             hub.files[key] = new
@@ -650,7 +638,7 @@ def _github_fake(
             reach=reach,
             read_mod=github_read,
             stream_mod=github_read,
-            mount_index=True,
+            readdir=github_readdir,
         )
 
 
@@ -803,10 +791,10 @@ async def _line(ws: Workspace, line: str) -> bytes:
 
 
 async def _reconcile_stat(ws: Workspace, virtual: str) -> FileStat:
-    # Reconcile stats through a fresh index (workspace/reconcile.py), so a
-    # listing's index row, which carries no token, cannot answer for it.
+    # Reconcile stats through its own check store (workspace/reconcile.py),
+    # so a listing's index row, which carries no token, cannot answer for it.
     return await ws.mount(virtual).call(
-        "stat", virtual, index=RAMIndexCacheStore()
+        "stat", virtual, index=ListingCheckStore()
     )
 
 

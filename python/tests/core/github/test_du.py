@@ -49,6 +49,10 @@ async def _unlisted(_accessor, path, _index=None):
     raise AssertionError(f"listed {path.virtual}")
 
 
+async def _read_tree(accessor, path, index=None):
+    return await tree(accessor, path)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "operand,flags,expected",
@@ -67,16 +71,18 @@ async def _unlisted(_accessor, path, _index=None):
 async def test_du_sums_the_tree_it_reads_once(
     monkeypatch, operand, flags, expected
 ):
-    monkeypatch.setitem(tree.__globals__, "ensure_tree", AsyncMock())
+    monkeypatch.setitem(
+        tree.__globals__, "refresh_tree", AsyncMock(return_value=TREE)
+    )
     table = CommandIO(
         readdir=_unlisted,
         read_bytes=AsyncMock(),
         read_stream=AsyncMock(),
         stat=_tree_stat,
-        read_tree=tree,
+        read_tree=_read_tree,
         is_mounted=lambda _: True,
     )
-    accessor = SimpleNamespace(truncated=False, tree=TREE)
+    accessor = SimpleNamespace(truncated=False, tree_loaded=False, tree=TREE)
     stream, io = await du(
         table,
         accessor,

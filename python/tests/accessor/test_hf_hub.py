@@ -65,13 +65,6 @@ def test_expand_commits_defaults_to_deciding_by_size():
     assert HfModelsAccessor(HfRepoConfig(repo_id="a/b")).expand_commits is None
 
 
-def test_a_fresh_accessor_has_hydrated_nothing():
-    acc = HfModelsAccessor(HfRepoConfig(repo_id="a/b"))
-    assert acc.tree == {}
-    assert acc.tree_loaded is False
-    assert acc.rows_cache is None
-
-
 def test_the_pool_waits_the_configured_timeout_without_progress():
     assert HfModelsAccessor(
         HfRepoConfig(repo_id="a/b")

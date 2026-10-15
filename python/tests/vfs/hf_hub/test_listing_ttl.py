@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.cache.index.view import IndexView
+import mirage.core.hf_hub.readdir as readdir_module
 from mirage.types import MountMode, ReadSpec
 from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
@@ -53,7 +53,7 @@ async def _out(ws: Workspace, line: str, session_id: str | None = None):
 
 
 @pytest.mark.asyncio
-async def test_a_reader_arriving_mid_refill_waits_for_it(monkeypatch):
+async def test_a_reader_arriving_mid_listing_waits_for_it(monkeypatch):
     with serve(_hub()) as hub:
         ws = _ws(_vfs(hub))
         first = second = None
@@ -64,20 +64,18 @@ async def test_a_reader_arriving_mid_refill_waits_for_it(monkeypatch):
             assert await _out(ws, "ls /m/d") == b"b.txt\n"
             await ws._registry.mount_for("/m/d").index.invalidate()
             walks = hub.count("tree")
-            wiped = asyncio.Event()
-            original = IndexView.invalidate_prefix
-            fired = []
+            walking = asyncio.Event()
+            original = readdir_module.fetch_tree
 
-            async def gated(self, vfs_path: str) -> None:
-                await original(self, vfs_path)
-                if not fired:
-                    fired.append(vfs_path)
-                    wiped.set()
+            async def gated(*args, **kwargs):
+                if not walking.is_set():
+                    walking.set()
                     await release.wait()
+                return await original(*args, **kwargs)
 
-            monkeypatch.setattr(IndexView, "invalidate_prefix", gated)
+            monkeypatch.setattr(readdir_module, "fetch_tree", gated)
             first = asyncio.ensure_future(_out(ws, "ls /m/d", "s0"))
-            await asyncio.wait_for(wiped.wait(), 5)
+            await asyncio.wait_for(walking.wait(), 5)
             second = asyncio.ensure_future(_out(ws, "ls /m/d", "s1"))
             await asyncio.sleep(0.02)
             waited = not second.done()

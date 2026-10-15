@@ -93,7 +93,8 @@ async def keep_listing(
     A plain list is the directory's whole listing. A ``DirListing``
     may also prove descendant listings (``seeds``), be a view rather
     than the whole directory (``partial``), or prove nothing absent
-    (``window``); each is kept for what it proves.
+    (``window``); each is kept for what it proves, and a seed at the
+    version its listing was read at.
 
     Args:
         index (IndexCacheStore): the mount's index.
@@ -116,7 +117,10 @@ async def keep_listing(
             (row.name, row) for row in children
         ]
         await index.set_dir(
-            f"{stem}/{relative.strip('/')}", seeded, window=listing.window
+            f"{stem}/{relative.strip('/')}",
+            seeded,
+            window=listing.window,
+            version=listing.version,
         )
     return [f"{stem}/{row.name}" for row in listing.entries]
 

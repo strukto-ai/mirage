@@ -14,319 +14,81 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GitHubAccessor } from '../../accessor/github.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { RedisIndexCacheStore } from '../../cache/index/redis.ts'
-import { IndexView } from '../../cache/index/view.ts'
-import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { FileType, PathSpec } from '../../types.ts'
-import { populateIndex, refillSnapshot } from './tree.ts'
+import { type DirListing, FileType, PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
-import { read } from './read.ts'
-import { stat } from './stat.ts'
 import { GitHubApiError, HttpGitHubTransport, type GitHubTransport } from './client.ts'
-import { BASE, ExpiredOnArrival, FakeGitHub, servedAccessor } from './_test_util.ts'
+import { BASE, FakeGitHub, servedAccessor } from './_test_util.ts'
 
 const TREE = [
-  { path: 'README.md', type: 'blob' as const, sha: 'eee', size: 50 },
-  { path: 'src', type: 'tree' as const, sha: 'aaa' },
-  { path: 'src/main.py', type: 'blob' as const, sha: 'bbb', size: 120 },
+  { path: 'src', type: 'tree', sha: 'aaa' },
+  { path: 'src/main.py', type: 'blob', sha: 'bbb', size: 120 },
+  { path: 'src/utils', type: 'tree', sha: 'ccc' },
+  { path: 'src/utils/helpers.py', type: 'blob', sha: 'ddd', size: 80 },
+  { path: 'README.md', type: 'blob', sha: 'eee', size: 50 },
 ]
 
-function accessorFor(probe: { trees: number }): GitHubAccessor {
+function accessor(): GitHubAccessor {
   const transport = {
-    get: () => {
-      probe.trees += 1
-      return Promise.resolve({ tree: TREE, truncated: false })
-    },
+    get: () => Promise.resolve({ tree: TREE, truncated: false, sha: 'HEAD1' }),
   } as unknown as GitHubTransport
   return new GitHubAccessor({
     transport,
-    owner: 'acme',
-    repo: 'proj',
+    owner: 'o',
+    repo: 'r',
     ref: 'main',
     defaultBranch: 'main',
   })
 }
 
-const TREE_MAP = {
-  src: { path: 'src', type: 'tree', sha: 'aaa', size: null },
-  'src/main.py': { path: 'src/main.py', type: 'blob', sha: 'bbb', size: 120 },
+function spec(rel: string, prefix = ''): PathSpec {
+  const virtual = rel === '' ? prefix || '/' : `${prefix}/${rel}`
+  return new PathSpec({ vfsPath: rel, virtual, directory: virtual })
 }
 
-async function seeded(): Promise<RAMIndexCacheStore> {
-  const index = new RAMIndexCacheStore()
-  await populateIndex(index, TREE_MAP, '')
-  return index
+function names(listing: DirListing): string[] {
+  return listing.entries.map((row) => row.name)
 }
 
-function spec(p: string): PathSpec {
-  return new PathSpec({ vfsPath: p.slice(1), virtual: p, directory: p })
-}
-
-describe('github readdir freshness', () => {
-  // The index *is* the listing here, seeded once from the recursive tree,
-  // so an expired one is a tree that aged out rather than a repository that
-  // emptied: before the refill `ls` exited 0 with no output once the
-  // day-long TTL lapsed, and reported the mount root missing after a write
-  // invalidated it.
-  it('refetches the tree when the listing expired', async () => {
-    const index = await seeded()
-    await index.invalidate()
-    const probe = { trees: 0 }
-    expect(await readdir(accessorFor(probe), spec('/'), index)).toEqual(['/README.md', '/src'])
-    expect(probe.trees).toBe(1)
+describe('github readdir', () => {
+  it.each([
+    ['', ['README.md', 'src']],
+    ['src', ['main.py', 'utils']],
+    ['src/utils', ['helpers.py']],
+  ])('lists the folder %j of the tree', async (rel, expected) => {
+    expect(names(await readdir(accessor(), spec(rel)))).toEqual(expected)
   })
 
-  it('does not refetch on a real miss', async () => {
-    const index = await seeded()
-    const probe = { trees: 0 }
-    await expect(readdir(accessorFor(probe), spec('/nope'), index)).rejects.toThrow()
-    expect(probe.trees).toBe(0)
+  it('seeds every folder below at the head of its one tree', async () => {
+    const listing = await readdir(accessor(), spec(''))
+    expect(listing.version).toBe('HEAD1')
+    expect(
+      Object.fromEntries([...listing.seeds].map(([k, v]) => [k, v.map((r) => r.name)])),
+    ).toEqual({ src: ['main.py', 'utils'], 'src/utils': ['helpers.py'] })
+    const src = listing.seeds.get('src') ?? []
+    const utils = src.find((row) => row.name === 'utils')
+    expect([utils?.type, utils?.extra]).toEqual([FileType.DIRECTORY, { sha: 'ccc' }])
+    expect([src[0]?.size, src[0]?.fingerprint]).toEqual([120, 'bbb'])
+  })
+
+  it('refuses what is no folder', async () => {
+    await expect(readdir(accessor(), spec('nonexistent'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(readdir(accessor(), spec('README.md'))).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
   })
 })
-
-for (const backend of ['ram', 'redis']) {
-  for (const replacement of ['tree', 'blob', 'missing']) {
-    it.skipIf(backend === 'redis' && process.env.REDIS_URL === undefined)(
-      `resolves an expired truncated-tree directory from the current ref (${backend}, ${replacement})`,
-      async () => {
-        const url = process.env.REDIS_URL
-        const index =
-          backend === 'ram'
-            ? new RAMIndexCacheStore()
-            : new RedisIndexCacheStore({
-                ...(url === undefined ? {} : { url }),
-                keyPrefix: `github-contract:${crypto.randomUUID()}:`,
-              })
-        const get = vi.fn((path: string) => {
-          if (path.endsWith('/git/blobs/new-nested')) {
-            return Promise.resolve({ content: 'cmVwbGFjZW1lbnQ=', encoding: 'base64' })
-          }
-          if (path.endsWith('/git/trees/main')) {
-            return Promise.resolve({ tree: [{ path: 'src', type: 'tree', sha: 'new-src' }] })
-          }
-          if (path.endsWith('/git/trees/new-src')) {
-            return Promise.resolve({
-              tree:
-                replacement === 'missing'
-                  ? []
-                  : [{ path: 'nested', type: replacement, sha: 'new-nested' }],
-            })
-          }
-          if (path.endsWith('/git/trees/new-nested')) {
-            return Promise.resolve({
-              tree: [{ path: 'new.py', type: 'blob', sha: 'new', size: 2 }],
-            })
-          }
-          throw new Error(`Unexpected request: ${path}`)
-        })
-        const accessor = new GitHubAccessor({
-          transport: { get, request: vi.fn() },
-          owner: 'acme',
-          repo: 'proj',
-          ref: 'main',
-          defaultBranch: 'main',
-        })
-        accessor.truncated = true
-        try {
-          await index.setDir('/repo', [
-            ['src', new IndexEntry({ id: 'old-src', name: 'src', resourceType: 'folder' })],
-          ])
-          await index.setDir('/repo/src', [
-            [
-              'nested',
-              new IndexEntry({ id: 'old-nested', name: 'nested', resourceType: 'folder' }),
-            ],
-          ])
-          await index.setDir('/repo/src/nested', [], new Date(Date.now() - 1000))
-          const path = new PathSpec({
-            vfsPath: 'src/nested',
-            virtual: '/repo/src/nested',
-            directory: '/repo/src/nested',
-          })
-          if (replacement === 'tree') {
-            for (let i = 0; i < 2; i++) {
-              expect(await readdir(accessor, path, index)).toEqual(['/repo/src/nested/new.py'])
-            }
-            expect(get.mock.calls.map(([p]) => p.split('/').at(-1))).toEqual([
-              'main',
-              'new-src',
-              'new-nested',
-            ])
-          } else {
-            await expect(readdir(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
-            if (replacement === 'blob') {
-              expect((await stat(accessor, path, index)).type).toBe(FileType.FILE)
-              expect(new TextDecoder().decode(await read(accessor, path, index))).toBe(
-                'replacement',
-              )
-            } else {
-              await expect(stat(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
-              await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
-            }
-            expect(
-              get.mock.calls
-                .filter(([p]) => p.includes('/git/trees/'))
-                .map(([p]) => p.split('/').at(-1)),
-            ).toEqual(['main', 'new-src'])
-          }
-        } finally {
-          await index.clear()
-          await index.close()
-        }
-      },
-    )
-  }
-}
-
-for (const backend of ['ram', 'redis']) {
-  describe.skipIf(backend === 'redis' && process.env.REDIS_URL === undefined)(
-    `complete refill with ${backend}`,
-    () => {
-      it.each(['missing', 'blob'])('removes obsolete directories: %s', async (replacement) => {
-        const url = process.env.REDIS_URL
-        const index =
-          backend === 'ram'
-            ? new RAMIndexCacheStore()
-            : new RedisIndexCacheStore({
-                ...(url === undefined ? {} : { url }),
-                keyPrefix: `github-obsolete:${crypto.randomUUID()}:`,
-              })
-        const get = vi.fn(() =>
-          Promise.resolve({
-            tree:
-              replacement === 'missing' ? [] : [{ path: 'src', type: 'blob', sha: 'new', size: 3 }],
-            truncated: false,
-          }),
-        )
-        const accessor = new GitHubAccessor({
-          transport: { get, request: vi.fn() },
-          owner: 'acme',
-          repo: 'proj',
-          ref: 'main',
-          defaultBranch: 'main',
-        })
-        const path = new PathSpec({
-          vfsPath: 'src',
-          virtual: '/repo/src',
-          directory: '/repo/src',
-        })
-        try {
-          await index.setDir('/other', [
-            ['keep', new IndexEntry({ id: 'keep', name: 'keep', resourceType: 'file' })],
-          ])
-          await index.setDir('/repo', [
-            ['src', new IndexEntry({ id: 'old', name: 'src', resourceType: 'folder' })],
-          ])
-          await index.setDir('/repo/src', [
-            ['old.py', new IndexEntry({ id: 'old-file', name: 'old.py', resourceType: 'file' })],
-          ])
-          await index.invalidate()
-          for (let i = 0; i < 2; i++)
-            await expect(readdir(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
-          expect(get).toHaveBeenCalledTimes(1)
-          expect((await index.get('/repo/src/old.py')).entry).toBeUndefined()
-          expect((await index.get('/other/keep')).entry?.id).toBe('keep')
-        } finally {
-          await index.clear()
-          await index.close()
-        }
-      })
-    },
-  )
-}
-
-for (const backend of ['ram', 'redis']) {
-  describe.skipIf(backend === 'redis' && process.env.REDIS_URL === undefined)(
-    `truncated refill with ${backend}`,
-    () => {
-      for (const prefix of ['', '/repo']) {
-        for (const partialChildren of [false, true]) {
-          for (const refresh of [false, true]) {
-            it(`fetches complete listings (prefix=${prefix}, partial=${String(partialChildren)}, refresh=${String(refresh)})`, async () => {
-              const url = process.env.REDIS_URL
-              const index =
-                backend === 'ram'
-                  ? new RAMIndexCacheStore()
-                  : new RedisIndexCacheStore({
-                      ...(url === undefined ? {} : { url }),
-                      keyPrefix: `github-refill:${crypto.randomUUID()}:`,
-                    })
-              const folder = { path: 'docs', type: 'tree', sha: 'docs-sha' }
-              const partialTree = partialChildren
-                ? [folder, { path: 'docs/first.md', type: 'blob', sha: 'first', size: 1 }]
-                : [folder]
-              const get = vi.fn((path: string, params?: Record<string, string>) => {
-                if (params?.recursive === '1')
-                  return Promise.resolve({ tree: partialTree, truncated: true })
-                if (path.endsWith('/git/trees/main')) return Promise.resolve({ tree: [folder] })
-                if (path.endsWith('/git/trees/docs-sha'))
-                  return Promise.resolve({
-                    tree: [
-                      { path: 'first.md', type: 'blob', sha: 'first', size: 1 },
-                      { path: 'second.md', type: 'blob', sha: 'second', size: 2 },
-                    ],
-                  })
-                throw new Error(`Unexpected request: ${path}`)
-              })
-              const accessor = new GitHubAccessor({
-                transport: { get, request: vi.fn() },
-                owner: 'acme',
-                repo: 'proj',
-                ref: 'main',
-                defaultBranch: 'main',
-              })
-              const root = prefix || '/'
-              const rootPath = new PathSpec({ vfsPath: '', virtual: root, directory: root })
-              const docs = `${prefix}/docs`
-              const docsPath = new PathSpec({
-                vfsPath: 'docs',
-                virtual: docs,
-                directory: docs,
-              })
-              try {
-                if (refresh) {
-                  await index.setDir(root, [])
-                  await index.invalidate()
-                }
-                for (let i = 0; i < 2; i++) {
-                  expect(await readdir(accessor, rootPath, index)).toEqual([docs])
-                  expect(await readdir(accessor, docsPath, index)).toEqual([
-                    `${docs}/first.md`,
-                    `${docs}/second.md`,
-                  ])
-                }
-                expect(
-                  get.mock.calls.filter(([, params]) => params?.recursive === '1'),
-                ).toHaveLength(1)
-                expect(
-                  get.mock.calls
-                    .filter(([, params]) => params?.recursive !== '1')
-                    .map(([path]) => path.split('/').at(-1)),
-                ).toEqual(['main', 'main', 'docs-sha'])
-              } finally {
-                await index.clear()
-                await index.close()
-              }
-            })
-          }
-        }
-      }
-    },
-  )
-}
 
 describe('the truncated walk', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('caches each listing on the way down', async () => {
-    const gh = new FakeGitHub({ 'top.txt': 't', 'docs/sub/b.txt': 'b' })
+  function truncated(gh: FakeGitHub): GitHubAccessor {
     gh.truncatedRecursive = true
     vi.stubGlobal('fetch', gh.fetch)
-    const accessor = new GitHubAccessor({
+    return new GitHubAccessor({
       transport: new HttpGitHubTransport({ token: 't', baseUrl: BASE }),
       owner: 'o',
       repo: 'r',
@@ -335,135 +97,42 @@ describe('the truncated walk', () => {
       truncated: true,
       tree: {},
     })
-    const path = new PathSpec({
-      virtual: '/gh/docs/sub',
-      directory: '/gh/docs/sub',
-      resolved: false,
-      vfsPath: 'docs/sub',
-    })
-    const index = new RAMIndexCacheStore()
-    expect(await readdir(accessor, path, index)).toEqual(['/gh/docs/sub/b.txt'])
-    // The root and docs listings on the way down, then docs/sub itself.
-    for (const listed of ['/gh', '/gh/docs', '/gh/docs/sub']) {
-      expect((await index.listDir(listed)).entries).not.toBeNull()
-    }
+  }
+
+  it('lists each folder by its sha', async () => {
+    const gh = new FakeGitHub({ 'top.txt': 't', 'docs/sub/b.txt': 'b' })
+    const walker = truncated(gh)
+    const root = await readdir(walker, spec('', '/gh'))
+    expect(names(root)).toEqual(['docs', 'top.txt'])
+    const docs = await readdir(walker, spec('docs', '/gh'), root.entries[0])
+    expect(names(docs)).toEqual(['sub'])
     expect(gh.count('recursive')).toBe(0)
+    await expect(readdir(walker, spec('docs', '/gh'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('refuses a directory GitHub cut short', async () => {
     const gh = new FakeGitHub({ 'top.txt': 't', 'big/a.txt': 'a', 'big/b.txt': 'b' })
-    gh.truncatedRecursive = true
+    const walker = truncated(gh)
     gh.truncatedDirs.set('big', 1)
-    vi.stubGlobal('fetch', gh.fetch)
-    const accessor = new GitHubAccessor({
-      transport: new HttpGitHubTransport({ token: 't', baseUrl: BASE }),
-      owner: 'o',
-      repo: 'r',
-      ref: 'main',
-      defaultBranch: 'main',
-      truncated: true,
-      tree: {},
-    })
-    const index = new RAMIndexCacheStore()
-    const path = new PathSpec({
-      virtual: '/gh/big',
-      directory: '/gh/big',
-      resolved: false,
-      vfsPath: 'big',
-    })
-    const err = await readdir(accessor, path, index).catch((e: unknown) => e)
+    const root = await readdir(walker, spec('', '/gh'))
+    const big = root.entries.find((row) => row.name === 'big')
+    const err = await readdir(walker, spec('big', '/gh'), big).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(GitHubApiError)
     expect((err as GitHubApiError).message).toContain('truncated the tree listing')
-    // Nothing partial was cached as the directory's whole listing.
-    expect((await index.listDir('/gh/big')).entries ?? null).toBeNull()
   })
 })
 
-describe('github readdir answers from its own refill', () => {
-  let gh: FakeGitHub
-
+describe('a fresh tree', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  function served(files: Record<string, string>): GitHubAccessor {
-    gh = new FakeGitHub(files)
+  it('reports a folder it dropped as missing', async () => {
+    const gh = new FakeGitHub({ 'docs/a.txt': 'a', 'top.txt': 't' })
     vi.stubGlobal('fetch', gh.fetch)
-    return servedAccessor()
-  }
-
-  function under(rel: string): PathSpec {
-    return new PathSpec({ vfsPath: rel, virtual: `/gh/${rel}`, directory: `/gh/${rel}` })
-  }
-
-  const FILES = { 'docs/a.txt': 'alpha', 'docs/b.txt': 'bravo', 'top.txt': 'top' }
-
-  it.each([
-    ['root expired', null],
-    ['root live, folder expired', '/gh'],
-  ])('lists the folder when %s', async (_, live) => {
-    const accessor = served(FILES)
-    const index = new ExpiredOnArrival(live)
-    await refillSnapshot(accessor, index, '/gh')
-    gh.log.length = 0
-    expect(await readdir(accessor, under('docs'), index)).toEqual([
-      '/gh/docs/a.txt',
-      '/gh/docs/b.txt',
-    ])
-    expect(gh.counts()).toEqual([0, 1, 0])
-  })
-
-  it('answers ENOENT for a folder the fresh tree no longer has', async () => {
-    const accessor = served(FILES)
-    const index = new ExpiredOnArrival()
-    await refillSnapshot(accessor, index, '/gh')
     gh.files.delete('docs/a.txt')
-    gh.files.delete('docs/b.txt')
-    await index.invalidate()
-    await expect(readdir(accessor, under('docs'), index)).rejects.toMatchObject({
+    await expect(readdir(servedAccessor(), spec('docs', '/gh'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
-  })
-
-  it.each<[string, string, (key: string) => boolean]>([
-    ['retiring', '', () => false],
-    ['nested', 'docs', (key) => !key.startsWith('/gh/docs')],
-  ])('answers ENOENT under a view that refuses the folder (%s)', async (_, rel, owns) => {
-    const accessor = served({ 'docs/a.txt': 'alpha', 'top.txt': 'top' })
-    const view = new IndexView(
-      new RAMIndexCacheStore({ ttl: 86_400 }),
-      new RAMFileCacheStore(),
-      '/gh',
-      owns,
-      { readTtl: 600 },
-    )
-    const target =
-      rel === '' ? new PathSpec({ vfsPath: '', virtual: '/gh', directory: '/gh' }) : under(rel)
-    await expect(readdir(accessor, target, view)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(gh.counts()).toEqual([0, 1, 0])
-  })
-
-  it('keeps the per-directory fallback when the refill comes back truncated', async () => {
-    const accessor = served({ 'docs/a.txt': 'alpha', 'docs/deep/x.txt': 'x', 'top.txt': 'top' })
-    const index = new ExpiredOnArrival()
-    await refillSnapshot(accessor, index, '/gh')
-    gh.truncatedRecursive = true
-    gh.log.length = 0
-    expect(await readdir(accessor, under('docs/deep'), index)).toEqual(['/gh/docs/deep/x.txt'])
-    expect(accessor.truncated).toBe(true)
-    expect(gh.count('recursive')).toBe(1)
-    expect(gh.count('dir') + gh.count('sha_dir')).toBeGreaterThan(0)
-  })
-
-  it('filters snapshot children owned by another mount', async () => {
-    const accessor = served(FILES)
-    const view = new IndexView(
-      new ExpiredOnArrival(),
-      new RAMFileCacheStore(),
-      '/gh',
-      (key) => key !== '/gh/docs/b.txt',
-    )
-    expect(await readdir(accessor, under('docs'), view)).toEqual(['/gh/docs/a.txt'])
-    expect(gh.counts()).toEqual([0, 1, 0])
   })
 })

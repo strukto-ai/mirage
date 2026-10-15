@@ -141,11 +141,6 @@
    "typescript_only": {
    }
   },
-  "core/github/tree": {
-   "python_only": {
-    "_match_tree_to_index": "TypeScript makes the same tree-older-than-index check inline in ensureTree."
-   }
-  },
   "core/hf_hub/client": {
    "typescript_only": {
     "hubFetch": "fetch reports a transport failure as a bare TypeError, so TypeScript wraps it; aiohttp already raises ClientError, which the Python callers catch.",

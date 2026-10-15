@@ -13,23 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.hf_hub import HfHubAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.hf_hub.client import etag_value, hub_bytes_tagged, resolve_url
 from mirage.core.hf_hub.constants import REFUSED_STATUSES
-from mirage.core.hf_hub.lookup import key_of, lookup_retrying, refusals_denied
+from mirage.core.hf_hub.lookup import refusals_denied
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import ByteWindow
 
 
-async def resolve_entry(
-    accessor: HfHubAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore,
-) -> IndexEntry:
-    """The tree row for a path, or the error that says why there is none.
+def resolve_entry(path_spec: PathSpec, entry: FileStat | None) -> FileStat:
+    """The file's row, or the error that says why there is none.
 
     Shared by every content read so a file, a directory and an absence
     are told apart in exactly one place. It also means a read never
@@ -37,87 +31,75 @@ async def resolve_entry(
     The row is also where the read's token comes from (``row_token``).
 
     Args:
-        accessor (HfHubAccessor): backend handle.
         path_spec (PathSpec): the path being read.
-        index (IndexCacheStore): the mount's index.
-
-    Returns:
-        IndexEntry: the row for the path.
+        entry (FileStat | None): the path's row.
 
     Raises:
         FileNotFoundError: nothing exists at the path.
         IsADirectoryError: the path names a directory.
     """
-    virtual = path_spec.virtual
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
-    rel = path_spec.mount_path.strip("/")
-    if not rel:
-        raise eisdir(virtual)
-    with refusals_denied(path_spec):
-        found = await lookup_retrying(
-            accessor, index, prefix, key_of(prefix, rel)
-        )
-    if found.is_dir:
-        raise eisdir(virtual)
-    if found.entry is None:
-        raise enoent(virtual)
-    return found.entry
+    if not path_spec.mount_path.strip("/"):
+        raise eisdir(path_spec.virtual)
+    if entry is None:
+        raise enoent(path_spec.virtual)
+    if entry.type is FileType.DIRECTORY:
+        raise eisdir(path_spec.virtual)
+    return entry
 
 
-def row_token(entry: IndexEntry, etag: str) -> str | None:
+def row_token(entry: FileStat, etag: str) -> str | None:
     """The row's oid, if the response's ETag shows the bytes are that row's.
 
-    The listing can be older than the download: the tree lives until a
-    verdict clears it, while resolve always serves the revision's current
-    bytes. Stamping the listing's oid on newer bytes would let a later
-    revert to that oid pass them off as fresh, so the oid is stamped only
-    when the ETag names one of the row's own ids (the oid for a plain file,
-    the xet hash for a Xet one), and otherwise nothing is.
+    The listing can be older than the download: the listing lives until
+    the mount re-lists it, while resolve always serves the revision's
+    current bytes. Stamping the listing's oid on newer bytes would let a
+    later revert to that oid pass them off as fresh, so the oid is stamped
+    only when the ETag names one of the row's own ids (the oid for a plain
+    file, the xet hash for a Xet one), and otherwise nothing is.
 
     Args:
-        entry (IndexEntry): the tree row the read resolved.
+        entry (FileStat): the file's row.
         etag (str): the final response's ETag header.
 
     Returns:
         str | None: the oid to stamp, or None.
     """
     ids = {
-        entry.id,
+        entry.fingerprint,
         entry.extra.get("lfs_oid"),
         entry.extra.get("xet_hash"),
     } - {"", None}
     if etag_value(etag) not in ids:
         return None
-    return entry.id or None
+    return entry.fingerprint
 
 
 async def read(
     accessor: HfHubAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
+    entry: FileStat | None = None,
 ) -> bytes:
     """Read a file's content, or a byte window of it.
 
     Args:
         accessor (HfHubAccessor): backend handle.
         path (PathSpec): the file to read.
-        index (IndexCacheStore): the mount's index.
         offset (int): first byte to read.
         size (int | None): how many bytes; None reads to the end.
+        entry (FileStat | None): the file's row.
 
     Returns:
         bytes: the content.
     """
-    entry = await resolve_entry(accessor, path, index)
-    raw = path.mount_path
+    row = resolve_entry(path, entry)
     url = resolve_url(
         accessor.endpoint,
         accessor.repo_type,
         accessor.repo_id,
         accessor.revision,
-        accessor.repo_path(raw),
+        accessor.repo_path(path.mount_path),
     )
     window = (
         ByteWindow(offset=offset, size=size)
@@ -135,6 +117,6 @@ async def read(
         accessor.VFS_NAME,
         len(data),
         timer,
-        fingerprint=row_token(entry, etag),
+        fingerprint=row_token(row, etag),
     )
     return data

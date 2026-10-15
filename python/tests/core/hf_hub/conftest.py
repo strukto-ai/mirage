@@ -30,18 +30,23 @@ class FakeAccessor(HfHubAccessor):
 
 @pytest.fixture(autouse=True)
 def head(monkeypatch):
-    """The head commit a refill or a root stat asks for, answered locally.
+    """The head commit a listing or a root stat asks for, answered locally.
 
-    Every accessor here points at the real Hub, so the one request a refill
-    now makes before its tree walk is answered by this mock: "" by default,
-    which walks the tree at the branch and stores no version, the way a
-    mocked ``fetch_tree`` alone used to behave.
+    Every accessor here points at the real Hub, so the one request a
+    listing makes before its tree walk is answered by this mock: "" by
+    default, which walks the tree at the branch and versions nothing.
     """
     mock = AsyncMock(return_value="")
-    for module in ("tree", "stat"):
-        monkeypatch.setattr(
-            f"mirage.core.hf_hub.{module}.head_commit", mock, raising=False
-        )
+    for module in ("readdir", "stat"):
+        monkeypatch.setattr(f"mirage.core.hf_hub.{module}.head_commit", mock)
+    return mock
+
+
+@pytest.fixture
+def tree(monkeypatch):
+    """The tree a listing walks, answered locally: empty until seeded."""
+    mock = AsyncMock(return_value={})
+    monkeypatch.setattr("mirage.core.hf_hub.readdir.fetch_tree", mock)
     return mock
 
 
@@ -58,16 +63,20 @@ def prefixed():
 
 
 @pytest.fixture
-def loaded(accessor):
-    """An accessor whose listing is already hydrated, so no request runs."""
-    seed(accessor, file_row("a.txt", 7), file_row("d/b.txt", 3), dir_row("d"))
+def loaded(accessor, tree):
+    """An accessor whose listing answers locally, so no request runs."""
+    seed(tree, file_row("a.txt", 7), file_row("d/b.txt", 3), dir_row("d"))
     return accessor
 
 
-def seed(accessor, *rows) -> None:
-    accessor.tree = {r["path"]: parse_entry(r) for r in rows}
-    accessor.tree_loaded = True
-    accessor.rows_cache = None
+def seed(tree: AsyncMock, *rows) -> None:
+    """Answer every listing's tree walk with ``rows``.
+
+    Args:
+        tree (AsyncMock): the ``tree`` fixture.
+        *rows: tree rows, as the Hub sends them.
+    """
+    tree.return_value = {r["path"]: parse_entry(r) for r in rows}
 
 
 def ps(path: str, prefix: str = "") -> PathSpec:

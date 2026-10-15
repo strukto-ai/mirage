@@ -17,51 +17,42 @@ import logging
 import aiohttp
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.ram import ListingCheckStore
-from mirage.core.github.lookup import locate, lookup_retrying, point_lookup
 from mirage.core.github.repo import ensure_ref
-from mirage.core.github.tree import ensure_tree, fetch_head, index_entry
+from mirage.core.github.tree import (
+    fetch_dir_tree,
+    fetch_head,
+    point_row,
+    refresh_tree,
+    row_of,
+)
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.filetype import content_type_for_path
-from mirage.utils.key_prefix import mount_prefix_of
 
 log = logging.getLogger(__name__)
 
 
-def stat_of(entry: IndexEntry) -> FileStat:
-    """Render one tree row as a FileStat, the same from either route.
-
-    Args:
-        entry (IndexEntry): the row for the path.
-
-    Returns:
-        FileStat: the rendered stat.
-    """
-    if entry.resource_type == "folder":
-        return FileStat(name=entry.name, type=FileType.DIRECTORY)
-    return FileStat(
-        name=entry.name,
-        size=entry.size,
-        type=FileType.FILE,
-        content=content_type_for_path(entry.name),
-        fingerprint=entry.id,
-        extra={"sha": entry.id},
-    )
-
-
 async def stat(
     accessor: GitHubAccessor,
-    path_spec: PathSpec,
+    path: PathSpec,
+    entry: FileStat | None = None,
     index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     """Stat one path in the repository.
 
+    A path answers with its row, as its folder's listing names it. The
+    gate's check is handed no listed row, so it asks for the one path with
+    one directory listing, its parent's; a parent it cannot see, and a
+    truncated listing without the name, are no answer, so the whole tree is
+    asked instead, and one GitHub truncates is walked down from the ref one
+    directory at a time.
+
     Args:
         accessor (GitHubAccessor): backend handle.
-        path_spec (PathSpec): the path to stat.
-        index (IndexCacheStore): the mount's index.
+        path (PathSpec): the path to stat.
+        entry (FileStat | None): the path's row.
+        index (IndexCacheStore): the store the stat runs under.
 
     Returns:
         FileStat: the rendered stat.
@@ -69,52 +60,85 @@ async def stat(
     Raises:
         FileNotFoundError: nothing exists at the path.
     """
-    prefix, rel, key = locate(path_spec)
+    rel = path.mount_path.strip("/")
     if not rel:
         return FileStat(
             name="/",
             type=FileType.DIRECTORY,
             fingerprint=await _root_version(accessor, index),
         )
-    # A probe through a throwaway index asks for this one path; everything
-    # else answers from the mount's listing, filling it if need be.
-    found = await point_lookup(accessor, index, prefix, rel)
+    if entry is not None:
+        return entry
+    if not isinstance(index, ListingCheckStore):
+        raise enoent(path.virtual)
+    answer = await point_row(accessor, rel)
+    if answer is not None:
+        row, truncated = answer
+        if row is not None:
+            return row_of(row, row.path)
+        if not truncated:
+            raise enoent(path.virtual)
+    if not (accessor.tree_loaded and accessor.truncated):
+        whole = await refresh_tree(accessor)
+        if whole is not None:
+            if rel not in whole:
+                raise enoent(path.virtual)
+            return row_of(whole[rel], rel.rsplit("/", 1)[-1])
+    found = await _walked(accessor, rel)
     if found is None:
-        found = await lookup_retrying(accessor, index, prefix, key)
-    if found.entry is None:
-        raise enoent(path_spec.virtual)
-    return stat_of(found.entry)
+        raise enoent(path.virtual)
+    return found
+
+
+async def _walked(accessor: GitHubAccessor, rel: str) -> FileStat | None:
+    """The row at ``rel``, walked down from the ref one directory at a
+    time; None when a level does not name it.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        rel (str): the path, repo-relative.
+    """
+    sha = await ensure_ref(accessor)
+    names = rel.split("/")
+    for depth, name in enumerate(names):
+        rows = await fetch_dir_tree(
+            accessor.config, accessor.owner, accessor.repo, sha, accessor.pool
+        )
+        found = next((row for row in rows if row.path == name), None)
+        if found is None:
+            return None
+        if depth == len(names) - 1:
+            return row_of(found, name)
+        if found.type != "tree":
+            return None
+        sha = found.sha
+    return None
 
 
 async def tree(
-    accessor: GitHubAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: GitHubAccessor, path: PathSpec
 ) -> dict[str, FileStat] | None:
-    """Every entry under a directory of the repository, each as ``stat``
-    renders it, from the git tree the mount fetches once. None when
-    GitHub truncated that tree, which then names only some paths, or
-    when ``path`` is no directory in it, so the walk's readdir and stat
-    report what is there.
+    """Every entry under a directory of the repository, each as its row,
+    from one recursive tree. None when GitHub truncates that tree, which
+    then names only some paths, or when ``path`` is no directory in it,
+    so the walk's readdir and stat report what is there.
 
     Args:
         accessor (GitHubAccessor): backend handle.
         path (PathSpec): the directory.
-        index (IndexCacheStore): the mount's index, which the tree's
-            refetch reseeds.
     """
-    await ensure_tree(
-        accessor, index, mount_prefix_of(path.virtual, path.vfs_path)
-    )
-    if accessor.truncated:
+    if accessor.tree_loaded and accessor.truncated:
+        return None
+    fetched = await refresh_tree(accessor)
+    if fetched is None:
         return None
     base = path.mount_path.strip("/")
-    if base and getattr(accessor.tree.get(base), "type", None) != "tree":
+    if base and getattr(fetched.get(base), "type", None) != "tree":
         return None
     lead = base + "/" if base else ""
     return {
-        key[len(lead) :]: stat_of(index_entry(entry, key.rsplit("/", 1)[-1]))
-        for key, entry in accessor.tree.items()
+        key[len(lead) :]: row_of(entry, key.rsplit("/", 1)[-1])
+        for key, entry in fetched.items()
         if key.startswith(lead) and key != base
     }
 

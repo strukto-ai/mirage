@@ -17,27 +17,27 @@ from unittest.mock import patch
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.cache.index import NULL_INDEX, Evicted
+from mirage.cache.index import Evicted
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.core.hf_hub.client import HfHubError
+from mirage.core.hf_hub.readdir import readdir
 from mirage.core.hf_hub.tree import (
     collect,
     deletions_for,
-    ensure_live_snapshot,
-    ensure_tree,
     fetch_path,
     fetch_tree,
     filter_repo_paths,
-    index_rows,
     next_cursor,
     parse_entry,
     paths_info_url,
-    refill_index,
-    refill_snapshot,
+    row_of,
+    tree_rows,
     tree_url,
 )
+from mirage.types import FileType, PathSpec
 from mirage.vfs.hf_buckets.config import HfRepoConfig
+from mirage.workspace.mount.listing import keep_listing
 from tests.core.hf_hub.conftest import FakeAccessor, dir_row, file_row, page
 
 
@@ -278,75 +278,65 @@ async def test_fetch_tree_reraises_a_real_failure(mock_get, accessor):
         await fetch_tree(accessor)
 
 
-def test_index_rows_gives_the_root_a_listing_for_an_empty_repo():
-    """Without it an empty repository is byte for byte a dropped index."""
-    entries, children = index_rows({}, "")
-    assert entries == {}
-    assert children == {"/": []}
+def test_tree_rows_give_the_root_a_listing_for_an_empty_repo():
+    """Without it an empty repository lists as missing."""
+    assert tree_rows({}) == {"": []}
 
 
-def test_index_rows_keys_mount_absolute_under_a_prefix():
-    tree = {"a.txt": parse_entry(file_row("a.txt", 7))}
-    entries, children = index_rows(tree, "/m")
-    assert entries["/m/a.txt"].size == 7
-    assert children["/m"] == ["/m/a.txt"]
-
-
-def test_index_rows_implies_a_parent_a_page_boundary_split_off():
+def test_tree_rows_imply_a_parent_a_page_boundary_split_off():
     """A cursor can deliver a child before its own directory row.
 
     The implied folder gets a row of its own and a place in its parent's
-    listing, so every listed path has an entry: a versioned listing on
-    Redis reads EXPIRED when one of its children has none.
+    listing, so every folder lists and every listed name has a row.
     """
-    tree = {"d/e/a.txt": parse_entry(file_row("d/e/a.txt"))}
-    entries, children = index_rows(tree, "/m")
-    assert children["/m/d/e"] == ["/m/d/e/a.txt"]
-    assert children["/m/d"] == ["/m/d/e"]
-    assert children["/m"] == ["/m/d"]
-    for key in ("/m/d", "/m/d/e"):
-        assert entries[key].resource_type == "folder"
-        assert entries[key].name == key.rsplit("/", 1)[1]
-    assert set(entries) == {
-        path for rows in children.values() for path in rows
+    rows = tree_rows({"d/e/a.txt": parse_entry(file_row("d/e/a.txt"))})
+    assert {k: [r.name for r in v] for k, v in rows.items()} == {
+        "": ["d"],
+        "d": ["e"],
+        "d/e": ["a.txt"],
     }
+    assert rows[""][0].type is FileType.DIRECTORY
 
 
-def test_index_rows_leaves_a_directory_size_unset():
-    tree = {"d": parse_entry(dir_row("d"))}
-    entries, _ = index_rows(tree, "")
-    assert entries["/d"].size is None
-    assert entries["/d"].resource_type == "folder"
+def test_a_folder_row_replaces_the_one_its_child_implied():
+    rows = tree_rows(
+        {
+            "d/b.txt": parse_entry(file_row("d/b.txt")),
+            "d": parse_entry(
+                dir_row("d") | {"lastCommit": {"date": "2025-01-01"}}
+            ),
+        }
+    )
+    assert [(r.name, r.modified) for r in rows[""]] == [("d", "2025-01-01")]
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_refill_index_is_a_noop_without_an_index(mock_fetch, accessor):
-    assert await refill_index(accessor, NULL_INDEX, "") is False
-    mock_fetch.assert_not_awaited()
+def test_row_of_leaves_a_directory_size_unset():
+    row = row_of(parse_entry(dir_row("d")), "d")
+    assert (row.type, row.size) == (FileType.DIRECTORY, None)
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_refill_index_clears_the_derived_row_memo(mock_fetch, accessor):
-    mock_fetch.return_value = {"a.txt": parse_entry(file_row("a.txt"))}
-    accessor.rows_cache = ("", {}, {})
-    assert await refill_index(accessor, RAMIndexCacheStore(), "") is True
-    assert accessor.rows_cache is None
-    assert accessor.tree_loaded is True
+def test_row_of_leaves_mtime_unset_when_the_row_has_none():
+    """A Hub file's only mtime is its last commit, and a bare listing
+    carries none. None is the honest answer; a repo-wide timestamp
+    stamped on every file would be a confident lie."""
+    assert row_of(parse_entry(file_row("f")), "f").modified is None
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_ensure_tree_hydrates_an_empty_repo_exactly_once(
-    mock_fetch, accessor
-):
-    """An empty repository hydrates to {}; reading that as 'not
-    hydrated' refetches it on every call forever."""
-    mock_fetch.return_value = {}
-    await ensure_tree(accessor)
-    await ensure_tree(accessor)
-    assert mock_fetch.await_count == 1
+def test_row_of_reports_an_expanded_mtime():
+    entry = parse_entry(
+        file_row("f", lastCommit={"date": "2025-01-01T00:00:00.000Z"})
+    )
+    assert row_of(entry, "f").modified == "2025-01-01T00:00:00.000Z"
+
+
+def test_row_of_an_empty_id_carries_no_token():
+    entry = parse_entry({"type": "file", "oid": "", "path": "a.txt"})
+    assert row_of(entry, "a.txt").fingerprint is None
+
+
+def test_row_of_keeps_the_ids_a_read_stamps_by():
+    row = row_of(parse_entry(file_row("a.txt", lfs={"oid": "L"})), "a.txt")
+    assert (row.fingerprint, row.extra["lfs_oid"]) == ("oid-a.txt", "L")
 
 
 def test_tree_url_encodes_a_revision_holding_a_slash():
@@ -460,54 +450,6 @@ async def test_fetch_path_reads_an_empty_list_as_absence(mock_post, accessor):
     assert await fetch_path(accessor, "a.txt") == {}
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_refill_returns_the_snapshot_it_wrote(
-    mock_fetch, accessor, monkeypatch
-):
-    mock_fetch.return_value = {"a.txt": parse_entry(file_row("a.txt"))}
-    index = RAMIndexCacheStore()
-    write = index.seed
-
-    def seed(*args, **kwargs):
-        write(*args, **kwargs)
-        accessor.tree = {"other.txt": parse_entry(file_row("other.txt"))}
-
-    monkeypatch.setattr(index, "seed", seed)
-    snapshot = await refill_snapshot(accessor, index, "/m")
-    assert snapshot.children["/m"] == ["/m/a.txt"]
-    assert snapshot.entries["/m/a.txt"].id == "oid-a.txt"
-    assert (await index.list_dir("/m")).entries == ["/m/a.txt"]
-
-
-# The watcher sets accessor.tree with no lock, so a walk at an older head
-# can land while the refill awaits its invalidation. The refill seeds the
-# tree it fetched itself, stamped with the head it walked at, never the
-# accessor's tree re-read after an await.
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_a_refill_seeds_its_own_tree_when_the_watcher_swaps_it(
-    mock_fetch, accessor, head
-):
-    head.return_value = "c" * 40
-    mock_fetch.return_value = {"new.txt": parse_entry(file_row("new.txt"))}
-    index = RAMIndexCacheStore()
-    invalidate = index.invalidate_prefix
-
-    async def watcher_lands(*args, **kwargs):
-        accessor.tree = {"old.txt": parse_entry(file_row("old.txt"))}
-        await invalidate(*args, **kwargs)
-
-    index.invalidate_prefix = watcher_lands
-    snapshot = await refill_snapshot(accessor, index, "/m")
-    listing = await index.list_dir("/m")
-    assert listing.entries == ["/m/new.txt"]
-    assert listing.version == "c" * 40
-    assert (await index.get("/m/new.txt")).entry.id == "oid-new.txt"
-    assert (await index.get("/m/old.txt")).entry is None
-    assert snapshot.children["/m"] == ["/m/new.txt"]
-
-
 def _tree(*rows):
     return {row["path"]: parse_entry(row) for row in rows}
 
@@ -523,12 +465,11 @@ def _tree(*rows):
         (_tree(file_row("a.txt")), [Evicted("/m/d", folder=True)]),
     ],
 )
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_a_refill_reports_what_left_the_repository(
-    mock_fetch, accessor, after, reported
+async def test_a_relisting_reports_what_left_the_repository(
+    accessor, tree, after, reported
 ):
-    # The refill wipes the index before seeding the new tree, so without
-    # the diff a file removed upstream keeps its cached bytes and overlay.
+    # The seeds replace each folder's listing, so without the diff a file
+    # removed upstream keeps its cached bytes and overlay.
     gone: list[Evicted] = []
 
     async def on_gone(children: list[Evicted]) -> None:
@@ -541,86 +482,18 @@ async def test_a_refill_reports_what_left_the_repository(
         lambda _key: True,
         on_gone=on_gone,
     )
-    mock_fetch.return_value = _tree(
+    root = PathSpec(virtual="/m", directory="/m", vfs_path="")
+    tree.return_value = _tree(
         file_row("a.txt"), file_row("d/b.txt"), dir_row("d")
     )
-    await refill_snapshot(accessor, index, "/m")
+    await keep_listing(index, "/m", await readdir(accessor, root))
     assert gone == []
-    mock_fetch.return_value = after
-    await refill_snapshot(accessor, index, "/m")
+    tree.return_value = after
+    await keep_listing(index, "/m", await readdir(accessor, root))
     assert gone == reported
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_ensure_live_snapshot_refetches_a_dropped_index(
-    mock_fetch, accessor
-):
-    mock_fetch.return_value = {"a.txt": parse_entry(file_row("a.txt"))}
-    index = RAMIndexCacheStore()
-    assert await ensure_live_snapshot(accessor, index, "") is not None
-    # Live now: a second call must cost no request.
-    assert await ensure_live_snapshot(accessor, index, "") is None
-    assert mock_fetch.await_count == 1
-
-
 HEAD = "c" * 40
-
-
-# The refill walks the tree at the commit the head named, passed to the
-# walk rather than written to the accessor, and stamps every listing with it.
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.hub_get_response")
-async def test_a_refill_walks_and_stamps_the_head_it_resolved(
-    mock_get, accessor, head
-):
-    head.return_value = HEAD
-    mock_get.return_value = page(
-        [file_row("a.txt"), file_row("d/b.txt"), dir_row("d")]
-    )
-    index = RAMIndexCacheStore()
-    await refill_snapshot(accessor, index, "/m")
-    assert mock_get.await_args.args[1].endswith(f"/tree/{HEAD}")
-    assert accessor.revision == "main"
-    assert (await index.list_dir("/m")).version == HEAD
-    assert (await index.list_dir("/m/d")).version == HEAD
-
-
-# A head the Hub names as "" walks the tree at the branch and stores no
-# version, rather than asking for /tree/.
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.hub_get_response")
-async def test_a_refill_with_no_head_walks_the_branch_unversioned(
-    mock_get, accessor, head
-):
-    head.return_value = ""
-    mock_get.return_value = page([file_row("a.txt")])
-    index = RAMIndexCacheStore()
-    await refill_snapshot(accessor, index, "/m")
-    assert mock_get.await_args.args[1].endswith("/tree/main")
-    listing = await index.list_dir("/m")
-    assert listing.entries == ["/m/a.txt"]
-    assert listing.version is None
-
-
-# The head failing is the refill failing: a transient error is not
-# hidden behind a branch walk that would store rows of an unknown commit.
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_a_refill_whose_head_fails_raises(mock_fetch, accessor, head):
-    head.side_effect = HfHubError("boom", 500)
-    with pytest.raises(HfHubError):
-        await refill_snapshot(accessor, RAMIndexCacheStore(), "/m")
-    mock_fetch.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.hf_hub.tree.fetch_tree")
-async def test_a_refill_without_an_index_asks_no_head(
-    mock_fetch, accessor, head
-):
-    assert await refill_snapshot(accessor, NULL_INDEX, "") is None
-    head.assert_not_awaited()
 
 
 def test_tree_url_takes_the_revision_it_is_given(accessor, prefixed):

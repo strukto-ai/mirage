@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.core.hf_hub.read import read
+from mirage.core.hf_hub.readdir import readdir
 from mirage.observe.context import RecordingScope
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
@@ -23,6 +24,7 @@ from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from mirage.workspace.snapshot.drift import ContentDriftError
 from mirage.workspace.snapshot.state import to_state_dict
+from tests.fixtures.handed import call
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve
 
 REPO = ("models", "acme/widget")
@@ -75,7 +77,6 @@ async def test_a_revert_never_serves_other_bytes_as_fresh():
             assert await _out(ws, "cat /m/a.txt") == NEW
             # The fixture held: the listing was OLD's, and the cached copy
             # carries no token rather than OLD's oid.
-            assert vfs.accessor.tree_loaded
             assert not await ws.cache.is_fresh("/m/a.txt", blob_oid(OLD))
             _files(hub)["a.txt"] = OLD
             before = hub.count("resolve")
@@ -239,11 +240,11 @@ async def test_a_verified_read_pins_and_a_changed_file_drifts():
     with serve(_hub({"a.txt": OLD})) as hub:
         state = await _pinned_state(hub)
         _files(hub)["a.txt"] = NEW
-        walks = hub.count("tree")
+        hub.log.clear()
         with pytest.raises(ContentDriftError):
             await _load(state, _vfs(hub))
-        # A restored mount has not loaded its tree, so the check walks it.
-        assert hub.count("tree") > walks
+        # The check asks for the one path rather than walking the tree.
+        assert (hub.count("paths_info"), hub.count("tree")) == (1, 0)
 
 
 @pytest.mark.asyncio
@@ -260,7 +261,7 @@ async def test_an_unverified_read_pins_nothing():
 async def test_a_drift_check_the_hub_refuses_is_not_drift():
     with serve(_hub({"a.txt": OLD})) as hub:
         state = await _pinned_state(hub)
-        hub.fail["tree"] = (401, "")
+        hub.fail["paths_info"] = (401, "")
         with pytest.raises(PermissionError):
             await _load(state, _vfs(hub))
 
@@ -273,8 +274,7 @@ async def test_a_drift_check_on_a_loaded_mount_asks_one_path():
         try:
             await _out(ws, "cat /m/a.txt")
             state = await to_state_dict(ws)
-            # The live mount is handed over, so it has loaded its tree and
-            # the check asks for the one path rather than walking again.
+            # The check asks for the one path rather than walking again.
             _files(hub)["a.txt"] = NEW
             hub.log.clear()
             with pytest.raises(ContentDriftError):
@@ -355,7 +355,9 @@ async def test_a_ranged_read_stamps_the_whole_files_oid(override, expected):
         vfs = _vfs(hub)
         scope = RecordingScope()
         try:
-            data = await read(vfs.accessor, _spec("a.txt"), offset=2, size=3)
+            data = await call(
+                read, readdir, vfs.accessor, _spec("a.txt"), offset=2, size=3
+            )
         finally:
             scope.close()
             await vfs.accessor.close()

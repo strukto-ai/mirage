@@ -14,7 +14,6 @@
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.readdir import readdir
 from mirage.core.github.tree import ensure_tree
@@ -83,29 +82,25 @@ async def test_first_readdir_costs_one_tree_fetch(tree_calls):
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
     assert tree_calls == []
 
-    index = RAMIndexCacheStore()
-    entries = await readdir(
-        vfs.accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
+    listing = await readdir(
+        vfs.accessor, PathSpec(vfs_path="", virtual="/", directory="/")
     )
-    assert sorted(entries) == ["/src"]
+    assert [row.name for row in listing.entries] == ["src"]
     assert len(tree_calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_an_empty_repo_hydrates_once(tree_calls, monkeypatch):
     # Hydration was tracked by whether the tree held anything, so an
-    # empty repository read as "never hydrated" and refetched forever:
-    # twice per call with an index wired, since the refill seeds an empty
-    # root and then the fallback runs anyway.
+    # empty repository read as "never hydrated" and refetched forever.
     async def _empty(config, owner, repo, ref, session=None):
         tree_calls.append((owner, repo, ref))
         return {}, False, None
 
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", _empty)
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    index = RAMIndexCacheStore()
     for _ in range(3):
-        await ensure_tree(vfs.accessor, index, "/gh")
+        await ensure_tree(vfs.accessor)
     assert vfs.accessor.tree == {}
     assert vfs.accessor.tree_loaded is True
     assert len(tree_calls) == 1
@@ -172,11 +167,11 @@ async def test_reconcile_private_index_can_resolve_github_ids(
         await rec.reconcile_read(mount, path)
         assert await ws.cache.exists(path)
         assert ws.namespace.meta_for(path) is not None
-        # Neither index holds a listing, so the mount's own stat and the
-        # probe's private index are each answered by one listing of the
-        # parent, and nothing walks the tree.
-        assert tree_calls == []
-        assert dir_calls == ["main:src"] * 2
+        # The mount's own stat lists its way there with one tree, which
+        # names every folder; the probe's private index is handed no row,
+        # so it asks one listing of the parent.
+        assert tree_calls == [("o", "r", "main")]
+        assert dir_calls == ["main:src"]
     finally:
         await ws.close()
 
@@ -211,8 +206,6 @@ async def test_always_reads_current_github_blob_after_probe(
     ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     try:
         assert (await ws.shell("cat /gh/f.txt")).stdout == b"v1"
-        index = ws.mount("/gh").index_store
-        assert (await index.get("/gh/f.txt")).entry.id == "v1"
         sha = "v2"
         if surface == "shell":
             assert (await ws.shell("cat /gh/f.txt")).stdout == b"v2"

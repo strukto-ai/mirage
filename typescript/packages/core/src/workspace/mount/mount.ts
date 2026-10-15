@@ -34,6 +34,7 @@ import { coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
+import { withIndexLock } from '../../cache/index/lock.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type {
@@ -981,13 +982,17 @@ export class MountEntry {
 
   /**
    * A directory's children, from its stored listing or listed through the
-   * backend and kept. Mirrors Python's `_listed`.
+   * backend and kept. Finding the rows a listing is handed lists its parent,
+   * whose fetch may have proved this listing too (a seed). Mirrors Python's
+   * `_listed`.
    */
   private async listed(path: PathSpec, index: IndexCacheStore): Promise<string[]> {
     const key = indexKey(this.prefix, path)
     const stored = await storedListing(index, key)
     if (stored !== null) return stored
     const handed = (await this.handedFor('readdir', path, null, index)) ?? {}
+    const seeded = await storedListing(index, key)
+    if (seeded !== null) return seeded
     const listed = await this.vfs.readdir(path, handed)
     return keepListing(index, key, listed as readonly FileStat[] | DirListing)
   }
@@ -1166,26 +1171,34 @@ export class MountEntry {
     taken(name, kwargs)
     this.requireWritable(name, scope, [...args, ...Object.values(kwargs)], access)
     const index = kwargs.index ?? this.index
-    let found: Handed | null = null
-    if (vfs.listsStats && STORED_OPS.has(name)) {
-      let stored = await this.stored(name, scope, index)
-      if (stored === null && name === 'readdir') {
-        // Finding the rows a listing is handed lists its parent, whose
-        // fetch may have proved this listing too (a seed).
-        found = await this.handedFor(name, scope, null, index)
-        stored = await this.stored(name, scope, index)
+    const answer = async (): Promise<unknown> => {
+      let found: Handed | null = null
+      if (vfs.listsStats && STORED_OPS.has(name)) {
+        let stored = await this.stored(name, scope, index)
+        if (stored === null && name === 'readdir') {
+          // Finding the rows a listing is handed lists its parent, whose
+          // fetch may have proved this listing too (a seed).
+          found = await this.handedFor(name, scope, null, index)
+          stored = await this.stored(name, scope, index)
+        }
+        if (stored !== null) return stored
       }
-      if (stored !== null) return stored
+      for (const call of levels) {
+        const result = await this.run(name, call, scope, args, kwargs, index, found)
+        found = null
+        if (result === null || result === undefined) continue
+        const kept = vfs.listsStats ? await this.kept(name, scope, index, result) : result
+        if (name === 'stat') this.noteLive(scope, index, kept)
+        return kept
+      }
+      return null
     }
-    for (const call of levels) {
-      const result = await this.run(name, call, scope, args, kwargs, index, found)
-      found = null
-      if (result === null || result === undefined) continue
-      const kept = vfs.listsStats ? await this.kept(name, scope, index, result) : result
-      if (name === 'stat') this.noteLive(scope, index, kept)
-      return kept
+    // One listing of a folder at a time: a reader arriving while another
+    // lists it waits, then answers from what that one kept.
+    if (name === 'readdir' && vfs.listsStats) {
+      return withIndexLock(index, indexKey(this.prefix, scope), answer)
     }
-    return null
+    return answer()
   }
 
   /**

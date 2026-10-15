@@ -14,7 +14,7 @@
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import { isFolderKind } from '../../cache/index/config.ts'
-import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { KeyLock } from '../../cache/lock.ts'
@@ -1134,10 +1134,12 @@ export class Dispatcher {
   private async prepare(): Promise<void> {
     await this.namespace.ensureLoaded()
     if (this.drift?.pending === true && this.explaining() === null) {
-      // Resolve backend IDs afresh without consulting the restored index.
+      // Resolve backend IDs afresh without consulting the restored index:
+      // the check's own throwaway store, which a backend may answer by
+      // asking for the one path.
       await this.drift.drain(this.namespace, async (p) => {
         const [stat] = await this.dispatch('stat', PathSpec.fromStrPath(p), [], {
-          index: new RAMIndexCacheStore(),
+          index: new ListingCheckStore(),
         })
         return stat
       })

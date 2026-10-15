@@ -49,11 +49,9 @@ class GitHubAccessor(SessionAccessor):
         self.tree_lock = asyncio.Lock()
         self.branch_lock = asyncio.Lock()
         # The recursive git tree, keyed repo-relative with no leading
-        # slash, which is this mount's whole listing. find, du and grep's
-        # scope counter read it straight, the way TypeScript's always
-        # have: repo-relative path logic belongs on a git tree, not on an
-        # index whose keys are the mount's business. Reseated by every
-        # refill, so it is as fresh as the last one.
+        # slash, which is this mount's whole listing. grep's scope counter
+        # and code search read it straight. Reseated by every listing, so
+        # it is as fresh as the last one.
         self.tree: dict[str, TreeEntry] = tree if tree is not None else {}
         # Whether that tree is an answer or just the empty default, which
         # is not the same question as whether it holds anything: an empty
@@ -65,7 +63,6 @@ class GitHubAccessor(SessionAccessor):
         self.truncated = truncated
         # The head commit that tree was fetched at, as the response named
         # it, or None when it is not known (a tree handed in, a truncated
-        # or sha-less response). A tree walker compares it with the
-        # version its index listing was served at and refills on a
-        # difference, since another mount can refill a shared index.
+        # or sha-less response). Every listing out of the tree carries it
+        # as its version.
         self.tree_version: str | None = None

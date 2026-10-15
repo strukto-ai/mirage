@@ -27,7 +27,13 @@ from mirage.core.github.search import files_containing as _files_containing
 from mirage.core.github.stat import stat as _stat
 from mirage.core.github.stat import tree as _tree
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.types import FileStat, ListingVersion, PathSpec, VFSName
+from mirage.types import (
+    DirListing,
+    FileStat,
+    ListingVersion,
+    PathSpec,
+    VFSName,
+)
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.github.prompt import PROMPT
@@ -99,9 +105,7 @@ class GitHubVFS(BaseVFS):
         through ``ensure_tree`` and ``ensure_default_branch``.
 
         Hydrating lazily also removes a wasted round trip rather than
-        adding one: nothing seeds the index at build time, so the first
-        ``readdir`` ran ``ensure_live_snapshot`` and refetched the whole
-        tree anyway, discarding the one fetched here.
+        adding one: the first ``readdir`` fetches the whole tree anyway.
 
         ``default_branch``, ``tree`` and ``truncated`` stay accepted so a
         caller holding the answers (a test, a snapshot restore) can skip
@@ -149,34 +153,35 @@ class GitHubVFS(BaseVFS):
         self.listings_pin = _pin_of(ref)
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path, entry)
         return slice_window(data, offset, size)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+        return _read_stream(self.accessor, path, entry)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry, index)
 
-    async def read_tree(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path, index)
+    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path)
 
     async def files_containing(
         self,
@@ -185,20 +190,15 @@ class GitHubVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         if not whole_word:
             return None
-        return await _files_containing(self.accessor, index, text, [path])
+        return await _files_containing(self.accessor, text, [path])
 
     async def before_full_scan(
-        self,
-        path: PathSpec,
-        *,
-        files: int | None = None,
-        index: IndexCacheStore = NULL_INDEX,
+        self, path: PathSpec, *, files: int | None = None
     ) -> None:
-        await _before_full_scan(self.accessor, index, path, files)
+        await _before_full_scan(self.accessor, path, files)
 
     @property
     def is_default_branch(self) -> bool | None:

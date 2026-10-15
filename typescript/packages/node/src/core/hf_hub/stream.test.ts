@@ -18,20 +18,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
 import { readStream } from './stream.ts'
-import { parseEntry } from './tree.ts'
-
-function loaded(): HfHubAccessor {
-  const accessor = new HfHubAccessor({ repoId: 'acme/widget' } as never)
-  accessor.tree = new Map([
-    ['m', parseEntry({ type: 'directory', oid: 'tree-m', size: 0, path: 'm' })],
-    ['m/k.txt', parseEntry({ type: 'file', oid: 'oid-k', size: 5, path: 'm/k.txt' })],
-  ])
-  accessor.treeLoaded = true
-  accessor.rowsCache = null
-  return accessor
-}
+import { parseEntry, rowOf } from './tree.ts'
 
 const PATH = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
+// The row the listing of /m/m names for k.txt.
+const K_ROW = rowOf(parseEntry({ type: 'file', oid: 'oid-k', size: 5, path: 'm/k.txt' }), 'k.txt')
+
+function streamed(): AsyncIterable<Uint8Array> {
+  return readStream(new HfHubAccessor({ repoId: 'acme/widget' } as never), PATH, K_ROW)
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -46,7 +41,7 @@ describe('hf_hub stream record path', () => {
     })
     const [text, records] = await runWithRecording(async () => {
       let out = ''
-      for await (const chunk of readStream(loaded(), PATH)) out += new TextDecoder().decode(chunk)
+      for await (const chunk of streamed()) out += new TextDecoder().decode(chunk)
       return out
     })
     expect(text).toBe('hello')
@@ -75,7 +70,7 @@ describe('hf_hub stream stamp', () => {
     // arrived, so a reader that stops after one chunk (head -c 1) still
     // leaves a token behind.
     const [, records] = await runWithRecording(async () => {
-      await readStream(loaded(), PATH)[Symbol.asyncIterator]().next()
+      await streamed()[Symbol.asyncIterator]().next()
     })
     expect(records.map((r) => r.fingerprint)).toEqual(['oid-k'])
   })
@@ -83,7 +78,7 @@ describe('hf_hub stream stamp', () => {
   it('stamps nothing when the bytes are another version', async () => {
     vi.spyOn(client, 'hubStream').mockImplementation(answering('"another-version"', 'newr'))
     const [, records] = await runWithRecording(async () => {
-      for await (const chunk of readStream(loaded(), PATH)) void chunk
+      for await (const chunk of streamed()) void chunk
     })
     expect(records.map((r) => r.fingerprint)).toEqual([null])
   })
@@ -91,8 +86,7 @@ describe('hf_hub stream stamp', () => {
   it('reads with no recorder bound', async () => {
     vi.spyOn(client, 'hubStream').mockImplementation(answering('"oid-k"', 'ab'))
     const parts: string[] = []
-    for await (const chunk of readStream(loaded(), PATH))
-      parts.push(new TextDecoder().decode(chunk))
+    for await (const chunk of streamed()) parts.push(new TextDecoder().decode(chunk))
     expect(parts).toEqual(['ab'])
   })
 })
@@ -105,7 +99,7 @@ describe('a stream the Hub refuses', () => {
       yield new Uint8Array()
     })
     const err = await (async () => {
-      for await (const chunk of readStream(loaded(), PATH)) void chunk
+      for await (const chunk of streamed()) void chunk
     })().catch((e: unknown) => e)
     expect((err as { code?: string }).code).toBe('EACCES')
   })

@@ -12,17 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import { FileType, type FileStat, type PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
-import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { etagValue, hubBytesTagged, resolveUrl } from './client.ts'
 import { REFUSED_STATUSES } from './constants.ts'
-import { isDir, keyOf, lookupRetrying, refusalsDenied } from './lookup.ts'
+import { refusalsDenied } from './lookup.ts'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 export interface HfHubReadOptions {
@@ -31,62 +28,52 @@ export interface HfHubReadOptions {
 }
 
 /**
- * The tree row for a path, or the error that says why there is none.
+ * The file's row, or the error that says why there is none.
  *
  * Shared by every content read so a file, a directory and an absence are told
  * apart in exactly one place. It also means a read never reaches the network
- * for a path the listing already knows is absent.
+ * for a path the listing already knows is absent. Mirrors Python's
+ * `resolve_entry`.
  */
-export async function resolveEntry(
-  accessor: HfHubAccessor,
-  pathSpec: PathSpec,
-  index: IndexCacheStore | undefined,
-): Promise<IndexEntry> {
-  const virtual = pathSpec.virtual
-  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.vfsPath)
-  const rel = stripSlash(pathSpec.mountPath)
-  if (rel === '') throw eisdir(virtual)
-  const found = await refusalsDenied(pathSpec, () =>
-    lookupRetrying(accessor, index, prefix, keyOf(prefix, rel)),
-  )
-  if (isDir(found)) throw eisdir(virtual)
-  if (found.entry === null) throw enoent(virtual)
-  return found.entry
+export function resolveEntry(pathSpec: PathSpec, entry: FileStat | null | undefined): FileStat {
+  if (stripSlash(pathSpec.mountPath) === '') throw eisdir(pathSpec.virtual)
+  if (entry === undefined || entry === null) throw enoent(pathSpec.virtual)
+  if (entry.type === FileType.DIRECTORY) throw eisdir(pathSpec.virtual)
+  return entry
 }
 
 /**
  * The row's oid, if the response's ETag shows the bytes are that row's.
  *
- * The listing can be older than the download: the tree lives until a verdict
- * clears it, while resolve always serves the revision's current bytes.
+ * The listing can be older than the download: the listing lives until the
+ * mount re-lists it, while resolve always serves the revision's current bytes.
  * Stamping the listing's oid on newer bytes would let a later revert to that
  * oid pass them off as fresh, so the oid is stamped only when the ETag names
  * one of the row's own ids (the oid for a plain file, the xet hash for a Xet
  * one), and otherwise nothing is.
  */
-export function rowToken(entry: IndexEntry, etag: string): string | null {
+export function rowToken(entry: FileStat, etag: string): string | null {
   const ids = new Set<string>()
-  for (const id of [entry.id, entry.extra.lfs_oid, entry.extra.xet_hash]) {
+  for (const id of [entry.fingerprint, entry.extra.lfs_oid, entry.extra.xet_hash]) {
     if (typeof id === 'string' && id !== '') ids.add(id)
   }
   if (!ids.has(etagValue(etag))) return null
-  return entry.id || null
+  return entry.fingerprint
 }
 
 export async function read(
   accessor: HfHubAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
   options: HfHubReadOptions = {},
+  entry?: FileStat | null,
 ): Promise<Uint8Array> {
-  const entry = await resolveEntry(accessor, path, index)
-  const raw = path.mountPath
+  const row = resolveEntry(path, entry)
   const url = resolveUrl(
     accessor.endpoint,
     accessor.repoType,
     accessor.repoId,
     accessor.revision,
-    accessor.repoPath(raw),
+    accessor.repoPath(path.mountPath),
   )
   // `size: null` is the window's own spelling for "the rest of the file",
   // which is not the same as asking for no window at all.
@@ -101,7 +88,7 @@ export async function read(
     REFUSED_STATUSES,
   )
   record('read', path.virtual, accessor.vfsName, data.length, timer, {
-    fingerprint: rowToken(entry, etag),
+    fingerprint: rowToken(row, etag),
   })
   return data
 }

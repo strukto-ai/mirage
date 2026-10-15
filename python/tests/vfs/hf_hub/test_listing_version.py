@@ -175,17 +175,15 @@ async def test_a_cold_root_stat_sends_no_request():
         assert _counts(hub) == (0, 0, 0, 0)
 
 
-# A second mount over a warm shared store has not loaded its tree; the
-# gate's root stat, through its check store, asks the head once and never
-# walks or loads the tree.
+# A second mount over a warm shared store; the gate's root stat, through
+# its check store, asks the head once and never walks the tree.
 @pytest.mark.asyncio
 async def test_a_root_stat_through_a_throwaway_index_never_walks():
     shared = RAMIndexCacheStore()
     with serve(_hub()) as hub:
-        two_vfs = _vfs(hub)
         async with (
             _open(_vfs(hub), shared) as one,
-            _open(two_vfs, shared) as two,
+            _open(_vfs(hub), shared) as two,
         ):
             await _out(one, "ls /m")
             hub.log.clear()
@@ -194,7 +192,6 @@ async def test_a_root_stat_through_a_throwaway_index_never_walks():
             )
             assert found.fingerprint == hub.head(REPO)
             assert _counts(hub) == (1, 0, 0, 0)
-            assert two_vfs.accessor.tree_loaded is False
 
 
 def _count_list_dirs(monkeypatch, store) -> list[str]:
@@ -226,7 +223,7 @@ async def test_a_root_stat_through_the_mount_index_names_no_version(
         mount = ws.mount("/m")
         reads = _count_list_dirs(monkeypatch, mount.index_store)
         async with command_scope():
-            found = await stat(mount.vfs.accessor, ROOT, mount.index)
+            found = await stat(mount.vfs.accessor, ROOT, None, mount.index)
         assert stored is not None
         assert found.fingerprint is None
         assert reads == []
@@ -243,7 +240,7 @@ async def test_a_refused_head_names_no_version_and_walks_nothing(refusal):
         hub.fail["revision"] = refusal
         hub.log.clear()
         found = await stat(
-            ws.mount("/m").vfs.accessor, ROOT, ListingCheckStore()
+            ws.mount("/m").vfs.accessor, ROOT, None, ListingCheckStore()
         )
         assert found.fingerprint is None
         assert (hub.count("revision"), hub.count("tree")) == (1, 0)
@@ -278,7 +275,7 @@ async def test_a_full_sha_revision_checks_its_head_every_command():
     async with _served(_at_head) as (hub, ws):
         name = hub.head(REPO)
         assert await _out(ws, "ls /m/docs/sub") == LISTED
-        assert await _stored(ws) == name
+        assert await _stored(ws, "/m/docs/sub") == name
         hub.log.clear()
         assert await _out(ws, "ls /m/docs/sub") == LISTED
         assert _counts(hub) == (1, 0, 0, 0)
@@ -300,7 +297,7 @@ async def test_a_commit_between_the_head_and_the_walk_is_caught_next_command():
         assert await _out(ws, "ls /m/docs/sub") == LISTED
         hub.after_revision = None
         assert _revs(hub, "tree") == {old}
-        assert await _stored(ws) == old
+        assert await _stored(ws, "/m/docs/sub") == old
         hub.log.clear()
         assert await _out(ws, "ls /m/docs/sub") == GROWN
         assert _counts(hub) == (2, 1, 0, 0)

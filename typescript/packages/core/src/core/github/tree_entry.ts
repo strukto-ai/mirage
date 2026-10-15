@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry } from '../../cache/index/config.ts'
 import type { GitHubTreeItem } from './client.ts'
 
 export interface TreeEntry {
@@ -29,21 +28,4 @@ export function makeTreeEntry(item: GitHubTreeItem): TreeEntry {
     sha: item.sha,
     size: item.size ?? null,
   }
-}
-
-export function indexEntryFromTree(item: {
-  path: string
-  type: string
-  sha: string
-  size?: number | null
-}): IndexEntry {
-  const parts = item.path.split('/')
-  const name = parts[parts.length - 1] ?? item.path
-  return new IndexEntry({
-    id: item.sha,
-    name,
-    vfsName: name,
-    resourceType: item.type === 'tree' ? 'folder' : 'file',
-    size: item.size ?? null,
-  })
 }

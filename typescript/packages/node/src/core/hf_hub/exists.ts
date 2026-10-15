@@ -12,25 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { isEnoent } from '@struktoai/mirage-core/errors/fs'
+import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
-import { stat } from './stat.ts'
 
-/** Whether anything exists at a path: a file or a directory. */
-export async function exists(
-  accessor: HfHubAccessor,
+/**
+ * Whether anything exists at a path: the mount root, or a path its folder's
+ * listing names. Mirrors Python's `exists`.
+ */
+export function exists(
+  _accessor: HfHubAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): Promise<boolean> {
-  try {
-    await stat(accessor, path, index)
-  } catch (err) {
-    // "Cannot see the repo" is not "the path is absent"; only the latter
-    // answers false, as python's twin catches FileNotFoundError alone.
-    if (isEnoent(err)) return false
-    throw err
-  }
-  return true
+  return Promise.resolve(
+    stripSlash(path.mountPath) === '' || (entry !== undefined && entry !== null),
+  )
 }

@@ -202,15 +202,13 @@ describe('hf_hub versions a listing by its head commit', () => {
     expect(counts(fake)).toEqual([0, 0, 0, 0])
   })
 
-  // A second mount over a warm shared store has not loaded its tree; the
-  // gate's root stat, through its check store, asks the head once and never
-  // walks or loads the tree.
+  // A second mount over a warm shared store; the gate's root stat, through
+  // its check store, asks the head once and never walks the tree.
   it('never walks for a root stat through the check store', async () => {
     const fake = await hubOf()
     const shared = new RAMIndexCacheStore({ ttl: 600 })
     const one = wsOf(await vfsOf(fake), shared)
-    const twoVfs = await vfsOf(fake)
-    const two = wsOf(twoVfs, shared)
+    const two = wsOf(await vfsOf(fake), shared)
     await out(one, 'ls /m')
     fake.log.length = 0
     const found = (await two.mount('/m').callKeyed('stat', ROOT, [], {
@@ -218,7 +216,6 @@ describe('hf_hub versions a listing by its head commit', () => {
     })) as FileStat
     expect(found.fingerprint).toBe(fake.head())
     expect(counts(fake)).toEqual([1, 0, 0, 0])
-    expect(accessorOf(twoVfs).treeLoaded).toBe(false)
   })
 
   // Only the gate's check store wants the root's version, so a root stat
@@ -237,7 +234,7 @@ describe('hf_hub versions a listing by its head commit', () => {
     fake.log.length = 0
     const index = w.registry.mountFor('/m').index
     const reads = countListDirs(w.registry.mountFor('/m').indexStore)
-    const found = await runInCommandScope(() => stat(accessorOf(vfs), ROOT, index))
+    const found = await runInCommandScope(() => stat(accessorOf(vfs), ROOT, null, index))
     expect(version).not.toBeNull()
     expect(found.fingerprint).toBeNull()
     expect(reads).toEqual([])
@@ -259,7 +256,7 @@ describe('hf_hub versions a listing by its head commit', () => {
       fake.fail.set('revision', [status, code])
       fake.log.length = 0
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-      const found = await stat(accessorOf(vfs), ROOT, new ListingCheckStore())
+      const found = await stat(accessorOf(vfs), ROOT, null, new ListingCheckStore())
       expect(found.fingerprint).toBeNull()
       expect([fake.count('revision'), fake.count('tree')]).toEqual([1, 0])
       // Said on stderr, the way Python logs it.
@@ -308,7 +305,7 @@ describe('hf_hub versions a listing by its head commit', () => {
     const head = fake.head()
     const w = wsOf(await vfsOf(fake, head))
     expect(await out(w, 'ls /m/docs/sub')).toBe(LISTED)
-    expect(await stored(w)).toBe(head)
+    expect(await stored(w, '/m/docs/sub')).toBe(head)
     fake.log.length = 0
     expect(await out(w, 'ls /m/docs/sub')).toBe(LISTED)
     expect(counts(fake)).toEqual([1, 0, 0, 0])
@@ -332,7 +329,7 @@ describe('hf_hub versions a listing by its head commit', () => {
     expect(await out(w, 'ls /m/docs/sub')).toBe(LISTED)
     fake.afterRevision = null
     expect(revs(fake, 'tree')).toEqual([old])
-    expect(await stored(w)).toBe(old)
+    expect(await stored(w, '/m/docs/sub')).toBe(old)
     fake.log.length = 0
     expect(await out(w, 'ls /m/docs/sub')).toBe(GROWN)
     expect(counts(fake)).toEqual([2, 1, 0, 0])

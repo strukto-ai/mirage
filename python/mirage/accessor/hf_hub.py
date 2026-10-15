@@ -12,15 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-
 from pydantic import SecretStr
 
 from mirage.accessor.base import SessionAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hf_hub.client import stall_timeout
 from mirage.core.hf_hub.constants import DEFAULT_REVISION
-from mirage.core.hf_hub.tree_entry import TreeEntry
 from mirage.utils import key_prefix as kp
 from mirage.vfs.hf_buckets.config import HfRepoConfig
 
@@ -28,15 +24,13 @@ from mirage.vfs.hf_buckets.config import HfRepoConfig
 class HfHubAccessor(SessionAccessor):
     """A mount onto one Hugging Face Hub repository.
 
-    Holds the whole repository tree, the way GitHubAccessor holds a git
-    tree: the Hub's listing endpoint is recursive, so one paged walk is
-    the mount's entire listing and every read after it is a lookup. Find
-    and du read that tree directly; everything else goes through the
-    index it seeds.
+    The Hub's listing endpoint is recursive, so one paged walk is the
+    mount's entire listing, which the mount keeps; every stat and read
+    after it is handed its row.
 
     Constructed without touching the network. A constructor cannot await,
     so fetching here would mean a blocking client stalling whatever loop
-    the caller is on; the tree hydrates on first use instead.
+    the caller is on.
     """
 
     REPO_TYPE: str = ""
@@ -56,27 +50,6 @@ class HfHubAccessor(SessionAccessor):
         super().__init__(timeout=stall_timeout(config.timeout))
         self.config = config
         self._repo_type = repo_type or self.REPO_TYPE
-        # Guards the lazy hydration so concurrent first reads make one
-        # request rather than one per caller. Constructed outside a
-        # running loop on purpose; asyncio.Lock has not bound to a loop
-        # at construction since 3.10.
-        self.tree_lock = asyncio.Lock()
-        # The recursive tree, keyed mount-relative with no leading slash
-        # and with key_prefix already stripped. Reseated by every refill.
-        self.tree: dict[str, TreeEntry] = {}
-        # Whether that tree is an answer or just the empty default, which
-        # is a different question from whether it holds anything: an
-        # empty repository hydrates to {}, and reading that as "not
-        # hydrated" refetches it forever.
-        self.tree_loaded: bool = False
-        # The index tables derived from that tree, for a mount with no
-        # index wired. Derivation is O(tree), so a readdir loop over a
-        # large repo would be quadratic without a memo; every reseat of
-        # `tree` clears it.
-        self.rows_cache: (
-            tuple[str, dict[str, IndexEntry], dict[str, list[str]]] | None
-        ) = None
-        self.refills: int = 0
 
     @property
     def repo_type(self) -> str:

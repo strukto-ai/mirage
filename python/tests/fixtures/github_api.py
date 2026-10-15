@@ -25,11 +25,9 @@ from typing import Any
 
 from aiohttp import web
 
-from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import Evicted, IndexEntry, ListResult, LookupResult
+from mirage.cache.index import Evicted, IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.constants import CODE_SEARCH_SIZE_LIMIT
-from mirage.core.github.tree import refill_snapshot
 
 SYMLINK = "120000"
 REGULAR = "100644"
@@ -490,87 +488,6 @@ def serve(hub: FakeGitHub | None = None) -> Iterator[FakeGitHub]:
         loop.call_soon_threadsafe(loop.stop)
         thread.join()
         loop.close()
-
-
-# Each hook fires once, on the first listing of the nested parent, so the
-# retry sees real data; a root child would let ensure_live_snapshot's root
-# probe consume it instead.
-class _ClearedAtList(RAMIndexCacheStore):
-    def __init__(self, parent: str) -> None:
-        super().__init__()
-        self.parent = parent
-        self.fired = False
-
-    async def list_dir(self, vfs_path: str) -> ListResult:
-        if not self.fired and vfs_path == self.parent:
-            self.fired = True
-            await self.clear()
-        return await super().list_dir(vfs_path)
-
-
-class _StaleListing(RAMIndexCacheStore):
-    def __init__(self, parent: str, key: str) -> None:
-        super().__init__()
-        self.parent = parent
-        self.key = key
-        self.accessor: GitHubAccessor | None = None
-        self.fired = False
-
-    async def list_dir(self, vfs_path: str) -> ListResult:
-        result = await super().list_dir(vfs_path)
-        if self.fired or vfs_path != self.parent or self.accessor is None:
-            return result
-        self.fired = True
-        stale = [k for k in result.entries or [] if k != self.key]
-        # Another op refills while this lookup holds the stale listing.
-        await refill_snapshot(self.accessor, self, "/gh")
-        return ListResult(entries=stale, status=result.status)
-
-
-class _ClearedMidLookup(RAMIndexCacheStore):
-    def __init__(self) -> None:
-        super().__init__()
-        self.fired = False
-
-    async def get(self, vfs_path: str) -> LookupResult:
-        if not self.fired:
-            self.fired = True
-            await self.clear()
-        return await super().get(vfs_path)
-
-
-class _ClearedAndReseeded(RAMIndexCacheStore):
-    def __init__(self) -> None:
-        super().__init__()
-        self.accessor: GitHubAccessor | None = None
-        self.fired = False
-
-    async def get(self, vfs_path: str) -> LookupResult:
-        if self.fired or self.accessor is None:
-            return await super().get(vfs_path)
-        self.fired = True
-        await self.clear()
-        missed = await super().get(vfs_path)
-        await refill_snapshot(self.accessor, self, "/gh")
-        return missed
-
-
-def race_index(kind: str) -> RAMIndexCacheStore:
-    """An index that changes under the lookup it serves, once.
-
-    Args:
-        kind (str): ``list`` clears at the parent listing, ``stale`` hands
-            back a listing without the key while another op refills,
-            ``get`` clears at the entry read, ``reseed`` clears and refills
-            there so the root reads live.
-    """
-    if kind == "list":
-        return _ClearedAtList("/gh/docs/sub")
-    if kind == "stale":
-        return _StaleListing("/gh/docs/sub", "/gh/docs/sub/b.txt")
-    if kind == "get":
-        return _ClearedMidLookup()
-    return _ClearedAndReseeded()
 
 
 _EPOCH = datetime.fromtimestamp(0, timezone.utc)

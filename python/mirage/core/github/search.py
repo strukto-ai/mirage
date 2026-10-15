@@ -16,7 +16,6 @@ import logging
 from dataclasses import dataclass
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.api.client import SessionArg
 from mirage.core.github.client import github_get, github_request_response
 from mirage.core.github.config import GhConfig, GitHubConfig
@@ -178,12 +177,8 @@ async def narrow_paths(
     return out
 
 
-async def _scope_files(
-    accessor: GitHubAccessor, index: IndexCacheStore, under: list[PathSpec]
-) -> int:
-    await ensure_tree(
-        accessor, index, mount_prefix_of(under[0].virtual, under[0].vfs_path)
-    )
+async def _scope_files(accessor: GitHubAccessor, under: list[PathSpec]) -> int:
+    await ensure_tree(accessor)
     return sum(
         count_scope_files(accessor.tree, scope_relative_key(p)) for p in under
     )
@@ -191,7 +186,6 @@ async def _scope_files(
 
 async def files_containing(
     accessor: GitHubAccessor,
-    index: IndexCacheStore,
     text: str,
     under: list[PathSpec],
 ) -> list[PathSpec] | None:
@@ -211,7 +205,6 @@ async def files_containing(
 
     Args:
         accessor (GitHubAccessor): backend handle.
-        index (IndexCacheStore): the mount's index.
         text (str): the whole word grep searches for.
         under (list[PathSpec]): the directories walked.
 
@@ -220,7 +213,7 @@ async def files_containing(
     """
     if (
         not search_safe(text)
-        or await _scope_files(accessor, index, under) <= SCOPE_WARN
+        or await _scope_files(accessor, under) <= SCOPE_WARN
         or accessor.truncated
         or await ensure_ref(accessor) != await ensure_default_branch(accessor)
     ):
@@ -243,7 +236,6 @@ async def files_containing(
 
 async def before_full_scan(
     accessor: GitHubAccessor,
-    index: IndexCacheStore,
     path: PathSpec,
     files: int | None,
 ) -> None:
@@ -254,7 +246,6 @@ async def before_full_scan(
 
     Args:
         accessor (GitHubAccessor): backend handle.
-        index (IndexCacheStore): the mount's index.
         path (PathSpec): the directory about to be walked.
         files (int | None): the files the session sees under ``path``,
             counted by the dispatcher; None counts the tree.
@@ -263,9 +254,7 @@ async def before_full_scan(
         ValueError: the scope holds more than ``SCOPE_ERROR`` files.
     """
     count = (
-        files
-        if files is not None
-        else await _scope_files(accessor, index, [path])
+        files if files is not None else await _scope_files(accessor, [path])
     )
     if count > SCOPE_ERROR:
         raise ValueError(f"{count} files in scope, narrow the path")

@@ -153,8 +153,8 @@ describe('github versions a listing by its head commit', () => {
       const index = w.registry.mountFor('/gh').index
       const reads = countListDirs(w.registry.mountFor('/gh').indexStore)
       const found = scoped
-        ? await runInCommandScope(() => stat(vfs.accessor, ROOT, index))
-        : await stat(vfs.accessor, ROOT, index)
+        ? await runInCommandScope(() => stat(vfs.accessor, ROOT, null, index))
+        : await stat(vfs.accessor, ROOT, null, index)
       expect(version).not.toBeNull()
       expect(found.fingerprint).toBeNull()
       expect(reads).toEqual([])
@@ -204,34 +204,31 @@ describe('github versions a listing by its head commit', () => {
     expect(gh.counts()).toEqual([1, 1, 0])
   })
 
-  // A second workspace refills the index both share, so the first one's
-  // in-memory tree is older than its index. ls answers from the index and
-  // pays nothing for that; find and grep walk the tree, so they refill it.
+  // A second workspace re-lists the index both share, so the first one's
+  // in-memory tree is older than its index. ls, find and grep all read the
+  // stored listings, so none of them pays for that tree.
   // Shared as one RAM store, or as two Redis stores over one server.
   const backends = process.env.REDIS_URL === undefined ? ['ram'] : ['ram', 'redis']
-  it.each(backends)(
-    'refills a tree older than a shared index before walking it (%s)',
-    async (backend) => {
-      const shared = new RAMIndexCacheStore()
-      const keyPrefix = `shared:${crypto.randomUUID()}:`
-      const store = (): IndexCacheStore =>
-        backend === 'ram'
-          ? shared
-          : new RedisIndexCacheStore({ url: process.env.REDIS_URL ?? '', keyPrefix })
-      const one = await wsOf(await vfsOf(), ReadPolicy.FRESH, store())
-      const two = await wsOf(await vfsOf(), ReadPolicy.FRESH, store())
-      await out(one, 'ls /gh')
-      gh.set('d1/new.txt', 'new x\n')
-      await out(two, 'ls /gh/d1')
-      gh.log.length = 0
-      expect(await out(one, 'ls /gh/d1')).toBe(GROWN)
-      expect(gh.counts()).toEqual([1, 0, 0])
-      gh.log.length = 0
-      expect(await out(one, 'find /gh -name new.txt')).toBe('/gh/d1/new.txt\n')
-      expect(gh.counts()).toEqual([1, 1, 0])
-      expect(await out(one, 'grep -rl x /gh')).toContain('/gh/d1/new.txt')
-    },
-  )
+  it.each(backends)('walks a shared index newer than its tree (%s)', async (backend) => {
+    const shared = new RAMIndexCacheStore()
+    const keyPrefix = `shared:${crypto.randomUUID()}:`
+    const store = (): IndexCacheStore =>
+      backend === 'ram'
+        ? shared
+        : new RedisIndexCacheStore({ url: process.env.REDIS_URL ?? '', keyPrefix })
+    const one = await wsOf(await vfsOf(), ReadPolicy.FRESH, store())
+    const two = await wsOf(await vfsOf(), ReadPolicy.FRESH, store())
+    await out(one, 'ls /gh')
+    gh.set('d1/new.txt', 'new x\n')
+    await out(two, 'ls /gh/d1')
+    gh.log.length = 0
+    expect(await out(one, 'ls /gh/d1')).toBe(GROWN)
+    expect(gh.counts()).toEqual([1, 0, 0])
+    gh.log.length = 0
+    expect(await out(one, 'find /gh -name new.txt')).toBe('/gh/d1/new.txt\n')
+    expect(gh.counts()).toEqual([1, 0, 0])
+    expect(await out(one, 'grep -rl x /gh')).toContain('/gh/d1/new.txt')
+  })
 
   // A full-hex ref pins every listing: the stored version is the pin, so the
   // next command serves it with no request. Compared lowercased.

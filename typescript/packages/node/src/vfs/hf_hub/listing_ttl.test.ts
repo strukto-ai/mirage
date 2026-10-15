@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexView } from '@struktoai/mirage-core/cache/index/view'
 import { MountMode, ReadPolicy } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ExpiredOnArrival, FakeHub, serveHub } from '../../core/hf_hub/_test_util.ts'
+import * as tree from '../../core/hf_hub/tree.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 
@@ -73,49 +73,46 @@ function settleWithin<T>(work: Promise<T>, ms: number): Promise<'done' | 'pendin
   ])
 }
 
-/** Pause the first refill between its wipe and its reseed; one-shot. */
-function gateRefill(): { wiped: Promise<void>; release: () => void } {
-  // eslint-disable-next-line @typescript-eslint/unbound-method
-  const original = IndexView.prototype.invalidatePrefix
+/** Pause the first tree walk until released; one-shot. */
+function gateWalk(): { walking: Promise<void>; release: () => void } {
+  const original = tree.fetchTree
   let armed = true
   let signal = (): void => undefined
   let release = (): void => undefined
-  const wiped = new Promise<void>((resolve) => {
+  const walking = new Promise<void>((resolve) => {
     signal = resolve
   })
   const released = new Promise<void>((resolve) => {
     release = resolve
   })
-  vi.spyOn(IndexView.prototype, 'invalidatePrefix').mockImplementation(async function (
-    this: IndexView,
-    path: string,
-  ): Promise<void> {
-    await original.call(this, path)
-    if (!armed) return
-    armed = false
-    signal()
-    await released
+  vi.spyOn(tree, 'fetchTree').mockImplementation(async (...args) => {
+    if (armed) {
+      armed = false
+      signal()
+      await released
+    }
+    return original(...args)
   })
-  return { wiped, release }
+  return { walking, release }
 }
 
 describe('hf_hub listings under a shared view', () => {
-  it('waits on a refill in progress instead of duplicating it', async () => {
+  it('waits on a listing in progress instead of duplicating it', async () => {
     const fake = await hub()
     const w = ws(await vfsOf(fake))
     let first: Promise<string> | undefined
     let second: Promise<string> | undefined
-    let gate: { wiped: Promise<void>; release: () => void } | undefined
+    let gate: { walking: Promise<void>; release: () => void } | undefined
     try {
       w.createSession('s0')
       w.createSession('s1')
       expect(await out(w, 'ls /m/sub')).toBe(OLD_LS)
       const index = w.registry.mountFor('/m/sub').index
       await index.invalidate()
-      gate = gateRefill()
+      gate = gateWalk()
       const before = fake.count('tree')
       first = out(w, 'ls /m/sub', 's0')
-      expect(await settleWithin(gate.wiped, 2000)).toBe('done')
+      expect(await settleWithin(gate.walking, 2000)).toBe('done')
       second = out(w, 'ls /m/sub', 's1')
       const early = await settleWithin(second, 20)
       gate.release()

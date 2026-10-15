@@ -18,24 +18,32 @@ import pytest
 
 from mirage.core.hf_hub.client import HfHubError
 from mirage.core.hf_hub.exists import exists
+from mirage.core.hf_hub.readdir import readdir
+from mirage.types import PathSpec
 from tests.core.hf_hub.conftest import ps
+from tests.fixtures.handed import call
+
+
+async def _exists(accessor, path: PathSpec) -> bool:
+    return await call(exists, readdir, accessor, path)
 
 
 @pytest.mark.asyncio
-async def test_exists_for_a_file_and_a_directory(loaded):
-    assert await exists(loaded, ps("a.txt")) is True
-    assert await exists(loaded, ps("d")) is True
+async def test_exists_for_a_file_a_directory_and_the_root(loaded):
+    assert await _exists(loaded, ps("a.txt")) is True
+    assert await _exists(loaded, ps("d")) is True
+    assert await _exists(loaded, ps("")) is True
 
 
 @pytest.mark.asyncio
 async def test_exists_is_false_for_an_absence(loaded):
-    assert await exists(loaded, ps("nope")) is False
+    assert await _exists(loaded, ps("nope")) is False
 
 
 @pytest.mark.asyncio
 async def test_exists_lets_a_refusal_through(accessor):
     # "Cannot see the repo" is not "the file is absent".
     refused = AsyncMock(side_effect=HfHubError("expired", 401))
-    with patch("mirage.core.hf_hub.tree.fetch_tree", refused):
+    with patch("mirage.core.hf_hub.readdir.fetch_tree", refused):
         with pytest.raises(PermissionError):
-            await exists(accessor, ps("a.txt"))
+            await _exists(accessor, ps("a.txt"))

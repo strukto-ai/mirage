@@ -14,14 +14,12 @@
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { PathSpec } from '../../types.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
 import { lstripSlash, stripSlash } from '../../utils/slash.ts'
 import { type GitHubTransport, type GitHubCodeSearch, searchCode } from './client.ts'
 import { SCOPE_ERROR, SCOPE_WARN } from './constants.ts'
 import { countScopeFiles, scopeRelativeKey, searchSafe, unsearchableKeys } from './pushdown.ts'
-import { ensureTree } from './tree.ts'
 
 // Use GitHub code search to narrow grep/rg scopes to candidate files.
 // Returns null whenever the narrowed set cannot be trusted as a superset of
@@ -74,14 +72,9 @@ export async function narrowPaths(
   })
 }
 
-async function scopeFiles(
-  accessor: GitHubAccessor,
-  under: readonly PathSpec[],
-  index?: IndexCacheStore,
-): Promise<number> {
-  const first = under[0]
-  if (first === undefined) return 0
-  await ensureTree(accessor, index, mountPrefixOf(first.virtual, first.vfsPath))
+// The tree is the last listing's, fetched when the mount was built and
+// reseated by every listing since.
+function scopeFiles(accessor: GitHubAccessor, under: readonly PathSpec[]): number {
   let count = 0
   for (const p of under) count += countScopeFiles(accessor.tree, scopeRelativeKey(p))
   return count
@@ -105,11 +98,10 @@ export async function filesContaining(
   accessor: GitHubAccessor,
   text: string,
   under: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   if (
     !searchSafe(text) ||
-    (await scopeFiles(accessor, under, index)) <= SCOPE_WARN ||
+    scopeFiles(accessor, under) <= SCOPE_WARN ||
     accessor.truncated ||
     !accessor.isDefaultBranch
   ) {
@@ -134,14 +126,16 @@ export async function filesContaining(
  * than read. `files` is the files the session sees under `path`, counted by
  * the dispatcher; null counts the tree.
  */
-export async function beforeFullScan(
+export function beforeFullScan(
   accessor: GitHubAccessor,
   path: PathSpec,
   files: number | null,
-  index?: IndexCacheStore,
 ): Promise<void> {
-  const count = files ?? (await scopeFiles(accessor, [path], index))
-  if (count > SCOPE_ERROR) throw new Error(`${String(count)} files in scope, narrow the path`)
+  const count = files ?? scopeFiles(accessor, [path])
+  if (count > SCOPE_ERROR) {
+    return Promise.reject(new Error(`${String(count)} files in scope, narrow the path`))
+  }
+  return Promise.resolve()
 }
 
 /** Fetch a bounded REST search, following the server's pagination. */

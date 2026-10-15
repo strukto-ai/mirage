@@ -188,13 +188,13 @@ async def test_a_commit_after_the_tree_response_is_caught_next_command():
             assert hub.counts() == (1, 1, 0)
 
 
-# A second workspace refills the index both share, so the first one's
-# in-memory tree is older than its index. ls answers from the index and pays
-# nothing for that; find and grep walk the tree, so they refill it first.
+# A second workspace re-lists the index both share, so the first one's
+# in-memory tree is older than its index. ls, find and grep all read the
+# stored listings, so none of them pays for that tree.
 # Shared as one RAM store, or as two Redis stores over one server.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["ram", "redis"])
-async def test_a_tree_older_than_a_shared_index_is_refilled_for_walks(backend):
+async def test_a_walk_reads_a_shared_index_newer_than_its_tree(backend):
     client = FakeRedis() if backend == "redis" else None
     shared = RAMIndexCacheStore()
 
@@ -215,7 +215,7 @@ async def test_a_tree_older_than_a_shared_index_is_refilled_for_walks(backend):
             hub.log.clear()
             found = await _out(one, "find /gh -name new.txt")
             assert found == b"/gh/d1/new.txt\n"
-            assert hub.counts() == (1, 1, 0)
+            assert hub.counts() == (1, 0, 0)
             assert b"/gh/d1/new.txt" in await _out(one, "grep -rl x /gh")
         finally:
             await one.close()

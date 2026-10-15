@@ -17,11 +17,18 @@ import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { fetchDirTree, fetchTree } from './tree.ts'
 import { GitHubAccessor } from '../../accessor/github.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import { IndexEntry, type Evicted } from '../../cache/index/config.ts'
+import type { Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { IndexView } from '../../cache/index/view.ts'
-import { ensureLiveSnapshot, pointRow, populateIndex, refillSnapshot } from './tree.ts'
+import { PathSpec } from '../../types.ts'
+import { keepListing } from '../../workspace/mount/listing.ts'
+import { readdir } from './readdir.ts'
+import { pointRow, treeRows } from './tree.ts'
 import { FakeGitHub, blobSha, servedAccessor } from './_test_util.ts'
+
+function root(prefix: string): PathSpec {
+  return new PathSpec({ virtual: prefix, directory: prefix, vfsPath: '' })
+}
 
 const ITEMS = [
   { path: 'extern', mode: '160000', type: 'commit', sha: 'ccc' },
@@ -48,17 +55,16 @@ describe('github tree fetch', () => {
   })
 })
 
-describe('ensureLiveSnapshot', () => {
-  const TREE = {
-    data: { path: 'data', type: 'tree', sha: 't1', size: null },
-    'data/keep.txt': { path: 'data/keep.txt', type: 'blob', sha: 'b1', size: 4 },
-  }
-
-  function accessor(calls: { n: number }): GitHubAccessor {
-    return new GitHubAccessor({
+describe('a listing', () => {
+  it('refetches rather than reuse the build-time tree', async () => {
+    // The build tree is only true at build time: a mount's first listing can
+    // come long after it, so reusing it would answer a repository several
+    // external writes ago.
+    let calls = 0
+    const accessor = new GitHubAccessor({
       transport: {
         get: () => {
-          calls.n += 1
+          calls += 1
           return Promise.resolve({
             tree: [
               { path: 'data', type: 'tree' as const, sha: 't1' },
@@ -72,112 +78,28 @@ describe('ensureLiveSnapshot', () => {
       repo: 'proj',
       ref: 'main',
       defaultBranch: 'main',
-      tree: TREE,
+      tree: { data: { path: 'data', type: 'tree', sha: 't0', size: null } },
     })
-  }
-
-  it('refetches rather than reuse the build-time tree', async () => {
-    // The build tree is only true at build time: a mount's first read can
-    // come long after it, so reusing it would key an index built from a
-    // repository several external writes ago.
-    const calls = { n: 0 }
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    expect(await ensureLiveSnapshot(accessor(calls), index, '/gh')).not.toBeNull()
-    expect(calls.n).toBe(1)
-    expect((await index.listDir('/gh/data')).entries).toEqual(['/gh/data/keep.txt'])
-  })
-
-  it('refetches a dropped listing', async () => {
-    const calls = { n: 0 }
-    const acc = accessor(calls)
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await ensureLiveSnapshot(acc, index, '/gh')
-    // What invalidation does: drop the row rather than expire it, which is
-    // why the readers' EXPIRED probe never fires.
-    await index.invalidateDir('/gh')
-    await index.invalidateDir('/gh/data')
-    expect(await ensureLiveSnapshot(acc, index, '/gh')).not.toBeNull()
-    expect(calls.n).toBe(2)
-    expect((await index.listDir('/gh/data')).entries).toEqual(['/gh/data/keep.txt'])
-  })
-
-  it('refetches an expired root listing', async () => {
-    const calls = { n: 0 }
-    const acc = accessor(calls)
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await ensureLiveSnapshot(acc, index, '/gh')
-    await index.invalidate()
-    expect(await ensureLiveSnapshot(acc, index, '/gh')).not.toBeNull()
-    expect(calls.n).toBe(2)
-    expect((await index.listDir('/gh/data')).entries).toEqual(['/gh/data/keep.txt'])
-  })
-
-  it('reports no refill, and sends no request, without an index', async () => {
-    const calls = { n: 0 }
-    expect(await refillSnapshot(accessor(calls), undefined, '/gh')).toBeNull()
-    expect(calls.n).toBe(0)
-  })
-
-  it('leaves a live index alone and sends no request', async () => {
-    const calls = { n: 0 }
-    const acc = accessor(calls)
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await ensureLiveSnapshot(acc, index, '/gh')
-    const before = calls.n
-    expect(await ensureLiveSnapshot(acc, index, '/gh')).toBeNull()
-    expect(calls.n).toBe(before)
-  })
-
-  it('skips a truncated tree', async () => {
-    const calls = { n: 0 }
-    const acc = accessor(calls)
-    acc.truncated = true
-    expect(await ensureLiveSnapshot(acc, new RAMIndexCacheStore({ ttl: 600 }), '/gh')).toBeNull()
-    expect(calls.n).toBe(0)
-  })
-
-  it('skips a missing index', async () => {
-    expect(await ensureLiveSnapshot(accessor({ n: 0 }), undefined, '')).toBeNull()
+    const listing = await readdir(accessor, root('/gh'))
+    expect(calls).toBe(1)
+    expect(listing.seeds.get('data')?.map((row) => row.name)).toEqual(['keep.txt'])
   })
 })
 
-describe('populateIndex', () => {
-  const TREE = {
-    data: { path: 'data', type: 'tree', sha: 't1', size: null },
-    'data/keep.txt': { path: 'data/keep.txt', type: 'blob', sha: 'b1', size: 4 },
-  }
-
-  it('keys by mount-absolute path', async () => {
-    // Every other backend keys its index this way, which is what lets the
-    // shared CacheManager spell an eviction without knowing the backend.
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await populateIndex(index, TREE, '/gh')
-    expect((await index.listDir('/gh')).entries).toEqual(['/gh/data'])
-    expect((await index.listDir('/gh/data')).entries).toEqual(['/gh/data/keep.txt'])
+describe('treeRows', () => {
+  it('keys each folder by its repo path', () => {
+    const rows = treeRows({
+      data: { path: 'data', type: 'tree', sha: 't1', size: null },
+      'data/keep.txt': { path: 'data/keep.txt', type: 'blob', sha: 'b1', size: 4 },
+    })
+    expect(
+      Object.fromEntries([...rows].map(([folder, found]) => [folder, found.map((r) => r.name)])),
+    ).toEqual({ '': ['data'], data: ['keep.txt'] })
+    expect(rows.get('data')?.[0]?.extra).toEqual({ sha: 'b1' })
   })
 
-  it('keeps bare paths on a root mount', async () => {
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await populateIndex(index, TREE, '')
-    expect((await index.listDir('/')).entries).toEqual(['/data'])
-  })
-
-  it('gives an empty repo a root row', async () => {
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await populateIndex(index, {}, '/gh')
-    expect((await index.listDir('/gh')).entries).toEqual([])
-  })
-
-  // A truncated tree names only some children, so writing it must not evict
-  // the rest of a folder a per-directory fallback listed in full.
-  it('keeps rows a truncated tree does not name', async () => {
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await index.setDir('/gh/data', [
-      ['keep.txt', new IndexEntry({ id: 'b1', name: 'keep.txt', resourceType: 'file' })],
-      ['other.txt', new IndexEntry({ id: 'b2', name: 'other.txt', resourceType: 'file' })],
-    ])
-    await populateIndex(index, TREE, '/gh', new Date(0))
-    expect((await index.get('/gh/data/other.txt')).entry?.id).toBe('b2')
+  it('gives an empty repo a root listing', () => {
+    expect(treeRows({})).toEqual(new Map([['', []]]))
   })
 })
 
@@ -312,13 +234,17 @@ function ledgered(): { gone: Evicted[]; index: IndexView } {
   return { gone, index }
 }
 
-describe('refillSnapshot reports what left the repository', () => {
+async function relist(accessor: GitHubAccessor, index: IndexView): Promise<void> {
+  await keepListing(index, '/gh', await readdir(accessor, root('/gh')))
+}
+
+describe('a relisting reports what left the repository', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  // The refill wipes the index before seeding the new tree, so without the
-  // diff a file removed upstream keeps its cached bytes and overlay.
+  // The seeds replace each folder's listing, so without the diff a file
+  // removed upstream keeps its cached bytes and overlay.
   it.each([
     ['a removed file', ['d1/a.txt'], [{ path: '/gh/d1/a.txt', folder: false }]],
     ['a removed folder once', ['d1/a.txt', 'd1/b.txt'], [{ path: '/gh/d1', folder: true }]],
@@ -327,36 +253,11 @@ describe('refillSnapshot reports what left the repository', () => {
     vi.stubGlobal('fetch', gh.fetch)
     const accessor = servedAccessor()
     const { gone, index } = ledgered()
-    await refillSnapshot(accessor, index, '/gh')
+    await relist(accessor, index)
+    expect(gone).toEqual([])
     for (const path of removed) gh.files.delete(path)
-    await refillSnapshot(accessor, index, '/gh')
+    await relist(accessor, index)
     expect(gone).toEqual(reported)
-  })
-
-  // A truncated tree names only some paths, so a path missing from it is
-  // not a path the repository lost.
-  it.each([
-    [true, false],
-    [false, true],
-  ])('reports nothing when truncated before=%s after=%s', async (before, after) => {
-    const gh = new FakeGitHub({ 'd1/a.txt': 'a', 'top.txt': 't' })
-    gh.truncatedRecursive = before
-    vi.stubGlobal('fetch', gh.fetch)
-    const accessor = servedAccessor()
-    const { gone, index } = ledgered()
-    await refillSnapshot(accessor, index, '/gh')
-    gh.truncatedRecursive = after
-    gh.files.delete('d1/a.txt')
-    await refillSnapshot(accessor, index, '/gh')
-    expect(gone).toEqual([])
-  })
-
-  it('reports nothing on the first refill', async () => {
-    const gh = new FakeGitHub({ 'top.txt': 't' })
-    vi.stubGlobal('fetch', gh.fetch)
-    const { gone, index } = ledgered()
-    await refillSnapshot(servedAccessor(), index, '/gh')
-    expect(gone).toEqual([])
   })
 })
 
@@ -365,15 +266,16 @@ describe('the head commit a tree response names', () => {
     vi.unstubAllGlobals()
   })
 
-  it('stamps every folder of a refill with its head', async () => {
+  it('versions the listing and every seed with its head', async () => {
     const gh = new FakeGitHub({ 'd1/a.txt': 'a', 'd1/sub/b.txt': 'b', 'top.txt': 't' })
     vi.stubGlobal('fetch', gh.fetch)
     const accessor = servedAccessor()
-    const index = new RAMIndexCacheStore()
-    const snapshot = await refillSnapshot(accessor, index, '/gh')
+    const listing = await readdir(accessor, root('/gh'))
     const head = await gh.head()
-    expect(snapshot?.version).toBe(head)
+    expect(listing.version).toBe(head)
     expect(accessor.treeVersion).toBe(head)
+    const index = new RAMIndexCacheStore()
+    await keepListing(index, '/gh', listing)
     for (const folder of ['/gh', '/gh/d1', '/gh/d1/sub']) {
       expect((await index.listDir(folder)).version).toBe(head)
     }
@@ -382,16 +284,14 @@ describe('the head commit a tree response names', () => {
   it.each([
     ['truncated', true, false],
     ['without a head', false, true],
-  ])('stores no version for a refill %s', async (_label, truncated, dropSha) => {
+  ])('names no version for a listing %s', async (_label, truncated, dropSha) => {
     const gh = new FakeGitHub({ 'd1/a.txt': 'a', 'top.txt': 't' })
     gh.truncatedRecursive = truncated
     gh.dropSha = dropSha
     vi.stubGlobal('fetch', gh.fetch)
     const accessor = servedAccessor()
-    const index = new RAMIndexCacheStore()
-    const snapshot = await refillSnapshot(accessor, index, '/gh')
-    expect(snapshot?.version ?? null).toBeNull()
+    const listing = await readdir(accessor, root('/gh'))
+    expect(listing.version).toBeNull()
     expect(accessor.treeVersion).toBeNull()
-    expect((await index.listDir('/gh')).version ?? null).toBeNull()
   })
 })

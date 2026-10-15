@@ -17,8 +17,14 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import type { AddressInfo } from 'node:net'
 import type { Evicted, IndexEntry, SetDirOptions } from '@struktoai/mirage-core/cache/index/config'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
+import type { DirListing} from '@struktoai/mirage-core/types';
+import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
+import { vi } from 'vitest'
+import { HfHubAccessor } from '../../accessor/hf_hub.ts'
+import * as client from './client.ts'
+import { readdir } from './readdir.ts'
 
 // The Hub answers these to a paths-info body it cannot read as JSON, which is
 // what an untyped fetch body is (measured against huggingface.co, 2026-09-24).
@@ -518,4 +524,64 @@ export class ExpiredOnArrival extends RAMIndexCacheStore {
     )
     super.seed(new Map(), new Map(live), expiresAt, version)
   }
+}
+
+/** A PathSpec for a mount-local path under an optional mount prefix. */
+export function ps(path: string, prefix = ''): PathSpec {
+  const rel = stripSlash(path)
+  const stem = rstripSlash(prefix)
+  const virtual =
+    stem === '' ? (rel === '' ? '/' : `/${rel}`) : rel === '' ? stem : `${stem}/${rel}`
+  const parent = virtual.slice(0, virtual.lastIndexOf('/')) || '/'
+  return new PathSpec({ virtual, directory: parent, vfsPath: rel })
+}
+
+/** The errno an fs op refused with, which is what a backend test pins. */
+export async function codeOf(run: () => Promise<unknown>): Promise<string | undefined> {
+  try {
+    await run()
+  } catch (err) {
+    return (err as { code?: string }).code
+  }
+  return undefined
+}
+
+function page(rows: unknown[]): {
+  data: unknown[]
+  status: number
+  headers: Record<string, string>
+} {
+  return { data: rows, status: 200, headers: {} }
+}
+
+export const ROWS = [
+  { type: 'file', oid: 'oid-a', size: 7, path: 'a.txt' },
+  { type: 'file', oid: 'oid-b', size: 3, path: 'd/b.txt' },
+  { type: 'directory', oid: 'tree-d', size: 0, path: 'd' },
+]
+
+/** An accessor whose tree walk answers `rows` locally. */
+export function walking(rows: unknown[] = ROWS): HfHubAccessor {
+  vi.spyOn(client, 'hubGetResponse').mockResolvedValue(page(rows))
+  return new HfHubAccessor({ repoId: 'acme/widget' } as never)
+}
+
+/**
+ * The row the folder holding `path` lists for it, as the mount finds it: a
+ * listing of this backend is the whole tree, so one folder's listing names
+ * any row below the root.
+ */
+export async function rowAt(accessor: HfHubAccessor, path: PathSpec): Promise<FileStat | null> {
+  const rel = stripSlash(path.vfsPath)
+  if (rel === '') return null
+  const cut = rel.lastIndexOf('/')
+  const folder = cut === -1 ? '' : rel.slice(0, cut)
+  let listing: DirListing
+  try {
+    listing = await readdir(accessor, ps(folder))
+  } catch (err) {
+    if ((err as { code?: string }).code === 'ENOENT') return null
+    throw err
+  }
+  return listing.entries.find((row) => row.name === rel.slice(cut + 1)) ?? null
 }

@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from typing import Any, Callable
 
 from mirage.cache.file.mixin import FileCacheMixin
-from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.observe.record import (
     CONTENT_CHANGING_OPS,
     RETRACT_FINGERPRINT_OPS,
@@ -375,9 +375,11 @@ async def check_drift(
         return
     if not mount.vfs.supports_snapshot:
         return
-    # Resolve backend IDs afresh without consulting the restored index.
+    # Resolve backend IDs afresh without consulting the restored index:
+    # the check's own throwaway store, which a backend may answer by
+    # asking for the one path.
     try:
-        stat = await mount.call("stat", path, index=RAMIndexCacheStore())
+        stat = await mount.call("stat", path, index=ListingCheckStore())
     except (FileNotFoundError, NotADirectoryError) as exc:
         if mount_for(path) is not mount:
             return

@@ -57,6 +57,8 @@ export class CacheManager {
   // version the backend answered, the tick taken just before it was sent and
   // the monotonic millisecond it was sent at.
   private readonly checked = new Map<string, [string, number, number]>()
+  // The stored version each remembered answer refused, by that answer's tick.
+  private readonly refused = new Map<string, [string, number]>()
   // The newest check in flight per key, with its tick and send time.
   private readonly checking = new Map<string, [number, number, Promise<string | null>]>()
   private checkEpoch = 0
@@ -220,6 +222,9 @@ export class CacheManager {
     for (const [key, [, sentTick, sentAt]] of this.checked) {
       if (!this.sentRecently(sentTick, sentAt)) this.checked.delete(key)
     }
+    for (const [key, [, sentTick]] of this.refused) {
+      if (this.checked.get(key)?.[1] !== sentTick) this.refused.delete(key)
+    }
     this.checkBound = Math.max(CHECKED_LIMIT, 2 * this.checked.size)
   }
 
@@ -228,6 +233,7 @@ export class CacheManager {
   // and a check may be what builds it.
   private forgetChecks(): void {
     this.checked.clear()
+    this.refused.clear()
     this.checking.clear()
     this.checkEpoch += 1
   }
@@ -255,20 +261,31 @@ export class CacheManager {
    * is shared, and only then is a new one sent; the newest in flight is the
    * one later callers find. A remembered answer that differs from `stored` is
    * asked again rather than trusted, since the listing may have been written
-   * since. `check` answers null when the backend gives no version.
+   * since, unless that answer already refused this same `stored`: nothing
+   * about that listing changed. `check` answers null when the backend gives
+   * no version.
    */
-  checkedVersion(
+  async checkedVersion(
     key: string,
     stored: string,
     check: () => Promise<string | null>,
   ): Promise<string | null> {
     const checked = this.checked.get(key)
-    if (checked?.[0] === stored && this.sentRecently(checked[1], checked[2])) {
-      return Promise.resolve(checked[0])
+    if (checked !== undefined && this.sentRecently(checked[1], checked[2])) {
+      const refused = this.refused.get(key)
+      if (checked[0] === stored || (refused?.[0] === stored && refused[1] === checked[1])) {
+        return checked[0]
+      }
     }
     const flight = this.checking.get(key)
-    if (flight !== undefined && this.sentRecently(flight[0], flight[1])) return flight[2]
-    return this.sendCheck(key, check)
+    const version = await (flight !== undefined && this.sentRecently(flight[0], flight[1])
+      ? flight[2]
+      : this.sendCheck(key, check))
+    const answered = this.checked.get(key)
+    if (version !== stored && answered?.[0] === version) {
+      this.refused.set(key, [stored, answered[1]])
+    }
+    return version
   }
 
   private sendCheck(key: string, check: () => Promise<string | null>): Promise<string | null> {

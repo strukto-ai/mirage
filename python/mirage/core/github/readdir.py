@@ -12,192 +12,54 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.context import listing_refreshed
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    LookupStatus,
-)
-from mirage.cache.index.lock import index_lock
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree import (
-    ensure_live_snapshot,
     fetch_dir_tree,
-    refill_snapshot,
+    refresh_tree,
+    row_of,
+    tree_listing,
 )
-from mirage.core.github.tree_entry import TreeEntry
-from mirage.errors.fs import enoent
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
-
-log = logging.getLogger(__name__)
+from mirage.errors.fs import enoent, enotdir
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 
 
 async def readdir(
     accessor: GitHubAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
-    async with index_lock(index, prefix.rstrip("/") or "/"):
-        return await _readdir(accessor, path_spec, index)
+    path: PathSpec,
+    entry: FileStat | None = None,
+) -> DirListing:
+    """A folder's listing, with every folder below it as seeds.
 
-
-async def _readdir(
-    accessor: GitHubAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    """Read while the caller holds the mount's index lock through lookup."""
-    virtual = path_spec.virtual
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
-    path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
-    key = path.strip("/")
-    virtual_key = prefix + "/" + key if key else prefix or "/"
-    refilled = await ensure_live_snapshot(accessor, index, prefix)
-    listing = await index.list_dir(virtual_key)
-    # The index is the whole listing here, not a cache in front of one, so
-    # an *expired* answer means the tree aged out, not that the path is
-    # gone. Refetch once and ask again. A NOT_FOUND against a live index
-    # is a real absence and must not cost a tree fetch.
-    if (
-        listing.status == LookupStatus.EXPIRED
-        and not accessor.truncated
-        and refilled is None
-    ):
-        refilled = await refill_snapshot(accessor, index, prefix)
-        if refilled is not None:
-            listing = await index.list_dir(virtual_key)
-    if listing.entries is not None:
-        return listing.entries
-    if accessor.truncated and listing.status in (
-        LookupStatus.NOT_FOUND,
-        LookupStatus.EXPIRED,
-    ):
-        return await _fallback_readdir(
-            accessor, virtual_key, index, virtual, prefix
-        )
-    # A lock wait can outlast the TTL; use this refill only on EXPIRED.
-    if refilled is not None and listing.status == LookupStatus.EXPIRED:
-        refilled = index.scope_snapshot(refilled)
-        children = refilled.children.get(virtual_key)
-        if children is None:
-            raise enoent(virtual)
-        return list(children)
-    if listing.status == LookupStatus.NOT_FOUND:
-        raise enoent(virtual)
-    return []
-
-
-async def _fallback_readdir(
-    accessor: GitHubAccessor,
-    virtual_key: str,
-    index: IndexCacheStore,
-    virtual: str,
-    prefix: str,
-) -> list[str]:
-    """Per-directory tree fetch when recursive tree was truncated.
+    One recursive tree answers the whole repository at the head it names,
+    so the listing carries that head as its version. A tree GitHub
+    truncated names only some paths; the folder is then read from its own
+    tree, by the sha its row carries, and once a mount has seen its tree
+    truncated it asks no recursive tree again.
 
     Args:
         accessor (GitHubAccessor): backend handle.
-        virtual_key (str): Mount-absolute directory key.
-        index (IndexCacheStore): the mount's index.
-        virtual (str): Virtual path, for the error message.
-        prefix (str): the mount prefix, which the descent has to strip to
-            walk the repository's own path segments.
+        path (PathSpec): the folder, or a glob word in it.
+        entry (FileStat | None): the folder's row, as its parent lists it.
+
+    Raises:
+        NotADirectoryError: a file is at the path.
+        FileNotFoundError: nothing is.
     """
-    parent_sha = await _resolve_dir_sha(accessor, virtual_key, index, prefix)
-    if parent_sha is None:
-        raise enoent(virtual)
-    entries = await fetch_dir_tree(
-        accessor.config,
-        accessor.owner,
-        accessor.repo,
-        parent_sha,
-        accessor.pool,
+    rel = (path.dir if path.pattern else path).mount_path.strip("/")
+    if not (accessor.tree_loaded and accessor.truncated):
+        tree = await refresh_tree(accessor)
+        if tree is not None:
+            return tree_listing(tree, rel, accessor.tree_version, path.virtual)
+    if not rel:
+        sha = await ensure_ref(accessor)
+    elif entry is None:
+        raise enoent(path.virtual)
+    elif entry.type is not FileType.DIRECTORY:
+        raise enotdir(path.virtual)
+    else:
+        sha = str(entry.extra["sha"])
+    rows = await fetch_dir_tree(
+        accessor.config, accessor.owner, accessor.repo, sha, accessor.pool
     )
-    return await _cache_dir(index, virtual_key, entries)
-
-
-async def _cache_dir(
-    index: IndexCacheStore, virtual_key: str, entries: list[TreeEntry]
-) -> list[str]:
-    """Cache one complete tree listing, including each traversed parent."""
-    norm = virtual_key.rstrip("/") or "/"
-    child_keys: list[str] = []
-    dir_entries: list[tuple[str, IndexEntry]] = []
-    for entry in entries:
-        child_path = norm.rstrip("/") + "/" + entry.path
-        resource_type = "folder" if entry.type == "tree" else "file"
-        idx_entry = IndexEntry(
-            id=entry.sha,
-            name=entry.path,
-            resource_type=resource_type,
-            size=entry.size,
-        )
-        dir_entries.append((entry.path, idx_entry))
-        child_keys.append(child_path)
-    await index.set_dir(norm, dir_entries)
-    log.debug(
-        "fallback readdir populated %d entries for %s",
-        len(entries),
-        virtual_key,
-    )
-    return sorted(child_keys)
-
-
-async def _resolve_dir_sha(
-    accessor: GitHubAccessor,
-    virtual_key: str,
-    index: IndexCacheStore,
-    prefix: str = "",
-) -> str | None:
-    """Get the tree SHA for a directory path.
-
-    Descend from the ref, reusing only parents refreshed this command;
-    an older cached row may name a previous branch head.
-
-    Args:
-        accessor (GitHubAccessor): backend handle.
-        virtual_key (str): Mount-absolute directory key.
-        index (IndexCacheStore): the mount's index.
-        prefix (str): the mount prefix the keys are built against.
-    """
-    norm = virtual_key.rstrip("/") or "/"
-    stem = prefix.rstrip("/")
-    rest = norm[len(stem) :] if stem and norm.startswith(stem) else norm
-    parts = [p for p in rest.strip("/").split("/") if p]
-    current_sha = await ensure_ref(accessor)
-    current_path = stem or "/"
-    for part in parts:
-        child_path = current_path.rstrip("/") + "/" + part
-        if listing_refreshed(current_path):
-            listing = await index.list_dir(current_path)
-            if listing.entries is not None and child_path in listing.entries:
-                cached = (await index.get(child_path)).entry
-                if cached is not None and cached.resource_type == "folder":
-                    current_sha = cached.id
-                    current_path = child_path
-                    continue
-        entries = await fetch_dir_tree(
-            accessor.config,
-            accessor.owner,
-            accessor.repo,
-            current_sha,
-            accessor.pool,
-        )
-        child_path = current_path.rstrip("/") + "/" + part
-        found = next((entry for entry in entries if entry.path == part), None)
-        if found is None or found.type != "tree":
-            # Remove the former directory before caching a replacement blob.
-            await index.invalidate_prefix(child_path)
-        await _cache_dir(index, current_path, entries)
-        if found is None or found.type != "tree":
-            return None
-        current_sha = found.sha
-        current_path = child_path
-    return current_sha
+    return DirListing(entries=[row_of(row, row.path) for row in rows])

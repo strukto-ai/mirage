@@ -12,39 +12,63 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
-import { PathSpec } from '@struktoai/mirage-core/types'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
 import { read, rowToken } from './read.ts'
 import * as repo from './repo.ts'
-import { parseEntry } from './tree.ts'
+import { parseEntry, rowOf } from './tree.ts'
+import { codeOf, ps, rowAt, walking } from './_test_util.ts'
 
-function loaded(): HfHubAccessor {
-  const accessor = new HfHubAccessor({ repoId: 'acme/widget' } as never)
-  accessor.tree = new Map([
-    ['m', parseEntry({ type: 'directory', oid: 'tree-m', size: 0, path: 'm' })],
-    ['m/k.txt', parseEntry({ type: 'file', oid: 'oid-k', size: 5, path: 'm/k.txt' })],
-  ])
-  accessor.treeLoaded = true
-  accessor.rowsCache = null
-  return accessor
+function accessor(): HfHubAccessor {
+  return new HfHubAccessor({ repoId: 'acme/widget' } as never)
 }
 
 const PATH = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
+// The row the listing of /m/m names for k.txt.
+const K_ROW = rowOf(parseEntry({ type: 'file', oid: 'oid-k', size: 5, path: 'm/k.txt' }), 'k.txt')
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+describe('hf_hub read', () => {
+  it('never reaches the network for a path the listing knows is absent', async () => {
+    const spy = vi.spyOn(client, 'hubBytesTagged')
+    expect(await codeOf(() => read(accessor(), ps('nope'), {}, null))).toBe('ENOENT')
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('reports EISDIR for a directory and for the mount root', async () => {
+    const folder = new FileStat({ name: 'd', type: FileType.DIRECTORY })
+    expect(await codeOf(() => read(accessor(), ps('d'), {}, folder))).toBe('EISDIR')
+    expect(await codeOf(() => read(accessor(), ps(''), {}, null))).toBe('EISDIR')
+  })
+
+  it('fetches the resolve url', async () => {
+    const spy = vi
+      .spyOn(client, 'hubBytesTagged')
+      .mockResolvedValue([new TextEncoder().encode('hello'), ''])
+    const data = await read(accessor(), ps('a.txt'), {}, K_ROW)
+    expect(new TextDecoder().decode(data)).toBe('hello')
+    expect(spy.mock.calls[0]?.[1]).toBe('https://huggingface.co/acme/widget/resolve/main/a.txt')
+    expect(spy.mock.calls[0]?.[2]).toBeUndefined()
+  })
+
+  it('passes a byte window', async () => {
+    const spy = vi.spyOn(client, 'hubBytesTagged').mockResolvedValue([new Uint8Array(2), ''])
+    await read(accessor(), ps('a.txt'), { offset: 0, size: 2 }, K_ROW)
+    expect(spy.mock.calls[0]?.[2]).toEqual({ offset: 0, size: 2 })
+  })
 })
 
 // A key named like its mount: neither `m/k.txt` nor `/m/k.txt` is virtual.
 describe('hf_hub read record path', () => {
   it('records the virtual path', async () => {
     vi.spyOn(client, 'hubBytesTagged').mockResolvedValue([new TextEncoder().encode('hello'), ''])
-    const [data, records] = await runWithRecording(() => read(loaded(), PATH))
+    const [data, records] = await runWithRecording(() => read(accessor(), PATH, {}, K_ROW))
     expect(new TextDecoder().decode(data)).toBe('hello')
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })
@@ -52,20 +76,25 @@ describe('hf_hub read record path', () => {
 
 // One row whose four ids all differ, and none is a hash of the content, so
 // every accepted ETag is distinguishable from every other and from a guess.
-const ROW = new IndexEntry({
-  id: 'O',
+const ROW = new FileStat({
   name: 'f.bin',
-  resourceType: 'file',
+  type: FileType.FILE,
+  fingerprint: 'O',
   extra: { oid: 'O', lfs_oid: 'L', xet_hash: 'X', last_commit: 'C' },
 })
 // The common case: a plain git file carries its oid and nothing else.
-const PLAIN = new IndexEntry({ id: 'P', name: 'a.txt', resourceType: 'file', extra: { oid: 'P' } })
+const PLAIN = new FileStat({
+  name: 'a.txt',
+  type: FileType.FILE,
+  fingerprint: 'P',
+  extra: { oid: 'P' },
+})
 // A row that carries the LFS and Xet keys empty: a missing ETag must not match
 // one of them.
-const BLANK = new IndexEntry({
-  id: 'P',
+const BLANK = new FileStat({
   name: 'a.txt',
-  resourceType: 'file',
+  type: FileType.FILE,
+  fingerprint: 'P',
   extra: { oid: 'P', lfs_oid: '', xet_hash: '' },
 })
 
@@ -88,12 +117,7 @@ describe('rowToken', () => {
   it('never stamps an empty id', () => {
     // The ETag matches, so this takes the match branch; an empty id must
     // still come back as no token rather than ''.
-    const entry = new IndexEntry({
-      id: '',
-      name: 'f',
-      resourceType: 'file',
-      extra: { lfs_oid: 'L' },
-    })
+    const entry = new FileStat({ name: 'f', type: FileType.FILE, extra: { lfs_oid: 'L' } })
     expect(rowToken(entry, '"L"')).toBeNull()
   })
 })
@@ -104,7 +128,7 @@ describe('hf_hub read stamp', () => {
       new TextEncoder().encode('hello'),
       '"oid-k"',
     ])
-    const [, records] = await runWithRecording(() => read(loaded(), PATH))
+    const [, records] = await runWithRecording(() => read(accessor(), PATH, {}, K_ROW))
     expect(records.map((r) => r.fingerprint)).toEqual(['oid-k'])
   })
 
@@ -116,25 +140,18 @@ describe('hf_hub read stamp', () => {
       new TextEncoder().encode('newer'),
       '"another-version"',
     ])
-    const [, records] = await runWithRecording(() => read(loaded(), PATH))
+    const [, records] = await runWithRecording(() => read(accessor(), PATH, {}, K_ROW))
     expect(records.map((r) => r.fingerprint)).toEqual([null])
   })
 })
 
 describe('a read the Hub refuses', () => {
-  // The accessor points at the real Hub, so the head the refill asks for
-  // before its walk is answered locally; the refused walk is the subject.
-  beforeEach(() => {
-    vi.spyOn(repo, 'headCommit').mockResolvedValue('')
-  })
-
   it('is permission denied', async () => {
-    vi.spyOn(client, 'hubGetResponse').mockRejectedValue(new client.HfHubError('nope', 403))
-    const accessor = new HfHubAccessor({ repoId: 'acme/widget' } as never)
-    const spec = new PathSpec({ virtual: '/a.txt', vfsPath: 'a.txt', directory: '/' })
-    const err = await read(accessor, spec, new RAMIndexCacheStore()).catch((e: unknown) => e)
-    expect((err as { code?: string }).code).toBe('EACCES')
-    vi.restoreAllMocks()
+    // The listing that would hand the read its row is refused.
+    vi.spyOn(repo, 'headCommit').mockResolvedValue('')
+    const walker = walking()
+    vi.mocked(client.hubGetResponse).mockRejectedValue(new client.HfHubError('nope', 403))
+    expect(await codeOf(() => rowAt(walker, ps('a.txt')))).toBe('EACCES')
   })
 })
 
@@ -142,8 +159,7 @@ describe('a download the Hub refuses', () => {
   it.each([401, 403])('is permission denied for %i', async (status) => {
     // A gated repo lists its tree but refuses the file itself.
     vi.spyOn(client, 'hubBytesTagged').mockRejectedValue(new client.HfHubError('gated', status))
-    const err = await read(loaded(), PATH).catch((e: unknown) => e)
-    expect((err as { code?: string }).code).toBe('EACCES')
+    expect(await codeOf(() => read(accessor(), PATH, {}, K_ROW))).toBe('EACCES')
   })
 
   it('keeps a vanished file a hub error', async () => {
@@ -151,7 +167,7 @@ describe('a download the Hub refuses', () => {
     vi.spyOn(client, 'hubBytesTagged').mockRejectedValue(
       new client.HfHubError('gone', 404, 'EntryNotFound'),
     )
-    const err = await read(loaded(), PATH).catch((e: unknown) => e)
+    const err = await read(accessor(), PATH, {}, K_ROW).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(client.HfHubError)
   })
 })

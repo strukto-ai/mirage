@@ -21,23 +21,23 @@ import pytest
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.cache.index import NULL_INDEX, Evicted, IndexEntry
+from mirage.cache.index import Evicted
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GitHubConfig
+from mirage.core.github.readdir import readdir
 from mirage.core.github.tree import (
-    ensure_live_snapshot,
     ensure_tree,
     fetch_dir_page,
     fetch_dir_tree,
     fetch_tree,
-    index_rows,
     point_row,
-    refill_snapshot,
-    seed_index,
+    tree_rows,
 )
 from mirage.core.github.tree_entry import TreeEntry
+from mirage.types import PathSpec
+from mirage.workspace.mount.listing import keep_listing
 from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
 
 
@@ -181,107 +181,37 @@ def _accessor(config):
 
 @pytest.mark.asyncio
 @patch("mirage.core.github.tree.github_get")
-async def test_ensure_live_snapshot_refetches_the_build_tree(mock_get, config):
-    # The build tree is only true at build time: a mount's first read can
-    # come long after it, so reusing it would key an index built from a
-    # repository several external writes ago.
+async def test_a_listing_refetches_the_build_tree(mock_get, config):
+    # The build tree is only true at build time: a mount's first listing
+    # can come long after it, so reusing it would answer a repository
+    # several external writes ago.
     mock_get.return_value = _tree_payload()
-    index = RAMIndexCacheStore(ttl=600)
     accessor = _accessor(config)
-    assert await ensure_live_snapshot(accessor, index, "/gh") is not None
+    listing = await readdir(accessor, _root("/gh"))
     mock_get.assert_awaited_once()
-    assert (await index.list_dir("/gh/data")).entries == ["/gh/data/keep.txt"]
+    assert [row.name for row in listing.seeds["data"]] == ["keep.txt"]
+    assert accessor.tree_loaded
 
 
-@pytest.mark.asyncio
-@patch("mirage.core.github.tree.github_get")
-async def test_ensure_live_snapshot_refetches_a_dropped_listing(
-    mock_get, config
-):
-    mock_get.return_value = _tree_payload()
-    index = RAMIndexCacheStore(ttl=600)
-    accessor = _accessor(config)
-    await ensure_live_snapshot(accessor, index, "/gh")
-    # What invalidation does: drop the row rather than expire it, which
-    # is why the readers' EXPIRED probe never fires.
-    await index.invalidate_dir("/gh")
-    await index.invalidate_dir("/gh/data")
-    assert await ensure_live_snapshot(accessor, index, "/gh") is not None
-    assert mock_get.await_count == 2
-    assert (await index.list_dir("/gh/data")).entries == ["/gh/data/keep.txt"]
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.github.tree.github_get")
-async def test_ensure_live_snapshot_refetches_an_expired_listing(
-    mock_get, config
-):
-    mock_get.return_value = _tree_payload()
-    index = RAMIndexCacheStore(ttl=600)
-    accessor = _accessor(config)
-    await ensure_live_snapshot(accessor, index, "/gh")
-    await index.invalidate()
-    assert await ensure_live_snapshot(accessor, index, "/gh") is not None
-    assert mock_get.await_count == 2
-    assert (await index.list_dir("/gh/data")).entries == ["/gh/data/keep.txt"]
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.github.tree.github_get")
-async def test_ensure_live_snapshot_leaves_a_live_index_alone(
-    mock_get, config
-):
-    mock_get.return_value = _tree_payload()
-    index = RAMIndexCacheStore(ttl=600)
-    accessor = _accessor(config)
-    await ensure_live_snapshot(accessor, index, "/gh")
-    mock_get.reset_mock()
-    assert await ensure_live_snapshot(accessor, index, "/gh") is None
-    mock_get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.github.tree.github_get")
-async def test_ensure_live_snapshot_skips_a_truncated_tree(mock_get, config):
-    index = RAMIndexCacheStore(ttl=600)
-    accessor = _accessor(config)
-    accessor.truncated = True
-    assert await ensure_live_snapshot(accessor, index, "/gh") is None
-    mock_get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_ensure_live_snapshot_skips_the_null_index(config):
-    assert (
-        await ensure_live_snapshot(_accessor(config), NULL_INDEX, "") is None
-    )
-
-
-def test_index_rows_key_by_mount_absolute_path():
-    # Every other backend keys its index this way, which is what lets the
-    # shared CacheManager spell an eviction without knowing the backend.
+def test_tree_rows_key_each_folder_by_its_repo_path():
     tree = {
         "data": TreeEntry(path="data", type="tree", sha="t1", size=None),
         "data/keep.txt": TreeEntry(
             path="data/keep.txt", type="blob", sha="b1", size=4
         ),
     }
-    entries, children = index_rows(tree, "/gh")
-    assert sorted(entries) == ["/gh/data", "/gh/data/keep.txt"]
-    assert sorted(children) == ["/gh", "/gh/data"]
+    rows = tree_rows(tree)
+    assert {
+        folder: [r.name for r in found] for folder, found in rows.items()
+    } == {
+        "": ["data"],
+        "data": ["keep.txt"],
+    }
+    assert rows["data"][0].extra == {"sha": "b1"}
 
 
-def test_index_rows_root_mount_keeps_bare_paths():
-    entries, children = index_rows(
-        {"a.txt": TreeEntry(path="a.txt", type="blob", sha="b", size=1)}, ""
-    )
-    assert sorted(entries) == ["/a.txt"]
-    assert sorted(children) == ["/"]
-
-
-def test_index_rows_gives_an_empty_repo_a_root_row():
-    _entries, children = index_rows({}, "/gh")
-    assert children == {"/gh": []}
+def test_tree_rows_give_an_empty_repo_a_root_listing():
+    assert tree_rows({}) == {"": []}
 
 
 @pytest.mark.asyncio
@@ -447,26 +377,8 @@ async def test_a_malformed_point_answer_is_refused():
                 await point_row(accessor, "docs/a.txt")
 
 
-@pytest.mark.asyncio
-async def test_a_truncated_seed_keeps_rows_it_does_not_name():
-    accessor = _accessor(GitHubConfig(token="t"))
-    accessor.truncated = True
-    index = RAMIndexCacheStore(ttl=600)
-    await index.set_dir(
-        "/gh/data",
-        [
-            (
-                "keep.txt",
-                IndexEntry(id="b1", name="keep.txt", resource_type="file"),
-            ),
-            (
-                "other.txt",
-                IndexEntry(id="b2", name="other.txt", resource_type="file"),
-            ),
-        ],
-    )
-    seed_index(accessor, index, "/gh")
-    assert (await index.get("/gh/data/other.txt")).entry.id == "b2"
+def _root(prefix: str) -> PathSpec:
+    return PathSpec(virtual=prefix, directory=prefix, vfs_path="")
 
 
 def _ledgered(store: RAMIndexCacheStore) -> tuple[list[Evicted], IndexView]:
@@ -480,6 +392,10 @@ def _ledgered(store: RAMIndexCacheStore) -> tuple[list[Evicted], IndexView]:
     )
 
 
+async def _relist(accessor: GitHubAccessor, index: IndexView) -> None:
+    await keep_listing(index, "/gh", await readdir(accessor, _root("/gh")))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "removed, reported",
@@ -488,50 +404,24 @@ def _ledgered(store: RAMIndexCacheStore) -> tuple[list[Evicted], IndexView]:
         (["d1/a.txt", "d1/b.txt"], [Evicted("/gh/d1", folder=True)]),
     ],
 )
-async def test_a_refill_reports_what_left_the_repository(removed, reported):
-    # The refill wipes the index before seeding the new tree, so without
-    # the diff a file removed upstream keeps its cached bytes and overlay.
+async def test_a_relisting_reports_what_left_the_repository(removed, reported):
+    # The seeds replace each folder's listing, so without the diff a file
+    # removed upstream keeps its cached bytes and overlay.
     files = {"d1/a.txt": b"a", "d1/b.txt": b"b", "top.txt": b"t"}
     with serve(FakeGitHub(files=dict(files))) as gh:
         accessor = _served_accessor(gh)
         gone, index = _ledgered(RAMIndexCacheStore())
-        await refill_snapshot(accessor, index, "/gh")
+        await _relist(accessor, index)
+        assert gone == []
         for path in removed:
             del gh.files[path]
-        await refill_snapshot(accessor, index, "/gh")
+        await _relist(accessor, index)
         assert gone == reported
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("before, after", [(True, False), (False, True)])
-async def test_a_truncated_tree_on_either_side_reports_nothing(before, after):
-    # A truncated tree names only some paths, so a path missing from it is
-    # not a path the repository lost.
-    files = {"d1/a.txt": b"a", "top.txt": b"t"}
-    with serve(
-        FakeGitHub(files=dict(files), truncated_recursive=before)
-    ) as gh:
-        accessor = _served_accessor(gh)
-        gone, index = _ledgered(RAMIndexCacheStore())
-        await refill_snapshot(accessor, index, "/gh")
-        gh.truncated_recursive = after
-        del gh.files["d1/a.txt"]
-        await refill_snapshot(accessor, index, "/gh")
-        assert gone == []
-
-
-@pytest.mark.asyncio
-async def test_the_first_refill_reports_nothing():
-    with serve(FakeGitHub(files={"top.txt": b"t"})) as gh:
-        accessor = _served_accessor(gh)
-        gone, index = _ledgered(RAMIndexCacheStore())
-        await refill_snapshot(accessor, index, "/gh")
-        assert gone == []
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("truncated,drop_sha", [(True, False), (False, True)])
-async def test_a_refill_with_no_whole_head_stores_no_version(
+async def test_a_listing_with_no_whole_head_names_no_version(
     truncated, drop_sha
 ):
     files = {"d1/a.txt": b"a", "top.txt": b"t"}
@@ -541,11 +431,9 @@ async def test_a_refill_with_no_whole_head_stores_no_version(
         )
     ) as gh:
         accessor = _served_accessor(gh)
-        index = RAMIndexCacheStore()
-        snapshot = await refill_snapshot(accessor, index, "/gh")
-        assert snapshot.version is None
+        listing = await readdir(accessor, _root("/gh"))
+        assert listing.version is None
         assert accessor.tree_version is None
-        assert (await index.list_dir("/gh")).version is None
 
 
 @pytest.mark.asyncio

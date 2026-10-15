@@ -193,8 +193,8 @@ async def test_a_changed_file_is_refetched_once_then_served_warm():
             hub.log.clear()
             assert await _out(ws, f"cat {PATH}") == NEW
             # The probe finds a new sha; cat's own stat serves the probe's
-            # answer; the read refills and downloads.
-            assert hub.counts() == (1, 1, 1)
+            # answer, and the read is handed it and downloads.
+            assert hub.counts() == (1, 0, 1)
             hub.log.clear()
             assert await _out(ws, f"cat {PATH}") == NEW
             # Warm now: the routing probe, and nothing else.
@@ -235,17 +235,19 @@ async def test_a_new_mount_asks_one_directory_per_stat_until_it_lists():
             await ws.close()
 
 
+# A bounded mount lists its way to the first stat with one tree, which
+# names every folder, so every stat and listing after it is free.
 @pytest.mark.asyncio
-async def test_a_bounded_mount_asks_one_directory_per_stat_until_it_lists():
+async def test_a_bounded_mount_lists_once_for_its_stats():
     with serve(_hub()) as hub:
         ws = _ws(_vfs(hub), ReadPolicy.BOUNDED)
         try:
             await _out(ws, f"stat {PATH}")
+            assert hub.counts() == (0, 1, 0)
             await _out(ws, f"stat {PATH}")
             await _out(ws, "ls /gh/docs")
-            assert hub.counts() == (2, 1, 0)
             await _out(ws, f"stat {PATH}")
-            assert hub.counts() == (2, 1, 0)
+            assert hub.counts() == (0, 1, 0)
         finally:
             await ws.close()
 
@@ -358,16 +360,20 @@ async def test_a_refused_token_keeps_the_overlay():
         try:
             await _out(ws, f"cat {PATH}")
             await _overlaid(ws)
-            # Only the one-directory route refuses: deferring on 401 would
-            # walk the tree, which answers, and hide the refusal.
-            hub.fail["dir"] = (401, "Bad credentials")
-            hub.log.clear()
+            # A refused token refuses every route: the read fails with the
+            # refusal, and the refusal never reads as the file gone.
+            hub.fail.update(
+                {
+                    "dir": (401, "Bad credentials"),
+                    "recursive": (401, "Bad credentials"),
+                }
+            )
             err = await _fails(ws, f"cat {PATH}")
             assert err == (
                 "cat: 401, message='Unauthorized', url='"
-                f"{hub.url}/repos/o/r/git/trees/main:docs'\n"
+                f"{hub.url}/repos/o/r/git/trees/main"
+                "?recursive=1'\n"
             )
-            assert hub.count("recursive") == 0
             assert _kept(ws)
         finally:
             await ws.close()
@@ -402,11 +408,10 @@ async def test_a_file_gone_from_a_live_directory_is_gone():
             err = await _fails(ws, f"cat {PATH}")
             assert err == f"cat: {PATH}: No such file or directory\n"
             assert ws.namespace.meta_for(PATH) is None
-            # The probe and cat's own stat each answer absent from one listing
-            # of docs/; the single walk is the generic adapter asking whether
-            # the path is an implicit directory after that ENOENT. A probe
-            # that deferred on the complete listing would walk once more.
-            assert hub.counts() == (2, 1, 0)
+            # The probe answers absent from one listing of docs/ and drops
+            # the stale row; cat's own stat then lists its way there once,
+            # and that tree names the file absent too.
+            assert hub.counts() == (1, 1, 0)
         finally:
             await ws.close()
 

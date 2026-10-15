@@ -18,7 +18,12 @@ import functools
 import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    asynccontextmanager,
+    contextmanager,
+    nullcontext,
+)
 from typing import Any, Callable, cast
 
 from mirage.accessor.base import Accessor
@@ -26,6 +31,7 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig
 from mirage.cache.index.factory import build_index
+from mirage.cache.index.lock import index_lock
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
@@ -1537,7 +1543,9 @@ class MountEntry:
         self, path: PathSpec, index: IndexCacheStore
     ) -> list[str]:
         """A directory's children, from its stored listing or listed
-        through the backend and kept.
+        through the backend and kept. Finding the rows a listing is
+        handed lists its parent, whose fetch may have proved this listing
+        too (a seed).
 
         Args:
             path (PathSpec): the directory, keyed below the mount.
@@ -1549,6 +1557,9 @@ class MountEntry:
             return stored
         readdir: Callable[..., Awaitable[Any]] = self.vfs.readdir
         handed = await self._handed(readdir, path, {}, index)
+        stored = await stored_listing(index, key)
+        if stored is not None:
+            return stored
         listed = await readdir(path, **_handed_on(readdir, index, **handed))
         return await keep_listing(index, key, listed)
 
@@ -1702,6 +1713,21 @@ class MountEntry:
             self.read.policy is ReadPolicy.FRESH
             and self.vfs.listing_version == ListingVersion.FOLDER
         )
+
+    def _listing_lock(
+        self, name: str, scope: PathSpec, index: IndexCacheStore
+    ) -> AbstractAsyncContextManager[None]:
+        """One listing of a folder at a time: a reader arriving while
+        another lists it waits, then answers from what that one kept.
+
+        Args:
+            name (str): the op about to run.
+            scope (PathSpec): its path, keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+        """
+        if name != "readdir" or not self._lists:
+            return nullcontext()
+        return index_lock(index, index_key(self.prefix, scope))
 
     async def _kept(
         self, name: str, scope: PathSpec, index: IndexCacheStore, result: Any
@@ -1878,35 +1904,42 @@ class MountEntry:
                 # spells the two the same, and routing the physical one
                 # hands the op back to the backend serving it.
                 with host_io():
-                    handed: dict[str, FileStat | None] | None = None
-                    if name in STORED_OPS and self._lists:
-                        stored = await self._stored(name, scope, index)
-                        if stored is None and name == "readdir":
-                            # Finding the rows a listing is handed lists
-                            # its parent, whose fetch may have proved this
-                            # listing too (a seed).
-                            handed = await self._handed(
-                                levels[0], scope, kwargs, index
-                            )
+                    async with self._listing_lock(name, scope, index):
+                        handed: dict[str, FileStat | None] | None = None
+                        if name in STORED_OPS and self._lists:
                             stored = await self._stored(name, scope, index)
-                        if stored is not None:
-                            return stored
-                    for fn in levels:
-                        result = await self._run(
-                            name, fn, scope, args, kwargs, op_timeout, handed
-                        )
-                        handed = None
-                        if result is None:
-                            continue
-                        if self._lists:
-                            result = await self._kept(
-                                name, scope, index, result
+                            if stored is None and name == "readdir":
+                                # Finding the rows a listing is handed lists
+                                # its parent, whose fetch may have proved this
+                                # listing too (a seed).
+                                handed = await self._handed(
+                                    levels[0], scope, kwargs, index
+                                )
+                                stored = await self._stored(name, scope, index)
+                            if stored is not None:
+                                return stored
+                        for fn in levels:
+                            result = await self._run(
+                                name,
+                                fn,
+                                scope,
+                                args,
+                                kwargs,
+                                op_timeout,
+                                handed,
                             )
-                        if name == "stat":
-                            self._note_live(scope, index, fn, result)
-                        return _wrap_stream(
-                            result, self.mount_id, self.activity
-                        )
+                            handed = None
+                            if result is None:
+                                continue
+                            if self._lists:
+                                result = await self._kept(
+                                    name, scope, index, result
+                                )
+                            if name == "stat":
+                                self._note_live(scope, index, fn, result)
+                            return _wrap_stream(
+                                result, self.mount_id, self.activity
+                            )
                 return None
             finally:
                 reset_caller(token)

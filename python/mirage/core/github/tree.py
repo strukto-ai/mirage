@@ -14,29 +14,21 @@
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
 
 import aiohttp
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    ListResult,
-    LookupStatus,
-)
-from mirage.cache.index.config import IndexSnapshot
-from mirage.cache.index.diff import departed
-from mirage.cache.index.lock import index_lock
 from mirage.core.api.client import SessionArg
 from mirage.core.github.client import GitHubApiError, github_get
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.constants import DEFER_STATUSES
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree_entry import TreeEntry
+from mirage.errors.fs import enoent, enotdir
+from mirage.types import DirListing, FileStat, FileType
+from mirage.utils.filetype import content_type_for_path
 
 log = logging.getLogger(__name__)
 
@@ -278,161 +270,81 @@ async def point_row(
     return row, truncated
 
 
-def index_entry(entry: TreeEntry, name: str) -> IndexEntry:
-    """The index row for one tree row, the same from every route.
+def row_of(entry: TreeEntry, name: str) -> FileStat:
+    """The row for one tree row, the same from every route: a file's carries
+    its blob sha as its fingerprint, and every row its sha.
 
     Args:
         entry (TreeEntry): the git tree row.
         name (str): the row's last path segment.
-
-    Returns:
-        IndexEntry: the row, its id the blob or tree sha.
     """
-    return IndexEntry(
-        id=entry.sha,
+    if entry.type == "tree":
+        return FileStat(
+            name=name, type=FileType.DIRECTORY, extra={"sha": entry.sha}
+        )
+    return FileStat(
         name=name,
-        resource_type=("folder" if entry.type == "tree" else "file"),
         size=entry.size,
+        type=FileType.FILE,
+        content=content_type_for_path(name),
+        fingerprint=entry.sha,
+        extra={"sha": entry.sha},
     )
 
 
-def index_rows(
-    tree: dict[str, TreeEntry], prefix: str
-) -> tuple[dict[str, IndexEntry], dict[str, list[str]]]:
-    """Turn a git tree into the index's entry and children tables.
+def tree_rows(tree: dict[str, TreeEntry]) -> dict[str, list[FileStat]]:
+    """Each folder's rows, keyed by its repo-relative path ("" the root).
 
-    Keyed by mount-absolute path, the way every other backend keys its
-    index, so the shared cache machinery can spell an eviction without
-    knowing which backend it is talking to. The tree itself stays
-    repo-relative; ``prefix`` is what lifts it.
-
-    Shared so the mount's seed and a later refill build the same rows;
-    TypeScript keeps its twin in this module too (`populateIndex`).
+    The repository root always has a listing, even when the tree is
+    empty, so an empty repository lists as empty rather than missing.
 
     Args:
         tree (dict[str, TreeEntry]): the recursive tree, keyed by
             repo-relative path.
-        prefix (str): the mount prefix ("/gh"), or "" for a root mount.
-
-    Returns:
-        tuple[dict[str, IndexEntry], dict[str, list[str]]]: entries keyed
-        by mount-absolute path, and each directory's sorted children.
     """
-    stem = prefix.rstrip("/")
-    dirs: dict[str, list[tuple[str, IndexEntry]]] = defaultdict(list)
-    # The repository root always exists, so it gets a row even when the
-    # tree is empty. Without it an empty repository is byte for byte a
-    # dropped index, and `ensure_live_snapshot` would refetch on every read
-    # of one; `ls` on it also read as ENOENT rather than as empty.
-    dirs[stem or "/"] = []
+    folders: dict[str, list[FileStat]] = defaultdict(list)
+    folders[""] = []
     for path, entry in tree.items():
         if entry.type == "tree":
-            dirs.setdefault(stem + "/" + path, [])
-        parts = path.rsplit("/", 1)
-        if len(parts) == 2:
-            parent, name = stem + "/" + parts[0], parts[1]
-        else:
-            parent, name = stem or "/", parts[0]
-        dirs[parent].append((name, index_entry(entry, name)))
-    entries = {
-        (parent.rstrip("/") + "/" + name): entry
-        for parent, rows in dirs.items()
-        for name, entry in rows
-    }
-    children = {
-        parent: sorted(parent.rstrip("/") + "/" + name for name, _ in rows)
-        for parent, rows in dirs.items()
-    }
-    return entries, children
+            folders.setdefault(path, [])
+        parent, _, name = path.rpartition("/")
+        folders[parent].append(row_of(entry, name))
+    for rows in folders.values():
+        rows.sort(key=lambda row: row.name)
+    return dict(folders)
 
 
-def seed_index(
-    accessor: GitHubAccessor,
-    index: IndexCacheStore,
-    prefix: str,
-) -> IndexSnapshot:
-    """Write the accessor's tree into ``index`` under ``prefix``.
-
-    Every listing is stamped with ``accessor.tree_version``, the head the
-    tree was fetched at, so one version covers the whole mount.
+def tree_listing(
+    tree: dict[str, TreeEntry], rel: str, version: str | None, virtual: str
+) -> DirListing:
+    """The listing of the folder ``rel`` out of the whole tree, with every
+    folder below it as seeds, all at ``version``.
 
     Args:
-        accessor (GitHubAccessor): the mount's accessor, holding the tree.
-        index (IndexCacheStore): the index to seed.
-        prefix (str): the mount prefix the keys are built against.
+        tree (dict[str, TreeEntry]): the recursive tree.
+        rel (str): the folder, repo-relative ("" the root).
+        version (str | None): the head the tree was fetched at.
+        virtual (str): the path asked, for the error.
 
-    Returns:
-        IndexSnapshot: the rows it wrote, and their version.
+    Raises:
+        NotADirectoryError: a file is at ``rel``.
+        FileNotFoundError: nothing is.
     """
-    entries, children = index_rows(accessor.tree, prefix)
-    # A truncated response cannot establish that any listing is complete,
-    # including an apparently empty directory. Readdir must fill it first.
-    expires_at = (
-        datetime.fromtimestamp(0, timezone.utc)
-        if accessor.truncated
-        else datetime.now(timezone.utc) + timedelta(days=365)
+    folders = tree_rows(tree)
+    if rel not in folders:
+        if rel in tree:
+            raise enotdir(virtual)
+        raise enoent(virtual)
+    lead = rel + "/" if rel else ""
+    return DirListing(
+        entries=folders[rel],
+        seeds={
+            folder[len(lead) :]: rows
+            for folder, rows in folders.items()
+            if folder != rel and folder.startswith(lead)
+        },
+        version=version,
     )
-    version = None if accessor.truncated else accessor.tree_version
-    index.seed(entries, children, expires_at, version=version)
-    return IndexSnapshot(entries=entries, children=children, version=version)
-
-
-async def refill_snapshot(
-    accessor: GitHubAccessor,
-    index: IndexCacheStore,
-    prefix: str,
-) -> IndexSnapshot | None:
-    """Refetch the recursive tree, re-seed the index from it, return its rows.
-
-    The mount fetches the whole tree once and seeds the index with it, so
-    the index is the listing rather than a cache in front of one. That
-    makes a cleared or expired index indistinguishable from an empty
-    repository -- `ls` reported the mount root missing after an
-    invalidation, and reported nothing at all once the day-long TTL
-    lapsed. This is the refill that makes dropping the index mean
-    "refetch", which is what invalidating it was always supposed to mean.
-
-    The rows are returned so a reader can answer from them when its
-    re-read of the store has already expired (it waited on the mutation
-    lock past the mount's ttl).
-
-    Args:
-        accessor (GitHubAccessor): the mount's accessor, holding the
-            config and the ref to refetch.
-        index (IndexCacheStore): the index to re-seed.
-        prefix (str): the mount prefix the index keys are built against.
-
-    Returns:
-        IndexSnapshot | None: the rows seeded; None when there is no index
-        to seed, so a caller does not retry a lookup that cannot change.
-    """
-    # The caller holds index_lock through replacement and its final lookup.
-    if index is NULL_INDEX:
-        return None
-    # Only a complete tree can say what is gone; a first fetch has nothing
-    # to compare with, and a truncated one names only some paths.
-    previous = (
-        dict(accessor.tree)
-        if accessor.tree_loaded and not accessor.truncated
-        else None
-    )
-    ref = await ensure_ref(accessor)
-    tree, truncated, head = await fetch_tree(
-        accessor.config, accessor.owner, accessor.repo, ref, accessor.pool
-    )
-    reseat_tree(accessor, tree, truncated, head)
-    # A refill replaces this mount's snapshot, including paths now absent.
-    await index.invalidate_prefix(prefix.rstrip("/") or "/")
-    snapshot = seed_index(accessor, index, prefix)
-    if previous is not None and not truncated:
-        await index.report_gone(
-            departed(previous.items(), tree, prefix, _is_folder)
-        )
-    return snapshot
-
-
-def _is_folder(entry: TreeEntry) -> bool:
-    return entry.type == "tree"
 
 
 def reseat_tree(
@@ -457,161 +369,43 @@ def reseat_tree(
     accessor.tree_version = None if truncated else head
 
 
-async def ensure_live_snapshot(
+async def refresh_tree(
     accessor: GitHubAccessor,
-    index: IndexCacheStore,
-    prefix: str,
-) -> IndexSnapshot | None:
-    """Refetch when the index holds no live root listing.
-
-    Every reader here treats a missing listing as a real absence, which
-    is right against a *live* index and wrong against one that was never
-    filled or has been dropped, and invalidation drops rather than
-    expires: `invalidate_dir` removes the directory's row outright, so
-    the EXPIRED probe each reader already runs never fires. An expired
-    root counts as not live too: the tree is written whole, so it means
-    the whole tree aged out, and find, du and grep read that tree rather
-    than the listing.
-
-    The root listing is what tells live from not, in one lookup and no
-    request: the tree is written whole, so while the index is live every
-    directory has a row and the mount root always does. One refill makes
-    it live again, so this cannot cost a fetch per miss, which is what
-    kept the readers from probing on absence in the first place.
-
-    Not live always **refetches**, and never re-seeds the tree the mount
-    was built with. That tree is only true at build time: the first read
-    of a mount can come long after it, and reusing it then served an
-    index built from a repository five external writes ago. It is still
-    what ``accessor.tree`` starts as, so find and du have something to
-    read before any listing happens, and every refill reseats it.
+) -> dict[str, TreeEntry] | None:
+    """Fetch the ref's recursive tree and reseat the accessor on it.
 
     Args:
         accessor (GitHubAccessor): the mount's accessor.
-        index (IndexCacheStore): the index to check and fill.
-        prefix (str): the mount prefix the index keys are built against.
 
     Returns:
-        IndexSnapshot | None: the refill's rows, or None when none was
-        needed or possible.
+        dict[str, TreeEntry] | None: the tree, keyed by repo-relative
+        path, at ``accessor.tree_version``; None when GitHub truncated it,
+        which then names only some paths.
     """
-    if index is NULL_INDEX:
-        return None
-    # The liveness probe comes before anything on the accessor, so a live
-    # index still answers every read without one.
-    root = await index.list_dir(prefix.rstrip("/") or "/")
-    return await _refill_unless_live(accessor, index, prefix, root)
+    ref = await ensure_ref(accessor)
+    tree, truncated, head = await fetch_tree(
+        accessor.config, accessor.owner, accessor.repo, ref, accessor.pool
+    )
+    reseat_tree(accessor, tree, truncated, head)
+    return None if truncated else tree
 
 
-async def _refill_unless_live(
-    accessor: GitHubAccessor,
-    index: IndexCacheStore,
-    prefix: str,
-    root: ListResult,
-) -> IndexSnapshot | None:
-    """``ensure_live_snapshot`` for a root listing the caller already read.
-
-    Args:
-        accessor (GitHubAccessor): the mount's accessor.
-        index (IndexCacheStore): the index to fill, held under its lock.
-        prefix (str): the mount prefix the index keys are built against.
-        root (ListResult): the root listing, read through the gate.
-
-    Returns:
-        IndexSnapshot | None: the refill's rows, or None when none was
-        needed or possible.
-    """
-    if root.status not in (LookupStatus.NOT_FOUND, LookupStatus.EXPIRED):
-        return None
-    # A truncated tree is not the whole listing, so the invariant this
-    # rests on does not hold and readdir's per-directory fallback owns
-    # the miss instead.
-    if accessor.truncated:
-        return None
-    return await refill_snapshot(accessor, index, prefix)
-
-
-async def ensure_tree(
-    accessor: GitHubAccessor,
-    index: IndexCacheStore = NULL_INDEX,
-    prefix: str = "",
-) -> None:
+async def ensure_tree(accessor: GitHubAccessor) -> None:
     """Fetch the recursive tree if this mount has not got one yet.
 
     The mount is constructed without touching the network, so readers
-    that consult ``accessor.tree`` directly rather than through the
-    index -- find, du and grep's scope counter -- have to hydrate it
-    first. Readers that go through the index do not call this:
-    :func:`ensure_live_snapshot` already refetches for them.
-
-    Prefers that same refill when an index is wired, so a first `find`
-    seeds the index for the `ls` after it instead of fetching a tree
-    only this call can see. Falls back to a bare fetch when there is no
-    index, which is the only case the old build-time fetch was really
-    covering.
+    that consult ``accessor.tree`` directly rather than through a listing
+    (grep's scope counter and code search) hydrate it first. Every
+    listing reseats it, so it is as current as the last listing.
 
     Hydration is tracked by ``tree_loaded``, never by whether the tree
-    holds anything: an empty repository hydrates to ``{}``, and reading
-    that as "not hydrated" refetched it on every call, twice per call
-    once an index was wired (the refill seeds an empty root, then the
-    fallback runs because the tree still looks empty).
+    holds anything: an empty repository hydrates to ``{}``.
 
     Args:
         accessor (GitHubAccessor): the mount's accessor.
-        index (IndexCacheStore): the mount's index, when it has one.
-        prefix (str): the mount prefix the index keys are built against.
     """
     if accessor.tree_loaded:
-        # Tree walkers bypass listings, so they need their own expiry probe.
-        if index is not NULL_INDEX:
-            async with index_lock(index, prefix.rstrip("/") or "/"):
-                root = await index.list_dir(prefix.rstrip("/") or "/")
-                refilled = await _refill_unless_live(
-                    accessor, index, prefix, root
-                )
-                if refilled is None:
-                    await _match_tree_to_index(accessor, index, prefix, root)
         return
     async with accessor.tree_lock:
-        if accessor.tree_loaded:
-            return
-        if index is not NULL_INDEX:
-            async with index_lock(index, prefix.rstrip("/") or "/"):
-                await ensure_live_snapshot(accessor, index, prefix)
-                if accessor.tree_loaded:
-                    return
-        ref = await ensure_ref(accessor)
-        tree, truncated, head = await fetch_tree(
-            accessor.config, accessor.owner, accessor.repo, ref, accessor.pool
-        )
-        reseat_tree(accessor, tree, truncated, head)
-
-
-async def _match_tree_to_index(
-    accessor: GitHubAccessor,
-    index: IndexCacheStore,
-    prefix: str,
-    root: ListResult,
-) -> None:
-    """Refill when the in-memory tree is older than the live index.
-
-    Another mount sharing the index can refill it, which moves its root
-    listing to a newer head while this accessor still holds the tree it
-    fetched earlier. Listings answer from the index and never notice; a
-    walker of ``accessor.tree`` would read the old tree. The root listing
-    is the one the liveness probe just read through the gate, under the
-    same lock, so its version is the one the gate approved and the index
-    is not read again. A truncated tree keeps readdir's per-directory
-    fallback instead.
-
-    Args:
-        accessor (GitHubAccessor): the mount's accessor.
-        index (IndexCacheStore): the mount's index, held under its lock.
-        prefix (str): the mount prefix the index keys are built against.
-        root (ListResult): the live root listing the probe read.
-    """
-    if accessor.truncated:
-        return
-    if root.entries is None or root.version == accessor.tree_version:
-        return
-    await refill_snapshot(accessor, index, prefix)
+        if not accessor.tree_loaded:
+            await refresh_tree(accessor)
