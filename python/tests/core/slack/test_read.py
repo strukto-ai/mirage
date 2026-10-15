@@ -21,7 +21,13 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.read import follow, read, read_range, read_stream
+from mirage.core.slack.read import (
+    follow,
+    read,
+    read_many,
+    read_range,
+    read_stream,
+)
 from mirage.types import PathSpec
 
 pytestmark = pytest.mark.asyncio
@@ -255,3 +261,45 @@ async def test_only_a_chat_day_is_followed(accessor, index):
         await follow(accessor, spec("/users/alice__U001.json"), 1, 1.0, index)
         is None
     )
+
+
+async def test_a_batch_walks_each_run_of_days_once(accessor, index):
+    await _populate_index(index)
+    days = ["2023-11-14", "2023-11-15", "2023-11-17"]
+    chats = [f"/{CHANNEL}/{day}/chat.jsonl" for day in days]
+    for day in days[1:]:
+        await index.set_dir(
+            f"/{CHANNEL}/{day}",
+            [
+                (
+                    "chat.jsonl",
+                    IndexEntry(
+                        id=f"C001:{day}:chat",
+                        name="chat.jsonl",
+                        resource_type="slack/chat_jsonl",
+                        vfs_name="chat.jsonl",
+                    ),
+                )
+            ],
+        )
+    on_14 = {"text": "a", "ts": "1699999999.000100"}
+    on_15 = {"text": "b", "ts": "1700050000.000000"}
+    with patch(
+        "mirage.core.slack.read.fetch_messages_for_day",
+        new_callable=AsyncMock,
+        side_effect=[[on_14, on_15], []],
+    ) as fetch:
+        answers = await read_many(
+            accessor,
+            [spec(c) for c in [*chats, "/users/alice__U001.json"]],
+            index,
+        )
+    assert answers == {
+        chats[0]: jsonl_bytes([on_14]),
+        chats[1]: jsonl_bytes([on_15]),
+        chats[2]: jsonl_bytes([]),
+    }
+    assert [
+        (call.args[2], call.kwargs["last_day"])
+        for call in fetch.call_args_list
+    ] == [("2023-11-14", "2023-11-15"), ("2023-11-17", "2023-11-17")]

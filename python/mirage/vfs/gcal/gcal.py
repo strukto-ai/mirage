@@ -19,6 +19,7 @@ from mirage.accessor.gcal import GCalAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gcal.day import bucket_name, bucket_start
 from mirage.core.gcal.read import read as _read
+from mirage.core.gcal.read import read_many as _read_many
 from mirage.core.gcal.readdir import readdir as _readdir
 from mirage.core.gcal.search import files_containing as _files_containing
 from mirage.core.gcal.stat import stat as _stat
@@ -90,6 +91,14 @@ class GCalVFS(BaseVFS):
     ) -> bytes:
         data = await _read(self.accessor, path, index)
         return slice_window(data, offset, size)
+
+    async def read_many(
+        self,
+        paths: list[PathSpec],
+        limit: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> dict[str, bytes]:
+        return await _read_many(self.accessor, paths, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

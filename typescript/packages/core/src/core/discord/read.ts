@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../io/cooperative.ts'
-import { dayChannelId, followedDay, guardDay } from '../time_range.ts'
+import { dayChannelId, followedDay, guardDay, readDays } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
@@ -22,7 +22,7 @@ import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { downloadFile, downloadFileStream } from './files.ts'
-import { listMessagesForDay, getHistoryJsonl, type DiscordMessage } from './history.ts'
+import { listMessagesForDay, getHistoryJsonl, snowflakeAt, type DiscordMessage } from './history.ts'
 import { listMembers } from './members.ts'
 import { readdir } from './readdir.ts'
 import { compactJsonBytes } from '../render/json.ts'
@@ -146,3 +146,39 @@ async function followChat(
 }
 
 export const follow = perKind(detectScope, { messages: followChat })
+
+/** A run of a channel's days, fetched as one. Mirrors Python's `_fetch_run`. */
+function fetchRun(
+  accessor: DiscordAccessor,
+  channelId: string,
+  first: string,
+  last: string,
+): Promise<DiscordMessage[]> {
+  return listMessagesForDay(accessor, channelId, first, 100, undefined, last)
+}
+
+/** Whether a message was posted in a day's bounds. Mirrors Python's `_posted_within`. */
+function postedWithin(message: DiscordMessage, start: number, end: number): boolean {
+  return BigInt(message.id) >= snowflakeAt(start) && BigInt(message.id) < snowflakeAt(end)
+}
+
+/**
+ * Several chat.jsonl files, one history walk per run of a channel's
+ * consecutive days (`readDays`). Mirrors Python's `read_many`.
+ */
+export function readMany(
+  accessor: DiscordAccessor,
+  paths: readonly PathSpec[],
+  index?: IndexCacheStore,
+): Promise<Map<string, Uint8Array>> {
+  return readDays(
+    readdir,
+    accessor,
+    accessor.timeRange,
+    paths,
+    index,
+    detectScope,
+    (channelId, first, last) => fetchRun(accessor, channelId, first, last),
+    postedWithin,
+  )
+}

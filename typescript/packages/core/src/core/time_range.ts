@@ -8,6 +8,7 @@ import type { StatHook } from './hierarchy/stat.ts'
 import { enoent } from '../errors/fs.ts'
 import { abortable, sleep } from '../utils/abort.ts'
 import { jsonlBytes } from './render/json.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
 
@@ -194,4 +195,88 @@ export function followedDay<M>(
       return this
     },
   }
+}
+
+/**
+ * Several chat days' chat.jsonl files, one fetch per run of a channel's
+ * consecutive days.
+ *
+ * Each file is proven as its own read proves it (a day in scope, a channel
+ * the listing holds); one that is not, or is no chat file, is left out for its
+ * own read to answer. Each day's lines are the run's messages posted within
+ * it, oldest first, as its own read lists them. `fetch(channelId, first,
+ * last)` answers a channel's messages from a run's first day through its
+ * last, oldest first; `within(message, start, end)` whether a message was
+ * posted in a day's bounds. Mirrors Python's `read_days`.
+ */
+export async function readDays<A extends Accessor, M>(
+  readdir: ReaddirFn<A>,
+  accessor: A,
+  scope: TimeRange,
+  paths: readonly PathSpec[],
+  index: IndexCacheStore | undefined,
+  detect: (path: PathSpec) => ScopeMatch,
+  fetch: (channelId: string, first: string, last: string) => Promise<M[]>,
+  within: (message: M, start: number, end: number) => boolean,
+): Promise<Map<string, Uint8Array>> {
+  const days = new Map<string, Map<string, string>>()
+  for (const path of paths) {
+    const match = detect(path)
+    if (match.kind !== 'messages') continue
+    const day = match.slots.day ?? ''
+    let channelId: string
+    try {
+      scope.requireDay(day, path.virtual)
+      channelId = await dayChannelId(readdir, accessor, path, index)
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'ENOENT') throw err
+      console.debug(`readDays leaves out ${path.virtual}: ${String(err)}`)
+      continue
+    }
+    const named = days.get(channelId) ?? new Map<string, string>()
+    named.set(day, path.virtual)
+    days.set(channelId, named)
+  }
+  const answers = new Map<string, Uint8Array>()
+  for (const [channelId, named] of days) {
+    let run: string[] = []
+    for (const day of [...named.keys()].sort(compareCodePoints)) {
+      const last = run[run.length - 1]
+      if (
+        last !== undefined &&
+        Date.parse(`${day}T00:00:00Z`) - Date.parse(`${last}T00:00:00Z`) !== 86_400_000
+      ) {
+        for (const [virtual, body] of await readRun(channelId, run, named, scope, fetch, within)) {
+          answers.set(virtual, body)
+        }
+        run = []
+      }
+      run.push(day)
+    }
+    for (const [virtual, body] of await readRun(channelId, run, named, scope, fetch, within)) {
+      answers.set(virtual, body)
+    }
+  }
+  return answers
+}
+
+/** One run of a channel's consecutive days, fetched once. Mirrors Python's `_read_run`. */
+async function readRun<M>(
+  channelId: string,
+  run: readonly string[],
+  named: ReadonlyMap<string, string>,
+  scope: TimeRange,
+  fetch: (channelId: string, first: string, last: string) => Promise<M[]>,
+  within: (message: M, start: number, end: number) => boolean,
+): Promise<Map<string, Uint8Array>> {
+  const answers = new Map<string, Uint8Array>()
+  const [first] = run
+  const last = run[run.length - 1]
+  if (first === undefined || last === undefined) return answers
+  const messages = await fetch(channelId, first, last)
+  for (const day of run) {
+    const [start, end] = scope.dayBounds(day)
+    answers.set(named.get(day) ?? '', jsonlBytes(messages.filter((m) => within(m, start, end))))
+  }
+  return answers
 }

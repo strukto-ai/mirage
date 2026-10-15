@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import {
   follow as discordFollow,
   read as discordRead,
+  readMany as discordReadMany,
   readRange as discordReadRange,
   readStream as discordReadStream,
 } from '../../core/discord/read.ts'
@@ -49,6 +50,14 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
       index,
       size === null ? { offset } : { offset, size },
     )
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    _limit: number,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, Uint8Array>> {
+    return discordReadMany(this.accessor, paths, index)
   }
 
   override readStream(

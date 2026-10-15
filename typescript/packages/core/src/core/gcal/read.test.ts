@@ -18,7 +18,7 @@ import { API, EVENTS, HK, makeAccessor, spec } from './_test_util.ts'
 
 vi.mock('./client.ts', async () => (await import('./_test_util.ts')).CLIENT)
 
-const { read } = await import('./read.ts')
+const { read, readMany } = await import('./read.ts')
 
 const WEEK = '/primary/2026-08-10--2026-08-16'
 const PHD = 'aaaa1__0900-1030_PhD_Defense.gcal.json'
@@ -91,4 +91,26 @@ describe('gcal read', () => {
   ])('is ENOENT on a %i-day mount for %s', async (size, path) => {
     await expect(read(makeAccessor({ bucket_days: size }), spec(path), index)).rejects.toThrow()
   })
+})
+
+// Twin of test_a_batch_lists_each_day_once.
+it('lists each day of a batch once', async () => {
+  const day = '/primary/2026-08-11'
+  const paths = [
+    `${day}/${PHD}`,
+    `${day}/bbbb2__1500-1600_Committee_Meeting.gcal.json`,
+    `${day}/zzzz9__0000-0100_Nope.gcal.json`,
+    '/primary/calendar.json',
+  ]
+  const answers = await readMany(
+    makeAccessor(),
+    paths.map((path) => spec(path)),
+  )
+  expect(new Map([...answers].map(([path, body]) => [path, parsed(body)]))).toEqual(
+    new Map([
+      [paths[0], EVENTS[0]],
+      [paths[1], EVENTS[1]],
+    ]),
+  )
+  expect(API.listed).toHaveLength(1)
 })

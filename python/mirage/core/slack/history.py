@@ -31,8 +31,9 @@ async def stream_messages_for_day(
     limit: int = 200,
     session: SessionArg = None,
     after: str | None = None,
+    last_day: str | None = None,
 ) -> AsyncIterator[list[dict[str, Any]]]:
-    """Page-streaming history for a channel-day.
+    """Page-streaming history for a channel-day, or a run of days.
 
     Args:
         config (SlackConfig): Slack credentials.
@@ -42,12 +43,15 @@ async def stream_messages_for_day(
         limit (int): max per page.
         session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this ``ts``.
+        last_day (str | None): the last day of a run read as one, the
+            day itself when None.
 
     Yields:
         list[dict]: messages in one Slack page (unsorted; the eager
         wrapper sorts at the end).
     """
-    oldest, latest = scope.day_bounds(date_str)
+    oldest, _ = scope.day_bounds(date_str)
+    _, latest = scope.day_bounds(last_day or date_str)
     if oldest >= latest:
         return
     async for page in cursor_pages(
@@ -78,6 +82,7 @@ async def fetch_messages_for_day(
     scope: TimeRange,
     session: SessionArg = None,
     after: str | None = None,
+    last_day: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all messages for a date as parsed dicts (eager).
 
@@ -88,13 +93,21 @@ async def fetch_messages_for_day(
         scope (TimeRange): the mount's time scope, clipping the day.
         session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this ``ts``.
+        last_day (str | None): the last day of a run read as one, the
+            day itself when None.
 
     Returns:
         list[dict]: messages sorted by ts ascending.
     """
     messages: list[dict[str, Any]] = []
     async for page in stream_messages_for_day(
-        config, channel_id, date_str, scope, session=session, after=after
+        config,
+        channel_id,
+        date_str,
+        scope,
+        session=session,
+        after=after,
+        last_day=last_day,
     ):
         messages.extend(page)
     messages.sort(key=lambda m: float(m.get("ts", "0")))

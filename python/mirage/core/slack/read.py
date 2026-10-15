@@ -27,7 +27,12 @@ from mirage.core.slack.history import fetch_messages_for_day, get_history_jsonl
 from mirage.core.slack.readdir import readdir
 from mirage.core.slack.scope import detect_scope
 from mirage.core.slack.users import get_user_profile, user_json_bytes
-from mirage.core.time_range import day_channel_id, followed_day, guard_day
+from mirage.core.time_range import (
+    day_channel_id,
+    followed_day,
+    guard_day,
+    read_days,
+)
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
 from mirage.types import PathSpec
@@ -188,3 +193,45 @@ async def _follow_chat(
 
 
 follow = per_kind(detect_scope, {"messages": _follow_chat})
+
+
+async def _fetch_run(
+    accessor: SlackAccessor, channel_id: str, first: str, last: str
+) -> list[dict[str, Any]]:
+    return await fetch_messages_for_day(
+        accessor.config,
+        channel_id,
+        first,
+        accessor.time_range,
+        session=accessor.pool,
+        last_day=last,
+    )
+
+
+def _posted_within(message: dict[str, Any], start: float, end: float) -> bool:
+    return start <= float(message["ts"]) < end
+
+
+async def read_many(
+    accessor: SlackAccessor,
+    paths: list[PathSpec],
+    index: IndexCacheStore = NULL_INDEX,
+) -> dict[str, bytes]:
+    """Several chat.jsonl files, one history walk per run of a channel's
+    consecutive days (``read_days``).
+
+    Args:
+        accessor (SlackAccessor): backend accessor.
+        paths (list[PathSpec]): the files.
+        index (IndexCacheStore): cached directory entries.
+    """
+    return await read_days(
+        readdir,
+        accessor,
+        accessor.time_range,
+        paths,
+        index,
+        detect_scope,
+        partial(_fetch_run, accessor),
+        _posted_within,
+    )

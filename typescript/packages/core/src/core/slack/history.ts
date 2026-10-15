@@ -28,11 +28,12 @@ export async function* streamMessagesForDay(
   accessor: SlackAccessor,
   channelId: string,
   dateStr: string,
-  options: { limit?: number; after?: string } = {},
+  options: { limit?: number; after?: string; lastDay?: string } = {},
 ): AsyncIterableIterator<SlackMessage[]> {
   const limit = options.limit ?? 200
   const after = options.after
-  const [oldest, latest] = accessor.timeRange.dayBounds(dateStr)
+  const [oldest] = accessor.timeRange.dayBounds(dateStr)
+  const [, latest] = accessor.timeRange.dayBounds(options.lastDay ?? dateStr)
   if (oldest >= latest) return
   for await (const page of cursorPages<SlackMessage>(
     accessor.transport,
@@ -55,20 +56,22 @@ export async function* streamMessagesForDay(
   }
 }
 
-/** Every message of a channel-day, or only those after `after`, oldest first. */
+/**
+ * Every message of a channel-day, or only those after `after`, oldest first;
+ * through `lastDay` for a run of days read as one.
+ */
 export async function fetchMessagesForDay(
   accessor: SlackAccessor,
   channelId: string,
   dateStr: string,
   after?: string,
+  lastDay?: string,
 ): Promise<SlackMessage[]> {
   const messages: SlackMessage[] = []
-  for await (const page of streamMessagesForDay(
-    accessor,
-    channelId,
-    dateStr,
-    after === undefined ? {} : { after },
-  )) {
+  for await (const page of streamMessagesForDay(accessor, channelId, dateStr, {
+    ...(after === undefined ? {} : { after }),
+    ...(lastDay === undefined ? {} : { lastDay }),
+  })) {
     messages.push(...page)
   }
   messages.sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts))

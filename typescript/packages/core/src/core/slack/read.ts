@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../io/cooperative.ts'
-import { dayChannelId, followedDay, guardDay } from '../time_range.ts'
+import { dayChannelId, followedDay, guardDay, readDays } from '../time_range.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
@@ -154,3 +154,39 @@ async function followChat(
 }
 
 export const follow = perKind(detectScope, { messages: followChat })
+
+/** A run of a channel's days, fetched as one. Mirrors Python's `_fetch_run`. */
+function fetchRun(
+  accessor: SlackAccessor,
+  channelId: string,
+  first: string,
+  last: string,
+): Promise<SlackMessage[]> {
+  return fetchMessagesForDay(accessor, channelId, first, undefined, last)
+}
+
+/** Whether a message was posted in a day's bounds. Mirrors Python's `_posted_within`. */
+function postedWithin(message: SlackMessage, start: number, end: number): boolean {
+  return Number(message.ts) >= start && Number(message.ts) < end
+}
+
+/**
+ * Several chat.jsonl files, one history walk per run of a channel's
+ * consecutive days (`readDays`). Mirrors Python's `read_many`.
+ */
+export function readMany(
+  accessor: SlackAccessor,
+  paths: readonly PathSpec[],
+  index?: IndexCacheStore,
+): Promise<Map<string, Uint8Array>> {
+  return readDays(
+    readdir,
+    accessor,
+    accessor.timeRange,
+    paths,
+    index,
+    detectScope,
+    (channelId, first, last) => fetchRun(accessor, channelId, first, last),
+    postedWithin,
+  )
+}

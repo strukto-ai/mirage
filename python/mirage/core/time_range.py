@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -14,11 +15,13 @@ from mirage.core.hierarchy.probe import (
     resolve_entry,
 )
 from mirage.core.hierarchy.readdir import Guard
-from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.hierarchy.scope import DetectFn, ScopeMatch
 from mirage.core.hierarchy.stat import StatHook
 from mirage.core.render.json import jsonl_bytes
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
+
+logger = logging.getLogger(__name__)
 
 TIMESTAMP = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})\Z"
@@ -233,3 +236,94 @@ async def followed_day(
         if closed:
             break
     await asyncio.Event().wait()
+
+
+async def read_days(
+    readdir: ReaddirFn[A],
+    accessor: A,
+    scope: TimeRange,
+    paths: list[PathSpec],
+    index: IndexCacheStore,
+    detect: DetectFn,
+    fetch: Callable[[str, str, str], Awaitable[list[dict[str, Any]]]],
+    within: Callable[[dict[str, Any], float, float], bool],
+) -> dict[str, bytes]:
+    """Several chat days' chat.jsonl files, one fetch per run of a
+    channel's consecutive days.
+
+    Each file is proven as its own read proves it (a day in scope, a
+    channel the listing holds); one that is not, or is no chat file, is
+    left out for its own read to answer. Each day's lines are the run's
+    messages posted within it, oldest first, as its own read lists them.
+
+    Args:
+        readdir (ReaddirFn): the backend's readdir.
+        accessor (Accessor): backend accessor.
+        scope (TimeRange): the mount's time scope, bounding each day.
+        paths (list[PathSpec]): the files.
+        index (IndexCacheStore): index cache.
+        detect (DetectFn): the backend's scope classifier.
+        fetch (Callable): a channel's messages from a run's first day
+            through its last, oldest first, as
+            ``fetch(channel_id, first, last)``.
+        within (Callable): whether a message was posted in a day's
+            bounds, as ``within(message, start, end)``.
+    """
+    days: dict[str, dict[str, str]] = {}
+    for path in paths:
+        match = detect(path)
+        if match.kind != "messages":
+            continue
+        try:
+            scope.require_day(match.slots["day"], path.virtual)
+            channel_id = await day_channel_id(readdir, accessor, path, index)
+        except FileNotFoundError as exc:
+            logger.debug("read_days leaves out %s: %s", path.virtual, exc)
+            continue
+        days.setdefault(channel_id, {})[match.slots["day"]] = path.virtual
+    answers: dict[str, bytes] = {}
+    for channel_id, named in days.items():
+        run: list[str] = []
+        for day in sorted(named):
+            if run and date.fromisoformat(day) - date.fromisoformat(
+                run[-1]
+            ) != timedelta(days=1):
+                answers.update(
+                    await _read_run(
+                        channel_id, run, named, scope, fetch, within
+                    )
+                )
+                run = []
+            run.append(day)
+        answers.update(
+            await _read_run(channel_id, run, named, scope, fetch, within)
+        )
+    return answers
+
+
+async def _read_run(
+    channel_id: str,
+    run: list[str],
+    named: dict[str, str],
+    scope: TimeRange,
+    fetch: Callable[[str, str, str], Awaitable[list[dict[str, Any]]]],
+    within: Callable[[dict[str, Any], float, float], bool],
+) -> dict[str, bytes]:
+    """One run of a channel's consecutive days, fetched once.
+
+    Args:
+        channel_id (str): the channel.
+        run (list[str]): its days, consecutive and ascending.
+        named (dict[str, str]): each day's file, by day.
+        scope (TimeRange): the mount's time scope, bounding each day.
+        fetch (Callable): as ``read_days`` takes it.
+        within (Callable): as ``read_days`` takes it.
+    """
+    messages = await fetch(channel_id, run[0], run[-1])
+    answers: dict[str, bytes] = {}
+    for day in run:
+        start, end = scope.day_bounds(day)
+        answers[named[day]] = jsonl_bytes(
+            [m for m in messages if within(m, start, end)]
+        )
+    return answers

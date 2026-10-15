@@ -13,11 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.core.discord.read import follow, read, read_range, read_stream
+from mirage.core.discord.history import snowflake_at
+from mirage.core.discord.read import (
+    follow,
+    read,
+    read_many,
+    read_range,
+    read_stream,
+)
 from mirage.core.render.json import jsonl_bytes
 from mirage.types import PathSpec
 from tests.core.discord.conftest import DAY, MESSAGES, SEALED_DAY
@@ -156,3 +164,30 @@ async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
 async def test_only_a_chat_day_is_followed(api, accessor, index):
     member = f"/{GUILD_DIR}/members/alice__U001.json"
     assert await follow(accessor, spec(member), 1, 1.0, index) is None
+
+
+async def test_a_batch_walks_a_run_of_days_once(api, accessor, index):
+    nxt = "2024-01-16"
+    on_day, later = (
+        {
+            "id": str(
+                snowflake_at(datetime(*at, tzinfo=timezone.utc).timestamp())
+            ),
+            "content": text,
+        }
+        for at, text in (((2024, 1, 15, 10), "a"), ((2024, 1, 16, 1), "b"))
+    )
+    chats = [CHAT, f"/{CHANNEL}/{nxt}/chat.jsonl"]
+    with patch(
+        "mirage.core.discord.read.list_messages_for_day",
+        new_callable=AsyncMock,
+        return_value=[on_day, later],
+    ) as walk:
+        answers = await read_many(accessor, [spec(c) for c in chats], index)
+    assert answers == {
+        chats[0]: jsonl_bytes([on_day]),
+        chats[1]: jsonl_bytes([later]),
+    }
+    assert [
+        (call.args[2], call.kwargs["last_day"]) for call in walk.call_args_list
+    ] == [(DAY, nxt)]

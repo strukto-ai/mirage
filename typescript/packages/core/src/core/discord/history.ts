@@ -34,8 +34,10 @@ async function* streamMessagesForDay(
   dateStr: string,
   pageSize = 100,
   after?: string,
+  lastDay?: string,
 ): AsyncIterableIterator<DiscordMessage[]> {
-  const [start, end] = accessor.timeRange.dayBounds(dateStr)
+  const [start] = accessor.timeRange.dayBounds(dateStr)
+  const [, end] = accessor.timeRange.dayBounds(lastDay ?? dateStr)
   if (start >= end) return
   const first = snowflakeAt(start)
   const beforeBig = snowflakeAt(end)
@@ -54,16 +56,27 @@ async function* streamMessagesForDay(
   }
 }
 
-/** Every message of a channel-day, or only those after `after`, oldest first. */
+/**
+ * Every message of a channel-day, or only those after `after`, oldest first;
+ * through `lastDay` for a run of days read as one.
+ */
 export async function listMessagesForDay(
   accessor: DiscordAccessor,
   channelId: string,
   dateStr: string,
   pageSize = 100,
   after?: string,
+  lastDay?: string,
 ): Promise<DiscordMessage[]> {
   const out: DiscordMessage[] = []
-  for await (const page of streamMessagesForDay(accessor, channelId, dateStr, pageSize, after)) {
+  for await (const page of streamMessagesForDay(
+    accessor,
+    channelId,
+    dateStr,
+    pageSize,
+    after,
+    lastDay,
+  )) {
     out.push(...page)
   }
   out.sort((a, b) => {

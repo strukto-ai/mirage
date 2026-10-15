@@ -19,6 +19,7 @@ from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.discord.read import follow as _follow
 from mirage.core.discord.read import read as _read
+from mirage.core.discord.read import read_many as _read_many
 from mirage.core.discord.read import read_range as _read_range
 from mirage.core.discord.read import read_stream as _read_stream
 from mirage.core.discord.readdir import readdir as _readdir
@@ -67,6 +68,14 @@ class DiscordVFS(BaseVFS):
         if not offset and size is None:
             return await _read(self.accessor, path, index)
         return await _read_range(self.accessor, path, index, offset, size)
+
+    async def read_many(
+        self,
+        paths: list[PathSpec],
+        limit: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> dict[str, bytes]:
+        return await _read_many(self.accessor, paths, index)
 
     def read_stream(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

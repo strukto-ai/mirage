@@ -19,7 +19,7 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
-import { follow, read, readStream } from './read.ts'
+import { follow, read, readMany, readStream } from './read.ts'
 
 interface Call {
   endpoint: string
@@ -346,4 +346,53 @@ describe('follow', () => {
       ),
     ).toBeNull()
   })
+})
+
+// Twin of test_a_batch_walks_each_run_of_days_once.
+it('walks each run of days of a batch once', async () => {
+  const idx = new RAMIndexCacheStore()
+  const channel = '/mnt/slack/channels/general__C1'
+  await idx.setDir('/mnt/slack/channels', [
+    [
+      'general__C1',
+      new IndexEntry({
+        id: 'C1',
+        name: 'general',
+        resourceType: 'slack/channel',
+        vfsName: 'general__C1',
+      }),
+    ],
+  ])
+  const days = ['2026-04-24', '2026-04-25', '2026-04-27']
+  for (const day of days) {
+    await idx.setDir(`${channel}/${day}`, [
+      [
+        'chat.jsonl',
+        new IndexEntry({
+          id: `C1:${day}:chat`,
+          name: 'chat.jsonl',
+          resourceType: 'slack/chat_jsonl',
+          vfsName: 'chat.jsonl',
+        }),
+      ],
+    ])
+  }
+  const on24 = { ts: '1776988900.000000', text: 'a' }
+  const on25 = { ts: '1777075300.000000', text: 'b' }
+  const t = new FakeTransport(() => ({ ok: true, messages: [on24, on25] }))
+  const chats = days.map((day) => `${channel}/${day}/chat.jsonl`)
+  const answers = await readMany(
+    new SlackAccessor(t),
+    [...chats, '/mnt/slack/users/alice__U1.json'].map((v) => spec(v, '/mnt/slack')),
+    idx,
+  )
+  const lines = (body: Uint8Array | undefined): unknown[] =>
+    decoder
+      .decode(body)
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line) as unknown)
+  expect(chats.map((chat) => lines(answers.get(chat)))).toEqual([[on24], [on25], []])
+  expect(answers.size).toBe(3)
+  expect(t.calls.filter((call) => call.endpoint === 'conversations.history')).toHaveLength(2)
 })

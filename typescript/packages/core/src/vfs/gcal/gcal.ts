@@ -27,7 +27,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gcalReaddir } from '../../core/gcal/readdir.ts'
 import { filesContaining as gcalFilesContaining } from '../../core/gcal/search.ts'
-import { read as gcalRead } from '../../core/gcal/read.ts'
+import { read as gcalRead, readMany as gcalReadMany } from '../../core/gcal/read.ts'
 import { stat as gcalStat } from '../../core/gcal/stat.ts'
 import { unlink as gcalUnlink } from '../../core/gcal/unlink.ts'
 
@@ -83,6 +83,10 @@ export class GCalVFS extends BaseVFS {
   ): Promise<Uint8Array> {
     const data = await gcalRead(this.accessor, path, index)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override readMany(paths: PathSpec[]): Promise<Map<string, Uint8Array>> {
+    return gcalReadMany(this.accessor, paths)
   }
 
   override filesContaining(

@@ -18,6 +18,7 @@ import { DU_MAX_ENTRIES } from '../../core/slack/constants.ts'
 import {
   follow as slackFollow,
   read as slackRead,
+  readMany as slackReadMany,
   readRange as slackReadRange,
   readStream as slackReadStream,
 } from '../../core/slack/read.ts'
@@ -53,6 +54,14 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   ): Promise<Uint8Array> {
     if (offset === 0 && size === null) return slackRead(this.accessor, path, index)
     return slackReadRange(this.accessor, path, index, size === null ? { offset } : { offset, size })
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    _limit: number,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, Uint8Array>> {
+    return slackReadMany(this.accessor, paths, index)
   }
 
   override readStream(

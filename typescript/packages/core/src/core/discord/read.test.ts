@@ -19,7 +19,8 @@ import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
-import { follow, read, readStream } from './read.ts'
+import { snowflakeAt } from './history.ts'
+import { follow, read, readMany, readStream } from './read.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -364,4 +365,54 @@ describe('follow', () => {
     const asked = t.calls.filter((c) => c.endpoint === '/channels/C1/messages')
     expect(asked.map((c) => c.params?.after)).toContain('1196400000000000000')
   })
+})
+
+// Twin of test_a_batch_walks_a_run_of_days_once.
+it('walks a run of days of a batch once', async () => {
+  const idx = new RAMIndexCacheStore()
+  const channels = '/mnt/discord/My Server__G1/channels'
+  await idx.setDir(channels, [
+    [
+      'general__C1',
+      new IndexEntry({
+        id: 'C1',
+        name: 'general',
+        resourceType: 'discord/channel',
+        vfsName: 'general__C1',
+      }),
+    ],
+  ])
+  const days = ['2024-01-15', '2024-01-16']
+  for (const day of days) {
+    await idx.setDir(`${channels}/general__C1/${day}`, [
+      [
+        'chat.jsonl',
+        new IndexEntry({
+          id: `C1:${day}:chat`,
+          name: 'chat.jsonl',
+          resourceType: 'discord/chat_jsonl',
+          vfsName: 'chat.jsonl',
+        }),
+      ],
+    ])
+  }
+  const [onDay, later] = [
+    [Date.UTC(2024, 0, 15, 10), 'a'],
+    [Date.UTC(2024, 0, 16, 1), 'b'],
+  ].map(([at, text]) => ({ id: snowflakeAt(Number(at) / 1000).toString(), content: text }))
+  const t = new FakeDiscordTransport(() => [onDay, later])
+  const chats = days.map((day) => `${channels}/general__C1/${day}/chat.jsonl`)
+  const answers = await readMany(
+    new DiscordAccessor(t),
+    chats.map((v) => spec(v, '/mnt/discord')),
+    idx,
+  )
+  const lines = (body: Uint8Array | undefined): unknown[] =>
+    decoder
+      .decode(body)
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line) as unknown)
+  expect(chats.map((chat) => lines(answers.get(chat)))).toEqual([[onDay], [later]])
+  expect(t.calls.filter((call) => call.endpoint === '/channels/C1/messages')).toHaveLength(1)
 })

@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from mirage.core.gcal.read import read
+from mirage.core.gcal.read import read, read_many
 from tests.fixtures.gcal_api import EVENTS, HK, make_accessor, spec
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("gcal_api")]
@@ -108,3 +108,21 @@ async def test_reading_a_directory_reports_absence(accessor, index):
 async def test_a_name_the_tree_does_not_hold_is_enoent(size, path, index):
     with pytest.raises(FileNotFoundError):
         await read(make_accessor(bucket_days=size), spec(path), index)
+
+
+async def test_a_batch_lists_each_day_once(gcal_api, index):
+    day = "/primary/2026-08-11"
+    paths = [
+        f"{day}/{PHD}",
+        f"{day}/bbbb2__1500-1600_Committee_Meeting.gcal.json",
+        f"{day}/zzzz9__0000-0100_Nope.gcal.json",
+        "/primary/calendar.json",
+    ]
+    answers = await read_many(
+        make_accessor(), [spec(path) for path in paths], index
+    )
+    assert {path: json.loads(body) for path, body in answers.items()} == {
+        paths[0]: EVENTS[0],
+        paths[1]: EVENTS[1],
+    }
+    assert len(gcal_api.listed) == 1

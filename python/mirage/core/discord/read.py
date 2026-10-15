@@ -23,6 +23,7 @@ from mirage.core.discord.files import download_file, download_file_stream
 from mirage.core.discord.history import (
     get_history_jsonl,
     list_messages_for_day,
+    snowflake_at,
 )
 from mirage.core.discord.members import list_members
 from mirage.core.discord.readdir import readdir
@@ -31,7 +32,12 @@ from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import compact_json_bytes
-from mirage.core.time_range import day_channel_id, followed_day, guard_day
+from mirage.core.time_range import (
+    day_channel_id,
+    followed_day,
+    guard_day,
+    read_days,
+)
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
 from mirage.types import PathSpec
@@ -195,3 +201,45 @@ async def _follow_chat(
 
 
 follow = per_kind(detect_scope, {"messages": _follow_chat})
+
+
+async def _fetch_run(
+    accessor: DiscordAccessor, channel_id: str, first: str, last: str
+) -> list[dict[str, Any]]:
+    return await list_messages_for_day(
+        accessor.config,
+        channel_id,
+        first,
+        accessor.time_range,
+        session=accessor.pool,
+        last_day=last,
+    )
+
+
+def _posted_within(message: dict[str, Any], start: float, end: float) -> bool:
+    return snowflake_at(start) <= int(message["id"]) < snowflake_at(end)
+
+
+async def read_many(
+    accessor: DiscordAccessor,
+    paths: list[PathSpec],
+    index: IndexCacheStore = NULL_INDEX,
+) -> dict[str, bytes]:
+    """Several chat.jsonl files, one history walk per run of a channel's
+    consecutive days (``read_days``).
+
+    Args:
+        accessor (DiscordAccessor): backend accessor.
+        paths (list[PathSpec]): the files.
+        index (IndexCacheStore): cached directory entries.
+    """
+    return await read_days(
+        readdir,
+        accessor,
+        accessor.time_range,
+        paths,
+        index,
+        detect_scope,
+        partial(_fetch_run, accessor),
+        _posted_within,
+    )

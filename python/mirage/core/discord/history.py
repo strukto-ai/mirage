@@ -42,8 +42,9 @@ async def stream_messages_for_day(
     page_size: int = 100,
     session: SessionArg = None,
     after: str | None = None,
+    last_day: str | None = None,
 ) -> AsyncIterator[list[dict[str, Any]]]:
-    """Stream message pages for a channel-day.
+    """Stream message pages for a channel-day, or a run of days.
 
     Walks ``/channels/<id>/messages?after=<snowflake>&limit=N``
     forward through the day, stopping when messages exceed the
@@ -57,11 +58,14 @@ async def stream_messages_for_day(
         page_size (int): per-page limit (Discord caps at 100).
         session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this id.
+        last_day (str | None): the last day of a run read as one, the
+            day itself when None.
 
     Yields:
         list[dict]: message dicts, filtered to within the date.
     """
-    start, end = scope.day_bounds(date_str)
+    start, _ = scope.day_bounds(date_str)
+    _, end = scope.day_bounds(last_day or date_str)
     if start >= end:
         return
     first = snowflake_at(start)
@@ -92,6 +96,7 @@ async def list_messages_for_day(
     page_size: int = 100,
     session: SessionArg = None,
     after: str | None = None,
+    last_day: str | None = None,
 ) -> list[dict[str, Any]]:
     """List all messages for a channel-day (eager).
 
@@ -103,6 +108,8 @@ async def list_messages_for_day(
         page_size (int): per-page limit.
         session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this id.
+        last_day (str | None): the last day of a run read as one, the
+            day itself when None.
 
     Returns:
         list[dict]: messages within the date, sorted oldest-first.
@@ -116,6 +123,7 @@ async def list_messages_for_day(
         page_size,
         session=session,
         after=after,
+        last_day=last_day,
     ):
         out.extend(page)
     out.sort(key=lambda m: int(m["id"]))
