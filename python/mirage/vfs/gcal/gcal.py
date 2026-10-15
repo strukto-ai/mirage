@@ -24,6 +24,7 @@ from mirage.core.gcal.readdir import readdir as _readdir
 from mirage.core.gcal.search import files_containing as _files_containing
 from mirage.core.gcal.stat import stat as _stat
 from mirage.core.gcal.unlink import unlink as _unlink
+from mirage.core.gcal.watch import build_delta_hook
 from mirage.core.google.client import TokenManager
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
@@ -35,6 +36,7 @@ from mirage.vfs.gcal.prompt import (
     PROMPT,
     WRITE_PROMPT,
 )
+from mirage.watch.base import DeltaHook
 
 EXAMPLE_DAY = date(2026, 8, 11)
 
@@ -99,6 +101,9 @@ class GCalVFS(BaseVFS):
         index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, bytes]:
         return await _read_many(self.accessor, paths, index)
+
+    def delta_hook(self) -> DeltaHook:
+        return build_delta_hook(self.accessor)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

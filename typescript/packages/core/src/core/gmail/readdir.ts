@@ -52,7 +52,7 @@ export function msgFilename(subject: string, msgId: string): string {
   return `${sanitize(subject, NAME_MAX_BYTES - fixed)}__${msgId}${MSG_SUFFIX}`
 }
 
-function dateFromInternal(internalDate: string | undefined): string {
+export function dateFromInternal(internalDate: string | undefined): string {
   if (internalDate === undefined) return '1970-01-01'
   const ts = Number.parseInt(internalDate, 10)
   if (!Number.isFinite(ts)) return '1970-01-01'

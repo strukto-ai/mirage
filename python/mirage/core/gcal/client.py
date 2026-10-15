@@ -35,6 +35,7 @@ __all__ = [
     "google_get",
     "list_calendars",
     "list_events",
+    "sync_events",
     "delete_event",
 ]
 
@@ -179,6 +180,54 @@ async def list_events(
             )
         ]
     return items
+
+
+async def sync_events(
+    token_manager: TokenManager,
+    calendar_id: str,
+    sync_token: str | None,
+    time_zone: str | None = None,
+) -> tuple[list[dict[str, JsonValue]], str | None]:
+    """A calendar's events changed since ``sync_token``, every event when
+    None, and the token the next sync starts from.
+
+    Instances of a recurring series come one by one (singleEvents), as a
+    listing names them, and one deleted since the token comes back with
+    status ``cancelled``. Calendar answers 410 for a token it no longer
+    honors, which raises as any failed call does.
+
+    Args:
+        token_manager (TokenManager): the mount's OAuth handle.
+        calendar_id (str): the calendar id, or "primary".
+        sync_token (str | None): where the last sync ended, None for a
+            full one.
+        time_zone (str | None): zone the response renders times in.
+    """
+    url = (
+        f"{calendar_base(token_manager)}/calendars/"
+        f"{quote(calendar_id, safe='')}/events"
+    )
+    params = {"singleEvents": "true", "maxResults": "2500"}
+    if time_zone:
+        params["timeZone"] = time_zone
+    if sync_token is not None:
+        params["syncToken"] = sync_token
+    items: list[dict[str, JsonValue]] = []
+    token: str | None = None
+    for _ in range(MAX_PAGES):
+        page = dict(params)
+        if token:
+            page["pageToken"] = token
+        data = await google_get(token_manager, url, params=page)
+        rows = data.get("items")
+        if isinstance(rows, list):
+            items.extend(r for r in rows if isinstance(r, dict))
+        nxt = data.get("nextPageToken")
+        if not isinstance(nxt, str) or not nxt:
+            done = data.get("nextSyncToken")
+            return items, done if isinstance(done, str) else None
+        token = nxt
+    raise RuntimeError(PAGE_LIMIT)
 
 
 async def delete_event(

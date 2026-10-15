@@ -20,12 +20,14 @@ from mirage.core.gmail.read import read as _read
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.core.gmail.search import files_containing as _files_containing
 from mirage.core.gmail.stat import stat as _stat
+from mirage.core.gmail.watch import build_delta_hook
 from mirage.core.google.client import TokenManager
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gmail.config import GmailConfig
 from mirage.vfs.gmail.prompt import PROMPT, WRITE_PROMPT
+from mirage.watch.base import DeltaHook
 
 
 class GmailVFS(BaseVFS):
@@ -65,6 +67,9 @@ class GmailVFS(BaseVFS):
     ) -> bytes:
         data = await _read(self.accessor, path, index)
         return slice_window(data, offset, size)
+
+    def delta_hook(self) -> DeltaHook:
+        return build_delta_hook(self.accessor)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

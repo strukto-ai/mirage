@@ -25,6 +25,8 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gmailReaddir } from '../../core/gmail/readdir.ts'
+import { buildDeltaHook } from '../../core/gmail/watch.ts'
+import type { DeltaHook } from '../../watch/base.ts'
 import { filesContaining as gmailFilesContaining } from '../../core/gmail/search.ts'
 import { read as gmailRead } from '../../core/gmail/read.ts'
 import { stat as gmailStat } from '../../core/gmail/stat.ts'
@@ -68,6 +70,10 @@ export class GmailVFS extends BaseVFS {
   ): Promise<Uint8Array> {
     const data = await gmailRead(this.accessor, path, index)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override deltaHook(): DeltaHook {
+    return buildDeltaHook(this.accessor)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

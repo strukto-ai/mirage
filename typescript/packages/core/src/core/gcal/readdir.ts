@@ -52,7 +52,7 @@ const CALENDAR_DIR = 'gcal/calendar_dir'
 export const CALENDAR_JSON = 'gcal/calendar_json'
 const BUCKET_DIR = 'gcal/bucket_dir'
 export const EVENT = 'gcal/event'
-const FREE_BUSY_ROLE = 'freeBusyReader'
+export const FREE_BUSY_ROLE = 'freeBusyReader'
 // The text Calendar's search reads that the listing does not keep.
 const SEARCHED_FIELDS: readonly string[] = ['summary', 'description', 'location']
 

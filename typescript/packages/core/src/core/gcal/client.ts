@@ -120,6 +120,39 @@ export async function listEvents(
     : items
 }
 
+/**
+ * A calendar's events changed since `syncToken`, every event when null, and
+ * the token the next sync starts from. Instances of a recurring series come one
+ * by one (singleEvents), as a listing names them, and one deleted since the
+ * token comes back with status `cancelled`. Calendar answers 410 for a token it
+ * no longer honors, which rejects as any failed call does. Mirrors Python's
+ * `sync_events`.
+ */
+export async function syncEvents(
+  tokenManager: TokenManager,
+  calendarId: string,
+  syncToken: string | null,
+  timeZone?: string,
+): Promise<[Record<string, JsonValue>[], string | null]> {
+  const url = `${calendarBase(tokenManager)}/calendars/${encodeURIComponent(calendarId)}/events`
+  const base: Record<string, string> = { singleEvents: 'true', maxResults: '2500' }
+  if (timeZone !== undefined && timeZone !== '') base.timeZone = timeZone
+  if (syncToken !== null) base.syncToken = syncToken
+  const items: Record<string, JsonValue>[] = []
+  let token: string | null = null
+  for (let i = 0; i < MAX_PAGES; i += 1) {
+    const page = token !== null ? { ...base, pageToken: token } : base
+    const data = await googleGet(tokenManager, url, page)
+    items.push(...rows(data))
+    token = nextToken(data)
+    if (token === null) {
+      const done = (data as Record<string, unknown>).nextSyncToken
+      return [items, typeof done === 'string' ? done : null]
+    }
+  }
+  throw new Error(PAGE_LIMIT)
+}
+
 /** Delete one event. */
 export async function deleteEvent(
   tokenManager: TokenManager,
