@@ -288,8 +288,10 @@ def tree_copy(root: str, source: str, target: str) -> tuple[int, bytes, bytes]:
         return (
             1,
             b"",
-            f"cp: cannot create directory '{target}': "
-            "No such file or directory\n".encode(),
+            (
+                f"cp: cannot create directory '{target}': "
+                "No such file or directory\n"
+            ).encode(),
         )
     errors: list[str] = []
 

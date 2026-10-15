@@ -182,6 +182,7 @@ export class FakeDrive {
     const item = this.items.get(fileId)
     if (item === undefined) throw new Error(`no item ${fileId}`)
     if (opts.body?.name !== undefined) item.name = opts.body.name as string
+    item.modifiedTime = (opts.body?.modifiedTime as string | undefined) ?? '2026-10-01T00:00:00Z'
     if (opts.addParents !== undefined) item.parents.push(opts.addParents)
     if (opts.removeParents !== undefined) {
       item.parents = item.parents.filter((p) => p !== opts.removeParents)

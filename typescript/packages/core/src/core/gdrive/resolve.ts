@@ -29,6 +29,7 @@ export interface DriveNode {
   name: string
   mimeType: string
   driveId: string | null
+  modified?: string
 }
 
 const ROOT_DRIVE_IDS = new WeakMap<GDriveAccessor, string | null>()
@@ -113,6 +114,7 @@ export function nodeFromItem(item: DriveFile, driveId: string | null): DriveNode
     name: item.name,
     mimeType: item.mimeType ?? '',
     driveId: item.driveId ?? driveId,
+    modified: item.modifiedTime ?? '',
   }
 }
 

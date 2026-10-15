@@ -9,12 +9,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+const LOCKED_MEMBER =
+  '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>' +
+  '<d:href>/remote.php/dav/files/user/c/a.txt</d:href>' +
+  '<d:status>HTTP/1.1 423 Locked</d:status></d:response></d:multistatus>'
+
 describe('nextcloud dirCopy', () => {
-  it.each<[number, string | null]>([
-    [201, null],
-    [404, 'ENOENT'],
-  ])('is one copy of the whole tree (%d)', async (status, code) => {
-    const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status })))
+  it.each<[number, string | null, string | null]>([
+    [201, null, null],
+    [404, null, 'ENOENT'],
+    [207, LOCKED_MEMBER, 'EACCES'],
+  ])('is one copy of the whole tree (%d)', async (status, body, code) => {
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(body, { status })))
     vi.stubGlobal('fetch', fetchMock)
     const copying = dirCopy(
       new NextcloudAccessor({ url: `${ROOT}/`, username: 'alice', password: 'secret' }),

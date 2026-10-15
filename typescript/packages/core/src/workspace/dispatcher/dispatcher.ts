@@ -2643,6 +2643,9 @@ export class Dispatcher {
     if (applied.length > 0) {
       await this.namespace.dropAttrs(p.virtual, applied)
       await this.invalidateAfterWriteByPath(p.virtual, null, false)
+    } else {
+      // A backend that applied nothing may not have looked for the path.
+      await this.xattrTarget(mount, p)
     }
     if (Object.keys(residual).length > 0) await this.writeOverlay(p.virtual, residual)
     return residual

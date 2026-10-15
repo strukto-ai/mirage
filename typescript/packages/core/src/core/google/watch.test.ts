@@ -35,15 +35,18 @@ const ROOT = new PathSpec({
   vfsPath: mountKey('/gdocs', '/gdocs'),
 })
 
-function listing(modified: string): Awaited<ReturnType<typeof drive.listAllFiles>> {
+function listing(
+  modified: string,
+  complete = true,
+): Awaited<ReturnType<typeof drive.listAllFiles>> {
   return {
     files: [{ id: 'doc1', name: 'Plan', modifiedTime: modified, owners: [{ me: true }] }],
-    complete: true,
+    complete,
   }
 }
 
 describe('google app delta hook', () => {
-  it('reads an edit as an update after the baseline', async () => {
+  it('reads an edit as an update and refuses an unfinished listing', async () => {
     const hook = appDeltaHook(
       new GDocsAccessor({
         tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
@@ -56,8 +59,10 @@ describe('google app delta hook', () => {
       .mockResolvedValueOnce(listing('2026-10-01T09:00:00.000Z'))
       .mockResolvedValueOnce(listing('2026-10-01T10:00:00.000Z'))
       .mockResolvedValueOnce(listing('2026-10-01T10:00:00.000Z'))
+      .mockResolvedValueOnce(listing('2026-10-01T11:00:00.000Z', false))
     const baseline = await hook.pull(ROOT, null)
     const changed = await hook.pull(ROOT, baseline.checkpoint)
+    await expect(hook.pull(ROOT, changed.checkpoint)).rejects.toMatchObject({ code: 'EIO' })
     expect(baseline.changes).toEqual([])
     expect(changed.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
       ['update', '/gdocs/owned/2026-10-01_Plan__doc1.gdoc.json'],

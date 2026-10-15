@@ -46,6 +46,7 @@ describe('gdrive rename', () => {
     await rename(accessor, spec('/old.txt'), spec('/new.txt'))
     expect(fake.items.get(id)?.name).toBe('new.txt')
     expect(fake.items.get(id)?.parents).toEqual(['root'])
+    expect(fake.items.get(id)?.modifiedTime).toBe('2026-01-01T00:00:00Z')
   })
 
   it('moves between folders', async () => {

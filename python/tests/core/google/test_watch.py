@@ -31,7 +31,9 @@ ROOT = PathSpec(
 )
 
 
-def listing(modified: str) -> tuple[list[dict[str, Any]], bool]:
+def listing(
+    modified: str, complete: bool = True
+) -> tuple[list[dict[str, Any]], bool]:
     return (
         [
             {
@@ -41,12 +43,12 @@ def listing(modified: str) -> tuple[list[dict[str, Any]], bool]:
                 "owners": [{"me": True}],
             }
         ],
-        True,
+        complete,
     )
 
 
 @pytest.mark.asyncio
-async def test_an_edit_is_an_update_after_the_baseline():
+async def test_an_edit_is_an_update_and_an_unfinished_listing_fails():
     hook = app_delta_hook(
         GDocsAccessor(config=None, token_manager=None), readdir, stat
     )
@@ -58,10 +60,13 @@ async def test_an_edit_is_an_update_after_the_baseline():
             listing("2026-10-01T09:00:00.000Z"),
             listing("2026-10-01T10:00:00.000Z"),
             listing("2026-10-01T10:00:00.000Z"),
+            listing("2026-10-01T11:00:00.000Z", complete=False),
         ],
     ):
         baseline = await hook.pull(ROOT, None)
         changed = await hook.pull(ROOT, baseline.checkpoint)
+        with pytest.raises(OSError):
+            await hook.pull(ROOT, changed.checkpoint)
     assert baseline.changes == ()
     assert [(c.kind, c.path.virtual) for c in changed.changes] == [
         (

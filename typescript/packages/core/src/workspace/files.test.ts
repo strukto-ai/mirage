@@ -762,6 +762,25 @@ describe('Files.setattr', () => {
     await ws.vfs.setattr('/data/dir/link', { uid: 9 })
     expect((await ws.vfs.stat('/data/dir/f.txt')).uid).toBe(9)
   })
+
+  it('refuses a missing path when the backend keeps nothing', async () => {
+    const vfs = new RAMVFS()
+    vfs.setattr = (_path, { mode, uid, gid, atime, mtime }) =>
+      Promise.resolve(
+        Object.fromEntries(
+          Object.entries({ mode, uid, gid, atime, mtime }).filter(
+            ([, value]) => value !== undefined,
+          ),
+        ) as Record<string, number | string>,
+      )
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/f.txt', 'hello')
+    expect(await ws.vfs.setattr('/data/f.txt', { uid: 7 })).toEqual({ uid: 7 })
+    expect((await ws.vfs.stat('/data/f.txt')).uid).toBe(7)
+    await expect(ws.vfs.setattr('/data/missing.txt', { uid: 7 })).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
 })
 
 // readlink(2) splits its two misses and callers read them differently:

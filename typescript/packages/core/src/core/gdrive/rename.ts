@@ -45,7 +45,7 @@ async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec
   const name = driveTargetName(basename, srcNode)
   const move = dstParentId !== srcParentId
   await patchFile(tm, srcNode.id, {
-    body: { name },
+    body: srcNode.modified ? { name, modifiedTime: srcNode.modified } : { name },
     ...(move ? { addParents: dstParentId, removeParents: srcParentId } : {}),
   })
   // A folder carries a subtree under both names. dst also loses one when

@@ -601,6 +601,32 @@ describe('per-entry policy still materializes directories', () => {
     },
   )
 
+  it('names a refused dirCopy and goes on', async () => {
+    // A tree the backend copied in part is not copied again entry by entry:
+    // its refusal is the operand's, and later sources still go.
+    const files = new Map([
+      ['/t/f.txt', new Uint8Array([70])],
+      ['/u/g.txt', new Uint8Array([71])],
+    ])
+    const dirs = new Set(['/t', '/u', '/c'])
+    const { stat, copy, find, mkdir } = typedBackend(files, dirs)
+    const dirCopy = (_src: PathSpec, dst: PathSpec): Promise<void> => {
+      if (key(dst) === '/c/t') return Promise.reject(eacces(dst))
+      dirs.add(key(dst))
+      return Promise.resolve()
+    }
+    const [, io] = await cpGeneric(
+      ['/t', '/u', '/c'].map(spec),
+      stat,
+      { copy, find, dirCopy, mkdir },
+      cpFlags({ recursive: true }),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot create directory '/c/t': Permission denied\n")
+    expect(dirs.has('/c/u')).toBe(true)
+    expect(files.has('/c/t/f.txt')).toBe(false)
+  })
+
   it('names a refused entry copy and goes on', async () => {
     const files = new Map([
       ['/t/a.txt', new Uint8Array([65])],

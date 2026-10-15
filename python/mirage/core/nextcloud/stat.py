@@ -106,12 +106,13 @@ async def stat(
         md = await op.stat(stripped)
     except NotFound as exc:
         raise enoent(path) from exc
+    modified = md.last_modified.isoformat() if md.last_modified else None
     if md.mode == EntryMode.Dir:
         return FileStat(
             name=stripped.rsplit("/", 1)[-1] or "/",
             type=FileType.DIRECTORY,
+            modified=modified,
         )
-    modified = md.last_modified.isoformat() if md.last_modified else None
     return FileStat(
         name=stripped.rsplit("/", 1)[-1],
         size=md.content_length,

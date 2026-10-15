@@ -54,13 +54,29 @@ async def test_copy_duplicates_file(make_acc):
     assert acc._fake.files["src.txt"] == b"payload"
 
 
+LOCKED_MEMBER = (
+    b'<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>'
+    b"<d:href>/remote.php/dav/files/user/dst/a.txt</d:href>"
+    b"<d:status>HTTP/1.1 423 Locked</d:status></d:response></d:multistatus>"
+)
+
+
 @pytest.mark.parametrize(
-    ("status", "error"), [(201, None), (404, FileNotFoundError)]
+    ("status", "body", "error"),
+    [
+        (201, b"", None),
+        (404, b"", FileNotFoundError),
+        (207, LOCKED_MEMBER, PermissionError),
+    ],
 )
 @pytest.mark.asyncio
-async def test_dir_copy_is_one_copy_of_the_whole_tree(make_acc, status, error):
+async def test_dir_copy_is_one_copy_of_the_whole_tree(
+    make_acc, status, body, error
+):
     root = "https://cloud.example.com/remote.php/dav/files/user"
-    answer = httpx.Response(status, request=httpx.Request("COPY", root))
+    answer = httpx.Response(
+        status, content=body, request=httpx.Request("COPY", root)
+    )
     with patch(
         "mirage.core.nextcloud.copy.dav_request",
         new_callable=AsyncMock,

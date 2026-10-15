@@ -2068,6 +2068,17 @@ async def cp_generic(
                     await strategy.dir_copy(src, target)
                 except OperationNotSupportedError:
                     copied = False
+                except OSError as exc:
+                    reason = fs_strerror(exc)
+                    if reason is None:
+                        raise
+                    errors.append(
+                        f"cp: cannot open directory '{src.raw_path}': {reason}"
+                        if getattr(exc, "filename", None) == src.virtual
+                        else "cp: cannot create directory "
+                        f"'{target.raw_path}': {reason}"
+                    )
+                    continue
                 if copied:
                     lines.extend(tree)
                     if copies is not None:

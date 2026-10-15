@@ -10,27 +10,29 @@ ROOT = "https://cloud.example.com/remote.php/dav/files/user/"
 
 
 @pytest.mark.parametrize(
-    ("available", "expected"),
+    ("available", "status", "expected"),
     [
         (
             "700",
+            "200 OK",
             CapacityResult(
                 state=CapacityState.QUOTA, total=1000, used=300, available=700
             ),
         ),
-        ("-3", CapacityResult(state=CapacityState.ELASTIC)),
+        ("-3", "200 OK", CapacityResult(state=CapacityState.ELASTIC)),
+        ("", "404 Not Found", CapacityResult(state=CapacityState.UNKNOWN)),
     ],
 )
 @pytest.mark.asyncio
 async def test_the_quota_properties_are_the_capacity(
-    make_acc, available, expected
+    make_acc, available, status, expected
 ):
     body = (
         '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>'
         "<d:href>/remote.php/dav/files/user/</d:href><d:propstat><d:prop>"
         f"<d:quota-available-bytes>{available}</d:quota-available-bytes>"
         "<d:quota-used-bytes>300</d:quota-used-bytes>"
-        "</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>"
+        f"</d:prop><d:status>HTTP/1.1 {status}</d:status></d:propstat>"
         "</d:response></d:multistatus>"
     )
     answer = httpx.Response(

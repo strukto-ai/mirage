@@ -2673,10 +2673,12 @@ class Dispatcher:
         the residual; residual fields go to the overlay and natively
         applied ones are dropped from it, so a stale overlay never
         shadows a fresh backend value, and the cached stat and listing
-        that still carry the old value go too. A mount without the op, and a
-        link path (which has no backend inode), overlay everything. The
-        overlay half is the dispatcher's own write, so it runs inside the same
-        gates as the native half.
+        that still carry the old value go too. A backend that applied
+        nothing may not have looked for the path, so it is settled
+        before the overlay takes the fields. A mount without the op, and
+        a link path (which has no backend inode), overlay everything. The
+        overlay half is the dispatcher's own write, so it runs inside the
+        same gates as the native half.
 
         Args:
             mount (MountEntry): the mount owning the path.
@@ -2701,6 +2703,8 @@ class Dispatcher:
         if applied:
             await self._namespace.drop_attrs(path.virtual, applied)
             await self.invalidate_after_write(mount, path, times=False)
+        else:
+            await self._xattr_target(mount, path, vis)
         if residual:
             await self._write_overlay(path.virtual, residual)
         return dict(residual)

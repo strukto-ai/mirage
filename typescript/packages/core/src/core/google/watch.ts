@@ -14,9 +14,11 @@
 
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { fsError } from '../../errors/fs.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { ListingDeltaHook } from '../../watch/delta.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { ReaddirWalk } from '../../watch/walk.ts'
 import type { ReaddirFn } from '../hierarchy/probe.ts'
 
@@ -25,7 +27,10 @@ import type { ReaddirFn } from '../hierarchy/probe.ts'
  * each corpus once, one Drive query narrowed to the app's MIME type, and
  * fingerprints a file by the modified time its stat reports. An edit on
  * another day renames the file, since the date leads the name, and reads as
- * one file gone and another made. Mirrors Python's `app_delta_hook`.
+ * one file gone and another made. A corpus Drive could not finish listing is
+ * cached as entries but not as the directory, and fails the pull, so the files
+ * it left out never read as deleted and the checkpoint stays where it was.
+ * Mirrors Python's `app_delta_hook`.
  */
 export function appDeltaHook<A extends GoogleApiAccessor>(
   accessor: A,
@@ -33,7 +38,15 @@ export function appDeltaHook<A extends GoogleApiAccessor>(
   stat: (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<FileStat>,
 ): DeltaHook {
   const walk = new ReaddirWalk(
-    (path: PathSpec, index: IndexCacheStore): Promise<string[]> => readdir(accessor, path, index),
+    async (path: PathSpec, index: IndexCacheStore): Promise<string[]> => {
+      const names = await readdir(accessor, path, index)
+      const corpus = rstripSlash(path.virtual)
+      const listing = await index.listDir(corpus)
+      if (stripSlash(path.vfsPath) !== '' && (listing.entries ?? null) === null) {
+        throw fsError(path, 'EIO')
+      }
+      return names
+    },
     (path: PathSpec, index: IndexCacheStore): Promise<FileStat> => stat(accessor, path, index),
   )
   return new ListingDeltaHook(walk.walk.bind(walk))

@@ -16,8 +16,11 @@ from functools import partial
 from typing import TypeVar
 
 from mirage.accessor.google_api import GoogleApiAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.probe import ReaddirFn
-from mirage.types import StatFn
+from mirage.errors.fs import fs_error
+from mirage.errors.types import FsCondition
+from mirage.types import PathSpec, StatFn
 from mirage.watch.base import DeltaHook
 from mirage.watch.delta import ListingDeltaHook
 from mirage.watch.walk import ReaddirWalk
@@ -35,13 +38,24 @@ def app_delta_hook(
     A pull lists each corpus once, one Drive query narrowed to the app's
     MIME type, and fingerprints a file by the modified time its stat
     reports. An edit on another day renames the file, since the date
-    leads the name, and reads as one file gone and another made.
+    leads the name, and reads as one file gone and another made. A
+    corpus Drive could not finish listing is cached as entries but not
+    as the directory, and fails the pull, so the files it left out never
+    read as deleted and the checkpoint stays where it was.
 
     Args:
         accessor (GoogleApiAccessor): backend accessor.
         readdir (ReaddirFn): the app's readdir.
         stat (StatFn): the app's stat.
     """
-    return ListingDeltaHook(
-        ReaddirWalk(partial(readdir, accessor), partial(stat, accessor))
-    )
+
+    async def listed(path: PathSpec, index: IndexCacheStore) -> list[str]:
+        names = await readdir(accessor, path, index)
+        corpus = path.virtual.rstrip("/")
+        if path.vfs_path.strip("/") and (
+            (await index.list_dir(corpus)).entries is None
+        ):
+            raise fs_error(path, FsCondition.EIO)
+        return names
+
+    return ListingDeltaHook(ReaddirWalk(listed, partial(stat, accessor)))

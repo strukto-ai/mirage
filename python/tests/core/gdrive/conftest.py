@@ -186,6 +186,7 @@ class FakeDrive:
         remove_parents: str | None = None,
     ) -> dict:
         item = self.items[file_id]
+        item["modifiedTime"] = "2026-10-01T00:00:00Z"
         if body:
             item.update(body)
         if add_parents:

@@ -44,6 +44,7 @@ async def test_rename_in_place(fake_drive, gdrive_accessor):
     await rename(gdrive_accessor, spec("/old.txt"), spec("/new.txt"))
     assert fake_drive.items[file_id]["name"] == "new.txt"
     assert fake_drive.items[file_id]["parents"] == ["root"]
+    assert fake_drive.items[file_id]["modifiedTime"] == "2026-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio

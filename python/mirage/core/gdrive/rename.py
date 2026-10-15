@@ -55,10 +55,13 @@ async def rename(
     name = drive_target_name(posixpath.basename(dst.vfs_path), src_node)
     add_parents = dst_parent_id if dst_parent_id != src_parent_id else None
     remove_parents = src_parent_id if add_parents else None
+    body = {"name": name}
+    if src_node.modified:
+        body["modifiedTime"] = src_node.modified
     await patch_file(
         token_manager,
         src_node.id,
-        {"name": name},
+        body,
         add_parents=add_parents,
         remove_parents=remove_parents,
     )

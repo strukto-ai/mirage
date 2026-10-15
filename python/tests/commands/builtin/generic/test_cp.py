@@ -492,6 +492,35 @@ async def test_a_declined_dir_copy_copies_entry_by_entry(refuse):
 
 
 @pytest.mark.asyncio
+async def test_a_refused_dir_copy_names_the_tree_and_goes_on():
+    # A tree the backend copied in part is not copied again entry by
+    # entry: its refusal is the operand's, and later sources still go.
+    files = {"/t/f.txt": b"F", "/u/g.txt": b"G"}
+    dirs = {"/t", "/u", "/c"}
+    stat, copy, find, mkdir = _typed_backend(files, dirs)
+
+    async def dir_copy(src, dst) -> None:
+        if _key(dst) == "/c/t":
+            raise eacces(dst)
+        dirs.add(_key(dst))
+
+    _, io = await cp_generic(
+        [_spec(p) for p in ["/t", "/u", "/c"]],
+        strategy=NativeCopy(
+            copy=copy, find=find, dir_copy=dir_copy, mkdir=mkdir
+        ),
+        stat=stat,
+        flags=CpFlags(recursive=True),
+    )
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"cp: cannot create directory '/c/t': Permission denied\n"
+    )
+    assert "/c/u" in dirs
+    assert "/c/t/f.txt" not in files
+
+
+@pytest.mark.asyncio
 async def test_a_refused_entry_copy_names_the_entry_and_goes_on():
     files = {"/t/a.txt": b"A", "/t/b.txt": b"B"}
     dirs = {"/t"}

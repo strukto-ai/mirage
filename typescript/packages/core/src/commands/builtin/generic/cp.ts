@@ -1593,7 +1593,16 @@ export async function cpGeneric(
         try {
           await strategy.dirCopy(src, target)
         } catch (err) {
-          if (classify(err) !== 'ENOTSUP') throw err
+          if (classify(err) !== 'ENOTSUP') {
+            const reason = fsStrerror(err)
+            if (reason === null) throw err
+            errors.push(
+              (err as { virtualPath?: unknown }).virtualPath === src.virtual
+                ? `cp: cannot open directory '${src.rawPath}': ${reason}`
+                : `cp: cannot create directory '${target.rawPath}': ${reason}`,
+            )
+            continue
+          }
           copied = false
         }
         if (copied) {
