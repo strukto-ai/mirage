@@ -24,7 +24,7 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import splice_window
 
 ReadFn = Callable[[PathSpec], Awaitable[bytes]]
-WriteFn = Callable[[PathSpec, bytes], Awaitable[None]]
+WriteFn = Callable[[PathSpec, bytes], Awaitable[FileStat | None]]
 StatFn = Callable[[PathSpec], Awaitable[FileStat]]
 
 

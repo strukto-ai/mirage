@@ -3,7 +3,6 @@ from collections.abc import AsyncIterator
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.constants import DEFAULT_CHUNK_SIZE
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.errors.fs import enoent
@@ -14,7 +13,6 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: NextcloudAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> AsyncIterator[bytes]:
     key = nextcloud_key(path)

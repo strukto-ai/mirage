@@ -1,4 +1,3 @@
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { recordStream } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
@@ -9,7 +8,6 @@ import { isNotFound, nextcloudKey } from './util.ts'
 export async function* readStream(
   accessor: NextcloudAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   chunkSize = DEFAULT_CHUNK_SIZE,
 ): AsyncIterable<Uint8Array> {
   const op = await accessor.operator()

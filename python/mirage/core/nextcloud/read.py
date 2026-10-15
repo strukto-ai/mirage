@@ -1,7 +1,6 @@
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
@@ -11,7 +10,6 @@ from mirage.types import PathSpec
 async def read(
     accessor: NextcloudAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:

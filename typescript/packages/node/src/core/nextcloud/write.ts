@@ -1,4 +1,3 @@
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -10,7 +9,6 @@ export async function write(
   accessor: NextcloudAccessor,
   path: PathSpec,
   data: Uint8Array,
-  _index?: IndexCacheStore,
 ): Promise<void> {
   const timer = startOp()
   try {

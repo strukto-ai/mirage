@@ -5,15 +5,10 @@ from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    ResourceType,
-)
 from mirage.core.nextcloud.constants import SCOPE_ERROR
+from mirage.core.nextcloud.stat import stat_of
 from mirage.errors.fs import enoent, enotdir, listing_error
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)
@@ -54,10 +49,14 @@ def _kind_probes(
 
 
 async def readdir(
-    accessor: NextcloudAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+    accessor: NextcloudAccessor, path: PathSpec
+) -> list[FileStat]:
+    """A folder's children, each as ``stat`` answers it.
+
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+        path (PathSpec): the folder.
+    """
     prefix = mount_prefix_of(path.virtual, path.vfs_path)
     target = path.directory if path.pattern else path.virtual
     if prefix and target.startswith(prefix):
@@ -65,9 +64,6 @@ async def readdir(
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             target = rest or "/"
     virtual_key = (prefix + target if prefix else target).rstrip("/") or "/"
-    listing = await index.list_dir(virtual_key)
-    if listing.entries is not None:
-        return listing.entries
     list_path = target.strip("/")
     list_path = list_path + "/" if list_path else "/"
     op = accessor.operator()
@@ -104,7 +100,7 @@ async def readdir(
         raise await listing_error(path, target, *_kind_probes(accessor))
     # PROPFIND normally carries getcontentlength for every file; when the
     # lister omits the metadata, one stat per affected file fills the gap
-    # so the index never caches an unknown size.
+    # so a listing never answers an unknown size.
     for base, size in sizes.items():
         if size is None:
             md = await op.stat(base.lstrip("/"))
@@ -124,25 +120,12 @@ async def readdir(
             len(names),
             SCOPE_ERROR,
         )
-    virtual_entries = sorted((prefix + e if prefix else e) for e in names)
-    index_entries: list[tuple[str, IndexEntry]] = []
-    for e in names:
-        name = e.rsplit("/", 1)[-1]
-        if e in dir_keys:
-            entry_obj = IndexEntry(
-                id=e,
-                name=name,
-                resource_type=ResourceType.FOLDER,
-                remote_time=times.get(e, ""),
-            )
-        else:
-            entry_obj = IndexEntry(
-                id=e,
-                name=name,
-                resource_type=ResourceType.FILE,
-                size=sizes.get(e),
-                remote_time=times.get(e, ""),
-            )
-        index_entries.append((name, entry_obj))
-    await index.set_dir(virtual_key, index_entries)
-    return virtual_entries
+    return [
+        stat_of(
+            e.rsplit("/", 1)[-1],
+            e in dir_keys,
+            None if e in dir_keys else sizes.get(e),
+            times.get(e, ""),
+        )
+        for e in names
+    ]

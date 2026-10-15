@@ -1,4 +1,3 @@
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -15,7 +14,6 @@ export interface NextcloudReadOptions {
 export async function read(
   accessor: NextcloudAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options: NextcloudReadOptions = {},
 ): Promise<Uint8Array> {
   const op = await accessor.operator()

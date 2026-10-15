@@ -1,4 +1,3 @@
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
@@ -23,13 +22,13 @@ async function codeOf(promise: Promise<unknown>): Promise<string> {
 }
 
 describe('nextcloud readdir', () => {
-  it('indexes listing sizes, 0-byte files included', async () => {
+  it('lists rows with their sizes, 0-byte files included', async () => {
     const accessor = accessorWith(new FakeNextcloudOperator({ 'a.txt': 'hello', 'empty.txt': '' }))
-    const index = new RAMIndexCacheStore()
-    const out = await readdir(accessor, PathSpec.fromStrPath('/'), index)
-    expect(out).toEqual(['/a.txt', '/empty.txt'])
-    expect((await index.get('/a.txt')).entry?.size).toBe(5)
-    expect((await index.get('/empty.txt')).entry?.size).toBe(0)
+    const rows = await readdir(accessor, PathSpec.fromStrPath('/'))
+    expect(rows.map((row) => [row.name, row.size])).toEqual([
+      ['a.txt', 5],
+      ['empty.txt', 0],
+    ])
   })
 
   it('backfills a lister-omitted size with one stat', async () => {
@@ -53,9 +52,8 @@ describe('nextcloud readdir', () => {
       )
     }
     const accessor = accessorWith(fake)
-    const index = new RAMIndexCacheStore()
-    await readdir(accessor, PathSpec.fromStrPath('/'), index)
-    expect((await index.get('/a.txt')).entry?.size).toBe(5)
+    const [row] = await readdir(accessor, PathSpec.fromStrPath('/'))
+    expect(row?.size).toBe(5)
   })
 
   it('reports ENOENT for a missing path', async () => {

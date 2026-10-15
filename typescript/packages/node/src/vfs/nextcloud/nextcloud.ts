@@ -13,7 +13,7 @@ import type {
   FileStat,
   SetAttrFields,
 } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir } from '../../core/nextcloud/readdir.ts'
 import { read } from '../../core/nextcloud/read.ts'
@@ -45,6 +45,7 @@ export class NextcloudVFS extends BaseVFS {
   // WebDAV PROPFIND carries getcontentlength for every file; readdir
   // backfills any lister-omitted size with one stat per affected file.
   override readonly sizesAlwaysKnown: boolean = true
+  override readonly listsStats: boolean = true
   override readonly supportsSnapshot = true
   override readonly prompt = PROMPT
   override readonly accessor: NextcloudAccessor
@@ -58,33 +59,30 @@ export class NextcloudVFS extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return readdir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return readdir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return read(this.accessor, path, index)
-    return read(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return read(this.accessor, path)
+    return read(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return stat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return stat(this.accessor, path)
   }
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
-    return tree(this.accessor, path, index)
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return tree(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return readStream(this.accessor, path, index)
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    return readStream(this.accessor, path)
   }
 
   override exists(path: PathSpec): Promise<boolean> {
@@ -95,11 +93,11 @@ export class NextcloudVFS extends BaseVFS {
     return write(this.accessor, path, data)
   }
 
-  override append(path: PathSpec, data: Uint8Array, index?: IndexCacheStore): Promise<void> {
+  override append(path: PathSpec, data: Uint8Array): Promise<void> {
     return appendByRewrite(
-      (p) => this.read(p, index),
+      (p) => this.read(p),
       (p, d) => this.write(p, d),
-      (p) => this.stat(p, index),
+      (p) => this.stat(p),
       path,
       data,
     )
@@ -117,7 +115,7 @@ export class NextcloudVFS extends BaseVFS {
     return unlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return rmdir(this.accessor, path)
   }
 

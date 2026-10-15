@@ -2,45 +2,40 @@ from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    ResourceType,
-)
 from mirage.core.nextcloud.search import search_files
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.filetype import content_type_for_path
-from mirage.utils.key_prefix import mount_prefix_of, raw_path_of
+from mirage.utils.key_prefix import raw_path_of
 
 
-def stat_of(entry: IndexEntry) -> FileStat:
-    """A listed row as ``stat`` renders it, the same from the index and
+def stat_of(
+    name: str, folder: bool, size: int | None, modified: str
+) -> FileStat:
+    """A listed row as ``stat`` renders it, the same from a listing and
     from a search.
 
     Args:
-        entry (IndexEntry): the row.
+        name (str): the entry's name.
+        folder (bool): whether it is a folder.
+        size (int | None): a file's byte length.
+        modified (str): its last-modified stamp, empty when unknown.
     """
-    if entry.resource_type == ResourceType.FOLDER:
+    if folder:
         return FileStat(
-            name=entry.name,
-            type=FileType.DIRECTORY,
-            modified=entry.remote_time or None,
+            name=name, type=FileType.DIRECTORY, modified=modified or None
         )
     return FileStat(
-        name=entry.name,
-        size=entry.size,
-        modified=entry.remote_time or None,
+        name=name,
+        size=size,
+        modified=modified or None,
         type=FileType.FILE,
-        content=content_type_for_path(entry.name),
+        content=content_type_for_path(name),
     )
 
 
 async def tree(
-    accessor: NextcloudAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: NextcloudAccessor, path: PathSpec
 ) -> dict[str, FileStat] | None:
     """Every file and folder under a directory, each as ``stat`` answers
     it after a listing, from Nextcloud's file search: a page of a
@@ -52,7 +47,6 @@ async def tree(
     Args:
         accessor (NextcloudAccessor): Nextcloud accessor.
         path (PathSpec): the directory.
-        index (IndexCacheStore): unused; the search answers directly.
     """
     found = await search_files(accessor, path)
     if found is None:
@@ -68,39 +62,22 @@ async def tree(
             return None
         name = entry.key.rsplit("/", 1)[-1]
         rows[entry.key[len(lead) :]] = stat_of(
-            IndexEntry(
-                id=entry.key,
-                name=name,
-                resource_type=(
-                    ResourceType.FOLDER if folder else ResourceType.FILE
-                ),
-                size=entry.size,
-                remote_time=entry.modified or "",
-            )
+            name, folder, entry.size, entry.modified or ""
         )
     return rows
 
 
-async def stat(
-    accessor: NextcloudAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    original_prefix = mount_prefix_of(path.virtual, path.vfs_path)
+async def stat(accessor: NextcloudAccessor, path: PathSpec) -> FileStat:
+    """What is at ``path``, asked by its WebDAV path.
+
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+        path (PathSpec): the path.
+    """
     raw = raw_path_of(path)
     stripped = raw.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
-    virtual_key = (
-        original_prefix + "/" + stripped if original_prefix else "/" + stripped
-    )
-    lookup = await index.get(virtual_key)
-    if lookup.entry is not None:
-        return stat_of(lookup.entry)
-    parent = virtual_key.rsplit("/", 1)[0] or "/"
-    parent_listing = await index.list_dir(parent)
-    if parent_listing.entries is not None:
-        raise enoent(path)
     op = accessor.operator()
     try:
         md = await op.stat(stripped)

@@ -1,7 +1,6 @@
 from opendal.exceptions import NotFound
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
@@ -12,7 +11,6 @@ async def write(
     accessor: NextcloudAccessor,
     path: PathSpec,
     data: bytes,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     key = nextcloud_key(path)
     op = accessor.operator()

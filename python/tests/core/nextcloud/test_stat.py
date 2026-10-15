@@ -1,6 +1,5 @@
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.nextcloud.read import read
 from mirage.core.nextcloud.readdir import readdir
 from mirage.core.nextcloud.search import SearchEntry
@@ -60,11 +59,9 @@ async def test_stat_root_is_directory(make_acc):
 
 
 @pytest.mark.asyncio
-async def test_stat_returns_modified_from_index(make_acc):
+async def test_a_listed_row_carries_modified(make_acc):
     acc = make_acc({"data/file.txt": b"abcde"})
-    cache = RAMIndexCacheStore(ttl=60)
-    await readdir(acc, PathSpec.from_str_path("/data"), cache)
-    s = await stat(acc, PathSpec.from_str_path("/data/file.txt"), index=cache)
+    (s,) = await readdir(acc, PathSpec.from_str_path("/data"))
     assert s.modified == "2026-01-01T00:00:00+00:00"
     assert s.size == 5
     assert s.type != FileType.DIRECTORY
@@ -91,12 +88,10 @@ async def test_readdir_backfills_lister_omitted_size(make_acc):
 
     acc.operator = lambda: fake
     fake.list = _stripped_list
-    index = RAMIndexCacheStore()
-    await readdir(acc, PathSpec.from_str_path("/"), index)
-    entry = (await index.get("/a.txt")).entry
-    assert entry is not None
+    rows = await readdir(acc, PathSpec.from_str_path("/"))
+    entry = next(row for row in rows if row.name == "a.txt")
     assert entry.size == 5
-    assert entry.remote_time != ""
+    assert entry.modified
 
 
 @pytest.mark.asyncio
@@ -110,20 +105,19 @@ async def test_stat_size_matches_read_for_every_file(make_acc):
         "docs/b.bin": b"abc",
     }
     acc = make_acc(contents)
-    index = RAMIndexCacheStore()
     files: list[str] = []
     stack = ["/"]
     while stack:
         current = stack.pop()
-        listing = await readdir(acc, PathSpec.from_str_path(current), index)
+        listing = await readdir(acc, PathSpec.from_str_path(current))
         for child in listing:
-            trimmed = child.rstrip("/")
-            info = await stat(acc, PathSpec.from_str_path(trimmed), index)
+            trimmed = current.rstrip("/") + "/" + child.name
+            info = child
             if info.type == FileType.DIRECTORY:
                 stack.append(trimmed)
                 continue
             assert info.size is not None, trimmed
-            body = await read(acc, PathSpec.from_str_path(trimmed), index)
+            body = await read(acc, PathSpec.from_str_path(trimmed))
             assert info.size == len(body), trimmed
             files.append(trimmed)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]

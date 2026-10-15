@@ -1,31 +1,33 @@
 import type { Metadata } from 'opendal'
-import { IndexEntry, ResourceType } from '@struktoai/mirage-core/cache/index/config'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
-import { mountPrefixOf, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { searchFiles } from './search/index.ts'
 import { isNotFound } from './util.ts'
 
-/** A listed row as `stat` renders it, the same from the index and from a search. */
-export function statOf(entry: IndexEntry): FileStat {
-  if (entry.resourceType === ResourceType.FOLDER) {
-    return new FileStat({
-      name: entry.name,
-      type: FileType.DIRECTORY,
-      modified: entry.remoteTime || null,
-    })
+/**
+ * A listed row as `stat` renders it, the same from a listing and from a
+ * search. Mirrors Python's `stat_of`.
+ */
+export function statOf(
+  name: string,
+  folder: boolean,
+  size: number | null,
+  modified: string,
+): FileStat {
+  if (folder) {
+    return new FileStat({ name, type: FileType.DIRECTORY, modified: modified || null })
   }
   return new FileStat({
-    name: entry.name,
-    size: entry.size ?? null,
-    modified: entry.remoteTime || null,
+    name,
+    size,
+    modified: modified || null,
     type: FileType.FILE,
-    content: contentTypeForPath(entry.name),
+    content: contentTypeForPath(name),
   })
 }
 
@@ -40,7 +42,6 @@ export function statOf(entry: IndexEntry): FileStat {
 export async function tree(
   accessor: NextcloudAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Map<string, FileStat> | null> {
   const found = await searchFiles(accessor, path)
   if (found === null) return null
@@ -54,38 +55,21 @@ export async function tree(
     rows.set(
       entry.key.slice(lead.length),
       statOf(
-        new IndexEntry({
-          id: entry.key,
-          name: entry.key.slice(entry.key.lastIndexOf('/') + 1),
-          resourceType: folder ? ResourceType.FOLDER : ResourceType.FILE,
-          size: entry.size,
-          remoteTime: entry.modified ?? '',
-        }),
+        entry.key.slice(entry.key.lastIndexOf('/') + 1),
+        folder,
+        entry.size,
+        entry.modified ?? '',
       ),
     )
   }
   return rows
 }
 
-export async function stat(
-  accessor: NextcloudAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+/** What is at `path`, asked by its WebDAV path. Mirrors Python's `stat`. */
+export async function stat(accessor: NextcloudAccessor, path: PathSpec): Promise<FileStat> {
   const raw = rawPathOf(path)
   const key = stripSlash(raw)
   if (key === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
-  const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
-  if (index !== undefined) {
-    const lookup = await index.get(virtualKey)
-    if (lookup.entry !== undefined && lookup.entry !== null) {
-      return statOf(lookup.entry)
-    }
-    const parent = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
-    const listing = await index.listDir(parent)
-    if (listing.entries !== undefined && listing.entries !== null) throw enoent(path)
-  }
   const op = await accessor.operator()
   let metadata: Metadata
   try {
