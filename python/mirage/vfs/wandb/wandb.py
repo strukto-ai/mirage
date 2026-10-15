@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.wandb import WandbAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.core.wandb.config import WandbConfig
 from mirage.core.wandb.read import read, read_stream
 from mirage.core.wandb.readdir import readdir
@@ -23,8 +24,10 @@ class WandbVFS(BaseVFS):
         self.config = config
         self.accessor = WandbAccessor(config)
 
-    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
-        return await readdir(self.accessor, path)
+    async def readdir(
+        self, path: PathSpec, index: IndexCacheStore | None = None
+    ) -> list[FileStat] | DirListing:
+        return await readdir(self.accessor, path, index)
 
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None

@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Any
 
 from mirage import ShellExecution
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.cli.types import CLI, CLIHandler, CLIInvocation
 from mirage.commands.spec.types import CommandSpec
 from mirage.config import load_config
@@ -112,10 +111,8 @@ class TrackedStreamVFS(CachedRAMVFS):
         self.pulls = 0
         self.closed = 0
 
-    async def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ):
-        data = await super().read(path, index)
+    async def read_stream(self, path: PathSpec):
+        data = await super().read(path)
         try:
             for offset in range(0, len(data), self.chunk_size):
                 self.pulls += 1

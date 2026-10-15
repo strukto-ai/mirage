@@ -7,7 +7,6 @@ from requests import request_checks
 
 from mirage import MountMode, Workspace
 from mirage.core.wandb.read import read, read_stream
-from mirage.core.wandb.stat import stat
 from mirage.types import PathSpec
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.wandb import WandbConfig, WandbVFS
@@ -54,16 +53,10 @@ async def main() -> None:
         assert json.loads(
             await read(vfs.accessor, path("lab/experiments/run-a/config.json"))
         ) == {"lr": 0.01, "label": "café"}
-        assert (
-            await stat(
-                vfs.accessor, path("lab/experiments/run-a/history.jsonl")
-            )
-        ).size is None
-        assert (
-            await stat(
-                vfs.accessor, path("lab/experiments/run-a/files/notes.txt")
-            )
-        ).size == 6
+        history = "/wandb/lab/experiments/run-a/history.jsonl"
+        assert (await ws.vfs.stat(history)).size is None
+        notes = "/wandb/lab/experiments/run-a/files/notes.txt"
+        assert (await ws.vfs.stat(notes)).size == 6
         assert await read(
             vfs.accessor, path("lab/experiments/run-a/files/nested/model.bin")
         ) == bytes([0, 1, 2, 255])

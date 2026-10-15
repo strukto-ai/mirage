@@ -17,6 +17,7 @@ import { entryOrWarm } from '../../cache/index/warm.ts'
 import { enoent } from '../../errors/fs.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 /**
  * The key a mount keeps `path` under in its index: the virtual path, the
@@ -24,8 +25,8 @@ import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
  * directory it lists. Mirrors Python's `index_key`.
  */
 export function indexKey(prefix: string, path: PathSpec): string {
-  const root = prefix.replace(/\/+$/, '')
-  const key = (path.pattern !== null ? path.dir : path).vfsPath.replace(/^\/+|\/+$/g, '')
+  const root = rstripSlash(prefix)
+  const key = stripSlash((path.pattern !== null ? path.dir : path).vfsPath)
   return key !== '' ? `${root}/${key}` : root || '/'
 }
 
@@ -82,7 +83,7 @@ export async function keepListing(
   const stem = key === '/' ? '' : key
   for (const [relative, children] of listing.seeds) {
     const seeded: [string, FileStat][] = children.map((row) => [row.name, row])
-    await index.setDir(`${stem}/${relative.replace(/^\/+|\/+$/g, '')}`, seeded, null, {
+    await index.setDir(`${stem}/${stripSlash(relative)}`, seeded, null, {
       window: listing.window,
       version: listing.version,
     })

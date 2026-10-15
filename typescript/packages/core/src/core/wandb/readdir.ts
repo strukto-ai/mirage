@@ -4,6 +4,8 @@ import { enoent, enotdir } from '../../errors/fs.ts'
 import { WandbAPIError } from './errors.ts'
 import { LEAVES, parts, runVars, safeName } from './pathing.ts'
 import { RUN_EXISTS } from './queries.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { Named, FileMetadata } from './types.ts'
 
 export function row(
@@ -61,6 +63,7 @@ function runFiles(path: PathSpec, prefix: string, files: FileMetadata[]): DirLis
 export async function readdir(
   accessor: WandbAccessor,
   pathSpec: PathSpec,
+  index?: IndexCacheStore,
 ): Promise<FileStat[] | DirListing> {
   const path = pathSpec.pattern ? pathSpec.dir : pathSpec
   const ps = parts(accessor, path)
@@ -69,7 +72,10 @@ export async function readdir(
   if (ps.length === 1) nodes = await accessor.client.projects(ps[0] ?? '')
   else if (ps.length === 2) nodes = await accessor.client.runs(ps[0] ?? '', ps[1] ?? '')
   else if (ps.length === 3) {
-    await accessor.client.run(runVars(ps), RUN_EXISTS)
+    // A run the stored listing of its project names is not asked about again.
+    const key = rstripSlash(path.virtual)
+    const listed = await index?.listDir(key.slice(0, key.lastIndexOf('/')) || '/')
+    if (listed?.entries?.includes(key) !== true) await accessor.client.run(runVars(ps), RUN_EXISTS)
     return [...LEAVES.map(leaf), row('files', true)]
   } else if (ps[3] === 'files') {
     const files = await accessor.client.files(runVars(ps))

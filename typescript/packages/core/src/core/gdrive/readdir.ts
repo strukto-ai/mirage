@@ -26,6 +26,7 @@ import { rootContext } from './resolve.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { enotdir, enoent } from '../../errors/fs.ts'
+import { stripSlash } from '../../utils/slash.ts'
 
 const RESOURCE_TYPES: Readonly<Record<string, string>> = {
   'application/vnd.google-apps.folder': 'gdrive/folder',
@@ -108,7 +109,7 @@ export async function readdir(
   entry?: FileStat | null,
 ): Promise<FileStat[] | DirListing> {
   const target = path.pattern !== null ? path.dir : path
-  const atRoot = target.vfsPath.replace(/^\/+|\/+$/g, '') === ''
+  const atRoot = stripSlash(target.vfsPath) === ''
   let folderId: string
   let driveId: string | null = null
   if (atRoot) {

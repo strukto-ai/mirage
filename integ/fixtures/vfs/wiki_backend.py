@@ -25,8 +25,8 @@
 import hashlib
 from copy import deepcopy
 
-from mirage import (NULL_INDEX, Accessor, BaseVFS, ContentType, FileStat,
-                    FileType, IndexCacheStore, PathSpec)
+from mirage import (Accessor, BaseVFS, ContentType, FileStat, FileType,
+                    PathSpec)
 
 PAGES = {"notes.md": "agents just speak bash\n"}
 FEED = {"status.md": "All systems go.\n"}
@@ -42,22 +42,28 @@ def _key(path: PathSpec) -> str:
     return path.vfs_path.strip("/")
 
 
+def _row(name: str, page: str) -> FileStat:
+    data = page.encode()
+    return FileStat(name=name,
+                    size=len(data),
+                    type=FileType.FILE,
+                    content=ContentType.TEXT,
+                    fingerprint=hashlib.sha256(data).hexdigest()[:16])
+
+
 class PagesVFS(BaseVFS):
     """One flat page store: readdir, read and stat, and write."""
 
     accessor: PageAccessor
 
-    async def readdir(self,
-                      path: PathSpec,
-                      index: IndexCacheStore = NULL_INDEX) -> list[str]:
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
         if _key(path):
             raise NotADirectoryError(path.virtual)
-        parent = path.virtual.rstrip("/")
-        return [f"{parent}/{name}" for name in sorted(self.accessor.pages)]
+        pages = self.accessor.pages
+        return [_row(name, pages[name]) for name in sorted(pages)]
 
     async def read(self,
                    path: PathSpec,
-                   index: IndexCacheStore = NULL_INDEX,
                    offset: int = 0,
                    size: int | None = None) -> bytes:
         key = _key(path)
@@ -67,21 +73,14 @@ class PagesVFS(BaseVFS):
             raise FileNotFoundError(path.virtual)
         return self.accessor.pages[key].encode()
 
-    async def stat(self,
-                   path: PathSpec,
-                   index: IndexCacheStore = NULL_INDEX) -> FileStat:
+    async def stat(self, path: PathSpec) -> FileStat:
         key = _key(path)
         name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
         if not key:
             return FileStat(name=name, size=None, type=FileType.DIRECTORY)
         if key not in self.accessor.pages:
             raise FileNotFoundError(path.virtual)
-        data = self.accessor.pages[key].encode()
-        return FileStat(name=name,
-                        size=len(data),
-                        type=FileType.FILE,
-                        content=ContentType.TEXT,
-                        fingerprint=hashlib.sha256(data).hexdigest()[:16])
+        return _row(name, self.accessor.pages[key])
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         key = _key(path)

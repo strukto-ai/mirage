@@ -14,7 +14,7 @@
 
 import { z } from 'zod'
 
-import type { FileStat} from '../../types.ts';
+import type { FileStat } from '../../types.ts'
 import { ContentType, FileType } from '../../types.ts'
 import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
 

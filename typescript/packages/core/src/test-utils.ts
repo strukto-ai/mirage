@@ -267,11 +267,13 @@ export function dispatched(
 }
 
 /**
- * A RAM mount that keeps its reads, and reads a batch in one call where
- * `batched`, counting both. Mirrors the Python `BatchedRAM` test fixture.
+ * A RAM mount standing in for a remote store: it keeps its reads, and reads a
+ * batch in one call where `batched`, counting both. Mirrors the Python
+ * `BatchedRAM` test fixture.
  */
 export class BatchedRAM extends RAMVFS {
   override readonly cachesReads: boolean = true
+  override readonly local: boolean = false
   readonly reads: string[] = []
   readonly batches: string[][] = []
 

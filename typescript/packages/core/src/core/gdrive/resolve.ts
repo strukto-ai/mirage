@@ -18,6 +18,7 @@ import { eacces, enoent, enotdir } from '../../errors/fs.ts'
 import { GoogleApiError } from '../google/client.ts'
 import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
+import { stripSlash } from '../../utils/slash.ts'
 
 // A resolved Drive item: enough identity to mutate it.
 export interface DriveNode {
@@ -113,7 +114,7 @@ export async function parentFolder(
   path: PathSpec,
   parent: FileStat | null | undefined,
 ): Promise<[string, string | null]> {
-  if (!path.vfsPath.replace(/^\/+|\/+$/g, '').includes('/')) return rootContext(accessor)
+  if (!stripSlash(path.vfsPath).includes('/')) return rootContext(accessor)
   if (parent === null || parent === undefined) throw enoent(path.virtual)
   if (parent.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
   const driveId = parent.extra.drive_id

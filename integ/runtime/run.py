@@ -41,7 +41,6 @@ from mirage import (  # noqa: E402
     ProcessExecutorMixin,
     Workspace,
 )
-from mirage.cache.index import NULL_INDEX, IndexCacheStore  # noqa: E402
 from mirage.commands.cli.types import CLI  # noqa: E402
 from mirage.commands.spec.types import CommandSpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
@@ -505,21 +504,15 @@ class FailingRAMVFS(RAMVFS):
         super().__init__()
         self._failing = frozenset(failing)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
+    async def stat(self, path: PathSpec) -> FileStat:
         self._refuse(path)
-        return await super().stat(path, index)
+        return await super().stat(path)
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
         self._refuse(path)
-        return await super().read(path, index, offset, size)
+        return await super().read(path, offset, size)
 
     def _refuse(self, path: PathSpec) -> None:
         if path.vfs_path.strip("/") in self._failing:

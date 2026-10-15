@@ -26,7 +26,7 @@ import {
   registerVfsFactory as registerBrowserVfs,
 } from '@struktoai/mirage-browser'
 import { Limit, MountMode, type PathSpec } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type {
@@ -269,10 +269,10 @@ class TrackedStreamVFS extends CachedRAMVFS {
 
   override async *readStream(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     signal?: AbortSignal,
   ): AsyncIterableIterator<Uint8Array> {
-    const data = await super.read(path, index)
+    const data = await super.read(path, handed)
     try {
       for (let offset = 0; offset < data.byteLength; offset += this.chunkSize) {
         this.pulls++

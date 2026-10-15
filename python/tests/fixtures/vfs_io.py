@@ -224,8 +224,10 @@ def dispatched(ws: Workspace) -> list[tuple[str, str]]:
 
 
 class BatchedRAM(RAMVFS):
-    """A RAM mount that keeps its reads, and reads a batch in one call
-    where ``batched``, counting both."""
+    """A RAM mount standing in for a remote store: it keeps its reads,
+    and reads a batch in one call where ``batched``, counting both."""
+
+    local = False
 
     def __init__(self, batched: bool = True) -> None:
         super().__init__()

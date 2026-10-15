@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FileStat} from '../../types.ts';
+import type { FileStat } from '../../types.ts'
 import { FileType } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { underPath } from '../../utils/key_prefix.ts'

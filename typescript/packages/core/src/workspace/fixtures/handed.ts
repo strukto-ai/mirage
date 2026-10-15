@@ -15,6 +15,7 @@
 import { DirListing, type FileStat, PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { Handed } from '../../vfs/types.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 export type ListFn<A> = (
   accessor: A,
@@ -60,9 +61,9 @@ export async function entryAt<A>(
 
 /** The folder holding `path`, addressed like it. Mirrors Python's `parent_of`. */
 export function parentOf(path: PathSpec): PathSpec {
-  const trimmed = path.virtual.replace(/\/+$/, '')
+  const trimmed = rstripSlash(path.virtual)
   const virtual = trimmed.slice(0, trimmed.lastIndexOf('/')) || '/'
-  const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(path.vfsPath)
   return new PathSpec({
     virtual,
     directory: virtual,

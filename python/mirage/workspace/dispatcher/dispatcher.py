@@ -1210,7 +1210,8 @@ class Dispatcher:
         rule a one-call walk meets in ``_declines``), and no path the
         session hides or a path rule reaches. A file already kept, one a
         renderer answers, one pinned to a revision and one on a mount
-        that keeps no reads is passed over. A store that reads a batch
+        that keeps no reads or holds its data locally (read as fast when
+        asked) is passed over. A store that reads a batch
         (``read_many``) is asked once for the rest of its files; any
         other is asked for each file its listing sizes within
         ``READ_AHEAD_BYTES``. A failure is logged and dropped: the read
@@ -1247,6 +1248,7 @@ class Dispatcher:
                 mount is None
                 or manager is None
                 or mount.retiring
+                or mount.vfs.local
                 or call.path.virtual in mount.revisions
                 or (
                     gate is not None

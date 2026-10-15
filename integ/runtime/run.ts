@@ -65,7 +65,7 @@ import {
   type ProcessExecutor,
 } from '@struktoai/mirage-core'
 import type { RuntimeLanguage } from '@struktoai/mirage-core/runtime/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 
 const HOST = 'typescript'
@@ -488,19 +488,19 @@ class FailingRAMVFS extends RAMVFS {
     this.failing = new Set(failing)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     if (this.fails(path)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
-    return super.stat(path, index)
+    return super.stat(path, handed)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
     if (this.fails(path)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
-    return super.read(path, index, offset, size)
+    return super.read(path, handed, offset, size)
   }
 
   private fails(path: PathSpec): boolean {

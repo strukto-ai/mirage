@@ -20,6 +20,7 @@ export interface WandbVFSState {
 
 export class WandbVFS extends BaseVFS {
   override readonly handed = {
+    readdir: ['index'],
     stat: ['entry'],
   } as const
 
@@ -35,8 +36,8 @@ export class WandbVFS extends BaseVFS {
     this.accessor = new WandbAccessor(config)
   }
 
-  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
-    return readdir(this.accessor, path)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return readdir(this.accessor, path, handed?.index)
   }
 
   override async read(

@@ -573,8 +573,8 @@ interface Call {
  */
 function spelledUnder(call: Call, entries: string[]): string[] {
   if (call.walked === null) return entries
-  const asked = call.walked.virtual.replace(/\/+$/, '')
-  const reached = call.path.virtual.replace(/\/+$/, '')
+  const asked = rstripSlash(call.walked.virtual)
+  const reached = rstripSlash(call.path.virtual)
   return entries.map((entry) =>
     entry.startsWith(`${reached}/`) ? asked + entry.slice(reached.length) : entry,
   )
@@ -1025,7 +1025,8 @@ export class Dispatcher {
    * speaks for the session (the rule a one-call walk meets in `declines`),
    * and no path the session hides or a path rule reaches. A file already
    * kept, one a renderer answers, one pinned to a revision and one on a mount
-   * that keeps no reads is passed over. A store that reads a batch
+   * that keeps no reads or holds its data locally (read as fast when asked)
+   * is passed over. A store that reads a batch
    * (`readMany`) is asked once for the rest of its files; any other is asked
    * for each file its listing sizes within READ_AHEAD_BYTES. A failure is
    * logged and dropped: the read that follows meets it itself. Mirrors
@@ -1056,6 +1057,7 @@ export class Dispatcher {
         mount === null ||
         manager === null ||
         mount.retiring ||
+        mount.vfs.local ||
         mount.revisions.has(call.path.virtual) ||
         (gate !== null && (gate.scopes(path.virtual) || gate.scopes(call.path.virtual)))
       ) {
@@ -1966,7 +1968,7 @@ export class Dispatcher {
       )
     }
     if (call.name === 'stat' && result instanceof FileStat) {
-      const name = call.path.virtual.replace(/\/+$/, '').split('/').pop() ?? ''
+      const name = rstripSlash(call.path.virtual).split('/').pop() ?? ''
       // A mount's root answers as the backend's own root; in the namespace
       // it is the name it is mounted at.
       const row = result.name === '/' && name !== '' ? result.with({ name }) : result
@@ -2025,7 +2027,7 @@ export class Dispatcher {
    * meets them in `readdir`. Mirrors Python's Dispatcher._with_links.
    */
   private withLinks(path: PathSpec, tree: Map<string, FileStat>): Map<string, FileStat> {
-    const base = path.virtual.replace(/\/+$/, '')
+    const base = rstripSlash(path.virtual)
     const owner = this.namespace.tryMountFor(path.virtual)
     const merged = new Map(tree)
     for (const [virtual, row] of this.namespace.linkStatsBelow(path.virtual)) {

@@ -14,6 +14,7 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
+import { stripSlash } from '../../utils/slash.ts'
 
 /**
  * Whether anything is at `path`: the mount root, or a row its parent's
@@ -24,7 +25,5 @@ export function exists(
   path: PathSpec,
   entry?: FileStat | null,
 ): Promise<boolean> {
-  return Promise.resolve(
-    (entry !== null && entry !== undefined) || path.vfsPath.replace(/^\/+|\/+$/g, '') === '',
-  )
+  return Promise.resolve((entry !== null && entry !== undefined) || stripSlash(path.vfsPath) === '')
 }

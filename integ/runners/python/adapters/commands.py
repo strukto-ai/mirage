@@ -15,7 +15,6 @@
 import asyncio
 from dataclasses import replace
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.aggregators import concat_aggregate
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.adapter import command_io
@@ -35,7 +34,7 @@ from mirage.commands.config import (
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.vfs.ram import RAMVFS
 
 
@@ -160,20 +159,14 @@ class CommandService(RAMVFS):
         return self._commands
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
         raise PermissionError(13, "service exposes search only", path.virtual)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
         if path.virtual.endswith(".deny"):
             raise PermissionError(13, "Permission denied", path.virtual)
-        return await super().readdir(path, index)
+        return await super().readdir(path)
 
 
 async def scope_probe(inv: CLIInvocation):

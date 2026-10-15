@@ -15,6 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
+import { stripSlash } from '../../utils/slash.ts'
 
 /**
  * What is at `path`: the row its parent's listing named. Drive is
@@ -27,7 +28,7 @@ export function stat(
   path: PathSpec,
   entry?: FileStat | null,
 ): Promise<FileStat> {
-  if (path.vfsPath.replace(/^\/+|\/+$/g, '') === '') {
+  if (stripSlash(path.vfsPath) === '') {
     return Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
   }
   if (entry === null || entry === undefined) return Promise.reject(enoent(path.virtual))

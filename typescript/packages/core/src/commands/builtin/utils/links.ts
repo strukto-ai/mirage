@@ -21,6 +21,7 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
 import { CycleError, gnuBasename, resolvePath } from '../../../utils/path.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 
 /**
  * Where a name stands as lstat reaches it: every link above its final name
@@ -263,7 +264,7 @@ async function linkedReaddir<A extends Accessor>(
     entries = []
   }
   if (owed.length === 0) return entries
-  const present = new Set(entries.map((entry) => gnuBasename(entry.replace(/\/+$/, ''))))
+  const present = new Set(entries.map((entry) => gnuBasename(rstripSlash(entry))))
   return [...entries, ...owed.filter((n) => !present.has(n)).map((n) => `${base}/${n}`)]
 }
 

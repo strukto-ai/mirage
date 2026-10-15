@@ -35,14 +35,25 @@ function key(path: PathSpec): string {
   return stripSlash(path.vfsPath)
 }
 
+function row(name: string, page: string): FileStat {
+  const data = ENC.encode(page)
+  const fingerprint = createHash('sha256').update(data).digest('hex').slice(0, 16)
+  return new FileStat({
+    name,
+    size: data.length,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
+    fingerprint,
+  })
+}
+
 // One flat page store: readdir, read and stat, and write.
 class PagesVFS extends BaseVFS<PageAccessor> {
-  override async readdir(path: PathSpec): Promise<string[]> {
+  override async readdir(path: PathSpec): Promise<FileStat[]> {
     if (key(path) !== '') throw enotdir(path)
-    const parent = rstripSlash(path.virtual)
     return Object.keys(this.accessor.pages)
       .sort()
-      .map((name) => `${parent}/${name}`)
+      .map((name) => row(name, this.accessor.pages[name] ?? ''))
   }
 
   override async read(path: PathSpec): Promise<Uint8Array> {
@@ -58,15 +69,7 @@ class PagesVFS extends BaseVFS<PageAccessor> {
     const base = trimmed.slice(trimmed.lastIndexOf('/') + 1) || '/'
     if (name === '') return new FileStat({ name: base, size: null, type: FileType.DIRECTORY })
     if (!Object.hasOwn(this.accessor.pages, name)) throw enoent(path)
-    const data = ENC.encode(this.accessor.pages[name])
-    const fingerprint = createHash('sha256').update(data).digest('hex').slice(0, 16)
-    return new FileStat({
-      name: base,
-      size: data.length,
-      type: FileType.FILE,
-      content: ContentType.TEXT,
-      fingerprint,
-    })
+    return row(base, this.accessor.pages[name] ?? '')
   }
 
   override async write(path: PathSpec, data: Uint8Array): Promise<void> {

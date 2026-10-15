@@ -29,7 +29,7 @@ from mirage import Mount, MountBackend, MountMode, Workspace
 from mirage.fuse.mount import mount_background, resolve_fusermount_binary
 from mirage.policy import Policy
 from mirage.policy.types import Deny, VfsContext, VfsResultContext
-from mirage.types import FileStat, FileType
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.ram import RAMVFS
 
 # What a probe records: a captured file body or stat string, a byte
@@ -49,11 +49,17 @@ class SizelessRAM(RAMVFS):
 
     caches_reads = True
 
-    async def stat(self, path, *args, **kwargs) -> FileStat:
-        result = await super().stat(path, *args, **kwargs)
-        if result.type == FileType.DIRECTORY:
-            return result
-        return result.model_copy(update={"size": None})
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return [_sizeless(row) for row in await super().readdir(path)]
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        return _sizeless(await super().stat(path))
+
+
+def _sizeless(row: FileStat) -> FileStat:
+    if row.type == FileType.DIRECTORY:
+        return row
+    return row.model_copy(update={"size": None})
 
 
 API_CONTENT = b'{"messages": 2}\n'

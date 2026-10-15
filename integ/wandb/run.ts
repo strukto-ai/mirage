@@ -94,7 +94,8 @@ try {
     assert.deepEqual(ts[i], expected, `TypeScript: ${c.name}`)
     assert.deepEqual(py.cases[i], expected, `Python: ${c.name}`)
   }
-  const p = (key: string) => PathSpec.fromStrPath('/wandb/' + key, key)
+  // ops() mounts the VFS at the root, so its paths are spelled from there.
+  const p = (key: string) => PathSpec.fromStrPath('/' + key, key)
   const summary = 'lab/experiments/run-a/summary.json'
   const other = 'other/experiments/run-a/summary.json'
   const values = await Promise.all([ops(vfs).read(p(summary)), ops(vfs).read(p(other))])
@@ -146,7 +147,7 @@ try {
     'lab/experiments/run-long/history.jsonl',
   )
   const start = server.requests.length
-  const stream = readStream(vfs.accessor, path, ops(vfs).index)
+  const stream = readStream(vfs.accessor, path)
   assert.equal((await stream.next()).done, false)
   await stream.return(undefined)
   assert.equal(

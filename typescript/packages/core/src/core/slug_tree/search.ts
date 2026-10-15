@@ -16,7 +16,7 @@ import { enoent } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../utils/glob_walk.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { stripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { listingAt, treeKey, type SlugTree } from './tree.ts'
 
 export function validateQuery(query: string, topK: number): void {
@@ -73,7 +73,7 @@ export async function searchScope<A>(
   if (paths.some((p) => stripSlash(p.vfsPath) === '')) return [[], prefix]
   const rows = await tree.load(accessor)
   const listed = (_accessor: A, path: PathSpec): Promise<string[]> => {
-    const base = path.virtual.replace(/\/+$/, '')
+    const base = rstripSlash(path.virtual)
     return Promise.resolve(listingAt(rows, path).entries.map((row) => `${base}/${row.name}`))
   }
   return [

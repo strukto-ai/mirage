@@ -2,6 +2,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from mirage.accessor.wandb import WandbAccessor
+from mirage.cache.index import IndexCacheStore
 from mirage.core.wandb.errors import WandbAPIError
 from mirage.core.wandb.pathing import LEAVES, parts, run_vars, safe_name
 from mirage.core.wandb.queries import RUN_EXISTS
@@ -80,13 +81,18 @@ def _run_files(
 
 
 async def readdir(
-    accessor: WandbAccessor, path_spec: PathSpec
+    accessor: WandbAccessor,
+    path_spec: PathSpec,
+    index: IndexCacheStore | None = None,
 ) -> list[FileStat] | DirListing:
-    """A directory's rows.
+    """A directory's rows. A run the stored listing of its project names
+    is not asked about again.
 
     Args:
         accessor (WandbAccessor): the mount's accessor.
         path_spec (PathSpec): the directory, or a glob word in it.
+        index (IndexCacheStore | None): the mount's index, whose listing
+            of the project proves a run exists.
     """
     path = path_spec.dir if path_spec.pattern else path_spec
     ps = parts(accessor, path)
@@ -97,7 +103,11 @@ async def readdir(
     elif len(ps) == 2:
         nodes = await accessor.client.runs(*ps)
     elif len(ps) == 3:
-        await accessor.client.run(run_vars(ps), RUN_EXISTS)
+        key = path.virtual.rstrip("/")
+        parent = key.rsplit("/", 1)[0] or "/"
+        listed = await index.list_dir(parent) if index is not None else None
+        if listed is None or key not in (listed.entries or []):
+            await accessor.client.run(run_vars(ps), RUN_EXISTS)
         return [_leaf(n) for n in LEAVES] + [row("files", True)]
     elif ps[3] == "files":
         files = await accessor.client.files(run_vars(ps))

@@ -15,7 +15,6 @@
 import { concatAggregate } from '@struktoai/mirage-core/commands/builtin/aggregators'
 import { CLI as CLIProgram, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { commandIo, generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -156,9 +155,9 @@ export class CommandService extends RAMVFS {
     return Promise.reject(eacces(path))
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     if (path.virtual.endsWith('.deny')) return Promise.reject(eacces(path))
-    return super.readdir(path, index)
+    return super.readdir(path)
   }
 }
 export const CLI = new CLIProgram({

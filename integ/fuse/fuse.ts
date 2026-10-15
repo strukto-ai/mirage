@@ -54,12 +54,19 @@ import { resolveFusermountBinary } from '@struktoai/mirage-node/fuse/mount'
 // sizes them (see the CLAUDE.md FUSE section).
 const API_CONTENT = '{"messages": 2}\n'
 
+function sizeless(row: FileStat): FileStat {
+  return row.type === FileType.DIRECTORY ? row : row.with({ size: null })
+}
+
 class SizelessRAM extends RAMVFS {
   override readonly cachesReads = true
 
+  override async readdir(path: PathSpec): Promise<FileStat[]> {
+    return (await super.readdir(path)).map(sizeless)
+  }
+
   override async stat(path: PathSpec): Promise<FileStat> {
-    const s = await super.stat(path)
-    return s.type === FileType.DIRECTORY ? s : s.with({ size: null })
+    return sizeless(await super.stat(path))
   }
 }
 

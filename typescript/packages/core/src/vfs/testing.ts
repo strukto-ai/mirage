@@ -2,12 +2,13 @@ import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { getExtension } from '../utils/filetype.ts'
 import { isEnoent } from '../errors/fs.ts'
-import type { FileStat} from '../types.ts';
+import type { FileStat } from '../types.ts'
 import { DirListing, FileType, PathSpec } from '../types.ts'
 import { mountPrefixOf } from '../utils/key_prefix.ts'
 import type { BaseVFS } from './base.ts'
 import type { Handed } from './types.ts'
 import { concat } from '../utils/bytes.ts'
+import { rstripSlash } from '../utils/slash.ts'
 
 /** A known file, its parent and absent sibling, and an optional chunk bound. */
 export interface ReadFixture {
@@ -114,7 +115,7 @@ export async function checkReadContract(
   check(parent.type === FileType.DIRECTORY, 'parent must stat as a directory')
   const listed = await vfs.readdir(fixture.directory, folder)
   const rows = listed instanceof DirListing ? listed.entries : listed
-  const child = fixture.file.virtual.replace(/\/+$/, '').split('/').pop() ?? ''
+  const child = rstripSlash(fixture.file.virtual).split('/').pop() ?? ''
   check(
     rows.some((row) => row.name === child),
     'readdir must include the child',
