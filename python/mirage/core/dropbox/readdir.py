@@ -16,20 +16,41 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.dropbox.api import get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.constants import CONTENT_HASH
 from mirage.core.dropbox.fingerprint import token_of
 from mirage.errors.fs import listing_error
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.filetype import content_type_for_path
 
 
-def _resource_type_for(entry: dict[str, Any]) -> str:
+def stat_from_entry(entry: dict[str, Any]) -> FileStat:
+    modified = (
+        entry.get("server_modified") or entry.get("client_modified") or ""
+    )
+    name = entry.get("name", "")
+    entry_id = entry.get("id") or entry.get("path_display") or name
     if entry.get(".tag") == "folder":
-        return "dropbox/folder"
-    return "dropbox/file"
+        return FileStat(
+            name=name,
+            type=FileType.DIRECTORY,
+            modified=modified,
+            extra={"dropbox_id": entry_id},
+        )
+    size = entry.get("size")
+    return FileStat(
+        name=name,
+        size=size if isinstance(size, int) else None,
+        type=FileType.FILE,
+        content=content_type_for_path(name),
+        modified=modified,
+        fingerprint=token_of(entry.get(CONTENT_HASH)),
+        extra={
+            "dropbox_id": entry_id,
+            "resource_type": "dropbox/file",
+        },
+    )
 
 
 def dropbox_path_from_key(root: str, key: str) -> str:
@@ -61,19 +82,16 @@ async def _is_dir(accessor: DropboxAccessor, key: str) -> bool:
 
 
 async def readdir(
-    accessor: DropboxAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
+    accessor: DropboxAccessor, path_spec: PathSpec
+) -> list[FileStat]:
+    """A folder's children, each as ``stat`` answers it.
+
+    Args:
+        accessor (DropboxAccessor): Dropbox accessor.
+        path_spec (PathSpec): the folder.
+    """
     path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
     key = path.strip("/")
-    virtual_key = prefix + "/" + key if key else prefix or "/"
-
-    cached = await index.list_dir(virtual_key)
-    if cached.entries is not None:
-        return cached.entries
-
     dropbox_path = dropbox_path_from_key(accessor.root_path, key)
     try:
         files = await list_folder(accessor.token_manager, dropbox_path)
@@ -92,32 +110,6 @@ async def readdir(
                 partial(_is_dir, accessor),
             ) from exc
         raise
-
-    entries: list[tuple[str, IndexEntry, bool]] = []
-    for f in files:
-        is_dir = f.get(".tag") == "folder"
-        filename = f["name"]
-        modified = f.get("server_modified") or f.get("client_modified") or ""
-        size = f.get("size")
-        token = None if is_dir else token_of(f.get(CONTENT_HASH))
-        entry = IndexEntry(
-            id=f.get("id") or f.get("path_display") or filename,
-            name=filename,
-            resource_type=_resource_type_for(f),
-            remote_time=modified,
-            vfs_name=filename,
-            size=size if not is_dir and isinstance(size, int) else None,
-            extra={} if token is None else {CONTENT_HASH: token},
-        )
-        entries.append((filename, entry, is_dir))
-
-    entries.sort(key=lambda listed: listed[0])
-    await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
-    path_prefix = f"/{key}/" if key else "/"
-    out: list[str] = []
-    for name, _, is_folder in entries:
-        if is_folder:
-            out.append(f"{prefix}{path_prefix}{name}/")
-        else:
-            out.append(f"{prefix}{path_prefix}{name}")
-    return out
+    rows = [stat_from_entry(f) for f in files]
+    rows.sort(key=lambda row: row.name)
+    return rows

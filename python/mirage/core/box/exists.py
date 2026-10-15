@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.core.box.resolve import path_parts, resolve_item
-from mirage.types import PathSpec
+from mirage.core.box.resolve import path_parts
+from mirage.types import FileStat, PathSpec
 
 
-async def exists(accessor: BoxAccessor, path: PathSpec) -> bool:
+async def exists(
+    accessor: BoxAccessor, path: PathSpec, entry: FileStat | None = None
+) -> bool:
     if not path_parts(path):
         return True
-    return await resolve_item(accessor, path_parts(path)) is not None
+    return entry is not None

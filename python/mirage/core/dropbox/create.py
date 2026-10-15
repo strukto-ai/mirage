@@ -14,8 +14,8 @@
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.write import write
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
-async def create(accessor: DropboxAccessor, path: PathSpec) -> None:
-    await write(accessor, path, b"")
+async def create(accessor: DropboxAccessor, path: PathSpec) -> FileStat | None:
+    return await write(accessor, path, b"")

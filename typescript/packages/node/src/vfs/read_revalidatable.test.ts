@@ -31,16 +31,17 @@ import type { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
-import type { DropboxAccessor } from '@struktoai/mirage-core/accessor/dropbox'
-import type { BoxAccessor } from '@struktoai/mirage-core/accessor/box'
 import { commandIo } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
 import type { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive } from '@struktoai/mirage-core/observe/context'
 import { DirListing, type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
+import { readdir as boxReaddir } from '@struktoai/mirage-core/core/box/readdir'
+import { readdir as dropboxReaddir } from '@struktoai/mirage-core/core/dropbox/readdir'
+import type { DropboxVFS } from '@struktoai/mirage-core/vfs/dropbox/dropbox'
 import { readdir as gdriveReaddir } from '@struktoai/mirage-core/core/gdrive/readdir'
+import type { BoxVFS } from '@struktoai/mirage-core/vfs/box/box'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { GridFSAccessor } from '../accessor/gridfs.ts'
@@ -687,16 +688,24 @@ let s3: S3Mock
 let hubs: FakeHub[] = []
 let graphs: FakeGraph[] = []
 
-// What is at `path` on a Drive mount, found by listing each folder from the
-// root down, each handed the row its parent's listing named, as the mount
-// finds it. Mirrors python's tests/fixtures/handed.py entry_at.
-async function gdriveEntry(accessor: GDriveAccessor, path: PathSpec): Promise<FileStat | null> {
+// What is at `path` on a mount, found by listing each folder from the root
+// down, each handed the row its parent's listing named, as the mount finds
+// it. Mirrors python's tests/fixtures/handed.py entry_at.
+async function entryAt<A>(
+  readdir: (
+    accessor: A,
+    path: PathSpec,
+    entry: FileStat | null,
+  ) => Promise<readonly FileStat[] | DirListing>,
+  accessor: A,
+  path: PathSpec,
+): Promise<FileStat | null> {
   const names = path.vfsPath.split('/').filter((name) => name !== '')
   let found: FileStat | null = null
   for (const [depth, name] of names.entries()) {
     const key = names.slice(0, depth).join('/')
     const virtual = key === '' ? '/m' : `/m/${key}`
-    const listed = await gdriveReaddir(
+    const listed = await readdir(
       accessor,
       new PathSpec({ virtual, directory: virtual, vfsPath: key }),
       found,
@@ -765,9 +774,14 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       root_path: root,
       endpoint: dropbox.url,
     })
-    const accessor = vfs.accessor as DropboxAccessor
+    const dropboxVfs = vfs as DropboxVFS
+    const accessor = dropboxVfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
-    const index = new RAMIndexCacheStore()
+    // A read is handed the row its parent's listing names, as the mount
+    // hands it; Dropbox stats by path.
+    const handed = async (p: PathSpec): Promise<Handed> => ({
+      entry: await entryAt(dropboxReaddir, accessor, p),
+    })
     return {
       vfs,
       accessor,
@@ -776,9 +790,11 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         dropbox.write(stored, next)
       },
-      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
-      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
-      stat: (p) => commandIo(vfs).stat(accessor, p, index),
+      readBytes: async (p) => dropboxVfs.read(p, await handed(p)),
+      readStream: async function* (p) {
+        yield* dropboxVfs.readStream(p, await handed(p))
+      },
+      stat: (p) => dropboxVfs.stat(p),
       streamSlot: 'stream',
     }
   }
@@ -795,9 +811,14 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       endpoint: box.url,
       ...(shape === 'prefixed' ? { root_folder_id: box.idOf(PREFIX) } : {}),
     })
-    const accessor = vfs.accessor as BoxAccessor
+    const boxVfs = vfs as BoxVFS
+    const accessor = boxVfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
-    const index = new RAMIndexCacheStore()
+    // An id-addressed backend reads the row its parent's listing names, so
+    // each direct call is handed that row, as the mount hands it.
+    const handed = async (p: PathSpec): Promise<Handed> => ({
+      entry: await entryAt(boxReaddir, accessor, p),
+    })
     return {
       vfs,
       accessor,
@@ -806,9 +827,11 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         box.write(stored, next)
       },
-      readBytes: (p) => commandIo(vfs).readBytes(accessor, p, index),
-      readStream: (p) => commandIo(vfs).readStream(accessor, p, index),
-      stat: (p) => commandIo(vfs).stat(accessor, p, index),
+      readBytes: async (p) => boxVfs.read(p, await handed(p)),
+      readStream: async function* (p) {
+        yield* boxVfs.readStream(p, await handed(p))
+      },
+      stat: async (p) => boxVfs.stat(p, await handed(p)),
       streamSlot: 'stream',
     }
   }
@@ -919,7 +942,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     // An id-addressed backend reads the row its parent's listing names, so
     // each direct call is handed that row, as the mount hands it.
     const handed = async (p: PathSpec): Promise<Handed> => ({
-      entry: await gdriveEntry(accessor, p),
+      entry: await entryAt(gdriveReaddir, accessor, p),
     })
     const before = H.gdriveDownloads
     return {
@@ -1798,8 +1821,9 @@ describe('the read-token contract', () => {
         const before = box.log.length
         expect(new TextDecoder().decode(await line(ws, `cat /m/${DEEP}`))).toBe('new\n')
         const log = box.log.slice(before)
-        // The probe after a write is one parent walk, not an info by id.
-        expect(log).toEqual(walk(box))
+        // The write keeps the row its reply named, so the probe after it is
+        // one info by id rather than a parent walk.
+        expect(log).toEqual([`info:${box.idOf(DEEP)}`])
       })
     })
 
@@ -1841,12 +1865,8 @@ describe('the read-token contract', () => {
         const fid = box.idOf(DEEP)
         expect(SEED.byteLength).toBe(CHANGED.byteLength)
         expect(out).toEqual(CHANGED)
-        expect(box.log.slice(before)).toEqual([
-          `info:${fid}`,
-          ...walk(box),
-          `content:${fid}`,
-          `dl:${fid}`,
-        ])
+        // The read is handed the probe's live row, so it downloads by id.
+        expect(box.log.slice(before)).toEqual([`info:${fid}`, `content:${fid}`, `dl:${fid}`])
       })
     })
 
@@ -1866,11 +1886,10 @@ describe('the read-token contract', () => {
         expect(meta).toBeNull()
         expect(moved).toEqual(SEED)
         // The probe: one info by the hinted id, which places the file
-        // elsewhere; its walk lists the old parent chain, misses, and
-        // resolveItem lists it again. GONE clears the mount index, so cat's
-        // own stat walks twice more.
+        // elsewhere; its walk lists the old parent chain and misses. GONE
+        // clears the mount index, so cat's own stat walks once more.
         const w = walk(box)
-        expect(log).toEqual([`info:${fid}`, ...w, ...w, ...w, ...w])
+        expect(log).toEqual([`info:${fid}`, ...w, ...w])
       })
     })
 
@@ -1888,15 +1907,9 @@ describe('the read-token contract', () => {
           const log = box.log.slice(before)
           const modeBits = await line(ws, `stat -c %a /m/${DEEP}`)
           expect(out).toEqual(CHANGED)
-          // The probe's walk fills only its throwaway store and STALE clears
-          // the mount's index, so the read resolves the new id by walking again.
-          expect(log).toEqual([
-            `info:${old}`,
-            ...walk(box),
-            ...walk(box),
-            `content:${fresh}`,
-            `dl:${fresh}`,
-          ])
+          // The probe's walk finds the new id, and the read is handed that
+          // live row: no second walk.
+          expect(log).toEqual([`info:${old}`, ...walk(box), `content:${fresh}`, `dl:${fresh}`])
           // STALE keeps the overlay; reading the purged id's 404 as gone would
           // have dropped it while the walk still printed the new bytes.
           expect(new TextDecoder().decode(modeBits)).toBe('600\n')
@@ -1932,9 +1945,9 @@ describe('the read-token contract', () => {
         expect(code).toBe(1)
         expect(err).toContain('No such file or directory')
         expect(await line(ws, 'cat /m/a/b2/c.txt')).toEqual(SEED)
-        // Each walk stops at a, which no longer holds b: the probe's populate
-        // pass and resolveItem, then cat's own stat over the cleared index.
-        expect(log).toEqual([`info:${fid}`, ...toA, ...toA, ...toA, ...toA])
+        // Each walk stops at a, which no longer holds b: the probe's, then
+        // cat's own stat over the cleared index.
+        expect(log).toEqual([`info:${fid}`, ...toA, ...toA])
       })
     })
 
@@ -1950,12 +1963,11 @@ describe('the read-token contract', () => {
         expect(code).toBe(1)
         expect(out).toEqual(new Uint8Array(0))
         expect(err).toContain('No such file or directory')
-        // The root's listing 404s each time: the probe's populate pass and
-        // resolveItem, cat's own stat (the same two), then the parent listing
-        // cat's missing-operand path asks for.
+        // The root's listing 404s each time: the probe's walk, cat's own
+        // stat, then the parent listing cat's missing-operand path asks for.
         expect(box.log.slice(before)).toEqual([
           `info:${fid}`,
-          ...Array<string>(5).fill(`items:${root}`),
+          ...Array<string>(3).fill(`items:${root}`),
         ])
       }, 'r/')
     })
@@ -1987,12 +1999,7 @@ describe('the read-token contract', () => {
         await line(ws, `cat /m/${DEEP}`)
         const before = box.log.length
         expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
-        expect(box.log.slice(before)).toEqual([
-          `info:${fid}`,
-          ...walk(box),
-          `content:${fid}`,
-          `dl:${fid}`,
-        ])
+        expect(box.log.slice(before)).toEqual([`info:${fid}`, `content:${fid}`, `dl:${fid}`])
       })
     })
 

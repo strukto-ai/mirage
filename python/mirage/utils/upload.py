@@ -21,6 +21,33 @@ from mirage.types import FileStat, JsonValue
 logger = logging.getLogger(__name__)
 
 
+def upload_stat(
+    item: JsonValue,
+    stat_of: Callable[[dict[str, Any]], FileStat],
+    virtual: str,
+) -> FileStat | None:
+    """The stat a write's reply names for the stored item, or None.
+
+    ``stat_of`` is the backend's own stat parser, so the stat reads as its
+    ``stat`` does. The write has landed by now, so a reply that is not an
+    object, or that the parser cannot read, answers None instead of
+    raising.
+
+    Args:
+        item (JsonValue): the stored item's metadata from the reply.
+        stat_of (Callable[[dict[str, Any]], FileStat]): the backend's stat
+            parser for that metadata.
+        virtual (str): the written path, for the debug log.
+    """
+    if not isinstance(item, dict):
+        return None
+    try:
+        return stat_of(item)
+    except Exception as exc:
+        logger.debug("unreadable upload reply for %s: %s", virtual, exc)
+        return None
+
+
 def upload_token(
     item: JsonValue,
     stat_of: Callable[[dict[str, Any]], FileStat],
@@ -39,10 +66,5 @@ def upload_token(
             parser for that metadata.
         virtual (str): the written path, for the debug log.
     """
-    if not isinstance(item, dict):
-        return None
-    try:
-        return stat_of(item).fingerprint or None
-    except Exception as exc:
-        logger.debug("unreadable upload reply for %s: %s", virtual, exc)
-        return None
+    stat = upload_stat(item, stat_of, virtual)
+    return None if stat is None else stat.fingerprint or None

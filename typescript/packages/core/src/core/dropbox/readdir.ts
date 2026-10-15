@@ -12,22 +12,39 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { listingError } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
 import { getMetadata, listFolder, type DropboxEntry } from './api.ts'
 import { CONTENT_HASH } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
-function resourceTypeFor(entry: DropboxEntry): string {
-  if (entry['.tag'] === 'folder') return 'dropbox/folder'
-  return 'dropbox/file'
+export function statFromEntry(entry: DropboxEntry): FileStat {
+  const modified = entry.server_modified ?? entry.client_modified ?? ''
+  if (entry['.tag'] === 'folder') {
+    return new FileStat({
+      name: entry.name,
+      type: FileType.DIRECTORY,
+      modified,
+      extra: { dropbox_id: entry.id ?? entry.path_display ?? entry.name },
+    })
+  }
+  return new FileStat({
+    name: entry.name,
+    size: typeof entry.size === 'number' ? entry.size : null,
+    type: FileType.FILE,
+    content: contentTypeForPath(entry.name),
+    modified,
+    fingerprint: tokenOf(entry[CONTENT_HASH]),
+    extra: {
+      dropbox_id: entry.id ?? entry.path_display ?? entry.name,
+      resource_type: 'dropbox/file',
+    },
+  })
 }
 
 export function dropboxPathFromKey(root: string, key: string): string {
@@ -60,21 +77,10 @@ async function isDir(accessor: DropboxAccessor, key: string): Promise<boolean> {
   return entry !== null && entry['.tag'] === 'folder'
 }
 
-export async function readdir(
-  accessor: DropboxAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+/** A folder's children, each as `stat` answers it. Mirrors Python's `readdir`. */
+export async function readdir(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat[]> {
   const key = (path.pattern !== null ? path.dir : path).vfsPath
-  const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
-
-  if (index !== undefined) {
-    const cached = await index.listDir(virtualKey)
-    if (cached.entries !== undefined && cached.entries !== null) return cached.entries
-  }
-
-  const dropboxPath = dropboxPathFromKey(accessor.rootPath, key)
+  const dropboxPath = dropboxPathFromKey(accessor.rootPath, stripSlash(key))
   let files: DropboxEntry[]
   try {
     files = await listFolder(accessor.tokenManager, dropboxPath)
@@ -95,38 +101,7 @@ export async function readdir(
     }
     throw err
   }
-
-  const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
-  for (const f of files) {
-    const isDir = f['.tag'] === 'folder'
-    const filename = f.name
-    const modified = f.server_modified ?? f.client_modified ?? ''
-    const size = typeof f.size === 'number' ? f.size : null
-    const token = isDir ? null : tokenOf(f[CONTENT_HASH])
-    const entry = new IndexEntry({
-      id: f.id ?? f.path_display ?? filename,
-      name: filename,
-      resourceType: resourceTypeFor(f),
-      remoteTime: modified,
-      vfsName: filename,
-      size: !isDir ? size : null,
-      extra: token === null ? {} : { [CONTENT_HASH]: token },
-    })
-    entries.push({ name: filename, entry, isDir })
-  }
-  entries.sort((a, b) => compareCodePoints(a.name, b.name))
-
-  if (index !== undefined) {
-    await index.setDir(
-      virtualKey,
-      entries.map((e) => [e.name, e.entry] as [string, IndexEntry]),
-    )
-  }
-  const pathPrefix = key !== '' ? `/${key}/` : '/'
-  const out: string[] = []
-  for (const e of entries) {
-    if (e.isDir) out.push(`${prefix}${pathPrefix}${e.name}/`)
-    else out.push(`${prefix}${pathPrefix}${e.name}`)
-  }
-  return out
+  const rows = files.map(statFromEntry)
+  rows.sort((a, b) => compareCodePoints(a.name, b.name))
+  return rows
 }

@@ -22,8 +22,7 @@ vi.mock('./api.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileType, PathSpec } from '../../types.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { readdir } from './readdir.ts'
@@ -54,16 +53,15 @@ describe('dropbox readdir', () => {
     ])
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const out = await readdir(
-      accessor,
-      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-      index,
-    )
-    expect(out).toEqual(['/docs/', '/notes.txt'])
+    const out = await readdir(accessor, new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }))
+    expect(out.map((row) => [row.name, row.type])).toEqual([
+      ['docs', FileType.DIRECTORY],
+      ['notes.txt', FileType.FILE],
+    ])
+    expect(out[1]?.size).toBe(42)
   })
 
-  it('lists nested subfolder using cached parent', async () => {
+  it('lists a nested subfolder by its path', async () => {
     vi.mocked(api.listFolder).mockImplementation((_tm, p: string) => {
       if (p === '' || p === '/') {
         return Promise.resolve([
@@ -85,14 +83,11 @@ describe('dropbox readdir', () => {
     })
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    await readdir(accessor, new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }), index)
     const out = await readdir(
       accessor,
       new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
-      index,
     )
-    expect(out).toContain('/docs/note.md')
+    expect(out.map((row) => row.name)).toEqual(['note.md'])
   })
 
   it('scopes listings under a subfolder mount root', async () => {
@@ -117,19 +112,16 @@ describe('dropbox readdir', () => {
     })
 
     const accessor = new DropboxAccessor({ tokenManager: STUB_TM, rootPath: '/Team/data' })
-    const index = new RAMIndexCacheStore()
     const root = await readdir(
       accessor,
       new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-      index,
     )
-    expect(root).toEqual(['/docs/'])
+    expect(root.map((row) => row.name)).toEqual(['docs'])
     const nested = await readdir(
       accessor,
       new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
-      index,
     )
-    expect(nested).toEqual(['/docs/note.md'])
+    expect(nested.map((row) => row.name)).toEqual(['note.md'])
   })
 
   it('honors prefix when constructing virtual path', async () => {
@@ -138,7 +130,6 @@ describe('dropbox readdir', () => {
     ])
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
       new PathSpec({
@@ -146,9 +137,8 @@ describe('dropbox readdir', () => {
         directory: '/dropbox',
         vfsPath: mountKey('/dropbox', '/dropbox'),
       }),
-      index,
     )
-    expect(out).toEqual(['/dropbox/a.txt'])
+    expect(out.map((row) => row.name)).toEqual(['a.txt'])
   })
 
   it('reports ENOTDIR for an operand under a file', async () => {
@@ -164,7 +154,6 @@ describe('dropbox readdir', () => {
       readdir(
         makeAccessor(),
         new PathSpec({ vfsPath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt/x' }),
-        new RAMIndexCacheStore(),
       ),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
@@ -180,12 +169,11 @@ describe('dropbox readdir', () => {
           virtual: '/nope/deeper',
           directory: '/nope/deeper',
         }),
-        new RAMIndexCacheStore(),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('indexes 0-byte files with size 0', async () => {
+  it('keeps 0-byte files with size 0', async () => {
     vi.mocked(api.listFolder).mockResolvedValue([
       {
         '.tag': 'file',
@@ -198,14 +186,7 @@ describe('dropbox readdir', () => {
     ])
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const out = await readdir(
-      accessor,
-      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-      index,
-    )
-    expect(out).toEqual(['/empty.txt'])
-    const entry = (await index.get('/empty.txt')).entry
-    expect(entry?.size).toBe(0)
+    const out = await readdir(accessor, new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }))
+    expect(out.map((row) => [row.name, row.size])).toEqual([['empty.txt', 0]])
   })
 })

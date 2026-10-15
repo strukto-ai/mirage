@@ -30,19 +30,28 @@ vi.mock('./api.ts', async () => {
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { captureRead, runWithWriteContext } from '../../cache/context.ts'
 import type { WriteContext } from '../../cache/types.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
 import * as client from './client.ts'
 import type { DropboxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { read, readStream } from './read.ts'
-import { truncateByRewrite } from '../generic/rewrite.ts'
+import { readdir } from './readdir.ts'
 import { runWithRecording } from '../../observe/context.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 
 function makeAccessor(): DropboxAccessor {
   return new DropboxAccessor({ tokenManager: STUB_TM })
+}
+
+// The row a listing names for a file: Dropbox downloads by path, so it only
+// says a file is there.
+const NOTE = new FileStat({ name: 'note.txt', type: FileType.FILE })
+
+// What the mount hands a read at `path`, found by listing as it would.
+async function listed(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat | null> {
+  return (await handedAt(readdir, accessor, path)).entry ?? null
 }
 
 describe('dropbox read', () => {
@@ -59,16 +68,12 @@ describe('dropbox read', () => {
     vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([104, 105, 33]), null])
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const data = await read(
-      accessor,
-      new PathSpec({
-        virtual: '/dropbox/note.txt',
-        directory: '/dropbox',
-        vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
-      }),
-      index,
-    )
+    const path = new PathSpec({
+      virtual: '/dropbox/note.txt',
+      directory: '/dropbox',
+      vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
+    })
+    const data = await read(accessor, path, undefined, await listed(accessor, path))
     expect(data).toEqual(new Uint8Array([104, 105, 33]))
     expect(client.dropboxDownload).toHaveBeenCalledWith(STUB_TM, '/note.txt', undefined)
   })
@@ -86,16 +91,12 @@ describe('dropbox read', () => {
     vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([104, 105]), null])
 
     const accessor = new DropboxAccessor({ tokenManager: STUB_TM, rootPath: 'Team/data' })
-    const index = new RAMIndexCacheStore()
-    const data = await read(
-      accessor,
-      new PathSpec({
-        virtual: '/dropbox/note.txt',
-        directory: '/dropbox',
-        vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
-      }),
-      index,
-    )
+    const path = new PathSpec({
+      virtual: '/dropbox/note.txt',
+      directory: '/dropbox',
+      vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
+    })
+    const data = await read(accessor, path, undefined, await listed(accessor, path))
     expect(data).toEqual(new Uint8Array([104, 105]))
     expect(client.dropboxDownload).toHaveBeenCalledWith(STUB_TM, '/Team/data/note.txt', undefined)
   })
@@ -106,13 +107,10 @@ describe('dropbox read', () => {
     ])
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
+    const path = new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' })
+    const entry = await listed(accessor, path)
     await expect(
-      read(
-        accessor,
-        new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
-        index,
-      ),
+      read(accessor, path, undefined, entry),
       // The stamped code is the signal, not the message: the message is the
       // bare operand, which is what the shell renders and what Python's
       // IsADirectoryError(virtual) carries.
@@ -138,16 +136,14 @@ describe('dropbox read stamps content_hash', () => {
 
   // A ranged read is answered 206 and still carries Dropbox-API-Result.
   it.each([
-    ['full-indexed', true, undefined],
-    ['ranged-indexed', true, { offset: 2, size: 3 }],
-    ['full-bare', false, undefined],
-    ['ranged-bare', false, { offset: 2, size: 3 }],
-  ] as const)('%s records the download token', async (_id, indexed, window) => {
+    ['full', undefined],
+    ['ranged', { offset: 2, size: 3 }],
+  ] as const)('%s records the download token', async (_id, window) => {
     vi.mocked(api.listFolder).mockResolvedValue(LISTING)
     vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([1, 2, 3]), HEADER])
-    const [data, records] = await runWithRecording(() =>
-      read(makeAccessor(), spec, indexed ? new RAMIndexCacheStore() : undefined, window),
-    )
+    const accessor = makeAccessor()
+    const entry = await listed(accessor, spec)
+    const [data, records] = await runWithRecording(() => read(accessor, spec, window, entry))
     expect(data).toEqual(new Uint8Array([1, 2, 3]))
     expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([['read', 3, 'fresh']])
   })
@@ -164,9 +160,11 @@ describe('dropbox read stamps content_hash', () => {
         yield new Uint8Array([3])
       },
     )
+    const accessor = makeAccessor()
+    const entry = await listed(accessor, spec)
     const drain = async (): Promise<number[]> => {
       const out: number[] = []
-      for await (const c of readStream(makeAccessor(), spec, new RAMIndexCacheStore())) {
+      for await (const c of readStream(accessor, spec, entry)) {
         out.push(c.byteLength)
       }
       return out
@@ -180,21 +178,17 @@ describe('dropbox read stamps content_hash', () => {
     expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([['read', 3, 'fresh']])
   })
 
-  // The ops factory's emulated truncate reads with no index.
+  // A 409 says the listed file is no longer there, which the mount reads as a
+  // stale row and lists again; anything else is a failure.
   it.each([
-    ['missing', 409, 'path/not_found/...', { code: 'ENOENT' }],
-    ['folder', 409, 'path/not_file/...', { code: 'EISDIR' }],
-    ['restricted', 409, 'path/restricted_content/...', { status: 409 }],
-    ['server-error', 500, 'path/not_found/...', { status: 500 }],
-  ] as const)(
-    'maps only an index-less miss to ENOENT (%s)',
-    async (_id, status, summary, raised) => {
-      vi.mocked(client.dropboxDownload).mockRejectedValue(
-        new client.DropboxApiError('refused', status, summary),
-      )
-      await expect(read(makeAccessor(), spec)).rejects.toMatchObject(raised)
-    },
-  )
+    [409, { code: 'ENOENT' }],
+    [500, { status: 500 }],
+  ] as const)('maps only a listed read %s to ENOENT', async (status, raised) => {
+    vi.mocked(client.dropboxDownload).mockRejectedValue(
+      new client.DropboxApiError('refused', status, 'path/not_found/...'),
+    )
+    await expect(read(makeAccessor(), spec, undefined, NOTE)).rejects.toMatchObject(raised)
+  })
 })
 
 describe('dropbox read publishes its token on a conditional mount', () => {
@@ -218,84 +212,8 @@ describe('dropbox read publishes its token on a conditional mount', () => {
     ])
     const path = new PathSpec({ virtual: '/a.txt', directory: '/', vfsPath: 'a.txt' })
     const [, tokens] = await runWithWriteContext('/', conditional ? context : null, () =>
-      captureRead(path.virtual, () => read(makeAccessor(), path, undefined, options)),
+      captureRead(path.virtual, () => read(makeAccessor(), path, options, NOTE)),
     )
     expect(tokens).toEqual(published)
-  })
-})
-
-function header(name: string): string {
-  return JSON.stringify({ name, content_hash: 'h' })
-}
-
-async function listed(): Promise<RAMIndexCacheStore> {
-  const index = new RAMIndexCacheStore()
-  await index.setDir('/', [])
-  return index
-}
-
-describe('dropbox read past an earlier listing', () => {
-  // The cached listing predates the file, so it is no proof of absence: the
-  // read goes to Dropbox by path and stamps the download's hash.
-  const n = new PathSpec({ virtual: '/n', directory: '/', vfsPath: 'n' })
-
-  async function drain(accessor: DropboxAccessor, index: RAMIndexCacheStore): Promise<number> {
-    let size = 0
-    for await (const c of readStream(accessor, n, index)) size += c.byteLength
-    return size
-  }
-
-  it('downloads a file created since', async () => {
-    vi.mocked(api.listFolder).mockReset()
-    vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([7, 8]), header('n')])
-    vi.mocked(client.dropboxDownloadStream).mockImplementation(
-      async function* (_tm, _path, onResponse) {
-        await Promise.resolve()
-        onResponse?.({ 'dropbox-api-result': header('n') })
-        yield new Uint8Array([7, 8])
-      },
-    )
-    const accessor = makeAccessor()
-    const [data, records] = await runWithRecording(async () => read(accessor, n, await listed()))
-    expect(data).toEqual(new Uint8Array([7, 8]))
-    expect(records.map((r) => r.fingerprint)).toEqual(['h'])
-    expect(vi.mocked(client.dropboxDownload).mock.lastCall?.[1]).toBe('/n')
-    expect(await drain(accessor, await listed())).toBe(2)
-    expect(vi.mocked(client.dropboxDownloadStream).mock.lastCall?.[1]).toBe('/n')
-    expect(api.listFolder).not.toHaveBeenCalled()
-  })
-
-  it('names what Dropbox answered', async () => {
-    const refused = new client.DropboxApiError('refused', 409, 'path/not_file/..')
-    vi.mocked(client.dropboxDownload).mockRejectedValue(refused)
-    vi.mocked(client.dropboxDownloadStream).mockImplementation(
-      // eslint-disable-next-line require-yield
-      async function* () {
-        await Promise.resolve()
-        throw refused
-      },
-    )
-    await expect(read(makeAccessor(), n, await listed())).rejects.toMatchObject({ code: 'EISDIR' })
-    await expect(drain(makeAccessor(), await listed())).rejects.toMatchObject({ code: 'EISDIR' })
-  })
-
-  // A download by path matches names case-insensitively; the listing does
-  // not, so past a listing a file stored as N is not n. Truncate's index-less
-  // read keeps N's bytes: its upload lands on N, which a miss would have
-  // zeroed.
-  it('refuses a file in another case past a listing', async () => {
-    vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([1]), header('N')])
-    vi.mocked(client.dropboxDownloadStream).mockImplementation(
-      async function* (_tm, _path, onResponse) {
-        await Promise.resolve()
-        onResponse?.({ 'dropbox-api-result': header('N') })
-        yield new Uint8Array([1])
-      },
-    )
-    await expect(read(makeAccessor(), n, await listed())).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(drain(makeAccessor(), await listed())).rejects.toMatchObject({ code: 'ENOENT' })
-    const write = vi.fn(() => Promise.resolve())
-    await truncateByRewrite((p) => read(makeAccessor(), p), write, n, 1, false)
-    expect(write.mock.calls).toEqual([[n, new Uint8Array([1])]])
   })
 })

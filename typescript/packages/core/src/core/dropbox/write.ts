@@ -15,22 +15,23 @@
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { nativeCondition, writeCondition } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import type { PathSpec } from '../../types.ts'
-import { uploadToken } from '../../utils/upload.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { uploadStat } from '../../utils/upload.ts'
 import { lookup, refused, type DropboxEntry } from './api.ts'
 import { liveOf } from './fingerprint.ts'
 import { dropboxUpload } from './client.ts'
 import { dropboxPathOf } from './paths.ts'
-import { statFromEntry } from './stat.ts'
+import { statFromEntry } from './readdir.ts'
 
 // Single-call upload; Dropbox caps it at ~150 MB (larger files need
 // upload sessions, not supported here). A held version costs one
-// get_metadata and goes out as the file's rev in `update` mode.
+// get_metadata and goes out as the file's rev in `update` mode. Answers the
+// stored file's stat, null for a reply that names none.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,
   data: Uint8Array,
-): Promise<void> {
+): Promise<FileStat | null> {
   const tm = accessor.tokenManager
   const apiPath = dropboxPathOf(accessor, path)
   const cond = await writeCondition(path, 'put')
@@ -39,11 +40,15 @@ export async function write(
     rev = await nativeCondition(path, cond, liveOf(await lookup(tm, apiPath)), 'put')
   }
   const timer = startOp()
+  let entry: unknown
   try {
-    const entry = await dropboxUpload(tm, apiPath, data, rev)
-    const token = uploadToken(entry as DropboxEntry | null, statFromEntry, path.virtual)
-    record('write', path.virtual, 'dropbox', data.byteLength, timer, { fingerprint: token })
+    entry = await dropboxUpload(tm, apiPath, data, rev)
   } catch (err) {
     throw (await refused(path, err, cond, rev)) ?? err
   }
+  const stored = uploadStat(entry as DropboxEntry | null, statFromEntry, path.virtual)
+  record('write', path.virtual, 'dropbox', data.byteLength, timer, {
+    fingerprint: stored?.fingerprint ?? null,
+  })
+  return stored
 }

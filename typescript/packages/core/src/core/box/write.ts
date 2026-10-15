@@ -15,50 +15,94 @@
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { nativeCondition, writeCondition } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import type { PathSpec } from '../../types.ts'
-import { eisdir, enoent } from '../../errors/fs.ts'
-import { uploadToken } from '../../utils/upload.ts'
+import { type FileStat, FileType, type PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
+import { eisdir } from '../../errors/fs.ts'
+import { uploadStat } from '../../utils/upload.ts'
 import { type BoxItem, refused, uploadFileVersion, uploadNewFile } from './api.ts'
+import { BoxApiError } from './client.ts'
+import { CONFLICT_STATUS } from './constants.ts'
 import { liveOf } from './fingerprint.ts'
-import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
-import { statFromItem } from './stat.ts'
+import { statFromItem } from './readdir.ts'
+import { itemOf, liveItem, parentFolder, pathParts } from './resolve.ts'
+
+/**
+ * Upload `data` as a new file at `path`, plainly. The listing named nothing
+ * there; Box holding a file by that name now means the listing is older than
+ * it, so the file found live gets a new version, as a write to a listed file
+ * would. Mirrors Python's `_upload_new`.
+ */
+async function uploadNew(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  data: Uint8Array,
+  folderId: string,
+): Promise<unknown> {
+  const tm = accessor.tokenManager
+  const parts = pathParts(path)
+  try {
+    return await uploadNewFile(tm, folderId, parts[parts.length - 1] ?? '', data)
+  } catch (err) {
+    if (
+      !(err instanceof BoxApiError) ||
+      err.status !== CONFLICT_STATUS ||
+      (err.conflict !== null && err.conflict !== 'file')
+    )
+      throw err
+    const found = await liveItem(accessor, path, null)
+    if (found?.type !== 'file') throw err
+    return uploadFileVersion(tm, found.id, found.name, data, null)
+  }
+}
 
 /**
  * Upload a new file, or a new version of an existing one. A held version goes
- * out as the file's etag.
+ * out as the file's etag. Answers the stored file's stat, null for a reply
+ * that names none. Mirrors Python's `write`.
  */
 export async function write(
   accessor: BoxAccessor,
   path: PathSpec,
   data: Uint8Array,
-): Promise<void> {
+  handed: Handed = {},
+): Promise<FileStat | null> {
   const parts = pathParts(path)
-  if (parts.length === 0) throw eisdir(path.virtual)
+  if (parts.length === 0 || handed.entry?.type === FileType.DIRECTORY) throw eisdir(path.virtual)
   const tm = accessor.tokenManager
   const cond = await writeCondition(path, 'put')
   const timer = startOp()
-  const existing = await resolveItem(accessor, parts)
+  let existing = itemOf(handed.entry)
+  // A held version is checked against what is there now: the listed row can
+  // be older than the read that holds it.
+  if (cond !== null) existing = await liveItem(accessor, path, existing)
   const etag = await nativeCondition(path, cond, liveOf(existing), 'put')
-  let upload: () => Promise<unknown>
-  if (existing !== null && existing.type === 'file') {
-    // Overwrite uploads a new version under the same id, keeping Box's own
-    // name so a box-native file isn't renamed with the vfs suffix.
-    upload = () => uploadFileVersion(tm, existing.id, existing.name, data, etag)
-  } else {
-    const parentId = await resolveParentId(accessor, parts)
-    if (parentId === null) throw enoent(path.virtual)
-    upload = () => uploadNewFile(tm, parentId, parts[parts.length - 1] ?? '', data)
-  }
+  let reply: unknown
   try {
-    const reply = await upload()
-    const entries: unknown =
-      typeof reply === 'object' && reply !== null && !Array.isArray(reply)
-        ? (reply as { entries?: unknown }).entries
-        : undefined
-    const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
-    const token = uploadToken(first, statFromItem, path.virtual)
-    record('write', path.virtual, 'box', data.length, timer, { fingerprint: token })
+    if (existing?.type === 'file') {
+      // Overwrite uploads a new version under the same id, keeping Box's own
+      // name so a box-native file isn't renamed with the vfs suffix.
+      reply = await uploadFileVersion(tm, existing.id, existing.name, data, etag)
+    } else if (cond === null) {
+      reply = await uploadNew(accessor, path, data, parentFolder(accessor, path, handed.parent))
+    } else {
+      reply = await uploadNewFile(
+        tm,
+        parentFolder(accessor, path, handed.parent),
+        parts[parts.length - 1] ?? '',
+        data,
+      )
+    }
   } catch (err) {
     throw (await refused(path, err, cond, etag)) ?? err
   }
+  const entries: unknown =
+    typeof reply === 'object' && reply !== null && !Array.isArray(reply)
+      ? (reply as { entries?: unknown }).entries
+      : undefined
+  const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
+  const stored = uploadStat(first, statFromItem, path.virtual)
+  record('write', path.virtual, 'box', data.length, timer, {
+    fingerprint: stored?.fingerprint ?? null,
+  })
+  return stored
 }

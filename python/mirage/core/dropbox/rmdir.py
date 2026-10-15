@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dropbox.api import delete_path, get_metadata, list_folder
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
@@ -22,11 +21,7 @@ from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
-async def rmdir(
-    accessor: DropboxAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> None:
+async def rmdir(accessor: DropboxAccessor, path: PathSpec) -> None:
     """Remove an empty folder.
 
     delete_v2 removes a folder RECURSIVELY; kernel/GNU rmdir must fail
@@ -36,8 +31,6 @@ async def rmdir(
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): folder to remove.
-        index (IndexCacheStore): accepted for the rmdir slot's shape;
-            unused.
     """
     api_path = dropbox_path_of(accessor, path)
     try:

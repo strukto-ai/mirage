@@ -16,10 +16,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.index.config import IndexEntry
 from mirage.core.box.checksum import checksum
 from mirage.observe.context import RecordingScope
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 SCOPE = PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/a.txt")
 
@@ -30,12 +29,14 @@ async def _listed(index, sha1: str | None) -> None:
         [
             (
                 "a.txt",
-                IndexEntry(
-                    id="200",
+                FileStat(
                     name="a.txt",
-                    resource_type="box/file",
-                    vfs_name="a.txt",
-                    extra={"sha1": sha1} if sha1 else {},
+                    type=FileType.FILE,
+                    extra={
+                        "box_id": "200",
+                        "resource_type": "box/file",
+                        **({"sha1": sha1} if sha1 else {}),
+                    },
                 ),
             )
         ],
@@ -50,7 +51,12 @@ async def test_box_answers_its_live_sha1(accessor, index):
         new_callable=AsyncMock,
         return_value={"id": "200", "sha1": "AB" * 20},
     ) as info:
-        assert await checksum(accessor, SCOPE, "sha1", index) == "ab" * 20
+        assert (
+            await checksum(
+                accessor, SCOPE, "sha1", (await index.get("/a.txt")).entry
+            )
+            == "ab" * 20
+        )
     info.assert_awaited_once_with(accessor.token_manager, "200")
 
 
@@ -63,7 +69,12 @@ async def test_box_without_a_sha1_reads(accessor, index, sha1):
         new_callable=AsyncMock,
         return_value={"id": "200", "sha1": sha1},
     ):
-        assert await checksum(accessor, SCOPE, "sha1", index) is None
+        assert (
+            await checksum(
+                accessor, SCOPE, "sha1", (await index.get("/a.txt")).entry
+            )
+            is None
+        )
 
 
 @pytest.mark.asyncio
@@ -71,7 +82,12 @@ async def test_box_keeps_no_md5(accessor, index):
     with patch(
         "mirage.core.box.checksum.get_file_info", new_callable=AsyncMock
     ) as info:
-        assert await checksum(accessor, SCOPE, "md5", index) is None
+        assert (
+            await checksum(
+                accessor, SCOPE, "md5", (await index.get("/a.txt")).entry
+            )
+            is None
+        )
     info.assert_not_awaited()
 
 
@@ -90,7 +106,9 @@ async def test_box_records_the_token_a_read_would(
             new_callable=AsyncMock,
             return_value={"id": "200", "sha1": "AB" * 20},
         ):
-            await checksum(accessor, SCOPE, "sha1", index)
+            await checksum(
+                accessor, SCOPE, "sha1", (await index.get("/a.txt")).entry
+            )
     finally:
         scope.close()
     assert [(r.op, r.path, r.fingerprint) for r in scope.records] == [

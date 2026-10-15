@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '../../cache/index/config.ts'
 import type { LiveVersion } from '../../cache/types.ts'
+import type { FileStat } from '../../types.ts'
 import type { BoxItem } from './api.ts'
 import { SHA1 } from './constants.ts'
 
@@ -34,7 +34,7 @@ export function liveOf(item: BoxItem | null): LiveVersion | null {
 }
 
 /** The content token a listing row carries. */
-export function entryToken(entry: IndexEntry): string | null {
+export function entryToken(entry: FileStat): string | null {
   return tokenOf(entry.extra[SHA1])
 }
 
@@ -45,7 +45,7 @@ export function entryToken(entry: IndexEntry): string | null {
  * download leaves them disagreeing, and new bytes are never labelled with
  * the old token. `digest` is the SHA-1 hex of the bytes the read returned.
  */
-export function readToken(entry: IndexEntry, digest: string): string | null {
+export function readToken(entry: FileStat, digest: string): string | null {
   const token = entryToken(entry)
   return token !== null && token === digest ? token : null
 }

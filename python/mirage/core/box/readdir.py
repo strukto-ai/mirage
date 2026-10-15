@@ -12,20 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import active_cache_manager
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.cache.index.warm import entry_or_warm
 from mirage.core.box.api import absent_on_404, list_folder_items
 from mirage.core.box.constants import SHA1
 from mirage.core.box.fingerprint import token_of
 from mirage.core.box.resolve import root_id
 from mirage.errors.fs import enoent, enotdir
-from mirage.types import FileType, PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.filetype import content_type_for_path
 
 
 def resource_type_for(item: dict[str, Any]) -> str:
@@ -36,73 +32,77 @@ def resource_type_for(item: dict[str, Any]) -> str:
     return "box/file"
 
 
+def stat_from_item(item: dict[str, Any]) -> FileStat:
+    """The stat of one Box item, as a listing, ``GET /files/{id}`` or an
+    upload's reply returns it.
+
+    ``extra`` carries what the functions handed the stat act on: the item
+    id, and for a file the sha1 a read checks and the etag a conditional
+    write sends.
+
+    Args:
+        item (dict[str, Any]): a Box item.
+    """
+    vfs_name = item["name"]
+    rt = resource_type_for(item)
+    if rt == "box/folder":
+        return FileStat(
+            name=vfs_name,
+            type=FileType.DIRECTORY,
+            modified=item.get("modified_at") or "",
+            extra={"box_id": item["id"]},
+        )
+    sha1 = token_of(item.get(SHA1))
+    etag = token_of(item.get("etag"))
+    return FileStat(
+        name=vfs_name,
+        size=item.get("size"),
+        type=FileType.FILE,
+        content=content_type_for_path(vfs_name),
+        modified=item.get("modified_at") or "",
+        fingerprint=sha1,
+        extra={
+            "box_id": item["id"],
+            "resource_type": rt,
+            **({SHA1: sha1} if sha1 else {}),
+            **({"etag": etag} if etag else {}),
+        },
+    )
+
+
 async def readdir(
     accessor: BoxAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    virtual = path_spec.virtual
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
-    path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
-    key = path.strip("/")
-    virtual_key = prefix + "/" + key if key else prefix or "/"
+    entry: FileStat | None = None,
+) -> list[FileStat]:
+    """A folder's children, each as ``stat`` answers it.
 
-    cached = await index.list_dir(virtual_key)
-    if cached.entries is not None:
-        return cached.entries
+    The mount root lists its root folder; any other folder is listed by
+    the id its parent's listing named. Web links are bookmarks with no
+    content endpoint and no size, so they are left out.
 
-    if not key:
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path_spec (PathSpec): the folder.
+        entry (FileStat | None): what is at the folder.
+    """
+    target = path_spec.dir if path_spec.pattern else path_spec
+    if not target.vfs_path.strip("/"):
         folder_id = root_id(accessor)
+    elif entry is None:
+        raise enoent(path_spec.virtual)
+    elif entry.type is not FileType.DIRECTORY:
+        raise enotdir(path_spec.virtual)
     else:
-        manager = active_cache_manager()
-        probed = (
-            manager.probed_stat(path_spec) if manager is not None else None
-        )
-        if probed is not None and probed.type != FileType.DIRECTORY:
-            raise enotdir(virtual)
-        parent_virtual = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"
-        parent_path = PathSpec.from_str_path(
-            parent_virtual, mount_key(parent_virtual, prefix)
-        )
-        entry = await entry_or_warm(
-            index, virtual_key, partial(readdir, accessor, parent_path, index)
-        )
-        if entry is None:
-            raise enoent(virtual)
-        if entry.resource_type != "box/folder":
-            raise enotdir(virtual)
-        folder_id = entry.id
-
+        folder_id = entry.extra["box_id"]
     items = await absent_on_404(
-        virtual, lambda: list_folder_items(accessor.token_manager, folder_id)
+        path_spec.virtual,
+        lambda: list_folder_items(accessor.token_manager, folder_id),
     )
-    entries: list[tuple[str, IndexEntry, bool]] = []
-    for it in items:
-        if it.get("type") == "web_link":
-            # Weblinks are bookmarks: no content endpoint, no size. Hide
-            # them from listings instead of serving an unreadable entry.
-            continue
-        is_dir = it.get("type") == "folder"
-        filename = it["name"]
-        sha1 = token_of(it.get(SHA1))
-        entry = IndexEntry(
-            id=it["id"],
-            name=filename,
-            resource_type=resource_type_for(it),
-            remote_time=it.get("modified_at") or "",
-            vfs_name=filename,
-            size=None if is_dir else it.get("size"),
-            extra={SHA1: sha1} if sha1 else {},
-        )
-        entries.append((filename, entry, is_dir))
-
-    entries.sort(key=lambda listed: listed[0])
-    await index.set_dir(virtual_key, [(name, e) for name, e, _ in entries])
-    path_prefix = f"/{key}/" if key else "/"
-    result_paths = []
-    for name, _, is_folder in entries:
-        if is_folder:
-            result_paths.append(f"{prefix}{path_prefix}{name}/")
-        else:
-            result_paths.append(f"{prefix}{path_prefix}{name}")
-    return result_paths
+    rows = [
+        stat_from_item(item)
+        for item in items
+        if item.get("type") != "web_link"
+    ]
+    rows.sort(key=lambda row: row.name)
+    return rows

@@ -22,7 +22,7 @@ import { buildDeltaHook } from '../../core/box/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
 import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
 import { capacity as boxCapacity } from '../../core/box/capacity.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../types.ts'
 import { readdir as boxReaddir } from '../../core/box/readdir.ts'
 import { read as boxRead, readStream as boxStream } from '../../core/box/read.ts'
 import { checksum as boxChecksum } from '../../core/box/checksum.ts'
@@ -54,6 +54,26 @@ export class BoxVFS extends BaseVFS {
   // checks its bytes against the row it resolved through.
   override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry'],
+    stat: ['entry', 'index'],
+    checksum: ['entry'],
+    readStream: ['entry'],
+    exists: ['entry'],
+    write: ['entry', 'parent'],
+    create: ['entry', 'parent'],
+    mkdir: ['parent'],
+    unlink: ['entry'],
+    rmdir: ['entry'],
+    rmR: ['entry'],
+    rename: ['entry', 'dstParent', 'dstEntry'],
+    copy: ['entry', 'dstParent', 'dstEntry'],
+    dirCopy: ['entry', 'dstParent', 'dstEntry'],
+    truncate: ['entry', 'parent'],
+    filesContaining: ['entry'],
+  } as const
   override readonly prompt: string = PROMPT
   readonly config: BoxConfig
   override readonly accessor: BoxAccessor
@@ -75,87 +95,104 @@ export class BoxVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return boxReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[]> {
+    return boxReaddir(this.accessor, path, handed?.entry)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return boxRead(this.accessor, path, index)
-    return boxRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return boxRead(this.accessor, path, undefined, handed?.entry)
+    return boxRead(
+      this.accessor,
+      path,
+      size === null ? { offset } : { offset, size },
+      handed?.entry,
+    )
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return boxStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return boxStat(this.accessor, path, handed?.entry, handed?.index)
   }
 
-  override checksum(
+  override checksum(path: PathSpec, algorithm: string, handed?: Handed): Promise<string | null> {
+    return boxChecksum(this.accessor, path, algorithm, handed?.entry)
+  }
+
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return boxStream(this.accessor, path, handed?.entry)
+  }
+
+  override exists(path: PathSpec, handed?: Handed): Promise<boolean> {
+    return boxExists(this.accessor, path, handed?.entry)
+  }
+
+  override write(
     path: PathSpec,
-    algorithm: string,
-    index?: IndexCacheStore,
-  ): Promise<string | null> {
-    return boxChecksum(this.accessor, path, algorithm, index)
+    data: Uint8Array,
+    _signal?: AbortSignal,
+    handed: Handed = {},
+  ): Promise<FileStat | null> {
+    return boxWrite(this.accessor, path, data, handed)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return boxStream(this.accessor, path, index)
+  override create(path: PathSpec, handed: Handed = {}): Promise<FileStat | null> {
+    return boxCreate(this.accessor, path, handed)
   }
 
-  override exists(path: PathSpec): Promise<boolean> {
-    return boxExists(this.accessor, path)
+  override mkdir(path: PathSpec, parents = false, handed: Handed = {}): Promise<FileStat | null> {
+    return boxMkdir(this.accessor, path, parents, handed)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return boxWrite(this.accessor, path, data)
+  override unlink(path: PathSpec, handed?: Handed): Promise<void> {
+    return boxUnlink(this.accessor, path, handed)
   }
 
-  override create(path: PathSpec): Promise<void> {
-    return boxCreate(this.accessor, path)
+  override rmdir(path: PathSpec, handed?: Handed): Promise<void> {
+    return boxRmdir(this.accessor, path, handed)
   }
 
-  override mkdir(path: PathSpec, parents = false): Promise<void> {
-    return boxMkdir(this.accessor, path, parents)
+  override rmR(path: PathSpec, handed: Handed = {}): Promise<void> {
+    return boxRmR(this.accessor, path, handed)
   }
 
-  override unlink(path: PathSpec): Promise<void> {
-    return boxUnlink(this.accessor, path)
+  override rename(src: PathSpec, dst: PathSpec, handed: Handed = {}): Promise<FileStat | null> {
+    return boxRename(this.accessor, src, dst, handed)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
-    return boxRmdir(this.accessor, path)
+  override copy(
+    src: PathSpec,
+    dst: PathSpec,
+    _signal?: AbortSignal,
+    handed: Handed = {},
+  ): Promise<FileStat | null> {
+    return boxCopy(this.accessor, src, dst, handed)
   }
 
-  override rmR(path: PathSpec): Promise<void> {
-    return boxRmR(this.accessor, path)
+  override dirCopy(src: PathSpec, dst: PathSpec, handed: Handed = {}): Promise<FileStat | null> {
+    return boxCopy(this.accessor, src, dst, handed)
   }
 
-  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    return boxRename(this.accessor, src, dst)
-  }
-
-  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return boxCopy(this.accessor, src, dst)
-  }
-
-  override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return boxCopy(this.accessor, src, dst)
-  }
-
-  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    return boxTruncate(this.accessor, path, length, noCreate)
+  override truncate(
+    path: PathSpec,
+    length: number,
+    noCreate = false,
+    handed: Handed = {},
+  ): Promise<void> {
+    return boxTruncate(this.accessor, path, length, noCreate, handed)
   }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
+    handed?: Handed,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || !this.accessor.contentSearch) return Promise.resolve(null)
-    return boxFilesContaining(this.accessor, text, [path])
+    return boxFilesContaining(this.accessor, text, path, handed?.entry)
   }
 
   override capacity(): Promise<CapacityResult> {

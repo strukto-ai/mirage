@@ -13,9 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import type { PathSpec } from '../../types.ts'
-import { listFolderItems, type BoxFileInfo, type BoxItem, type BoxSearchItem } from './api.ts'
-import { ACTIVE, ALL_FILES_FOLDER_ID, TRASH_FOLDER_ID } from './constants.ts'
+import { enoent, enotdir } from '../../errors/fs.ts'
+import { type FileStat, FileType, type PathSpec } from '../../types.ts'
+import {
+  getFileInfo,
+  listFolderItems,
+  type BoxFileInfo,
+  type BoxItem,
+  type BoxSearchItem,
+} from './api.ts'
+import { BoxApiError } from './client.ts'
+import { ACTIVE, ALL_FILES_FOLDER_ID, SHA1, TRASH_FOLDER_ID } from './constants.ts'
 
 export function pathParts(path: PathSpec): string[] {
   return path.vfsPath.split('/').filter((p) => p !== '')
@@ -56,14 +64,37 @@ export async function resolveItem(accessor: BoxAccessor, parts: string[]): Promi
   return chain[chain.length - 1] ?? null
 }
 
-export async function resolveParentId(
+/**
+ * The Box item a listed row names, in the shape a lookup answers. Mirrors
+ * Python's `item_of`.
+ */
+export function itemOf(row: FileStat | null | undefined): BoxItem | null {
+  if (row === null || row === undefined) return null
+  const sha1 = row.extra[SHA1]
+  const etag = row.extra.etag
+  return {
+    id: row.extra.box_id as string,
+    type: row.type === FileType.DIRECTORY ? 'folder' : 'file',
+    name: row.name,
+    ...(typeof sha1 === 'string' ? { sha1 } : {}),
+    ...(typeof etag === 'string' ? { etag } : {}),
+  }
+}
+
+/**
+ * The folder a create at `path` lands in: the mount root's, or what is at the
+ * parent path. A missing or non-directory parent names the operand, as
+ * mkdir(2) does. Mirrors Python's `parent_folder`.
+ */
+export function parentFolder(
   accessor: BoxAccessor,
-  parts: string[],
-): Promise<string | null> {
-  if (parts.length <= 1) return accessor.rootFolderId
-  const parent = await resolveItem(accessor, parts.slice(0, -1))
-  if (parent?.type !== 'folder') return null
-  return parent.id
+  path: PathSpec,
+  parent: FileStat | null | undefined,
+): string {
+  if (pathParts(path).length <= 1) return accessor.rootFolderId
+  if (parent === null || parent === undefined) throw enoent(path.virtual)
+  if (parent.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
+  return parent.extra.box_id as string
 }
 
 /**
@@ -110,4 +141,30 @@ export function namesThisPath(accessor: BoxAccessor, item: BoxFileInfo, path: Pa
   if (chain.length === 0 || chain[0]?.id !== ALL_FILES_FOLDER_ID) return false
   if (chain.some((anc) => anc.id === TRASH_FOLDER_ID)) return false
   return mountRelativeKey(item, accessor.rootFolderId) === pathParts(path).join('/')
+}
+
+/**
+ * What is at `path` now, asked live. A listed row can be older than the
+ * version an op holds, so a check or a conditional write asks again: one
+ * `GET /files/{id}` by the id the row names, when the answer is still the
+ * active file at exactly this path, else a walk of the listings from the
+ * mount root. Only the walk may call a path gone, so a 404 or 403 by id falls
+ * back to it rather than answering null. Mirrors Python's `live_item`.
+ */
+export async function liveItem(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  lead: BoxItem | null,
+): Promise<BoxItem | null> {
+  if (lead?.type === 'file' && lead.id !== '') {
+    let item: BoxFileInfo | null = null
+    try {
+      item = await getFileInfo(accessor.tokenManager, lead.id)
+    } catch (err) {
+      if (!(err instanceof BoxApiError) || (err.status !== 403 && err.status !== 404)) throw err
+      console.warn(`listed id for ${path.virtual} unusable: ${String(err)}`)
+    }
+    if (item !== null && namesThisPath(accessor, item, path)) return item
+  }
+  return resolveItem(accessor, pathParts(path))
 }

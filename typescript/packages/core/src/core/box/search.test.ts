@@ -16,29 +16,21 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiModule from './api.ts'
-import type * as ResolveModule from './resolve.ts'
 
 vi.mock('./api.ts', async () => {
   const actual = await vi.importActual<typeof ApiModule>('./api.ts')
   return { ...actual, searchContent: vi.fn() }
 })
 
-vi.mock('./resolve.ts', async () => {
-  const actual = await vi.importActual<typeof ResolveModule>('./resolve.ts')
-  return { ...actual, resolveItem: vi.fn() }
-})
-
 import { BoxAccessor } from '../../accessor/box.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import type { BoxSearchItem } from './api.ts'
-import * as resolve from './resolve.ts'
 import { filesContaining } from './search.ts'
 
 const STUB_TM = {} as BoxTokenManager
 const search = vi.mocked(api.searchContent)
-const resolveItem = vi.mocked(resolve.resolveItem)
 
 function makeAccessor(rootFolderId?: string): BoxAccessor {
   return new BoxAccessor({
@@ -68,7 +60,6 @@ const ROOT: [string, string][] = [['0', 'All Files']]
 
 beforeEach(() => {
   search.mockReset()
-  resolveItem.mockReset()
 })
 
 describe('filesContaining', () => {
@@ -81,7 +72,7 @@ describe('filesContaining', () => {
       ],
       truncated: false,
     })
-    const out = await filesContaining(makeAccessor(), 'needle', [mountRoot()])
+    const out = await filesContaining(makeAccessor(), 'needle', mountRoot())
     expect(search.mock.calls[0]?.[2]).toBe('0')
     expect(out?.map((p) => [p.virtual, p.vfsPath])).toEqual([
       ['/data/x.txt', 'x.txt'],
@@ -95,12 +86,12 @@ describe('filesContaining', () => {
       directory: '/data/docs',
       vfsPath: 'docs',
     })
-    resolveItem.mockResolvedValueOnce({ id: '100', type: 'folder', name: 'docs' })
+    const row = new FileStat({ name: 'docs', type: FileType.DIRECTORY, extra: { box_id: '100' } })
     search.mockResolvedValueOnce({
       items: [file('5', 'in.txt', [...ROOT, ['100', 'docs']])],
       truncated: false,
     })
-    const out = await filesContaining(makeAccessor(), 'needle', [scope])
+    const out = await filesContaining(makeAccessor(), 'needle', scope, row)
     expect(search.mock.calls[0]?.[2]).toBe('100')
     expect(out?.map((p) => [p.virtual, p.vfsPath])).toEqual([['/data/docs/in.txt', 'docs/in.txt']])
   })
@@ -115,7 +106,7 @@ describe('filesContaining', () => {
     ['no hit', () => search.mockResolvedValueOnce({ items: [], truncated: false })],
   ])('is null for %s', async (_name, arrange) => {
     arrange()
-    expect(await filesContaining(makeAccessor(), 'needle', [mountRoot()])).toBeNull()
+    expect(await filesContaining(makeAccessor(), 'needle', mountRoot())).toBeNull()
   })
 
   it('is null for a scope that is no folder', async () => {
@@ -124,7 +115,8 @@ describe('filesContaining', () => {
       directory: '/data/a.txt',
       vfsPath: 'a.txt',
     })
-    resolveItem.mockResolvedValueOnce({ id: '9', type: 'file', name: 'a.txt' })
-    expect(await filesContaining(makeAccessor(), 'needle', [scope])).toBeNull()
+    const row = new FileStat({ name: 'a.txt', type: FileType.FILE, extra: { box_id: '9' } })
+    expect(await filesContaining(makeAccessor(), 'needle', scope, row)).toBeNull()
+    expect(search).not.toHaveBeenCalled()
   })
 })

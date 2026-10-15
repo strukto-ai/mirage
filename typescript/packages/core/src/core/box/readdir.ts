@@ -12,19 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { activeCacheManager } from '../../cache/context.ts'
-import { entryOrWarm } from '../../cache/index/warm.ts'
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
+import { stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { enotdir, enoent } from '../../errors/fs.ts'
 import { absentOn404, listFolderItems, type BoxItem } from './api.ts'
 import { SHA1 } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
-import { enotdir, enoent } from '../../errors/fs.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
 
 export function resourceTypeFor(item: BoxItem): string {
   if (item.type === 'folder') return 'box/folder'
@@ -32,74 +28,63 @@ export function resourceTypeFor(item: BoxItem): string {
   return 'box/file'
 }
 
+/**
+ * The stat of one Box item, as a listing, `GET /files/{id}` or an upload's
+ * reply returns it. `extra` carries what the functions handed the stat act
+ * on: the item id, and for a file the sha1 a read checks and the etag a
+ * conditional write sends. Mirrors Python's `stat_from_item`.
+ */
+export function statFromItem(item: BoxItem): FileStat {
+  const vfsName = item.name
+  const rt = resourceTypeFor(item)
+  if (rt === 'box/folder') {
+    return new FileStat({
+      name: vfsName,
+      type: FileType.DIRECTORY,
+      modified: item.modified_at ?? '',
+      extra: { box_id: item.id },
+    })
+  }
+  const size = typeof item.size === 'number' ? item.size : null
+  const sha1 = tokenOf(item[SHA1])
+  const etag = tokenOf(item.etag)
+  return new FileStat({
+    name: vfsName,
+    size,
+    type: FileType.FILE,
+    content: contentTypeForPath(vfsName),
+    modified: item.modified_at ?? '',
+    fingerprint: sha1,
+    extra: {
+      box_id: item.id,
+      resource_type: rt,
+      ...(sha1 === null ? {} : { [SHA1]: sha1 }),
+      ...(etag === null ? {} : { etag }),
+    },
+  })
+}
+
+/**
+ * A folder's children, each as `stat` answers it. The mount root lists its
+ * root folder; any other folder is listed by the id its parent's listing
+ * named. Web links are bookmarks with no content endpoint and no size, so
+ * they are left out. Mirrors Python's `readdir`.
+ */
 export async function readdir(
   accessor: BoxAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const key = (path.pattern !== null ? path.dir : path).vfsPath
-  const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
-
-  if (index !== undefined) {
-    const cached = await index.listDir(virtualKey)
-    if (cached.entries !== undefined && cached.entries !== null) return cached.entries
-  }
-
+  entry?: FileStat | null,
+): Promise<FileStat[]> {
+  const target = path.pattern !== null ? path.dir : path
   let folderId: string
-  if (key === '') {
-    folderId = accessor.rootFolderId
-  } else {
-    if (index === undefined) {
-      throw enoent(path.virtual)
-    }
-    const probed = activeCacheManager()?.probedStat(path)
-    if (probed != null && probed.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
-    const parentVirtual = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-    const parentPath = PathSpec.fromStrPath(parentVirtual, mountKey(parentVirtual, prefix))
-    const entry = await entryOrWarm(index, virtualKey, () => readdir(accessor, parentPath, index))
-    if (entry === null) throw enoent(path.virtual)
-    if (entry.resourceType !== 'box/folder') throw enotdir(path.virtual)
-    folderId = entry.id
-  }
-
+  if (stripSlash(target.vfsPath) === '') folderId = accessor.rootFolderId
+  else if (entry === null || entry === undefined) throw enoent(path.virtual)
+  else if (entry.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
+  else folderId = entry.extra.box_id as string
   const items = await absentOn404(path.virtual, () =>
     listFolderItems(accessor.tokenManager, folderId),
   )
-  const entries: { name: string; entry: IndexEntry; isDir: boolean }[] = []
-  for (const it of items) {
-    if (it.type === 'web_link') {
-      // Weblinks are bookmarks: no content endpoint, no size. Hide them
-      // from listings instead of serving an unreadable entry.
-      continue
-    }
-    const isDir = it.type === 'folder'
-    const filename = it.name
-    const sha1 = tokenOf(it[SHA1])
-    const entry = new IndexEntry({
-      id: it.id,
-      name: filename,
-      resourceType: resourceTypeFor(it),
-      remoteTime: it.modified_at ?? '',
-      vfsName: filename,
-      size: isDir ? null : typeof it.size === 'number' ? it.size : null,
-      extra: sha1 === null ? {} : { [SHA1]: sha1 },
-    })
-    entries.push({ name: filename, entry, isDir })
-  }
-  entries.sort((a, b) => compareCodePoints(a.name, b.name))
-
-  if (index !== undefined) {
-    await index.setDir(
-      virtualKey,
-      entries.map((e) => [e.name, e.entry] as [string, IndexEntry]),
-    )
-  }
-  const pathPrefix = key !== '' ? `/${key}/` : '/'
-  const out: string[] = []
-  for (const e of entries) {
-    if (e.isDir) out.push(`${prefix}${pathPrefix}${e.name}/`)
-    else out.push(`${prefix}${pathPrefix}${e.name}`)
-  }
-  return out
+  const rows = items.filter((item) => item.type !== 'web_link').map(statFromItem)
+  rows.sort((a, b) => compareCodePoints(a.name, b.name))
+  return rows
 }

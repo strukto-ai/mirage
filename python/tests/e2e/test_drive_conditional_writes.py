@@ -20,6 +20,7 @@ import pytest_asyncio
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
+from mirage.types import ReadPolicy, ReadSpec
 from mirage.vfs.registry import build_vfs
 from tests.fixtures.box_api import FakeBox
 from tests.fixtures.box_api import serve as serve_box
@@ -80,12 +81,18 @@ def drive(request: pytest.FixtureRequest) -> Iterator[Drive]:
 async def workspace(drive: Drive) -> AsyncIterator[Callable[..., Workspace]]:
     built: list[Workspace] = []
 
-    def make(write: WritePolicy = WritePolicy.CONDITIONAL) -> Workspace:
+    def make(
+        write: WritePolicy = WritePolicy.CONDITIONAL,
+        read: ReadSpec | None = None,
+    ) -> Workspace:
         name = "box" if isinstance(drive.fake, FakeBox) else "dropbox"
         vfs = build_vfs(name, drive.config)
-        ws = Workspace(
-            {drive.root: Mount(vfs, mode=MountMode.WRITE, write=write)}
+        mount = (
+            Mount(vfs, mode=MountMode.WRITE, write=write)
+            if read is None
+            else Mount(vfs, mode=MountMode.WRITE, write=write, read=read)
         )
+        ws = Workspace({drive.root: mount})
         built.append(ws)
         return ws
 
@@ -386,18 +393,23 @@ async def test_a_move_lifts_a_kept_version(drive, workspace, ancestor):
 
 @pytest.mark.asyncio
 @BOX
-async def test_a_box_write_sends_as_many_requests_as_a_plain_one(
+async def test_a_box_conditional_write_asks_by_id_before_each_upload(
     drive, workspace
 ):
-    counts = []
+    # A plain write uploads to the id the listing named; a held version is
+    # checked live first, by that id, so a changed file is refused before
+    # its body goes out. The redirect truncates, then writes: two uploads.
+    logs = []
+    fid = drive.box.id_of("f")
     for policy in (WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL):
         ws = workspace(policy)
         await _run(ws, "cat /box/f")
         before = len(drive.box.log)
         await _run(ws, "echo mine > /box/f")
-        counts.append(len(drive.box.log) - before)
+        logs.append(drive.box.log[before:])
         drive.put("f", SEED["f"])
-    assert counts[0] == counts[1]
+    upload = f"upload:{fid}"
+    assert logs == [[upload, upload], [f"info:{fid}", upload] * 2]
 
 
 @pytest.mark.asyncio
@@ -442,7 +454,9 @@ async def test_a_box_folder_copied_whole_lifts_the_lost_marks_beneath_it(
         drive.box.hooks["upload"] = lambda: drive.drop("d")
 
     drive.box.hooks["upload"] = theirs
-    ws = workspace()
+    # Only a fresh mount lists again to see d gone: a write keeps its own
+    # row in its folder's listing rather than dropping the listing.
+    ws = workspace(read=ReadSpec(policy=ReadPolicy.FRESH))
     line = (
         "cat /box/d/a > /dev/null; echo x > /box/d/a; echo y > /box/y; "
         "cp -r /box/s /box/d && echo mine > /box/d/a"

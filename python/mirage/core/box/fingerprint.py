@@ -14,10 +14,9 @@
 
 from typing import Any
 
-from mirage.cache.index import IndexEntry
 from mirage.cache.types import LiveVersion
 from mirage.core.box.constants import SHA1
-from mirage.types import JsonValue
+from mirage.types import FileStat, JsonValue
 
 
 def token_of(value: JsonValue) -> str | None:
@@ -46,16 +45,16 @@ def live_of(item: dict[str, Any] | None) -> LiveVersion | None:
     )
 
 
-def entry_token(entry: IndexEntry) -> str | None:
+def entry_token(entry: FileStat) -> str | None:
     """The content token a listing row carries.
 
     Args:
-        entry (IndexEntry): the file's index row.
+        entry (FileStat): the file's listed row.
     """
     return token_of(entry.extra.get(SHA1))
 
 
-def read_token(entry: IndexEntry, digest: str) -> str | None:
+def read_token(entry: FileStat, digest: str) -> str | None:
     """The token a whole read stamps: the listed sha1, if the bytes match it.
 
     A download carries no version header, so the bytes are checked against
@@ -64,7 +63,7 @@ def read_token(entry: IndexEntry, digest: str) -> str | None:
     with the old token.
 
     Args:
-        entry (IndexEntry): the row the read resolved through.
+        entry (FileStat): the row the read resolved through.
         digest (str): SHA-1 hex of the bytes the read returned.
     """
     token = entry_token(entry)

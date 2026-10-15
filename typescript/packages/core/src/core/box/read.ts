@@ -13,49 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { publishRead, writesConditioned } from '../../cache/context.ts'
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { entryOrWarm } from '../../cache/index/warm.ts'
 import { record, recordStream, startOp } from '../../observe/context.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import { Sha1, sha1Hex } from '../../utils/hash.ts'
 import { downloadFile, downloadFileStream } from './api.ts'
 import { entryToken, readToken } from './fingerprint.ts'
-import { readdir } from './readdir.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { windowFor } from '../../utils/ranges.ts'
 
 /**
- * The index entry of the file at `path`, listing its parent when the index
- * does not hold it. Rejects ENOENT when nothing is there and EISDIR when a
- * folder is. Mirrors Python's `file_entry`.
+ * What is at the file `path`, as its parent's listing named it. Throws ENOENT
+ * when nothing is there and EISDIR when a folder is. Mirrors Python's
+ * `file_entry`.
  */
-export async function fileEntry(
-  accessor: BoxAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<IndexEntry> {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  let p = path.virtual
-  if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
-  const key = stripSlash(p)
-  if (key === '') throw eisdir(path.virtual)
-  if (index === undefined) throw enoent(path.virtual)
-  const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
-
-  const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
-  const entry = await entryOrWarm(
-    index,
-    virtualKey,
-    parentKey !== virtualKey
-      ? () => readdir(accessor, PathSpec.fromStrPath(parentKey, mountKey(parentKey, prefix)), index)
-      : null,
-  )
-  if (entry === null) throw enoent(path.virtual)
-  if (entry.resourceType === 'box/folder') throw eisdir(path.virtual)
+export function fileEntry(path: PathSpec, entry: FileStat | null | undefined): FileStat {
+  if (stripSlash(path.vfsPath) === '') throw eisdir(path.virtual)
+  if (entry === null || entry === undefined) throw enoent(path.virtual)
+  if (entry.type === FileType.DIRECTORY) throw eisdir(path.virtual)
   return entry
 }
 
@@ -67,28 +43,28 @@ export async function fileEntry(
  * Args:
  *   accessor: Box accessor.
  *   path: the path to read.
- *   index: listing cache, consulted for the file id.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
+ *   entry: what is at the path.
  */
 export async function read(
   accessor: BoxAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
+  entry?: FileStat | null,
 ): Promise<Uint8Array> {
   const window = windowFor(options?.offset ?? 0, options?.size ?? null)
-  const entry = await fileEntry(accessor, path, index)
+  const found = fileEntry(path, entry)
   const timer = startOp()
-  const data = await downloadFile(accessor.tokenManager, entry.id, window)
+  const data = await downloadFile(accessor.tokenManager, found.extra.box_id as string, window)
   // Only a whole read through a row with a sha1 can yield a token, so nothing
   // else is hashed. The token never depends on a recorder being bound
   // (read_revalidatable.test.ts holds each declarer to it). A whole buffer
   // prefers WebCrypto's native SHA-1, falling back to incremental Sha1
   // when unavailable. Streams use incremental Sha1 without buffering.
-  const hashable = window === undefined && entryToken(entry) !== null
+  const hashable = window === undefined && entryToken(found) !== null
   const digest = hashable ? await sha1Hex(data) : null
   let fingerprint: string | null = null
-  if (digest !== null) fingerprint = writesConditioned(path) ? digest : readToken(entry, digest)
+  if (digest !== null) fingerprint = writesConditioned(path) ? digest : readToken(found, digest)
   publishRead(path.virtual, data, fingerprint)
   record('read', path.virtual, 'box', data.byteLength, timer, {
     fingerprint,
@@ -106,24 +82,27 @@ export async function read(
  * Args:
  *   accessor: Box accessor.
  *   path: the path to read.
- *   index: listing cache, consulted for the file id.
+ *   entry: what is at the path.
  */
 export async function* readStream(
   accessor: BoxAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): AsyncIterable<Uint8Array> {
-  const entry = await fileEntry(accessor, path, index)
+  const found = fileEntry(path, entry)
   const rec = recordStream('read', path.virtual, 'box')
   const conditioned = writesConditioned(path)
-  const digest = rec !== null && entryToken(entry) !== null ? new Sha1() : null
-  for await (const chunk of downloadFileStream(accessor.tokenManager, entry.id)) {
+  const digest = rec !== null && entryToken(found) !== null ? new Sha1() : null
+  for await (const chunk of downloadFileStream(
+    accessor.tokenManager,
+    found.extra.box_id as string,
+  )) {
     digest?.update(chunk)
     if (rec !== null) rec.bytes += chunk.byteLength
     yield chunk
   }
   if (rec !== null && digest !== null) {
     const token = digest.digest()
-    rec.fingerprint = conditioned ? token : readToken(entry, token)
+    rec.fingerprint = conditioned ? token : readToken(found, token)
   }
 }

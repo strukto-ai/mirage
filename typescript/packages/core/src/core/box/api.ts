@@ -89,7 +89,7 @@ interface ListItemsResponse {
 
 const LIST_FIELDS = 'id,name,type,size,modified_at,etag,sha1,parent'
 const SEARCH_FIELDS = 'id,name,type,path_collection'
-const ITEM_FIELDS = 'type,id,name,size,modified_at,sha1,path_collection,item_status'
+const ITEM_FIELDS = 'type,id,name,size,modified_at,etag,sha1,path_collection,item_status'
 const SEARCH_PAGE = 200
 // Box search serves at most 10,000 matches across all pages; a result set
 // that reaches the ceiling may be incomplete and must not narrow a scan.

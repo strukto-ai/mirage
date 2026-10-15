@@ -264,11 +264,12 @@ def _wants(fn: Callable[..., Any]) -> frozenset[str]:
 
 
 def _lists_stats(fn: Callable[..., Any]) -> bool:
-    """Whether a backend's ``readdir`` answers stats for the mount to
-    keep, rather than keeping its own listings in an index it takes.
+    """Whether a backend function answers from what the mount hands it
+    rather than from an index it takes: a ``readdir`` that does answers
+    stats for the mount to keep.
 
     Args:
-        fn (Callable[..., Any]): the backend's readdir.
+        fn (Callable[..., Any]): the backend function.
     """
     target = fn.func if isinstance(fn, functools.partial) else fn
     names = _parameters(getattr(target, "__func__", target))
@@ -1481,7 +1482,9 @@ class MountEntry:
         self, scope: PathSpec, index: IndexCacheStore
     ) -> FileStat | None:
         """What is at ``scope``, as its parent's listing names it, listing
-        the parent when no stored listing does.
+        the parent when no stored listing does. Under ``fresh`` the running
+        command's check of ``scope`` already asked the backend, so its
+        answer stands in for the walk; a check itself always walks.
 
         Args:
             scope (PathSpec): a path keyed below the mount.
@@ -1490,6 +1493,11 @@ class MountEntry:
         key = index_key(self.prefix, scope)
         if key == self._root_key or not self._lists:
             return None
+        manager = self.cache_manager
+        if manager is not None and not isinstance(index, ListingCheckStore):
+            probed = manager.probed_stat(scope)
+            if probed is not None:
+                return probed
         return await entry_at(
             index,
             key,
@@ -1550,7 +1558,13 @@ class MountEntry:
                 ``dst`` is the destination.
             index (IndexCacheStore): the mount's index.
         """
-        wants = _wants(self._backend_fn(fn))
+        backend = self._backend_fn(fn)
+        if isinstance(index, ListingCheckStore) and not _lists_stats(backend):
+            # Under a fresh check a function that takes the check's store
+            # answers from its hints: walking for its stats would cost the
+            # requests it saves.
+            return {}
+        wants = _wants(backend)
         handed: dict[str, FileStat | None] = {}
         if "entry" in wants:
             handed["entry"] = await self._entry(scope, index)

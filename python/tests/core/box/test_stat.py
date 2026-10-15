@@ -17,25 +17,25 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.core.box.read import read
 from mirage.core.box.readdir import readdir
 from mirage.core.box.stat import stat
-from mirage.types import ContentType, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.vfs.box.config import BoxConfig
+from tests.fixtures.handed import call
 
 
 @pytest.mark.asyncio
-async def test_stat_root_fetches_folder_info(accessor, index):
+async def test_stat_root_fetches_folder_info(accessor):
     with patch(
         "mirage.core.box.stat.get_folder_info",
         new_callable=AsyncMock,
         return_value={"id": "0", "modified_at": "2026-04-01T00:00:00+00:00"},
     ) as mock_info:
         info = await stat(
-            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/")
         )
     assert info.type == FileType.DIRECTORY
     assert info.name == "/"
@@ -44,28 +44,27 @@ async def test_stat_root_fetches_folder_info(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_file_carries_box_metadata(accessor, index):
-    await index.set_dir(
-        "/",
-        [
-            (
-                "a.txt",
-                IndexEntry(
-                    id="200",
-                    name="a.txt",
-                    resource_type="box/file",
-                    remote_time="2026-04-01T00:00:00+00:00",
-                    vfs_name="a.txt",
-                    size=5,
-                ),
-            )
-        ],
-    )
-    info = await stat(
-        accessor,
-        PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-        index,
-    )
+async def test_stat_file_carries_box_metadata(accessor):
+    items = [
+        {
+            "id": "200",
+            "name": "a.txt",
+            "type": "file",
+            "size": 5,
+            "modified_at": "2026-04-01T00:00:00+00:00",
+        }
+    ]
+    with patch(
+        "mirage.core.box.readdir.list_folder_items",
+        new_callable=AsyncMock,
+        return_value=items,
+    ):
+        info = await call(
+            stat,
+            readdir,
+            accessor,
+            PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+        )
     assert info.content == ContentType.TEXT
     assert info.size == 5
     assert info.modified == "2026-04-01T00:00:00+00:00"
@@ -81,12 +80,11 @@ async def test_stat_folder_is_directory(accessor, index):
         [
             (
                 "docs",
-                IndexEntry(
-                    id="100",
+                FileStat(
                     name="docs",
-                    resource_type="box/folder",
-                    remote_time="2026-04-01T00:00:00+00:00",
-                    vfs_name="docs",
+                    type=FileType.DIRECTORY,
+                    modified="2026-04-01T00:00:00+00:00",
+                    extra={"box_id": "100"},
                 ),
             )
         ],
@@ -94,14 +92,14 @@ async def test_stat_folder_is_directory(accessor, index):
     info = await stat(
         accessor,
         PathSpec(vfs_path="docs", virtual="/docs", directory="/"),
-        index,
+        (await index.get("/docs")).entry,
     )
     assert info.type == FileType.DIRECTORY
     assert info.extra["box_id"] == "100"
 
 
 @pytest.mark.asyncio
-async def test_stat_populates_via_parent_readdir(accessor, index):
+async def test_stat_answers_the_row_the_parent_listing_names(accessor):
     items = [
         {
             "id": "200",
@@ -116,16 +114,17 @@ async def test_stat_populates_via_parent_readdir(accessor, index):
         new_callable=AsyncMock,
         return_value=items,
     ):
-        info = await stat(
+        info = await call(
+            stat,
+            readdir,
             accessor,
             PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-            index,
         )
     assert info.size == 5
 
 
 @pytest.mark.asyncio
-async def test_stat_missing_raises(accessor, index):
+async def test_stat_missing_raises(accessor):
     with (
         patch(
             "mirage.core.box.readdir.list_folder_items",
@@ -139,15 +138,16 @@ async def test_stat_missing_raises(accessor, index):
         ),
     ):
         with pytest.raises(FileNotFoundError):
-            await stat(
+            await call(
+                stat,
+                readdir,
                 accessor,
                 PathSpec(vfs_path="ghost", virtual="/ghost", directory="/"),
-                index,
             )
 
 
 @pytest.mark.asyncio
-async def test_stat_size_matches_read_for_every_file(accessor, index):
+async def test_stat_size_matches_read_for_every_file(accessor):
     # The fskit invariant behind sizes_always_known: the size stat serves
     # from the listing must equal the byte length a read delivers, 0-byte
     # files included; weblinks never appear at all.
@@ -210,29 +210,26 @@ async def test_stat_size_matches_read_for_every_file(accessor, index):
         stack = ["/"]
         while stack:
             current = stack.pop()
-            listing = await readdir(
-                accessor, PathSpec.from_str_path(current), index
+            listing = await call(
+                readdir, readdir, accessor, PathSpec.from_str_path(current)
             )
             for child in listing:
-                trimmed = child.rstrip("/")
-                info = await stat(
-                    accessor, PathSpec.from_str_path(trimmed), index
-                )
+                trimmed = current.rstrip("/") + "/" + child.name
+                spec = PathSpec.from_str_path(trimmed)
+                info = await call(stat, readdir, accessor, spec)
                 if info.type == FileType.DIRECTORY:
                     stack.append(trimmed)
                     continue
                 assert info.size is not None, trimmed
-                body = await read(
-                    accessor, PathSpec.from_str_path(trimmed), index
-                )
+                body = await call(read, readdir, accessor, spec)
                 assert info.size == len(body), trimmed
                 files.append(trimmed)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]
 
 
 @pytest.mark.asyncio
-async def test_stat_direct_resolve_hides_weblinks(accessor, index):
-    # Weblinks are filtered from listings; the resolve_item fallback must
+async def test_stat_direct_resolve_hides_weblinks(accessor):
+    # Weblinks are filtered from listings; a check's resolve_item walk must
     # not resurface one as a sizeless, unreadable entry.
     weblink = {
         "id": "300",
@@ -258,12 +255,12 @@ async def test_stat_direct_resolve_hides_weblinks(accessor, index):
                 PathSpec(
                     vfs_path="homepage", virtual="/homepage", directory="/"
                 ),
-                index,
+                index=ListingCheckStore(),
             )
 
 
 @pytest.mark.asyncio
-async def test_stat_root_reads_a_404_as_absence(accessor, index):
+async def test_stat_root_reads_a_404_as_absence(accessor):
     with patch(
         "mirage.core.box.stat.get_folder_info",
         new_callable=AsyncMock,
@@ -273,12 +270,11 @@ async def test_stat_root_reads_a_404_as_absence(accessor, index):
             await stat(
                 accessor,
                 PathSpec(vfs_path="", virtual="/", directory="/"),
-                index,
             )
 
 
 @pytest.mark.asyncio
-async def test_stat_root_keeps_a_server_error_a_failure(accessor, index):
+async def test_stat_root_keeps_a_server_error_a_failure(accessor):
     with patch(
         "mirage.core.box.stat.get_folder_info",
         new_callable=AsyncMock,
@@ -288,7 +284,6 @@ async def test_stat_root_keeps_a_server_error_a_failure(accessor, index):
             await stat(
                 accessor,
                 PathSpec(vfs_path="", virtual="/", directory="/"),
-                index,
             )
     assert caught.value.status == 500
 
@@ -361,14 +356,17 @@ async def _scratch_stat(
 ):
     src = RAMIndexCacheStore()
     parent, name = virtual.rsplit("/", 1)
-    row = IndexEntry(id=row_id, name=name, resource_type=kind)
+    row = FileStat(
+        name=name,
+        type=(FileType.DIRECTORY if kind == "box/folder" else FileType.FILE),
+        extra={"box_id": row_id},
+    )
     await src.set_dir(parent, [(name, row)])
     scratch = ListingCheckStore(hints=src)
     vfs_path = "a/b/c.txt"
     with (
-        patch("mirage.core.box.readdir.list_folder_items", new=box.list_items),
         patch("mirage.core.box.resolve.list_folder_items", new=box.list_items),
-        patch("mirage.core.box.stat.get_file_info", new=box.file_info),
+        patch("mirage.core.box.resolve.get_file_info", new=box.file_info),
     ):
         return await stat(
             accessor,
@@ -377,12 +375,11 @@ async def _scratch_stat(
                 virtual=virtual,
                 directory=virtual.rsplit("/", 1)[0],
             ),
-            scratch,
+            index=scratch,
         )
 
 
 WALK_FOUND = ["items:0", "items:A", "items:B"]
-WALK_GONE = WALK_FOUND + WALK_FOUND
 
 
 def _rooted(root: str) -> BoxAccessor:
@@ -391,7 +388,7 @@ def _rooted(root: str) -> BoxAccessor:
 
 
 @pytest.mark.asyncio
-async def test_a_sha1_less_row_stats_with_no_token(accessor, index):
+async def test_a_sha1_less_row_stats_with_no_token(accessor):
     # modified_at is no content token: two same-size edits in one second
     # share it, so a file Box gives no sha1 stats with none.
     with patch(
@@ -399,10 +396,11 @@ async def test_a_sha1_less_row_stats_with_no_token(accessor, index):
         new_callable=AsyncMock,
         return_value=[_row("200", "a.txt", None)],
     ):
-        info = await stat(
+        info = await call(
+            stat,
+            readdir,
             accessor,
             PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-            index,
         )
     assert info.fingerprint is None
     assert info.modified == "2026-04-01T00:00:00+00:00"
@@ -411,40 +409,29 @@ async def test_a_sha1_less_row_stats_with_no_token(accessor, index):
 @pytest.mark.asyncio
 async def test_a_direct_resolve_of_a_sha1_less_item_has_no_token(accessor):
     listing = AsyncMock(return_value=[_row("200", "a.txt", None)])
-    with (
-        patch("mirage.core.box.readdir.list_folder_items", new=listing),
-        patch("mirage.core.box.resolve.list_folder_items", new=listing),
-    ):
+    with patch("mirage.core.box.resolve.list_folder_items", new=listing):
         info = await stat(
             accessor,
             PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+            index=ListingCheckStore(),
         )
     assert info.fingerprint is None
     assert info.modified == "2026-04-01T00:00:00+00:00"
 
 
 @pytest.mark.asyncio
-async def test_a_listed_sha1_is_the_stat_token(accessor, index):
-    await index.set_dir(
-        "/",
-        [
-            (
-                "a.txt",
-                IndexEntry(
-                    id="200",
-                    name="a.txt",
-                    resource_type="box/file",
-                    remote_time="2026-04-01T00:00:00+00:00",
-                    extra={"sha1": SHA_FAST},
-                ),
-            )
-        ],
-    )
-    info = await stat(
-        accessor,
-        PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-        index,
-    )
+async def test_a_listed_sha1_is_the_stat_token(accessor):
+    with patch(
+        "mirage.core.box.readdir.list_folder_items",
+        new_callable=AsyncMock,
+        return_value=[_row("200", "a.txt", SHA_FAST)],
+    ):
+        info = await call(
+            stat,
+            readdir,
+            accessor,
+            PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
+        )
     assert info.fingerprint == SHA_FAST
 
 
@@ -467,18 +454,21 @@ async def test_a_valid_hint_is_one_request_and_the_walks_answer(accessor):
 async def test_only_a_scratch_store_takes_the_one_request_path(accessor):
     box = _Box(_walk_tree(leaf=_row("F1", "c.txt", SHA_FAST)), None)
     store = RAMIndexCacheStore()
+    row = FileStat(name="c.txt", type=FileType.FILE, extra={"box_id": "F1"})
     with (
-        patch("mirage.core.box.readdir.list_folder_items", new=box.list_items),
-        patch("mirage.core.box.stat.get_file_info", new=box.file_info),
+        patch("mirage.core.box.resolve.list_folder_items", new=box.list_items),
+        patch("mirage.core.box.resolve.get_file_info", new=box.file_info),
     ):
-        await stat(
+        info = await stat(
             accessor,
             PathSpec(
                 vfs_path="a/b/c.txt", virtual="/a/b/c.txt", directory="/a/b"
             ),
+            row,
             store,
         )
-    assert box.log == WALK_FOUND
+    assert info is row
+    assert box.log == []
 
 
 @pytest.mark.asyncio
@@ -501,15 +491,15 @@ async def test_no_hint_walks_as_today(accessor):
     box = _Box(_walk_tree(leaf=_row("F2", "c.txt", SHA_WALK)), None)
     scratch = ListingCheckStore()
     with (
-        patch("mirage.core.box.readdir.list_folder_items", new=box.list_items),
-        patch("mirage.core.box.stat.get_file_info", new=box.file_info),
+        patch("mirage.core.box.resolve.list_folder_items", new=box.list_items),
+        patch("mirage.core.box.resolve.get_file_info", new=box.file_info),
     ):
         info = await stat(
             accessor,
             PathSpec(
                 vfs_path="a/b/c.txt", virtual="/a/b/c.txt", directory="/a/b"
             ),
-            scratch,
+            index=scratch,
         )
     assert box.log == WALK_FOUND
     assert info.fingerprint == SHA_WALK
@@ -531,13 +521,13 @@ async def test_no_hint_walks_as_today(accessor):
         (
             _item([ALL_FILES, _folder("A", "a"), _folder("X", "x")]),
             None,
-            WALK_GONE,
+            WALK_FOUND,
         ),
         # Only the path-name check fails: the parent renamed to b2.
         (
             _item([ALL_FILES, _folder("A", "a"), _folder("B", "b2")]),
             None,
-            WALK_GONE,
+            WALK_FOUND,
         ),
         # Only the path-name check fails: a case-only rename, which a listing
         # tells apart.
@@ -546,7 +536,7 @@ async def test_no_hint_walks_as_today(accessor):
                 [ALL_FILES, _folder("A", "a"), _folder("B", "b")], name="C.txt"
             ),
             None,
-            WALK_GONE,
+            WALK_FOUND,
         ),
         # Only the is-a-file check fails.
         (
@@ -612,9 +602,8 @@ async def test_a_file_under_a_trashed_mount_root_is_gone(chain):
     box = _Box({}, _item(chain))
     with pytest.raises(FileNotFoundError):
         await _scratch_stat(_rooted("R"), box, virtual="/m/a/b/c.txt")
-    # The trashed root's listing 404s for the populate walk and again for
-    # resolve_item.
-    assert box.log == ["info:F1", "items:R", "items:R"]
+    # The trashed root's listing 404s for the walk.
+    assert box.log == ["info:F1", "items:R"]
 
 
 @pytest.mark.asyncio

@@ -17,10 +17,11 @@ import type { BoxAccessor } from '../../accessor/box.ts'
 import { runWithOwnVersion } from '../../cache/context.ts'
 import { OwnRead } from '../../cache/types.ts'
 import type { PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { sha1Hex } from '../../utils/hash.ts'
 import { downloadFile } from './api.ts'
 import { liveOf } from './fingerprint.ts'
-import { pathParts, resolveItem } from './resolve.ts'
+import { itemOf } from './resolve.ts'
 import { write } from './write.ts'
 
 /**
@@ -33,13 +34,14 @@ export async function truncate(
   path: PathSpec,
   length: number,
   noCreate = false,
+  handed: Handed = {},
 ): Promise<void> {
   if (noCreate) throw enotsup('box', 'truncate --no-create', path)
   if (length === 0) {
-    await write(accessor, path, new Uint8Array(0))
+    await write(accessor, path, new Uint8Array(0), handed)
     return
   }
-  const item = await resolveItem(accessor, pathParts(path))
+  const item = itemOf(handed.entry)
   const live = liveOf(item)
   let data: Uint8Array = new Uint8Array(0)
   let own: string | OwnRead | null = OwnRead.ABSENT
@@ -54,5 +56,5 @@ export async function truncate(
     next = new Uint8Array(length)
     next.set(data)
   }
-  await runWithOwnVersion(path, own, () => write(accessor, path, next))
+  await runWithOwnVersion(path, own, () => write(accessor, path, next, handed))
 }

@@ -18,15 +18,15 @@ from mirage.core.dropbox.api import lookup, refused
 from mirage.core.dropbox.client import DropboxApiError, dropbox_upload
 from mirage.core.dropbox.fingerprint import live_of
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.core.dropbox.stat import stat_from_entry
+from mirage.core.dropbox.readdir import stat_from_entry
 from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
-from mirage.utils.upload import upload_token
+from mirage.types import FileStat, PathSpec
+from mirage.utils.upload import upload_stat
 
 
 async def write(
     accessor: DropboxAccessor, path: PathSpec, data: bytes
-) -> None:
+) -> FileStat | None:
     """Upload in a single call; Dropbox caps it at ~150 MB (larger files
     need upload sessions, not supported here).
 
@@ -37,6 +37,10 @@ async def write(
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): target path.
         data (bytes): file content.
+
+    Returns:
+        FileStat | None: the stored file's stat, None for a reply that
+            names none.
     """
     tm = accessor.token_manager
     api_path = dropbox_path_of(accessor, path)
@@ -46,20 +50,17 @@ async def write(
         live = live_of(await lookup(tm, api_path))
         rev = await native_condition(path, cond, live, "put")
     timer = start_op()
-
-    async def send() -> None:
-        entry = await dropbox_upload(tm, api_path, data, rev)
-        token = upload_token(entry, stat_from_entry, path.virtual)
-        record(
-            "write",
-            path.virtual,
-            "dropbox",
-            len(data),
-            timer,
-            fingerprint=token,
-        )
-
     try:
-        await send()
+        entry = await dropbox_upload(tm, api_path, data, rev)
     except DropboxApiError as exc:
         raise (await refused(path, exc, cond, rev)) or exc
+    stored = upload_stat(entry, stat_from_entry, path.virtual)
+    record(
+        "write",
+        path.virtual,
+        "dropbox",
+        len(data),
+        timer,
+        fingerprint=None if stored is None else stored.fingerprint,
+    )
+    return stored

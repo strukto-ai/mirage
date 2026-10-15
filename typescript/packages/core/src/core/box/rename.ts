@@ -16,17 +16,20 @@ import type { BoxAccessor } from '../../accessor/box.ts'
 
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { uploadStat } from '../../utils/upload.ts'
 import { updateFile, updateFolder, type BoxItem } from './api.ts'
 import { replaceFile, retaken } from './copy.ts'
-import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
+import { statFromItem } from './readdir.ts'
+import { itemOf, parentFolder, pathParts } from './resolve.ts'
 import { deleteEmptyFolder } from './rmdir.ts'
 
 async function clearDest(
   accessor: BoxAccessor,
   dst: PathSpec,
-  dstParts: string[],
+  existing: BoxItem | null,
   src: BoxItem,
 ): Promise<WriteCondition | null> {
   // mv and cp overwrite; Box 409s on a name clash, so clear an existing dst.
@@ -35,7 +38,6 @@ async function clearDest(
   // whether or not that directory has children. Only a folder gives way to a
   // folder, and then only an empty one: a non-empty one is mv's "Directory not
   // empty", which recursive=false gets from Box for free, as rmdir does.
-  const existing = await resolveItem(accessor, dstParts)
   if (existing === null) return src.type === 'file' ? replaceFile(accessor, dst, null) : null
   if (existing.id === src.id) return null
   const tm = accessor.tokenManager
@@ -51,24 +53,30 @@ async function clearDest(
 /**
  * Move a file or folder whole; only a destination it replaces is held. A rename
  * onto its own name is a no-op, as rename(2) is: nothing is sent or recorded,
- * so the line keeps the version it read. Mirrors Python's `rename`.
+ * so the line keeps the version it read. Answers the item's stat where it
+ * landed, null when the reply names none. Mirrors Python's `rename`.
  */
-export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
+export async function rename(
+  accessor: BoxAccessor,
+  src: PathSpec,
+  dst: PathSpec,
+  handed: Handed = {},
+): Promise<FileStat | null> {
   const tm = accessor.tokenManager
-  const item = await resolveItem(accessor, pathParts(src))
+  const item = itemOf(handed.entry)
   if (item === null) throw enoent(src.virtual)
-  if (src.virtual === dst.virtual) return
+  if (src.virtual === dst.virtual) return null
+  const folderId = parentFolder(accessor, dst, handed.dstParent)
   const dstParts = pathParts(dst)
-  const dstParent = await resolveParentId(accessor, dstParts)
-  if (dstParent === null) throw enoent(dst.virtual)
   const upto = lostCount()
   const timer = startOp()
-  const cond = await clearDest(accessor, dst, dstParts, item)
+  const cond = await clearDest(accessor, dst, itemOf(handed.dstEntry), item)
   const newName = dstParts[dstParts.length - 1] ?? ''
+  let moved: BoxItem
   try {
     if (item.type === 'folder')
-      await updateFolder(tm, item.id, { name: newName, parentId: dstParent })
-    else await updateFile(tm, item.id, { name: newName, parentId: dstParent })
+      moved = await updateFolder(tm, item.id, { name: newName, parentId: folderId })
+    else moved = await updateFile(tm, item.id, { name: newName, parentId: folderId })
   } catch (err) {
     throw (await retaken(err, cond, dst)) ?? err
   }
@@ -81,4 +89,5 @@ export async function rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec
   record(op, dst.virtual, 'box', 0, timer)
   liftLost(src, upto, folder)
   liftLost(dst, upto, folder)
+  return uploadStat(moved, statFromItem, dst.virtual)
 }

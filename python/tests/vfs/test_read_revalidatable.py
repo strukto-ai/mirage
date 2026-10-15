@@ -19,7 +19,9 @@ import hashlib
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from inspect import signature
 from types import ModuleType
+from typing import Any
 from unittest.mock import AsyncMock
 from weakref import WeakKeyDictionary
 
@@ -52,6 +54,8 @@ from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import CommandIO
+from mirage.core.box.readdir import readdir as box_readdir
+from mirage.core.dropbox.readdir import readdir as dropbox_readdir
 from mirage.core.gdrive.readdir import readdir as gdrive_readdir
 from mirage.core.hf_hub.client import etag_value
 from mirage.observe.context import OpTimer, active_recorder
@@ -236,8 +240,8 @@ class Fake:
     # reads of the object rather than one index entry with itself.
     stat_indexed: bool = True
     # The listing that names the row each function is handed, where the
-    # backend reads one (gdrive): the direct calls are handed it, as the
-    # mount hands it.
+    # backend reads one (gdrive, box, dropbox): the direct calls are handed
+    # it, as the mount hands it.
     readdir: ListFn | None = None
 
     @property
@@ -255,31 +259,32 @@ class Fake:
     def stat_args(self) -> tuple:
         return self.args() if self.stat_indexed else ()
 
-    async def handed(self, path: PathSpec) -> dict[str, FileStat | None]:
-        if self.readdir is None:
+    async def handed(
+        self, fn: Callable[..., Any], path: PathSpec
+    ) -> dict[str, FileStat | None]:
+        if self.readdir is None or "entry" not in signature(fn).parameters:
             return {}
         return {"entry": await entry_at(self.readdir, self.vfs.accessor, path)}
 
     async def read_bytes(self, path: PathSpec) -> bytes:
-        handed = await self.handed(path)
-        if handed:
-            return await self.vfs.read(path, **handed)
+        if self.readdir is not None:
+            read = self.vfs.read
+            return await read(path, **await self.handed(read, path))
         return await self.io.read_bytes(self.vfs.accessor, path, *self.args())
 
     async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        handed = await self.handed(path)
-        stream = (
-            self.vfs.read_stream(path, **handed)
-            if handed
-            else self.io.read_stream(self.vfs.accessor, path, *self.args())
-        )
+        if self.readdir is not None:
+            read_stream = self.vfs.read_stream
+            stream = read_stream(path, **await self.handed(read_stream, path))
+        else:
+            stream = self.io.read_stream(self.vfs.accessor, path, *self.args())
         async for chunk in stream:
             yield chunk
 
     async def stat(self, path: PathSpec) -> FileStat:
-        handed = await self.handed(path)
-        if handed:
-            return await self.vfs.stat(path, **handed)
+        if self.readdir is not None:
+            stat = self.vfs.stat
+            return await stat(path, **await self.handed(stat, path))
         return await self.io.stat(self.vfs.accessor, path, *self.stat_args())
 
 
@@ -673,7 +678,7 @@ def _dropbox_fake(shape: str, data: bytes) -> Iterator[Fake]:
             reach=[],
             read_mod=dropbox_read,
             stream_mod=dropbox_read,
-            index=RAMIndexCacheStore(),
+            readdir=dropbox_readdir,
         )
 
 
@@ -699,7 +704,7 @@ def _box_fake(shape: str, data: bytes) -> Iterator[Fake]:
             reach=[],
             read_mod=box_read,
             stream_mod=box_read,
-            index=RAMIndexCacheStore(),
+            readdir=box_readdir,
         )
 
 
@@ -1700,12 +1705,13 @@ def test_a_fresh_box_read_after_a_tee_probes_once_without_a_download():
         await _line(ws, f"echo new | tee /m/{DEEP}")
         before = len(box.log)
         out = await _line(ws, f"cat /m/{DEEP}")
-        return out, box.log[before:], _walk(box)
+        return out, box.log[before:], box.id_of(DEEP)
 
-    out, log, walk = _box_case(scenario)
+    out, log, fid = _box_case(scenario)
     assert out == b"new\n"
-    # The probe after a write is one parent walk, not an info by id.
-    assert log == walk
+    # The write keeps the row its reply named, so the probe after it is one
+    # info by id rather than a parent walk.
+    assert log == [f"info:{fid}"]
 
 
 async def _direct_box_read_case(ws, box):
@@ -1741,7 +1747,8 @@ def test_a_same_size_box_rewrite_in_the_same_second_is_refetched():
     )
     assert len(CHANGED) == len(SEED)
     assert out == CHANGED
-    assert log == [f"info:{fid}"] + walk + [f"content:{fid}", f"dl:{fid}"]
+    # The read is handed the probe's live row, so it downloads by id.
+    assert log == [f"info:{fid}", f"content:{fid}", f"dl:{fid}"]
 
 
 def test_a_box_file_moved_outside_is_gone_and_drops_its_overlay():
@@ -1753,9 +1760,9 @@ def test_a_box_file_moved_outside_is_gone_and_drops_its_overlay():
     assert meta is None
     assert moved == SEED
     # The probe: one info by the hinted id, which places the file elsewhere;
-    # its walk lists the old parent chain, misses, and resolve_item lists it
-    # again. GONE clears the mount index, so cat's own stat walks twice more.
-    assert log == [f"info:{fid}"] + walk + walk + walk + walk
+    # its walk lists the old parent chain and misses. GONE clears the mount
+    # index, so cat's own stat walks once more.
+    assert log == [f"info:{fid}"] + walk + walk
 
 
 @pytest.mark.parametrize("mode", ["trash", "purge"])
@@ -1774,9 +1781,9 @@ def test_a_box_file_deleted_and_recreated_is_read_anew(mode):
 
     out, log, mode_bits, old, new, walk = _box_case(scenario)
     assert out == CHANGED
-    # The probe's walk fills only its throwaway store and STALE clears the
-    # mount's index, so the read resolves the new id by walking again.
-    assert log == [f"info:{old}"] + walk + walk + [
+    # The probe's walk finds the new id, and the read is handed that live
+    # row: no second walk.
+    assert log == [f"info:{old}"] + walk + [
         f"content:{new}",
         f"dl:{new}",
     ]
@@ -1799,9 +1806,9 @@ def test_a_box_file_under_a_renamed_parent_is_gone():
     assert code == 1
     assert "No such file or directory" in err
     assert renamed == SEED
-    # Each walk stops at a, which no longer holds b: the probe's populate
-    # pass and resolve_item, then cat's own stat over the cleared index.
-    assert log == [f"info:{fid}"] + to_a + to_a + to_a + to_a
+    # Each walk stops at a, which no longer holds b: the probe's, then cat's
+    # own stat over the cleared index.
+    assert log == [f"info:{fid}"] + to_a + to_a
 
 
 def test_a_box_file_under_a_trashed_mount_root_is_gone():
@@ -1813,10 +1820,9 @@ def test_a_box_file_under_a_trashed_mount_root_is_gone():
     assert code == 1
     assert out == b""
     assert "No such file or directory" in err
-    # The root's listing 404s each time: the probe's populate pass and
-    # resolve_item, cat's own stat (the same two), then the parent listing
-    # cat's missing-operand path asks for.
-    assert log == [f"info:{fid}"] + [f"items:{root}"] * 5
+    # The root's listing 404s each time: the probe's walk, cat's own stat,
+    # then the parent listing cat's missing-operand path asks for.
+    assert log == [f"info:{fid}"] + [f"items:{root}"] * 3
 
 
 def test_a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk():
@@ -1838,7 +1844,7 @@ def test_a_box_file_with_no_sha1_is_refetched_on_every_fresh_read():
         _a_box_file_with_no_sha1_is_refetched_on_every_fresh_read_case
     )
     assert out == SEED
-    assert log == [f"info:{fid}"] + walk + [f"content:{fid}", f"dl:{fid}"]
+    assert log == [f"info:{fid}", f"content:{fid}", f"dl:{fid}"]
 
 
 def test_a_warm_box_ls_shows_what_a_cold_one_does_from_one_request():

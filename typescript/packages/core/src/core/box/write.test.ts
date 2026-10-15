@@ -50,11 +50,17 @@ vi.mock('./api.ts', async () => {
 
 import { BoxAccessor } from '../../accessor/box.ts'
 import { runWithRecording } from '../../observe/context.ts'
-import { PathSpec } from '../../types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
+import { BoxVFS } from '../../vfs/box/box.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { copy } from './copy.ts'
 import { mkdir } from './mkdir.ts'
+import { readdir } from './readdir.ts'
 import { rename } from './rename.ts'
 import { rmR, rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
@@ -75,6 +81,21 @@ const TREE: Record<string, ApiModule.BoxItem[]> = {
   ],
   '300': [],
   '400': [],
+}
+
+// What the mount hands a function at `path` (and a rename's or a copy's
+// `dst`), found by listing TREE as it would.
+function handed(path: PathSpec, dst?: PathSpec): Promise<Handed> {
+  return handedAt(readdir, makeAccessor(), path, dst)
+}
+
+async function workspace(): Promise<Workspace> {
+  const vfs = new BoxVFS({ accessToken: 'test-token' })
+  Object.assign(vfs, { accessor: makeAccessor() })
+  return new Workspace(
+    { '/d/': vfs },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
 }
 
 function spec(virtual: string): PathSpec {
@@ -103,7 +124,12 @@ describe('box write ops', () => {
   })
 
   it('uploads a new file under the resolved parent', async () => {
-    await write(makeAccessor(), spec('/data/new.txt'), new Uint8Array([1, 2]))
+    await write(
+      makeAccessor(),
+      spec('/data/new.txt'),
+      new Uint8Array([1, 2]),
+      await handed(spec('/data/new.txt')),
+    )
     expect(vi.mocked(api.uploadNewFile)).toHaveBeenCalledWith(
       STUB_TM,
       '100',
@@ -113,7 +139,12 @@ describe('box write ops', () => {
   })
 
   it('uploads a new version when the file already exists', async () => {
-    await write(makeAccessor(), spec('/data/a.txt'), new Uint8Array([9]))
+    await write(
+      makeAccessor(),
+      spec('/data/a.txt'),
+      new Uint8Array([9]),
+      await handed(spec('/data/a.txt')),
+    )
     expect(vi.mocked(api.uploadFileVersion)).toHaveBeenCalledWith(
       STUB_TM,
       '200',
@@ -125,7 +156,7 @@ describe('box write ops', () => {
 
   it('mkdir creates under the resolved parent', async () => {
     vi.mocked(api.createFolder).mockResolvedValue({ type: 'folder', id: '400', name: 'x' })
-    await mkdir(makeAccessor(), spec('/data/x'))
+    await mkdir(makeAccessor(), spec('/data/x'), false, await handed(spec('/data/x')))
     expect(vi.mocked(api.createFolder)).toHaveBeenCalledWith(STUB_TM, '100', 'x')
   })
 
@@ -135,54 +166,92 @@ describe('box write ops', () => {
     ['/data/missing/x', 'ENOENT'],
   ])('mkdir %s refuses a parent that is not a folder', async (virtual, code) => {
     vi.mocked(api.createFolder).mockClear()
-    await expect(mkdir(makeAccessor(), spec(virtual))).rejects.toMatchObject({ code })
+    // Finding the parent is where a file in the way answers ENOTDIR, as the
+    // mount's listing of it does.
+    await expect(
+      handed(spec(virtual)).then((h) => mkdir(makeAccessor(), spec(virtual), false, h)),
+    ).rejects.toMatchObject({ code })
     expect(vi.mocked(api.createFolder)).not.toHaveBeenCalled()
   })
 
+  // -p is the mount's: it makes one level at a time and names the file it
+  // stops at above the operand, as GNU does.
   it.each([
     ['/data/a.txt/x/y', 'ENOTDIR'],
     ['/data/a.txt', 'EEXIST'],
   ])('mkdir -p %s names the file it stops at', async (virtual, code) => {
     vi.mocked(api.createFolder).mockClear()
-    await expect(mkdir(makeAccessor(), spec(virtual), true)).rejects.toMatchObject({
-      code,
-      virtualPath: '/data/a.txt',
+    const ws = await workspace()
+    try {
+      await expect(
+        ws.dispatch('mkdir', `/d${virtual}`, [], { parents: true }),
+      ).rejects.toMatchObject({ code, virtualPath: '/d/data/a.txt' })
+      expect(vi.mocked(api.createFolder)).not.toHaveBeenCalled()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('mkdir -p hands each level the folder the level above made', async () => {
+    const created: [string, string][] = []
+    vi.mocked(api.createFolder).mockImplementation((_tm, parentId: string, name: string) => {
+      created.push([parentId, name])
+      return Promise.resolve({ type: 'folder', id: `new-${name}`, name })
     })
-    expect(vi.mocked(api.createFolder)).not.toHaveBeenCalled()
+    const ws = await workspace()
+    try {
+      await ws.dispatch('mkdir', '/d/data/p/q', [], { parents: true })
+      expect(created).toEqual([
+        ['100', 'p'],
+        ['new-p', 'q'],
+      ])
+    } finally {
+      await ws.close()
+      vi.mocked(api.createFolder).mockReset()
+    }
   })
 
   it('mkdir of a taken name is EEXIST', async () => {
     vi.mocked(api.createFolder).mockRejectedValueOnce(
       new BoxApiError('Box POST /folders -> 409', 409),
     )
-    await expect(mkdir(makeAccessor(), spec('/data/a.txt'))).rejects.toMatchObject({
+    await expect(
+      mkdir(makeAccessor(), spec('/data/a.txt'), false, await handed(spec('/data/a.txt'))),
+    ).rejects.toMatchObject({
       code: 'EEXIST',
     })
   })
 
   it('unlink deletes a file by id', async () => {
-    await unlink(makeAccessor(), spec('/data/a.txt'))
+    await unlink(makeAccessor(), spec('/data/a.txt'), await handed(spec('/data/a.txt')))
     expect(vi.mocked(api.deleteFile)).toHaveBeenCalledWith(STUB_TM, '200', null)
   })
 
   it('unlink on a folder throws EISDIR', async () => {
-    await expect(unlink(makeAccessor(), spec('/data/sub'))).rejects.toMatchObject({
+    await expect(
+      unlink(makeAccessor(), spec('/data/sub'), await handed(spec('/data/sub'))),
+    ).rejects.toMatchObject({
       code: 'EISDIR',
     })
   })
 
   it('rmdir removes a folder non-recursively', async () => {
-    await rmdir(makeAccessor(), spec('/data/sub'))
+    await rmdir(makeAccessor(), spec('/data/sub'), await handed(spec('/data/sub')))
     expect(vi.mocked(api.deleteFolder)).toHaveBeenCalledWith(STUB_TM, '300', false)
   })
 
   it('rmR removes a folder recursively', async () => {
-    await rmR(makeAccessor(), spec('/data/sub'))
+    await rmR(makeAccessor(), spec('/data/sub'), await handed(spec('/data/sub')))
     expect(vi.mocked(api.deleteFolder)).toHaveBeenCalledWith(STUB_TM, '300', true)
   })
 
   it('rename moves a file to a new name under the dst parent', async () => {
-    await rename(makeAccessor(), spec('/data/a.txt'), spec('/data/b.txt'))
+    await rename(
+      makeAccessor(),
+      spec('/data/a.txt'),
+      spec('/data/b.txt'),
+      await handed(spec('/data/a.txt'), spec('/data/b.txt')),
+    )
     expect(vi.mocked(api.updateFile)).toHaveBeenCalledWith(STUB_TM, '200', {
       name: 'b.txt',
       parentId: '100',
@@ -191,7 +260,12 @@ describe('box write ops', () => {
 
   it('rename replaces an empty folder destination', async () => {
     vi.mocked(api.updateFolder).mockClear()
-    await rename(makeAccessor(), spec('/data/sub'), spec('/data/dst'))
+    await rename(
+      makeAccessor(),
+      spec('/data/sub'),
+      spec('/data/dst'),
+      await handed(spec('/data/sub'), spec('/data/dst')),
+    )
     expect(vi.mocked(api.deleteFolder)).toHaveBeenCalledWith(STUB_TM, '400', false)
     expect(vi.mocked(api.updateFolder)).toHaveBeenCalledWith(STUB_TM, '300', {
       name: 'dst',
@@ -205,7 +279,12 @@ describe('box write ops', () => {
     vi.mocked(api.updateFolder).mockClear()
     vi.mocked(api.deleteFolder).mockRejectedValueOnce(new BoxApiError('conflict', 409))
     await expect(
-      rename(makeAccessor(), spec('/data/sub'), spec('/data/dst')),
+      rename(
+        makeAccessor(),
+        spec('/data/sub'),
+        spec('/data/dst'),
+        await handed(spec('/data/sub'), spec('/data/dst')),
+      ),
     ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
     expect(vi.mocked(api.updateFolder)).not.toHaveBeenCalled()
   })
@@ -214,7 +293,12 @@ describe('box write ops', () => {
     vi.mocked(api.updateFolder).mockClear()
     vi.mocked(api.deleteFolder).mockRejectedValueOnce(new BoxApiError('boom', 500))
     await expect(
-      rename(makeAccessor(), spec('/data/sub'), spec('/data/dst')),
+      rename(
+        makeAccessor(),
+        spec('/data/sub'),
+        spec('/data/dst'),
+        await handed(spec('/data/sub'), spec('/data/dst')),
+      ),
     ).rejects.toBeInstanceOf(BoxApiError)
     expect(vi.mocked(api.updateFolder)).not.toHaveBeenCalled()
   })
@@ -226,7 +310,12 @@ describe('box write ops', () => {
     vi.mocked(api.deleteFolder).mockClear()
     vi.mocked(api.updateFile).mockClear()
     await expect(
-      rename(makeAccessor(), spec('/data/a.txt'), spec('/data/sub')),
+      rename(
+        makeAccessor(),
+        spec('/data/a.txt'),
+        spec('/data/sub'),
+        await handed(spec('/data/a.txt'), spec('/data/sub')),
+      ),
     ).rejects.toMatchObject({ code: 'EISDIR' })
     expect(vi.mocked(api.deleteFolder)).not.toHaveBeenCalled()
     expect(vi.mocked(api.updateFile)).not.toHaveBeenCalled()
@@ -236,7 +325,12 @@ describe('box write ops', () => {
     vi.mocked(api.deleteFile).mockClear()
     vi.mocked(api.updateFolder).mockClear()
     await expect(
-      rename(makeAccessor(), spec('/data/sub'), spec('/data/a.txt')),
+      rename(
+        makeAccessor(),
+        spec('/data/sub'),
+        spec('/data/a.txt'),
+        await handed(spec('/data/sub'), spec('/data/a.txt')),
+      ),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
     expect(vi.mocked(api.deleteFile)).not.toHaveBeenCalled()
     expect(vi.mocked(api.updateFolder)).not.toHaveBeenCalled()
@@ -248,7 +342,12 @@ describe('box write ops', () => {
     vi.mocked(api.copyFile).mockClear()
     vi.mocked(api.deleteFile).mockClear()
     await expect(
-      copy(makeAccessor(), spec('/data/a.txt'), spec('/data/sub')),
+      copy(
+        makeAccessor(),
+        spec('/data/a.txt'),
+        spec('/data/sub'),
+        await handed(spec('/data/a.txt'), spec('/data/sub')),
+      ),
     ).rejects.toMatchObject({ code: 'EISDIR' })
     expect(vi.mocked(api.copyFile)).not.toHaveBeenCalled()
     expect(vi.mocked(api.deleteFile)).not.toHaveBeenCalled()
@@ -257,31 +356,39 @@ describe('box write ops', () => {
   it('copy refuses a folder onto an existing file with ENOTDIR', async () => {
     vi.mocked(api.deleteFile).mockClear()
     await expect(
-      copy(makeAccessor(), spec('/data/sub'), spec('/data/a.txt')),
+      copy(
+        makeAccessor(),
+        spec('/data/sub'),
+        spec('/data/a.txt'),
+        await handed(spec('/data/sub'), spec('/data/a.txt')),
+      ),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
     expect(vi.mocked(api.deleteFile)).not.toHaveBeenCalled()
   })
 
   it('a rename onto its own name sends and records nothing', async () => {
     vi.mocked(api.updateFile).mockClear()
+    const h = await handed(spec('/data/a.txt'), spec('/data/a.txt'))
     const [, records] = await runWithRecording(() =>
-      rename(makeAccessor(), spec('/data/a.txt'), spec('/data/a.txt')),
+      rename(makeAccessor(), spec('/data/a.txt'), spec('/data/a.txt'), h),
     )
     expect(vi.mocked(api.updateFile)).not.toHaveBeenCalled()
     expect(records).toEqual([])
   })
 
   it('copy copies a file into the dst parent, recorded once', async () => {
+    const h = await handed(spec('/data/a.txt'), spec('/data/c.txt'))
     const [, records] = await runWithRecording(() =>
-      copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt')),
+      copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt'), h),
     )
     expect(vi.mocked(api.copyFile)).toHaveBeenCalledWith(STUB_TM, '200', '100', 'c.txt')
     expect(records.map((r) => [r.op, r.path])).toEqual([['copy', '/data/c.txt']])
   })
 
   it('copy of a whole folder is recorded as a prefix', async () => {
+    const h = await handed(spec('/data/sub'), spec('/data/new'))
     const [, records] = await runWithRecording(() =>
-      copy(makeAccessor(), spec('/data/sub'), spec('/data/new')),
+      copy(makeAccessor(), spec('/data/sub'), spec('/data/new'), h),
     )
     expect(vi.mocked(api.copyFolder)).toHaveBeenCalledWith(STUB_TM, '300', '100', 'new')
     expect(records.map((r) => [r.op, r.path])).toEqual([['copy_prefix', '/data/new']])
@@ -298,8 +405,9 @@ describe('box write ops', () => {
     })
     H.order = []
     try {
+      const h = await handed(spec('/data/a.txt'), spec('/data/b.txt'))
       const [, records] = await runWithRecording(() =>
-        copy(makeAccessor(), spec('/data/a.txt'), spec('/data/b.txt')),
+        copy(makeAccessor(), spec('/data/a.txt'), spec('/data/b.txt'), h),
       )
       expect(H.order).toEqual(['copyFile', 'record'])
       expect(records.map((r) => [r.op, r.path])).toEqual([['copy', '/data/b.txt']])
@@ -331,7 +439,8 @@ describe('box write ops', () => {
     })
     H.order = []
     try {
-      await runWithRecording(() => copy(makeAccessor(), spec('/data/sub'), spec('/data/dst')))
+      const h = await handed(spec('/data/sub'), spec('/data/dst'))
+      await runWithRecording(() => copy(makeAccessor(), spec('/data/sub'), spec('/data/dst'), h))
       expect(H.order).toEqual(['copyFolder', 'record', 'copyFolder', 'record'])
     } finally {
       vi.mocked(api.copyFolder).mockReset()
@@ -374,8 +483,9 @@ describe.each([
   async function writeRecorded(reply: unknown): Promise<unknown[][]> {
     vi.mocked(api.uploadNewFile).mockResolvedValue(reply as never)
     vi.mocked(api.uploadFileVersion).mockResolvedValue(reply as never)
+    const h = await handed(spec(virtual))
     const [, records] = await runWithRecording(() =>
-      write(makeAccessor(), spec(virtual), new TextEncoder().encode('hello')),
+      write(makeAccessor(), spec(virtual), new TextEncoder().encode('hello'), h),
     )
     return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
   }

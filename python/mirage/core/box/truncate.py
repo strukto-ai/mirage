@@ -19,14 +19,19 @@ from mirage.cache.context import own_write_version
 from mirage.cache.types import OwnRead
 from mirage.core.box.api import download_file
 from mirage.core.box.fingerprint import live_of
-from mirage.core.box.resolve import path_parts, resolve_item
+from mirage.core.box.resolve import item_of
 from mirage.core.box.write import write
 from mirage.errors.fs import enotsup
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def truncate(
-    accessor: BoxAccessor, path: PathSpec, length: int, no_create: bool = False
+    accessor: BoxAccessor,
+    path: PathSpec,
+    length: int,
+    no_create: bool = False,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> None:
     """Resize a file by rewriting it whole.
 
@@ -38,13 +43,15 @@ async def truncate(
         path (PathSpec): the file.
         length (int): the new size.
         no_create (bool): refuse to create a missing file (unsupported).
+        entry (FileStat | None): what is at the path.
+        parent (FileStat | None): what is at its parent path.
     """
     if no_create:
         raise enotsup("box", "truncate --no-create", path)
     if length == 0:
-        await write(accessor, path, b"")
+        await write(accessor, path, b"", entry, parent)
         return
-    item = await resolve_item(accessor, path_parts(path))
+    item = item_of(entry)
     live = live_of(item)
     data = b""
     own: str | OwnRead | None = OwnRead.ABSENT
@@ -56,4 +63,4 @@ async def truncate(
     else:
         new = data + b"\x00" * (length - len(data))
     with own_write_version(path, own):
-        await write(accessor, path, new)
+        await write(accessor, path, new, entry, parent)

@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { deleteCondition, nativeCondition } from '../../cache/context.ts'
+import { deleteCondition, nativeCondition, writesConditioned } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { type BoxItem, deleteFile, refused } from './api.ts'
 import { liveOf } from './fingerprint.ts'
-import { pathParts, resolveItem } from './resolve.ts'
+import { itemOf, liveItem } from './resolve.ts'
 
 /**
  * Delete a resolved file, held to the version read, else the one found.
@@ -28,8 +29,15 @@ import { pathParts, resolveItem } from './resolve.ts'
 export async function deleteResolved(
   accessor: BoxAccessor,
   path: PathSpec,
-  item: BoxItem,
+  lead: BoxItem,
 ): Promise<void> {
+  let item = lead
+  if (writesConditioned(path)) {
+    // The listed row can be older than the version the mount holds.
+    const found = await liveItem(accessor, path, item)
+    if (found === null) throw enoent(path.virtual)
+    item = found
+  }
   const live = liveOf(item)
   const cond = await deleteCondition(path, live?.content ?? null)
   const etag = await nativeCondition(path, cond, live, 'delete')
@@ -40,8 +48,12 @@ export async function deleteResolved(
   }
 }
 
-export async function unlink(accessor: BoxAccessor, path: PathSpec): Promise<void> {
-  const item = await resolveItem(accessor, pathParts(path))
+export async function unlink(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  handed: Handed = {},
+): Promise<void> {
+  const item = itemOf(handed.entry)
   if (item === null) throw enoent(path.virtual)
   if (item.type === 'folder') throw eisdir(path.virtual)
   const upto = lostCount()

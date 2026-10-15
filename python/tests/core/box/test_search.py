@@ -19,7 +19,7 @@ import pytest
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.core.box.search import files_containing
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.box.config import BoxConfig
 
 
@@ -64,7 +64,7 @@ async def test_hits_are_named_from_their_path_collection():
         new_callable=AsyncMock,
         return_value=(results, False),
     ) as spy:
-        out = await files_containing(make_accessor(), "needle", [mount_root()])
+        out = await files_containing(make_accessor(), "needle", mount_root())
     assert spy.await_args.args[2] == "0"
     assert out is not None
     assert [(p.virtual, p.vfs_path) for p in out] == [
@@ -79,19 +79,15 @@ async def test_a_subfolder_scope_searches_under_its_folder_id():
         vfs_path="docs", virtual="/data/docs", directory="/data/docs"
     )
     results = [_file("5", "in.txt", ROOT + [("100", "docs")])]
-    with (
-        patch(
-            "mirage.core.box.search.resolve_item",
-            new_callable=AsyncMock,
-            return_value={"id": "100", "type": "folder"},
-        ),
-        patch(
-            "mirage.core.box.search.search_content",
-            new_callable=AsyncMock,
-            return_value=(results, False),
-        ) as spy,
-    ):
-        out = await files_containing(make_accessor(), "needle", [scope])
+    row = FileStat(
+        name="docs", type=FileType.DIRECTORY, extra={"box_id": "100"}
+    )
+    with patch(
+        "mirage.core.box.search.search_content",
+        new_callable=AsyncMock,
+        return_value=(results, False),
+    ) as spy:
+        out = await files_containing(make_accessor(), "needle", scope, row)
     assert spy.await_args.args[2] == "100"
     assert out is not None
     assert [(p.virtual, p.vfs_path) for p in out] == [
@@ -116,7 +112,7 @@ async def test_an_answer_that_may_miss_a_match_is_none(answer):
         new_callable=AsyncMock,
         **answer,
     ):
-        out = await files_containing(make_accessor(), "needle", [mount_root()])
+        out = await files_containing(make_accessor(), "needle", mount_root())
     assert out is None
 
 
@@ -125,10 +121,10 @@ async def test_a_scope_that_is_no_folder_is_none():
     scope = PathSpec(
         vfs_path="a.txt", virtual="/data/a.txt", directory="/data/a.txt"
     )
+    row = FileStat(name="a.txt", type=FileType.FILE, extra={"box_id": "9"})
     with patch(
-        "mirage.core.box.search.resolve_item",
-        new_callable=AsyncMock,
-        return_value={"id": "9", "type": "file"},
-    ):
-        out = await files_containing(make_accessor(), "needle", [scope])
+        "mirage.core.box.search.search_content", new_callable=AsyncMock
+    ) as spy:
+        out = await files_containing(make_accessor(), "needle", scope, row)
     assert out is None
+    spy.assert_not_awaited()

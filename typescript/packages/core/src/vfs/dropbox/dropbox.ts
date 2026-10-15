@@ -22,7 +22,7 @@ import { buildDeltaHook } from '../../core/dropbox/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
 import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
 import { capacity as dropboxCapacity } from '../../core/dropbox/capacity.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../types.ts'
 import type { MkdirOp } from '../types.ts'
 import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
 import { read as dropboxRead, readStream as dropboxStream } from '../../core/dropbox/read.ts'
@@ -58,6 +58,12 @@ export class DropboxVFS extends BaseVFS {
   // at no extra request.
   override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    read: ['entry'],
+    readStream: ['entry'],
+    truncate: ['entry'],
+  } as const
   override readonly prompt: string = PROMPT
   readonly config: DropboxConfig
   override readonly accessor: DropboxAccessor
@@ -75,54 +81,64 @@ export class DropboxVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
-    return dropboxTree(this.accessor, path, index)
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return dropboxTree(this.accessor, path)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return dropboxReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return dropboxReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return dropboxRead(this.accessor, path, index)
-    return dropboxRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null)
+      return dropboxRead(this.accessor, path, undefined, handed?.entry)
+    return dropboxRead(
+      this.accessor,
+      path,
+      size === null ? { offset } : { offset, size },
+      handed?.entry,
+    )
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return dropboxStat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return dropboxStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return dropboxStream(this.accessor, path, index)
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return dropboxStream(this.accessor, path, handed?.entry)
   }
 
   override exists(path: PathSpec): Promise<boolean> {
     return dropboxExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+  override write(path: PathSpec, data: Uint8Array): Promise<FileStat | null> {
     return dropboxWrite(this.accessor, path, data)
   }
 
-  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+  override truncate(
+    path: PathSpec,
+    length: number,
+    noCreate = false,
+    handed: Handed = {},
+  ): Promise<void> {
     return truncateByRewrite(
-      (p) => this.read(p),
-      (p, d) => this.write(p, d),
+      (p) => this.read(p, handed),
+      async (p, d) => {
+        await this.write(p, d)
+      },
       path,
       length,
       noCreate,
     )
   }
 
-  override create(path: PathSpec): Promise<void> {
+  override create(path: PathSpec): Promise<FileStat | null> {
     return dropboxCreate(this.accessor, path)
   }
 
@@ -134,7 +150,7 @@ export class DropboxVFS extends BaseVFS {
     return dropboxUnlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return dropboxRmdir(this.accessor, path)
   }
 

@@ -21,11 +21,12 @@ vi.mock('./api.ts', async () => {
 })
 
 import { BoxAccessor } from '../../accessor/box.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { type FileStat, PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { entryAt } from '../../workspace/fixtures/handed.ts'
 import * as api from './api.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
+import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
 const STUB_TM = {} as BoxTokenManager
@@ -138,11 +139,24 @@ async function scratchStat(
   const src = new RAMIndexCacheStore()
   const parent = virtual.slice(0, virtual.lastIndexOf('/'))
   const name = virtual.slice(virtual.lastIndexOf('/') + 1)
+  const folderRow = (hint.kind ?? 'box/file') === 'box/folder'
   await src.setDir(parent, [
-    [name, new IndexEntry({ id: hint.rowId ?? 'F1', name, resourceType: hint.kind ?? 'box/file' })],
+    [
+      name,
+      new FileStat({
+        name,
+        type: folderRow ? FileType.DIRECTORY : FileType.FILE,
+        extra: { box_id: hint.rowId ?? 'F1' },
+      }),
+    ],
   ])
   const scratch = new ListingCheckStore({ hints: src })
-  return stat(accessor, new PathSpec({ vfsPath: 'a/b/c.txt', virtual, directory: parent }), scratch)
+  return stat(
+    accessor,
+    new PathSpec({ vfsPath: 'a/b/c.txt', virtual, directory: parent }),
+    undefined,
+    scratch,
+  )
 }
 
 function rooted(root: string): BoxAccessor {
@@ -152,40 +166,30 @@ function rooted(root: string): BoxAccessor {
 const DEEP = new PathSpec({ vfsPath: 'a/b/c.txt', virtual: '/a/b/c.txt', directory: '/a/b' })
 const FLAT = new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' })
 const WALK_FOUND = ['items:0', 'items:A', 'items:B']
-const WALK_GONE = [...WALK_FOUND, ...WALK_FOUND]
 
 describe('box stat token', () => {
   // modified_at is no content token: two same-size edits in one second
   // share it, so a file Box gives no sha1 stats with none.
   it('a sha1-less row stats with no token', async () => {
     new FakeBox({ '0': [row('200', 'a.txt', null)] }, null)
-    const info = await stat(makeAccessor(), FLAT, new RAMIndexCacheStore())
+    const accessor = makeAccessor()
+    const info = await stat(accessor, FLAT, await entryAt(readdir, accessor, FLAT))
     expect(info.fingerprint).toBeNull()
     expect(info.modified).toBe('2026-04-01T00:00:00+00:00')
   })
 
   it('a direct resolve of a sha1-less item has no token', async () => {
     new FakeBox({ '0': [row('200', 'a.txt', null)] }, null)
-    const info = await stat(makeAccessor(), FLAT)
+    const info = await stat(makeAccessor(), FLAT, undefined, new ListingCheckStore())
     expect(info.fingerprint).toBeNull()
     expect(info.modified).toBe('2026-04-01T00:00:00+00:00')
   })
 
   it('a listed sha1 is the stat token', async () => {
-    const index = new RAMIndexCacheStore()
-    await index.setDir('/', [
-      [
-        'a.txt',
-        new IndexEntry({
-          id: '200',
-          name: 'a.txt',
-          resourceType: 'box/file',
-          remoteTime: '2026-04-01T00:00:00+00:00',
-          extra: { sha1: SHA_FAST },
-        }),
-      ],
-    ])
-    expect((await stat(makeAccessor(), FLAT, index)).fingerprint).toBe(SHA_FAST)
+    new FakeBox({ '0': [row('200', 'a.txt', SHA_FAST)] }, null)
+    const accessor = makeAccessor()
+    const info = await stat(accessor, FLAT, await entryAt(readdir, accessor, FLAT))
+    expect(info.fingerprint).toBe(SHA_FAST)
   })
 })
 
@@ -206,8 +210,9 @@ describe('box stat on a scratch store', () => {
 
   it('only a scratch store takes the one-request path', async () => {
     const box = new FakeBox(walkTree('0', row('F1', 'c.txt', SHA_FAST)), null)
-    await stat(makeAccessor(), DEEP, new RAMIndexCacheStore())
-    expect(box.log).toEqual(WALK_FOUND)
+    const handed = new FileStat({ name: 'c.txt', type: FileType.FILE, extra: { box_id: 'F1' } })
+    expect(await stat(makeAccessor(), DEEP, handed, new RAMIndexCacheStore())).toBe(handed)
+    expect(box.log).toEqual([])
   })
 
   it.each([
@@ -222,7 +227,7 @@ describe('box stat on a scratch store', () => {
 
   it('no hint walks as today', async () => {
     const box = new FakeBox(walkTree('0', row('F2', 'c.txt', SHA_WALK)), null)
-    const info = await stat(makeAccessor(), DEEP, new ListingCheckStore())
+    const info = await stat(makeAccessor(), DEEP, undefined, new ListingCheckStore())
     expect(box.log).toEqual(WALK_FOUND)
     expect(info.fingerprint).toBe(SHA_WALK)
   })
@@ -232,11 +237,11 @@ describe('box stat on a scratch store', () => {
     // Only the active-status check fails: trashed, its chain unchanged.
     ['trashed', item(ORIGINAL, 'trashed'), row('F2', 'c.txt', SHA_WALK), WALK_FOUND],
     // Only the path-name check fails: moved under a/x.
-    ['moved', item([ALL_FILES, folder('A', 'a'), folder('X', 'x')]), null, WALK_GONE],
+    ['moved', item([ALL_FILES, folder('A', 'a'), folder('X', 'x')]), null, WALK_FOUND],
     // Only the path-name check fails: the parent renamed to b2.
-    ['parent-renamed', item([ALL_FILES, folder('A', 'a'), folder('B', 'b2')]), null, WALK_GONE],
+    ['parent-renamed', item([ALL_FILES, folder('A', 'a'), folder('B', 'b2')]), null, WALK_FOUND],
     // Only the path-name check fails: a case-only rename, which a listing tells apart.
-    ['case-only', item(ORIGINAL, 'active', { name: 'C.txt' }), null, WALK_GONE],
+    ['case-only', item(ORIGINAL, 'active', { name: 'C.txt' }), null, WALK_FOUND],
     // Only the is-a-file check fails.
     [
       'not-a-file',
@@ -280,7 +285,7 @@ describe('box stat on a scratch store', () => {
     await expect(scratchStat(rooted('R'), '/m/a/b/c.txt')).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    expect(box.log).toEqual(['info:F1', 'items:R', 'items:R'])
+    expect(box.log).toEqual(['info:F1', 'items:R'])
   })
 
   // R reached from a folder that is not 0. Only the All-Files-root check

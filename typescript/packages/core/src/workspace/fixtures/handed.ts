@@ -25,7 +25,8 @@ export type ListFn<A> = (
 /**
  * What is at `path`, found by listing each folder from the mount root down,
  * each handed what its parent's listing named, as the mount finds it. Null for
- * the mount root and for a path nothing is at. Mirrors Python's `entry_at`.
+ * the mount root and for a path nothing is at; a listing of a file is ENOTDIR,
+ * as it is for the mount. Mirrors Python's `entry_at`.
  */
 export async function entryAt<A>(
   readdir: ListFn<A>,
@@ -47,7 +48,7 @@ export async function entryAt<A>(
       )
     } catch (error) {
       const code = (error as { code?: unknown }).code
-      if (code === 'ENOENT' || code === 'ENOTDIR') return null
+      if (code === 'ENOENT') return null
       throw error
     }
     const rows = listed instanceof DirListing ? listed.entries : listed

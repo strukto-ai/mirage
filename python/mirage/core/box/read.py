@@ -13,70 +13,44 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
-import posixpath
 from collections.abc import AsyncIterator
-from functools import partial
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import publish_read, writes_conditioned
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.cache.index.warm import entry_or_warm
 from mirage.core.box.api import download_file, download_file_stream
 from mirage.core.box.fingerprint import entry_token, read_token
-from mirage.core.box.readdir import readdir
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, record_stream, start_op
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import window_for
 
 
-async def file_entry(
-    accessor: BoxAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> IndexEntry:
-    """The index entry of the file at ``path``, listing its parent when
-    the index does not hold it.
+def file_entry(path: PathSpec, entry: FileStat | None) -> FileStat:
+    """What is at the file ``path``, as its parent's listing named it.
 
     Args:
-        accessor (BoxAccessor): Box accessor.
         path (PathSpec): the file.
-        index (IndexCacheStore): listing cache, consulted for the file id.
+        entry (FileStat | None): what is at the path.
 
     Raises:
         FileNotFoundError: nothing is there.
         IsADirectoryError: a folder is.
     """
-    virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    key = path.vfs_path
-    if not key:
-        raise eisdir(virtual)
-    virtual_key = prefix + "/" + key if prefix else "/" + key
-    parent_key = posixpath.dirname(virtual_key) or "/"
-    parent_path = PathSpec.from_str_path(
-        parent_key, mount_key(parent_key, prefix)
-    )
-    warm = (
-        partial(readdir, accessor, parent_path, index)
-        if parent_key != virtual_key
-        else None
-    )
-    entry = await entry_or_warm(index, virtual_key, warm)
+    if not path.vfs_path.strip("/"):
+        raise eisdir(path.virtual)
     if entry is None:
-        raise enoent(virtual)
-    if entry.resource_type == "box/folder":
-        raise eisdir(virtual)
+        raise enoent(path.virtual)
+    if entry.type is FileType.DIRECTORY:
+        raise eisdir(path.virtual)
     return entry
 
 
 async def read(
     accessor: BoxAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
+    entry: FileStat | None = None,
 ) -> bytes:
     """Read a file, optionally only a byte range of it.
 
@@ -86,23 +60,25 @@ async def read(
     Args:
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the path to read.
-        index (IndexCacheStore): listing cache, consulted for the file id.
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
+        entry (FileStat | None): what is at the path.
     """
-    entry = await file_entry(accessor, path, index)
+    found = file_entry(path, entry)
     timer = start_op()
     window = window_for(offset, size)
-    data = await download_file(accessor.token_manager, entry.id, window)
+    data = await download_file(
+        accessor.token_manager, found.extra["box_id"], window
+    )
     fingerprint = None
     # Only a whole read (no window) through a row with a sha1 can yield a
     # token, so nothing else is hashed. The token never depends on a recorder
     # being bound (tests/vfs/test_read_revalidatable.py holds each declarer
     # to it).
-    if window is None and entry_token(entry) is not None:
+    if window is None and entry_token(found) is not None:
         digest = hashlib.sha1(data).hexdigest()
         fingerprint = (
-            digest if writes_conditioned() else read_token(entry, digest)
+            digest if writes_conditioned() else read_token(found, digest)
         )
     publish_read(path.virtual, data, fingerprint)
     record(
@@ -114,7 +90,7 @@ async def read(
 async def read_stream(
     accessor: BoxAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
 ) -> AsyncIterator[bytes]:
     """Stream a file, stamped with its sha1 once it has been read whole.
 
@@ -126,17 +102,19 @@ async def read_stream(
     Args:
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the path to read.
-        index (IndexCacheStore): listing cache, consulted for the file id.
+        entry (FileStat | None): what is at the path.
     """
-    entry = await file_entry(accessor, path, index)
+    found = file_entry(path, entry)
     rec = record_stream("read", path.virtual, "box")
     conditioned = writes_conditioned()
     digest = (
         hashlib.sha1()
-        if rec is not None and entry_token(entry) is not None
+        if rec is not None and entry_token(found) is not None
         else None
     )
-    async for chunk in download_file_stream(accessor.token_manager, entry.id):
+    async for chunk in download_file_stream(
+        accessor.token_manager, found.extra["box_id"]
+    ):
         if digest is not None:
             digest.update(chunk)
         if rec is not None:
@@ -144,4 +122,4 @@ async def read_stream(
         yield chunk
     if rec is not None and digest is not None:
         token = digest.hexdigest()
-        rec.fingerprint = token if conditioned else read_token(entry, token)
+        rec.fingerprint = token if conditioned else read_token(found, token)

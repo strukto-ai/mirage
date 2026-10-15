@@ -20,14 +20,23 @@ from mirage.core.box.api import (
 )
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.copy import replace_file, retaken
-from mirage.core.box.resolve import path_parts, resolve_item, resolve_parent_id
+from mirage.core.box.readdir import stat_from_item
+from mirage.core.box.resolve import item_of, parent_folder, path_parts
 from mirage.core.box.rmdir import delete_empty_folder
 from mirage.errors.fs import eisdir, enoent, enotdir
 from mirage.observe.context import lift_lost, lost_count, record, start_op
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
+from mirage.utils.upload import upload_stat
 
 
-async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
+async def rename(
+    accessor: BoxAccessor,
+    src: PathSpec,
+    dst: PathSpec,
+    entry: FileStat | None = None,
+    dst_parent: FileStat | None = None,
+    dst_entry: FileStat | None = None,
+) -> FileStat | None:
     """Move a file or folder whole; only a destination it replaces is held.
 
     A rename onto its own name is a no-op, as rename(2) is: nothing is
@@ -37,19 +46,22 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
         accessor (BoxAccessor): Box accessor.
         src (PathSpec): the item to move.
         dst (PathSpec): where it lands.
+        entry (FileStat | None): what is at ``src``.
+        dst_parent (FileStat | None): what is at ``dst``'s parent path.
+        dst_entry (FileStat | None): what is at ``dst``.
+
+    Returns:
+        FileStat | None: the item's stat where it landed, None when the
+            reply names none.
     """
     tm = accessor.token_manager
-    src_parts = path_parts(src)
-    dst_parts = path_parts(dst)
-    item = await resolve_item(accessor, src_parts)
+    item = item_of(entry)
     if item is None:
         raise enoent(src.virtual)
     if src.virtual == dst.virtual:
-        return
-    dst_parent = await resolve_parent_id(accessor, dst_parts)
-    if dst_parent is None:
-        raise enoent(dst.virtual)
-    new_name = dst_parts[-1]
+        return None
+    folder_id = parent_folder(accessor, dst, dst_parent)
+    new_name = path_parts(dst)[-1]
     # mv overwrites the destination; Box 409s on a name clash, so clear
     # an existing dst first. A type mismatch is refused with rename(2)'s own
     # errnos and outranks emptiness, since real rename answers EISDIR for a
@@ -60,7 +72,7 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     upto = lost_count()
     timer = start_op()
     cond: WriteCondition | None = None
-    existing = await resolve_item(accessor, dst_parts)
+    existing = item_of(dst_entry)
     if existing is None and item.get("type") == "file":
         cond = await replace_file(accessor, dst, None)
     if existing is not None and existing["id"] != item["id"]:
@@ -75,12 +87,12 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
             cond = await replace_file(accessor, dst, existing)
     try:
         if item.get("type") == "folder":
-            await update_folder(
-                tm, item["id"], name=new_name, parent_id=dst_parent
+            moved = await update_folder(
+                tm, item["id"], name=new_name, parent_id=folder_id
             )
         else:
-            await update_file(
-                tm, item["id"], name=new_name, parent_id=dst_parent
+            moved = await update_file(
+                tm, item["id"], name=new_name, parent_id=folder_id
             )
     except BoxApiError as exc:
         raise (await retaken(exc, cond, dst)) or exc
@@ -93,3 +105,4 @@ async def rename(accessor: BoxAccessor, src: PathSpec, dst: PathSpec) -> None:
     record(op, dst.virtual, "box", 0, timer)
     lift_lost(src, upto, subtree=folder)
     lift_lost(dst, upto, subtree=folder)
+    return upload_stat(moved, stat_from_item, dst.virtual)

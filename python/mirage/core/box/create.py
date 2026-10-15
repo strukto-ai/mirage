@@ -13,16 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.box import BoxAccessor
-from mirage.core.box.resolve import path_parts, resolve_item
 from mirage.core.box.write import write
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
-async def create(accessor: BoxAccessor, path: PathSpec) -> None:
+async def create(
+    accessor: BoxAccessor,
+    path: PathSpec,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
+) -> FileStat | None:
     # touch: create an empty file when absent. Box has no mtime-only API,
     # so touching an existing file is a no-op rather than a truncation.
-    parts = path_parts(path)
-    existing = await resolve_item(accessor, parts)
-    if existing is not None:
-        return
-    await write(accessor, path, b"")
+    if entry is not None:
+        return None
+    return await write(accessor, path, b"", parent=parent)

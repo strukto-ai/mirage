@@ -19,11 +19,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.index.config import IndexEntry
 from mirage.core.box.read import read, read_stream
 from mirage.observe.context import RecordingScope
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import ByteWindow
+
+
+async def _row(index, virtual: str) -> FileStat | None:
+    return (await index.get(virtual)).entry
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -39,11 +42,10 @@ async def test_read_plain_file_downloads_by_id(accessor, index):
         [
             (
                 "a.txt",
-                IndexEntry(
-                    id="200",
+                FileStat(
                     name="a.txt",
-                    resource_type="box/file",
-                    vfs_name="a.txt",
+                    type=FileType.FILE,
+                    extra={"box_id": "200", "resource_type": "box/file"},
                 ),
             )
         ],
@@ -53,7 +55,12 @@ async def test_read_plain_file_downloads_by_id(accessor, index):
         new_callable=AsyncMock,
         return_value=b"hello",
     ) as mock_dl:
-        assert await read(accessor, _spec("/a.txt"), index) == b"hello"
+        assert (
+            await read(
+                accessor, _spec("/a.txt"), entry=await _row(index, "/a.txt")
+            )
+            == b"hello"
+        )
     mock_dl.assert_awaited_once_with(accessor.token_manager, "200", None)
 
 
@@ -64,11 +71,10 @@ async def test_a_ranged_read_asks_box_for_the_range(accessor, index):
         [
             (
                 "a.txt",
-                IndexEntry(
-                    id="200",
+                FileStat(
                     name="a.txt",
-                    resource_type="box/file",
-                    vfs_name="a.txt",
+                    type=FileType.FILE,
+                    extra={"box_id": "200", "resource_type": "box/file"},
                 ),
             )
         ],
@@ -78,7 +84,13 @@ async def test_a_ranged_read_asks_box_for_the_range(accessor, index):
         new_callable=AsyncMock,
         return_value=b"ell",
     ) as mock_dl:
-        got = await read(accessor, _spec("/a.txt"), index, offset=1, size=3)
+        got = await read(
+            accessor,
+            _spec("/a.txt"),
+            offset=1,
+            size=3,
+            entry=await _row(index, "/a.txt"),
+        )
     assert got == b"ell"
     mock_dl.assert_awaited_once_with(
         accessor.token_manager, "200", ByteWindow(1, 3)
@@ -92,11 +104,10 @@ async def test_a_read_to_the_end_leaves_the_range_open(accessor, index):
         [
             (
                 "a.txt",
-                IndexEntry(
-                    id="200",
+                FileStat(
                     name="a.txt",
-                    resource_type="box/file",
-                    vfs_name="a.txt",
+                    type=FileType.FILE,
+                    extra={"box_id": "200", "resource_type": "box/file"},
                 ),
             )
         ],
@@ -106,7 +117,15 @@ async def test_a_read_to_the_end_leaves_the_range_open(accessor, index):
         new_callable=AsyncMock,
         return_value=b"llo",
     ) as mock_dl:
-        assert await read(accessor, _spec("/a.txt"), index, offset=2) == b"llo"
+        assert (
+            await read(
+                accessor,
+                _spec("/a.txt"),
+                offset=2,
+                entry=await _row(index, "/a.txt"),
+            )
+            == b"llo"
+        )
     mock_dl.assert_awaited_once_with(
         accessor.token_manager, "200", ByteWindow(2, None)
     )
@@ -119,11 +138,10 @@ async def test_read_box_native_file_returns_raw_bytes(accessor, index):
         [
             (
                 "n.boxnote",
-                IndexEntry(
-                    id="300",
+                FileStat(
                     name="n.boxnote",
-                    resource_type="box/file",
-                    vfs_name="n.boxnote",
+                    type=FileType.FILE,
+                    extra={"box_id": "300", "resource_type": "box/file"},
                 ),
             )
         ],
@@ -134,7 +152,11 @@ async def test_read_box_native_file_returns_raw_bytes(accessor, index):
         new_callable=AsyncMock,
         return_value=raw,
     ):
-        out = await read(accessor, _spec("/n.boxnote"), index)
+        out = await read(
+            accessor,
+            _spec("/n.boxnote"),
+            entry=await _row(index, "/n.boxnote"),
+        )
     assert out == raw
 
 
@@ -145,17 +167,16 @@ async def test_read_folder_raises_eisdir(accessor, index):
         [
             (
                 "docs",
-                IndexEntry(
-                    id="100",
+                FileStat(
                     name="docs",
-                    resource_type="box/folder",
-                    vfs_name="docs",
+                    type=FileType.DIRECTORY,
+                    extra={"box_id": "100"},
                 ),
             )
         ],
     )
     with pytest.raises(IsADirectoryError):
-        await read(accessor, _spec("/docs"), index)
+        await read(accessor, _spec("/docs"), entry=await _row(index, "/docs"))
 
 
 @pytest.mark.asyncio
@@ -166,7 +187,11 @@ async def test_read_missing_populates_parent_then_raises(accessor, index):
         return_value=[],
     ):
         with pytest.raises(FileNotFoundError):
-            await read(accessor, _spec("/ghost.txt"), index)
+            await read(
+                accessor,
+                _spec("/ghost.txt"),
+                entry=await _row(index, "/ghost.txt"),
+            )
 
 
 @pytest.mark.asyncio
@@ -176,11 +201,10 @@ async def test_stream_plain_file_chunks(accessor, index):
         [
             (
                 "a.txt",
-                IndexEntry(
-                    id="200",
+                FileStat(
                     name="a.txt",
-                    resource_type="box/file",
-                    vfs_name="a.txt",
+                    type=FileType.FILE,
+                    extra={"box_id": "200", "resource_type": "box/file"},
                 ),
             )
         ],
@@ -192,7 +216,10 @@ async def test_stream_plain_file_chunks(accessor, index):
 
     with patch("mirage.core.box.read.download_file_stream", new=fake_stream):
         chunks = [
-            c async for c in read_stream(accessor, _spec("/a.txt"), index)
+            c
+            async for c in read_stream(
+                accessor, _spec("/a.txt"), entry=await _row(index, "/a.txt")
+            )
         ]
     assert b"".join(chunks) == b"hello"
 
@@ -208,12 +235,14 @@ async def _listed(index, sha1):
         [
             (
                 "a.txt",
-                IndexEntry(
-                    id="200",
+                FileStat(
                     name="a.txt",
-                    resource_type="box/file",
-                    vfs_name="a.txt",
-                    extra=extra,
+                    type=FileType.FILE,
+                    extra={
+                        "box_id": "200",
+                        "resource_type": "box/file",
+                        **extra,
+                    },
                 ),
             )
         ],
@@ -228,7 +257,12 @@ async def _recorded_read(accessor, index, data, **window):
             new_callable=AsyncMock,
             return_value=data,
         ):
-            got = await read(accessor, _spec("/a.txt"), index, **window)
+            got = await read(
+                accessor,
+                _spec("/a.txt"),
+                **window,
+                entry=await _row(index, "/a.txt"),
+            )
     finally:
         scope.close()
     return got, [(r.op, r.bytes, r.fingerprint) for r in scope.records]
@@ -314,7 +348,9 @@ async def _recorded_stream(accessor, index, *chunks, close_after=None):
         with patch(
             "mirage.core.box.read.download_file_stream", new=_chunked(*chunks)
         ):
-            it = read_stream(accessor, _spec("/a.txt"), index)
+            it = read_stream(
+                accessor, _spec("/a.txt"), entry=await _row(index, "/a.txt")
+            )
             async for c in it:
                 got.append(c)
                 if close_after is not None and len(got) == close_after:
@@ -363,14 +399,22 @@ async def test_reads_with_no_recorder_bound_still_return_bytes(
         new_callable=AsyncMock,
         return_value=DATA,
     ):
-        assert await read(accessor, _spec("/a.txt"), index) == DATA
+        assert (
+            await read(
+                accessor, _spec("/a.txt"), entry=await _row(index, "/a.txt")
+            )
+            == DATA
+        )
     # Only whole reads publish a token without an observer.
     calls = _counting_sha1(monkeypatch)
     with patch(
         "mirage.core.box.read.download_file_stream", new=_chunked(DATA)
     ):
         assert [
-            c async for c in read_stream(accessor, _spec("/a.txt"), index)
+            c
+            async for c in read_stream(
+                accessor, _spec("/a.txt"), entry=await _row(index, "/a.txt")
+            )
         ] == [DATA]
     assert calls == []
 

@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
 from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dropbox.capacity import capacity as _capacity
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.copy import copy as _copy
@@ -67,53 +67,51 @@ class DropboxVFS(BaseVFS):
         self._token_manager = DropboxTokenManager(config)
         self.accessor = DropboxAccessor(config, self._token_manager)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await _readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
     ) -> bytes:
-        if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read(self.accessor, path, index, offset, size)
+        return await _read(self.accessor, path, offset, size, entry)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await _stat(self.accessor, path)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> AsyncIterator[bytes]:
-        return _stream(self.accessor, path, index)
+        return _stream(self.accessor, path, entry)
 
-    async def read_tree(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path, index)
+    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        await _write(self.accessor, path, data)
+    async def write(self, path: PathSpec, data: bytes) -> FileStat | None:
+        return await _write(self.accessor, path, data)
 
-    async def create(self, path: PathSpec) -> None:
-        await _create(self.accessor, path)
+    async def create(self, path: PathSpec) -> FileStat | None:
+        return await _create(self.accessor, path)
 
     async def truncate(
-        self, path: PathSpec, length: int, no_create: bool = False
+        self,
+        path: PathSpec,
+        length: int,
+        no_create: bool = False,
+        entry: FileStat | None = None,
     ) -> None:
         await truncate_by_rewrite(
-            self.read, self.write, path, length, no_create
+            functools.partial(self.read, entry=entry),
+            self.write,
+            path,
+            length,
+            no_create,
         )
 
     async def unlink(self, path: PathSpec) -> None:
@@ -122,10 +120,8 @@ class DropboxVFS(BaseVFS):
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         await _mkdir(self.accessor, path, parents=parents)
 
-    async def rmdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
-        await _rmdir(self.accessor, path, index)
+    async def rmdir(self, path: PathSpec) -> None:
+        await _rmdir(self.accessor, path)
 
     async def rm_r(self, path: PathSpec) -> Any:
         return await _rm_r(self.accessor, path)
@@ -146,7 +142,6 @@ class DropboxVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         if not whole_word or not self.accessor.config.content_search:
             return None

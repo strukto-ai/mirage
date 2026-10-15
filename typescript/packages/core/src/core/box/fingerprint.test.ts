@@ -14,7 +14,7 @@
 
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { IndexEntry } from '../../cache/index/config.ts'
+import { FileStat, FileType } from '../../types.ts'
 import { entryToken, readToken, tokenOf } from './fingerprint.ts'
 
 function sha1(text: string): string {
@@ -23,13 +23,12 @@ function sha1(text: string): string {
 
 const SHA = sha1('hello')
 
-function entry(extra: Record<string, unknown> = {}): IndexEntry {
-  return new IndexEntry({
-    id: 'F1',
+function entry(extra: Record<string, unknown> = {}): FileStat {
+  return new FileStat({
     name: 'a.txt',
-    resourceType: 'box/file',
-    remoteTime: '2026-04-01T00:00:00+00:00',
-    extra,
+    type: FileType.FILE,
+    modified: '2026-04-01T00:00:00+00:00',
+    extra: { box_id: 'F1', resource_type: 'box/file', ...extra },
   })
 }
 

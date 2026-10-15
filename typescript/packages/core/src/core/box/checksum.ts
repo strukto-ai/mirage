@@ -14,9 +14,8 @@
 
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { writesConditioned } from '../../cache/context.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { getFileInfo } from './api.ts'
 import { SHA1 } from './constants.ts'
 import { readToken, tokenOf } from './fingerprint.ts'
@@ -33,17 +32,17 @@ export async function checksum(
   accessor: BoxAccessor,
   path: PathSpec,
   algorithm: string,
-  index?: IndexCacheStore,
+  entry?: FileStat | null,
 ): Promise<string | null> {
   if (algorithm !== SHA1) return null
-  const entry = await fileEntry(accessor, path, index)
+  const row = fileEntry(path, entry)
   const timer = startOp()
-  const item = await getFileInfo(accessor.tokenManager, entry.id)
+  const item = await getFileInfo(accessor.tokenManager, row.extra.box_id as string)
   const found = tokenOf(item.sha1)
   if (found === null) return null
   const digest = found.toLowerCase()
   record('read', path.virtual, 'box', 0, timer, {
-    fingerprint: writesConditioned(path) ? digest : readToken(entry, digest),
+    fingerprint: writesConditioned(path) ? digest : readToken(row, digest),
   })
   return digest
 }

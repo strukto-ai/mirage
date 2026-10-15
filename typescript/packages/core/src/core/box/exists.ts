@@ -13,10 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import type { PathSpec } from '../../types.ts'
-import { pathParts, resolveItem } from './resolve.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { pathParts } from './resolve.ts'
 
-export async function exists(accessor: BoxAccessor, path: PathSpec): Promise<boolean> {
-  if (pathParts(path).length === 0) return true
-  return (await resolveItem(accessor, pathParts(path))) !== null
+export function exists(
+  _accessor: BoxAccessor,
+  path: PathSpec,
+  entry?: FileStat | null,
+): Promise<boolean> {
+  if (pathParts(path).length === 0) return Promise.resolve(true)
+  return Promise.resolve(entry !== null && entry !== undefined)
 }

@@ -15,6 +15,28 @@
 import type { FileStat } from '../types.ts'
 
 /**
+ * The stat a write's reply names for the stored item, or null.
+ *
+ * `statOf` is the backend's own stat parser, so the stat reads as its `stat`
+ * does. The write has landed by now, so a reply that is not an object, or
+ * that the parser cannot read, answers null instead of throwing. Mirrors
+ * python's `upload_stat`.
+ */
+export function uploadStat<T extends object>(
+  item: T | null | undefined,
+  statOf: (item: T) => FileStat,
+  virtual: string,
+): FileStat | null {
+  if (typeof item !== 'object' || item === null || Array.isArray(item)) return null
+  try {
+    return statOf(item)
+  } catch (err) {
+    console.warn(`unreadable upload reply for ${virtual}: ${String(err)}`)
+    return null
+  }
+}
+
+/**
  * The token an upload reply names for the stored file, or null.
  *
  * `statOf` is the backend's own stat parser, so the write's token is the
@@ -27,12 +49,6 @@ export function uploadToken<T extends object>(
   statOf: (item: T) => FileStat,
   virtual: string,
 ): string | null {
-  if (typeof item !== 'object' || item === null || Array.isArray(item)) return null
-  try {
-    const token = statOf(item).fingerprint
-    return token === null || token === '' ? null : token
-  } catch (err) {
-    console.warn(`unreadable upload reply for ${virtual}: ${String(err)}`)
-    return null
-  }
+  const token = uploadStat(item, statOf, virtual)?.fingerprint ?? null
+  return token === '' ? null : token
 }

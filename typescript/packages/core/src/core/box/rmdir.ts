@@ -16,17 +16,22 @@ import type { BoxAccessor } from '../../accessor/box.ts'
 import { conditioned, settleAfter, heldVersions, keepRefused } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { childSpec } from '../../utils/key_prefix.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
 import { type BoxItem, deleteFile, deleteFolder, deleteWebLink, listFolderItems } from './api.ts'
 import { GONE_STATUS, LOST_STATUS, CONFLICT_STATUS } from './constants.ts'
 import { liveOf } from './fingerprint.ts'
-import { pathParts, resolveItem } from './resolve.ts'
+import { itemOf, pathParts } from './resolve.ts'
 import { deleteResolved } from './unlink.ts'
 
-export async function rmdir(accessor: BoxAccessor, path: PathSpec): Promise<void> {
-  const item = await resolveItem(accessor, pathParts(path))
+export async function rmdir(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  handed: Handed = {},
+): Promise<void> {
+  const item = itemOf(handed.entry)
   if (item === null) throw enoent(path.virtual)
   if (item.type !== 'folder') throw enotdir(path.virtual)
   await deleteEmptyFolder(accessor.tokenManager, item.id, path)
@@ -126,10 +131,13 @@ async function remove(
  * Remove a file or folder; a conditional mount walks it file by file. Mirrors
  * Python's `rm_r`.
  */
-export async function rmR(accessor: BoxAccessor, path: PathSpec): Promise<void> {
-  const parts = pathParts(path)
-  if (parts.length === 0) return
-  const item = await resolveItem(accessor, parts)
+export async function rmR(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  handed: Handed = {},
+): Promise<void> {
+  if (pathParts(path).length === 0) return
+  const item = itemOf(handed.entry)
   if (item === null) throw enoent(path.virtual)
   const upto = lostCount()
   const timer = startOp()

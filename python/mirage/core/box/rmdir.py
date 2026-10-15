@@ -22,7 +22,6 @@ from mirage.cache.context import (
     keep_refused,
     settle_after,
 )
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.box.api import (
     delete_file,
     delete_folder,
@@ -32,21 +31,20 @@ from mirage.core.box.api import (
 from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.core.box.constants import CONFLICT_STATUS, GONE_STATUS, LOST_STATUS
 from mirage.core.box.fingerprint import live_of
-from mirage.core.box.resolve import path_parts, resolve_item
+from mirage.core.box.resolve import item_of, path_parts
 from mirage.core.box.unlink import delete_resolved
 from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.observe.context import lift_lost, lost_count, record, start_op
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import child_spec
 
 logger = logging.getLogger(__name__)
 
 
 async def rmdir(
-    accessor: BoxAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    accessor: BoxAccessor, path: PathSpec, entry: FileStat | None = None
 ) -> None:
-    parts = path_parts(path)
-    item = await resolve_item(accessor, parts)
+    item = item_of(entry)
     if item is None:
         raise enoent(path.virtual)
     if item.get("type") != "folder":
@@ -174,17 +172,19 @@ async def _remove(
     return True
 
 
-async def rm_r(accessor: BoxAccessor, path: PathSpec) -> None:
+async def rm_r(
+    accessor: BoxAccessor, path: PathSpec, entry: FileStat | None = None
+) -> None:
     """Remove a file or folder; a conditional mount walks it file by file.
 
     Args:
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the operand.
+        entry (FileStat | None): what is at the path.
     """
-    parts = path_parts(path)
-    if not parts:
+    if not path_parts(path):
         return
-    item = await resolve_item(accessor, parts)
+    item = item_of(entry)
     if item is None:
         raise enoent(path.virtual)
     upto = lost_count()

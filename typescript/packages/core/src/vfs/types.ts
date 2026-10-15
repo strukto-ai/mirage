@@ -28,6 +28,9 @@ export interface Handed {
   readonly parent?: FileStat | null
   readonly dstEntry?: FileStat | null
   readonly dstParent?: FileStat | null
+  // The store the call runs under, for a function that answers a fresh
+  // check itself; Python's names `index`.
+  readonly index?: IndexCacheStore
 }
 
 export type SetAttrsOp<A extends Accessor = Accessor> = (

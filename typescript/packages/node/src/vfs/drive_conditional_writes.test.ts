@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, WritePolicy } from '@struktoai/mirage-core/types'
+import {
+  DEFAULT_READ_TTL,
+  MountMode,
+  ReadPolicy,
+  type ReadSpec,
+  WritePolicy,
+} from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
@@ -83,9 +89,18 @@ class Drive {
 let drive: Drive
 const built: Workspace[] = []
 
-async function workspace(write: WritePolicy = WritePolicy.CONDITIONAL): Promise<Workspace> {
+async function workspace(
+  write: WritePolicy = WritePolicy.CONDITIONAL,
+  read?: ReadSpec,
+): Promise<Workspace> {
   const vfs = await buildVfs(drive.kind, drive.config())
-  const ws = new Workspace({ [drive.root]: new Mount(vfs, { mode: MountMode.WRITE, write }) })
+  const ws = new Workspace({
+    [drive.root]: new Mount(vfs, {
+      mode: MountMode.WRITE,
+      write,
+      ...(read === undefined ? {} : { read }),
+    }),
+  })
   built.push(ws)
   return ws
 }
@@ -359,17 +374,25 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
 describe('conditional writes only Box has', () => {
   use('box')
 
-  it('sends as many requests conditioned as plain', async () => {
-    const counts: number[] = []
+  // A plain write uploads to the id the listing named; a held version is
+  // checked live first, by that id, so a changed file is refused before its
+  // body goes out. The redirect truncates, then writes: two uploads.
+  it('a conditional write asks by id before each upload', async () => {
+    const logs: string[][] = []
+    const fid = drive.box.idOf('f')
     for (const policy of [WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL]) {
       const ws = await workspace(policy)
       await run(ws, 'cat /box/f')
       const before = drive.box.log.length
       await run(ws, 'echo mine > /box/f')
-      counts.push(drive.box.log.length - before)
+      logs.push(drive.box.log.slice(before))
       drive.put('f', SEED.f ?? '')
     }
-    expect(counts[0]).toBe(counts[1])
+    const upload = `upload:${fid}`
+    expect(logs).toEqual([
+      [upload, upload],
+      [`info:${fid}`, upload, `info:${fid}`, upload],
+    ])
   })
 
   it('resizing holds the bytes it downloaded', async () => {
@@ -416,7 +439,12 @@ describe('conditional writes only Box has', () => {
         drive.drop('d')
       })
     })
-    const ws = await workspace()
+    // Only a fresh mount lists again to see d gone: a write keeps its own row
+    // in its folder's listing rather than dropping the listing.
+    const ws = await workspace(WritePolicy.CONDITIONAL, {
+      policy: ReadPolicy.FRESH,
+      ttl: DEFAULT_READ_TTL,
+    })
     const line =
       'cat /box/d/a > /dev/null; echo x > /box/d/a; echo y > /box/y; ' +
       'cp -r /box/s /box/d && echo mine > /box/d/a'

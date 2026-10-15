@@ -15,16 +15,27 @@
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { nativeCondition, stale, writeCondition } from '../../cache/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { childSpec } from '../../utils/key_prefix.ts'
+import { uploadStat } from '../../utils/upload.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import { liftLost, lostCount, record, startOp, type OpTimer } from '../../observe/context.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import { BoxApiError } from './client.ts'
 import { CONFLICT_STATUS } from './constants.ts'
-import { copyFile, copyFolder, deleteFile, listFolderItems, refused, type BoxItem } from './api.ts'
+import {
+  absentOn404,
+  copyFile,
+  copyFolder,
+  deleteFile,
+  listFolderItems,
+  refused,
+  type BoxItem,
+} from './api.ts'
 import { liveOf } from './fingerprint.ts'
-import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
+import { statFromItem } from './readdir.ts'
+import { itemOf, liveItem, parentFolder, pathParts } from './resolve.ts'
 
 /**
  * Clear the file a copy or move lands on, held to the version read. Returns
@@ -33,9 +44,11 @@ import { pathParts, resolveItem, resolveParentId } from './resolve.ts'
 export async function replaceFile(
   accessor: BoxAccessor,
   dst: PathSpec,
-  existing: BoxItem | null,
+  lead: BoxItem | null,
 ): Promise<WriteCondition | null> {
+  let existing = lead
   const cond = await writeCondition(dst, 'copy')
+  if (cond !== null) existing = await liveItem(accessor, dst, existing)
   const etag = await nativeCondition(dst, cond, liveOf(existing), 'copy')
   if (existing !== null) {
     try {
@@ -81,25 +94,43 @@ function landed(dst: PathSpec, whole: boolean, timer: OpTimer, upto: number): vo
 }
 
 /**
- * Copy `item` to `dst`, merging a folder into a folder. Mirrors Python's
- * `_copy_into`.
+ * Copy `item` to `dst`, merging a folder into a folder: `folderId` is the
+ * folder `dst` lands in, `existing` what is at `dst`. Answers the copy's stat,
+ * null for a merge or a reply that names none. Mirrors Python's `_copy_into`.
  */
-async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Promise<void> {
+async function copyInto(
+  accessor: BoxAccessor,
+  item: BoxItem,
+  dst: PathSpec,
+  folderId: string,
+  existing: BoxItem | null,
+): Promise<FileStat | null> {
   const tm = accessor.tokenManager
   const timer = startOp()
   const upto = lostCount()
-  const dstParts = pathParts(dst)
-  const existing = await resolveItem(accessor, dstParts)
   if (item.type === 'folder' && existing !== null && existing.type === 'folder') {
-    // Merge into an existing folder, as cp -r does: copy each child
-    // rather than replacing the folder, so pre-existing entries survive.
-    for (const child of await listFolderItems(tm, item.id)) {
-      await copyInto(accessor, child, childSpec(dst, child.name))
+    // Merge into an existing folder, as cp -r does: copy each child rather
+    // than replacing the folder, so pre-existing entries survive. A folder the
+    // listing named but Box no longer has is ENOENT, which has the mount list
+    // again and copy into what is there now.
+    const there = new Map(
+      (await absentOn404(dst.virtual, () => listFolderItems(tm, existing.id))).map(
+        (kid) => [kid.name, kid] as const,
+      ),
+    )
+    const kids = await absentOn404(dst.virtual, () => listFolderItems(tm, item.id))
+    for (const child of kids) {
+      await copyInto(
+        accessor,
+        child,
+        childSpec(dst, child.name),
+        existing.id,
+        there.get(child.name) ?? null,
+      )
     }
-    return
+    return null
   }
-  const dstParent = await resolveParentId(accessor, dstParts)
-  if (dstParent === null) throw enoent(dst.virtual)
+  const dstParts = pathParts(dst)
   const newName = dstParts[dstParts.length - 1] ?? ''
   let cond: WriteCondition | null = null
   if (existing !== null && existing.id !== item.id) {
@@ -113,17 +144,19 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
   } else if (existing === null && item.type === 'file') {
     cond = await replaceFile(accessor, dst, null)
   }
+  let made: BoxItem
   try {
     if (item.type === 'folder') {
-      await copyFolder(tm, item.id, dstParent, newName)
+      made = await copyFolder(tm, item.id, folderId, newName)
       landed(dst, true, timer, upto)
     } else {
-      await copyFile(tm, item.id, dstParent, newName)
+      made = await copyFile(tm, item.id, folderId, newName)
       landed(dst, false, timer, upto)
     }
   } catch (err) {
     throw (await retaken(err, cond, dst)) ?? err
   }
+  return uploadStat(made, statFromItem, dst.virtual)
 }
 
 /**
@@ -131,10 +164,22 @@ async function copyInto(accessor: BoxAccessor, item: BoxItem, dst: PathSpec): Pr
  * is recorded as it lands; a replaced file only once its copy lands, so through
  * the clear the line keeps its version. A landed path also lifts the line's lost
  * marks on it, and beneath it for a folder copied whole. The dispatcher evicts
- * what the copy changed, also when it fails.
+ * what the copy changed, also when it fails. Answers the copy's stat, null for
+ * a merge or a reply that names none.
  */
-export async function copy(accessor: BoxAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const item = await resolveItem(accessor, pathParts(src))
+export async function copy(
+  accessor: BoxAccessor,
+  src: PathSpec,
+  dst: PathSpec,
+  handed: Handed = {},
+): Promise<FileStat | null> {
+  const item = itemOf(handed.entry)
   if (item === null) throw enoent(src.virtual)
-  await copyInto(accessor, item, dst)
+  return copyInto(
+    accessor,
+    item,
+    dst,
+    parentFolder(accessor, dst, handed.dstParent),
+    itemOf(handed.dstEntry),
+  )
 }

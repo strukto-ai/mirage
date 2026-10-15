@@ -17,10 +17,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.readdir import readdir
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.dropbox.config import DropboxConfig
 
@@ -35,13 +34,8 @@ def make_accessor(root_path: str = "/") -> DropboxAccessor:
     return DropboxAccessor(config, DropboxTokenManager(config))
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_readdir_root_marks_folders_with_slash(index):
+async def test_readdir_root_marks_folders_with_slash():
     files = [
         {
             ".tag": "folder",
@@ -66,14 +60,17 @@ async def test_readdir_root_marks_folders_with_slash(index):
         out = await readdir(
             make_accessor(),
             PathSpec(vfs_path="", virtual="/", directory="/"),
-            index,
         )
-    assert out == ["/docs/", "/notes.txt"]
+    assert [(row.name, row.type) for row in out] == [
+        ("docs", FileType.DIRECTORY),
+        ("notes.txt", FileType.FILE),
+    ]
+    assert out[1].size == 42
     assert fake.await_args.args[1] == ""
 
 
 @pytest.mark.asyncio
-async def test_readdir_scopes_under_subfolder_root(index):
+async def test_readdir_scopes_under_subfolder_root():
     async def fake_list(tm, path):
         if path == "/Team/data":
             return [
@@ -101,19 +98,18 @@ async def test_readdir_scopes_under_subfolder_root(index):
         "mirage.core.dropbox.readdir.list_folder", side_effect=fake_list
     ):
         root = await readdir(
-            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/")
         )
         nested = await readdir(
             accessor,
             PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
-            index,
         )
-    assert root == ["/docs/"]
-    assert nested == ["/docs/note.md"]
+    assert [row.name for row in root] == ["docs"]
+    assert [row.name for row in nested] == ["note.md"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_honors_mount_prefix(index):
+async def test_readdir_honors_mount_prefix():
     files = [
         {
             ".tag": "file",
@@ -135,9 +131,8 @@ async def test_readdir_honors_mount_prefix(index):
                 directory="/dropbox",
                 vfs_path=mount_key("/dropbox", "/dropbox"),
             ),
-            index,
         )
-    assert out == ["/dropbox/a.txt"]
+    assert [row.name for row in out] == ["a.txt"]
 
 
 def _metadata(entries: dict[str, str]):
@@ -151,7 +146,7 @@ def _metadata(entries: dict[str, str]):
 
 
 @pytest.mark.asyncio
-async def test_readdir_maps_409_to_enoent(index):
+async def test_readdir_maps_409_to_enoent():
     with patch(
         "mirage.core.dropbox.readdir.list_folder",
         new_callable=AsyncMock,
@@ -168,12 +163,11 @@ async def test_readdir_maps_409_to_enoent(index):
                         virtual="/missing",
                         directory="/missing",
                     ),
-                    index,
                 )
 
 
 @pytest.mark.asyncio
-async def test_readdir_under_a_file_is_enotdir(index):
+async def test_readdir_under_a_file_is_enotdir():
     # list_folder answers path/not_found for `/a.txt/x` exactly as it does
     # for a name that is simply absent, so only the ancestor walk can tell
     # GNU's "Not a directory" from "No such file or directory".
@@ -194,12 +188,11 @@ async def test_readdir_under_a_file_is_enotdir(index):
                         virtual="/a.txt/x",
                         directory="/a.txt/x",
                     ),
-                    index,
                 )
 
 
 @pytest.mark.asyncio
-async def test_readdir_on_a_file_is_enotdir_without_walking(index):
+async def test_readdir_on_a_file_is_enotdir_without_walking():
     # The operand is itself a file, so the shortcut in readdir_error settles
     # it: one metadata call, none for the ancestors above it.
     seen: list[str] = []
@@ -222,6 +215,5 @@ async def test_readdir_on_a_file_is_enotdir_without_walking(index):
                         virtual="/docs/a.txt",
                         directory="/docs/a.txt",
                     ),
-                    index,
                 )
     assert seen == ["/docs/a.txt"]

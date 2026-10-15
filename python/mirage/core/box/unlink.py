@@ -15,14 +15,18 @@
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.context import delete_condition, native_condition
+from mirage.cache.context import (
+    delete_condition,
+    native_condition,
+    writes_conditioned,
+)
 from mirage.core.box.api import delete_file, refused
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.fingerprint import live_of
-from mirage.core.box.resolve import path_parts, resolve_item
+from mirage.core.box.resolve import item_of, live_item
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import lift_lost, lost_count, record, start_op
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def delete_resolved(
@@ -35,6 +39,12 @@ async def delete_resolved(
         path (PathSpec): the file's path.
         item (dict[str, Any]): the file as the lookup found it.
     """
+    if writes_conditioned():
+        # The listed row can be older than the version the mount holds.
+        found = await live_item(accessor, path, item)
+        if found is None:
+            raise enoent(path.virtual)
+        item = found
     live = live_of(item)
     cond = await delete_condition(path, live.content if live else None)
     etag = await native_condition(path, cond, live, "delete")
@@ -44,9 +54,10 @@ async def delete_resolved(
         raise (await refused(path, exc, cond, etag)) or exc
 
 
-async def unlink(accessor: BoxAccessor, path: PathSpec) -> None:
-    parts = path_parts(path)
-    item = await resolve_item(accessor, parts)
+async def unlink(
+    accessor: BoxAccessor, path: PathSpec, entry: FileStat | None = None
+) -> None:
+    item = item_of(entry)
     if item is None:
         raise enoent(path.virtual)
     if item.get("type") == "folder":

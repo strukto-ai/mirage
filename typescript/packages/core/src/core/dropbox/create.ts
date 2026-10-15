@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { write } from './write.ts'
 
-export async function create(accessor: DropboxAccessor, path: PathSpec): Promise<void> {
-  await write(accessor, path, new Uint8Array())
+export function create(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat | null> {
+  return write(accessor, path, new Uint8Array())
 }

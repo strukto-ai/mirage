@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ApiModule from './api.ts'
 
@@ -22,13 +21,15 @@ vi.mock('./api.ts', async () => {
 })
 
 import { BoxAccessor } from '../../accessor/box.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { readdir } from './readdir.ts'
 
 const STUB_TM = {} as BoxTokenManager
+const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
+const DOCS = new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' })
+const DOCS_ROW = new FileStat({ name: 'docs', type: FileType.DIRECTORY, extra: { box_id: '111' } })
 
 function makeAccessor(): BoxAccessor {
   return new BoxAccessor({ tokenManager: STUB_TM })
@@ -39,12 +40,7 @@ describe('box readdir', () => {
     vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId: string) => {
       if (folderId === '0') {
         return Promise.resolve([
-          {
-            type: 'folder' as const,
-            id: '111',
-            name: 'docs',
-            modified_at: '2026-04-01T00:00:00Z',
-          },
+          { type: 'folder' as const, id: '111', name: 'docs', modified_at: '2026-04-01T00:00:00Z' },
           {
             type: 'file' as const,
             id: '222',
@@ -56,54 +52,33 @@ describe('box readdir', () => {
       }
       throw new Error(`unexpected folderId=${folderId}`)
     })
-
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const out = await readdir(
-      accessor,
-      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-      index,
-    )
-    expect(out).toEqual(['/docs/', '/notes.txt'])
+    const rows = await readdir(makeAccessor(), ROOT)
+    expect(rows.map((row) => [row.name, row.type, row.size, row.extra.box_id])).toEqual([
+      ['docs', FileType.DIRECTORY, null, '111'],
+      ['notes.txt', FileType.FILE, 12, '222'],
+    ])
   })
 
-  it('walks up to parent to resolve subfolder ID', async () => {
+  it('lists a subfolder by the id its row names', async () => {
     vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId: string) => {
-      if (folderId === '0') {
-        return Promise.resolve([{ type: 'folder' as const, id: '111', name: 'docs' }])
-      }
       if (folderId === '111') {
         return Promise.resolve([{ type: 'file' as const, id: '222', name: 'note.md', size: 5 }])
       }
       throw new Error(`unexpected folderId=${folderId}`)
     })
-
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const out = await readdir(
-      accessor,
-      new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
-      index,
-    )
-    expect(out).toContain('/docs/note.md')
+    const rows = await readdir(makeAccessor(), DOCS, DOCS_ROW)
+    expect(rows.map((row) => row.name)).toEqual(['note.md'])
   })
 
-  it('honors prefix when constructing virtual path', async () => {
-    vi.mocked(api.listFolderItems).mockResolvedValue([
-      { type: 'file' as const, id: '333', name: 'a.txt', size: 1 },
-    ])
-
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const out = await readdir(
-      accessor,
-      new PathSpec({ virtual: '/box', directory: '/box', vfsPath: mountKey('/box', '/box') }),
-      index,
-    )
-    expect(out).toEqual(['/box/a.txt'])
+  it('a folder no listing named is ENOENT, a file ENOTDIR, with no request', async () => {
+    vi.mocked(api.listFolderItems).mockReset()
+    await expect(readdir(makeAccessor(), DOCS)).rejects.toMatchObject({ code: 'ENOENT' })
+    const file = new FileStat({ name: 'docs', type: FileType.FILE, extra: { box_id: '9' } })
+    await expect(readdir(makeAccessor(), DOCS, file)).rejects.toMatchObject({ code: 'ENOTDIR' })
+    expect(api.listFolderItems).not.toHaveBeenCalled()
   })
 
-  it('indexes 0-byte files with size 0 and hides weblinks', async () => {
+  it('keeps 0-byte files with size 0 and hides weblinks', async () => {
     vi.mocked(api.listFolderItems).mockResolvedValue([
       {
         type: 'file' as const,
@@ -119,47 +94,25 @@ describe('box readdir', () => {
         modified_at: '2026-04-01T00:00:00Z',
       },
     ])
-
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const out = await readdir(
-      accessor,
-      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-      index,
-    )
-    expect(out).toEqual(['/empty.txt'])
-    const entry = (await index.get('/empty.txt')).entry
-    expect(entry?.size).toBe(0)
-    expect((await index.get('/homepage')).entry ?? null).toBeNull()
+    const rows = await readdir(makeAccessor(), ROOT)
+    expect(rows.map((row) => [row.name, row.size])).toEqual([['empty.txt', 0]])
   })
 
   it('reads a 404 from the folder listing as absence, not as a failure', async () => {
     // BoxApiError carries only an HTTP status, so a folder deleted after its
-    // entry was cached must be stamped ENOENT here; du's walk counts a
-    // stamped ENOENT as zero and propagates everything else.
+    // row was listed must be stamped ENOENT here; du's walk counts a stamped
+    // ENOENT as zero and propagates everything else.
     vi.mocked(api.listFolderItems).mockRejectedValue(
       new BoxApiError('Box GET /folders/111/items -> 404 not_found', 404),
     )
-    await expect(
-      readdir(
-        makeAccessor(),
-        new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-        new RAMIndexCacheStore(),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readdir(makeAccessor(), ROOT)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('lets a throttled folder listing stay a failure', async () => {
     vi.mocked(api.listFolderItems).mockRejectedValue(
       new BoxApiError('Box GET /folders/111/items -> 429 rate_limit', 429),
     )
-    await expect(
-      readdir(
-        makeAccessor(),
-        new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-        new RAMIndexCacheStore(),
-      ),
-    ).rejects.toMatchObject({ status: 429 })
+    await expect(readdir(makeAccessor(), ROOT)).rejects.toMatchObject({ status: 429 })
   })
 
   it.each([
@@ -170,12 +123,16 @@ describe('box readdir', () => {
     vi.mocked(api.listFolderItems).mockResolvedValue([
       { type: 'file', id: '200', name: 'a.txt', size: 1, sha1 } as unknown as api.BoxItem,
     ])
-    const index = new RAMIndexCacheStore()
-    await readdir(
-      makeAccessor(),
-      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-      index,
-    )
-    expect((await index.get('/a.txt')).entry?.extra.sha1).toBe(kept)
+    const [row] = await readdir(makeAccessor(), ROOT)
+    expect(row?.extra.sha1).toBe(kept)
+    expect(row?.fingerprint).toBe(kept ?? null)
+  })
+
+  it('rows carry the etag a write sends', async () => {
+    vi.mocked(api.listFolderItems).mockResolvedValue([
+      { type: 'file' as const, id: '200', name: 'a.txt', size: 1, etag: '3' },
+    ])
+    const [row] = await readdir(makeAccessor(), ROOT)
+    expect(row?.extra.etag).toBe('3')
   })
 })

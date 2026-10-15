@@ -27,7 +27,6 @@ vi.mock('./client.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { ContentType, FileType, PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
@@ -36,6 +35,7 @@ import { stat } from './stat.ts'
 import { read } from './read.ts'
 import { readdir } from './readdir.ts'
 import { FakeDropboxRpc } from './_test_util.ts'
+import { handedAt } from '../../workspace/fixtures/handed.ts'
 
 const STUB_TM = {} as DropboxTokenManager
 
@@ -60,16 +60,6 @@ const FOLDER_ENTRY: DropboxEntry = {
   path_display: '/docs',
 }
 
-async function listedWithoutA(index: RAMIndexCacheStore): Promise<FakeDropboxRpc> {
-  vi.mocked(client.dropboxRpc).mockImplementation(
-    new FakeDropboxRpc({ entries: [FOLDER_ENTRY] }).handle,
-  )
-  await readdir(makeAccessor(), new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }), index)
-  const fake = new FakeDropboxRpc({ entries: [FOLDER_ENTRY, FILE_ENTRY] })
-  vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
-  return fake
-}
-
 describe('dropbox stat', () => {
   it('is a directory at the mount root with no I/O', async () => {
     const fake = new FakeDropboxRpc()
@@ -77,16 +67,14 @@ describe('dropbox stat', () => {
     const out = await stat(
       makeAccessor(),
       new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-      new RAMIndexCacheStore(),
     )
     expect(out.type).toBe(FileType.DIRECTORY)
     expect(out.name).toBe('/')
     expect(fake.listRequests).toBe(0)
   })
 
-  it('resolves a file directly through get_metadata without an index', async () => {
-    // No index: stat resolves through get_metadata (unlink/rmdir
-    // classification and the wired find core take this path).
+  it('resolves a file through get_metadata', async () => {
+    // Dropbox addresses by path: stat is one get_metadata.
     const fake = new FakeDropboxRpc({ metadata: FILE_ENTRY })
     vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
     const out = await stat(makeAccessor(), PathSpec.fromStrPath('/a.txt'))
@@ -99,7 +87,7 @@ describe('dropbox stat', () => {
     expect(out.extra.resource_type).toBe('dropbox/file')
   })
 
-  it('resolves a folder directly through get_metadata without an index', async () => {
+  it('resolves a folder through get_metadata', async () => {
     const fake = new FakeDropboxRpc({ metadata: FOLDER_ENTRY })
     vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
     const out = await stat(makeAccessor(), PathSpec.fromStrPath('/docs'))
@@ -109,7 +97,7 @@ describe('dropbox stat', () => {
     expect(out.extra.dropbox_id).toBe('id:docs')
   })
 
-  it('maps a 409 to ENOENT without an index', async () => {
+  it('maps a 409 to ENOENT', async () => {
     const fake = new FakeDropboxRpc({ metadata: null })
     vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
     await expect(stat(makeAccessor(), PathSpec.fromStrPath('/ghost.txt'))).rejects.toMatchObject({
@@ -118,7 +106,7 @@ describe('dropbox stat', () => {
     })
   })
 
-  it('propagates a non-409 error without an index', async () => {
+  it('propagates a non-409 error', async () => {
     // A rate-limit or server error is not absence: it must surface.
     vi.mocked(client.dropboxRpc).mockRejectedValue(new DropboxApiError('boom', 500))
     await expect(stat(makeAccessor(), PathSpec.fromStrPath('/a.txt'))).rejects.toMatchObject({
@@ -171,73 +159,10 @@ describe('dropbox stat', () => {
     },
   )
 
-  it('populates from the parent listing on an index miss', async () => {
-    const fake = new FakeDropboxRpc({ entries: [FILE_ENTRY] })
-    vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
-    const out = await stat(
-      makeAccessor(),
-      new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
-      new RAMIndexCacheStore(),
-    )
-    expect(out.content).toBe(ContentType.TEXT)
-    expect(out.name).toBe('a.txt')
-    expect(out.size).toBe(5)
-    expect(out.modified).toBe('2026-04-01T00:00:00Z')
-    expect(out.fingerprint).toBe('hash-a')
-    expect(out.extra.dropbox_id).toBe('id:a')
-    expect(out.extra.resource_type).toBe('dropbox/file')
-    expect(fake.listRequests).toBe(1)
-    expect(fake.metadataPaths).toEqual([])
-  })
-
-  it('serves an index hit without a second listing', async () => {
-    // Once a parent listing populates the index, a stat of any sibling
-    // serves from cache. metadata:null makes a stray get_metadata blow up
-    // as a 409, so a single list request proves both came from the index.
-    const fake = new FakeDropboxRpc({ entries: [FOLDER_ENTRY, FILE_ENTRY], metadata: null })
-    vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
-    const index = new RAMIndexCacheStore()
-    const accessor = makeAccessor()
-    const fileOut = await stat(
-      accessor,
-      new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
-      index,
-    )
-    const dirOut = await stat(
-      accessor,
-      new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/' }),
-      index,
-    )
-    expect(fileOut.content).toBe(ContentType.TEXT)
-    expect(dirOut.type).toBe(FileType.DIRECTORY)
-    expect(dirOut.extra.dropbox_id).toBe('id:docs')
-    expect(fake.listRequests).toBe(1)
-  })
-
-  it('reports ENOENT when the parent lists but omits the child', async () => {
-    // The parent lists cleanly without the child: stat's own
-    // re-check-then-ENOENT, distinct from readdir's 409 mapping.
-    const other: DropboxEntry = {
-      '.tag': 'file',
-      id: 'id:o',
-      name: 'other.txt',
-      path_display: '/other.txt',
-      size: 1,
-    }
-    const fake = new FakeDropboxRpc({ entries: [other] })
-    vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
-    await expect(
-      stat(
-        makeAccessor(),
-        new PathSpec({ vfsPath: 'note.txt', virtual: '/note.txt', directory: '/' }),
-        new RAMIndexCacheStore(),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT', virtualPath: '/note.txt' })
-    expect([fake.listRequests, fake.metadataPaths]).toEqual([1, []])
-  })
-
-  it('honors the mount prefix on an index miss', async () => {
-    const fake = new FakeDropboxRpc({ entries: [FILE_ENTRY] })
+  // Every other test runs on an unprefixed mount; this pins the prefix
+  // arithmetic of the path get_metadata is asked for.
+  it('honors the mount prefix', async () => {
+    const fake = new FakeDropboxRpc({ metadata: FILE_ENTRY })
     vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
     const out = await stat(
       makeAccessor(),
@@ -246,79 +171,11 @@ describe('dropbox stat', () => {
         directory: '/dropbox',
         vfsPath: mountKey('/dropbox/a.txt', '/dropbox'),
       }),
-      new RAMIndexCacheStore(),
     )
     expect(out.content).toBe(ContentType.TEXT)
     expect(out.name).toBe('a.txt')
     expect(out.size).toBe(5)
-  })
-
-  it('reports ENOENT when the parent is genuinely missing', async () => {
-    // 409 on the listing and on every ancestor probe: readdir reports
-    // ENOENT, and stat answers its own ENOENT naming the child, never asking
-    // for the child by path.
-    const asked: string[] = []
-    vi.mocked(client.dropboxRpc).mockImplementation((_tm, endpoint, body) => {
-      if (endpoint === '/files/get_metadata') asked.push(String((body as { path?: string }).path))
-      return Promise.reject(new DropboxApiError('nf', 409, 'path/not_found/...'))
-    })
-    await expect(
-      stat(
-        makeAccessor(),
-        new PathSpec({
-          vfsPath: 'ghost/missing.txt',
-          virtual: '/ghost/missing.txt',
-          directory: '/ghost',
-        }),
-        new RAMIndexCacheStore(),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT', virtualPath: '/ghost/missing.txt' })
-    expect(asked).not.toContain('/ghost/missing.txt')
-  })
-
-  it('propagates a 5xx from the parent listing instead of ENOENT', async () => {
-    // A 5xx/429 while listing the parent is not absence: readdir re-raises
-    // it and stat must let it surface, never collapse it into a
-    // (destructively actionable) false ENOENT.
-    vi.mocked(client.dropboxRpc).mockImplementation((_tm, endpoint) => {
-      if (endpoint === '/files/list_folder') return Promise.reject(new DropboxApiError('boom', 500))
-      throw new Error(`unexpected endpoint ${endpoint}`)
-    })
-    await expect(
-      stat(
-        makeAccessor(),
-        new PathSpec({
-          vfsPath: 'ghost/missing.txt',
-          virtual: '/ghost/missing.txt',
-          directory: '/ghost',
-        }),
-        new RAMIndexCacheStore(),
-      ),
-    ).rejects.toMatchObject({ status: 500 })
-  })
-
-  it('propagates ENOTDIR for a path under a file', async () => {
-    // A path under a file is ENOTDIR, not ENOENT: readdir's ancestor walk
-    // classifies it and stat must let it escape.
-    vi.mocked(client.dropboxRpc).mockImplementation((_tm, endpoint, body) => {
-      if (endpoint === '/files/list_folder') {
-        return Promise.reject(new DropboxApiError('nf', 409, 'path/not_folder/...'))
-      }
-      if (endpoint === '/files/get_metadata') {
-        if ((body as { path?: string }).path === '/a.txt') {
-          return Promise.resolve({ '.tag': 'file', name: 'a.txt' })
-        }
-        return Promise.reject(new DropboxApiError('nf', 409, 'path/not_found/...'))
-      }
-      throw new Error(`unexpected endpoint ${endpoint}`)
-    })
-    await expect(
-      stat(
-        makeAccessor(),
-        new PathSpec({ vfsPath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt' }),
-        new RAMIndexCacheStore(),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOTDIR' })
+    expect(fake.metadataPaths).toEqual(['/a.txt'])
   })
 
   it('serves a size for every listed file that matches its read length', async () => {
@@ -362,10 +219,16 @@ describe('dropbox stat', () => {
       '/empty.txt': new Uint8Array([]),
       '/docs/b.bin': new Uint8Array([97, 98, 99]),
     }
+    const byPath = new Map(
+      Object.values(tree).flatMap((kids) => kids.map((e) => [e.path_display, e])),
+    )
     vi.mocked(client.dropboxRpc).mockImplementation((_tm, endpoint, body) => {
       if (endpoint === '/files/list_folder') {
         const p = (body as { path: string }).path
         return Promise.resolve({ entries: tree[p], cursor: 'c', has_more: false })
+      }
+      if (endpoint === '/files/get_metadata') {
+        return Promise.resolve(byPath.get((body as { path: string }).path))
       }
       throw new Error(`unexpected endpoint ${endpoint}`)
     })
@@ -376,22 +239,23 @@ describe('dropbox stat', () => {
     })
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
     const files: string[] = []
     const stack = ['/']
     while (stack.length > 0) {
       const current = stack.pop()
       if (current === undefined) break
-      const listing = await readdir(accessor, PathSpec.fromStrPath(current), index)
+      const listing = await readdir(accessor, PathSpec.fromStrPath(current))
       for (const child of listing) {
-        const trimmed = child.replace(/\/$/, '')
-        const info = await stat(accessor, PathSpec.fromStrPath(trimmed), index)
+        const trimmed = `${current.replace(/\/$/, '')}/${child.name}`
+        const spec = PathSpec.fromStrPath(trimmed)
+        const info = await stat(accessor, spec)
         if (info.type === FileType.DIRECTORY) {
           stack.push(trimmed)
           continue
         }
         expect(info.size).not.toBeNull()
-        const bytes = await read(accessor, PathSpec.fromStrPath(trimmed), index)
+        const handed = await handedAt(readdir, accessor, spec)
+        const bytes = await read(accessor, spec, undefined, handed.entry)
         expect(info.size).toBe(bytes.length)
         files.push(trimmed)
       }
@@ -399,15 +263,14 @@ describe('dropbox stat', () => {
     expect(files.sort()).toEqual(['/a.txt', '/docs/b.bin', '/empty.txt'])
   })
 
-  // A fresh check stats through a throwaway store: one get_metadata, not a
-  // listing of the parent into a store dropped right after.
-  it('asks one lookup through a check store', async () => {
+  // One get_metadata, never a listing of the parent: the mount keeps
+  // listings and answers a listed path itself.
+  it('asks one lookup', async () => {
     const fake = new FakeDropboxRpc({ entries: [FILE_ENTRY], metadata: FILE_ENTRY })
     vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
     const out = await stat(
       makeAccessor(),
       new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
-      new ListingCheckStore(),
     )
     expect(out.fingerprint).toBe('hash-a')
     expect(fake.listRequests).toBe(0)
@@ -422,21 +285,12 @@ describe('dropbox stat', () => {
     ['restricted', 409, 'path/restricted_content/..', { status: 409 }],
     ['5xx', 502, 'path/not_found/..', { status: 502 }],
   ]
-  it.each([false, true].flatMap((check) => answers.map((answer) => [check, ...answer] as const)))(
-    'reads only a miss as ENOENT (check store %s, %s)',
-    async (check, _id, status, summary, raised) => {
-      vi.mocked(client.dropboxRpc).mockRejectedValue(
-        new DropboxApiError('refused', status, summary),
-      )
-      await expect(
-        stat(
-          makeAccessor(),
-          new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
-          check ? new ListingCheckStore() : undefined,
-        ),
-      ).rejects.toMatchObject(raised)
-    },
-  )
+  it.each(answers)('reads only a miss as ENOENT (%s)', async (_id, status, summary, raised) => {
+    vi.mocked(client.dropboxRpc).mockRejectedValue(new DropboxApiError('refused', status, summary))
+    await expect(
+      stat(makeAccessor(), new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' })),
+    ).rejects.toMatchObject(raised)
+  })
 
   // get_metadata matches case-insensitively where a listing is exact.
   it('reports ENOENT when get_metadata answers another case', async () => {
@@ -446,28 +300,4 @@ describe('dropbox stat', () => {
       code: 'ENOENT',
     })
   })
-
-  // The listing was cached before another client created a.txt: a miss there
-  // is no proof, so stat asks once by path instead of answering ENOENT until
-  // the listing's ttl.
-  const A_TXT = new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' })
-
-  it.each([
-    ['found', FILE_ENTRY, [FileType.FILE, 'hash-a']],
-    ['absent', null, 'ENOENT'],
-  ] as const)(
-    'asks once for a name past an earlier listing (%s)',
-    async (_id, metadata, expected) => {
-      const index = new RAMIndexCacheStore()
-      const fake = await listedWithoutA(index)
-      fake.metadata = metadata
-      if (typeof expected === 'string') {
-        await expect(stat(makeAccessor(), A_TXT, index)).rejects.toMatchObject({ code: expected })
-      } else {
-        const out = await stat(makeAccessor(), A_TXT, index)
-        expect([out.type, out.fingerprint]).toEqual(expected)
-      }
-      expect([fake.metadataPaths, fake.listRequests]).toEqual([['/a.txt'], 0])
-    },
-  )
 })

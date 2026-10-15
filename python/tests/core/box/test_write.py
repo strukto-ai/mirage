@@ -20,12 +20,17 @@ import pytest
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.copy import copy
 from mirage.core.box.mkdir import mkdir
+from mirage.core.box.readdir import readdir
 from mirage.core.box.rename import rename
 from mirage.core.box.rmdir import rm_r, rmdir
 from mirage.core.box.unlink import unlink
 from mirage.core.box.write import write
 from mirage.observe.context import RecordingScope
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.vfs.box import BoxVFS
+from mirage.vfs.box.config import BoxConfig
+from mirage.workspace import Workspace
+from tests.fixtures.handed import call
 
 _TREE = {
     "0": [
@@ -51,6 +56,12 @@ async def _fake_list(_tm, folder_id, limit=1000):
     return _TREE.get(folder_id, [])
 
 
+def _workspace(accessor) -> Workspace:
+    vfs = BoxVFS(config=BoxConfig(access_token="test-token"))
+    vfs.accessor = accessor
+    return Workspace({"/d/": vfs}, mode=MountMode.WRITE)
+
+
 @pytest.fixture
 def root_accessor(accessor):
     # Mount root is the account root "0".
@@ -60,12 +71,14 @@ def root_accessor(accessor):
 @pytest.mark.asyncio
 async def test_write_new_file_uploads_under_parent(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
         ) as up,
     ):
-        await write(root_accessor, _spec("/data/new.txt"), b"hello")
+        await call(
+            write, readdir, root_accessor, _spec("/data/new.txt"), b"hello"
+        )
     up.assert_awaited_once_with(
         root_accessor.token_manager, "100", "new.txt", b"hello"
     )
@@ -74,12 +87,14 @@ async def test_write_new_file_uploads_under_parent(root_accessor):
 @pytest.mark.asyncio
 async def test_write_existing_file_uploads_version(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.write.upload_file_version", new_callable=AsyncMock
         ) as ver,
     ):
-        await write(root_accessor, _spec("/data/a.txt"), b"OVER")
+        await call(
+            write, readdir, root_accessor, _spec("/data/a.txt"), b"OVER"
+        )
     ver.assert_awaited_once_with(
         root_accessor.token_manager, "200", "a.txt", b"OVER", None
     )
@@ -88,23 +103,25 @@ async def test_write_existing_file_uploads_version(root_accessor):
 @pytest.mark.asyncio
 async def test_write_missing_parent_raises(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
     ):
         with pytest.raises(FileNotFoundError):
-            await write(root_accessor, _spec("/data/ghost/x.txt"), b"x")
+            await call(
+                write, readdir, root_accessor, _spec("/data/ghost/x.txt"), b"x"
+            )
 
 
 @pytest.mark.asyncio
 async def test_mkdir_creates_under_parent(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.mkdir.create_folder",
             new_callable=AsyncMock,
-            return_value={"id": "400"},
+            return_value={"id": "400", "name": "newdir", "type": "folder"},
         ) as cf,
     ):
-        await mkdir(root_accessor, _spec("/data/newdir"))
+        await call(mkdir, readdir, root_accessor, _spec("/data/newdir"))
     cf.assert_awaited_once_with(root_accessor.token_manager, "100", "newdir")
 
 
@@ -121,13 +138,13 @@ async def test_mkdir_refuses_a_parent_that_is_not_a_folder(
     root_accessor, virtual, error
 ):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.mkdir.create_folder", new_callable=AsyncMock
         ) as cf,
     ):
         with pytest.raises(error):
-            await mkdir(root_accessor, _spec(virtual))
+            await call(mkdir, readdir, root_accessor, _spec(virtual))
     cf.assert_not_awaited()
 
 
@@ -142,21 +159,31 @@ async def test_mkdir_refuses_a_parent_that_is_not_a_folder(
 async def test_mkdir_parents_names_the_file_it_stops_at(
     root_accessor, virtual, error
 ):
-    with (
-        patch("mirage.core.box.mkdir.list_folder_items", new=_fake_list),
-        patch(
-            "mirage.core.box.mkdir.create_folder", new_callable=AsyncMock
-        ) as cf,
-    ):
-        with pytest.raises(error, match="'/data/a.txt'$"):
-            await mkdir(root_accessor, _spec(virtual), parents=True)
-    cf.assert_not_awaited()
+    # -p is the mount's: it makes one level at a time and names the file
+    # it stops at above the operand, as GNU does.
+    ws = _workspace(root_accessor)
+    try:
+        with (
+            patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
+            patch(
+                "mirage.core.box.mkdir.create_folder", new_callable=AsyncMock
+            ) as cf,
+        ):
+            with pytest.raises(error, match="'/d/data/a.txt'$"):
+                await ws.dispatch(
+                    "mkdir",
+                    PathSpec.from_str_path("/d" + virtual),
+                    parents=True,
+                )
+        cf.assert_not_awaited()
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
 async def test_mkdir_of_a_taken_name_is_eexist(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.mkdir.create_folder",
             new_callable=AsyncMock,
@@ -164,7 +191,7 @@ async def test_mkdir_of_a_taken_name_is_eexist(root_accessor):
         ),
     ):
         with pytest.raises(FileExistsError):
-            await mkdir(root_accessor, _spec("/data/a.txt"))
+            await call(mkdir, readdir, root_accessor, _spec("/data/a.txt"))
 
 
 @pytest.mark.asyncio
@@ -178,49 +205,54 @@ async def test_mkdir_parents_creates_each_missing_level(root_accessor):
             {"id": new_id, "name": name, "type": "folder"}
         )
         _TREE[new_id] = []
-        return {"id": new_id}
+        return {"id": new_id, "name": name, "type": "folder"}
 
-    with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-        patch("mirage.core.box.mkdir.list_folder_items", new=_fake_list),
-        patch("mirage.core.box.mkdir.create_folder", new=fake_create),
-    ):
-        await mkdir(root_accessor, _spec("/data/p/q"), parents=True)
-    assert ("100", "p") in created
-    assert ("new-p", "q") in created
-    _TREE.pop("new-p", None)
-    _TREE.pop("new-q", None)
-    _TREE["100"] = [e for e in _TREE["100"] if e["name"] != "p"]
+    ws = _workspace(root_accessor)
+    try:
+        with (
+            patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
+            patch("mirage.core.box.mkdir.create_folder", new=fake_create),
+        ):
+            await ws.dispatch(
+                "mkdir", PathSpec.from_str_path("/d/data/p/q"), parents=True
+            )
+        # Each level is handed the folder the level above made.
+        assert created == [("100", "p"), ("new-p", "q")]
+    finally:
+        await ws.close()
+        _TREE.pop("new-p", None)
+        _TREE.pop("new-q", None)
+        _TREE["100"] = [e for e in _TREE["100"] if e["name"] != "p"]
 
 
 @pytest.mark.asyncio
 async def test_unlink_deletes_file(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.unlink.delete_file", new_callable=AsyncMock
         ) as df,
     ):
-        await unlink(root_accessor, _spec("/data/a.txt"))
+        await call(unlink, readdir, root_accessor, _spec("/data/a.txt"))
     df.assert_awaited_once_with(root_accessor.token_manager, "200", None)
 
 
 @pytest.mark.asyncio
 async def test_unlink_on_folder_raises_isdir(root_accessor):
-    with patch("mirage.core.box.resolve.list_folder_items", new=_fake_list):
+    with patch("mirage.core.box.readdir.list_folder_items", new=_fake_list):
         with pytest.raises(IsADirectoryError):
-            await unlink(root_accessor, _spec("/data/sub"))
+            await call(unlink, readdir, root_accessor, _spec("/data/sub"))
 
 
 @pytest.mark.asyncio
 async def test_rmdir_deletes_folder_non_recursive(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.rmdir.delete_folder", new_callable=AsyncMock
         ) as df,
     ):
-        await rmdir(root_accessor, _spec("/data/sub"))
+        await call(rmdir, readdir, root_accessor, _spec("/data/sub"))
     df.assert_awaited_once_with(
         root_accessor.token_manager, "300", recursive=False
     )
@@ -229,12 +261,12 @@ async def test_rmdir_deletes_folder_non_recursive(root_accessor):
 @pytest.mark.asyncio
 async def test_rm_r_recursive_on_folder(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.rmdir.delete_folder", new_callable=AsyncMock
         ) as df,
     ):
-        await rm_r(root_accessor, _spec("/data/sub"))
+        await call(rm_r, readdir, root_accessor, _spec("/data/sub"))
     df.assert_awaited_once_with(
         root_accessor.token_manager, "300", recursive=True
     )
@@ -243,12 +275,18 @@ async def test_rm_r_recursive_on_folder(root_accessor):
 @pytest.mark.asyncio
 async def test_rename_moves_file(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.rename.update_file", new_callable=AsyncMock
         ) as uf,
     ):
-        await rename(root_accessor, _spec("/data/a.txt"), _spec("/data/b.txt"))
+        await call(
+            rename,
+            readdir,
+            root_accessor,
+            _spec("/data/a.txt"),
+            dst=_spec("/data/b.txt"),
+        )
     uf.assert_awaited_once_with(
         root_accessor.token_manager, "200", name="b.txt", parent_id="100"
     )
@@ -257,7 +295,7 @@ async def test_rename_moves_file(root_accessor):
 @pytest.mark.asyncio
 async def test_rename_replaces_empty_folder_destination(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.rmdir.delete_folder", new_callable=AsyncMock
         ) as df,
@@ -265,7 +303,13 @@ async def test_rename_replaces_empty_folder_destination(root_accessor):
             "mirage.core.box.rename.update_folder", new_callable=AsyncMock
         ) as uo,
     ):
-        await rename(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
+        await call(
+            rename,
+            readdir,
+            root_accessor,
+            _spec("/data/sub"),
+            dst=_spec("/data/dst"),
+        )
     df.assert_awaited_once_with(
         root_accessor.token_manager, "400", recursive=False
     )
@@ -279,7 +323,7 @@ async def test_rename_refuses_nonempty_folder_destination(root_accessor):
     # Box decides the emptiness, not us: recursive=false 409s on a folder
     # with children, and that is mv's "Directory not empty".
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.rmdir.delete_folder",
             new_callable=AsyncMock,
@@ -290,7 +334,13 @@ async def test_rename_refuses_nonempty_folder_destination(root_accessor):
         ) as uo,
     ):
         with pytest.raises(OSError) as caught:
-            await rename(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
+            await call(
+                rename,
+                readdir,
+                root_accessor,
+                _spec("/data/sub"),
+                dst=_spec("/data/dst"),
+            )
     assert caught.value.errno == errno.ENOTEMPTY
     assert uo.await_count == 0
 
@@ -298,7 +348,7 @@ async def test_rename_refuses_nonempty_folder_destination(root_accessor):
 @pytest.mark.asyncio
 async def test_rename_unmapped_folder_error_propagates(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.rmdir.delete_folder",
             new_callable=AsyncMock,
@@ -307,7 +357,13 @@ async def test_rename_unmapped_folder_error_propagates(root_accessor):
         patch("mirage.core.box.rename.update_folder", new_callable=AsyncMock),
     ):
         with pytest.raises(BoxApiError):
-            await rename(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
+            await call(
+                rename,
+                readdir,
+                root_accessor,
+                _spec("/data/sub"),
+                dst=_spec("/data/dst"),
+            )
 
 
 @pytest.mark.asyncio
@@ -316,7 +372,7 @@ async def test_rename_file_onto_folder_raises_isdir(root_accessor):
     # that directory has children, so the type check outranks emptiness and
     # the folder is never deleted to find out.
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.rmdir.delete_folder", new_callable=AsyncMock
         ) as df,
@@ -325,8 +381,12 @@ async def test_rename_file_onto_folder_raises_isdir(root_accessor):
         ) as uf,
     ):
         with pytest.raises(IsADirectoryError):
-            await rename(
-                root_accessor, _spec("/data/a.txt"), _spec("/data/sub")
+            await call(
+                rename,
+                readdir,
+                root_accessor,
+                _spec("/data/a.txt"),
+                dst=_spec("/data/sub"),
             )
     assert df.await_count == 0
     assert uf.await_count == 0
@@ -335,7 +395,7 @@ async def test_rename_file_onto_folder_raises_isdir(root_accessor):
 @pytest.mark.asyncio
 async def test_rename_folder_onto_file_raises_notdir(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.copy.delete_file", new_callable=AsyncMock
         ) as df,
@@ -344,8 +404,12 @@ async def test_rename_folder_onto_file_raises_notdir(root_accessor):
         ) as uo,
     ):
         with pytest.raises(NotADirectoryError):
-            await rename(
-                root_accessor, _spec("/data/sub"), _spec("/data/a.txt")
+            await call(
+                rename,
+                readdir,
+                root_accessor,
+                _spec("/data/sub"),
+                dst=_spec("/data/a.txt"),
             )
     assert df.await_count == 0
     assert uo.await_count == 0
@@ -356,14 +420,20 @@ async def test_copy_file_onto_folder_raises_isdir(root_accessor):
     # cp refuses a type mismatch rather than replacing: this branch used to
     # recursively delete the destination folder.
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch("mirage.core.box.copy.copy_file", new_callable=AsyncMock) as cf,
         patch(
             "mirage.core.box.copy.delete_file", new_callable=AsyncMock
         ) as df,
     ):
         with pytest.raises(IsADirectoryError):
-            await copy(root_accessor, _spec("/data/a.txt"), _spec("/data/sub"))
+            await call(
+                copy,
+                readdir,
+                root_accessor,
+                _spec("/data/a.txt"),
+                dst=_spec("/data/sub"),
+            )
     assert cf.await_count == 0
     assert df.await_count == 0
 
@@ -371,7 +441,7 @@ async def test_copy_file_onto_folder_raises_isdir(root_accessor):
 @pytest.mark.asyncio
 async def test_copy_folder_onto_file_raises_notdir(root_accessor):
     with (
-        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
         patch("mirage.core.box.copy.list_folder_items", new=_fake_list),
         patch(
             "mirage.core.box.copy.copy_folder", new_callable=AsyncMock
@@ -381,7 +451,13 @@ async def test_copy_folder_onto_file_raises_notdir(root_accessor):
         ) as df,
     ):
         with pytest.raises(NotADirectoryError):
-            await copy(root_accessor, _spec("/data/sub"), _spec("/data/a.txt"))
+            await call(
+                copy,
+                readdir,
+                root_accessor,
+                _spec("/data/sub"),
+                dst=_spec("/data/a.txt"),
+            )
     assert cd.await_count == 0
     assert df.await_count == 0
 
@@ -391,13 +467,17 @@ async def test_copy_file(root_accessor):
     scope = RecordingScope()
     try:
         with (
-            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
             patch(
                 "mirage.core.box.copy.copy_file", new_callable=AsyncMock
             ) as cf,
         ):
-            await copy(
-                root_accessor, _spec("/data/a.txt"), _spec("/data/c.txt")
+            await call(
+                copy,
+                readdir,
+                root_accessor,
+                _spec("/data/a.txt"),
+                dst=_spec("/data/c.txt"),
             )
     finally:
         scope.close()
@@ -412,12 +492,18 @@ async def test_copy_of_a_whole_folder_is_recorded_as_a_prefix(root_accessor):
     scope = RecordingScope()
     try:
         with (
-            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
             patch(
                 "mirage.core.box.copy.copy_folder", new_callable=AsyncMock
             ) as cd,
         ):
-            await copy(root_accessor, _spec("/data/sub"), _spec("/data/new"))
+            await call(
+                copy,
+                readdir,
+                root_accessor,
+                _spec("/data/sub"),
+                dst=_spec("/data/new"),
+            )
     finally:
         scope.close()
     cd.assert_awaited_once_with(
@@ -451,11 +537,17 @@ async def test_a_merge_records_each_folder_before_the_next(
 
     try:
         with (
-            patch("mirage.core.box.resolve.list_folder_items", new=listing),
+            patch("mirage.core.box.readdir.list_folder_items", new=listing),
             patch("mirage.core.box.copy.list_folder_items", new=listing),
             patch("mirage.core.box.copy.copy_folder", new=copied),
         ):
-            await copy(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
+            await call(
+                copy,
+                readdir,
+                root_accessor,
+                _spec("/data/sub"),
+                dst=_spec("/data/dst"),
+            )
     finally:
         scope.close()
     assert seen == [[], [("copy_prefix", "/data/dst/x")]]
@@ -474,12 +566,16 @@ async def test_a_replaced_file_is_recorded_only_once_its_copy_lands(
 
     try:
         with (
-            patch("mirage.core.box.resolve.list_folder_items", new=_copy_list),
+            patch("mirage.core.box.readdir.list_folder_items", new=_copy_list),
             patch("mirage.core.box.copy.copy_file", new=copied),
             patch("mirage.core.box.copy.delete_file", new_callable=AsyncMock),
         ):
-            await copy(
-                root_accessor, _spec("/data/a.txt"), _spec("/data/b.txt")
+            await call(
+                copy,
+                readdir,
+                root_accessor,
+                _spec("/data/a.txt"),
+                dst=_spec("/data/b.txt"),
             )
     finally:
         scope.close()
@@ -494,13 +590,17 @@ async def test_a_rename_onto_its_own_name_sends_and_records_nothing(
     scope = RecordingScope()
     try:
         with (
-            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
             patch(
                 "mirage.core.box.rename.update_file", new_callable=AsyncMock
             ) as moved,
         ):
-            await rename(
-                root_accessor, _spec("/data/a.txt"), _spec("/data/a.txt")
+            await call(
+                rename,
+                readdir,
+                root_accessor,
+                _spec("/data/a.txt"),
+                dst=_spec("/data/a.txt"),
             )
     finally:
         scope.close()
@@ -516,22 +616,13 @@ async def test_write_records_the_virtual_path(root_accessor):
     )
     scope = RecordingScope()
     try:
-        with (
-            patch(
-                "mirage.core.box.write.resolve_item",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-            patch(
-                "mirage.core.box.write.resolve_parent_id",
-                new_callable=AsyncMock,
-                return_value="100",
-            ),
-            patch(
-                "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
-            ),
+        parent = FileStat(
+            name="m", type=FileType.DIRECTORY, extra={"box_id": "100"}
+        )
+        with patch(
+            "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
         ):
-            await write(root_accessor, spec, b"hello")
+            await write(root_accessor, spec, b"hello", parent=parent)
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
@@ -582,7 +673,7 @@ async def _box_write_recorded(accessor, virtual: str, reply):
 
     try:
         with (
-            patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+            patch("mirage.core.box.readdir.list_folder_items", new=_fake_list),
             patch(
                 "mirage.core.box.write.upload_new_file",
                 new_callable=AsyncMock,
@@ -594,7 +685,7 @@ async def _box_write_recorded(accessor, virtual: str, reply):
                 return_value=reply,
             ),
         ):
-            await write(accessor, _spec(virtual), b"hello")
+            await call(write, readdir, accessor, _spec(virtual), b"hello")
     finally:
         scope.close()
     rows = [

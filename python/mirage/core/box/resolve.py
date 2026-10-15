@@ -12,16 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
-from mirage.core.box.api import list_folder_items
+from mirage.core.box.api import get_file_info, list_folder_items
+from mirage.core.box.client import BoxApiError
 from mirage.core.box.constants import (
     ACTIVE,
     ALL_FILES_FOLDER_ID,
+    SHA1,
     TRASH_FOLDER_ID,
 )
-from mirage.types import PathSpec
+from mirage.errors.fs import enoent, enotdir
+from mirage.types import FileStat, FileType, PathSpec
+
+logger = logging.getLogger(__name__)
 
 
 def path_parts(path: PathSpec) -> list[str]:
@@ -79,15 +85,44 @@ async def resolve_item(
     return chain[-1]
 
 
-async def resolve_parent_id(
-    accessor: BoxAccessor, parts: list[str]
-) -> str | None:
-    if len(parts) <= 1:
-        return root_id(accessor)
-    parent = await resolve_item(accessor, parts[:-1])
-    if parent is None or parent.get("type") != "folder":
+def item_of(row: FileStat | None) -> dict[str, Any] | None:
+    """The Box item a listed row names, in the shape a lookup answers.
+
+    Args:
+        row (FileStat | None): the row, as its folder's listing named it.
+    """
+    if row is None:
         return None
-    return parent["id"]
+    return {
+        "id": row.extra["box_id"],
+        "type": "folder" if row.type is FileType.DIRECTORY else "file",
+        "name": row.name,
+        SHA1: row.extra.get(SHA1),
+        "etag": row.extra.get("etag"),
+    }
+
+
+def parent_folder(
+    accessor: BoxAccessor, path: PathSpec, parent: FileStat | None
+) -> str:
+    """The folder a create at ``path`` lands in: the mount root's, or
+    what is at the parent path.
+
+    A missing or non-directory parent names the operand, as mkdir(2)
+    does.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): the path being created.
+        parent (FileStat | None): what is at its parent path.
+    """
+    if len(path_parts(path)) <= 1:
+        return root_id(accessor)
+    if parent is None:
+        raise enoent(path.virtual)
+    if parent.type is not FileType.DIRECTORY:
+        raise enotdir(path.virtual)
+    return parent.extra["box_id"]
 
 
 def mount_relative_key(
@@ -148,3 +183,33 @@ def names_this_path(
         return False
     key = mount_relative_key(item, root_id(accessor))
     return key == "/".join(path_parts(path))
+
+
+async def live_item(
+    accessor: BoxAccessor, path: PathSpec, lead: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """What is at ``path`` now, asked live.
+
+    A listed row can be older than the version an op holds, so a check
+    or a conditional write asks again: one ``GET /files/{id}`` by the
+    id the row names, when the answer is still the active file at
+    exactly this path, else a walk of the listings from the mount root.
+    Only the walk may call a path gone, so a 404 or 403 by id falls
+    back to it rather than answering None.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): the path.
+        lead (dict[str, Any] | None): the item the listed row names.
+    """
+    if lead is not None and lead.get("type") == "file" and lead.get("id"):
+        try:
+            item = await get_file_info(accessor.token_manager, lead["id"])
+        except BoxApiError as exc:
+            if exc.status not in (403, 404):
+                raise
+            logger.debug("listed id for %s unusable: %s", path.virtual, exc)
+        else:
+            if names_this_path(accessor, item, path):
+                return item
+    return await resolve_item(accessor, path_parts(path))

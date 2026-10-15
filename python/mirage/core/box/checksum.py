@@ -14,20 +14,19 @@
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import writes_conditioned
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.box.api import get_file_info
 from mirage.core.box.constants import SHA1
 from mirage.core.box.fingerprint import read_token, token_of
 from mirage.core.box.read import file_entry
 from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def checksum(
     accessor: BoxAccessor,
     path: PathSpec,
     algorithm: str,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
 ) -> str | None:
     """The sha1 Box keeps for a file's content, asked live.
 
@@ -40,13 +39,13 @@ async def checksum(
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the file.
         algorithm (str): the hashlib name asked for.
-        index (IndexCacheStore): listing cache, consulted for the file id.
+        entry (FileStat | None): what is at the path.
     """
     if algorithm != SHA1:
         return None
-    entry = await file_entry(accessor, path, index)
+    row = file_entry(path, entry)
     timer = start_op()
-    item = await get_file_info(accessor.token_manager, entry.id)
+    item = await get_file_info(accessor.token_manager, row.extra["box_id"])
     found = token_of(item.get(SHA1))
     if found is None:
         return None
@@ -58,7 +57,7 @@ async def checksum(
         0,
         timer,
         fingerprint=(
-            digest if writes_conditioned() else read_token(entry, digest)
+            digest if writes_conditioned() else read_token(row, digest)
         ),
     )
     return digest

@@ -21,10 +21,8 @@ vi.mock('./api.ts', async () => {
 })
 
 import { BoxAccessor } from '../../accessor/box.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { runWithRecording } from '../../observe/context.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import * as api from './api.ts'
 import type { BoxTokenManager } from './client.ts'
 import { checksum } from './checksum.ts'
@@ -33,21 +31,12 @@ const TM = {} as BoxTokenManager
 const SCOPE = new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' })
 const accessor = new BoxAccessor({ tokenManager: TM })
 
-async function listed(sha1 = '0'.repeat(40)): Promise<RAMIndexCacheStore> {
-  const index = new RAMIndexCacheStore()
-  await index.setDir('/', [
-    [
-      'a.txt',
-      new IndexEntry({
-        id: '200',
-        name: 'a.txt',
-        resourceType: 'box/file',
-        vfsName: 'a.txt',
-        extra: { sha1 },
-      }),
-    ],
-  ])
-  return index
+function listed(sha1 = '0'.repeat(40)): FileStat {
+  return new FileStat({
+    name: 'a.txt',
+    type: FileType.FILE,
+    extra: { box_id: '200', resource_type: 'box/file', sha1 },
+  })
 }
 
 beforeEach(() => {
@@ -58,19 +47,19 @@ describe('Box checksum', () => {
   // Mirrors python's test_box_answers_its_live_sha1.
   it('answers its live sha1', async () => {
     vi.mocked(api.getFileInfo).mockResolvedValue({ id: '200', sha1: 'AB'.repeat(20) } as never)
-    expect(await checksum(accessor, SCOPE, 'sha1', await listed())).toBe('ab'.repeat(20))
+    expect(await checksum(accessor, SCOPE, 'sha1', listed())).toBe('ab'.repeat(20))
     expect(api.getFileInfo).toHaveBeenCalledWith(TM, '200')
   })
 
   // Mirrors python's test_box_without_a_sha1_reads.
   it.each([null, ''])('reads a file whose sha1 is %j', async (sha1) => {
     vi.mocked(api.getFileInfo).mockResolvedValue({ id: '200', sha1 } as never)
-    expect(await checksum(accessor, SCOPE, 'sha1', await listed())).toBeNull()
+    expect(await checksum(accessor, SCOPE, 'sha1', listed())).toBeNull()
   })
 
   // Mirrors python's test_box_keeps_no_md5.
   it('keeps no md5', async () => {
-    expect(await checksum(accessor, SCOPE, 'md5', await listed())).toBeNull()
+    expect(await checksum(accessor, SCOPE, 'md5', listed())).toBeNull()
     expect(api.getFileInfo).not.toHaveBeenCalled()
   })
 
@@ -80,8 +69,8 @@ describe('Box checksum', () => {
     ['0'.repeat(40), null],
   ])('records the token a read would, listed %s', async (sha1, token) => {
     vi.mocked(api.getFileInfo).mockResolvedValue({ id: '200', sha1: 'AB'.repeat(20) } as never)
-    const index = await listed(sha1)
-    const [, records] = await runWithRecording(() => checksum(accessor, SCOPE, 'sha1', index))
+    const row = listed(sha1)
+    const [, records] = await runWithRecording(() => checksum(accessor, SCOPE, 'sha1', row))
     expect(records.map((r) => [r.op, r.path, r.fingerprint])).toEqual([['read', '/a.txt', token]])
   })
 })

@@ -27,7 +27,9 @@ async def entry_at(
 ) -> FileStat | None:
     """What is at ``path``, found by listing each folder from the mount
     root down, each handed what its parent's listing named, as the mount
-    finds it. None for the mount root and for a path nothing is at.
+    finds it, or by path alone for a backend whose listing takes no row.
+    None for the mount root and for a path nothing is at; a listing of a
+    file is ENOTDIR, as it is for the mount.
 
     Args:
         readdir (ListFn): the backend's readdir.
@@ -36,14 +38,19 @@ async def entry_at(
     """
     prefix = mount_prefix_of(path.virtual, path.vfs_path)
     names = [name for name in path.vfs_path.split("/") if name]
+    handed = "entry" in inspect.signature(readdir).parameters
     found: FileStat | None = None
     for depth, name in enumerate(names):
         key = "/".join(names[:depth])
         virtual = f"{prefix}/{key}" if key else prefix or "/"
         folder = PathSpec(virtual=virtual, directory=virtual, vfs_path=key)
         try:
-            listed = await readdir(accessor, folder, found)
-        except (FileNotFoundError, NotADirectoryError):
+            listed = await (
+                readdir(accessor, folder, found)
+                if handed
+                else readdir(accessor, folder)
+            )
+        except FileNotFoundError:
             return None
         rows = listed.entries if isinstance(listed, DirListing) else listed
         found = next((row for row in rows if row.name == name), None)

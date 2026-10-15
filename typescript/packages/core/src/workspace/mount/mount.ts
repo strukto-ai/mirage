@@ -939,11 +939,17 @@ export class MountEntry {
 
   /**
    * What is at `scope`, as its parent's listing names it, listing the parent
-   * when no stored listing does. Mirrors Python's `_entry`.
+   * when no stored listing does. Under `fresh` the running command's check of
+   * `scope` already asked the backend, so its answer stands in for the walk;
+   * a check itself always walks. Mirrors Python's `_entry`.
    */
   private async entry(scope: PathSpec, index: IndexCacheStore): Promise<FileStat | null> {
     const key = indexKey(this.prefix, scope)
     if (key === this.rootKey || !this.vfs.listsStats) return null
+    if (this.cacheManager !== null && !(index instanceof ListingCheckStore)) {
+      const probed = this.cacheManager.probedStat(scope)
+      if (probed !== null) return probed
+    }
     return entryAt(index, key, () => this.listed(this.folder(scope), index))
   }
 
@@ -983,6 +989,12 @@ export class MountEntry {
     if (!this.vfs.listsStats) return null
     const wants = this.wants(name)
     const handed: { -readonly [K in keyof Handed]: Handed[K] } = {}
+    if (wants.includes('index')) {
+      handed.index = index
+      // Under a fresh check such a function answers from the check's hints:
+      // walking for its stats would cost the requests it saves.
+      if (index instanceof ListingCheckStore) return handed
+    }
     for (const stat of HANDED) {
       if (!wants.includes(stat)) continue
       if (stat === 'entry') handed.entry = await this.entry(scope, index)
@@ -1017,7 +1029,7 @@ export class MountEntry {
     try {
       return await call(scope, args, handed === null ? kwargs : { ...kwargs, handed })
     } catch (err) {
-      if (handed === null || !isEnoent(err) || !Object.values(handed).some((stat) => stat != null))
+      if (handed === null || !isEnoent(err) || !HANDED.some((stat) => handed[stat] != null))
         throw err
     }
     await this.forget(scope, dst, index)
