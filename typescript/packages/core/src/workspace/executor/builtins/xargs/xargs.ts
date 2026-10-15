@@ -528,6 +528,19 @@ interface RunOptions {
   stdin?: ByteSource | null
 }
 
+async function drainChild(
+  io: IOResult,
+  output: IOResult,
+  pipe: PipeConsole,
+  signal: AbortSignal,
+): Promise<void> {
+  for await (const chunk of chunks(io.stdout ?? new Uint8Array(), signal))
+    await pipe.emit(Channel.STDOUT, chunk)
+  await pipe.emit(Channel.STDERR, await io.materializeStderr())
+  output.stderr = await pipe.snapshot(Channel.STDERR)
+  output.exitCode = io.exitCode
+}
+
 /**
  * Run the builder's command lines as they arrive, at most `procs` at a time.
  *
@@ -564,18 +577,6 @@ async function* runLines(
   const active = new Set<Promise<void>>()
   const pipes = new Set<PipeConsole>()
   const controller = new AbortController()
-  const drain = async (
-    io: IOResult,
-    output: IOResult,
-    pipe: PipeConsole,
-    signal: AbortSignal,
-  ): Promise<void> => {
-    for await (const chunk of chunks(io.stdout ?? new Uint8Array(), signal))
-      await pipe.emit(Channel.STDOUT, chunk)
-    await pipe.emit(Channel.STDERR, await io.materializeStderr())
-    output.stderr = await pipe.snapshot(Channel.STDERR)
-    output.exitCode = io.exitCode
-  }
   const run = async (
     words: string[],
     output: IOResult,
@@ -592,7 +593,7 @@ async function* runLines(
           signal,
           sink: pipe,
         })
-        await drain(io, output, pipe, signal)
+        await drainChild(io, output, pipe, signal)
       })
       return
     }
@@ -615,7 +616,7 @@ async function* runLines(
             signal,
             sink: pipe,
           })
-          await drain(io, output, pipe, signal)
+          await drainChild(io, output, pipe, signal)
         })
       })
       return

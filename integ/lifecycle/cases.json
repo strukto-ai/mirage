@@ -6262,6 +6262,73 @@
           }
         }
       ]
+    },
+    {
+      "id": "streamed_search_combines_empty_stderr_across_mounts",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/a": {
+            "vfs": "ram",
+            "config": {}
+          },
+          "/b": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "/b/needle.txt",
+          "data": "needle\n"
+        },
+        {
+          "op": "exec",
+          "command": "rg needle /",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/b/needle.txt:needle\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rg needle /a /b",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/b/needle.txt:needle\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rg --files /a /b",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/b/needle.txt\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rg missing /a /b",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        }
+      ]
     }
   ]
 }

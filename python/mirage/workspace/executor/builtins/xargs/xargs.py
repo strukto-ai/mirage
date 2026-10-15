@@ -548,6 +548,17 @@ def xargs_missing(name: str) -> str:
     return f"xargs: {name}: No such file or directory\n"
 
 
+async def _drain_child(
+    io: IOResult, output: IOResult, pipe: PipeConsole
+) -> None:
+    async with aclosing(chunks(io.stdout or b"")) as source:
+        async for chunk in source:
+            await pipe.emit(Channel.STDOUT, chunk)
+    await pipe.emit(Channel.STDERR, await io.materialize_stderr())
+    output.stderr = await pipe.snapshot(Channel.STDERR)
+    output.exit_code = io.exit_code
+
+
 async def _run_lines(
     execute_fn: Callable[..., Any],
     events: AsyncGenerator[str | list[bytes], None],
@@ -595,14 +606,6 @@ async def _run_lines(
     active: set[asyncio.Task[None]] = set()
     pipes: set[PipeConsole] = set()
 
-    async def drain(io: IOResult, output: IOResult, pipe: PipeConsole) -> None:
-        async with aclosing(chunks(io.stdout or b"")) as source:
-            async for chunk in source:
-                await pipe.emit(Channel.STDOUT, chunk)
-        await pipe.emit(Channel.STDERR, await io.materialize_stderr())
-        output.stderr = await pipe.snapshot(Channel.STDERR)
-        output.exit_code = io.exit_code
-
     async def run(
         words: list[str], output: IOResult, pipe: PipeConsole
     ) -> None:
@@ -617,7 +620,7 @@ async def _run_lines(
                 io = await execute_fn(
                     line, session_id=session.session_id, **extra
                 )
-                await drain(io, output, pipe)
+                await _drain_child(io, output, pipe)
             finally:
                 reset_program_invocation(marked)
             return
@@ -631,7 +634,7 @@ async def _run_lines(
         marked = set_program_invocation(child)
         try:
             io = await execute_fn(line, session_id=session.session_id, **extra)
-            await drain(io, output, pipe)
+            await _drain_child(io, output, pipe)
         finally:
             reset_program_invocation(marked)
             reset_current_session(token)

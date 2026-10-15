@@ -262,7 +262,9 @@ export async function runSearch(
   const code = combinedExit(
     name,
     results.map((r) => r.io.exitCode),
-    results.map((r) => r.io.exitCode !== 0 && r.io.stderr !== null),
+    await Promise.all(
+      results.map(async (r) => r.io.exitCode !== 0 && (await r.io.materializeStderr()).length > 0),
+    ),
     quiet,
   )
   const [parts, footer] =
