@@ -37,7 +37,7 @@ import {
 import type { Ctx } from '../../kit/typescript/index.ts'
 import { createDriveItem, deleteTree, fmtFile, pushRevision } from './item.ts'
 import { exportFile, listFiles } from './list.ts'
-import { followParentDrive, movedParents, refuseParents } from './parents.ts'
+import { ROOT, followParentDrive, movedParents, refuseParents } from './parents.ts'
 
 // The old fake spelled a resource id `[^/:]+`, so a path whose id half holds
 // an in-segment verb matched no route rather than being read as an id.
@@ -57,6 +57,43 @@ function fmtRevision(r: Revision): JsonObj {
     md5Checksum: r.md5Checksum,
     size: String(r.content.length),
   }
+}
+
+// What files.get answers for `root`, the folder My Drive's top items name as
+// their parent.
+const MY_DRIVE: JsonObj = {
+  kind: 'drive#file',
+  id: ROOT,
+  name: 'My Drive',
+  mimeType: FOLDER_MIME,
+  owners: [OWNER],
+}
+
+// Each file changed after the page token, at its newest state, and the token
+// the next read starts from. A file gone since is `removed` with no `file`,
+// which is all Drive sends for one.
+function listChanges(st: GwsState, query: URLSearchParams): Reply {
+  const after = Number(query.get('pageToken') ?? '0')
+  const latest = new Map<string, number>()
+  for (const [seq, fileId] of st.changes) {
+    if (seq <= after) continue
+    latest.delete(fileId)
+    latest.set(fileId, seq)
+  }
+  const changes: JsonValue[] = []
+  for (const fileId of latest.keys()) {
+    const item = st.files.get(fileId)
+    changes.push(
+      item === undefined
+        ? { kind: 'drive#change', changeType: 'file', fileId, removed: true }
+        : { kind: 'drive#change', changeType: 'file', fileId, removed: false, file: fmtFile(item) },
+    )
+  }
+  return ok({
+    kind: 'drive#changeList',
+    newStartPageToken: String(st.counters.get('change') ?? 0),
+    changes,
+  })
 }
 
 function fileOr404(ctx: GwsCtx, key = 'id'): DriveItem | Reply {
@@ -98,6 +135,7 @@ function uploadPatch(ctx: GwsCtx): Reply {
   item.content = ctx.body
   item.modifiedTime = ctx.db.now()
   pushRevision(item)
+  ctx.db.noteChange(item.id)
   return ok(fmtFile(item))
 }
 
@@ -213,6 +251,7 @@ function patchFile(ctx: GwsCtx): Reply {
   // modifiedTime is writable: a caller may set it, which Drive keeps to the
   // millisecond; any other update stamps the time of the change.
   item.modifiedTime = stamp === undefined ? ctx.db.now() : new Date(stamp).toISOString()
+  ctx.db.noteChange(item.id)
   return ok(fmtFile(item))
 }
 
@@ -336,6 +375,13 @@ export function driveRoutes(): KitRoute<C>[] {
       { write: true },
     ),
 
+    route('GET', '/drive/v3/changes/startPageToken', (ctx) =>
+      ok({
+        kind: 'drive#startPageToken',
+        startPageToken: String(ctx.db.counters.get('change') ?? 0),
+      }),
+    ),
+    route('GET', '/drive/v3/changes', (ctx) => listChanges(ctx.db, ctx.query)),
     route('POST', '/drive/v3/files/:id/copy', copyFile, { write: true }),
     route('GET', '/drive/v3/files/:id/export', (ctx) => {
       const item = fileOr404(ctx)
@@ -416,6 +462,7 @@ export function driveRoutes(): KitRoute<C>[] {
       'GET',
       '/drive/v3/files/:id',
       (ctx) => {
+        if (ctx.params.id === ROOT && !ctx.db.files.has(ROOT)) return ok(MY_DRIVE)
         const item = fileOr404(ctx)
         if (isReply(item)) return item
         if (ctx.query.get('alt') === 'media') {

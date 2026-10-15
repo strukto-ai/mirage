@@ -14,9 +14,13 @@
 
 import type { JsonValue } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
-import { baseName, norm } from './paths.ts'
-import { childNames, fileAt, dirAt, folderSize, versionsOf } from './store.ts'
+import { baseName, dirName, norm } from './paths.ts'
+import { childNames, fileAt, dirAt, fileId, folderId, folderSize, versionsOf } from './store.ts'
 import type { FileRow } from './store.ts'
+
+function parentOf(drive: string, path: string): JsonValue {
+  return { id: folderId(drive, dirName(norm(path))), driveId: drive }
+}
 
 // The download URL is absolute and points back at the host the caller actually
 // reached, which is why the origin is a parameter rather than a field the
@@ -28,9 +32,12 @@ export async function fileItem(
   origin: string,
   row: FileRow,
 ): Promise<JsonValue> {
+  const versions = await versionsOf(db, tenant, row.drive, row.path)
   return {
-    id: row.ctag,
+    id: fileId(row.drive, row.seq),
     name: baseName(row.path),
+    parentReference: parentOf(row.drive, row.path),
+    createdDateTime: versions.at(-1)?.lastModifiedDateTime ?? row.modified,
     size: row.content.length,
     lastModifiedDateTime: row.modified,
     cTag: row.ctag,
@@ -40,7 +47,7 @@ export async function fileItem(
     // so the account is a path segment rather than something the handler on
     // the other end can read off a header.
     '@microsoft.graph.downloadUrl': `${origin}/download/${encodeURIComponent(tenant)}/${row.drive}/${row.path}`,
-    versions: await versionsOf(db, tenant, row.drive, row.path),
+    versions,
   }
 }
 
@@ -56,11 +63,12 @@ export async function folderItem(
 ): Promise<JsonValue> {
   const p = norm(path)
   return {
-    id: p === '' ? `${drive}:root` : `${drive}:folder:${p}`,
+    id: folderId(drive, p),
     name: p === '' ? 'root' : baseName(p),
     size: await folderSize(db, tenant, drive, p),
     lastModifiedDateTime: modified,
     folder: { childCount: (await childNames(db, tenant, drive, p)).length },
+    ...(p === '' ? { root: {} } : { parentReference: parentOf(drive, p) }),
   }
 }
 

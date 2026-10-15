@@ -23,6 +23,7 @@ export interface FileRow {
   ctag: string
   etag: string
   modified: string
+  seq: number
 }
 
 export interface Ctx0 {
@@ -94,6 +95,7 @@ export async function ensureParents(ctx: Ctx0, drive: string, path: string): Pro
       await ctx.db.graphDir.create({
         data: { tenant: ctx.tenant, drive, path: dir, seq: ctx.minter.next('dir') },
       })
+      await noteChange(ctx, drive, folderId(drive, dir), dir)
     }
   }
 }
@@ -107,6 +109,68 @@ export async function addDir(ctx: Ctx0, drive: string, path: string): Promise<vo
   await ctx.db.graphDir.create({
     data: { tenant: ctx.tenant, drive, path: p, seq: ctx.minter.next('dir') },
   })
+  await noteChange(ctx, drive, folderId(drive, p), p)
+}
+
+// A file keeps the seq it was created with through every write and move, as
+// a vendor id survives both; a folder is named by its path.
+export function fileId(drive: string, seq: number): string {
+  return `${drive}:file:${String(seq)}`
+}
+
+export function folderId(drive: string, path: string): string {
+  const p = norm(path)
+  return p === '' ? `${drive}:root` : `${drive}:folder:${p}`
+}
+
+/** The file whose id is `id`, or null. */
+export async function fileById(
+  db: C,
+  tenant: string,
+  drive: string,
+  id: string,
+): Promise<FileRow | null> {
+  const prefix = `${drive}:file:`
+  if (!id.startsWith(prefix)) return null
+  const seq = Number(id.slice(prefix.length))
+  if (!Number.isInteger(seq)) return null
+  return db.graphFile.findFirst({ where: { tenant, drive, seq } })
+}
+
+/** Record that an item changed and where it now is, for the next /delta read. */
+export async function noteChange(
+  ctx: Ctx0,
+  drive: string,
+  itemId: string,
+  path: string,
+): Promise<void> {
+  await ctx.db.graphChange.create({
+    data: { tenant: ctx.tenant, drive, itemId, path: norm(path), seq: ctx.minter.next('change') },
+  })
+}
+
+/** Each change after `after`, oldest first. */
+export async function changesAfter(
+  db: C,
+  tenant: string,
+  drive: string,
+  after: number,
+): Promise<{ itemId: string; path: string }[]> {
+  return db.graphChange.findMany({
+    where: { tenant, drive, seq: { gt: after } },
+    orderBy: { seq: 'asc' },
+    select: { itemId: true, path: true },
+  })
+}
+
+/** The seq of the newest change, 0 when the drive has none. */
+export async function lastChange(db: C, tenant: string, drive: string): Promise<number> {
+  const row = await db.graphChange.findFirst({
+    where: { tenant, drive },
+    orderBy: { seq: 'desc' },
+    select: { seq: true },
+  })
+  return row?.seq ?? 0
 }
 
 function enriched(path: string, content: Uint8Array): Uint8Array {
@@ -163,7 +227,7 @@ export async function writeFile(
       seq: ctx.minter.next('ver'),
     },
   })
-  return ctx.db.graphFile.upsert({
+  const row = await ctx.db.graphFile.upsert({
     where: fileKey(ctx.tenant, drive, p),
     update: {
       content: body as Uint8Array<ArrayBuffer>,
@@ -184,6 +248,8 @@ export async function writeFile(
       seq: ctx.minter.next('file'),
     },
   })
+  await noteChange(ctx, drive, fileId(drive, row.seq), p)
+  return row
 }
 
 export async function childNames(
@@ -236,6 +302,7 @@ export async function removeAt(ctx: Ctx0, drive: string, path: string): Promise<
   if (file !== null) {
     await ctx.db.graphFile.delete({ where: fileKey(tenant, drive, p) })
     await ctx.db.graphVersion.deleteMany({ where: { tenant, drive, path: p } })
+    await noteChange(ctx, drive, fileId(drive, file.seq), p)
     return true
   }
   if (!(await dirAt(ctx.db, tenant, drive, p)) || p === '') return false
@@ -244,6 +311,7 @@ export async function removeAt(ctx: Ctx0, drive: string, path: string): Promise<
   await ctx.db.graphDir.deleteMany({ where: { tenant, drive, path: { startsWith: prefix } } })
   await ctx.db.graphFile.deleteMany({ where: { tenant, drive, path: { startsWith: prefix } } })
   await ctx.db.graphVersion.deleteMany({ where: { tenant, drive, path: { startsWith: prefix } } })
+  await noteChange(ctx, drive, folderId(drive, p), p)
   return true
 }
 
@@ -267,6 +335,7 @@ export async function moveFile(
     data: { ...row, path: dest, etag: `${drive}-tag${String(ctx.minter.next('tag'))}` },
   })
   await moveVersions(ctx, drive, src, dest)
+  await noteChange(ctx, drive, fileId(drive, moved.seq), dest)
   return moved
 }
 
@@ -292,6 +361,7 @@ export async function moveDir(ctx: Ctx0, drive: string, src: string, dest: strin
   const tenant = ctx.tenant
   const prefix = `${src}/`
   await ctx.db.graphDir.deleteMany({ where: { tenant, drive, path: src } })
+  await noteChange(ctx, drive, folderId(drive, src), src)
   await addDir(ctx, drive, dest)
   const dirs = await ctx.db.graphDir.findMany({
     where: { tenant, drive, path: { startsWith: prefix } },
@@ -309,6 +379,7 @@ export async function moveDir(ctx: Ctx0, drive: string, src: string, dest: strin
     await ctx.db.graphFile.delete({ where: fileKey(tenant, drive, row.path) })
     await ctx.db.graphFile.create({ data: { ...row, path: to } })
     await moveVersions(ctx, drive, row.path, to)
+    await noteChange(ctx, drive, fileId(drive, row.seq), to)
   }
 }
 

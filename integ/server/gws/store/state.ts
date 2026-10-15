@@ -70,12 +70,18 @@ export class GwsState {
   events = new Map<string, Map<string, CalendarEvent>>()
   forms = new Map<string, FormDoc>()
   counters = new Map<string, number>()
+  changes: [number, string][] = []
   readonly epochMs: number
   ticks: number
 
   constructor(epochMs: number, ticks = 0) {
     this.epochMs = epochMs
     this.ticks = ticks
+  }
+
+  // Record that a Drive file was made, changed or removed, for changes.list.
+  noteChange(fileId: string): void {
+    this.changes.push([this.next('change'), fileId])
   }
 
   // Per kind, so a new Doc does not advance the next file id.

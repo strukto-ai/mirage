@@ -119,6 +119,7 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
   const [
     meta,
     counters,
+    changes,
     drives,
     files,
     parents,
@@ -145,6 +146,7 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
   ] = await Promise.all([
     db.meta.findUnique({ where: { tenant } }),
     db.counter.findMany({ where }),
+    db.driveChange.findMany({ where, orderBy: seq }),
     db.drive.findMany({ where, orderBy: seq }),
     db.driveFile.findMany({ where, orderBy: seq }),
     db.driveParent.findMany({ where, orderBy: seq }),
@@ -178,6 +180,7 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
     meta?.ticks ?? 0,
   )
   for (const row of counters) st.counters.set(row.kind, row.n)
+  for (const row of changes) st.changes.push([row.seq, row.fileId])
 
   for (const row of drives) st.drives.set(row.id, { id: row.id, name: row.name })
 

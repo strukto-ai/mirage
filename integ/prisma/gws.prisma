@@ -123,6 +123,17 @@ model DriveFile {
 
 // A folder has many files and a file has one parent, and neither side owns
 // the other. See rules 2, 3 and 4: no cascade, no foreign key, one parent.
+// Each Drive file a request made, changed or removed, in order, so
+// changes.list can name what changed after a page token. A row per change
+// rather than a column on DriveFile, since a removed file has no row left.
+model DriveChange {
+  tenant String
+  seq    Int
+  fileId String
+
+  @@id([tenant, seq])
+}
+
 model DriveParent {
   pk       Int    @id @default(autoincrement())
   tenant   String

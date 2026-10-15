@@ -101,6 +101,7 @@ interface Change {
 export const TABLES: readonly (readonly [keyof Rows, string])[] = [
   ['meta', 'Meta'],
   ['counters', 'Counter'],
+  ['changes', 'DriveChange'],
   ['drives', 'Drive'],
   ['files', 'DriveFile'],
   ['parents', 'DriveParent'],
@@ -278,6 +279,7 @@ async function insertCells(tx: RawClient, rows: readonly Row[]): Promise<void> {
 export interface Rows {
   meta: { tenant: string; epochMs: bigint; ticks: number }[]
   counters: { tenant: string; kind: string; n: number }[]
+  changes: { tenant: string; seq: number; fileId: string }[]
   drives: { tenant: string; id: string; name: string; seq: number }[]
   files: {
     tenant: string
@@ -442,6 +444,7 @@ export function buildRows(tenant: string, st: GwsState): Rows {
   const rows: Rows = {
     meta: [{ tenant, epochMs: BigInt(st.epochMs), ticks: st.ticks }],
     counters: [],
+    changes: [],
     drives: [],
     files: [],
     parents: [],
@@ -467,6 +470,7 @@ export function buildRows(tenant: string, st: GwsState): Rows {
     formResponses: [],
   }
   for (const [kind, n] of st.counters) rows.counters.push({ tenant, kind, n })
+  for (const [seq, fileId] of st.changes) rows.changes.push({ tenant, seq, fileId })
 
   let seq = 0
   for (const drive of st.drives.values()) {

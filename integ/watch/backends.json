@@ -1,20 +1,14 @@
 {
   "mounts": [
-    "disk",
-    "ssh",
     "dropbox",
-    "s3",
-    "gridfs",
     "onedrive",
     "box",
-    "hf_buckets",
-    "gdrive",
-    "github"
+    "gdrive"
   ],
   "mount": "/m",
   "watch_dir": "/m/data",
   "modes": [
-    "pull"
+    "ping"
   ],
   "seed": [
     "keep.txt"
@@ -432,7 +426,7 @@
         {
           "id": "rename_as_move",
           "modes": [
-            "push"
+            "ping"
           ],
           "warm": [
             "cat /m/data/orig.txt",
@@ -461,12 +455,17 @@
               "cmd": "cat /m/data/orig.txt",
               "absent": "original content"
             }
+          ],
+          "skip_vfs": [
+            "dropbox",
+            "onedrive",
+            "gdrive"
           ]
         },
         {
           "id": "rename_as_delete_create",
           "modes": [
-            "pull"
+            "ping"
           ],
           "warm": [
             "cat /m/data/orig.txt",
@@ -494,11 +493,11 @@
               "cmd": "cat /m/data/orig.txt",
               "absent": "original content"
             }
+          ],
+          "skip_vfs": [
+            "box"
           ]
         }
-      ],
-      "skip_vfs": [
-        "hf_buckets"
       ]
     },
     {

@@ -109,6 +109,7 @@ export function createDriveItem(
   if (parentDrive !== undefined) item.driveId = parentDrive
   if (!isNativeMime(mimeType) && mimeType !== FOLDER_MIME) pushRevision(item)
   st.files.set(item.id, item)
+  st.noteChange(item.id)
   autoLink(st, item)
   return item
 }
@@ -121,11 +122,14 @@ export function deleteTree(st: GwsState, id: string): void {
       if (item.parents.includes(current)) doomed.push(item.id)
     }
     st.files.delete(current)
+    st.noteChange(current)
     unlinkEntity(st, current)
   }
 }
 
 export function touchNative(st: GwsState, id: string): void {
   const file = st.files.get(id)
-  if (file !== undefined) file.modifiedTime = st.now()
+  if (file === undefined) return
+  file.modifiedTime = st.now()
+  st.noteChange(id)
 }

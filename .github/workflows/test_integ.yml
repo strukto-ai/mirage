@@ -1134,15 +1134,6 @@ jobs:
           NEXTCLOUD_ADMIN_USER: admin
           NEXTCLOUD_ADMIN_PASSWORD: admin123
           NEXTCLOUD_TRUSTED_DOMAINS: localhost
-      mongodb:
-        image: mongo:8
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "bash -c 'true > /dev/tcp/127.0.0.1/27017' && mongosh --quiet --eval 'if (!db.runCommand({ping:1}).ok) quit(1)'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     env:
       NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
       NEXTCLOUD_USERNAME: admin
@@ -1205,11 +1196,8 @@ jobs:
           # the reset and the battery cannot disagree about the password.
           admin-password: ${{ env.NEXTCLOUD_PASSWORD }}
 
-      # disk and ssh need nothing (tempdir, in-process SFTP server);
-      # dropbox is an out-of-process fake started below; s3 and gridfs need a
-      # real service each, and skip when the env is absent rather than
-      # failing.
-      - name: Start MinIO for the watch battery
+      # The cross-host watch cache cases read through an S3 mount.
+      - name: Start MinIO for the watch cache cases
         run: |
           docker run -d --name minio-watch -p 9000:9000 \
             -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
@@ -1227,11 +1215,10 @@ jobs:
             cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 \
             mb --ignore-existing local/mirage-watch
 
-      # gdrive, dropbox, box, onedrive, hf and github are the watch targets
-      # whose fakes are TypeScript and out-of-process; the one in-process fake
-      # (ssh) needs nothing. Every one of these backends SKIPS ITSELF when its
-      # URL is unset, so a server that is not started here costs coverage in
-      # silence rather than failing the job.
+      # gdrive, dropbox, box and onedrive are the ping batteries' targets, each
+      # a TypeScript fake out of process. Every one of these backends SKIPS
+      # ITSELF when its URL is unset, so a server that is not started here
+      # costs coverage in silence rather than failing the job.
       - name: Start the fake Google Workspace server
         run: |
           cd integ && nohup pnpm exec tsx server/gws/main.ts --port 19999 \
@@ -1287,37 +1274,6 @@ jobs:
           # if the only thing it does is cat the log.
           grep -q "ONEDRIVE_URL=" /tmp/onedrive-watch.log
 
-      - name: Start the fake Hugging Face hub
-        working-directory: integ
-        run: |
-          nohup pnpm exec tsx server/hf/main.ts --port 5099 \
-            > /tmp/hf-watch.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "HF_URL=" /tmp/hf-watch.log && break
-            sleep 1
-          done
-          cat /tmp/hf-watch.log
-          # Fail HERE, not 20 minutes later as a connection refused inside the
-          # battery: a server that died on startup still leaves this step green
-          # if the only thing it does is cat the log.
-          grep -q "HF_URL=" /tmp/hf-watch.log
-
-      # Its own process on its own port, and seeded EMPTY: the watch battery
-      # creates the one repository it watches, where the corpus batteries read
-      # a seeded tree. 5103 is no fake's default (gate_selftest checks), so a
-      # fake started without --port cannot take it.
-      - name: Start the fake GitHub server
-        working-directory: integ
-        run: |
-          nohup pnpm exec tsx server/github/main.ts --port 5103 --fixture empty \
-            > /tmp/github-watch.log 2>&1 &
-          for i in $(seq 1 30); do
-            grep -q "GITHUB_URL=" /tmp/github-watch.log && break
-            sleep 1
-          done
-          cat /tmp/github-watch.log
-          grep -q "GITHUB_URL=" /tmp/github-watch.log
-
       - name: Build packages for cross-host watch cache tests
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-node... build
@@ -1338,18 +1294,10 @@ jobs:
           NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
           NEXTCLOUD_USERNAME: admin
           NEXTCLOUD_PASSWORD: admin123
-          S3_ENDPOINT: http://localhost:9000
-          S3_BUCKET: mirage-watch
-          S3_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: minio
-          AWS_SECRET_ACCESS_KEY: minio123
-          MONGODB_URI: mongodb://localhost:27017
           GWS_URL: http://127.0.0.1:19999
           DROPBOX_URL: http://127.0.0.1:5088
           BOX_URL: http://127.0.0.1:5096
           ONEDRIVE_URL: http://127.0.0.1:5089
-          HF_URL: http://127.0.0.1:5099
-          GITHUB_URL: http://127.0.0.1:5103
           WATCH_RESULTS_FILE: /tmp/watch-battery-results.txt
         run: ./python/.venv/bin/python integ/watch/run.py
 

@@ -154,6 +154,21 @@ async function listFolder(ctx: Ctx<C>): Promise<Reply> {
   })
 }
 
+// A cursor at the folder's present: a delta watermark with no listing, so the
+// next continue answers only what changed after this call.
+async function latestCursor(ctx: Ctx<C>): Promise<Reply> {
+  const body = obj(ctx.json())
+  const path = str(body.path)
+  const recursive = body.recursive === true
+  const seq = await maxItemSeq(ctx.db, ctx.tenant)
+  if ((await listChildren(ctx.db, ctx.tenant, path, false)) === null) {
+    return apiError('path/not_found/...')
+  }
+  const payload = JSON.stringify({ kind: 'delta', path, recursive, seq })
+  const cursor = await saveCursor(ctx.db, ctx.tenant, 'list', payload, ctx.minter)
+  return { status: 200, body: { cursor } }
+}
+
 async function listContinue(ctx: Ctx<C>): Promise<Reply> {
   const payload = await takeCursor(ctx.db, ctx.tenant, str(obj(ctx.json()).cursor), 'list')
   if (payload === null) return apiError('reset/...')
@@ -348,6 +363,7 @@ export function dropboxRoutes(): KitRoute<C>[] {
     route('POST', '/oauth2/token', token),
     route('POST', '/2/files/list_folder', listFolder),
     route('POST', '/2/files/list_folder/continue', listContinue, { write: true }),
+    route('POST', '/2/files/list_folder/get_latest_cursor', latestCursor, { write: true }),
     route('POST', '/2/files/get_metadata', getMetadata),
     route('POST', '/2/files/download', download),
     route('POST', '/2/files/upload', upload, { write: true }),

@@ -32,6 +32,7 @@ import { fileItem, folderItem, itemAt } from './render.ts'
 import {
   addDir,
   addDrive,
+  changesAfter,
   childNames,
   conflictFree,
   copyDir,
@@ -39,7 +40,11 @@ import {
   drives,
   fileAt,
   folderSize,
+  fileById,
+  fileId,
+  folderId,
   hasDrive,
+  lastChange,
   moveDir,
   moveFile,
   removeAt,
@@ -351,7 +356,7 @@ async function searchItems(
     const name = baseName(row.path)
     const hit =
       name.toLowerCase().includes(text) || wholeWordHit(text, DEC.decode(row.content).toLowerCase())
-    if (hit) value.push({ id: row.ctag, name, file: {} })
+    if (hit) value.push({ id: fileId(drive, row.seq), name, file: {} })
   }
   return { status: 200, body: { value } }
 }
@@ -359,8 +364,49 @@ async function searchItems(
 // One dispatcher for every drive URL shape. Graph reaches the same items
 // through /me/drive, /sites/{id}/drive and /drives/{key}, so the shapes differ
 // only in which drive they name and are resolved to (drive, rest) before this.
+// What changed after the link's token, the newest state of each item, and the
+// link the next read starts from; `token=latest` lists nothing. An item gone
+// since is its id with the `deleted` facet, which is all the vendor sends.
+async function delta(ctx: Ctx<C>, drive: string): Promise<Reply> {
+  const token = ctx.query.get('token') ?? '0'
+  const last = await lastChange(ctx.db, ctx.tenant, drive)
+  const link = `${ctx.url.origin}${ctx.url.pathname}?token=${String(last)}`
+  if (token === 'latest') return { status: 200, body: { value: [], '@odata.deltaLink': link } }
+  const after = Number(token)
+  if (!Number.isInteger(after)) {
+    return { status: 410, body: { error: { code: 'resyncRequired', message: 'Resync required' } } }
+  }
+  const latest = new Map<string, string>()
+  for (const row of await changesAfter(ctx.db, ctx.tenant, drive, after)) {
+    latest.delete(row.itemId)
+    latest.set(row.itemId, row.path)
+  }
+  const value: JsonValue[] = []
+  for (const [id, path] of latest) {
+    const found = await itemById(ctx, drive, id)
+    value.push(found ?? { id, name: baseName(path), deleted: {} })
+  }
+  return { status: 200, body: { value, '@odata.deltaLink': link } }
+}
+
+// An item by the id the renderer gave it, null when it is gone.
+async function itemById(ctx: Ctx<C>, drive: string, id: string): Promise<JsonValue | null> {
+  const file = await fileById(ctx.db, ctx.tenant, drive, id)
+  if (file !== null) return fileItem(ctx.db, ctx.tenant, ctx.url.origin, file)
+  let path: string | null = null
+  if (id === folderId(drive, '')) path = ''
+  else if (id.startsWith(`${drive}:folder:`)) path = id.slice(`${drive}:folder:`.length)
+  if (path === null || !(await dirAt(ctx.db, ctx.tenant, drive, path))) return null
+  return folderItem(ctx.db, ctx.tenant, drive, path, stamp(ctx))
+}
+
 async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string): Promise<Reply> {
   if (!(await hasDrive(ctx.db, ctx.tenant, drive))) return notFound()
+  if (method === 'GET' && rest === 'root/delta') return delta(ctx, drive)
+  if (method === 'GET' && rest.startsWith('items/')) {
+    const found = await itemById(ctx, drive, decodeURIComponent(rest.slice('items/'.length)))
+    return found === null ? notFound() : { status: 200, body: found }
+  }
   const { item, action } = parseItemPath(`/${rest}`)
   if (action === 'children') {
     return method === 'POST' ? mkdir(ctx, drive, item) : childrenOf(ctx, drive, item)

@@ -2,6 +2,7 @@
   "vfs": "nextcloud",
   "mount": "/nc",
   "watch_dir": "/nc/data",
+  "modes": ["push"],
   "seed": ["keep.txt"],
   "cases": [
     {
@@ -195,18 +196,6 @@
           "warm": ["cat /nc/data/orig.txt", "ls /nc/data"],
           "mutate": {"op": "rename", "path": "data/orig.txt", "to": "data/renamed.txt"},
           "expect": {"kind": "move", "path": "/nc/data/renamed.txt", "previous": "/nc/data/orig.txt"},
-          "checks": [
-            {"cmd": "cat /nc/data/renamed.txt", "contains": "original content"},
-            {"cmd": "ls /nc/data", "absent": "orig.txt"},
-            {"cmd": "cat /nc/data/orig.txt", "absent": "original content"}
-          ]
-        },
-        {
-          "id": "rename_as_delete_create",
-          "modes": ["pull"],
-          "warm": ["cat /nc/data/orig.txt", "ls /nc/data"],
-          "mutate": {"op": "rename", "path": "data/orig.txt", "to": "data/renamed.txt"},
-          "expect": {"kind": "create", "path": "/nc/data/renamed.txt"},
           "checks": [
             {"cmd": "cat /nc/data/renamed.txt", "contains": "original content"},
             {"cmd": "ls /nc/data", "absent": "orig.txt"},

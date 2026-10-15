@@ -121,3 +121,16 @@ model GraphMonitor {
 
   @@id([tenant, token])
 }
+
+// Each item a write, removal or move touched, in order, so /delta can name what
+// changed after a token. `path` is where the change left it, which is all a
+// removed item still has to be named by.
+model GraphChange {
+  tenant String
+  drive  String
+  itemId String
+  path   String
+  seq    Int
+
+  @@id([tenant, drive, seq])
+}
