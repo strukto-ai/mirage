@@ -79,6 +79,7 @@ Codex's shell commands, file reads and patches run in the workspace, under the S
 `codex exec-server forward` carries the tool calls of a remote harness, such as an [OpenAI Agents API](/python/agents/openai-agents-api) session, to an exec server. `mirage codex-exec` makes the workspace that exec server: it listens on a local port and relays each connection to the server's codex-exec route with the CLI's token, which forward cannot send itself.
 
 ```bash
+uv tool install 'mirage-ai[ssh]'
 npm install -g @openai/codex@alpha
 mirage codex-exec demo --listen 127.0.0.1:8790
 ```
@@ -91,8 +92,6 @@ CODEX_API_KEY="$OPENAI_EXECUTOR_API_KEY" codex exec-server forward \
 ```
 
 The remote URL and environment id come from the harness's session, and `CODEX_API_KEY` is its environment key.
-
-In Python the server's codex-exec route needs the `ssh` extra.
 
 - Each connection runs in a fresh session under the workspace's default profile, closed when the connection ends. A reconnect starts a new session; the files stay.
 - `mirage codex-exec` lets in any connection on its port, as you, and refuses one from a browser page. Keep it on loopback.
