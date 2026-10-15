@@ -165,9 +165,11 @@ class Dereference:
     every operand of the line (du.c's di_set, coreutils 9.7): what one
     operand reaches is not counted again under another, and an operand
     already counted prints nothing. A link leading back into its operand's
-    own tree is never counted, since the file it reaches is counted under
-    its own name there (where GNU's readdir order may reach the link
-    first, mirage's sorted walk always prefers the file's own name). Under
+    own tree waits for the walk to end, and counts only if the walk never
+    reached the file under the file's own name: mirage's sorted walk
+    prefers that name (where GNU's readdir order may reach the link
+    first), and a directory the walk may not list leaves the link the one
+    name that reaches the file, which GNU then counts it under. Under
     ``-x`` a link that leads onto another mount is left out whole, as GNU
     leaves out what stat(2) places on another device.
 
@@ -179,6 +181,8 @@ class Dereference:
             path it resolves to.
         tree (str): the operand being walked, as the path it resolves to.
         home (str | None): under ``-x``, the mount that operand lies on.
+        waiting (list[tuple[PathSpec, str]]): the walk's links into its
+            tree, each with the path it resolves to.
     """
 
     links: LinkView
@@ -186,6 +190,7 @@ class Dereference:
     counted: set[str] = field(default_factory=set)
     tree: str = "/"
     home: str | None = None
+    waiting: list[tuple[PathSpec, str]] = field(default_factory=list)
 
     def operand(self, path: PathSpec) -> "Dereference":
         """This invocation's state, walking one operand.
@@ -195,7 +200,7 @@ class Dereference:
         """
         tree = self.links.resolve(path.virtual)
         home = self.mounts.root_of(tree) if self.mounts is not None else None
-        return replace(self, tree=tree, home=home)
+        return replace(self, tree=tree, home=home, waiting=[])
 
     def repeated(self, path: PathSpec) -> bool:
         """Whether an earlier operand's walk already counted this one.
@@ -237,6 +242,7 @@ async def _counted(
     ):
         return None
     if info.type == FileType.SYMLINK and under_path(real, follow.tree):
+        follow.waiting.append((path, real))
         return None
     if real in follow.counted:
         return None
@@ -314,6 +320,46 @@ def _walk(
     return readdir, stat, answered
 
 
+async def _walk_operand(
+    ops: CommandIO,
+    accessor: Accessor,
+    index: IndexCacheStore,
+    budget: WalkBudget,
+    follow: Dereference | None,
+    path: PathSpec,
+    entries: list[tuple[str, int]] | None = None,
+) -> int:
+    """Walk one operand, then count each link into its tree whose file
+    the walk never reached under the file's own name.
+
+    Args:
+        ops (CommandIO): the mount's table.
+        accessor (Accessor): the mounted backend.
+        index (IndexCacheStore): cache index threaded through reads.
+        budget (WalkBudget): the invocation's allowance and records.
+        follow (Dereference | None): the invocation's ``-L`` state.
+        path (PathSpec): the operand.
+        entries (list[tuple[str, int]] | None): collects each file's
+            size under its name; None for a total alone.
+    """
+    budget.directories.clear()
+    walk = _walk(ops, accessor, index)
+    state = follow.operand(path) if follow is not None else None
+    total = await _du_walk(walk, index, path, budget, entries, state)
+    if state is not None:
+        for link, real in state.waiting:
+            if real not in state.counted:
+                total += await _du_walk(
+                    walk,
+                    index,
+                    link,
+                    budget,
+                    entries,
+                    replace(state, tree=link.virtual),
+                )
+    return total
+
+
 async def walk_size(
     ops: CommandIO,
     accessor: Accessor,
@@ -322,15 +368,7 @@ async def walk_size(
     follow: Dereference | None,
     path: PathSpec,
 ) -> int:
-    budget.directories.clear()
-    return await _du_walk(
-        _walk(ops, accessor, index),
-        index,
-        path,
-        budget,
-        None,
-        follow.operand(path) if follow is not None else None,
-    )
+    return await _walk_operand(ops, accessor, index, budget, follow, path)
 
 
 async def walk_entries(
@@ -342,14 +380,8 @@ async def walk_entries(
     path: PathSpec,
 ) -> DuEntries:
     entries: list[tuple[str, int]] = []
-    budget.directories.clear()
-    total = await _du_walk(
-        _walk(ops, accessor, index),
-        index,
-        path,
-        budget,
-        entries,
-        follow.operand(path) if follow is not None else None,
+    total = await _walk_operand(
+        ops, accessor, index, budget, follow, path, entries
     )
     entries.sort()
     return entries, total

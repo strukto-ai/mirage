@@ -1103,7 +1103,9 @@ async function mirrorDirs(
     const entryDst = spelledFrom(mountedPath(target, dstMount), target)
     const entry = spelledFrom(mountedPath(src, entryMount), src)
     try {
-      const { exists, isDir } = await entryKind(destStat(stat, copies), entryDst, index)
+      // A directory meets a link at its name as the link itself, where a file
+      // writes through it (GNU's lstat for a directory source, coreutils 9.7).
+      const { exists, isDir } = await entryKind(stat, entryDst, index)
       if (isDir) continue
       if (
         !exists ||
@@ -1227,7 +1229,7 @@ export async function copyEntries(
     const entryDstSpec = descendantPath(target, dstBase + entry.slice(srcBase.length))
     if (kind === FileType.DIRECTORY) {
       try {
-        const { exists, isDir } = await entryKind(destStat(stat, opts.copies), entryDstSpec, index)
+        const { exists, isDir } = await entryKind(stat, entryDstSpec, index)
         if (isDir) continue
         const free =
           !exists ||

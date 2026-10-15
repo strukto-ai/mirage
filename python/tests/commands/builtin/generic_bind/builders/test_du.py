@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import errno
 
 import pytest
 
@@ -22,7 +23,7 @@ from mirage.errors.fs import enotsup, walk_declined
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import MountView
+from mirage.view.types import LinkView, MountView, NamespaceView
 
 TREE = {
     "/db": ["/db/a.txt", "/db/sub"],
@@ -210,3 +211,69 @@ async def test_a_directory_no_file_points_at_still_gets_its_row():
     assert await _run(_sealed_ops(), "/db") == (rows, 1, notes)
     everything = "3\t/db/a.txt\n" + rows
     assert await _run(_sealed_ops(), "/db", a=True) == (everything, 1, notes)
+
+
+LINKED = FileStat(name="f", type=FileType.FILE, size=6)
+
+
+def _unlisted_ops() -> CommandIO:
+    # /db/private refuses its listing, though its file answers a stat by
+    # name, the way a directory without read permission does.
+    async def readdir(_accessor, path, _index=None):
+        if path.virtual == "/db/private":
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return ["/db/link", "/db/private"] if path.virtual == "/db" else []
+
+    async def stat(_accessor, path, _index=None):
+        if path.virtual == "/db/link":
+            return FileStat(name="link", type=FileType.SYMLINK, size=9)
+        return FileStat(name=path.virtual, type=FileType.DIRECTORY)
+
+    async def read_bytes(_accessor, _path, _index=None):
+        return b""
+
+    return CommandIO(
+        readdir=readdir,
+        read_bytes=read_bytes,
+        read_stream=read_bytes,
+        stat=stat,
+        is_mounted=lambda _a: True,
+    )
+
+
+async def _target(path):
+    return LINKED if path == "/db/link" else None
+
+
+async def _exists(_path):
+    return True
+
+
+@pytest.mark.asyncio
+async def test_du_L_counts_a_link_whose_file_only_it_reaches():
+    # A link into the operand's tree is left to the file's own name, but
+    # a directory the walk may not list hides that name, and GNU then
+    # counts the file under the link (coreutils 9.7).
+    links = LinkView(
+        stat_at=lambda _path: None,
+        subtree=lambda _path: [],
+        resolve=lambda path: "/db/private/f" if path == "/db/link" else path,
+        exists=_exists,
+        target_stat=_target,
+    )
+    stream, io = await du(
+        _unlisted_ops(),
+        object(),
+        [_spec("/db")],
+        [],
+        CommandOpts(
+            flags={"a": True, "L": True}, ns=NamespaceView(links=links)
+        ),
+    )
+    assert (await materialize(stream)).decode() == (
+        "6\t/db/link\n0\t/db/private\n6\t/db\n"
+    )
+    assert (io.exit_code, (io.stderr or b"").decode()) == (
+        1,
+        "du: cannot read directory '/db/private': Permission denied\n",
+    )

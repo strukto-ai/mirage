@@ -483,6 +483,42 @@
         "stdout": "'s/a' -> 't/a' (backup: 't/a~')\nrc=0\nold\n../o/x\nnew",
         "stderr": ""
       }
+    },
+    {
+      "id": "cp_r_meets_a_destination_link_to_a_directory_as_the_link",
+      "seq": 17000027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cpl_d/s/sub /data/cpl_d/t /data/cpl_d/other && echo x > /data/cpl_d/s/sub/f && echo y > /data/cpl_d/s/top && echo o > /data/cpl_d/other/o && echo z > /data/cpl_d/t/z && ln -s ../other /data/cpl_d/t/sub && cd /data/cpl_d && cp -r s/. t; echo rc=$?; ls other; cp -rb s/. t; echo rc=$?; ls -A t; cat t/sub/f; ls other; cd /; rm -r /data/cpl_d",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\no\nrc=0\nsub\nsub~\ntop\ntop~\nz\nx\no\n",
+        "stderr": "cp: cannot overwrite non-directory 't/./sub' with directory 's/./sub'\n"
+      },
+      "flags": [
+        "r",
+        "b"
+      ]
     }
   ]
 }

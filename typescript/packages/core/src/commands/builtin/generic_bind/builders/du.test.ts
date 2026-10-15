@@ -19,7 +19,7 @@ import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces, enoent, enotsup, walkDeclined } from '../../../../errors/fs.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandIO } from '../../../config.ts'
-import type { MountView } from '../../../../view/types.ts'
+import type { LinkView, MountView } from '../../../../view/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -316,5 +316,48 @@ describe('WalkBudget', () => {
     expect(Array.from({ length: 100 }, () => budget.spend('/a')).every(Boolean)).toBe(true)
     expect([0, 1].map(() => budget.spend('/a/b'))).toEqual([true, false])
     expect(budget.hit).toBe(true)
+  })
+})
+
+// A link into the operand's tree is left to the file's own name, but a
+// directory the walk may not list hides that name, and GNU then counts the
+// file under the link (coreutils 9.7).
+describe('du -L through a directory it may not list', () => {
+  it('counts a link whose file only it reaches', async () => {
+    const ops: CommandIO = {
+      ...OPS,
+      readdir: (_a, p) =>
+        p.virtual === '/db/private'
+          ? Promise.reject(eacces(p.virtual))
+          : Promise.resolve(p.virtual === '/db' ? ['/db/link', '/db/private'] : []),
+      stat: (_a, p) =>
+        Promise.resolve(
+          p.virtual === '/db/link'
+            ? new FileStat({ name: 'link', type: FileType.SYMLINK, size: 9 })
+            : new FileStat({ name: p.virtual, type: FileType.DIRECTORY }),
+        ),
+    }
+    const links: LinkView = {
+      statAt: () => null,
+      subtree: () => [],
+      resolve: (path) => (path === '/db/link' ? '/db/private/f' : path),
+      exists: () => Promise.resolve(true),
+      targetStat: (path) =>
+        Promise.resolve(
+          path === '/db/link' ? new FileStat({ name: 'f', type: FileType.FILE, size: 6 }) : null,
+        ),
+    }
+    const result = await BUILDER.fn(ops, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
+      stdin: null,
+      flags: { a: true, L: true },
+      cwd: '/',
+      ns: { links },
+    })
+    const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
+    expect(DEC.decode(out)).toBe('6\t/db/link\n0\t/db/private\n6\t/db\n')
+    expect([io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
+      1,
+      "du: cannot read directory '/db/private': Permission denied\n",
+    ])
   })
 })

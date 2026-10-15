@@ -153,12 +153,13 @@ function treeOf<A extends Accessor>(
  * GNU counts each file once, under the first name its walks meet, across
  * every operand of the line (du.c's di_set, coreutils 9.7): what one operand
  * reaches is not counted again under another, and an operand already counted
- * prints nothing. A link leading back into its operand's own tree is never
- * counted, since the file it reaches is counted under its own name there
- * (where GNU's readdir order may reach the link first, mirage's sorted walk
- * always prefers the file's own name). Under `-x` a link that leads onto
- * another mount is left out whole, as GNU leaves out what stat(2) places on
- * another device.
+ * prints nothing. A link leading back into its operand's own tree waits for
+ * the walk to end, and counts only if the walk never reached the file under
+ * the file's own name: mirage's sorted walk prefers that name (where GNU's
+ * readdir order may reach the link first), and a directory the walk may not
+ * list leaves the link the one name that reaches the file, which GNU then
+ * counts it under. Under `-x` a link that leads onto another mount is left out
+ * whole, as GNU leaves out what stat(2) places on another device.
  */
 class Dereference {
   constructor(
@@ -171,6 +172,8 @@ class Dereference {
     readonly tree = '/',
     // Under `-x`, the mount that operand lies on.
     readonly home: string | null = null,
+    // The walk's links into its tree, each with the path it resolves to.
+    readonly waiting: [PathSpec, string][] = [],
   ) {}
 
   /** This invocation's state, walking one operand. */
@@ -178,6 +181,18 @@ class Dereference {
     const tree = this.links.resolve(path.virtual)
     const home = this.mounts === null ? null : this.mounts.rootOf(tree)
     return new Dereference(this.links, this.mounts, this.counted, tree, home)
+  }
+
+  /** The same walk, settling a link into its tree under the link's name. */
+  under(link: PathSpec): Dereference {
+    return new Dereference(
+      this.links,
+      this.mounts,
+      this.counted,
+      link.virtual,
+      this.home,
+      this.waiting,
+    )
   }
 
   /** Whether an earlier operand's walk already counted this one. */
@@ -212,7 +227,10 @@ async function counted(
     return null
   }
   if (follow.home !== null && follow.mounts?.rootOf(real) !== follow.home) return null
-  if (info.type === FileType.SYMLINK && underPath(real, follow.tree)) return null
+  if (info.type === FileType.SYMLINK && underPath(real, follow.tree)) {
+    follow.waiting.push([path, real])
+    return null
+  }
   if (follow.counted.has(real)) return null
   follow.counted.add(real)
   return target
@@ -270,6 +288,35 @@ async function duWalk(
   return total
 }
 
+/**
+ * Walk one operand, then count each link into its tree whose file the walk
+ * never reached under the file's own name. `entries` collects each file's
+ * size under its name, null for a total alone. Mirrors Python's
+ * _walk_operand.
+ */
+async function walkOperand<A extends Accessor>(
+  ops: CommandIO<A>,
+  accessor: A,
+  index: IndexCacheStore | undefined,
+  budget: WalkBudget,
+  follow: Dereference | null,
+  path: PathSpec,
+  entries: [string, number][] | null,
+): Promise<number> {
+  budget.directories.length = 0
+  const walk = treeOf(ops, accessor, index)
+  const state = follow === null ? null : follow.operand(path)
+  let total = await duWalk(walk, index, path, budget, entries, state)
+  if (state !== null) {
+    for (const [link, real] of state.waiting) {
+      if (!state.counted.has(real)) {
+        total += await duWalk(walk, index, link, budget, entries, state.under(link))
+      }
+    }
+  }
+  return total
+}
+
 export function walkSize<A extends Accessor>(
   ops: CommandIO<A>,
   accessor: A,
@@ -278,15 +325,7 @@ export function walkSize<A extends Accessor>(
   follow: Dereference | null,
   path: PathSpec,
 ): Promise<number> {
-  budget.directories.length = 0
-  return duWalk(
-    treeOf(ops, accessor, index),
-    index,
-    path,
-    budget,
-    null,
-    follow === null ? null : follow.operand(path),
-  )
+  return walkOperand(ops, accessor, index, budget, follow, path, null)
 }
 
 export async function walkEntries<A extends Accessor>(
@@ -298,15 +337,7 @@ export async function walkEntries<A extends Accessor>(
   path: PathSpec,
 ): Promise<DuEntries> {
   const entries: [string, number][] = []
-  budget.directories.length = 0
-  const total = await duWalk(
-    treeOf(ops, accessor, index),
-    index,
-    path,
-    budget,
-    entries,
-    follow === null ? null : follow.operand(path),
-  )
+  const total = await walkOperand(ops, accessor, index, budget, follow, path, entries)
   entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
 }

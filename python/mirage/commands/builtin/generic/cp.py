@@ -1522,9 +1522,10 @@ async def _mirror_dirs(
         entry_dst = spelled_from(mounted_path(target, dst_mount), target)
         entry = spelled_from(mounted_path(src, entry_mount), src)
         try:
-            exists, is_dir = await entry_kind(
-                partial(dest_stat, stat, copies), entry_dst
-            )
+            # A directory meets a link at its name as the link itself,
+            # where a file writes through it (GNU's lstat for a directory
+            # source, coreutils 9.7).
+            exists, is_dir = await entry_kind(stat, entry_dst)
             if is_dir:
                 continue
             free = (
@@ -1689,9 +1690,7 @@ async def copy_entries(
         )
         if kind == FileType.DIRECTORY:
             try:
-                exists, is_dir = await entry_kind(
-                    partial(dest_stat, stat, copies), entry_dst
-                )
+                exists, is_dir = await entry_kind(stat, entry_dst)
                 if is_dir:
                     continue
                 free = (
