@@ -20,6 +20,7 @@ import type { FileStat } from '../../../types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
+import { currentCaller, runWithCaller, type Caller } from '../../../context/session_context.ts'
 import type { MountView, NamespaceView } from '../../../view/types.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
@@ -52,17 +53,30 @@ export function dispatchIO(dispatch: DispatchFn, bound?: MountView): CommandIO {
         throw eisdir(path)
       return materialize((await dispatch('read', path))[0] as ByteSource)
     },
-    readStream: async function* (_accessor, path) {
-      if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
-        throw eisdir(path)
-      yield* chunks((await dispatch('read', path))[0] as ByteSource)
-    },
+    readStream: (_accessor, path) => callerStream(dispatch, currentCaller(), path),
     isMounted: () => true,
     // No cap of its own: a du walk charges each entry to the mount serving
     // it, at that mount's cap (see WalkBudget).
     maxDuEntries: null,
     ...dispatchedSlots(dispatch, ['write', 'pwrite', 'unlink', 'mkdir', 'truncate']),
   }
+}
+
+/** A streamed read that opens as the command that asked for it: at the first
+ * pull, which can come after that command ended, so under the command's
+ * caller, as a `fresh` mount trusts only the listings that command made.
+ * Mirrors Python's _caller_stream. */
+async function* callerStream(
+  dispatch: DispatchFn,
+  caller: Caller,
+  path: PathSpec,
+): AsyncIterable<Uint8Array> {
+  const data = await runWithCaller(caller, async () => {
+    if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
+      throw eisdir(path)
+    return (await dispatch('read', path, [], { stream: true }))[0] as ByteSource
+  })
+  yield* chunks(data)
 }
 
 function noneBelow(): string[] {
@@ -75,7 +89,8 @@ function noneBelow(): string[] {
  * stays for `--one-file-system`. The output is read before this returns,
  * inside the running command: a `fresh` mount trusts only the listings that
  * command made, so a lazy stream read after it ends would be served the
- * previous command's. */
+ * previous command's. A builder that `streams` only reads, and each read opens
+ * as this command (`callerStream`), so its output is handed on live. */
 export async function runDispatch(
   builder: GenericCommand,
   paths: readonly PathSpec[],
@@ -134,5 +149,6 @@ export async function runDispatch(
     },
   )
   if (result === null) return [null, new IOResult()]
+  if (builder.streams === true) return result
   return [await materialize(result[0]), result[1]]
 }

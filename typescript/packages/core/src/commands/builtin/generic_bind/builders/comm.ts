@@ -24,5 +24,6 @@ const comm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
 export const BUILDER: GenericCommand = {
   name: 'comm',
   read: true,
+  streams: true,
   fn: comm,
 }

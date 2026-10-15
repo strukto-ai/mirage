@@ -192,6 +192,9 @@ class GenericCommand:
     read: bool = False
     # Hands on what it reads (cat, head), so its input is not split.
     pass_through: bool = False
+    # Only reads its operands while its output drains (comm, fold), so a
+    # cross-mount run hands that output on live.
+    streams: bool = False
 
 
 def require_op(ops: CommandIO, op: Operation) -> OperationFn:

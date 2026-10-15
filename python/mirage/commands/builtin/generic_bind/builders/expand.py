@@ -42,4 +42,4 @@ async def expand(
     )
 
 
-BUILDER = GenericCommand("expand", expand, read=True)
+BUILDER = GenericCommand("expand", expand, read=True, streams=True)

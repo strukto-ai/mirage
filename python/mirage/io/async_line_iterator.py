@@ -263,6 +263,29 @@ class AsyncLineIterator:
             return
         await self.discard()
 
+    async def peek(self) -> bool:
+        """Whether another byte follows, consuming nothing.
+
+        Pulls the source's next chunk only when nothing is buffered, so a
+        line still arriving never holds the answer up.
+
+        Returns:
+            bool: False at end of input.
+        """
+        while not self._buf:
+            if self._exhausted:
+                return False
+            try:
+                await self._budget.run()
+                self._buf = await self._next_chunk()
+                self._view = None
+            except StopAsyncIteration:
+                self._exhausted = True
+            except BaseException as exc:
+                await self._failed(exc)
+                raise
+        return True
+
     async def read_chunk(self) -> bytes | None:
         """Hand over what is buffered, else the source's next chunk.
 

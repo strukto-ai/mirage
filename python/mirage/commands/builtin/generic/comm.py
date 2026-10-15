@@ -1,7 +1,8 @@
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.stream import stdin_stream
+from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -37,8 +38,11 @@ async def comm(
             CommandName.COMM,
             paths[-1].raw_path or paths[-1].virtual if paths else None,
         )
-    read = stdin_stream(read_stream, stdin)
-    readers = [AsyncLineIterator(read(p)) for p in paths]
+    read = normalized_read(read_stream)
+    shared = AsyncLineIterator(resolve_source(stdin))
+    readers = [
+        shared if is_stdin(p) else AsyncLineIterator(read(p)) for p in paths
+    ]
     io = IOResult()
     return _comm_stream(
         readers,
@@ -48,6 +52,7 @@ async def comm(
         output_delimiter,
         total,
         b"\0" if zero_terminated else b"\n",
+        all(p.raw_path == "-" for p in paths),
     ), io
 
 
@@ -59,6 +64,7 @@ async def _comm_stream(
     delimiter: str,
     total: bool,
     separator: bytes,
+    closes_stdin_twice: bool,
 ) -> AsyncIterator[bytes]:
     """Merge the two inputs, checking each one's order as GNU comm does.
 
@@ -77,6 +83,9 @@ async def _comm_stream(
         delimiter (str): the column separator.
         total (bool): --total.
         separator (bytes): the record terminator.
+        closes_stdin_twice (bool): both operands are ``-``, which share
+            one stdin reader; GNU closes stdin twice and ends with ``comm:
+            -: Bad file descriptor``, exit 1, before --total.
     """
     lines: list[str | None] = [None, None]
     warned = [False, False]
@@ -134,6 +143,10 @@ async def _comm_stream(
                 return
             if column != 1 and await pull(1):
                 return
+        if closes_stdin_twice:
+            errors.append("comm: -: Bad file descriptor\n")
+            io.stderr, io.exit_code = "".join(errors).encode(), 1
+            return
         if total:
             yield (
                 delimiter.join(
@@ -150,7 +163,7 @@ async def _comm_stream(
             errors.append("comm: input is not in sorted order\n")
             io.stderr = "".join(errors).encode()
     finally:
-        for reader in readers:
+        for reader in dict.fromkeys(readers):
             await reader.discard()
 
 

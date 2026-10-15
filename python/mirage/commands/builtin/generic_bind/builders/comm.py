@@ -41,4 +41,4 @@ async def comm(
     )
 
 
-BUILDER = GenericCommand("comm", comm, read=True)
+BUILDER = GenericCommand("comm", comm, read=True, streams=True)

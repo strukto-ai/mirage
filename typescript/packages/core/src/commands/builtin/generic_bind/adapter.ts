@@ -916,6 +916,11 @@ export interface GenericCommand<A extends Accessor = Accessor> {
    * through. A scan inside such a command splits its own input.
    */
   passThrough?: boolean
+  /**
+   * The command only reads its operands while its output drains (`comm`,
+   * `fold`), so a cross-mount run hands that output on live.
+   */
+  streams?: boolean
 }
 
 /** Refuse a hidden path the way nonexistence would: ENOENT for anything

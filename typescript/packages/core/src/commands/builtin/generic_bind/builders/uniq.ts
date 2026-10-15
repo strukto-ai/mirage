@@ -36,5 +36,6 @@ const uniq: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
 export const BUILDER: GenericCommand = {
   name: 'uniq',
   read: true,
+  streams: true,
   fn: uniq,
 }

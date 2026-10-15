@@ -29,5 +29,6 @@ const expand: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
 export const BUILDER: GenericCommand = {
   name: 'expand',
   read: true,
+  streams: true,
   fn: expand,
 }

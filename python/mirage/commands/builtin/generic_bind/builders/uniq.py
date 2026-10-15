@@ -47,4 +47,4 @@ async def uniq(
     )
 
 
-BUILDER = GenericCommand("uniq", uniq, read=True)
+BUILDER = GenericCommand("uniq", uniq, read=True, streams=True)

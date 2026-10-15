@@ -26,8 +26,14 @@ from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context.session_context import (
+    Caller,
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.errors.fs import eisdir
-from mirage.io.stream import ensure_stream, materialize
+from mirage.io.stream import close_quietly, ensure_stream, materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
@@ -86,15 +92,10 @@ def dispatch_io(
         data, _ = await dispatch("read", path)
         return await materialize(data) or b""
 
-    async def read_stream(
+    def read_stream(
         accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
-        info, _ = await dispatch("stat", path)
-        if cast(FileStat, info).type == FileType.DIRECTORY:
-            raise eisdir(path)
-        data, _ = await dispatch("read", path)
-        async for chunk in ensure_stream(data):
-            yield chunk
+        return _caller_stream(dispatch, current_caller(), path)
 
     return CommandIO(
         readdir=readdir,
@@ -109,6 +110,36 @@ def dispatch_io(
             dispatch, ("write", "pwrite", "unlink", "mkdir", "truncate")
         ),
     )
+
+
+async def _caller_stream(
+    dispatch: DispatchFn, caller: Caller, path: PathSpec
+) -> AsyncIterator[bytes]:
+    """A streamed read that opens as the command that asked for it.
+
+    It opens at the first pull, which can come after that command ended,
+    so it opens under the command's caller: a ``fresh`` mount trusts only
+    the listings that command made.
+
+    Args:
+        dispatch (DispatchFn): policy-checked operation dispatcher.
+        caller (Caller): the asking command's caller.
+        path (PathSpec): the file.
+    """
+    token = bind_caller(caller)
+    try:
+        info, _ = await dispatch("stat", path)
+        if cast(FileStat, info).type == FileType.DIRECTORY:
+            raise eisdir(path)
+        data, _ = await dispatch("read", path, stream=True)
+    finally:
+        reset_caller(token)
+    source = ensure_stream(data)
+    try:
+        async for chunk in source:
+            yield chunk
+    finally:
+        await close_quietly(source)
 
 
 async def run_dispatch(
@@ -126,7 +157,9 @@ async def run_dispatch(
 
     The output is read before this returns, inside the running command: a
     ``fresh`` mount trusts only the listings that command made, so a lazy
-    stream read after it ends would be served the previous command's.
+    stream read after it ends would be served the previous command's. A
+    builder that ``streams`` only reads, and each read opens as this
+    command (``_caller_stream``), so its output is handed on live.
 
     Args:
         builder (GenericCommand): the command's existing generic binding.
@@ -187,4 +220,6 @@ async def run_dispatch(
     if result is None:
         return None, IOResult()
     stdout, io = result
+    if builder.streams:
+        return stdout, io
     return await materialize(stdout), io

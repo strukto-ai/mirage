@@ -43,4 +43,4 @@ async def join(
     )
 
 
-BUILDER = GenericCommand("join", join, read=True)
+BUILDER = GenericCommand("join", join, read=True, streams=True)

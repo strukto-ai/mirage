@@ -19,7 +19,7 @@ import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
-import { stdinStream } from '../utils/stream.ts'
+import { isStdin } from '../utils/stream.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 
@@ -66,10 +66,12 @@ export function commGeneric(
   const p1 = paths[0]
   const p2 = paths[1]
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
-  const stream = stdinStream(read, opts.stdin)
-  const readers = [new AsyncLineIterator(stream(p1)), new AsyncLineIterator(stream(p2))] as const
+  const shared = new AsyncLineIterator(opts.stdin ?? new Uint8Array())
+  const reader = (p: PathSpec): AsyncLineIterator =>
+    isStdin(p) ? shared : new AsyncLineIterator(read(p))
   const io = new IOResult()
-  return [commStream(readers, io, parsed), io]
+  const twice = p1.rawPath === '-' && p2.rawPath === '-'
+  return [commStream([reader(p1), reader(p2)], io, parsed, twice), io]
 }
 
 /**
@@ -79,12 +81,15 @@ export function commGeneric(
  * under --check-order, where the first disorder ends the run, never under
  * --nocheck-order, and by default only once a line unique to one file has
  * printed, warning once per file and closing with `input is not in sorted
- * order`. Both exit 1.
+ * order`. Both exit 1. Two `-` operands share one stdin reader, and GNU,
+ * closing stdin twice, ends with `comm: -: Bad file descriptor`, exit 1,
+ * before --total.
  */
 async function* commStream(
   readers: readonly [AsyncLineIterator, AsyncLineIterator],
   io: IOResult,
   flags: CommFlags,
+  closesStdinTwice: boolean,
 ): AsyncIterable<Uint8Array> {
   const separator = flags.zeroTerminated ? 0 : 10
   const lines: [string | null, string | null] = [null, null]
@@ -140,6 +145,12 @@ async function* commStream(
       if (column !== 2 && (await pull(0))) return
       if (column !== 1 && (await pull(1))) return
     }
+    if (closesStdinTwice) {
+      errors.push('comm: -: Bad file descriptor\n')
+      io.stderr = ENC.encode(errors.join(''))
+      io.exitCode = 1
+      return
+    }
     if (flags.total)
       yield ENC.encode(
         [...counts.filter((_, i) => !suppressed[i]).map(String), 'total'].join(
@@ -151,6 +162,6 @@ async function* commStream(
       io.stderr = ENC.encode(errors.join(''))
     }
   } finally {
-    for (const reader of readers) await reader.discard()
+    for (const reader of new Set(readers)) await reader.discard()
   }
 }

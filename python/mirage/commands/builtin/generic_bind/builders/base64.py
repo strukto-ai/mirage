@@ -42,4 +42,4 @@ async def base64(
     )
 
 
-BUILDER = GenericCommand("base64", base64, read=True)
+BUILDER = GenericCommand("base64", base64, read=True, streams=True)

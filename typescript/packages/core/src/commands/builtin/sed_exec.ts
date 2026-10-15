@@ -203,7 +203,6 @@ export class SedMachine {
   private inputs: SedInput[] = []
   private fileIdx = 0
   private nextLine: InputLine | undefined
-  private broken: SedPanic | undefined
   private fileName = '-'
   private resetAtNextFile = true
   private lineNumber = 0
@@ -259,7 +258,6 @@ export class SedMachine {
     this.inputs = inputs
     this.fileIdx = 0
     this.nextLine = undefined
-    this.broken = undefined
     this.resetAtNextFile = true
     try {
       while (!this.stopped()) {
@@ -314,44 +312,33 @@ export class SedMachine {
    * Read this operand's next line ahead; whether there is one.
    *
    * A failed operand goes GNU sed 4.9's ways. One that never opens (a
-   * missing file) is reported, exit 2, and the run reads on. One that opens
-   * and then fails to read (a directory, or a read that breaks off) panics,
-   * exit 4. The look-ahead of `$`, `n` and `N` (`peek`) only peeks for one
-   * more byte: a read that fails before giving one reads as the operand's
-   * end, and one that gave bytes first says there is more and leaves the
-   * panic to the read that takes them.
+   * missing file; stdin is always open) is reported, exit 2, and the run
+   * reads on. One that opens and then fails to read (a directory, or a read
+   * that breaks off) panics, exit 4. The look-ahead of `$`, `n` and `N`
+   * (`peek`) only peeks for one more byte, so a line still arriving never
+   * holds it up: a peek that fails reads as the operand's end, and a byte
+   * already buffered leaves the failure to the read that takes the line.
    */
   private async more(peek = false): Promise<boolean> {
     if (this.nextLine !== undefined) return true
-    if (this.broken !== undefined) {
-      if (peek) return true
-      throw this.broken
-    }
     if (this.reader === undefined) return false
-    const start = this.reader.position
     let raw: Uint8Array, chomped: boolean
     try {
+      if (peek) return await this.reader.peek(this.signal)
       ;[raw, chomped] = await this.reader.readUntil(10, this.signal)
     } catch (error) {
       if (!isFsError(error)) throw error
-      const loaded = this.reader.loaded
+      const opened = this.reader.loaded > 0 || this.fileName === '-' || isEisdir(error)
       await this.reader.discard()
       this.reader = undefined
-      if (loaded === 0 && !isEisdir(error)) {
+      if (!opened) {
         this.stderrLines.push(fsErrorLine('sed', PathSpec.fromStrPath(this.fileName), error))
         this.badCode = Math.max(this.badCode, readFailExitCode('sed', error))
         return false
       }
+      if (peek) return false
       const name = this.fileName === '-' ? 'stdin' : this.fileName
-      const panic = new SedPanic(
-        `sed: read error on ${name}: ${fsStrerror(error) ?? String(error)}\n`,
-      )
-      if (!peek) throw panic
-      if (loaded > start) {
-        this.broken = panic
-        return true
-      }
-      return false
+      throw new SedPanic(`sed: read error on ${name}: ${fsStrerror(error) ?? String(error)}\n`)
     }
     if (raw.length > 0 || chomped)
       this.nextLine = { text: byteView(raw, this.opts.utf8 ?? false), chomped }

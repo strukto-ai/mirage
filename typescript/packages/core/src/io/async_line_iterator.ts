@@ -328,6 +328,28 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     return [copyOf(data), found]
   }
 
+  /**
+   * Whether another byte follows, consuming nothing. Pulls the source's next
+   * chunk only when nothing is buffered, so a line still arriving never holds
+   * the answer up. Mirrors Python's peek.
+   */
+  async peek(signal?: AbortSignal): Promise<boolean> {
+    try {
+      while (this.buf.byteLength === 0) {
+        if (this.exhausted) return false
+        const pending = this.check(signal)
+        if (pending !== undefined) await pending
+        const result = await this.pull(signal)
+        if (result.done === true) this.exhausted = true
+        else this.buf = copyOf(result.value)
+      }
+      return true
+    } catch (error) {
+      await this.failed(error)
+      throw error
+    }
+  }
+
   /** Hand over what is buffered, else the source's next chunk; null at end of input. */
   async readChunk(): Promise<Uint8Array | null> {
     if (this.buf.byteLength > 0) {

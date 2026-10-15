@@ -1424,6 +1424,38 @@
         "stdout": "--- /data/sio-diff2\n+++ /dev/stdin\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "shell_stdin_comm_two_dashes_share_one_reader",
+      "seq": 916968,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'a\\nb\\nc\\nd\\n' | comm - -",
+      "expect": {
+        "exit": 1,
+        "stdout": "a\n\tb\nc\n\td\n",
+        "stderr": "comm: -: Bad file descriptor\n"
+      },
+      "note": "Two - operands read one stdin, each taking the next line it needs, and GNU, closing stdin twice, ends with EBADF, exit 1. Pinned in debian:stable-slim."
+    },
+    {
+      "id": "shell_stdin_sed_closed_stdin_is_a_read_error",
+      "seq": 916969,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "(printf 'g\\n' > /data/sio-sed; sed -n p - /data/sio-sed <&-; echo rc=$?; printf 'one\\n' > /data/sio-sed; sed -n '$p' /data/sio-sed - <&-; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=4\none\nrc=0\n",
+        "stderr": "sed: read error on stdin: Bad file descriptor\n"
+      },
+      "note": "A closed stdin is never a file sed failed to open: reading it is the read-error panic, exit 4, while the look-ahead of $ only peeks it and reads it as the end. Pinned in debian:stable-slim."
     }
   ]
 }

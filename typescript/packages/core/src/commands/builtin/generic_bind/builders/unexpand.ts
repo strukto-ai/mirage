@@ -29,5 +29,6 @@ const unexpand: GenericCommandFn = async (ops, accessor, paths, _texts, opts) =>
 export const BUILDER: GenericCommand = {
   name: 'unexpand',
   read: true,
+  streams: true,
   fn: unexpand,
 }

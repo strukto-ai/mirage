@@ -42,4 +42,4 @@ async def unexpand(
     )
 
 
-BUILDER = GenericCommand("unexpand", unexpand, read=True)
+BUILDER = GenericCommand("unexpand", unexpand, read=True, streams=True)

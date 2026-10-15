@@ -29,5 +29,6 @@ const join: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
 export const BUILDER: GenericCommand = {
   name: 'join',
   read: true,
+  streams: true,
   fn: join,
 }

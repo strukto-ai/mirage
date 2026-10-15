@@ -29,5 +29,6 @@ const fold: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
 export const BUILDER: GenericCommand = {
   name: 'fold',
   read: true,
+  streams: true,
   fn: fold,
 }

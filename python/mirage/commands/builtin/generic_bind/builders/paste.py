@@ -47,4 +47,4 @@ async def paste(
     )
 
 
-BUILDER = GenericCommand("paste", paste, read=True)
+BUILDER = GenericCommand("paste", paste, read=True, streams=True)

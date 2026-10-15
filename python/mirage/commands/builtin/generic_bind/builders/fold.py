@@ -42,4 +42,4 @@ async def fold(
     )
 
 
-BUILDER = GenericCommand("fold", fold, read=True)
+BUILDER = GenericCommand("fold", fold, read=True, streams=True)

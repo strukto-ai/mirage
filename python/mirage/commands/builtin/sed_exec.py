@@ -324,7 +324,6 @@ class SedMachine:
         self._inputs: list[SedInput] = []
         self._file_idx = 0
         self._next_line: _InputLine | None = None
-        self._broken: SedPanic | None = None
         self._file_name = "-"
         self._reset_at_next_file = True
         self._line_number = 0
@@ -370,7 +369,6 @@ class SedMachine:
         self._inputs = inputs
         self._file_idx = 0
         self._next_line = None
-        self._broken = None
         self._reset_at_next_file = True
         try:
             while not self.stopped():
@@ -425,32 +423,34 @@ class SedMachine:
         """Read this operand's next line ahead; whether there is one.
 
         A failed operand goes GNU sed 4.9's ways. One that never opens (a
-        missing file) is reported, exit 2, and the run reads on. One that
-        opens and then fails to read (a directory, or a read that breaks
-        off) panics, exit 4. The look-ahead of ``$``, ``n`` and ``N``
-        only peeks for one more byte: a read that fails before giving one
-        reads as the operand's end, and one that gave bytes first says
-        there is more and leaves the panic to the read that takes them.
+        missing file; stdin is always open) is reported, exit 2, and the
+        run reads on. One that opens and then fails to read (a directory,
+        or a read that breaks off) panics, exit 4. The look-ahead of
+        ``$``, ``n`` and ``N`` only peeks for one more byte, so a line
+        still arriving never holds it up: a peek that fails reads as the
+        operand's end, and a byte already buffered leaves the failure to
+        the read that takes the line.
 
         Args:
-            peek (bool): looking ahead rather than reading the line.
+            peek (bool): ask for one more byte rather than read the line.
         """
         if self._next_line is not None:
             return True
-        if self._broken is not None:
-            if peek:
-                return True
-            raise self._broken
         if self._reader is None:
             return False
-        start = self._reader.position
         try:
+            if peek:
+                return await self._reader.peek()
             raw, chomped = await self._reader.read_until(b"\n")
         except FS_ERRORS as exc:
-            loaded = self._reader.loaded
+            opened = (
+                self._reader.loaded > 0
+                or self._file_name == "-"
+                or isinstance(exc, IsADirectoryError)
+            )
             await self._reader.discard()
             self._reader = None
-            if not loaded and not isinstance(exc, IsADirectoryError):
+            if not opened:
                 self.stderr_lines.append(
                     fs_error_line(
                         "sed", PathSpec.from_str_path(self._file_name), exc
@@ -460,16 +460,12 @@ class SedMachine:
                     self.bad_code, read_fail_exit_code("sed", exc)
                 )
                 return False
+            if peek:
+                return False
             name = "stdin" if self._file_name == "-" else self._file_name
-            panic = SedPanic(
+            raise SedPanic(
                 f"sed: read error on {name}: {fs_strerror(exc) or exc}\n"
-            )
-            if not peek:
-                raise panic from exc
-            if loaded > start:
-                self._broken = panic
-                return True
-            return False
+            ) from exc
         if raw or chomped:
             self._next_line = _InputLine(
                 byte_view(raw, self.opts.utf8), chomped
