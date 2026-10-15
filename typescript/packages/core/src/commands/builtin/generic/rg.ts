@@ -55,7 +55,7 @@ import {
 } from '../rg_search.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { type LinkResolver, linkResolver } from '../utils/links.ts'
-import { formatOptionalRecords, formatRecords } from '../utils/output.ts'
+import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream, wrapBytes } from '../utils/stream.ts'
 import { RegexSyntax } from '../types.ts'
 import { PcreError, hostFlags, translatePcre } from '../utils/pcre.ts'
@@ -956,33 +956,24 @@ export async function rgGeneric(
     found = replay(sortHaystacks(listed, f))
   }
   const io = new IOResult()
-  if (f.listFiles) return noted([listFiles(found, f, warnings, io), io], notes, f)
-  if (pat === null) return usage(RG_NO_PATTERN)
-  const pattern = pat
-  async function* output(): AsyncIterable<Uint8Array> {
-    const worker = new Worker()
-    try {
-      yield* searchAll(
-        worker,
-        found,
-        paths,
-        pattern,
-        f,
-        stream,
-        first,
-        warnings,
-        implicit,
-        opts.cwd,
-        io,
-        opts.signal,
-        opts.shell,
-      )
-    } finally {
-      await found.return(undefined)
-      await worker.close()
-    }
-  }
-  return noted([output(), io], notes, f)
+  const out =
+    pat === null
+      ? listFiles(found, f, warnings, io)
+      : searchAll(
+          found,
+          paths,
+          pat,
+          f,
+          stream,
+          first,
+          warnings,
+          implicit,
+          opts.cwd,
+          io,
+          opts.signal,
+          opts.shell,
+        )
+  return noted([out, io], notes, f)
 }
 
 // A search's result with --ignore-file's notes ahead of its stderr, as
@@ -1075,7 +1066,7 @@ async function searchSingle(
 }
 
 // One streamed haystack's output, headed when --heading names it, with the
-// exit status settled as it goes.
+// exit status settled however the output ends.
 async function* settled(
   chunks: AsyncIterable<Uint8Array>,
   f: RgFlags,
@@ -1086,10 +1077,11 @@ async function* settled(
   shown: string,
 ): AsyncGenerator<Uint8Array> {
   let printed = false
+  let failed = false
   try {
     for await (const chunk of chunks) {
-      if (!printed && label !== null && headed(f) && tally.binary !== true)
-        yield encodeText(label + (f.null ? '\0' : recordEnd(f)))
+      const heading = printed ? null : lead(f, label, false, tally.binary === true)[1]
+      if (heading !== null && heading.length > 0) yield heading
       printed = true
       yield chunk
     }
@@ -1097,12 +1089,13 @@ async function* settled(
     if (!isFsError(err)) throw err
     // A read that fails once the stream is open is the searcher's to report,
     // exit 2, as ripgrep reports it for any file it searches.
+    failed = true
     io.stderr = f.noMessages ? null : ENC.encode(`${openErrorLine(shown, err)}\n`)
     io.exitCode = 2
-    return
+  } finally {
+    const listed = f.filesWithoutMatch && !f.quiet ? printed : null
+    if (!failed) io.exitCode = (listed ?? tally.selected) ? 0 : 1
   }
-  const listed = f.filesWithoutMatch && !f.quiet ? printed : null
-  io.exitCode = (listed ?? tally.selected) ? 0 : 1
 }
 
 // Whether --json writes its records and the summary: only for the printing
@@ -1152,6 +1145,19 @@ export function betweenFiles(f: RgFlags): string {
   if (headed(f) && !f.noFilename) return '\n'
   if (printsContext(f) && f.contextSeparator !== null) return f.contextSeparator + '\n'
   return ''
+}
+
+// What goes before a file's first output: the gap after the file printed
+// before it, and the --heading line naming it.
+function lead(
+  f: RgFlags,
+  label: string | null,
+  printed: boolean,
+  binary: boolean,
+): [Uint8Array, Uint8Array] {
+  const gap = encodeText(printed ? betweenFiles(f) : '')
+  if (label === null || !headed(f) || binary) return [gap, new Uint8Array()]
+  return [gap, encodeText(label + (f.null ? '\0' : recordEnd(f)))]
 }
 
 // Every input the line searches, in order: a stdin operand, a named file as
@@ -1242,27 +1248,19 @@ async function* listFiles(
 ): AsyncIterable<Uint8Array> {
   const term = f.null ? '\0' : '\n'
   let selected = false
-  for await (const h of found) {
-    selected = true
-    if (f.quiet) break
-    yield encodeText(printedPath(h.shown, f) + term)
+  try {
+    for await (const h of found) {
+      selected = true
+      if (f.quiet) break
+      yield encodeText(printedPath(h.shown, f) + term)
+    }
+  } finally {
+    io.exitCode = exitCodeFor(selected, warnings.length > 0, f.quiet)
+    if (warnings.length > 0 && !f.noMessages)
+      io.stderr = concat([await materialize(io.stderr), formatRecords(warnings)])
   }
-  io.exitCode = exitCodeFor(selected, warnings.length > 0, f.quiet)
-  if (!f.noMessages)
-    io.stderr = concat([
-      await materialize(io.stderr),
-      formatOptionalRecords(warnings) ?? new Uint8Array(),
-    ])
 }
 
-/**
- * Search every haystack in order and put the output together. ripgrep labels
- * every line when the line named more than one path or walked a directory;
- * -H forces the label and -I drops it. Between one file's context and the
- * next file's goes the context separator, and under --heading a blank line
- * goes between files instead. `implicit` says the line named no path, so
- * ripgrep reports a search that found nothing to search.
- */
 /**
  * What --pre's command prints for one file, or ripgrep's report of why it
  * failed: it runs `COMMAND PATH` with the file's contents on stdin, here as a
@@ -1291,8 +1289,15 @@ async function preprocessed(
   return [io.stdout === null ? new Uint8Array() : await materialize(io.stdout), null]
 }
 
+/**
+ * Search every haystack in order and put the output together. ripgrep labels
+ * every line when the line named more than one path or walked a directory;
+ * -H forces the label and -I drops it. Between one file's context and the
+ * next file's goes the context separator, and under --heading a blank line
+ * goes between files instead. `implicit` says the line named no path, so
+ * ripgrep reports a search that found nothing to search.
+ */
 async function* searchAll(
-  worker: Worker,
   found: AsyncIterable<Haystack>,
   paths: readonly PathSpec[],
   pat: RegExp,
@@ -1303,6 +1308,7 @@ async function* searchAll(
   implicit: boolean,
   // The session's working directory, which --pre-glob's globs are rooted at.
   cwd: string,
+  // Receives the exit status and the warnings, however the output ends.
   io: IOResult,
   signal?: AbortSignal,
   // Runs --pre's command in the session.
@@ -1310,17 +1316,8 @@ async function* searchAll(
 ): AsyncIterable<Uint8Array> {
   const multi = paths.length > 1
   let lone = !multi
-  const context = printsContext(f)
   const preGlobs = new Overrides(f.preGlobs ?? [], [], false)
-  const progressive = ![
-    f.stats,
-    f.json,
-    f.searchZip,
-    f.countOnly,
-    f.countMatches,
-    f.filesOnly,
-    f.filesWithoutMatch,
-  ].some((flag) => flag === true)
+  const progressive = f.stats !== true && f.json !== true && f.searchZip !== true
   let printed = false
   let selected = false
   let skipped = false
@@ -1328,157 +1325,151 @@ async function* searchAll(
   const listingOrCount = f.countOnly || f.countMatches || f.filesOnly || f.filesWithoutMatch
   const records = jsonSummary(f)
   const totals = new Totals()
+  const worker = new Worker()
   const started = performance.now()
-  for await (const h of found) {
-    searched += 1
-    const walked = h.spec === null
-    lone = lone && !walked
-    const name = printedPath(h.shown, f)
-    const label = !f.noFilename && (walked || multi || f.withFilename || f.vimgrep) ? name : null
-    const tally: Tally = { selected: false }
-    const chunks: Uint8Array[] = []
-    let filePrinted = false
-    let damaged = false
-    const faults: GzipDataError[] = []
-    const began = performance.now()
-    try {
-      const opened =
-        h.spec === null && h.resolver !== null
-          ? h.resolver.read(h.virtual)
-          : stream(h.spec ?? sameMountSpec(h.virtual, template))
-      const pipe = h.spec !== null && isStdin(h.spec)
-      let source = opened
-      const pre = f.pre ?? null
-      if (
-        pre !== null &&
-        !pipe &&
-        preGlobs.verdict(walkCandidate(h.shown, cwd), false) !== Verdict.IGNORE
-      ) {
-        const [text, refusal] = await preprocessed(
-          pre,
-          h.shown,
-          name,
-          await materialize(opened),
-          shell,
-        )
-        if (refusal !== null) {
-          warnings.push(refusal)
-          continue
+  try {
+    for await (const h of found) {
+      searched += 1
+      const walked = h.spec === null
+      lone = lone && !walked
+      const name = printedPath(h.shown, f)
+      const label = !f.noFilename && (walked || multi || f.withFilename || f.vimgrep) ? name : null
+      const tally: Tally = { selected: false }
+      const chunks: Uint8Array[] = []
+      let filePrinted = false
+      let damaged = false
+      const faults: GzipDataError[] = []
+      const began = performance.now()
+      try {
+        const opened =
+          h.spec === null && h.resolver !== null
+            ? h.resolver.read(h.virtual)
+            : stream(h.spec ?? sameMountSpec(h.virtual, template))
+        const pipe = h.spec !== null && isStdin(h.spec)
+        let source = opened
+        const pre = f.pre ?? null
+        if (
+          pre !== null &&
+          !pipe &&
+          preGlobs.verdict(walkCandidate(h.shown, cwd), false) !== Verdict.IGNORE
+        ) {
+          const [text, refusal] = await preprocessed(
+            pre,
+            h.shown,
+            name,
+            await materialize(opened),
+            shell,
+          )
+          if (refusal !== null) {
+            warnings.push(refusal)
+            continue
+          }
+          source = wrapBytes(text)
+        } else if (
+          f.searchZip === true &&
+          GZIP_NAMES.some((ext) => h.virtual.endsWith(ext)) &&
+          !pipe
+        ) {
+          source = upToDamage(gunzipStream(opened), faults)
         }
-        source = wrapBytes(text)
-      } else if (
-        f.searchZip === true &&
-        GZIP_NAMES.some((ext) => h.virtual.endsWith(ext)) &&
-        !pipe
-      ) {
-        source = upToDamage(gunzipStream(opened), faults)
-      }
-      for await (const c of searchHaystack(
-        source,
-        pat,
-        f,
-        name,
-        label,
-        tally,
-        signal,
-        !walked,
-        pipe,
-        worker,
-      )) {
-        if (progressive) {
+        for await (const c of searchHaystack(
+          source,
+          pat,
+          f,
+          name,
+          label,
+          tally,
+          signal,
+          !walked,
+          pipe,
+          worker,
+        )) {
+          if (!progressive) {
+            chunks.push(c)
+            continue
+          }
           if (!filePrinted) {
-            if (label !== null && headed(f)) {
-              if (printed) yield ENC.encode('\n')
-              if (tally.binary !== true) yield encodeText(label + (f.null ? '\0' : recordEnd(f)))
-            } else if (context && printed && f.contextSeparator !== null) {
-              yield encodeText(f.contextSeparator + '\n')
-            }
+            const before = concat(lead(f, label, printed, tally.binary === true))
+            if (before.length > 0) yield before
             filePrinted = printed = true
           }
+          selected ||= tally.selected
           yield c
-        } else chunks.push(c)
-      }
-      const [fault] = faults
-      if (fault !== undefined) throw fault
-    } catch (err) {
-      if (err instanceof GzipDataError) {
-        // -z runs gzip, whose refusal ripgrep frames in rules. gzip's output
-        // streams into the search, so the lines it decoded before the damage
-        // still print, but not what ripgrep writes once the file is done (a
-        // count, --files-without-match), and the file adds to no total.
-        warnings.push(`rg: ${name}: \n${GZIP_RULE}\n${err.render(name).trimStart()}${GZIP_RULE}`)
-        damaged = true
-        if (f.countOnly || f.countMatches || f.filesWithoutMatch) chunks.length = 0
-      } else {
-        if (!isFsError(err)) throw err
-        // ripgrep reports the failed input and keeps searching the rest.
-        warnings.push(openErrorLine(h.shown, err))
-        continue
-      }
-    }
-    const elapsed = (performance.now() - began) / 1000
-    selected ||= tally.selected
-    skipped ||= tally.skipped === true
-    if (records) {
-      if (chunks.length > 0) {
-        const begin = jsonLine({ type: 'begin', data: { path: jsonText(name) } })
-        const sent = begin.length + chunks.reduce((sum, c) => sum + c.length, 0)
-        yield begin
-        yield* chunks
-        if (!damaged) {
-          totals.add(tally, sent, elapsed)
-          yield totals.endRecord(name, tally, sent, elapsed)
         }
-      } else if (f.quiet && tally.selected && !damaged) {
+        const [fault] = faults
+        if (fault !== undefined) throw fault
+      } catch (err) {
+        if (err instanceof GzipDataError) {
+          // -z runs gzip, whose refusal ripgrep frames in rules. gzip's output
+          // streams into the search, so the lines it decoded before the damage
+          // still print, but not what ripgrep writes once the file is done (a
+          // count, --files-without-match), and the file adds to no total.
+          warnings.push(`rg: ${name}: \n${GZIP_RULE}\n${err.render(name).trimStart()}${GZIP_RULE}`)
+          damaged = true
+          if (f.countOnly || f.countMatches || f.filesWithoutMatch) chunks.length = 0
+        } else {
+          if (!isFsError(err)) throw err
+          // ripgrep reports the failed input and keeps searching the rest.
+          warnings.push(openErrorLine(h.shown, err))
+          continue
+        }
+      }
+      const elapsed = (performance.now() - began) / 1000
+      selected ||= tally.selected
+      skipped ||= tally.skipped === true
+      if (records) {
+        if (chunks.length > 0) {
+          const begin = jsonLine({ type: 'begin', data: { path: jsonText(name) } })
+          const sent = begin.length + chunks.reduce((sum, c) => sum + c.length, 0)
+          yield begin
+          yield* chunks
+          if (!damaged) {
+            totals.add(tally, sent, elapsed)
+            yield totals.endRecord(name, tally, sent, elapsed)
+          }
+        } else if (f.quiet && tally.selected && !damaged) {
+          totals.add(tally, 0, elapsed)
+        }
+      } else if (chunks.length > 0) {
+        const [gap, heading] = lead(f, label, printed, tally.binary === true)
+        // -c and -l counts and names are not what --stats counts.
+        const sent =
+          heading.length + (listingOrCount ? 0 : chunks.reduce((sum, c) => sum + c.length, 0))
+        if (gap.length + heading.length > 0) yield concat([gap, heading])
+        yield* chunks
+        printed = true
+        if (!damaged) totals.add(tally, sent, elapsed)
+      } else if (!damaged) {
         totals.add(tally, 0, elapsed)
       }
-    } else if (chunks.length > 0) {
-      // -c and -l counts and names are not what --stats counts.
-      let sent = listingOrCount ? 0 : chunks.reduce((sum, c) => sum + c.length, 0)
-      if (label !== null && headed(f)) {
-        if (printed) yield ENC.encode('\n')
-        if (tally.binary !== true) {
-          const heading = encodeText(label + (f.null ? '\0' : recordEnd(f)))
-          yield heading
-          sent += heading.length
-        }
-      } else if (context && printed && f.contextSeparator !== null) {
-        yield encodeText(f.contextSeparator + '\n')
-      }
-      yield* chunks
-      printed = true
-      if (!damaged) totals.add(tally, sent, elapsed)
-    } else if (!damaged) {
-      totals.add(tally, 0, elapsed)
+      // --stats and --json count every file, -q or not (14.1.1).
+      if (f.quiet && tally.selected && f.stats !== true && f.json !== true) break
     }
-    // --stats and --json count every file, -q or not (14.1.1).
-    if (f.quiet && tally.selected && f.stats !== true && f.json !== true) break
+    const total = (performance.now() - started) / 1000
+    if (records) yield totals.summaryRecord(total)
+    else if (f.stats === true) {
+      // ripgrep's parallel searcher gives the last --heading group its blank
+      // line too; one thread, as for a lone file, does not.
+      if (printed && headed(f) && runsParallel(f) && !lone) yield ENC.encode('\n')
+      yield totals.statsBlock(total)
+    }
+  } finally {
+    await worker.close()
+    // ripgrep's status under --files-without-match follows the listing, not
+    // the matching: 0 when a file was listed, 1 when every file matched
+    // (14.1.1; GNU grep keeps the match status). A walked binary file it
+    // skipped counts as one without a match, though no listing names it.
+    if (f.filesWithoutMatch && !f.quiet) selected = printed || skipped
+    let code = exitCodeFor(selected, warnings.length > 0, f.quiet)
+    const shown = f.noMessages ? [] : [...warnings]
+    if (implicit && searched === 0) {
+      // An error whatever --no-messages says, which only silences it.
+      if (!f.noMessages) shown.push(NOTHING_SEARCHED)
+      code = 2
+    }
+    io.exitCode = code
+    if (shown.length > 0) io.stderr = concat([await materialize(io.stderr), formatRecords(shown)])
   }
-  const total = (performance.now() - started) / 1000
-  if (records) yield totals.summaryRecord(total)
-  else if (f.stats === true) {
-    // ripgrep's parallel searcher gives the last --heading group its blank
-    // line too; one thread, as for a lone file, does not.
-    if (printed && headed(f) && runsParallel(f) && !lone) yield ENC.encode('\n')
-    yield totals.statsBlock(total)
-  }
-  // ripgrep's status under --files-without-match follows the listing, not
-  // the matching: 0 when a file was listed, 1 when every file matched
-  // (14.1.1; GNU grep keeps the match status). A walked binary file it
-  // skipped counts as one without a match, though no listing names it.
-  if (f.filesWithoutMatch && !f.quiet) selected = printed || skipped
-  let code = exitCodeFor(selected, warnings.length > 0, f.quiet)
-  const shown = f.noMessages ? [] : [...warnings]
-  if (implicit && searched === 0) {
-    // An error whatever --no-messages says, which only silences it.
-    if (!f.noMessages) shown.push(NOTHING_SEARCHED)
-    code = 2
-  }
-  io.exitCode = code
-  io.stderr = concat([
-    await materialize(io.stderr),
-    formatOptionalRecords(shown) ?? new Uint8Array(),
-  ])
 }
 
 // The flags with -H added, unless -I is the line's last word on it.

@@ -267,7 +267,7 @@ it.each<[string, string, string | null, string, boolean]>([
   ['rg -L ada /d', 'both', null, '', true],
   ['rg --files-without-match ada /d', 'both', null, '', true],
   ['rg -c --include-zero ada /d', 'both', null, '', true],
-  ['rg --stats ada /d | head -2', 'both', null, '', true],
+  ['rg --stats ada /d | grep -v second', 'both', EVERY, '', true],
   ['rg -z ada /d', 'both', EVERY, '', true],
   ["rg -U 'ada here\\nnothing' /d", 'both', EVERY, '', true],
   ['rg -U ada /d', 'lines', 'a.txt sub/d.txt', '', false],

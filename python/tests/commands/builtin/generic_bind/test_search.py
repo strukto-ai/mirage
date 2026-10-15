@@ -296,13 +296,7 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
             True,
         ),
         ("rg -q --files-without-match ada /d", "files", None, "ada", None),
-        (
-            "rg --stats ada /d | head -2",
-            "both",
-            None,
-            "",
-            True,
-        ),
+        ("rg --stats ada /d | grep -v second", "both", EVERY, "", True),
         ("rg -z ada /d", "both", EVERY, "", True),
         (
             "rg -U 'ada here\\nnothing' /d",

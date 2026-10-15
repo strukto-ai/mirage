@@ -21,7 +21,7 @@ from mirage.commands.builtin.utils.bre import (
     translate_bre,
     translate_ere,
 )
-from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.operands import materialized_read
 from mirage.commands.builtin.utils.pcre import PcreError, translate_pcre
 from mirage.commands.builtin.utils.rust_regex import (
     RustRegexError,
@@ -32,7 +32,6 @@ from mirage.commands.builtin.utils.rust_regex import (
 from mirage.commands.builtin.utils.types import HostRegex
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.posix import compile_posix_regex
@@ -93,19 +92,9 @@ async def resolve_pattern(
         raw = (
             pattern_file if isinstance(pattern_file, list) else [pattern_file]
         )
-        parts = [] if pattern is None else pattern.split("\n")
-        read = normalized_read(read_bytes)
+        read = materialized_read(read_bytes)
         for pf in [item for item in raw if isinstance(item, PathSpec)]:
-            reader = AsyncLineIterator(read(pf))
-            try:
-                while True:
-                    line, ended = await reader.read_until(b"\n")
-                    if not line and not ended:
-                        break
-                    parts.append(decode_text(line))
-            finally:
-                await reader.discard()
-        pattern = "\n".join(parts) if parts else None
+            pattern = merge_pattern_list(pattern, await read(pf))
         if pattern is None:
             return NEVER_MATCH, True
     if pattern is None:

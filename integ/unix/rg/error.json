@@ -574,6 +574,40 @@
       }
     },
     {
+      "id": "rg_cut_short_keeps_its_warnings_and_status",
+      "seq": 15800048,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && rg o nosuch a.txt | head -n 1; echo rc=${PIPESTATUS[0]}; rg --files nosuch a.txt | head -n 1; echo rc=${PIPESTATUS[0]}; set -o pipefail; rg o a.txt | head -n 1; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt:hello\nrc=2\na.txt\nrc=2\nhello\nrc=0\n",
+        "stderr": "rg: nosuch: No such file or directory (os error 2)\nrg: nosuch: No such file or directory (os error 2)\n"
+      }
+    },
+    {
       "id": "rg_version_after_a_bad_value",
       "seq": 14490063,
       "targets": [

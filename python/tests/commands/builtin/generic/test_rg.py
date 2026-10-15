@@ -500,7 +500,7 @@ def _typed(virtual: str, raw: str) -> PathSpec:
 
 async def _run_locked(paths: list[PathSpec], flags: dict):
     files = {"/d/sub/locked.txt": b"hit\n", "/d/sub/ok.txt": b"hit\n"}
-    readdir, stat, rb, rs = _make_backend(files)
+    readdir, stat, rb, _ = _make_backend(files)
 
     async def read_bytes(path):
         virtual = path.virtual if isinstance(path, PathSpec) else path
@@ -510,6 +510,9 @@ async def _run_locked(paths: list[PathSpec], flags: dict):
             )
         return await rb(path)
 
+    async def read_stream(path):
+        yield await read_bytes(path)
+
     output, io = await rg_generic(
         paths,
         ["hit"],
@@ -517,7 +520,7 @@ async def _run_locked(paths: list[PathSpec], flags: dict):
         readdir=readdir,
         stat=stat,
         read_bytes=read_bytes,
-        read_stream=rs,
+        read_stream=read_stream,
     )
     return await _drain_async(output), await _drain_async(io.stderr), io
 

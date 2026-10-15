@@ -47,10 +47,7 @@ from mirage.commands.builtin.rg_search import (
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.links import LinkResolver, link_resolver
-from mirage.commands.builtin.utils.output import (
-    format_optional_records,
-    format_records,
-)
+from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.pcre import PcreError, translate_pcre
 from mirage.commands.builtin.utils.rust_regex import (
     RustRegexError,
@@ -60,11 +57,11 @@ from mirage.commands.builtin.utils.rust_regex import (
 )
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
 from mirage.commands.builtin.utils.wrap import (
-    call_read_bytes,
     call_readdir,
     call_stat,
     mount_parent_readdir,
     mount_parent_stat,
+    to_pathspec,
 )
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
@@ -1257,16 +1254,13 @@ async def rg_generic(
     st = mount_parent_stat(
         partial(call_stat, stat, prefix=mount_prefix), mounts
     )
-    rb = partial(call_read_bytes, read_bytes, prefix=mount_prefix)
 
     if (
         pat is not None
         and len(paths) == 1
         and not (f.stats or f.json or f.search_zip or f.pre)
     ):
-        single = await _search_single(
-            paths[0], pat, f, st, rd, rb, read_stream, operand_stream
-        )
+        single = await _search_single(paths[0], pat, f, st, rd, operand_stream)
         if single is not None:
             return await _noted(single, notes, f)
 
@@ -1297,37 +1291,23 @@ async def rg_generic(
         listed = [h async for h in found]
         found = _replay(sort_haystacks(listed, f))
     io = IOResult()
-    if f.list_files:
-        out = _list_files(found, f, warnings, io)
-    else:
-        assert pat is not None
-
-        async def output() -> AsyncIterator[bytes]:
-            worker = Worker()
-            source = _search_all(
-                worker,
-                found,
-                paths,
-                pat,
-                f,
-                rb,
-                read_stream,
-                operand_stream,
-                warnings,
-                implicit,
-                cwd,
-                io,
-                opts.shell,
-            )
-            try:
-                async for chunk in source:
-                    yield chunk
-            finally:
-                await close_quietly(source)
-                await close_quietly(found)
-                await worker.close()
-
-        out = output()
+    out = (
+        _list_files(found, f, warnings, io)
+        if pat is None
+        else _search_all(
+            found,
+            paths,
+            pat,
+            f,
+            operand_stream,
+            mount_prefix,
+            warnings,
+            implicit,
+            cwd,
+            io,
+            opts.shell,
+        )
+    )
     return await _noted((out, io), notes, f)
 
 
@@ -1365,6 +1345,8 @@ async def _up_to_damage(
             yield chunk
     except GzipDataError as exc:
         faults.append(exc)
+    finally:
+        await close_quietly(source)
 
 
 async def _replay(found: list[Haystack]) -> AsyncIterator[Haystack]:
@@ -1378,8 +1360,6 @@ async def _search_single(
     f: RgFlags,
     st: Callable[[str], Awaitable[FileStat]],
     rd: Callable[[str], Awaitable[list[str]]],
-    rb: Callable[[str], Awaitable[bytes]],
-    read_stream: Callable[..., AsyncIterator[bytes]] | None,
     operand_stream: Callable[[PathSpec], AsyncIterator[bytes]],
 ) -> tuple[ByteSource | None, IOResult] | None:
     """One operand that is a file or stdin, streamed, or None for a
@@ -1391,9 +1371,7 @@ async def _search_single(
         f (RgFlags): the parsed flags.
         st (Callable): the wrapped stat.
         rd (Callable): the wrapped readdir.
-        rb (Callable): the wrapped whole-file read.
-        read_stream (Callable | None): the stream reader.
-        operand_stream (Callable): stdin's reader for a `-` operand.
+        operand_stream (Callable): the operand's reader, stdin's for `-`.
     """
     if not is_stdin(p):
         # The probes below go by `virtual`, which cannot carry the walk's
@@ -1414,19 +1392,12 @@ async def _search_single(
     label = (
         name if (f.with_filename or f.vimgrep) and not f.no_filename else None
     )
-    if is_stdin(p):
-        source: AsyncIterator[bytes] = operand_stream(p)
-    elif read_stream is not None:
-        source = read_stream(p)
-    else:
-        try:
-            source = _wrap_bytes(await rb(p.virtual))
-        except FS_ERRORS as exc:
-            return _refused(open_error_line(p.raw_path, exc), f)
     io = IOResult(exit_code=1)
     tally = Tally()
     return _settled(
-        search_haystack(source, pat, f, name, label, tally, pipe=is_stdin(p)),
+        search_haystack(
+            operand_stream(p), pat, f, name, label, tally, pipe=is_stdin(p)
+        ),
         f,
         label,
         tally,
@@ -1456,7 +1427,7 @@ async def _settled(
     shown: str,
 ) -> AsyncIterator[bytes]:
     """One streamed haystack's output, headed when --heading names it,
-    with the exit status settled as it goes.
+    with the exit status settled however the output ends.
 
     Args:
         chunks (AsyncIterator[bytes]): the haystack's records.
@@ -1466,31 +1437,31 @@ async def _settled(
         io (IOResult): receives the exit status.
         shown (str): the operand as typed, which a failed read names.
     """
-    printed = False
+    printed = failed = False
     try:
         async for chunk in chunks:
-            if (
-                not printed
-                and label is not None
-                and headed(f)
-                and not tally.binary
+            if not printed and (
+                heading := _lead(f, label, False, tally.binary)[1]
             ):
-                yield encode_text(label) + (b"\0" if f.null else record_end(f))
+                yield heading
             printed = True
             yield chunk
     except FS_ERRORS as exc:
         # A read that fails once the stream is open is the searcher's to
         # report, exit 2, as ripgrep reports it for any file it searches.
+        failed = True
         io.stderr = (
             None
             if f.no_messages
             else f"{open_error_line(shown, exc)}\n".encode()
         )
         io.exit_code = 2
-        return
-    listed = printed if f.files_without_match and not f.quiet else None
-    selected = tally.selected if listed is None else listed
-    io.exit_code = 0 if selected else 1
+    finally:
+        await close_quietly(chunks)
+        if not failed:
+            listed = printed if f.files_without_match and not f.quiet else None
+            selected = tally.selected if listed is None else listed
+            io.exit_code = 0 if selected else 1
 
 
 def json_summary(f: RgFlags) -> bool:
@@ -1580,6 +1551,24 @@ def between_files(f: RgFlags) -> bytes:
     if prints_context(f) and f.context_separator is not None:
         return encode_text(f.context_separator) + b"\n"
     return b""
+
+
+def _lead(
+    f: RgFlags, label: str | None, printed: bool, binary: bool
+) -> tuple[bytes, bytes]:
+    """What goes before a file's first output: the gap after the file
+    printed before it, and the --heading line naming it.
+
+    Args:
+        f (RgFlags): the parsed flags.
+        label (str | None): the file's label.
+        printed (bool): an earlier file printed.
+        binary (bool): a binary-file notice stands in for its lines.
+    """
+    gap = between_files(f) if printed else b""
+    if label is None or not headed(f) or binary:
+        return gap, b""
+    return gap, encode_text(label) + (b"\0" if f.null else record_end(f))
 
 
 async def haystacks(
@@ -1672,6 +1661,15 @@ async def _list_files(
     warnings: list[str],
     io: IOResult,
 ) -> AsyncIterator[bytes]:
+    """--files: every path the search would read, and nothing searched.
+
+    Args:
+        found (AsyncIterator[Haystack]): the haystacks.
+        f (RgFlags): the parsed flags.
+        warnings (list[str]): what could not be read.
+        io (IOResult): receives the exit status and the warnings, however
+            the output ends.
+    """
     term = b"\0" if f.null else b"\n"
     selected = False
     try:
@@ -1680,13 +1678,11 @@ async def _list_files(
             if f.quiet:
                 break
             yield encode_text(printed_path(h.shown, f)) + term
-        io.exit_code = exit_code_for(selected, bool(warnings), f.quiet)
-        if not f.no_messages:
-            io.stderr = await materialize(io.stderr) + (
-                format_optional_records(warnings) or b""
-            )
     finally:
         await close_quietly(found)
+        io.exit_code = exit_code_for(selected, bool(warnings), f.quiet)
+        if warnings and not f.no_messages:
+            io.stderr = await materialize(io.stderr) + format_records(warnings)
 
 
 async def preprocessed(
@@ -1721,14 +1717,12 @@ async def preprocessed(
 
 
 async def _search_all(
-    worker: Worker,
     found: AsyncIterator[Haystack],
     paths: list[PathSpec],
     pat: re.Pattern[str],
     f: RgFlags,
-    rb: Callable[[str], Awaitable[bytes]],
-    read_stream: Callable[..., AsyncIterator[bytes]] | None,
     operand_stream: Callable[[PathSpec], AsyncIterator[bytes]],
+    prefix: str,
     warnings: list[str],
     implicit: bool,
     cwd: str,
@@ -1743,206 +1737,195 @@ async def _search_all(
     under --heading a blank line goes between files instead.
 
     Args:
-        worker (Worker): one computation process shared by this invocation.
-        found (AsyncIterator[Haystack]): the haystacks.
+        found (AsyncIterator[Haystack]): the haystacks, closed with the
+            output.
         paths (list[PathSpec]): the operands.
         pat (re.Pattern[str]): the compiled pattern.
         f (RgFlags): the parsed flags.
-        rb (Callable): the wrapped whole-file read.
-        read_stream (Callable | None): the stream reader.
-        operand_stream (Callable): stdin's reader for a `-` operand.
+        operand_stream (Callable): each file's reader, stdin's for `-`.
+        prefix (str): the operands' mount prefix, which a walked file's
+            key is spelled under.
         warnings (list[str]): collects what could not be read.
         implicit (bool): the line named no path, so ripgrep reports a
             search that found nothing to search.
         cwd (str): the session's working directory, which --pre-glob's
             globs are rooted at.
+        io (IOResult): receives the exit status and the warnings, however
+            the output ends.
         shell (ShellFn | None): runs --pre's command in the session.
     """
     multi = len(paths) > 1
     lone = not multi
     pre_globs = Overrides(f.pre_globs, (), False)
-    context = prints_context(f)
-    progressive = not (
-        f.stats
-        or f.json
-        or f.search_zip
-        or f.count_only
-        or f.count_matches
-        or f.files_only
-        or f.files_without_match
-    )
-    printed = False
-    selected = False
-    skipped = False
+    progressive = not (f.stats or f.json or f.search_zip)
+    printed = selected = skipped = False
     searched = 0
     records = json_summary(f)
     totals = Totals()
+    worker = Worker()
     started = time.perf_counter()
-    async for h in found:
-        searched += 1
-        walked = h.spec is None
-        lone = lone and not walked
-        name = printed_path(h.shown, f)
-        label = (
-            name
-            if not f.no_filename
-            and (walked or multi or f.with_filename or f.vimgrep)
-            else None
-        )
-        tally = Tally()
-        began = time.perf_counter()
-        chunks: list[bytes] = []
-        file_printed = False
-        damaged = False
-        faults: list[GzipDataError] = []
-        try:
-            if h.spec is not None and is_stdin(h.spec):
-                source = operand_stream(h.spec)
-            elif h.spec is not None and read_stream is not None:
-                source = read_stream(h.spec)
-            elif h.resolver is not None:
-                source = h.resolver.read(h.virtual)
-            else:
-                source = _wrap_bytes(await rb(h.virtual))
-            stdin = h.spec is not None and is_stdin(h.spec)
-            if (
-                f.pre is not None
-                and not stdin
-                and pre_globs.verdict(walk_candidate(h.shown, cwd), False)
-                is not Verdict.IGNORE
-            ):
-                text, refusal = await preprocessed(
-                    f.pre, h.shown, name, await materialize(source), shell
-                )
-                if refusal is not None:
-                    warnings.append(refusal)
-                    continue
-                source = _wrap_bytes(text)
-            elif f.search_zip and h.virtual.endswith(GZIP_NAMES) and not stdin:
-                source = _up_to_damage(gunzip_stream(source), faults)
-            async for c in search_haystack(
-                source,
-                pat,
-                f,
-                name,
-                label,
-                tally,
-                not walked,
-                h.spec is not None and is_stdin(h.spec),
-                worker,
-            ):
-                if progressive:
-                    if not file_printed:
-                        if label is not None and headed(f):
-                            if printed:
-                                yield b"\n"
-                            if not tally.binary:
-                                yield encode_text(label) + (
-                                    b"\0" if f.null else record_end(f)
-                                )
-                        elif (
-                            context
-                            and printed
-                            and f.context_separator is not None
-                        ):
-                            yield encode_text(f.context_separator) + b"\n"
-                        file_printed = printed = True
-                    yield c
-                else:
-                    chunks.append(c)
-            if faults:
-                raise faults[0]
-        except FS_ERRORS as exc:
-            # ripgrep reports the failed input and keeps searching the rest.
-            warnings.append(open_error_line(h.shown, exc))
-            continue
-        except GzipDataError as exc:
-            # -z runs gzip, whose refusal ripgrep frames in rules.
-            warnings.append(
-                f"rg: {name}: \n{GZIP_RULE}\n"
-                f"{exc.render(name).lstrip()}{GZIP_RULE}"
+    try:
+        async for h in found:
+            searched += 1
+            walked = h.spec is None
+            lone = lone and not walked
+            name = printed_path(h.shown, f)
+            label = (
+                name
+                if not f.no_filename
+                and (walked or multi or f.with_filename or f.vimgrep)
+                else None
             )
-            # gzip's output streams into the search, so the lines it decoded
-            # before the damage still print, but not what ripgrep writes
-            # once the file is done (a count, --files-without-match), and
-            # the file adds to no total.
-            damaged = True
-            if f.count_only or f.count_matches or f.files_without_match:
-                chunks.clear()
-        elapsed = time.perf_counter() - began
-        selected = selected or tally.selected
-        skipped = skipped or tally.skipped
-        if records:
-            if chunks:
-                begin = json_line(
-                    {"type": "begin", "data": {"path": json_text(name)}}
+            tally = Tally()
+            began = time.perf_counter()
+            chunks: list[bytes] = []
+            file_printed = False
+            damaged = False
+            faults: list[GzipDataError] = []
+            stdin = h.spec is not None and is_stdin(h.spec)
+            try:
+                source = (
+                    h.resolver.read(h.virtual)
+                    if h.resolver is not None
+                    else operand_stream(
+                        to_pathspec(h.virtual, prefix)
+                        if h.spec is None
+                        else h.spec
+                    )
                 )
-                sent = len(begin) + sum(len(c) for c in chunks)
-                yield begin
+                if (
+                    f.pre is not None
+                    and not stdin
+                    and pre_globs.verdict(walk_candidate(h.shown, cwd), False)
+                    is not Verdict.IGNORE
+                ):
+                    text, refusal = await preprocessed(
+                        f.pre, h.shown, name, await materialize(source), shell
+                    )
+                    if refusal is not None:
+                        warnings.append(refusal)
+                        continue
+                    source = _wrap_bytes(text)
+                elif (
+                    f.search_zip
+                    and h.virtual.endswith(GZIP_NAMES)
+                    and not stdin
+                ):
+                    source = _up_to_damage(gunzip_stream(source), faults)
+                matches = search_haystack(
+                    source,
+                    pat,
+                    f,
+                    name,
+                    label,
+                    tally,
+                    not walked,
+                    stdin,
+                    worker,
+                )
+                try:
+                    async for c in matches:
+                        if not progressive:
+                            chunks.append(c)
+                            continue
+                        if not file_printed:
+                            if lead := b"".join(
+                                _lead(f, label, printed, tally.binary)
+                            ):
+                                yield lead
+                            file_printed = printed = True
+                        selected = selected or tally.selected
+                        yield c
+                finally:
+                    await close_quietly(matches)
+                if faults:
+                    raise faults[0]
+            except FS_ERRORS as exc:
+                # ripgrep reports the failed input and keeps searching the
+                # rest.
+                warnings.append(open_error_line(h.shown, exc))
+                continue
+            except GzipDataError as exc:
+                # -z runs gzip, whose refusal ripgrep frames in rules.
+                warnings.append(
+                    f"rg: {name}: \n{GZIP_RULE}\n"
+                    f"{exc.render(name).lstrip()}{GZIP_RULE}"
+                )
+                # gzip's output streams into the search, so the lines it
+                # decoded before the damage still print, but not what
+                # ripgrep writes once the file is done (a count,
+                # --files-without-match), and the file adds to no total.
+                damaged = True
+                if f.count_only or f.count_matches or f.files_without_match:
+                    chunks.clear()
+            elapsed = time.perf_counter() - began
+            selected = selected or tally.selected
+            skipped = skipped or tally.skipped
+            if records:
+                if chunks:
+                    begin = json_line(
+                        {"type": "begin", "data": {"path": json_text(name)}}
+                    )
+                    sent = len(begin) + sum(len(c) for c in chunks)
+                    yield begin
+                    for chunk in chunks:
+                        yield chunk
+                    if not damaged:
+                        totals.add(tally, sent, elapsed)
+                        yield totals.end_record(name, tally, sent, elapsed)
+                elif f.quiet and tally.selected and not damaged:
+                    totals.add(tally, 0, elapsed)
+            elif chunks:
+                gap, heading = _lead(f, label, printed, tally.binary)
+                # -c and -l counts and names are not what --stats counts.
+                sent = len(heading) + (
+                    0
+                    if f.count_only
+                    or f.count_matches
+                    or f.files_only
+                    or f.files_without_match
+                    else sum(len(c) for c in chunks)
+                )
+                if gap + heading:
+                    yield gap + heading
                 for chunk in chunks:
                     yield chunk
+                printed = True
                 if not damaged:
                     totals.add(tally, sent, elapsed)
-                    yield totals.end_record(name, tally, sent, elapsed)
-            elif f.quiet and tally.selected and not damaged:
+            elif not damaged:
                 totals.add(tally, 0, elapsed)
-        elif chunks:
-            # -c and -l counts and names are not what --stats counts.
-            sent = (
-                0
-                if f.count_only
-                or f.count_matches
-                or f.files_only
-                or f.files_without_match
-                else sum(len(c) for c in chunks)
-            )
-            if label is not None and headed(f):
-                if printed:
-                    yield b"\n"
-                if not tally.binary:
-                    heading = encode_text(label) + (
-                        b"\0" if f.null else record_end(f)
-                    )
-                    yield heading
-                    sent += len(heading)
-            elif context and printed and f.context_separator is not None:
-                yield encode_text(f.context_separator) + b"\n"
-            for chunk in chunks:
-                yield chunk
-            printed = True
-            if not damaged:
-                totals.add(tally, sent, elapsed)
-        elif not damaged:
-            totals.add(tally, 0, elapsed)
-        # --stats and --json count every file, -q or not (14.1.1).
-        if f.quiet and tally.selected and not (f.stats or f.json):
-            break
-    if records:
-        yield totals.summary_record(time.perf_counter() - started)
-    elif f.stats:
-        # ripgrep's parallel searcher gives the last --heading group its
-        # blank line too; one thread, as for a lone file, does not.
-        if printed and headed(f) and runs_parallel(f) and not lone:
-            yield b"\n"
-        yield totals.stats_block(time.perf_counter() - started)
-    if f.files_without_match and not f.quiet:
-        # ripgrep's status under --files-without-match follows the
-        # listing, not the matching: 0 when a file was listed, 1 when
-        # every file matched (14.1.1; GNU grep keeps the match status).
-        # A walked binary file it skipped counts as one without a match,
-        # though no listing names it.
-        selected = printed or skipped
-    code = exit_code_for(selected, bool(warnings), f.quiet)
-    shown = [] if f.no_messages else list(warnings)
-    if implicit and searched == 0:
-        # An error whatever --no-messages says, which only silences it.
-        if not f.no_messages:
-            shown.append(NOTHING_SEARCHED)
-        code = 2
-    io.exit_code = code
-    io.stderr = await materialize(io.stderr) + (
-        format_optional_records(shown) or b""
-    )
+            # --stats and --json count every file, -q or not (14.1.1).
+            if f.quiet and tally.selected and not (f.stats or f.json):
+                break
+        if records:
+            yield totals.summary_record(time.perf_counter() - started)
+        elif f.stats:
+            # ripgrep's parallel searcher gives the last --heading group its
+            # blank line too; one thread, as for a lone file, does not.
+            if printed and headed(f) and runs_parallel(f) and not lone:
+                yield b"\n"
+            yield totals.stats_block(time.perf_counter() - started)
+    finally:
+        await close_quietly(found)
+        await worker.close()
+        if f.files_without_match and not f.quiet:
+            # ripgrep's status under --files-without-match follows the
+            # listing, not the matching: 0 when a file was listed, 1 when
+            # every file matched (14.1.1; GNU grep keeps the match
+            # status). A walked binary file it skipped counts as one
+            # without a match, though no listing names it.
+            selected = printed or skipped
+        code = exit_code_for(selected, bool(warnings), f.quiet)
+        shown = [] if f.no_messages else list(warnings)
+        if implicit and searched == 0:
+            # An error whatever --no-messages says, which only silences it.
+            if not f.no_messages:
+                shown.append(NOTHING_SEARCHED)
+            code = 2
+        io.exit_code = code
+        if shown:
+            io.stderr = await materialize(io.stderr) + format_records(shown)
 
 
 __all__ = ["rg_generic"]

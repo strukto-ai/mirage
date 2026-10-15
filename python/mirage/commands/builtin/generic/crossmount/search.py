@@ -358,10 +358,7 @@ async def run_search(
     code = combined_exit(
         name,
         [r.io.exit_code for r in results],
-        [
-            r.io.exit_code != 0 and bool(await r.io.materialize_stderr())
-            for r in results
-        ],
+        [r.io.exit_code != 0 and r.io.stderr is not None for r in results],
         quiet,
     )
     parts, footer = (
