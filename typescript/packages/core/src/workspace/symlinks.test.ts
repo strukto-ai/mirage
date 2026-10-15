@@ -1449,6 +1449,24 @@ it.each([
   await ws.close()
 })
 
+// GNU stats the destination through its link, names a refusal and copies the
+// next entry (coreutils 9.7).
+it('cp -ru names a destination link it may not stat and goes on', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS(), '/sec': [new SealedRAMVFS(), MountMode.READ] },
+    { mode: MountMode.WRITE, shellParser: parser },
+  )
+  await ws.shell(
+    'mkdir -p /data/s /data/t && echo A > /data/s/a && echo B > /data/s/b && ln -s /sec/a /data/t/a',
+  )
+  const r = await ws.shell('cd /data && cp -ru s/. t; echo rc=$?; cat t/b')
+  expect([dec(r.stdout), dec(r.stderr)]).toEqual([
+    'rc=1\nB\n',
+    "cp: cannot stat 't/./a': Permission denied\n",
+  ])
+  await ws.close()
+})
+
 // GNU lists the link as the directory it leads to, an empty one included
 // (coreutils 9.7).
 it('ls -RL lists a link to an empty directory', async () => {

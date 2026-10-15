@@ -62,6 +62,9 @@ export interface WalkFindDeps {
   // again. A caller that does not collect them gets the failure
   // propagated instead.
   unstatted?: Map<string, unknown>
+  // -xdev's test of a directory's virtual path: one it fails is an entry
+  // still, and -empty still reads it, but the walk does not descend.
+  enters?: (virtual: string) => boolean
 }
 
 interface WalkEntry {
@@ -216,6 +219,7 @@ export async function walkFind(
   const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
   const pruneTree = bindTree(optionsTree(options), prefix, path.virtual, path.rawPath)
   const readDirectory = async (spec: PathSpec, cache?: IndexCacheStore): Promise<string[]> => {
+    if (deps.enters !== undefined && !deps.enters(spec.virtual)) return []
     if (treeHasPrune(pruneTree)) {
       const key = rstripSlash(spec.mountPath) || '/'
       const depth =

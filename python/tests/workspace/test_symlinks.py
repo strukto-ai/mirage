@@ -1802,6 +1802,29 @@ async def test_a_link_whose_target_refuses_stat(line, code, stdout, stderr):
 
 
 @pytest.mark.asyncio
+async def test_cp_ru_names_a_destination_link_it_may_not_stat_and_goes_on():
+    # GNU stats the destination through its link, names a refusal and
+    # copies the next entry (coreutils 9.7).
+    ws = Workspace(
+        {
+            "/data": (RAMVFS(), MountMode.WRITE),
+            "/sec": (_SealedRAMVFS(), MountMode.READ),
+        },
+        mode=MountMode.WRITE,
+    )
+    await ws.shell(
+        "mkdir -p /data/s /data/t && echo A > /data/s/a && "
+        "echo B > /data/s/b && ln -s /sec/a /data/t/a"
+    )
+    r = await ws.shell("cd /data && cp -ru s/. t; echo rc=$?; cat t/b")
+    assert (r.stdout, r.stderr or b"") == (
+        b"rc=1\nB\n",
+        b"cp: cannot stat 't/./a': Permission denied\n",
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_ls_rl_lists_a_link_to_an_empty_directory():
     # GNU lists the link as the directory it leads to, an empty one
     # included (coreutils 9.7).

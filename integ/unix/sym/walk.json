@@ -171,6 +171,40 @@
       }
     },
     {
+      "id": "sym_du_L_skips_what_an_earlier_operand_counted",
+      "seq": 17000029,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/sywo/d/sub/deep && printf 'abc\\n' > /data/sywo/d/sub/f && printf 'xy\\n' > /data/sywo/d/sub/deep/g && printf 'z\\n' > /data/sywo/d/top && cd /data/sywo && du -aL d/sub d | cut -f2); rm -r /data/sywo",
+      "expect": {
+        "exit": 0,
+        "stdout": "d/sub/deep/g\nd/sub/deep\nd/sub/f\nd/sub\nd/top\nd\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "sym_ls_RL_lists_a_directory_link",
       "seq": 17000010,
       "targets": [

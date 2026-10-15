@@ -74,7 +74,8 @@ class WalkBudget:
         unreadable (list[str]): virtual paths of the directories the
             walk could not open, in the order it met them.
         directories (list[str]): virtual paths of every directory the
-            walk met, the operand's own included.
+            last walk met, the operand's own included: each walk starts it
+            afresh, so an operand's rows are its own walk's.
         mounts (MountView | None): the mount table, for a walk with no
             cap of its own.
         spent (dict[str, int]): entries charged so far per mount root.
@@ -321,6 +322,7 @@ async def walk_size(
     follow: Dereference | None,
     path: PathSpec,
 ) -> int:
+    budget.directories.clear()
     return await _du_walk(
         _walk(ops, accessor, index),
         index,
@@ -340,6 +342,7 @@ async def walk_entries(
     path: PathSpec,
 ) -> DuEntries:
     entries: list[tuple[str, int]] = []
+    budget.directories.clear()
     total = await _du_walk(
         _walk(ops, accessor, index),
         index,

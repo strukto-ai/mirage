@@ -78,12 +78,10 @@ export function findWalk<A extends Accessor>(
         {
           unreadable: closed,
           unstatted,
-          readdir: async (spec, i) =>
-            home !== null &&
-            mounts !== undefined &&
-            landingRoot(mounts, links, spec.virtual) !== home
-              ? []
-              : readdir(spec, i),
+          readdir,
+          ...(home !== null && mounts !== undefined
+            ? { enters: (virtual: string) => landingRoot(mounts, links, virtual) === home }
+            : {}),
           // -mtime must see namespace times (touch results, observed
           // writes on mtime-less backends), same as ls.
           stat: async (spec, i) => {

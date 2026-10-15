@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.cache.context import active_cache_manager
-from mirage.cache.index import IndexCacheStore
 from mirage.commands.builtin.find_parse import (
     parse_depth,
     parse_find_expression,
@@ -956,20 +955,15 @@ async def find_walk_generic(
                     else None
                 )
 
-                async def read_directory(
-                    path: PathSpec, index: IndexCacheStore | None
-                ) -> list[str]:
-                    if (
-                        home is not None
-                        and mounts is not None
-                        and landing_root(mounts, links, path.virtual) != home
-                    ):
-                        return []
-                    return await readdir(path, index)
+                def stays(virtual: str) -> bool:
+                    return (
+                        mounts is None
+                        or landing_root(mounts, links, virtual) == home
+                    )
 
                 walked = await walk_find(
                     search,
-                    readdir=read_directory,
+                    readdir=readdir,
                     stat=stat,
                     index=opts.index,
                     args=args,
@@ -978,6 +972,7 @@ async def find_walk_generic(
                     unstatted=unstatted,
                     root=start.stat,
                     loops=loops,
+                    enters=stays if home is not None else None,
                 )
                 rows = respell_raw(walked, search.virtual, search.raw_path)
                 # GNU names a directory it may not open in the walk's own

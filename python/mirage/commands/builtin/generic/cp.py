@@ -1043,10 +1043,21 @@ async def overwrite_gate(
     if policy.update == "older":
         try:
             src_info = await stat(src)
-            if copies is not None and policy.backup is None:
-                target_info = await dest_stat(stat, copies, target)
         except (FileNotFoundError, NotADirectoryError, ValueError):
             return True
+        if copies is not None and policy.backup is None:
+            try:
+                target_info = await dest_stat(stat, copies, target)
+            except (FileNotFoundError, NotADirectoryError, ValueError):
+                return True
+            except FS_ERRORS as exc:
+                # GNU names a link whose target its stat may not reach
+                # and goes on with the next entry (coreutils 9.7).
+                errors.append(
+                    f"{policy.cmd_name}: cannot stat '{target.raw_path}': "
+                    f"{fs_strerror(exc)}"
+                )
+                return False
         src_ts = iso_timestamp(src_info.modified)
         target_ts = iso_timestamp(target_info.modified)
         if (

@@ -801,12 +801,23 @@ export async function overwriteGate(
     let srcInfo: FileStat
     try {
       srcInfo = await stat(src)
-      if (copies !== undefined && policy.backup === null) {
-        targetInfo = await destStat(stat, copies)(target)
-      }
     } catch (err) {
       if (!isMissingPath(err) && !isEnotdir(err)) throw err
       return true
+    }
+    if (copies !== undefined && policy.backup === null) {
+      try {
+        targetInfo = await destStat(stat, copies)(target)
+      } catch (err) {
+        if (isMissingPath(err) || isEnotdir(err)) return true
+        if (!isFsError(err)) throw err
+        // GNU names a link whose target its stat may not reach and goes on
+        // with the next entry (coreutils 9.7).
+        errors.push(
+          `${policy.cmdName}: cannot stat '${target.rawPath}': ${fsStrerror(err) ?? String(err)}`,
+        )
+        return false
+      }
     }
     const srcTs = modifiedTs(srcInfo.modified)
     const targetTs = modifiedTs(targetInfo.modified)

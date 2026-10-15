@@ -51,9 +51,10 @@ export class WalkBudget {
   // the order it met them; the generic reports them after the walks the
   // way GNU names an unreadable directory.
   readonly unreadable: string[] = []
-  // Every directory the walk met, the operand's own included, which is how
-  // one no file points at (an empty one, or a refused one) still gets
-  // GNU's row.
+  // Every directory the last walk met, the operand's own included, which is
+  // how one no file points at (an empty one, or a refused one) still gets
+  // GNU's row. Each walk starts it afresh, so an operand's rows are its own
+  // walk's.
   readonly directories: string[] = []
   // Under -L, each link that leads nowhere, with the strerror GNU adds for
   // a chain that loops.
@@ -277,6 +278,7 @@ export function walkSize<A extends Accessor>(
   follow: Dereference | null,
   path: PathSpec,
 ): Promise<number> {
+  budget.directories.length = 0
   return duWalk(
     treeOf(ops, accessor, index),
     index,
@@ -296,6 +298,7 @@ export async function walkEntries<A extends Accessor>(
   path: PathSpec,
 ): Promise<DuEntries> {
   const entries: [string, number][] = []
+  budget.directories.length = 0
   const total = await duWalk(
     treeOf(ops, accessor, index),
     index,
