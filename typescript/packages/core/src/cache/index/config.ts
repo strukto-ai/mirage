@@ -14,6 +14,7 @@
 
 import { z } from 'zod'
 
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
 
 export const ResourceType = Object.freeze({
@@ -159,6 +160,56 @@ export class IndexEntry {
 }
 
 /**
+ * What the index holds at a path: a backend's stat of it, or the older row a
+ * backend that has not moved to stats still writes.
+ */
+export type IndexRow = IndexEntry | FileStat
+
+/** Whether an index row names a folder; no row names nothing. */
+export function rowIsFolder(row: IndexRow | undefined): boolean {
+  if (row instanceof FileStat) return row.type === FileType.DIRECTORY
+  return isFolderKind(row?.resourceType)
+}
+
+/** Whether an index row names a file; no row names nothing. */
+export function rowIsFile(row: IndexRow | undefined): boolean {
+  if (row instanceof FileStat) return row.type !== FileType.DIRECTORY
+  return isFileKind(row?.resourceType)
+}
+
+/** `row` with the time it was indexed, when it carries one. */
+export function stamped(row: IndexRow, nowIso: string): IndexRow {
+  if (row instanceof FileStat || row.indexTime !== '') return row
+  return row.copyWith({ indexTime: nowIso })
+}
+
+/**
+ * The wire form of a stat row: what pydantic writes for the Python
+ * `FileStat`, which `JSON.stringify` of a `FileStat` already matches field
+ * for field and in order.
+ */
+export const FileStatWireSchema = z.object({
+  name: z.string(),
+  size: z.number().int().nullable().default(null),
+  modified: z.string().nullable().default(null),
+  fingerprint: z.string().nullable().default(null),
+  revision: z.string().nullable().default(null),
+  type: z.enum(Object.values(FileType) as [FileType, ...FileType[]]),
+  content: z
+    .enum(Object.values(ContentType) as [ContentType, ...ContentType[]])
+    .nullable()
+    .default(null),
+  mode: z.number().int().nullable().default(null),
+  uid: z.union([z.number(), z.string()]).nullable().default(null),
+  gid: z.union([z.number(), z.string()]).nullable().default(null),
+  atime: z.string().nullable().default(null),
+  ctime: z.string().nullable().default(null),
+  birthtime: z.string().nullable().default(null),
+  dev: z.number().int().nullable().default(null),
+  extra: z.record(z.string(), z.unknown()).default({}),
+})
+
+/**
  * A child a complete re-list no longer names. `folder` says whether it held
  * a listing or was typed a folder, so cleanup takes everything beneath it.
  */
@@ -192,6 +243,10 @@ export interface IndexSnapshot {
 }
 
 export interface LookupResult {
+  /**
+   * The row at the path. Typed as the older row while backends still read
+   * its fields; a row a stats listing kept is a `FileStat` at run time.
+   */
   entry?: IndexEntry | null
   status?: LookupStatus | null
 }

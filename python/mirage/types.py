@@ -13,7 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+)
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum, StrEnum
@@ -209,6 +215,39 @@ class FileStat(BaseModel):
                 f"got {self.content.value}"
             )
         return self
+
+
+@dataclass(frozen=True, slots=True)
+class DirListing:
+    """A directory's listing as a backend answers it, when one fetch
+    proves more than the directory's own children.
+
+    A backend's ``readdir`` answers a plain list of its children's stats,
+    or this when the fetch says more: a day of messages that also lists
+    its ``files/`` subdirectory, a board whose lists come with their
+    cards. The dispatcher keeps every listing it is handed, so entering a
+    seeded directory costs no second identical fetch.
+
+    Args:
+        entries (list[FileStat]): the listed directory's own children,
+            each filled in as ``stat`` would fill it.
+        seeds (Mapping[str, list[FileStat]]): descendant listings the
+            same fetch proved, keyed by path relative to the listed
+            directory (``files``, ``2026-01-05/Report__17``).
+        partial (bool): the entries are a filtered or truncated view (a
+            glob the backend narrowed, a fetch it did not finish), so
+            they are kept as entries but not as the directory's listing.
+            ``seeds`` stay full listings of the children it did report.
+        window (bool): the fetch was capped (the newest N messages, the
+            last N days), so the entries are everything to show but
+            prove nothing absent: a child that drops out of the window
+            has not been deleted. Kept as listings that evict nothing.
+    """
+
+    entries: list[FileStat]
+    seeds: Mapping[str, list[FileStat]] = field(default_factory=dict)
+    partial: bool = False
+    window: bool = False
 
 
 # Any value that survives a JSON round trip: what a decoded payload

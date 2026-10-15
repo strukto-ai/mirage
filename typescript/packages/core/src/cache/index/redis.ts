@@ -17,12 +17,16 @@ import { KeyLock } from '../lock.ts'
 import { uuid7 } from '../../utils/ids.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { FileStat } from '../../types.ts'
 import {
+  FileStatWireSchema,
   IndexDirectorySchema,
   IndexEntry,
   LookupStatus,
+  stamped,
   type Evicted,
   type IndexDirectory,
+  type IndexRow,
   type ListResult,
   type LookupResult,
   type SetDirOptions,
@@ -44,6 +48,39 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2])
 return 1
 `
+
+const ADD_ENTRY = `
+local raw = redis.call('GET', KEYS[1])
+local current = redis.call('GET', KEYS[2])
+local directory = redis.call('GET', KEYS[3])
+redis.call('SET', ARGV[1], ARGV[2])
+if raw and current and directory then
+  local listing = cjson.decode(raw)
+  if listing.generation == current .. ':' .. directory
+      and tonumber(ARGV[5]) < listing.expires_at then
+    local position = #listing.entries + 1
+    for i, path in ipairs(listing.entries) do
+      if path == ARGV[3] then return 0 end
+      if path > ARGV[3] then
+        position = i
+        break
+      end
+    end
+    table.insert(listing.entries, position, ARGV[3])
+    redis.call('SET', KEYS[1], cjson.encode(listing))
+    return 1
+  end
+end
+redis.call('SET', KEYS[1], ARGV[4])
+return 1
+`
+
+/** An index row read back from its JSON. Mirrors Python's `_row`. */
+function row(raw: string): IndexRow {
+  const decoded = JSON.parse(raw) as Record<string, unknown>
+  if ('resource_type' in decoded) return IndexEntry.fromJSON(raw)
+  return new FileStat(FileStatWireSchema.parse(decoded))
+}
 
 const PATH_RANGE = `
 local function path_range(root)
@@ -77,6 +114,12 @@ end
 local function is_kind(row_type, kind)
   return type(row_type) == 'string' and (row_type == kind
     or string.sub(row_type, -(#kind + 1)) == '/' .. kind)
+end
+local function row_kind(row)
+  if row.resource_type ~= nil then
+    return row.resource_type
+  end
+  return row.type == 'directory' and 'folder' or 'file'
 end
 `
 
@@ -196,7 +239,7 @@ local function protected(path)
 end
 local named = {}
 for i = 7, #ARGV, 2 do
-  named[ARGV[i]] = cjson.decode(ARGV[i + 1]).resource_type
+  named[ARGV[i]] = row_kind(cjson.decode(ARGV[i + 1]))
 end
 local seen, gone, folders = {}, {}, {}
 local function drop(path, buried)
@@ -205,7 +248,7 @@ local function drop(path, buried)
   end
   local row = redis.call('GET', ARGV[2] .. path)
   local folder = buried or redis.call('EXISTS', ARGV[3] .. path) == 1
-    or (row ~= false and is_kind(cjson.decode(row).resource_type, 'folder'))
+    or (row ~= false and is_kind(row_kind(cjson.decode(row)), 'folder'))
   if named[path] and not (folder and is_kind(named[path], 'file')) then
     return
   end
@@ -276,7 +319,7 @@ if raw then
   for _, path in ipairs(listing.entries) do
     local row = redis.call('GET', ARGV[1] .. path)
     local folder = redis.call('EXISTS', ARGV[2] .. path) == 1
-      or (row ~= false and is_kind(cjson.decode(row).resource_type, 'folder'))
+      or (row ~= false and is_kind(row_kind(cjson.decode(row)), 'folder'))
     local position = positions[path]
     if not position then
       entries[#entries + 1] = path
@@ -297,7 +340,7 @@ prune(KEYS[4], {ARGV[1], ARGV[2], ARGV[3], ARGV[4]},
 `
 
 interface PendingSeed {
-  entries: Map<string, IndexEntry>
+  entries: Map<string, IndexRow>
   children: Map<string, string[]>
   expiresAt: number
   version: string | null
@@ -401,12 +444,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   ): void {
     const nowIso = toIsoZ(new Date())
     this.pendingSeeds.push({
-      entries: new Map(
-        [...entries].map(([path, entry]) => [
-          path,
-          entry.indexTime === '' ? entry.copyWith({ indexTime: nowIso }) : entry,
-        ]),
-      ),
+      entries: new Map([...entries].map(([path, entry]) => [path, stamped(entry, nowIso)])),
       children: new Map([...children].map(([path, keys]) => [path, [...keys]])),
       expiresAt: expiresAt.getTime() / 1000,
       version,
@@ -580,7 +618,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     for await (const batch of c.scanIterator({ MATCH: `${globEscape(this.entryPrefix)}*` })) {
       for (const key of Array.isArray(batch) ? batch : [batch]) {
         const raw = await c.get(key)
-        if (raw !== null) entries.set(key.slice(this.entryPrefix.length), IndexEntry.fromJSON(raw))
+        if (raw !== null) entries.set(key.slice(this.entryPrefix.length), row(raw) as IndexEntry)
       }
     }
     return entries
@@ -591,32 +629,58 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const c = await this.client()
     const raw = await c.get(this.entryKey(vfsPath))
     if (raw === null) return { status: LookupStatus.NOT_FOUND }
-    return { entry: IndexEntry.fromJSON(raw) }
+    return { entry: row(raw) as IndexEntry }
   }
 
-  async put(vfsPath: string, entry: IndexEntry): Promise<void> {
+  async put(vfsPath: string, entry: IndexRow): Promise<void> {
     await this.flushSeed()
     const c = await this.client()
-    const stored =
-      entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
     const pipe = c.multi()
     this.trackPaths(pipe, [vfsPath])
-    pipe.set(this.entryKey(vfsPath), JSON.stringify(stored))
+    pipe.set(this.entryKey(vfsPath), JSON.stringify(stamped(entry, toIsoZ(new Date()))))
+    await pipe.exec()
+  }
+
+  async addEntry(vfsPath: string, entry: IndexRow): Promise<void> {
+    await this.flushSeed()
+    const c = await this.client()
+    const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
+    const now = new Date()
+    const generation = await this.generation(c, this.generationKey)
+    const directory = await this.generation(c, `${this.generationKey}:${folder}`)
+    const fresh: IndexDirectory = {
+      entries: [vfsPath],
+      generation: `${generation}:${directory}`,
+      expires_at: (now.getTime() + this.ttl * 1000) / 1000,
+      partial: true,
+      version: null,
+    }
+    const pipe = c.multi()
+    this.trackPaths(pipe, [folder, vfsPath])
+    pipe.eval(ADD_ENTRY, {
+      keys: [this.childrenKey(folder), this.generationKey, `${this.generationKey}:${folder}`],
+      arguments: [
+        this.entryKey(vfsPath),
+        JSON.stringify(stamped(entry, toIsoZ(now))),
+        vfsPath,
+        JSON.stringify(fresh),
+        String(now.getTime() / 1000),
+      ],
+    })
     await pipe.exec()
   }
 
   override async replaceIfUnchanged(
     path: string,
     predecessor: string,
-    entry: IndexEntry,
+    entry: IndexRow,
   ): Promise<boolean> {
     await this.flushSeed()
     const c = await this.client()
     const key = this.entryKey(path)
     const raw = await c.get(key)
-    if (raw === null || JSON.stringify(IndexEntry.fromJSON(raw)) !== predecessor) return false
-    const stored =
-      entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
+    if (raw === null || JSON.stringify(row(raw)) !== predecessor) return false
+    const stored = stamped(entry, toIsoZ(new Date()))
     return (
       (await c.eval(REPLACE_ENTRY, { keys: [key], arguments: [raw, JSON.stringify(stored)] })) === 1
     )
@@ -645,7 +709,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
 
   async setDir(
     vfsPath: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt?: Date | null,
     options: SetDirOptions = {},
   ): Promise<Evicted[]> {
@@ -662,7 +726,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
 
   override async setPartialDir(
     vfsPath: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt?: Date | null,
   ): Promise<void> {
     await this.storeDir(vfsPath, entries, expiredAt, true, false)
@@ -670,7 +734,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
 
   private async storeDir(
     vfsPath: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt: Date | null | undefined,
     partial: boolean,
     evict: boolean,
@@ -686,8 +750,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const directory = await this.generation(c, `${this.generationKey}:${vfsPath}`)
     const rows: [string, string][] = []
     for (const [name, entry] of entries) {
-      const stored = entry.indexTime === '' ? entry.copyWith({ indexTime: nowIso }) : entry
-      rows.push([prefix + name, JSON.stringify(stored)])
+      rows.push([prefix + name, JSON.stringify(stamped(entry, nowIso))])
     }
     const listing: IndexDirectory = {
       entries: rows.map(([path]) => path),

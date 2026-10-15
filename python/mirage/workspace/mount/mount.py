@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, Callable, cast
 
+from mirage.accessor.base import Accessor
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig
@@ -66,7 +67,7 @@ from mirage.core.generic.rewrite import (
     refuse_taken,
     truncate_by_rewrite,
 )
-from mirage.errors.fs import ebusy, enotsup
+from mirage.errors.fs import ebusy, enotdir, enotsup
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.errors import PipeClosed
@@ -77,6 +78,7 @@ from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.types import (
+    FileStat,
     FileType,
     Limit,
     MountMode,
@@ -98,6 +100,15 @@ from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect, SearchQuery
 from mirage.view.types import StatPath
 from mirage.workspace.mount.activity import VFSActivity
+from mirage.workspace.mount.constants import HANDED
+from mirage.workspace.mount.listing import (
+    entry_at,
+    folder_of,
+    index_key,
+    keep_listing,
+    stored_listing,
+    stored_stat,
+)
 from mirage.workspace.mount.read_policy import coerce_read_policy
 from mirage.workspace.mount.write_policy import (
     coerce_write_policy,
@@ -236,6 +247,53 @@ def _taken(
     return {k: v for k, v in kwargs.items() if k in names}
 
 
+def _wants(fn: Callable[..., Any]) -> frozenset[str]:
+    """The stats ``fn`` declares it is handed (``HANDED``).
+
+    Args:
+        fn (Callable[..., Any]): a backend function.
+    """
+    target = fn.func if isinstance(fn, functools.partial) else fn
+    names = _parameters(getattr(target, "__func__", target))
+    return frozenset() if names is None else names & HANDED
+
+
+def _lists_stats(fn: Callable[..., Any]) -> bool:
+    """Whether a backend's ``readdir`` answers stats for the mount to
+    keep, rather than keeping its own listings in an index it takes.
+
+    Args:
+        fn (Callable[..., Any]): the backend's readdir.
+    """
+    target = fn.func if isinstance(fn, functools.partial) else fn
+    names = _parameters(getattr(target, "__func__", target))
+    return names is not None and "index" not in names
+
+
+def _handed_on(
+    fn: Callable[..., Any], index: IndexCacheStore, **stats: FileStat | None
+) -> dict[str, Any]:
+    """The keywords a mount wrapper passes on to the backend function it
+    wraps: its index where it takes one, and each stat it declares that
+    was found.
+
+    Args:
+        fn (Callable[..., Any]): the backend function.
+        index (IndexCacheStore): the mount's index.
+        **stats (FileStat | None): the stats the mount resolved.
+    """
+    target = fn.func if isinstance(fn, functools.partial) else fn
+    names = _parameters(getattr(target, "__func__", target))
+    handed: dict[str, Any] = {
+        name: stat
+        for name, stat in stats.items()
+        if stat is not None and (names is None or name in names)
+    }
+    if names is None or "index" in names:
+        handed["index"] = index
+    return handed
+
+
 async def _read_window(
     read: Callable[..., Awaitable[bytes]],
     ranges: bool,
@@ -243,6 +301,7 @@ async def _read_window(
     index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
+    entry: FileStat | None = None,
 ) -> bytes:
     """A read, honoring a byte window when one is asked for.
 
@@ -263,18 +322,21 @@ async def _read_window(
         index (IndexCacheStore): the mount's index.
         offset (int): the window's first byte.
         size (int | None): the window's length, None through the end.
+        entry (FileStat | None): what is at ``path``, for a ``read`` that
+            declares it; None hands nothing.
     """
     if size == 0:
         return b""
     whole = not offset and size is None
+    handed = _handed_on(read, index, entry=entry)
     if ranges and not whole:
         try:
-            return await read(path, index=index, offset=offset, size=size)
+            return await read(path, offset=offset, size=size, **handed)
         except Exception as exc:
             if not is_unsatisfiable_range(exc):
                 raise
             return b""
-    data = await read(path, index=index)
+    data = await read(path, **handed)
     if whole:
         return data
     return slice_window(data, offset, size)
@@ -450,7 +512,44 @@ class MountEntry:
             path (PathSpec): the pattern, keyed below the mount.
             index (IndexCacheStore): the mount's index.
         """
-        return await self.io.resolve_glob(self.vfs.accessor, [path], index)
+        io = self.io
+        if self._lists:
+            io = dataclasses.replace(
+                io, readdir=self._listed_slot, stat=self._stat_slot
+            )
+        return await io.resolve_glob(self.vfs.accessor, [path], index)
+
+    async def _listed_slot(
+        self,
+        accessor: Accessor,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+        nofollow: bool = False,
+    ) -> list[str]:
+        """The command tier's ``readdir`` over this mount's listings.
+
+        Args:
+            accessor (Accessor): unused; the VFS holds its own.
+            path (PathSpec): the directory, keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+            nofollow (bool): unused; a VFS holds no link.
+        """
+        return await self._listed(path, index)
+
+    async def _stat_slot(
+        self,
+        accessor: Accessor,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> FileStat:
+        """The command tier's ``stat`` over this mount's listings.
+
+        Args:
+            accessor (Accessor): unused; the VFS holds its own.
+            path (PathSpec): the path, keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+        """
+        return await self._stat(index, path)
 
     @property
     def index(self) -> IndexCacheStore:
@@ -1197,9 +1296,9 @@ class MountEntry:
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         await append_by_rewrite(
-            functools.partial(self.vfs.read, index=index),
-            self.vfs.write,
-            functools.partial(self.vfs.stat, index=index),
+            functools.partial(self._read, index),
+            functools.partial(self._write, index),
+            functools.partial(self._stat, index),
             path,
             data,
         )
@@ -1212,9 +1311,9 @@ class MountEntry:
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         await pwrite_by_rewrite(
-            functools.partial(self.vfs.read, index=index),
-            self.vfs.write,
-            functools.partial(self.vfs.stat, index=index),
+            functools.partial(self._read, index),
+            functools.partial(self._write, index),
+            functools.partial(self._stat, index),
             path,
             data,
             expect_offset(offset, path),
@@ -1228,11 +1327,39 @@ class MountEntry:
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         await truncate_by_rewrite(
-            functools.partial(self.vfs.read, index=index),
-            self.vfs.write,
+            functools.partial(self._read, index),
+            functools.partial(self._write, index),
             path,
             length,
             no_create,
+        )
+
+    async def _read(self, index: IndexCacheStore, path: PathSpec) -> bytes:
+        """The VFS's read of a whole file, handed what is at its path.
+
+        Args:
+            index (IndexCacheStore): the mount's index.
+            path (PathSpec): the file, keyed below the mount.
+        """
+        read: Callable[..., Awaitable[bytes]] = self.vfs.read
+        handed = await self._handed(read, path, {}, index)
+        return await read(path, **_handed_on(read, index, **handed))
+
+    async def _write(
+        self, index: IndexCacheStore, path: PathSpec, data: bytes
+    ) -> Any:
+        """The VFS's write of a whole file, handed what is at its path
+        and the directory it goes in.
+
+        Args:
+            index (IndexCacheStore): the mount's index.
+            path (PathSpec): the file, keyed below the mount.
+            data (bytes): its whole content.
+        """
+        write: Callable[..., Awaitable[Any]] = self.vfs.write
+        handed = await self._handed(write, path, {}, index)
+        return await write(
+            path, data, **_handed_on(write, NULL_INDEX, **handed)
         )
 
     async def _pwrite(
@@ -1241,14 +1368,299 @@ class MountEntry:
         data: bytes,
         offset: int,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await self.vfs.pwrite(
-            path, data, expect_offset(offset, path), index=index
+        entry: FileStat | None = None,
+    ) -> Any:
+        return await self.vfs.pwrite(
+            path,
+            data,
+            expect_offset(offset, path),
+            **_handed_on(self.vfs.pwrite, index, entry=entry),
         )
 
-    async def _mkdir(self, path: PathSpec, parents: bool = False) -> None:
-        await refuse_taken(self.vfs.stat, path, parents)
-        await self.vfs.mkdir(path, parents=parents)
+    async def _mkdir(
+        self,
+        path: PathSpec,
+        parents: bool = False,
+        index: IndexCacheStore = NULL_INDEX,
+        parent: FileStat | None = None,
+    ) -> Any:
+        await refuse_taken(functools.partial(self._stat, index), path, parents)
+        mkdir: Callable[..., Awaitable[Any]] = self.vfs.mkdir
+        if parents and "parent" in _wants(mkdir):
+            return await self._mkdir_levels(path, index)
+        made = await mkdir(
+            path,
+            parents=parents,
+            **({} if parent is None else {"parent": parent}),
+        )
+        if not parents and isinstance(made, FileStat):
+            # A directory made new holds nothing yet.
+            await index.set_dir(index_key(self.prefix, path), [])
+        return made
+
+    async def _mkdir_levels(
+        self, path: PathSpec, index: IndexCacheStore
+    ) -> Any:
+        """``mkdir -p`` on a backend that makes a directory inside its
+        parent's entry: one level at a time, from the mount root down.
+
+        The level above does not exist yet when the one below needs it
+        as its parent, so each level's create answers its new stat and
+        the index keeps it where the next level looks for its parent,
+        with its own listing, which is empty.
+        A level that is there already is passed, a directory or not:
+        a file there is ENOTDIR for the level below, as mkdir(2) finds.
+
+        Args:
+            path (PathSpec): the deepest directory to make.
+            index (IndexCacheStore): the mount's index.
+        """
+        names = [n for n in path.vfs_path.strip("/").split("/") if n]
+        root = self.prefix.rstrip("/")
+        mkdir: Callable[..., Awaitable[Any]] = self.vfs.mkdir
+        made: Any = None
+        for depth in range(1, len(names) + 1):
+            level = self._scope(f"{root}/{'/'.join(names[:depth])}")
+            key = index_key(self.prefix, level)
+            found = await self._entry(level, index)
+            if found is not None:
+                if found.type is not FileType.DIRECTORY:
+                    raise enotdir(level)
+                continue
+            parent = await self._entry(self._folder(level), index)
+            made = await mkdir(
+                level, **({} if parent is None else {"parent": parent})
+            )
+            if isinstance(made, FileStat):
+                await index.add_entry(key, made)
+                await index.set_dir(key, [])
+        return made
+
+    @property
+    def _root_key(self) -> str:
+        """The index key of this mount's root, which no listing names."""
+        return self.prefix.rstrip("/") or "/"
+
+    def _folder(self, scope: PathSpec) -> PathSpec:
+        """The directory holding ``scope``, keyed below this mount.
+
+        Args:
+            scope (PathSpec): a path below the mount root.
+        """
+        return self._scope(scope.virtual.rstrip("/").rsplit("/", 1)[0] or "/")
+
+    @property
+    def _lists(self) -> bool:
+        """Whether the VFS answers listings as stats for the mount to
+        keep, rather than keeping its own in an index it takes."""
+        return self.vfs.supports("readdir") and _lists_stats(self.vfs.readdir)
+
+    def _backend_fn(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+        """The VFS function a mount wrapper calls, whose parameters say
+        which stats it is handed.
+
+        Args:
+            fn (Callable[..., Any]): what ``_callers`` answered.
+        """
+        if isinstance(fn, functools.partial) and fn.func is _read_window:
+            return cast(Callable[..., Any], fn.args[0])
+        if fn == self._mkdir:
+            return self.vfs.mkdir
+        if fn == self._pwrite:
+            return self.vfs.pwrite
+        return fn
+
+    async def _entry(
+        self, scope: PathSpec, index: IndexCacheStore
+    ) -> FileStat | None:
+        """What is at ``scope``, as its parent's listing names it, listing
+        the parent when no stored listing does.
+
+        Args:
+            scope (PathSpec): a path keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+        """
+        key = index_key(self.prefix, scope)
+        if key == self._root_key or not self._lists:
+            return None
+        return await entry_at(
+            index,
+            key,
+            functools.partial(self._listed, self._folder(scope), index),
+        )
+
+    async def _listed(
+        self, path: PathSpec, index: IndexCacheStore
+    ) -> list[str]:
+        """A directory's children, from its stored listing or listed
+        through the backend and kept.
+
+        Args:
+            path (PathSpec): the directory, keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+        """
+        key = index_key(self.prefix, path)
+        stored = await stored_listing(index, key)
+        if stored is not None:
+            return stored
+        readdir: Callable[..., Awaitable[Any]] = self.vfs.readdir
+        handed = await self._handed(readdir, path, {}, index)
+        listed = await readdir(path, **_handed_on(readdir, index, **handed))
+        return await keep_listing(index, key, listed)
+
+    async def _stat(self, index: IndexCacheStore, path: PathSpec) -> FileStat:
+        """A stat of ``path`` on this mount, as ``call`` answers one.
+
+        Args:
+            index (IndexCacheStore): the mount's index.
+            path (PathSpec): the path, keyed below the mount.
+        """
+        stat: Callable[..., Awaitable[FileStat]] = self.vfs.stat
+        key = index_key(self.prefix, path)
+        if not self._lists:
+            return await stat(path, **_handed_on(stat, index))
+        stored = (
+            None if key == self._root_key else await stored_stat(index, key)
+        )
+        if stored is not None:
+            return stored
+        handed = await self._handed(stat, path, {}, index)
+        return await stat(path, **_handed_on(stat, index, **handed))
+
+    async def _handed(
+        self,
+        fn: Callable[..., Any],
+        scope: PathSpec,
+        kwargs: dict[str, Any],
+        index: IndexCacheStore,
+    ) -> dict[str, FileStat | None]:
+        """The stats ``fn`` declares, each found in the stored listings.
+
+        Args:
+            fn (Callable[..., Any]): the function about to run.
+            scope (PathSpec): its path, keyed below the mount.
+            kwargs (dict[str, Any]): its keywords; a rename's or a copy's
+                ``dst`` is the destination.
+            index (IndexCacheStore): the mount's index.
+        """
+        wants = _wants(self._backend_fn(fn))
+        handed: dict[str, FileStat | None] = {}
+        if "entry" in wants:
+            handed["entry"] = await self._entry(scope, index)
+        if "parent" in wants:
+            handed["parent"] = await self._entry(self._folder(scope), index)
+        dst = kwargs.get("dst")
+        if isinstance(dst, PathSpec) and wants & {"dst_entry", "dst_parent"}:
+            there = self._scope(dst.virtual)
+            if "dst_entry" in wants:
+                handed["dst_entry"] = await self._entry(there, index)
+            if "dst_parent" in wants:
+                handed["dst_parent"] = await self._entry(
+                    self._folder(there), index
+                )
+        return handed
+
+    async def _stored(
+        self, name: str, scope: PathSpec, index: IndexCacheStore
+    ) -> Any:
+        """A listing or a stat the stored listings answer, None for one
+        the backend must.
+
+        Args:
+            name (str): ``readdir`` or ``stat``.
+            scope (PathSpec): the path, keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+        """
+        key = index_key(self.prefix, scope)
+        if name == "readdir":
+            return await stored_listing(index, key)
+        if key == self._root_key:
+            return None
+        return await stored_stat(index, key)
+
+    async def _run(
+        self,
+        name: str,
+        fn: Callable[..., Any],
+        scope: PathSpec,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        op_timeout: float | None,
+    ) -> Any:
+        """Run one function with the stats it declares.
+
+        A stat a stored listing handed in may be stale: the backend
+        answering ENOENT for it drops the listings it came from, which
+        lists them again, and the function runs once more. A function
+        handed nothing is not run again.
+
+        Args:
+            name (str): the op name.
+            fn (Callable[..., Any]): the function.
+            scope (PathSpec): its path, keyed below the mount.
+            args (tuple[Any, ...]): its positionals after the path.
+            kwargs (dict[str, Any]): its keywords, ``index`` among them.
+            op_timeout (float | None): the op's timeout.
+        """
+        index = kwargs["index"]
+        handed = await self._handed(fn, scope, kwargs, index)
+        try:
+            return await self._invoke(
+                name, fn, scope, args, {**kwargs, **handed}, op_timeout
+            )
+        except FileNotFoundError:
+            if all(stat is None for stat in handed.values()):
+                raise
+        await self._forget(scope, kwargs, index)
+        handed = await self._handed(fn, scope, kwargs, index)
+        return await self._invoke(
+            name, fn, scope, args, {**kwargs, **handed}, op_timeout
+        )
+
+    async def _invoke(
+        self,
+        name: str,
+        fn: Callable[..., Any],
+        scope: PathSpec,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        op_timeout: float | None,
+    ) -> Any:
+        """Call one function with the keywords it takes, under the op's
+        timeout.
+
+        Args:
+            name (str): the op name.
+            fn (Callable[..., Any]): the function.
+            scope (PathSpec): its path, keyed below the mount.
+            args (tuple[Any, ...]): its positionals after the path.
+            kwargs (dict[str, Any]): the keywords on offer.
+            op_timeout (float | None): the op's timeout.
+        """
+        result = fn(scope, *args, **_taken(name, fn, kwargs))
+        if inspect.isawaitable(result):
+            result = await run_with_timeout(result, op_timeout, name)
+        return result
+
+    async def _forget(
+        self, scope: PathSpec, kwargs: dict[str, Any], index: IndexCacheStore
+    ) -> None:
+        """Drop the listings a stale stat was handed from.
+
+        Args:
+            scope (PathSpec): the op's path, keyed below the mount.
+            kwargs (dict[str, Any]): its keywords; a ``dst`` is forgotten
+                too.
+            index (IndexCacheStore): the mount's index.
+        """
+        paths = [scope]
+        dst = kwargs.get("dst")
+        if isinstance(dst, PathSpec):
+            paths.append(self._scope(dst.virtual))
+        for path in paths:
+            key = index_key(self.prefix, path)
+            await index.invalidate_dir(folder_of(key))
+            await index.invalidate_dir(key)
 
     async def call(
         self,
@@ -1295,6 +1707,7 @@ class MountEntry:
 
             scope = self._scope(path)
             kwargs.setdefault("index", self.index)
+            index = kwargs["index"]
             op_timeout = self._op_timeout(name)
             token = bind_caller(
                 dataclasses.replace(
@@ -1303,19 +1716,26 @@ class MountEntry:
                 )
             )
             try:
-                for fn in levels:
-                    # The backend's own paths are host paths, so the process
-                    # patch (runtime/python/host/fs.py and open.py) must not answer
-                    # them: a disk mount rooted at its own virtual prefix
-                    # spells the two the same, and routing the physical one
-                    # hands the op back to the backend serving it.
-                    with host_io():
-                        result = fn(scope, *args, **_taken(name, fn, kwargs))
-                        if inspect.isawaitable(result):
-                            result = await run_with_timeout(
-                                result, op_timeout, name
+                # The backend's own paths are host paths, so the process
+                # patch (runtime/python/host/fs.py and open.py) must not answer
+                # them: a disk mount rooted at its own virtual prefix
+                # spells the two the same, and routing the physical one
+                # hands the op back to the backend serving it.
+                with host_io():
+                    if name in ("readdir", "stat") and self._lists:
+                        stored = await self._stored(name, scope, index)
+                        if stored is not None:
+                            return stored
+                    for fn in levels:
+                        result = await self._run(
+                            name, fn, scope, args, kwargs, op_timeout
+                        )
+                        if result is None:
+                            continue
+                        if name == "readdir" and self._lists:
+                            return await keep_listing(
+                                index, index_key(self.prefix, scope), result
                             )
-                    if result is not None:
                         return _wrap_stream(
                             result, self.mount_id, self.activity
                         )
@@ -1514,6 +1934,27 @@ class MountEntry:
         key = norm("/" + mount_key(path, self.prefix.rstrip("/")))
         return pipe_below(accessor, key)
 
+    async def _read_entry_stream(
+        self,
+        reader: Callable[..., AsyncIterator[bytes]],
+        scope: PathSpec,
+        index: IndexCacheStore,
+    ) -> AsyncIterator[bytes]:
+        """A streamed read handed what is at its path, found on the
+        first pull.
+
+        Args:
+            reader (Callable[..., AsyncIterator[bytes]]): the VFS's
+                streamed read.
+            scope (PathSpec): the file, keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+        """
+        entry = await self._entry(scope, index)
+        async for chunk in reader(
+            scope, **_handed_on(reader, index, entry=entry)
+        ):
+            yield chunk
+
     def read_stream(self, path: str) -> AsyncIterator[bytes]:
         """The VFS's streamed read of ``path``, framed for later pulls.
 
@@ -1535,8 +1976,12 @@ class MountEntry:
             vfs_path=mount_key(path, self.prefix.rstrip("/")),
         )
         reader = self.vfs.read_stream
-        source = reader(
-            scope, **_taken("read_stream", reader, {"index": self.index})
+        source = (
+            self._read_entry_stream(reader, scope, self.index)
+            if "entry" in _wants(reader)
+            else reader(
+                scope, **_taken("read_stream", reader, {"index": self.index})
+            )
         )
         limit = self.command_limits.get("read")
         stream = with_pull_timeout(

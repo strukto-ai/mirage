@@ -24,6 +24,7 @@ import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
+import { runInCommandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { enoent, erofs } from '../../errors/fs.ts'
@@ -2126,6 +2127,28 @@ describe('a link at the final name', () => {
         ws.dispatch('readdir', '/data/dlink', [], { nofollow: true }),
       ).rejects.toMatchObject({ code: 'ENOTDIR' })
       expect(await ws.dispatch('readdir', '/data/dlink')).toEqual(['/data/dlink/f.txt'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a stat after the command’s probe is the probe’s answer', async () => {
+    // Under read: fresh the probe already asked the backend about the
+    // command's operand. The stat after it is that answer, stamped as any
+    // stat is; a write in the command sends the next one to the backend.
+    const ws = await linked({ '/data/': new RAMVFS() })
+    try {
+      await ws.shell('echo hello > /data/a.txt')
+      const spec = PathSpec.fromStrPath('/data/a.txt')
+      const manager = ws.namespace.mountFor('/data/a.txt').cacheManager
+      if (manager === null) throw new Error('no cache manager')
+      await runInCommandScope(async () => {
+        manager.noteProbed(spec, new FileStat({ name: 'a.txt', size: 9, type: FileType.FILE }))
+        const probed = (await ws.dispatch('stat', '/data/a.txt')) as FileStat
+        expect([probed.size, probed.dev]).toEqual([9, ident('/data/')])
+        await ws.dispatch('write', '/data/a.txt', [ENC.encode('hi')])
+        expect(((await ws.dispatch('stat', '/data/a.txt')) as FileStat).size).toBe(2)
+      })
     } finally {
       await ws.close()
     }

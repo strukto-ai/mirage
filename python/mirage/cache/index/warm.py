@@ -16,7 +16,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.cache.index.config import IndexEntry, ListedMiss, LookupStatus
+from mirage.cache.index.config import IndexRow, ListedMiss, LookupStatus
 from mirage.cache.index.lock import index_lock
 from mirage.cache.index.store import IndexCacheStore
 
@@ -27,7 +27,7 @@ async def entry_or_warm(
     index: IndexCacheStore,
     virtual_key: str,
     warm: Callable[[], Awaitable[Any]] | None,
-) -> IndexEntry | None:
+) -> IndexRow | None:
     """``entry_or_listed_miss`` for a caller that cannot ask by path.
 
     A complete listing that omits the key answers None, whoever fetched
@@ -48,7 +48,7 @@ async def entry_or_listed_miss(
     index: IndexCacheStore,
     virtual_key: str,
     warm: Callable[[], Awaitable[Any]] | None,
-) -> IndexEntry | ListedMiss | None:
+) -> IndexRow | ListedMiss | None:
     """Resolve an entry when its parent listing is absent or expired.
 
     Id-addressed backends (Drive, Box, Dropbox, Gmail) can only turn a path

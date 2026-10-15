@@ -22,7 +22,7 @@ from typing import TypeVar
 from mirage.cache.context import capture_read
 from mirage.cache.file.io import latest_fingerprint, mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
-from mirage.cache.index.config import Evicted, IndexEntry
+from mirage.cache.index.config import Evicted, IndexRow
 from mirage.cache.index.constants import (
     CHECKED_LIMIT,
     LISTING_TRUST_WINDOW,
@@ -425,7 +425,7 @@ class CacheManager:
         path: PathSpec,
         generation: int,
         predecessor: str,
-        entry: IndexEntry,
+        entry: IndexRow,
     ) -> None:
         """Retain a live fallback row only while its predecessor still owns the slot.
 
@@ -433,7 +433,7 @@ class CacheManager:
             path (PathSpec): confirmed file path.
             generation (int): generation before the remote check.
             predecessor (str): serialized previous index row.
-            entry (IndexEntry): confirmed replacement row.
+            entry (IndexRow): confirmed replacement row.
         """
         key = self._cache_key(path)
         async with self.mutation():
@@ -773,6 +773,21 @@ class CacheManager:
         """
         key = await self._invalidate_path(path)
         await self._invalidate_parent(key)
+
+    async def keep_created(self, path: PathSpec, row: FileStat) -> None:
+        """Settle a create that answered its new entry's stat.
+
+        The entry is kept where its parent's listing names it, so a
+        listing of the parent and the next level of a nested create need
+        no request: what ``invalidate_after_write`` drops for a re-list
+        is the one name the create added.
+
+        Args:
+            path (PathSpec): the created path; only ``virtual`` is read.
+            row (FileStat): the backend's stat of it.
+        """
+        key = await self._invalidate_path(path)
+        await self._index.add_entry(key, row)
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         """Invalidate caches after a deletion of ``path``.

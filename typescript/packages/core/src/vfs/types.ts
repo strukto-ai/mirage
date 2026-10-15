@@ -15,6 +15,21 @@ import type {
   SetAttrFields,
 } from '../types.ts'
 
+/**
+ * The stats a VFS function may be handed, each filled from the mount's
+ * stored listings: what is at its path (`entry`), at its path's parent
+ * (`parent`), and the same two at a rename's or a copy's destination
+ * (`dstEntry`, `dstParent`). A function says which it takes in its VFS's
+ * `handed`; Python's declares them as keyword parameters and is handed them
+ * as keywords.
+ */
+export interface Handed {
+  readonly entry?: FileStat | null
+  readonly parent?: FileStat | null
+  readonly dstEntry?: FileStat | null
+  readonly dstParent?: FileStat | null
+}
+
 export type SetAttrsOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,

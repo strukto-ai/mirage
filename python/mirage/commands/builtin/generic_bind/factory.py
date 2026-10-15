@@ -162,41 +162,6 @@ def with_stat_cache(ops: CommandIO) -> CommandIO:
     return replace(ops, stat=functools.partial(_cached_stat, ops.stat))
 
 
-async def _probe_answered_stat(
-    stat: Callable[..., Any],
-    accessor: Accessor,
-    path: PathSpec,
-    *args,
-    **kwargs,
-):
-    # The freshness probe already asked the backend this command; asking
-    # again resolves through listings fresh has not re-checked yet.
-    manager = active_cache_manager()
-    probed = None if manager is None else manager.probed_stat(path)
-    if probed is not None:
-        return probed
-    return await stat(accessor, path, *args, **kwargs)
-
-
-def with_probe_answers(ops: CommandIO) -> CommandIO:
-    """Return ``ops`` whose ``stat`` serves this command's probe answer.
-
-    Under fresh the freshness probe has already asked the backend about
-    the operand (``CacheManager.probed_stat``). It is the backend's own
-    op-table stat, so this goes only on an adapter whose ``stat`` is that
-    function: a per-command stat keeps asking, so what it prints never
-    changes with the policy.
-
-    Applied to the raw adapter, below the path guards: a hidden or
-    refused path is answered by its guard before any remembered answer,
-    and every other slot keeps the guard order it always had.
-
-    Args:
-        ops (CommandIO): the backend's raw IO adapter.
-    """
-    return replace(ops, stat=functools.partial(_probe_answered_stat, ops.stat))
-
-
 def _stat_wraps(ops: CommandIO) -> CommandIO:
     return with_slash_guard(with_stat_cache(ops))
 
@@ -209,7 +174,6 @@ async def _run_with_namespace_globs(
     finish: Callable[[CommandIO], CommandIO],
     fn: Callable[..., Any],
     table: Callable[[CommandIO], CommandIO] | None,
-    write: bool,
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -234,17 +198,12 @@ async def _run_with_namespace_globs(
     owes this directory anything, so there is one code path rather than
     two; the guards read the current session at call time.
 
-    A read-only builder's stat serves the freshness probe's answer
-    (``with_probe_answers``), unless the command swaps in a stat of its
-    own, so what that prints never changes with the policy.
-
     Args:
         finish (Callable): the builder tier's stat and slash wraps,
             chosen at registration from the builder's read/write kind.
         fn (Callable): the builder's command function.
         table (Callable | None): a backend's change to the table for
             this command.
-        write (bool): whether the builder writes.
         accessor (Accessor): backend handle.
         paths (list[PathSpec]): the command's path operands.
         texts (list[str]): the command's text arguments.
@@ -254,8 +213,6 @@ async def _run_with_namespace_globs(
     """
     io = mount_io(opts)
     raw = table(io) if table is not None else io
-    if raw.stat is io.stat and not write:
-        raw = with_probe_answers(raw)
     ns = opts.ns
     links = ns.links if ns is not None else None
     stamped = with_links(
@@ -278,9 +235,7 @@ async def _run_with_namespace_globs(
     # dispatcher (stat, exists, readdir). Reads, writes and one-call
     # walks are the dispatcher's (`dispatched_io` on the mount's table),
     # which judges each itself and declines a one-call walk whose subtree
-    # the caller's view restricts. A probe answer is served below the
-    # guards (`with_probe_answers` on the raw table), so they still judge
-    # every path before it.
+    # the caller's view restricts.
     bound = with_dir_guard(with_command_guards(finish(stamped)))
     if split:
         # A RAM or cache read arrives as one whole chunk, over which a
@@ -319,7 +274,6 @@ def _bind(
         finish,
         builder.fn,
         table,
-        builder.write,
         split=not builder.pass_through,
     )
     (registered,) = registered_commands(

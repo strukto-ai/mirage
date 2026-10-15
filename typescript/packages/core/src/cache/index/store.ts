@@ -15,6 +15,7 @@
 import type {
   Evicted,
   IndexEntry,
+  IndexRow,
   IndexSnapshot,
   ListResult,
   LookupResult,
@@ -41,9 +42,17 @@ export abstract class IndexCacheStore {
   }
   abstract entries(): Promise<Map<string, IndexEntry>>
   abstract get(vfsPath: string): Promise<LookupResult>
-  abstract put(vfsPath: string, entry: IndexEntry): Promise<void>
+  abstract put(vfsPath: string, entry: IndexRow): Promise<void>
+  /**
+   * Keep a row a create just made, named in its parent's listing. A listing
+   * held for the parent gains the name, in order, and stays what it was: a
+   * complete one stays complete, since the create is the only change to it.
+   * With none held, the parent gets a partial listing that names the one
+   * entry, which proves it without proving anything absent.
+   */
+  abstract addEntry(vfsPath: string, entry: IndexRow): Promise<void>
   /** Atomically replace an existing row without renewing its listing; custom stores may decline. */
-  replaceIfUnchanged(_path: string, _predecessor: string, _entry: IndexEntry): Promise<boolean> {
+  replaceIfUnchanged(_path: string, _predecessor: string, _entry: IndexRow): Promise<boolean> {
     return Promise.resolve(false)
   }
   abstract listDir(vfsPath: string): Promise<ListResult>
@@ -56,7 +65,7 @@ export abstract class IndexCacheStore {
    */
   abstract setDir(
     vfsPath: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt?: Date | null,
     options?: SetDirOptions,
   ): Promise<Evicted[]>
@@ -79,7 +88,7 @@ export abstract class IndexCacheStore {
    */
   async setPartialDir(
     vfsPath: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     _expiredAt?: Date | null,
   ): Promise<void> {
     await this.invalidateDir(vfsPath)

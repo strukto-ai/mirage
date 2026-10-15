@@ -624,6 +624,18 @@ export class CacheManager {
     await this.invalidateParent(key)
   }
 
+  /**
+   * Settle a create that answered its new entry's stat. The entry is kept
+   * where its parent's listing names it, so a listing of the parent and the
+   * next level of a nested create need no request: what `invalidateAfterWrite`
+   * drops for a re-list is the one name the create added. Mirrors Python's
+   * `keep_created`.
+   */
+  async keepCreated(path: string | PathSpec, row: FileStat): Promise<void> {
+    const key = await this.invalidatePath(path)
+    if (this.index !== null) await this.index.addEntry(key, row)
+  }
+
   /** Invalidate caches after a deletion of `path`; only `virtual` is read. */
   async invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
     const key = await this.invalidatePath(path)

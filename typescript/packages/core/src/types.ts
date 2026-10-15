@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from './cache/index/store.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 import { dottedSpelling, resolvePath } from './utils/path.ts'
 
@@ -721,6 +720,51 @@ export class FileStat {
   }
 }
 
+export interface DirListingInit {
+  entries: readonly FileStat[]
+  seeds?: ReadonlyMap<string, readonly FileStat[]>
+  partial?: boolean
+  window?: boolean
+}
+
+/**
+ * A directory's listing as a backend answers it, when one fetch proves more
+ * than the directory's own children.
+ *
+ * A backend's `readdir` answers a plain list of its children's stats, or this
+ * when the fetch says more: a day of messages that also lists its `files/`
+ * subdirectory, a board whose lists come with their cards. The dispatcher
+ * keeps every listing it is handed, so entering a seeded directory costs no
+ * second identical fetch.
+ *
+ * - `entries`: the listed directory's own children, each filled in as `stat`
+ *   would fill it.
+ * - `seeds`: descendant listings the same fetch proved, keyed by path relative
+ *   to the listed directory (`files`, `2026-01-05/Report__17`).
+ * - `partial`: the entries are a filtered or truncated view (a glob the
+ *   backend narrowed, a fetch it did not finish), so they are kept as entries
+ *   but not as the directory's listing. `seeds` stay full listings of the
+ *   children it did report.
+ * - `window`: the fetch was capped (the newest N messages, the last N days),
+ *   so the entries are everything to show but prove nothing absent: a child
+ *   that drops out of the window has not been deleted. Kept as listings that
+ *   evict nothing.
+ */
+export class DirListing {
+  readonly entries: readonly FileStat[]
+  readonly seeds: ReadonlyMap<string, readonly FileStat[]>
+  readonly partial: boolean
+  readonly window: boolean
+
+  constructor(init: DirListingInit) {
+    this.entries = init.entries
+    this.seeds = init.seeds ?? new Map()
+    this.partial = init.partial ?? false
+    this.window = init.window ?? false
+    Object.freeze(this)
+  }
+}
+
 export const FileChangeKind = Object.freeze({
   CREATE: 'create',
   UPDATE: 'update',
@@ -854,9 +898,7 @@ export type ReaddirFn<Args extends unknown[] = [path: PathSpec]> = (
   ...args: Args
 ) => Promise<string[]>
 
-export type StatFn<Args extends unknown[] = [path: PathSpec, index?: IndexCacheStore]> = (
-  ...args: Args
-) => Promise<FileStat>
+export type StatFn<Args extends unknown[] = [path: PathSpec]> = (...args: Args) => Promise<FileStat>
 
 /**
  * What proving a running command's `.` and `..` reads.

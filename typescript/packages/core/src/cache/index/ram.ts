@@ -13,14 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { toIsoZ } from '../../utils/dates.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { underPath } from '../../utils/key_prefix.ts'
 import { KeyLock } from '../lock.ts'
 import {
   LookupStatus,
-  isFileKind,
-  isFolderKind,
+  rowIsFile,
+  rowIsFolder,
+  stamped,
   type Evicted,
   type IndexEntry,
+  type IndexRow,
   type ListResult,
   type LookupResult,
   type SetDirOptions,
@@ -29,7 +32,7 @@ import { IndexCacheStore } from './store.ts'
 
 export class RAMIndexCacheStore extends IndexCacheStore {
   readonly ttl: number
-  private readonly entryMap = new Map<string, IndexEntry>()
+  private readonly entryMap = new Map<string, IndexRow>()
   private readonly children = new Map<string, string[]>()
   private readonly expiry = new Map<string, number>()
   private readonly partial = new Set<string>()
@@ -49,12 +52,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     version: string | null = null,
   ): void {
     const nowIso = toIsoZ(new Date())
-    for (const [path, entry] of entries) {
-      this.entryMap.set(
-        path,
-        entry.indexTime === '' ? entry.copyWith({ indexTime: nowIso }) : entry,
-      )
-    }
+    for (const [path, entry] of entries) this.entryMap.set(path, stamped(entry, nowIso))
     for (const [path, keys] of children) {
       this.children.set(path, [...keys])
       this.expiry.set(path, expiresAt.getTime())
@@ -69,20 +67,38 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   }
 
   entries(): Promise<Map<string, IndexEntry>> {
-    return Promise.resolve(new Map(this.entryMap))
+    return Promise.resolve(new Map(this.entryMap) as Map<string, IndexEntry>)
   }
 
   get(vfsPath: string): Promise<LookupResult> {
     const entry = this.entryMap.get(vfsPath)
     if (entry === undefined) return Promise.resolve({ status: LookupStatus.NOT_FOUND })
-    return Promise.resolve({ entry })
+    return Promise.resolve({ entry: entry as IndexEntry })
   }
 
-  put(vfsPath: string, entry: IndexEntry): Promise<void> {
+  put(vfsPath: string, entry: IndexRow): Promise<void> {
     return this.lock.withLock(vfsPath, () => {
-      const stored =
-        entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
-      this.entryMap.set(vfsPath, stored)
+      this.entryMap.set(vfsPath, stamped(entry, toIsoZ(new Date())))
+      return Promise.resolve()
+    })
+  }
+
+  override addEntry(vfsPath: string, entry: IndexRow): Promise<void> {
+    const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
+    return this.lock.withLock(folder, () => {
+      const now = Date.now()
+      this.entryMap.set(vfsPath, stamped(entry, toIsoZ(new Date(now))))
+      const children = this.children.get(folder)
+      const exp = this.expiry.get(folder)
+      if (children === undefined || exp === undefined || now >= exp) {
+        this.children.set(folder, [vfsPath])
+        this.expiry.set(folder, now + this.ttl * 1000)
+        this.partial.add(folder)
+        this.versions.delete(folder)
+      } else if (!children.includes(vfsPath)) {
+        const at = children.findIndex((child) => compareCodePoints(child, vfsPath) > 0)
+        children.splice(at === -1 ? children.length : at, 0, vfsPath)
+      }
       return Promise.resolve()
     })
   }
@@ -90,15 +106,13 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   override replaceIfUnchanged(
     path: string,
     predecessor: string,
-    entry: IndexEntry,
+    entry: IndexRow,
   ): Promise<boolean> {
     return this.lock.withLock(path, () => {
       const current = this.entryMap.get(path)
       if (current === undefined || JSON.stringify(current) !== predecessor)
         return Promise.resolve(false)
-      const stored =
-        entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
-      this.entryMap.set(path, stored)
+      this.entryMap.set(path, stamped(entry, toIsoZ(new Date())))
       return Promise.resolve(true)
     })
   }
@@ -115,7 +129,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
 
   setDir(
     vfsPath: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt?: Date | null,
     options: SetDirOptions = {},
   ): Promise<Evicted[]> {
@@ -132,7 +146,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
 
   override setPartialDir(
     vfsPath: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt?: Date | null,
   ): Promise<void> {
     return this.storeDir(vfsPath, entries, expiredAt, true, false).then(() => undefined)
@@ -140,7 +154,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
 
   private storeDir(
     vfsPath: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt: Date | null | undefined,
     partial: boolean,
     evict: boolean,
@@ -152,12 +166,8 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       const exp = expiredAt ? expiredAt.getTime() : now + this.ttl * 1000
       const nowIso = toIsoZ(new Date(now))
       const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
-      const rows = new Map<string, IndexEntry>()
-      for (const [name, entry] of entries) {
-        const fullPath = prefix + name
-        const stored = entry.indexTime === '' ? entry.copyWith({ indexTime: nowIso }) : entry
-        rows.set(fullPath, stored)
-      }
+      const rows = new Map<string, IndexRow>()
+      for (const [name, entry] of entries) rows.set(prefix + name, stamped(entry, nowIso))
       const childKeys = [...rows.keys()]
       // What the last full knowledge named: the current listing, plus a
       // tombstone an invalidation left (a partial since then cannot have
@@ -177,10 +187,10 @@ export class RAMIndexCacheStore extends IndexCacheStore {
             .filter(
               (key) =>
                 (!rows.has(key) ||
-                  (isFileKind(rows.get(key)?.resourceType) &&
+                  (rowIsFile(rows.get(key)) &&
                     (buried.get(key) === true ||
                       this.children.has(key) ||
-                      isFolderKind(this.entryMap.get(key)?.resourceType)))) &&
+                      rowIsFolder(this.entryMap.get(key))))) &&
                 !excluded.some((prefix) => underPath(key, prefix)),
             )
             .map((key) => this.evict(key, buried.get(key) ?? false, excluded))
@@ -199,7 +209,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private evict(key: string, buriedFolder = false, excluded: readonly string[] = []): Evicted {
     const entry = this.entryMap.get(key)
     this.entryMap.delete(key)
-    const folder = buriedFolder || this.children.has(key) || isFolderKind(entry?.resourceType)
+    const folder = buriedFolder || this.children.has(key) || rowIsFolder(entry)
     if (folder) this.dropPrefix(key, false, excluded)
     return { path: key, folder }
   }
@@ -224,7 +234,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
           child,
           buried.get(child) === true ||
             this.children.has(child) ||
-            isFolderKind(this.entryMap.get(child)?.resourceType),
+            rowIsFolder(this.entryMap.get(child)),
         )
       }
       this.tombstones.set(

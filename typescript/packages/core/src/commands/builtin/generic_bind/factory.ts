@@ -60,29 +60,6 @@ export function withStatCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<
   return { ...ops, stat: cachedStat(ops.stat) }
 }
 
-/**
- * Return `ops` whose stat serves this command's probe answer.
- *
- * Under fresh the freshness probe has already asked the backend about the
- * operand (CacheManager.probedStat). It is the backend's own op-table stat,
- * so this goes only on an adapter whose stat is that function: a per-command
- * stat keeps asking, so what it prints never changes with the policy.
- *
- * Applied to the raw adapter, below the path guards: a hidden or refused path
- * is answered by its guard before any remembered answer, and every other slot
- * keeps the guard order it always had.
- */
-export function withProbeAnswers<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
-  const stat = ops.stat
-  return {
-    ...ops,
-    // The freshness probe already asked the backend this command; asking
-    // again resolves through listings fresh has not re-checked yet.
-    stat: async (accessor: A, path: PathSpec, index?: IndexCacheStore) =>
-      activeCacheManager()?.probedStat(path) ?? (await stat(accessor, path, index)),
-  }
-}
-
 // open(2) with O_CREAT refuses a slash-terminated name outright, before
 // looking anything up: `x/` can only ever be a directory, so there is
 // nothing to create and nothing to truncate. GNU tee and truncate both
@@ -205,9 +182,7 @@ function bind(
   // dispatcher (stat, exists, readdir). Reads, writes and one-call walks
   // are the dispatcher's (dispatchedIo on the mount's table), which
   // judges each itself and declines a one-call walk whose subtree the
-  // caller's view restricts. A probe answer is served below the guards
-  // (withProbeAnswers on the raw adapter), so they still judge every path
-  // before it. The invocation's mount prefix rides into its wrap-time
+  // caller's view restricts. The invocation's mount prefix rides into its wrap-time
   // scope for readers drained after the gate scopes return. The abort
   // guard sits outermost: once the invocation's signal has fired no slot
   // starts, so a handler the caller was released from begins no further
@@ -215,11 +190,8 @@ function bind(
   const fn: CommandFn = (accessor, paths, texts, opts) => {
     const io = mountIo(opts)
     const raw = table === undefined ? io : table(io)
-    // A per-command table with its own stat would otherwise print the
-    // probe's full stat under fresh only.
-    const answered = raw.stat === io.stat && b.write !== true ? withProbeAnswers(raw) : raw
     const guarded = withAbortGuard(
-      withDirGuard(withCommandGuards(finish(stampNamespace(answered, opts)), opts.mountPrefix)),
+      withDirGuard(withCommandGuards(finish(stampNamespace(raw, opts)), opts.mountPrefix)),
       opts.signal,
     )
     const split = b.passThrough !== true

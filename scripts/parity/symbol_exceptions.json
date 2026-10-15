@@ -420,7 +420,8 @@
    "typescript_only": {
     "IndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
     "RedisIndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
-    "normalizeIndexConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
+    "normalizeIndexConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built.",
+    "FileStatWireSchema": "pydantic validates a stat row Python reads back; TypeScript parses one with this schema."
    }
   },
   "vfs/secrets": {
@@ -629,6 +630,9 @@
   "types": {
    "python_only": {
     "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, as a forward reference to PathSpec; TypeScript types the field inline."
+   },
+   "typescript_only": {
+    "DirListingInit": "A TypeScript DirListing takes its fields as one object; the Python dataclass takes them as keywords."
    }
   },
   "cache/file/redis": {
@@ -653,6 +657,9 @@
   "vfs/types": {
    "python_only": {
     "EndpointVFS": "Python asks an S3 mount for its endpoint through this runtime-checkable protocol, since importing the S3 VFS would load its optional extra; TypeScript asks `vfs instanceof S3VFSBase`, which core always carries."
+   },
+   "typescript_only": {
+    "Handed": "Python hands the stats as keyword arguments a backend function declares; TypeScript has no keyword arguments, so they ride in one object."
    }
   },
   "core/s3/client": {

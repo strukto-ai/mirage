@@ -581,6 +581,20 @@ function spelledUnder(call: Call, entries: string[]): string[] {
   )
 }
 
+/**
+ * What the freshness probe of the running command got from the backend for a
+ * stat's path, null when it asked nothing. Under `read: fresh` the probe
+ * already asked the backend about the command's operand; asking again resolves
+ * through listings the command has not re-checked. A stat that asks for what
+ * the backend holds now (`fresh`) is the probe's own question, so it is asked.
+ * Mirrors Python's `_probed`.
+ */
+function probed(call: Call, mount: MountEntry): FileStat | null {
+  const manager = mount.cacheManager
+  if (call.name !== 'stat' || call.fresh || manager === null) return null
+  return manager.probedStat(call.path)
+}
+
 /** The filetype a read is rendered as, null for none. */
 function readType(call: Call): string | null {
   const requested = call.kwargs?.filetype
@@ -917,7 +931,14 @@ export class Dispatcher {
     const [answer, dst, fullArgs] = ran
     const result = this.filter(call, answer)
     if (settles) {
-      await this.settleWrite(name, call.path, dst, fullArgs, operands(name, call.args, call.kwargs))
+      await this.settleWrite(
+        name,
+        call.path,
+        dst,
+        fullArgs,
+        operands(name, call.args, call.kwargs),
+        answer,
+      )
     }
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
@@ -1787,7 +1808,14 @@ export class Dispatcher {
                 : own(onCall),
             async (value) => {
               served(report, value)
-              await this.settleWrite(name, p, dst, fullArgs, operands(name, call.args, kwargs))
+              await this.settleWrite(
+                name,
+                p,
+                dst,
+                fullArgs,
+                operands(name, call.args, kwargs),
+                value,
+              )
               await this.keepWritten(call, mount, fullArgs, mine, before)
             },
           )
@@ -1802,7 +1830,8 @@ export class Dispatcher {
           throw err
         }
       } else {
-        result = await run(fullKwargs)
+        const answered = probed(call, mount)
+        result = answered ?? (await run(fullKwargs))
         if (name === 'stat') result = await sized(mount, p, result)
       }
     } catch (err) {
@@ -2105,20 +2134,31 @@ export class Dispatcher {
    * the node table's links and attributes at its names. Mirrors Python's
    * Dispatcher._settle_write.
    */
+  /**
+   * What a write changes beside the store: the caches above the path, and the
+   * node table's links and attributes at its names. A copy reads its path, so
+   * only its destination changes. A create that answers its new entry's stat
+   * (`created`) has it kept where its parent's listing names it, in place of
+   * dropping that listing for a re-list: the create is the one change to it,
+   * and the next level of a nested create finds its parent there. Mirrors
+   * Python's Dispatcher._settle_write.
+   */
   private async settleWrite(
     name: string,
     p: PathSpec,
     dst: PathSpec | null,
     args: readonly unknown[],
     others: readonly [number | string, PathSpec][],
+    created: unknown = null,
   ): Promise<void> {
     const opened = appendsNothing(name, args)
     const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
     const removes = name === 'unlink' || name === 'rmdir' || name === 'rm_r'
+    const row = created instanceof FileStat ? created : null
     // A copy reads its path, so only its destination changes: the copy is a
     // new file there, or a new tree.
     if (COPY_OPS.has(name) && dst !== null) {
-      await this.invalidateAfterWriteByPath(dst.virtual)
+      await this.invalidateAfterWriteByPath(dst.virtual, null, true, false, row)
       if (name === 'dir_copy') await this.settleTreeCopy(p, dst)
       return
     }
@@ -2129,6 +2169,7 @@ export class Dispatcher {
       observed,
       !opened && name !== 'rename',
       removes,
+      name === 'rename' ? null : row,
     )
     for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)
     if (name === 'rm_r') {
@@ -2159,6 +2200,7 @@ export class Dispatcher {
     }
     if (name === 'rename' && dst !== null) {
       await this.invalidateAfterRenameByPath(p.virtual, dst.virtual)
+      if (row !== null) await this.keepCreated(dst.virtual, row)
       // rename(2) replaces the destination, so a node the table holds
       // at that name does not survive the move. A link left there
       // shadowed the file that had just landed: the listing showed the
@@ -3137,6 +3179,7 @@ export class Dispatcher {
     observed: number | null = null,
     times = true,
     removed = false,
+    created: FileStat | null = null,
   ): Promise<void> {
     // Directory writes (mkdir/rmdir via tree copies) arrive with a
     // trailing slash; normalize so the parent computation below does not
@@ -3149,8 +3192,22 @@ export class Dispatcher {
       if (times) await this.namespace.clearTimes(name, observed)
       const manager = this.managerFor(owner)
       if (removed) await manager.invalidateAfterUnlink(name)
+      else if (created !== null) await manager.keepCreated(name, created)
       else await manager.invalidateAfterWrite(name)
       await manager.invalidateAncestors(name)
+    }
+  }
+
+  /**
+   * Keep a moved entry's stat where its new parent's listing names it, under
+   * every mount of its store. Mirrors Python's Dispatcher._keep_created.
+   */
+  private async keepCreated(rawPath: string, row: FileStat): Promise<void> {
+    const path = rstripSlash(rawPath) || '/'
+    const mount = this.namespace.tryMountFor(path)
+    if (mount === null) return
+    for (const [owner, name] of this.aliases(mount, path)) {
+      await this.managerFor(owner).keepCreated(name, row)
     }
   }
 

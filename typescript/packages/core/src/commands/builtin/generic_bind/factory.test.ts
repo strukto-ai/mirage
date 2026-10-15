@@ -19,18 +19,7 @@ import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { requireOp } from './adapter.ts'
 import type { CommandIO } from '../../config.ts'
 import { BUILDERS } from './builders/index.ts'
-import {
-  GENERIC_COMMANDS,
-  generic,
-  scanIo,
-  withProbeAnswers,
-  withSlashGuard,
-  withStatCache,
-} from './factory.ts'
-import { runWithCacheManager } from '../../../cache/context.ts'
-import { RAMFileCacheStore } from '../../../cache/file/ram.ts'
-import { runInCommandScope } from '../../../cache/index/scope.ts'
-import { CacheManager } from '../../../cache/manager.ts'
+import { GENERIC_COMMANDS, generic, scanIo, withSlashGuard, withStatCache } from './factory.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { makeTree } from '../../../core/object_store/readdir.ts'
 import { makeStat } from '../../../core/object_store/stat.ts'
@@ -203,113 +192,5 @@ describe('scanIo', () => {
     const [scan, scoped] = scanIo(io, judged, '/s3/')
     expect(scan).not.toBe(io)
     expect(scoped).toBe(true)
-  })
-})
-
-describe('a command stat after the freshness probe', () => {
-  const path = new PathSpec({ vfsPath: 'a.txt', virtual: '/s3/a.txt', directory: '/s3/' })
-  const backend = new FileStat({ name: 'a.txt', size: 7, type: FileType.FILE })
-  const probed = new FileStat({ name: 'a.txt', size: 9, type: FileType.FILE })
-
-  function counting(answer: FileStat): { calls: number; ops: CommandIO } {
-    const counter = { calls: 0, ops: makeOps() }
-    counter.ops = withStatCache(
-      withProbeAnswers(
-        makeOps({
-          stat: () => {
-            counter.calls += 1
-            return Promise.resolve(answer)
-          },
-        }),
-      ),
-    )
-    return counter
-  }
-
-  // The freshness probe already asked the backend this command; asking again
-  // resolves through a listing fresh has not re-checked yet.
-  it('serves what the probe saw', async () => {
-    const stat = counting(backend)
-    const manager = new CacheManager(new RAMFileCacheStore(), null, '/s3/', true)
-    const served = await runWithCacheManager(manager, () =>
-      runInCommandScope(() => {
-        manager.noteProbed(path, probed)
-        return stat.ops.stat(new FakeAccessor(), path)
-      }),
-    )
-    expect(served).toBe(probed)
-    expect(stat.calls).toBe(0)
-  })
-
-  it('reaches the backend after a write in the same command', async () => {
-    const stat = counting(backend)
-    const manager = new CacheManager(new RAMFileCacheStore(), null, '/s3/', true)
-    const served = await runWithCacheManager(manager, () =>
-      runInCommandScope(async () => {
-        manager.noteProbed(path, probed)
-        await manager.invalidateAfterWrite(path)
-        return stat.ops.stat(new FakeAccessor(), path)
-      }),
-    )
-    expect(served).toBe(backend)
-    expect(stat.calls).toBe(1)
-  })
-
-  // gdrive-native docs report no size; the rendered length is in the file
-  // cache, and serving the probe's answer must not skip that backfill.
-  it('still fills the size from the cached render', async () => {
-    const stat = counting(backend)
-    const cache = new RAMFileCacheStore()
-    await cache.set('/s3/a.txt', new TextEncoder().encode('rendered!!'))
-    const manager = new CacheManager(cache, null, '/s3/', true)
-    const served = await runWithCacheManager(manager, () =>
-      runInCommandScope(() => {
-        manager.noteProbed(path, new FileStat({ name: 'a.txt', size: null, type: FileType.FILE }))
-        return stat.ops.stat(new FakeAccessor(), path)
-      }),
-    )
-    expect([served.size, stat.calls]).toEqual([10, 0])
-  })
-})
-
-// dify binds `ls` to a cheaper stat than its op table's. The probe's answer is
-// the op table's stat, so serving it there would change what a warm `ls -l`
-// prints under fresh only.
-describe('a command with its own stat', () => {
-  it('never serves the probe', async () => {
-    const calls = { table: 0, light: 0 }
-    const file = (size: number): FileStat =>
-      new FileStat({ name: 'a.txt', size, type: FileType.FILE, content: ContentType.TEXT })
-    const base = makeOps({
-      stat: () => {
-        calls.table += 1
-        return Promise.resolve(file(7))
-      },
-    })
-    const ls = generic('ls', {
-      vfs: 's3',
-      table: (io) => ({
-        ...io,
-        stat: () => {
-          calls.light += 1
-          return Promise.resolve(file(1))
-        },
-      }),
-    })
-    const run = async (name: string): Promise<string> => {
-      const command = name === 'ls' ? ls : generic(name)
-      const opts = { stdin: null, flags: {}, cwd: '/mnt', io: base }
-      const out = await command.fn(new FakeAccessor(), [spec('/a.txt')], [], opts)
-      return new TextDecoder().decode(await materialize(out?.[0] ?? null))
-    }
-    const manager = new CacheManager(new RAMFileCacheStore(), null, '/mnt/', true)
-    await runWithCacheManager(manager, () =>
-      runInCommandScope(async () => {
-        manager.noteProbed(spec('/a.txt'), file(9))
-        await run('ls')
-        await run('stat')
-      }),
-    )
-    expect(calls).toEqual({ table: 0, light: 1 })
   })
 })

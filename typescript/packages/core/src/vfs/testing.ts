@@ -81,7 +81,7 @@ export async function checkReadContract(
   )
   const parent = await vfs.stat(fixture.directory, store)
   check(parent.type === FileType.DIRECTORY, 'parent must stat as a directory')
-  const children = await vfs.readdir(fixture.directory, store)
+  const children = (await vfs.readdir(fixture.directory, store)) as string[]
   check(children.includes(fixture.file.virtual), 'readdir must include the child virtual path')
   const stored =
     render !== undefined && vfs.supports('read') ? await vfs.read(fixture.file, store) : data

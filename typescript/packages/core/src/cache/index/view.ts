@@ -18,6 +18,7 @@ import {
   LookupStatus,
   type Evicted,
   type IndexEntry,
+  type IndexRow,
   type IndexSnapshot,
   type ListResult,
   type LookupResult,
@@ -186,16 +187,22 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
-  put(path: string, entry: IndexEntry): Promise<void> {
+  put(path: string, entry: IndexRow): Promise<void> {
     return this.fence(async () => {
       if (this.owns(path)) await this.inner.put(path, entry)
+    })
+  }
+
+  addEntry(path: string, entry: IndexRow): Promise<void> {
+    return this.fence(async () => {
+      if (this.owns(path)) await this.inner.addEntry(path, entry)
     })
   }
 
   override replaceIfUnchanged(
     path: string,
     predecessor: string,
-    entry: IndexEntry,
+    entry: IndexRow,
   ): Promise<boolean> {
     return this.fence(() =>
       this.owns(path)
@@ -206,7 +213,7 @@ export class IndexView extends IndexCacheStore {
 
   setDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt?: Date | null,
     options: SetDirOptions = {},
   ): Promise<Evicted[]> {
@@ -226,7 +233,7 @@ export class IndexView extends IndexCacheStore {
 
   override setPartialDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt?: Date | null,
   ): Promise<void> {
     return this.storeDir(path, entries, expiredAt, true, false).then(() => undefined)
@@ -234,7 +241,7 @@ export class IndexView extends IndexCacheStore {
 
   private storeDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, IndexRow][],
     expiredAt: Date | null | undefined,
     partial: boolean,
     window: boolean,

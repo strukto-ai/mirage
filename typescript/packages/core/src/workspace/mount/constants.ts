@@ -42,3 +42,8 @@ export const CUSTOM_ENDPOINT_CONDITIONS: readonly WriteKind[] = WRITE_CONDITIONS
 
 /** The domains AWS serves S3 from: the commercial partitions and China. */
 export const AWS_DOMAINS: readonly string[] = ['amazonaws.com', 'amazonaws.com.cn']
+
+// What a backend function may be handed, each filled from the mount's stored
+// listings: the stat of what is at its path and at its path's parent, and the
+// same two at a rename's or a copy's destination. Mirrors Python's `HANDED`.
+export const HANDED = Object.freeze(['entry', 'parent', 'dstEntry', 'dstParent'] as const)

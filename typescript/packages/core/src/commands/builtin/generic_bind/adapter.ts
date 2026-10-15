@@ -15,6 +15,7 @@
 import {
   Effect,
   Target,
+  type Handed,
   type ReadBytesOp,
   type ResolveGlobOp,
   type SearchQuery,
@@ -46,7 +47,14 @@ import { moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { SessionAccess, StatOverlay } from '../../../view/types.ts'
 
-import { FileStat, FileType, PathSpec, type SetAttrFields, type WalkProbe } from '../../../types.ts'
+import {
+  DirListing,
+  FileStat,
+  FileType,
+  PathSpec,
+  type SetAttrFields,
+  type WalkProbe,
+} from '../../../types.ts'
 import {
   eacces,
   eisdir,
@@ -104,6 +112,31 @@ function withoutAccessor<T extends unknown[], R>(
   return (_accessor, ...args) => method(...args)
 }
 
+// What a command's index becomes on its way to a VFS function: nothing, for a
+// VFS whose listings the dispatcher keeps, which is handed no stats here,
+// with no mount to find them in.
+function indexFor(
+  vfs: BaseVFS,
+  index: IndexCacheStore | undefined,
+): IndexCacheStore | Handed | undefined {
+  return vfs.listsStats ? {} : index
+}
+
+// A VFS's listing as the paths a command walks. A VFS that answers its
+// children's stats is listed bare, with no mount to keep them: each stat names
+// a child of `path`. Mirrors Python's `_listed_paths`.
+async function listedPaths(
+  vfs: BaseVFS,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<string[]> {
+  const listed = await vfs.readdir(path, indexFor(vfs, index))
+  if (!vfs.listsStats) return listed as string[]
+  const rows = listed instanceof DirListing ? listed.entries : (listed as readonly FileStat[])
+  const base = rstripSlash((path.pattern !== null ? path.dir : path).virtual)
+  return rows.map((row) => `${base}/${row.name}`)
+}
+
 async function existsByStat(vfs: BaseVFS, path: PathSpec): Promise<boolean> {
   try {
     await vfs.stat(path)
@@ -133,10 +166,10 @@ function reader(
     const renderer = vfs.supports('read')
       ? undefined
       : vfs.renderers[getExtension(path.virtual) ?? '']
-    if (renderer === undefined) return vfs.read(path, index, offset, size)
+    if (renderer === undefined) return vfs.read(path, indexFor(vfs, index), offset, size)
     const render = (vfs as unknown as Record<string, typeof vfs.read>)[renderer]
     if (render === undefined) throw new TypeError(`${vfs.name}: no renderer named ${renderer}`)
-    return render.call(vfs, path, index, offset, size)
+    return render.call(vfs, path, indexFor(vfs, index), offset, size)
   }
 }
 
@@ -155,11 +188,17 @@ export function commandIo(vfs: BaseVFS): CommandIO {
   const readBytes: ReadBytesOp = (_accessor, path, index) => read(path, index)
   const streams = has('readStream')
   return {
-    readdir: withoutAccessor((path: PathSpec, index?: IndexCacheStore) => vfs.readdir(path, index)),
+    readdir: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
+      listedPaths(vfs, path, index),
+    ),
     readBytes,
-    stat: withoutAccessor((path: PathSpec, index?: IndexCacheStore) => vfs.stat(path, index)),
+    stat: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
+      vfs.stat(path, indexFor(vfs, index)),
+    ),
     readStream: streams
-      ? withoutAccessor((path: PathSpec, index?: IndexCacheStore) => vfs.readStream(path, index))
+      ? withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
+          vfs.readStream(path, indexFor(vfs, index)),
+        )
       : (a, p, i) => streamFromBytes(readBytes, a, p, i),
     ...(vfs.readsRanges
       ? {
@@ -176,31 +215,69 @@ export function commandIo(vfs: BaseVFS): CommandIO {
       ? withoutAccessor((path: PathSpec) => vfs.exists(path))
       : (_a: Accessor, path: PathSpec) => existsByStat(vfs, path),
     ...(has('write')
-      ? { write: withoutAccessor((p: PathSpec, d: Uint8Array) => vfs.write(p, d)) }
+      ? {
+          write: withoutAccessor(async (p: PathSpec, d: Uint8Array) => {
+            await vfs.write(p, d)
+          }),
+        }
       : {}),
     ...(has('append')
-      ? { append: withoutAccessor((p: PathSpec, d: Uint8Array) => vfs.append(p, d)) }
+      ? {
+          append: withoutAccessor(async (p: PathSpec, d: Uint8Array) => {
+            await vfs.append(p, d)
+          }),
+        }
       : {}),
     ...(has('pwrite')
-      ? { pwrite: withoutAccessor((p: PathSpec, d: Uint8Array, o: number) => vfs.pwrite(p, d, o)) }
+      ? {
+          pwrite: withoutAccessor(async (p: PathSpec, d: Uint8Array, o: number) => {
+            await vfs.pwrite(p, d, o)
+          }),
+        }
       : {}),
-    ...(has('create') ? { create: withoutAccessor((p: PathSpec) => vfs.create(p)) } : {}),
+    ...(has('create')
+      ? {
+          create: withoutAccessor(async (p: PathSpec) => {
+            await vfs.create(p)
+          }),
+        }
+      : {}),
     ...(has('mkdir')
-      ? { mkdir: withoutAccessor((p: PathSpec, parents?: boolean) => vfs.mkdir(p, parents)) }
+      ? {
+          mkdir: withoutAccessor(async (p: PathSpec, parents?: boolean) => {
+            await vfs.mkdir(p, parents)
+          }),
+        }
       : {}),
     ...(has('unlink') ? { unlink: withoutAccessor((p: PathSpec) => vfs.unlink(p)) } : {}),
     ...(has('rmdir')
-      ? { rmdir: withoutAccessor((p: PathSpec, index?: IndexCacheStore) => vfs.rmdir(p, index)) }
+      ? {
+          rmdir: withoutAccessor((p: PathSpec, index?: IndexCacheStore) =>
+            vfs.rmdir(p, indexFor(vfs, index)),
+          ),
+        }
       : {}),
     ...(has('rmR') ? { rmR: withoutAccessor((p: PathSpec) => vfs.rmR(p)) } : {}),
     ...(has('rename')
-      ? { rename: withoutAccessor((src: PathSpec, dst: PathSpec) => vfs.rename(src, dst)) }
+      ? {
+          rename: withoutAccessor(async (src: PathSpec, dst: PathSpec) => {
+            await vfs.rename(src, dst)
+          }),
+        }
       : {}),
     ...(has('copy')
-      ? { copy: withoutAccessor((src: PathSpec, dst: PathSpec) => vfs.copy(src, dst)) }
+      ? {
+          copy: withoutAccessor(async (src: PathSpec, dst: PathSpec) => {
+            await vfs.copy(src, dst)
+          }),
+        }
       : {}),
     ...(has('dirCopy')
-      ? { dirCopy: withoutAccessor((src: PathSpec, dst: PathSpec) => vfs.dirCopy(src, dst)) }
+      ? {
+          dirCopy: withoutAccessor(async (src: PathSpec, dst: PathSpec) => {
+            await vfs.dirCopy(src, dst)
+          }),
+        }
       : {}),
     ...(has('truncate')
       ? {

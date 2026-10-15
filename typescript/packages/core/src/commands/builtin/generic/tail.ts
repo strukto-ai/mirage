@@ -33,11 +33,10 @@ import {
   type TailCounts,
 } from '../tail_counts.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
-import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { enoent, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { splitOpened } from '../utils/operands.ts'
-import { dispatchStat } from '../utils/paths.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
@@ -176,6 +175,17 @@ async function catchUp(
   const data =
     whole !== null ? whole.slice(start) : await window(stream, readRange, p, start, length - start)
   return [data, start + data.byteLength]
+}
+
+/**
+ * A follow poll's stat: what the backend holds now, at the dispatcher, past the
+ * mount's index and past the stat the command's freshness probe kept: the poll
+ * looks for exactly the change neither has yet. Mirrors Python's `_polled_stat`.
+ */
+async function polledStat(dispatch: DispatchFn, p: PathSpec): Promise<FileStat> {
+  const [found] = await dispatch('stat', p, [], { fresh: true })
+  if (found === null || found === undefined) throw enoent(p)
+  return found as FileStat
 }
 
 /**
@@ -726,7 +736,7 @@ export async function tailGeneric(
         ? { stream: first, stat, readRange }
         : {
             stream: (p: PathSpec) => polledFile(dispatch, p),
-            stat: dispatchStat(dispatch),
+            stat: (p: PathSpec) => polledStat(dispatch, p),
             readRange: (p: PathSpec, offset: number, size: number) =>
               polledWindow(dispatch, p, offset, size),
           }

@@ -42,3 +42,8 @@ CUSTOM_ENDPOINT_CONDITIONS: frozenset[WriteKind] = WRITE_CONDITIONS["minio"]
 
 # The domains AWS serves S3 from: the commercial partitions and China.
 AWS_DOMAINS = ("amazonaws.com", "amazonaws.com.cn")
+
+# What a backend function may declare to be handed, each filled from the
+# mount's stored listings: the stat of what is at its path and at its
+# path's parent, and the same two at a rename's or a copy's destination.
+HANDED = frozenset({"entry", "parent", "dst_entry", "dst_parent"})

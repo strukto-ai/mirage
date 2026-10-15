@@ -12,17 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import bisect
 import json
 from datetime import datetime, timedelta, timezone
 
 from mirage.cache.index.config import (
     Evicted,
-    IndexEntry,
+    IndexRow,
     ListResult,
     LookupResult,
     LookupStatus,
-    is_file_kind,
-    is_folder_kind,
+    row_is_file,
+    row_is_folder,
+    stamped,
 )
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.lock import KeyLockMixin
@@ -36,7 +38,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     def __init__(self, ttl: float = 600) -> None:
         super().__init__()
         self._ttl = ttl
-        self._entries: dict[str, IndexEntry] = {}
+        self._entries: dict[str, IndexRow] = {}
         self._children: dict[str, list[str]] = {}
         self._expiry: dict[str, datetime] = {}
         self._partial: set[str] = set()
@@ -45,7 +47,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
     def seed(
         self,
-        entries: dict[str, IndexEntry],
+        entries: dict[str, IndexRow],
         children: dict[str, list[str]],
         expires_at: datetime,
         *,
@@ -53,14 +55,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     ) -> None:
         now_iso = to_iso_z(datetime.now(timezone.utc))
         self._entries.update(
-            {
-                path: (
-                    entry
-                    if entry.index_time
-                    else entry.model_copy(update={"index_time": now_iso})
-                )
-                for path, entry in entries.items()
-            }
+            {path: stamped(entry, now_iso) for path, entry in entries.items()}
         )
         self._children.update(
             {path: list(keys) for path, keys in children.items()}
@@ -76,7 +71,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         else:
             self._versions[vfs_path] = version
 
-    async def entries(self) -> dict[str, IndexEntry]:
+    async def entries(self) -> dict[str, IndexRow]:
         return dict(self._entries)
 
     @property
@@ -89,16 +84,29 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             return LookupResult(status=LookupStatus.NOT_FOUND)
         return LookupResult(entry=entry)
 
-    async def put(self, vfs_path: str, entry: IndexEntry) -> None:
+    async def put(self, vfs_path: str, entry: IndexRow) -> None:
         async with self._lock_for(vfs_path):
-            if not entry.index_time:
-                entry = entry.model_copy(
-                    update={"index_time": to_iso_z(datetime.now(timezone.utc))}
-                )
-            self._entries[vfs_path] = entry
+            self._entries[vfs_path] = stamped(
+                entry, to_iso_z(datetime.now(timezone.utc))
+            )
+
+    async def add_entry(self, vfs_path: str, entry: IndexRow) -> None:
+        folder = vfs_path.rsplit("/", 1)[0] or "/"
+        async with self._lock_for(folder):
+            now = datetime.now(timezone.utc)
+            self._entries[vfs_path] = stamped(entry, to_iso_z(now))
+            children = self._children.get(folder)
+            exp = self._expiry.get(folder)
+            if children is None or exp is None or now >= exp:
+                self._children[folder] = [vfs_path]
+                self._expiry[folder] = now + timedelta(seconds=self._ttl)
+                self._partial.add(folder)
+                self._versions.pop(folder, None)
+            elif vfs_path not in children:
+                bisect.insort(children, vfs_path)
 
     async def replace_if_unchanged(
-        self, vfs_path: str, predecessor: str, entry: IndexEntry
+        self, vfs_path: str, predecessor: str, entry: IndexRow
     ) -> bool:
         async with self._lock_for(vfs_path):
             current = self._entries.get(vfs_path)
@@ -106,11 +114,9 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 predecessor
             ):
                 return False
-            if not entry.index_time:
-                entry = entry.model_copy(
-                    update={"index_time": to_iso_z(datetime.now(timezone.utc))}
-                )
-            self._entries[vfs_path] = entry
+            self._entries[vfs_path] = stamped(
+                entry, to_iso_z(datetime.now(timezone.utc))
+            )
             return True
 
     async def list_dir(self, vfs_path: str) -> ListResult:
@@ -128,7 +134,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexEntry]],
+        entries: list[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -148,7 +154,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     async def set_partial_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexEntry]],
+        entries: list[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
     ) -> None:
         await self._set_dir(
@@ -158,7 +164,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     async def _set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexEntry]],
+        entries: list[tuple[str, IndexRow]],
         expired_at: datetime | None,
         *,
         partial: bool,
@@ -171,12 +177,10 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             exp = expired_at or (now + timedelta(seconds=self._ttl))
             now_iso = to_iso_z(now)
             prefix = "/" if vfs_path == "/" else vfs_path + "/"
-            rows: dict[str, IndexEntry] = {}
-            for name, entry in entries:
-                full_path = prefix + name
-                if not entry.index_time:
-                    entry = entry.model_copy(update={"index_time": now_iso})
-                rows[full_path] = entry
+            rows: dict[str, IndexRow] = {
+                prefix + name: stamped(entry, now_iso)
+                for name, entry in entries
+            }
             child_keys = list(rows)
             # What the last full knowledge named: the current listing, plus a
             # tombstone an invalidation left (a partial since then cannot
@@ -199,7 +203,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                     if (
                         key not in rows
                         or (
-                            is_file_kind(rows[key].resource_type)
+                            row_is_file(rows[key])
                             and (
                                 buried.get(key, False)
                                 or key in self._children
@@ -240,7 +244,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         folder = (
             buried_folder
             or key in self._children
-            or (entry is not None and is_folder_kind(entry.resource_type))
+            or (entry is not None and row_is_folder(entry))
         )
         if folder:
             self._drop_prefix(key, excluded=excluded)
@@ -291,7 +295,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
     def _is_folder(self, key: str) -> bool:
         entry = self._entries.get(key)
-        return entry is not None and is_folder_kind(entry.resource_type)
+        return entry is not None and row_is_folder(entry)
 
     def _drop_prefix(
         self,
@@ -363,7 +367,7 @@ class ListingCheckStore(RAMIndexCacheStore):
         self._hints = hints
         self.hinted_rows: dict[str, str] = {}
 
-    async def hint(self, vfs_path: str) -> IndexEntry | None:
+    async def hint(self, vfs_path: str) -> IndexRow | None:
         """Offer the mount row as a lead the backend must confirm live.
 
         Args:

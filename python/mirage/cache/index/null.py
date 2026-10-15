@@ -16,7 +16,7 @@ from datetime import datetime
 
 from mirage.cache.index.config import (
     Evicted,
-    IndexEntry,
+    IndexRow,
     ListResult,
     LookupResult,
     LookupStatus,
@@ -44,7 +44,7 @@ class NullIndexCacheStore(IndexCacheStore):
 
     def seed(
         self,
-        entries: dict[str, IndexEntry],
+        entries: dict[str, IndexRow],
         children: dict[str, list[str]],
         expires_at: datetime,
         *,
@@ -52,7 +52,10 @@ class NullIndexCacheStore(IndexCacheStore):
     ) -> None:
         return None
 
-    async def put(self, vfs_path: str, entry: IndexEntry) -> None:
+    async def put(self, vfs_path: str, entry: IndexRow) -> None:
+        return None
+
+    async def add_entry(self, vfs_path: str, entry: IndexRow) -> None:
         return None
 
     async def list_dir(self, vfs_path: str) -> ListResult:
@@ -61,7 +64,7 @@ class NullIndexCacheStore(IndexCacheStore):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexEntry]],
+        entries: list[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -70,7 +73,7 @@ class NullIndexCacheStore(IndexCacheStore):
     ) -> list[Evicted]:
         return []
 
-    async def entries(self) -> dict[str, IndexEntry]:
+    async def entries(self) -> dict[str, IndexRow]:
         return {}
 
     async def invalidate_entry(self, vfs_path: str) -> None:

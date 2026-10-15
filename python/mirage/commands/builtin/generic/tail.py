@@ -15,7 +15,6 @@ from mirage.commands.builtin.tail_counts import (
 )
 from mirage.commands.builtin.utils.constants import STDIN_HEADER_NAME
 from mirage.commands.builtin.utils.operands import operands_io, split_opened
-from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     operand_label,
@@ -32,7 +31,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import enoent, fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cooperative import chunks
@@ -41,6 +40,7 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import (
+    FileStat,
     FileType,
     PathSpec,
     PolymorphicReadFn,
@@ -442,6 +442,23 @@ def _read_last(
         return read(path) if data is None else data
 
     return read_last
+
+
+async def _polled_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
+    """A follow poll's stat: what the backend holds now, at the dispatcher.
+
+    Past the mount's index and past the stat the command's freshness
+    probe kept: the poll looks for exactly the change neither has yet.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        path (PathSpec): the followed file.
+    """
+    found: FileStat | None
+    found, _ = await dispatch("stat", path, fresh=True)
+    if found is None:
+        raise enoent(path)
+    return found
 
 
 async def _polled_window(
@@ -934,7 +951,7 @@ async def tail_generic(
             # they look for exactly the change neither has yet.
             poll_stat, poll_read, poll_range = stat, stream, read_range
             if opts.dispatch is not None:
-                poll_stat = functools.partial(dispatch_stat, opts.dispatch)
+                poll_stat = functools.partial(_polled_stat, opts.dispatch)
                 poll_read = functools.partial(_polled_file, opts.dispatch)
                 poll_range = functools.partial(_polled_window, opts.dispatch)
             return _follow(

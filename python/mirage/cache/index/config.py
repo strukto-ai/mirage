@@ -14,11 +14,12 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from mirage.cache.index.constants import DEFAULT_KEY_PREFIX
+from mirage.types import FileStat, FileType
 
 
 class ResourceType(str, Enum):
@@ -80,6 +81,45 @@ class IndexEntry(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
+# What the index holds at a path: a backend's stat of it, or the older
+# row a backend that has not moved to stats still writes.
+IndexRow: TypeAlias = IndexEntry | FileStat
+
+
+def row_is_folder(row: IndexRow) -> bool:
+    """Whether an index row names a folder.
+
+    Args:
+        row (IndexRow): the row.
+    """
+    if isinstance(row, FileStat):
+        return row.type is FileType.DIRECTORY
+    return is_folder_kind(row.resource_type)
+
+
+def row_is_file(row: IndexRow) -> bool:
+    """Whether an index row names a file.
+
+    Args:
+        row (IndexRow): the row.
+    """
+    if isinstance(row, FileStat):
+        return row.type is not FileType.DIRECTORY
+    return is_file_kind(row.resource_type)
+
+
+def stamped(row: IndexRow, now_iso: str) -> IndexRow:
+    """``row`` with the time it was indexed, when it carries one.
+
+    Args:
+        row (IndexRow): the row.
+        now_iso (str): the time to stamp.
+    """
+    if isinstance(row, FileStat) or row.index_time:
+        return row
+    return row.model_copy(update={"index_time": now_iso})
+
+
 @dataclass(frozen=True, slots=True)
 class IndexSnapshot:
     """Entry rows and directory children from one refill.
@@ -87,7 +127,7 @@ class IndexSnapshot:
     ``version`` is the backend's version the rows were read at, or None.
     """
 
-    entries: dict[str, IndexEntry]
+    entries: dict[str, IndexRow]
     children: dict[str, list[str]]
     version: str | None = None
 
@@ -105,7 +145,7 @@ class Evicted:
 
 
 class LookupResult(BaseModel):
-    entry: IndexEntry | None = None
+    entry: IndexRow | None = None
     status: LookupStatus | None = None
 
 

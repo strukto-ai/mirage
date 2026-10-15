@@ -1138,7 +1138,7 @@ async function mirrorDirs(
 // with no channel the refusal propagates rather than leave a silent gap.
 export async function cpWalk(
   readdir: ReaddirFn,
-  stat: StatFn,
+  stat: StatFn<[path: PathSpec, index?: IndexCacheStore]>,
   root: PathSpec,
   index?: IndexCacheStore,
   cmdName = 'cp',

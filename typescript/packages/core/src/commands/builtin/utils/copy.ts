@@ -102,7 +102,7 @@ export async function pathExists(stat: StatFn, path: PathSpec): Promise<boolean>
 }
 
 export async function isDirectory(
-  stat: StatFn,
+  stat: StatFn<[path: PathSpec, index?: IndexCacheStore]>,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<boolean> {

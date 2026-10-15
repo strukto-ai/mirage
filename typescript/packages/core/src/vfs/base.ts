@@ -17,13 +17,13 @@ import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { Command } from '../commands/config.ts'
 import { enotsup } from '../errors/fs.ts'
 import type { ByteSource } from '../io/types.ts'
-import type { CapacityResult, FileStat, PathSpec, SetAttrFields } from '../types.ts'
+import type { CapacityResult, DirListing, FileStat, PathSpec, SetAttrFields } from '../types.ts'
 import { CapacityState, ListingVersion } from '../types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../watch/base.ts'
 import { methodName, vfsCall } from './call.ts'
 import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
-import { Effect, type SearchQuery, Target } from './types.ts'
+import { Effect, type Handed, type SearchQuery, Target } from './types.ts'
 
 /**
  * The two keys the snapshot machinery reads out of a VFS's state.
@@ -215,6 +215,21 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * Mirrors Python's `BaseVFS.listing_version`.
    */
   readonly listingVersion: ListingVersion = ListingVersion.NONE
+
+  /**
+   * The stats each of this VFS's functions is handed, by method name: a
+   * function named here gets a `Handed` holding each stat it lists, found
+   * in the mount's stored listings, where it takes its index otherwise.
+   * Python reads the same off each function's parameters.
+   */
+  readonly handed: Readonly<Partial<Record<string, readonly (keyof Handed)[]>>> = {}
+
+  /**
+   * Whether `readdir` answers stats for the mount to keep, rather than
+   * keeping its own listings in the index it takes. Python reads it off
+   * `readdir` taking no index.
+   */
+  readonly listsStats: boolean = false
   /**
    * The version every listing of this mount is pinned at, when its ref names
    * a commit outright (github's full-sha ref; see `pinOf` in
@@ -312,7 +327,10 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** List the children of a directory. */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
-  readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
+  readdir(
+    path: PathSpec,
+    _index?: IndexCacheStore | Handed,
+  ): Promise<string[] | readonly FileStat[] | DirListing> {
     return Promise.reject(enotsup(this.name, 'readdir', path))
   }
 
@@ -324,7 +342,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
   read(
     path: PathSpec,
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
     _offset = 0,
     _size: number | null = null,
     _signal?: AbortSignal,
@@ -334,7 +352,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** Describe a path; rejects with ENOENT when nothing is there. */
   @vfsCall({ effect: Effect.METADATA })
-  stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+  stat(path: PathSpec, _index?: IndexCacheStore | Handed): Promise<FileStat> {
     return Promise.reject(enotsup(this.name, 'stat', path))
   }
 
@@ -344,7 +362,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readStream(
     path: PathSpec,
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
     _signal?: AbortSignal,
   ): AsyncIterable<Uint8Array> {
     throw enotsup(this.name, 'readStream', path)
@@ -368,7 +386,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * `max_read_rows`).
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  firstLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<Uint8Array | null> {
+  firstLines(
+    path: PathSpec,
+    _n: number,
+    _index?: IndexCacheStore | Handed,
+  ): Promise<Uint8Array | null> {
     return Promise.reject(enotsup(this.name, 'firstLines', path))
   }
 
@@ -383,7 +405,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * when the answer passes a ceiling on one read).
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  lastLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<Uint8Array | null> {
+  lastLines(
+    path: PathSpec,
+    _n: number,
+    _index?: IndexCacheStore | Handed,
+  ): Promise<Uint8Array | null> {
     return Promise.reject(enotsup(this.name, 'lastLines', path))
   }
 
@@ -396,7 +422,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * file's read error otherwise.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  lineCount(path: PathSpec, _index?: IndexCacheStore): Promise<number | null> {
+  lineCount(path: PathSpec, _index?: IndexCacheStore | Handed): Promise<number | null> {
     return Promise.reject(enotsup(this.name, 'lineCount', path))
   }
 
@@ -414,7 +440,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * with the file's read error otherwise.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  checksum(path: PathSpec, _algorithm: string, _index?: IndexCacheStore): Promise<string | null> {
+  checksum(
+    path: PathSpec,
+    _algorithm: string,
+    _index?: IndexCacheStore | Handed,
+  ): Promise<string | null> {
     return Promise.reject(enotsup(this.name, 'checksum', path))
   }
 
@@ -438,7 +468,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     path: PathSpec,
     _n: number,
     _interval: number,
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
   ): Promise<AsyncIterable<Uint8Array> | null> {
     return Promise.reject(enotsup(this.name, 'follow', path))
   }
@@ -457,13 +487,21 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * `read_tree`.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
-  readTree(path: PathSpec, _index?: IndexCacheStore): Promise<Map<string, FileStat> | null> {
+  readTree(
+    path: PathSpec,
+    _index?: IndexCacheStore | Handed,
+  ): Promise<Map<string, FileStat> | null> {
     return Promise.reject(enotsup(this.name, 'readTree', path))
   }
 
   /** Replace a file's bytes, creating it when missing. */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
-  write(path: PathSpec, _data: Uint8Array, _signal?: AbortSignal): Promise<void> {
+  write(
+    path: PathSpec,
+    _data: Uint8Array,
+    _signal?: AbortSignal,
+    _handed?: Handed,
+  ): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'write', path))
   }
 
@@ -476,9 +514,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
   append(
     path: PathSpec,
     _data: Uint8Array,
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
     _signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'append', path))
   }
 
@@ -493,27 +531,27 @@ export class BaseVFS<A extends Accessor = Accessor> {
     path: PathSpec,
     _data: Uint8Array,
     _offset: number,
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
     _signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'pwrite', path))
   }
 
   /** Create an empty file, leaving an existing one as it is. */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
-  create(path: PathSpec): Promise<void> {
+  create(path: PathSpec, _handed?: Handed): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'create', path))
   }
 
   /** Make a directory; `parents` makes missing parents too, as `mkdir -p`. */
   @vfsCall({ effect: Effect.CREATE, target: Target.DIR })
-  mkdir(path: PathSpec, _parents = false): Promise<void> {
+  mkdir(path: PathSpec, _parents = false, _handed?: Handed): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'mkdir', path))
   }
 
   /** Remove a file. */
   @vfsCall({ effect: Effect.REMOVE, target: Target.FILE })
-  unlink(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  unlink(path: PathSpec, _index?: IndexCacheStore | Handed): Promise<void> {
     return Promise.reject(enotsup(this.name, 'unlink', path))
   }
 
@@ -522,25 +560,25 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * rmdir's hidden-remnant walk lists through.
    */
   @vfsCall({ effect: Effect.REMOVE, target: Target.DIR })
-  rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  rmdir(path: PathSpec, _index?: IndexCacheStore | Handed): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rmdir', path))
   }
 
   /** Remove a subtree in one call instead of entry by entry. */
   @vfsCall({ effect: Effect.REMOVE, target: Target.DIR, subtree: true })
-  rmR(path: PathSpec): Promise<void> {
+  rmR(path: PathSpec, _handed?: Handed): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rmR', path))
   }
 
   /** Move a name within this VFS. */
   @vfsCall({ effect: Effect.RENAME, subtree: true })
-  rename(src: PathSpec, _dst: PathSpec): Promise<void> {
+  rename(src: PathSpec, _dst: PathSpec, _handed?: Handed): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'rename', src))
   }
 
   /** Copy a file within this VFS without moving its bytes through mirage. */
   @vfsCall({ effect: Effect.COPY, target: Target.FILE })
-  copy(_src: PathSpec, dst: PathSpec, _signal?: AbortSignal): Promise<void> {
+  copy(_src: PathSpec, dst: PathSpec, _signal?: AbortSignal, _handed?: Handed): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'copy', dst))
   }
 
@@ -562,7 +600,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   @vfsCall({ effect: Effect.COPY, target: Target.DIR, subtree: true })
-  dirCopy(_src: PathSpec, dst: PathSpec): Promise<void> {
+  dirCopy(_src: PathSpec, dst: PathSpec, _handed?: Handed): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'dirCopy', dst))
   }
 
@@ -572,7 +610,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * that atomically rejects with ENOTSUP before writing.
    */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
-  truncate(path: PathSpec, _length: number, _noCreate = false): Promise<void> {
+  truncate(path: PathSpec, _length: number, _noCreate = false, _handed?: Handed): Promise<void> {
     return Promise.reject(enotsup(this.name, 'truncate', path))
   }
 
@@ -597,7 +635,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   search(
     path: PathSpec,
     _query: SearchQuery,
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
   ): Promise<[string, string][] | null> {
     return Promise.reject(enotsup(this.name, 'search', path))
   }
@@ -606,7 +644,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   searchMany(
     paths: PathSpec[],
     _query: SearchQuery,
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
   ): Promise<[string, string][] | null> {
     return Promise.reject(enotsup(this.name, 'search', paths[0] ?? ''))
   }
@@ -656,7 +694,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _path: PathSpec,
     _text: string,
     _opts: { wholeWord: boolean; ignoreCase: boolean },
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
   ): Promise<PathSpec[] | null> {
     return Promise.resolve(null)
   }
@@ -684,7 +722,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _path: PathSpec,
     _text: string,
     _opts: { ignoreCase: boolean },
-    _index?: IndexCacheStore,
+    _index?: IndexCacheStore | Handed,
   ): Promise<ByteSource | null> {
     return Promise.resolve(null)
   }
@@ -703,7 +741,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * @param index the mount's index.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
-  beforeFullScan(_path: PathSpec, _files: number | null, _index?: IndexCacheStore): Promise<void> {
+  beforeFullScan(
+    _path: PathSpec,
+    _files: number | null,
+    _index?: IndexCacheStore | Handed,
+  ): Promise<void> {
     return Promise.resolve()
   }
 

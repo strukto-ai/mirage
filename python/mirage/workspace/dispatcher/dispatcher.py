@@ -774,6 +774,25 @@ class _Call:
         return mount.renders(filetype)
 
 
+def _probed(call: _Call, mount: MountEntry) -> FileStat | None:
+    """What the freshness probe of the running command got from the
+    backend for a stat's path, None when it asked nothing.
+
+    Under ``read: fresh`` the probe already asked the backend about the
+    command's operand; asking again resolves through listings the command
+    has not re-checked. A stat that asks for what the backend holds now
+    (``fresh``) is the probe's own question, so it is asked.
+
+    Args:
+        call (_Call): the admitted op.
+        mount (MountEntry): the mount serving its path.
+    """
+    manager = mount.cache_manager
+    if call.name != "stat" or call.fresh or manager is None:
+        return None
+    return manager.probed_stat(call.path)
+
+
 class Dispatcher:
     """Route a single VFS op to its mount and keep the file cache + index
     consistent.
@@ -1101,7 +1120,9 @@ class Dispatcher:
             raise
         result = self._filter(call, ran)
         if settles:
-            await self._settle_write(mount, name, call.path, kwargs, call.vis)
+            await self._settle_write(
+                mount, name, call.path, kwargs, call.vis, created=ran
+            )
         result = await boundary.complete(mark, call.path, call.write, result)
         return result, IOResult()
 
@@ -1596,7 +1617,12 @@ class Dispatcher:
                 )
                 raise
             await self._settle_write(
-                other, "copy", call.path, {"dst": dst}, call.vis
+                other,
+                "copy",
+                call.path,
+                {"dst": dst},
+                call.vis,
+                created=None,
             )
 
     async def _refuse_cross_mount(
@@ -1890,8 +1916,13 @@ class Dispatcher:
                     kwargs["files"] = await self._visible_files(mount, call)
                 if call.fresh:
                     kwargs["index"] = ListingCheckStore(hints=mount.index)
-                result = await mount.call(
-                    call.name, call.path.virtual, **kwargs
+                probed = _probed(call, mount)
+                result = (
+                    probed
+                    if probed is not None
+                    else await mount.call(
+                        call.name, call.path.virtual, **kwargs
+                    )
                 )
                 if call.name == "stat":
                     result = await _sized(mount, call.path, result)
@@ -2052,7 +2083,7 @@ class Dispatcher:
                 scope.close()
             _served(call.report, result)
             await self._settle_write(
-                mount, call.name, call.path, kwargs, call.vis
+                mount, call.name, call.path, kwargs, call.vis, created=result
             )
             await self._keep_written(call, mount, mine, before)
         return result
@@ -2268,12 +2299,17 @@ class Dispatcher:
         path: PathSpec,
         kwargs: dict[str, Any],
         vis: Visibility | None,
+        created: Any = None,
     ) -> None:
         """What a write changes beside the store: the caches above the
         path, and the node table's links and attributes at its names.
 
         A copy reads its path, so only its ``dst`` changes: the copy is
-        a new file there, or a new tree.
+        a new file there, or a new tree. A create that answers its new
+        entry's stat has it kept where its parent's listing names it, in
+        place of dropping that listing for a re-list: the create is the
+        one change to it, and the next level of a nested create finds
+        its parent there.
 
         Args:
             mount (MountEntry): the mount the write ran on.
@@ -2282,14 +2318,17 @@ class Dispatcher:
             kwargs (dict[str, Any]): the op's kwargs; a rename's or a
                 copy's ``dst`` is the moved or copied name.
             vis (Visibility | None): the writer's view.
+            created (Any): what the op answered; a ``FileStat`` is the
+                stat of the entry it created or replaced.
         """
         opened = _appends_nothing(name, kwargs)
         observed = (
             time.time() if name in STAMP_WRITE_OPS and not opened else None
         )
+        row = created if isinstance(created, FileStat) else None
         dst = kwargs.get("dst") if name in DESTINATION_OPS else None
         if name in COPY_OPS and isinstance(dst, PathSpec):
-            await self.invalidate_after_write(mount, dst)
+            await self.invalidate_after_write(mount, dst, created=row)
             if name == "dir_copy":
                 await self._settle_tree_copy(mount, path, dst)
             return
@@ -2301,6 +2340,7 @@ class Dispatcher:
             observed=observed,
             times=not opened and name != "rename",
             removed=name in ("unlink", "rmdir", "rm_r"),
+            created=None if name == "rename" else row,
         )
         for _, other in _operands(name, kwargs):
             await self.invalidate_after_write(mount, other)
@@ -2333,6 +2373,8 @@ class Dispatcher:
                 await self._namespace.purge_under(path.virtual, keep=arrived)
         if name == "rename" and isinstance(kwargs.get("dst"), PathSpec):
             await self.invalidate_after_rename(mount, path, kwargs["dst"])
+            if row is not None:
+                await self._keep_created(mount, kwargs["dst"], row)
             # rename(2) replaces the destination, so a node the
             # table holds at that name does not survive the move.
             # A link left there shadowed the file that had just
@@ -3302,6 +3344,7 @@ class Dispatcher:
         observed: float | None = None,
         times: bool = True,
         removed: bool = False,
+        created: FileStat | None = None,
     ) -> None:
         """Drop what a write to ``path`` made stale above the store.
 
@@ -3314,6 +3357,9 @@ class Dispatcher:
                 False for an open that wrote nothing.
             removed (bool): the write removed ``path`` (unlink, rmdir),
                 so its own listing goes too, as a core's removal drops it.
+            created (FileStat | None): the stat of what the write made at
+                ``path``, kept in its parent's listing instead of
+                dropping that listing; None to drop it.
         """
         for owner, name in self._aliases(mount, path):
             if times:
@@ -3323,9 +3369,25 @@ class Dispatcher:
             manager = self._manager_for(owner)
             if removed:
                 await manager.invalidate_after_unlink(name)
+            elif created is not None:
+                await manager.keep_created(name, created)
             else:
                 await manager.invalidate_after_write(name)
             await manager.invalidate_ancestors(name)
+
+    async def _keep_created(
+        self, mount: MountEntry, path: PathSpec, row: FileStat
+    ) -> None:
+        """Keep a moved entry's stat where its new parent's listing names
+        it, under every mount of its store.
+
+        Args:
+            mount (MountEntry): the mount the move ran on.
+            path (PathSpec): where the entry landed.
+            row (FileStat): its stat there.
+        """
+        for owner, name in self._aliases(mount, path):
+            await self._manager_for(owner).keep_created(name, row)
 
     async def _invalidate_tree(
         self, mount: MountEntry, path: PathSpec

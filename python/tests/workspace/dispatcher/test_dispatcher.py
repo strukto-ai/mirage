@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.cache.index.scope import command_scope
 from mirage.context import (
     Caller,
     current_caller,
@@ -162,6 +163,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     mount.renders = MagicMock(return_value=False)
     mount.writes = MagicMock(return_value=False)
     mount.call = AsyncMock(return_value=b"cold")
+    mount.cache_manager = None
     namespace.try_mount_for = MagicMock(return_value=mount)
     namespace.registry.policies = policies
     cache = MagicMock()
@@ -959,11 +961,9 @@ async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
     recorded: list[str] = []
     real = Dispatcher.invalidate_after_write
 
-    async def spy(self, mount, path, observed=None, times=True, removed=False):
+    async def spy(self, mount, path, **kwargs):
         recorded.append(path.virtual)
-        await real(
-            self, mount, path, observed=observed, times=times, removed=removed
-        )
+        await real(self, mount, path, **kwargs)
 
     monkeypatch.setattr(Dispatcher, "invalidate_after_write", spy)
     token = set_current_session(sess)
@@ -2183,6 +2183,25 @@ async def test_a_stat_names_the_device_of_the_mount_serving_it():
         "read_tree", PathSpec.from_str_path("/base"), nofollow=True
     )
     assert {row.dev for row in tree.values()} == {ident("/base/")}
+
+
+@pytest.mark.asyncio
+async def test_a_stat_after_the_commands_probe_is_the_probes_answer():
+    # Under read: fresh the probe already asked the backend about the
+    # command's operand. The stat after it is that answer, stamped as any
+    # stat is; a write in the command sends the next one to the backend.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo hello > /data/a.txt")
+    spec = PathSpec.from_str_path("/data/a.txt")
+    manager = ws.namespace.mount_for("/data/a.txt").cache_manager
+    probed = FileStat(name="a.txt", size=9, type=FileType.FILE)
+    async with command_scope():
+        manager.note_probed(spec, probed)
+        row, _ = await ws.dispatch("stat", spec)
+        assert (row.size, row.dev) == (9, ident("/data/"))
+        await ws.dispatch("write", spec, data=b"hi")
+        row, _ = await ws.dispatch("stat", spec)
+        assert row.size == 2
 
 
 class _LostReply(Tape):

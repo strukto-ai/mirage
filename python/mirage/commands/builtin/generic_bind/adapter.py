@@ -14,6 +14,7 @@
 
 import asyncio
 import functools
+import inspect
 import logging
 from collections.abc import (
     AsyncIterator,
@@ -59,7 +60,7 @@ from mirage.io.stream import close_quietly, ensure_stream, materialize
 from mirage.observe.context import revision_for
 from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec, WalkProbe
+from mirage.types import DirListing, FileStat, FileType, PathSpec, WalkProbe
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import move_reveals, path_visible
 from mirage.utils.path import norm, parent
@@ -280,16 +281,49 @@ def _without_accessor(method: Callable[..., Any]) -> OperationFn:
     """``method`` callable the way a command calls a slot.
 
     Commands still pass an accessor in front of every call; the VFS
-    holds its own, so it is dropped here.
+    holds its own, so it is dropped here. So is the index a command
+    passes after the path, for a function that keeps no index of its
+    own: the dispatcher keeps its listings.
 
     Args:
         method (Callable[..., Any]): a bound VFS function.
     """
+    params = inspect.signature(method).parameters
+    keeps = "index" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
 
     def call(accessor: Accessor, *args: Any, **kwargs: Any) -> Any:
+        if not keeps:
+            kwargs.pop("index", None)
+            if len(args) > 1 and isinstance(args[1], IndexCacheStore):
+                args = (args[0], *args[2:])
         return method(*args, **kwargs)
 
     return call
+
+
+async def _listed_paths(
+    vfs: BaseVFS, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+) -> list[str]:
+    """A VFS's listing as the paths a command walks.
+
+    A VFS that answers its children's stats is listed bare, with no
+    dispatcher to keep them: each stat names a child of ``path``.
+
+    Args:
+        vfs (BaseVFS): the VFS.
+        path (PathSpec): the directory.
+        index (IndexCacheStore): the command's index, for a VFS that
+            keeps its own listings.
+    """
+    readdir: Callable[..., Awaitable[Any]] = vfs.readdir
+    if "index" in inspect.signature(readdir).parameters:
+        return list(await readdir(path, index=index))
+    listed = await readdir(path)
+    rows = listed.entries if isinstance(listed, DirListing) else listed
+    base = (path.dir if path.pattern else path).virtual.rstrip("/")
+    return [f"{base}/{row.name}" for row in rows]
 
 
 async def _exists_by_stat(
@@ -334,11 +368,13 @@ def _reader(vfs: BaseVFS) -> Callable[..., Awaitable[bytes]]:
             if vfs.supports("read")
             else vfs.renderers.get(get_extension(path.virtual) or "")
         )
-        if renderer is None:
-            return await vfs.read(path, index, offset, size)
-        rendered: bytes = await getattr(vfs, renderer)(
-            path, index, offset, size
+        fn = vfs.read if renderer is None else getattr(vfs, renderer)
+        kept = (
+            {"index": index}
+            if "index" in inspect.signature(fn).parameters
+            else {}
         )
+        rendered: bytes = await fn(path, offset=offset, size=size, **kept)
         return rendered
 
     return read
@@ -367,8 +403,8 @@ def command_io(vfs: BaseVFS) -> CommandIO:
         # A VFS holds no link, so a listing's ``nofollow`` (the
         # dispatcher's to honor) has nothing here to stop at.
         readdir=_without_accessor(
-            lambda path, index=NULL_INDEX, nofollow=False: vfs.readdir(
-                path, index=index
+            lambda path, index=NULL_INDEX, nofollow=False: _listed_paths(
+                vfs, path, index
             )
         ),
         read_bytes=read_bytes,

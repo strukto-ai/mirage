@@ -79,7 +79,7 @@ export function descendantPath(root: PathSpec, virtual: string): PathSpec {
 // isMissingPath stays ENOENT-only so read-family commands keep reporting
 // "Not a directory" verbatim.
 export async function entryKind(
-  stat: StatFn,
+  stat: StatFn<[path: PathSpec, index?: IndexCacheStore]>,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<{ exists: boolean; isDir: boolean }> {
