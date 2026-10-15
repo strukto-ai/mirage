@@ -328,7 +328,7 @@ export class SedMachine {
       throw this.broken
     }
     if (this.reader === undefined) return false
-    const start = this.reader.loaded
+    const start = this.reader.position
     let raw: Uint8Array, chomped: boolean
     try {
       ;[raw, chomped] = await this.reader.readUntil(10, this.signal)

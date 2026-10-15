@@ -4914,7 +4914,8 @@
               "files": {
                 "/denied": "first,x\nsecond,y\n",
                 "/good": "good,x\n",
-                "/half": "firstabc,more\n"
+                "/half": "firstabc,more\n",
+                "/buffered": "one\ntail,more\n"
               },
               "chunk_size": 8,
               "fail_after": 1,
@@ -5025,6 +5026,17 @@
           }
         },
         {
+          "op": "exec",
+          "command": "sed -n '$p' /data/buffered",
+          "expect": {
+            "value": {
+              "exit_code": 4,
+              "stdout": "",
+              "stderr": "sed: read error on /data/buffered: Permission denied\n"
+            }
+          }
+        },
+        {
           "op": "drain_processes"
         },
         {
@@ -5032,7 +5044,7 @@
           "path": "/data",
           "expect": {
             "value": {
-              "closed": 10
+              "closed": 11
             }
           }
         },

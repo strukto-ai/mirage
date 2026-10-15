@@ -443,7 +443,7 @@ class SedMachine:
             raise self._broken
         if self._reader is None:
             return False
-        start = self._reader.loaded
+        start = self._reader.position
         try:
             raw, chomped = await self._reader.read_until(b"\n")
         except FS_ERRORS as exc:
