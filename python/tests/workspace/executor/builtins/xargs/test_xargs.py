@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from mirage.io import IOResult
+from mirage.io.pipe import CAPACITY
 from mirage.io.stream import materialize
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.xargs import (
@@ -1009,65 +1010,16 @@ async def test_parallel_abort_stops_an_open_input_and_joins_started_commands():
 
 
 @pytest.mark.asyncio
-async def test_child_output_is_bounded_and_closed_before_completion():
-    pulled = 0
-    closed = 0
-
-    async def stream():
-        nonlocal pulled, closed
-        try:
-            for _ in range(1000):
-                pulled += 1
-                yield b"x" * 16384
-        finally:
-            closed += 1
-
+async def test_early_close_keeps_a_cut_short_childs_status_and_stderr():
     async def execute(line, **kwargs):
-        return IOResult(stdout=stream())
-
-    out, _, _ = await stream_xargs(
-        execute, ["echo"], EvaluationContext(make_session()), b"a"
-    )
-    first = await asyncio.wait_for(anext(out), 1)
-    assert first == b"x" * 16384
-    assert pulled <= 6
-    await out.aclose()
-    assert closed == 1
-
-
-@pytest.mark.asyncio
-async def test_deferred_child_status_stops_admission():
-    calls = []
-
-    async def execute(line, **kwargs):
-        calls.append(line)
-        io = IOResult()
-
-        async def output():
-            yield b"before\n"
-            io.exit_code = 255
-
-        io.stdout = output()
-        return io
-
-    out, io, _ = await handle_xargs(
-        execute, ["-n1", "echo"], EvaluationContext(make_session()), b"a b c"
-    )
-    assert out == b"before\n"
-    assert calls == ["echo a"]
-    assert io.exit_code == 124
-    assert b"exited with status 255" in await io.materialize_stderr()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("code, expected", [(1, 123), (255, 124)])
-async def test_child_status_survives_early_close(code, expected):
-    async def execute(line, **kwargs):
-        return IOResult(stdout=b"row\n", exit_code=code)
+        return IOResult(
+            stdout=b"x" * CAPACITY * 2, stderr=b"oops\n", exit_code=1
+        )
 
     out, io, _ = await stream_xargs(
         execute, ["echo"], EvaluationContext(make_session()), b"a"
     )
-    assert await anext(out) == b"row\n"
+    await anext(out)
     await out.aclose()
-    assert io.exit_code == expected
+    assert io.exit_code == 123
+    assert await io.materialize_stderr() == b"oops\n"

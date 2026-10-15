@@ -13,8 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import re
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generator,
+)
 from contextlib import aclosing
 from typing import Any
 
@@ -40,6 +47,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks
+from mirage.io.errors import PipeClosed
 from mirage.io.stream import SharedStdin, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -51,11 +59,14 @@ from mirage.utils.quote import shell_quote
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.script import read_script_bytes
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.executor.jobs import pump
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import env_snapshot
 from mirage.workspace.types import ExecutionNode
+
+logger = logging.getLogger(__name__)
 
 _SYNOPSIS = "xargs [OPTION]... COMMAND [INITIAL-ARGS]..."
 _PROCS_MAX = 2147483647
@@ -549,14 +560,24 @@ def xargs_missing(name: str) -> str:
 
 
 async def _drain_child(
-    io: IOResult, output: IOResult, pipe: PipeConsole
+    child: Awaitable[IOResult], output: IOResult, pipe: PipeConsole
 ) -> None:
-    async with aclosing(chunks(io.stdout or b"")) as source:
-        async for chunk in source:
-            await pipe.emit(Channel.STDOUT, chunk)
-    await pipe.emit(Channel.STDERR, await io.materialize_stderr())
-    output.stderr = await pipe.snapshot(Channel.STDERR)
-    output.exit_code = io.exit_code
+    """Run one command into its pipe, keeping its stderr and status when
+    cut short; one cut short before answering died of SIGPIPE.
+
+    Args:
+        child (Awaitable[IOResult]): the command's evaluation.
+        output (IOResult): the run's result.
+        pipe (PipeConsole): where the command writes.
+    """
+    io: IOResult | None = None
+    try:
+        io = await child
+        await pump(pipe, Channel.STDERR, io.stderr)
+        await pump(pipe, Channel.STDOUT, io.stdout)
+    finally:
+        output.stderr = await pipe.snapshot(Channel.STDERR)
+        output.exit_code = 141 if io is None else io.exit_code
 
 
 async def _run_lines(
@@ -569,6 +590,7 @@ async def _run_lines(
     slot_var: str | None = None,
     registry: MountRegistry | None = None,
     stdin: ByteSource | None = None,
+    torn: list[IOResult],
 ) -> AsyncGenerator[tuple[list[IOResult], int | None], None]:
     """Run the builder's command lines as they arrive, at most ``procs`` at
     a time.
@@ -595,6 +617,8 @@ async def _run_lines(
         registry (MountRegistry | None): where a command name is looked
             up; None runs every name.
         stdin (ByteSource | None): input shared by all commands (-a).
+        torn (list[IOResult]): filled at teardown with the runs still
+            going, for the caller to record.
     """
     session = context.session
     stop: int | None = None
@@ -603,24 +627,19 @@ async def _run_lines(
     taken: set[int] = set()
     feed = SharedStdin(stdin) if stdin is not None else b""
 
-    active: set[asyncio.Task[None]] = set()
-    pipes: set[PipeConsole] = set()
+    active: dict[asyncio.Task[None], tuple[IOResult, PipeConsole]] = {}
 
     async def run(
         words: list[str], output: IOResult, pipe: PipeConsole
     ) -> None:
         line = shell_join(words)
-        extra = {"stdin": feed, "sink": pipe}
-        io: IOResult
+        extra = {"session_id": session.session_id, "stdin": feed, "sink": pipe}
         # xargs execs its command, so a builtin that is also a program
         # answers as the program.
         if not forked:
             marked = set_program_invocation(session)
             try:
-                io = await execute_fn(
-                    line, session_id=session.session_id, **extra
-                )
-                await _drain_child(io, output, pipe)
+                await _drain_child(execute_fn(line, **extra), output, pipe)
             finally:
                 reset_program_invocation(marked)
             return
@@ -633,8 +652,7 @@ async def _run_lines(
         token = set_current_evaluation(child_evaluation)
         marked = set_program_invocation(child)
         try:
-            io = await execute_fn(line, session_id=session.session_id, **extra)
-            await _drain_child(io, output, pipe)
+            await _drain_child(execute_fn(line, **extra), output, pipe)
         finally:
             reset_program_invocation(marked)
             reset_current_session(token)
@@ -642,11 +660,11 @@ async def _run_lines(
 
     async def invoke(
         event: str | list[bytes],
-    ) -> tuple[list[IOResult], asyncio.Task[None] | None, PipeConsole | None]:
+    ) -> tuple[list[IOResult], asyncio.Task[None] | None]:
         nonlocal stop
         results: list[IOResult] = []
         if isinstance(event, str):
-            return [IOResult(stderr=encode_text(event))], None, None
+            return [IOResult(stderr=encode_text(event))], None
         words = [decode_text(word) for word in event]
         if trace:
             results.append(IOResult(stderr=encode_text(_trace(event))))
@@ -659,9 +677,8 @@ async def _run_lines(
             )
             stop = 127
             stopping.set()
-            return results, None, None
+            return results, None
         pipe = PipeConsole()
-        pipes.add(pipe)
         io = IOResult(stdout=pipe.stream())
         results.append(io)
 
@@ -685,8 +702,8 @@ async def _run_lines(
                 pipe.end()
 
         task = asyncio.create_task(produce())
-        active.add(task)
-        return results, task, pipe
+        active[task] = io, pipe
+        return results, task
 
     async def admitted() -> AsyncIterator[str | list[bytes]]:
         stopped = asyncio.create_task(stopping.wait())
@@ -715,22 +732,23 @@ async def _run_lines(
 
     mapped = bounded_map_stream(admitted(), invoke, procs)
     try:
-        async for results, task, pipe in mapped:
+        async for results, task in mapped:
             yield results, stop
             if task is not None:
                 await task
-                active.remove(task)
-            if pipe is not None:
-                pipes.remove(pipe)
-            if stop is not None:
-                yield [], stop
+                del active[task]
     finally:
         await mapped.aclose()
-        for pipe in pipes:
+        for _, pipe in active.values():
             pipe.close_reader()
         for task in active:
             task.cancel()
-        await asyncio.gather(*active, return_exceptions=True)
+        for outcome in await asyncio.gather(*active, return_exceptions=True):
+            if isinstance(outcome, Exception) and not isinstance(
+                outcome, PipeClosed
+            ):
+                logger.debug("xargs command raised at teardown: %r", outcome)
+        torn.extend(io for io, _ in active.values())
         await events.aclose()
 
 
@@ -962,7 +980,7 @@ async def handle_xargs(
     async def output() -> AsyncIterator[bytes]:
         stop = None
         failed = False
-        pending: IOResult | None = None
+        torn: list[IOResult] = []
 
         async def record(io: IOResult) -> None:
             nonlocal failed, stop
@@ -981,20 +999,19 @@ async def handle_xargs(
             slot_var=slot_var,
             registry=registry,
             stdin=child_stdin,
+            torn=torn,
         )
         try:
             async for ios, stop in results:
                 for io in ios:
-                    pending = io
                     async with aclosing(chunks(io.stdout or b"")) as source:
                         async for chunk in source:
                             yield chunk
                     await record(io)
-                    pending = None
         finally:
             await results.aclose()
-            if pending is not None:
-                await record(pending)
+            for io in torn:
+                await record(io)
             # A reader that stops early still sees the runs it reached.
             if stop is not None:
                 merged.exit_code = stop

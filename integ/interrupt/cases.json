@@ -62,6 +62,12 @@
       "exit_code": 0
     },
     {
+      "id": "xargs-close-keeps-stderr",
+      "command": "{ printf x | xargs sh -c 'echo oops >&2; seq 100000; exit 1' sh | head -n1; echo ${PIPESTATUS[1]}; } 2>/xargs-err; cat /xargs-err",
+      "stdout": "1\n123\noops\n",
+      "exit_code": 0
+    },
+    {
       "id": "xargs-parallel",
       "command": "seq inf | xargs -P2 -n1 echo | head -n1",
       "stdout": "1\n",

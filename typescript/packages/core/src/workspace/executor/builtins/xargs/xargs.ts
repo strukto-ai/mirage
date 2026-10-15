@@ -16,6 +16,8 @@ import { mergeSignals } from '../../../../utils/abort.ts'
 import { chunks } from '../../../../io/cooperative.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import { Channel } from '../../../../shell/console/types.ts'
+import { pump } from '../../jobs.ts'
+import { PipeClosed } from '../../../../io/errors.ts'
 import { boundedMapStream } from '../../../../concurrency/limiter.ts'
 import type { EvaluationContext } from '../../../evaluation.ts'
 
@@ -526,19 +528,28 @@ interface RunOptions {
   slotVar?: string | null
   registry?: MountRegistry | null
   stdin?: ByteSource | null
+  /** Filled at teardown with the runs still going, for the caller to record. */
+  torn: IOResult[]
 }
 
+/**
+ * Run one command into its pipe, keeping its stderr and status when cut
+ * short; one cut short before answering died of SIGPIPE.
+ */
 async function drainChild(
-  io: IOResult,
+  child: Promise<IOResult>,
   output: IOResult,
   pipe: PipeConsole,
-  signal: AbortSignal,
 ): Promise<void> {
-  for await (const chunk of chunks(io.stdout ?? new Uint8Array(), signal))
-    await pipe.emit(Channel.STDOUT, chunk)
-  await pipe.emit(Channel.STDERR, await io.materializeStderr())
-  output.stderr = await pipe.snapshot(Channel.STDERR)
-  output.exitCode = io.exitCode
+  let io: IOResult | undefined
+  try {
+    io = await child
+    await pump(pipe, Channel.STDERR, io.stderr)
+    await pump(pipe, Channel.STDOUT, io.stdout)
+  } finally {
+    output.stderr = await pipe.snapshot(Channel.STDERR)
+    output.exitCode = io === undefined ? 141 : io.exitCode
+  }
 }
 
 /**
@@ -560,7 +571,7 @@ async function* runLines(
   events: (signal: AbortSignal) => AsyncGenerator<XargsEvent>,
   context: EvaluationContext,
   procs: number,
-  opts: RunOptions = {},
+  opts: RunOptions,
 ): AsyncGenerator<[IOResult[], number | null]> {
   const session = context.session
   const slotVar = opts.slotVar ?? null
@@ -574,9 +585,7 @@ async function* runLines(
   const stdin = opts.stdin == null ? new Uint8Array() : new SharedStdin(opts.stdin)
   // xargs execs its command, so a builtin that is also a program answers
   // as the program.
-  const active = new Set<Promise<void>>()
-  const pipes = new Set<PipeConsole>()
-  const controller = new AbortController()
+  const active = new Map<Promise<unknown>, [IOResult, PipeConsole]>()
   const run = async (
     words: string[],
     output: IOResult,
@@ -585,16 +594,13 @@ async function* runLines(
   ): Promise<void> => {
     const line = shellJoin(words)
     if (!forked) {
-      await runAsProgram(session, async () => {
-        const io = await executeFn(line, {
-          sessionId: session.sessionId,
-          context,
-          stdin,
-          signal,
-          sink: pipe,
-        })
-        await drainChild(io, output, pipe, signal)
-      })
+      await runAsProgram(session, () =>
+        drainChild(
+          executeFn(line, { sessionId: session.sessionId, context, stdin, signal, sink: pipe }),
+          output,
+          pipe,
+        ),
+      )
       return
     }
     let slot = 0
@@ -606,19 +612,22 @@ async function* runLines(
       child.vars = { ...child.vars, ...varsFromEnv({ [slotVar]: String(slot) }) }
     }
     try {
-      await runWithEvaluation(childEvaluation, async () => {
-        await runAsProgram(child, async () => {
-          const io = await executeFn(line, {
-            sessionId: child.sessionId,
-            context: childEvaluation,
-            session: child,
-            stdin,
-            signal,
-            sink: pipe,
-          })
-          await drainChild(io, output, pipe, signal)
-        })
-      })
+      await runWithEvaluation(childEvaluation, () =>
+        runAsProgram(child, () =>
+          drainChild(
+            executeFn(line, {
+              sessionId: child.sessionId,
+              context: childEvaluation,
+              session: child,
+              stdin,
+              signal,
+              sink: pipe,
+            }),
+            output,
+            pipe,
+          ),
+        ),
+      )
       return
     } finally {
       taken.delete(slot)
@@ -626,8 +635,7 @@ async function* runLines(
   }
   interface Run {
     results: IOResult[]
-    task?: Promise<void>
-    pipe?: PipeConsole
+    task?: Promise<unknown>
   }
   const invoke = (event: XargsEvent, signal: AbortSignal): Promise<Run> => {
     const slot: IOResult[] = []
@@ -643,12 +651,11 @@ async function* runLines(
       return Promise.resolve({ results: slot })
     }
     const pipe = new PipeConsole()
-    pipes.add(pipe)
     const io = new IOResult({ stdout: pipe.stream() })
     slot.push(io)
-    const task = (async (): Promise<void> => {
+    const task = (async (): Promise<unknown> => {
       try {
-        await run(words, io, pipe, mergeSignals(signal, controller.signal) ?? signal)
+        await run(words, io, pipe, signal)
         if (io.exitCode === 255 && !stopped()) {
           io.stderr = (
             await io.merge(
@@ -663,12 +670,13 @@ async function* runLines(
       } catch (error) {
         stop ??= 1
         pipe.end(error)
+        return error
       } finally {
         pipe.end()
       }
     })()
-    active.add(task)
-    return Promise.resolve({ results: slot, task, pipe })
+    active.set(task, [io, pipe])
+    return Promise.resolve({ results: slot, task })
   }
 
   async function* admitted(signal: AbortSignal): AsyncGenerator<XargsEvent> {
@@ -691,20 +699,22 @@ async function* runLines(
       admitted,
       invoke,
       width,
-      mergeSignals(context.frame.abortSignal, controller.signal) ?? undefined,
+      context.frame.abortSignal ?? undefined,
     )) {
       yield [job.results, stop]
       if (job.task !== undefined) {
         await job.task
         active.delete(job.task)
       }
-      if (job.pipe !== undefined) pipes.delete(job.pipe)
-      if (stopped()) yield [[], stop]
     }
   } finally {
-    controller.abort()
-    for (const pipe of pipes) pipe.closeReader()
-    await Promise.all(active)
+    for (const [, pipe] of active.values()) pipe.closeReader()
+    for (const error of await Promise.all(active.keys())) {
+      if (error === undefined || error instanceof PipeClosed) continue
+      if (!(error instanceof DOMException && error.name === 'AbortError'))
+        console.debug('xargs command raised at teardown:', error)
+    }
+    for (const [io] of active.values()) opts.torn.push(io)
   }
 }
 
@@ -927,7 +937,7 @@ export async function handleXargs(
   async function* output(): AsyncGenerator<Uint8Array> {
     let stopped: number | null = null
     let failed = false
-    let pending: IOResult | null = null
+    const torn: IOResult[] = []
     async function record(io: IOResult): Promise<boolean> {
       if (io.exitCode === 255 && stopped === null) stopped = 124
       merged.stderr = (await merged.merge(new IOResult({ stderr: io.stderr }))).stderr
@@ -939,17 +949,16 @@ export async function handleXargs(
         slotVar,
         registry: options.registry ?? null,
         stdin: childStdin,
+        torn,
       })) {
         stopped = stop
         for (const io of ios) {
-          pending = io
           yield* chunks(io.stdout ?? new Uint8Array())
           failed = (await record(io)) || failed
-          pending = null
         }
       }
     } finally {
-      if (pending !== null) failed = (await record(pending)) || failed
+      for (const io of torn) failed = (await record(io)) || failed
       // A reader that stops early still sees the runs it reached.
       if (stopped !== null) merged.exitCode = stopped
       else if (fatal !== null) {
