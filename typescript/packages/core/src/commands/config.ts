@@ -158,6 +158,9 @@ export interface CommandIO<A extends Accessor = Accessor> {
   globTargetStat?: TargetStat
   // The line's operand resolution, stamped beside globChildren from opts.ns.
   globFollow?: FollowOperands
+  // Told what each glob resolution answers: the operands the dispatched table
+  // warms a command's reads ahead of.
+  globResolved?: (found: PathSpec[]) => void
 }
 
 /**

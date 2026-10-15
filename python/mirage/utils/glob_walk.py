@@ -579,6 +579,7 @@ def make_resolve_glob(
     target_stat: LinkTargetStat | None = None,
     access: SessionAccess | None = None,
     follow: FollowOperands | None = None,
+    resolved: Callable[[list[PathSpec]], None] | None = None,
 ) -> ResolveGlobFn:
     """Build a resolve_glob generic over a backend's readdir.
 
@@ -595,6 +596,9 @@ def make_resolve_glob(
             trailing slash can follow a link the way bash does.
         follow (FollowOperands | None): the line's operand resolution,
             given to a typed word's matches.
+        resolved (Callable[[list[PathSpec]], None] | None): told what
+            each resolution answers, in order: the operands a command's
+            reads are warmed ahead of.
     """
 
     async def resolve_glob(
@@ -603,7 +607,7 @@ def make_resolve_glob(
         /,
         index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec]:
-        return await resolve_glob_with(
+        found = await resolve_glob_with(
             readdir,
             accessor,
             paths,
@@ -615,6 +619,9 @@ def make_resolve_glob(
             access,
             follow,
         )
+        if resolved is not None:
+            resolved(found)
+        return found
 
     return resolve_glob
 

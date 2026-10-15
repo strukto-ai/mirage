@@ -325,19 +325,88 @@ export function boundUncached<T extends unknown[], R>(
 }
 
 /** A command's whole or ranged read of the stored bytes, at the dispatcher. */
+// How many operands a whole read warms ahead of itself (`readAhead`).
+const READ_AHEAD = 8
+
+/**
+ * What a command's whole read of an operand awaits first, and what learns the
+ * operands its globs resolve to.
+ *
+ * A command reads its operands in turn, each whole once the one before is
+ * done. On a whole read of one, the next READ_AHEAD go to the dispatcher as
+ * one `read_many`, which keeps the small files among them in the read cache
+ * (one request where the store reads a batch), and the batch after goes once
+ * half of that one is read. A read whose file is still being warmed waits for
+ * it, so it is served warm instead of fetching the file again. No bytes are
+ * held here: a write in between drops the cached copy as it drops any. A
+ * path that is not an operand warms nothing. Mirrors Python's `read_ahead`.
+ */
+export function readAhead(
+  dispatch: DispatchFn,
+  paths: readonly PathSpec[],
+): [(path: PathSpec) => Promise<void>, (found: PathSpec[]) => void] {
+  const operands: PathSpec[] = []
+  const order = new Map<string, number>()
+  const warming = new Map<string, Promise<void>>()
+  let sent = 1
+  const noted = (found: readonly PathSpec[]): void => {
+    for (const path of found) {
+      if (path.pattern === null && !order.has(path.virtual)) {
+        order.set(path.virtual, operands.length)
+        operands.push(path)
+      }
+    }
+  }
+  const warmed = async (path: PathSpec): Promise<void> => {
+    const at = order.get(path.virtual)
+    if (at === undefined) return
+    const start = Math.max(sent, at + 1)
+    if (start < operands.length && start <= at + READ_AHEAD / 2) {
+      const batch = operands.slice(start, start + READ_AHEAD)
+      sent = start + batch.length
+      const task = warm(dispatch, batch)
+      for (const p of batch) warming.set(p.virtual, task)
+    }
+    await warming.get(path.virtual)
+  }
+  noted(paths)
+  return [warmed, noted]
+}
+
+/**
+ * Ask the dispatcher to keep `paths` in the read cache. A failure is logged
+ * and dropped: each read that follows meets it. Mirrors Python's `_warm`.
+ */
+async function warm(dispatch: DispatchFn, paths: readonly PathSpec[]): Promise<void> {
+  const [first, ...rest] = paths
+  if (first === undefined) return
+  try {
+    await dispatch('read_many', first, [], { paths: rest })
+  } catch (err) {
+    console.debug(`read-ahead from ${first.virtual} failed: ${String(err)}`)
+  }
+}
+
 async function dispatchedBytes(
   dispatch: DispatchFn,
   path: PathSpec,
   offset = 0,
   size: number | null = null,
+  ahead?: (path: PathSpec) => Promise<void>,
 ): Promise<Uint8Array> {
+  if (ahead !== undefined && offset === 0 && size === null) await ahead(path)
   const [data] = await dispatch('read', path, [], { filetype: null, offset, size })
   return materialize(data as ByteSource)
 }
 
 /** A command's streamed read of the stored bytes, at the dispatcher, opened at
  * the first pull as a backend stream is. */
-async function* dispatchedStream(dispatch: DispatchFn, path: PathSpec): AsyncIterable<Uint8Array> {
+async function* dispatchedStream(
+  dispatch: DispatchFn,
+  path: PathSpec,
+  ahead?: (path: PathSpec) => Promise<void>,
+): AsyncIterable<Uint8Array> {
+  if (ahead !== undefined) await ahead(path)
   const [data] = await dispatch('read', path, [], { stream: true, filetype: null })
   yield* ensureStream(data as ByteSource)
 }
@@ -534,7 +603,11 @@ export function dispatchedSlots(
  * dispatcher is where a write is judged and settled. Mirrors Python's
  * `dispatched_io`.
  */
-export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): CommandIO {
+export function dispatchedIo(
+  ops: CommandIO,
+  dispatch: DispatchFn | undefined,
+  paths: readonly PathSpec[] = [],
+): CommandIO {
   if (dispatch === undefined) {
     const refused: CommandIO = { ...ops }
     for (const slot of mutationSlots) {
@@ -544,6 +617,7 @@ export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): 
     }
     return refused
   }
+  const [ahead, noted] = readAhead(dispatch, paths)
   return {
     ...ops,
     ...dispatchedSlots(
@@ -569,8 +643,9 @@ export function dispatchedIo(ops: CommandIO, dispatch: DispatchFn | undefined): 
                 }),
           },
         }),
-    readBytes: (_accessor, path) => dispatchedBytes(dispatch, path),
-    readStream: (_accessor, path) => dispatchedStream(dispatch, path),
+    globResolved: noted,
+    readBytes: (_accessor, path) => dispatchedBytes(dispatch, path, 0, null, ahead),
+    readStream: (_accessor, path) => dispatchedStream(dispatch, path, ahead),
     ...(ops.readRange === undefined
       ? {}
       : {
@@ -594,6 +669,7 @@ export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>):
     ops.globTargetStat,
     ops.access,
     ops.globFollow,
+    ops.globResolved,
   )
 }
 

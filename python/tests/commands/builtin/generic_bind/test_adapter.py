@@ -57,7 +57,9 @@ from mirage.types import (
 )
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.view.types import NamespaceView
+from mirage.workspace import Workspace
 from mirage.workspace.session import SessionState
+from tests.fixtures.vfs_io import BatchedRAM
 
 TREE = {
     "/notion/pages": [
@@ -943,3 +945,16 @@ async def test_file_size_reads_a_path_pinned_to_a_revision():
         assert await bound(PathSpec.from_str_path("/f")) is None
     finally:
         reset_revisions(token)
+
+
+@pytest.mark.asyncio
+async def test_a_glob_read_warms_the_operands_after_it():
+    vfs = BatchedRAM()
+    names = [f"/f{i:02}" for i in range(12)]
+    vfs._store.files.update({name: b"x\n" for name in names})
+    with Workspace({"/r/": vfs}) as ws:
+        out = await ws.shell("cat /r/f*")
+        assert await out.stdout_str() == "x\n" * 12
+    warmed = [f"/r{name}" for name in names[1:]]
+    assert vfs.reads == ["/r/f00"]
+    assert vfs.batches == [warmed[:8], warmed[8:]]

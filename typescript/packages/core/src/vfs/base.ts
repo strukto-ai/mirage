@@ -612,6 +612,22 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
+   * Read several whole files in one request, for a read-ahead. Keyed by each
+   * answered path's `virtual`. A file may be left out (one larger than
+   * `limit` bytes, one the request could not read), and its own read answers
+   * it later; an error of the whole request rejects. Each file read is
+   * recorded as `read` records it, fingerprint included, so the read cache
+   * keeps its token. Mirrors Python's `read_many`.
+   */
+  readMany(
+    paths: PathSpec[],
+    _limit: number,
+    _index?: IndexCacheStore,
+  ): Promise<Map<string, Uint8Array>> {
+    return Promise.reject(enotsup(this.name, 'read', paths[0] ?? ''))
+  }
+
+  /**
    * Files under `path` whose content may contain `text`. grep and rg still
    * walk, filter, order and label every file, and read only the ones answered
    * here, matched on `vfsPath` without case, so an extra file costs a read and

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import dataclasses
 import errno
 import functools
@@ -25,6 +26,7 @@ from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.index.config import is_folder_kind
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
@@ -121,6 +123,7 @@ from mirage.workspace.dispatcher.constants import (
     NATIVE_WALK_OPS,
     NO_FOLLOW_OPS,
     POLICY_WRITE_OPS,
+    READ_AHEAD_BYTES,
     SERIAL_WRITE_OPS,
     SETATTR_KEYS,
     STAMP_WRITE_OPS,
@@ -390,6 +393,40 @@ def _visible_answer(
     if name == "files_containing":
         return [hit for hit in result if path_visible(vis, hit.virtual)]
     return [hit for hit in result if path_visible(vis, hit[0])]
+
+
+async def _fits_read_ahead(
+    mount: MountEntry, path: PathSpec, batched: bool
+) -> bool:
+    """Whether a read-ahead fetches ``path``, asked of the mount's index
+    alone: a file its listing sizes within ``READ_AHEAD_BYTES``, and where
+    the store reads a batch, also a file the listing does not size.
+
+    Args:
+        mount (MountEntry): the mount serving the path.
+        path (PathSpec): the file, as a virtual path.
+        batched (bool): whether the store reads a batch.
+    """
+    entry = (await mount.index.get(path.virtual)).entry
+    if entry is not None and is_folder_kind(entry.resource_type):
+        return False
+    if entry is None or entry.size is None:
+        return batched
+    return entry.size <= READ_AHEAD_BYTES
+
+
+async def _answered(
+    batch: Awaitable[dict[str, bytes]], virtual: str
+) -> bytes | None:
+    """The bytes a batch read answered for ``virtual``, None when it left
+    the file out.
+
+    Args:
+        batch (Awaitable[dict[str, bytes]]): the batch read, shared by
+            every file it was asked for.
+        virtual (str): the file's virtual path.
+    """
+    return (await batch).get(virtual)
 
 
 async def _is_directory(mount: MountEntry, path: PathSpec) -> bool:
@@ -882,6 +919,9 @@ class Dispatcher:
         stream = name == "read" and bool(kwargs.pop("stream", False))
         direct = name == "read" and bool(kwargs.pop("direct", False))
         fresh = name == "stat" and bool(kwargs.pop("fresh", False))
+        if name == "read_many":
+            await self._read_many([path, *kwargs.pop("paths", ())], caller)
+            return None, IOResult()
         scopes = kwargs.pop("scopes", ()) if name == "search" else ()
         if scopes:
             hits = await self._search_together(
@@ -1068,6 +1108,123 @@ class Dispatcher:
                 if path_visible(caller.visibility, hit[0])
             ]
         return await boundary.complete(mark, calls[0].path, False, result)
+
+    async def _read_many(self, typed: list[PathSpec], caller: Caller) -> None:
+        """Keep the small files ``typed`` names in the read cache, for the
+        reads a command is about to make of them; nothing is answered.
+
+        Each read that follows still meets every check of its own and is
+        served what this kept, so nothing is fetched where a check could
+        refuse that read before its backend is asked: nothing in a dry
+        run or while a coded pre_vfs policy speaks for the session (the
+        rule a one-call walk meets in ``_declines``), and no path the
+        session hides or a path rule reaches. A file already kept, one a
+        renderer answers, one pinned to a revision and one on a mount
+        that keeps no reads is passed over. A store that reads a batch
+        (``read_many``) is asked once for the rest of its files; any
+        other is asked for each file its listing sizes within
+        ``READ_AHEAD_BYTES``. A failure is logged and dropped: the read
+        that follows meets it itself.
+
+        Args:
+            typed (list[PathSpec]): the files, as the caller named them.
+            caller (Caller): who makes the reads.
+        """
+        if (
+            caller.explaining is not None
+            or await self._namespace.registry.policies.wants_for(
+                "pre_vfs",
+                _session_id(caller),
+                rules_only=caller.refusals is not None,
+            )
+        ):
+            return
+        await self._prepare(caller)
+        gate = caller.rule_gate
+        batches: dict[
+            str, tuple[MountEntry, CacheManager, list[PathSpec]]
+        ] = {}
+        for path in typed:
+            try:
+                call = await self._walk("read", path, {}, None, None, caller)
+                self._follow(call)
+            except OSError as exc:
+                logger.debug("read-ahead passes over %s: %s", path, exc)
+                continue
+            mount = self._namespace.try_mount_for(call.path.virtual)
+            manager = None if mount is None else self._filler(call, mount)
+            if (
+                mount is None
+                or manager is None
+                or mount.retiring
+                or call.path.virtual in mount.revisions
+                or (
+                    gate is not None
+                    and (
+                        gate.scopes(path.virtual)
+                        or gate.scopes(call.path.virtual)
+                    )
+                )
+            ):
+                continue
+            batches.setdefault(mount.prefix, (mount, manager, []))[2].append(
+                call.path
+            )
+        scope = RecordingScope(active=active_recorder() is None)
+        try:
+            for mount, manager, paths in batches.values():
+                await mount.ensure_ready()
+                batched = mount.vfs.supports("read_many")
+                wanted = [
+                    p
+                    for p in paths
+                    if not await manager.is_cached(p)
+                    and await _fits_read_ahead(mount, p, batched)
+                ]
+                if not wanted:
+                    continue
+                answers: asyncio.Future[dict[str, bytes]] = (
+                    asyncio.get_running_loop().create_future()
+                )
+                fills = [
+                    asyncio.ensure_future(
+                        manager.fill(
+                            p,
+                            functools.partial(_answered, answers, p.virtual)
+                            if batched
+                            else functools.partial(
+                                mount.call, "read", p.virtual
+                            ),
+                        )
+                    )
+                    for p in wanted
+                ]
+                try:
+                    if batched:
+                        # Each fill takes its generation, and the place its
+                        # records start, before the one request goes out: a
+                        # write landing while it runs keeps none of it.
+                        await asyncio.sleep(0)
+                        try:
+                            answers.set_result(
+                                await mount.read_many(
+                                    [p.virtual for p in wanted],
+                                    READ_AHEAD_BYTES,
+                                )
+                            )
+                        except Exception as exc:
+                            answers.set_exception(exc)
+                    for failure in await asyncio.gather(
+                        *fills, return_exceptions=True
+                    ):
+                        if isinstance(failure, BaseException):
+                            logger.debug("read-ahead dropped: %s", failure)
+                finally:
+                    answers.cancel()
+                    for fill in fills:
+                        fill.cancel()
+        finally:
+            scope.close()
 
     async def _prepare(self, caller: Caller) -> None:
         """Load the namespace and run what a snapshot restore left owed.

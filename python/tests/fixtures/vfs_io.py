@@ -17,12 +17,14 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
+from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.config import CommandIO
 from mirage.context import Caller
 from mirage.io import IOResult
 from mirage.types import PathSpec
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount import MountEntry
 
@@ -217,3 +219,37 @@ def dispatched(ws: Workspace) -> list[tuple[str, str]]:
 
     ws._dispatcher._dispatch = recording
     return seen
+
+
+class BatchedRAM(RAMVFS):
+    """A RAM mount that keeps its reads, and reads a batch in one call
+    where ``batched``, counting both."""
+
+    def __init__(self, batched: bool = True) -> None:
+        super().__init__()
+        self.caches_reads = True
+        self.batched = batched
+        self.reads: list[str] = []
+        self.batches: list[list[str]] = []
+        self._store.dirs.update({"/", "/secret"})
+        self._store.files.update(
+            {"/a": b"a\n", "/b": b"b\n", "/secret/c": b"c\n"}
+        )
+
+    def supports(self, name: str) -> bool:
+        return self.batched if name == "read_many" else super().supports(name)
+
+    async def read(self, path, index=NULL_INDEX, offset=0, size=None):
+        self.reads.append(path.virtual)
+        return await super().read(path, index, offset, size)
+
+    def read_stream(self, path, index=NULL_INDEX):
+        self.reads.append(path.virtual)
+        return super().read_stream(path, index)
+
+    async def read_many(self, paths, limit, index=NULL_INDEX):
+        self.batches.append([path.virtual for path in paths])
+        return {
+            path.virtual: self._store.files["/" + path.vfs_path.strip("/")]
+            for path in paths
+        }

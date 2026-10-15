@@ -129,6 +129,12 @@ FILE_CREATE_OPS = call_names(_VFS_CALLS, effects={Effect.WRITE}, creates=True)
 # a trailing slash on it is judged.
 ENTRY_CREATE_OPS = call_names(CALLS, effects={Effect.CREATE})
 
+# The most bytes a read-ahead fetches for one file, as its listing sizes
+# it. A larger file is left to the read that names it, and so is a file
+# the listing does not size, unless its store reads a batch
+# (``read_many``), which leaves out what passes this itself.
+READ_AHEAD_BYTES = 1 << 20
+
 # Ops that create the path they name. A hidden target refuses these
 # through `hidden_refusal` with `create` set: EACCES when the directory
 # the create lands in is visible (a hidden name there reads as a file

@@ -974,7 +974,7 @@ export class MountEntry {
       }
       const keyedPaths = this.keyedPaths(cmdName, paths)
       const probe = walkProbeOf(context)
-      const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context, probe)
+      const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context, probe, keyedPaths)
       return this.inCommandScope(probe, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
           const refusal = this.readOnlyRefusal(cmdName, cmd, flags, context.access)
@@ -1095,6 +1095,7 @@ export class MountEntry {
     flags: Record<string, FlagValue>,
     context: ExecContext,
     probe: WalkProbe | null,
+    paths: readonly PathSpec[],
   ): CommandOpts {
     const io = this.ioFor(context.access)
     return {
@@ -1107,7 +1108,7 @@ export class MountEntry {
       cwd: context.cwd ?? ROOT_CWD,
       index: this.index,
       io: {
-        ...dispatchedIo(io, context.dispatch),
+        ...dispatchedIo(io, context.dispatch, paths),
         ...(context.admission === undefined ? {} : { admission: context.admission }),
         ...(context.access === undefined ? {} : { access: context.access }),
         ...(probe === null ? {} : { walkProbe: probe }),
@@ -1396,6 +1397,32 @@ export class MountEntry {
             }),
           this.mountId,
         ),
+      ),
+    )
+  }
+
+  /**
+   * Read several whole files on this mount in one request, under the mount's
+   * `read` timeout. For the dispatcher's read-ahead, once it has walked and
+   * followed each path; keyed by virtual path, a file left out is read on its
+   * own later. Mirrors Python's `read_many`.
+   */
+  async readMany(paths: readonly string[], limit: number): Promise<Map<string, Uint8Array>> {
+    return this.use(() =>
+      runWithMountContext(
+        () =>
+          this.runWithWriteRevisions(() =>
+            runWithTimeout(
+              this.vfs.readMany(
+                paths.map((p) => this.scope(p)),
+                limit,
+                this.index,
+              ),
+              this.opTimeout('read'),
+              'read',
+            ),
+          ),
+        this.mountId,
       ),
     )
   }

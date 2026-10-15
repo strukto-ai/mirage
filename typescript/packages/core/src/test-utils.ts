@@ -20,6 +20,8 @@ import type { OpKwargs } from './view/types.ts'
 import type { WriteContext } from './cache/types.ts'
 import { type FileStat, MountMode, type PathSpec } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
+import { RAMVFS } from './vfs/ram/ram.ts'
+import { stripSlash } from './utils/slash.ts'
 import type { Accessor } from './accessor/base.ts'
 import { commandIo } from './commands/builtin/generic_bind/adapter.ts'
 import type { CommandIO } from './commands/config.ts'
@@ -261,4 +263,54 @@ export function dispatched(
   const bind = dispatcher.forSession.bind(dispatcher)
   dispatcher.forSession = (session) => watch(bind(session))
   return seen
+}
+
+/**
+ * A RAM mount that keeps its reads, and reads a batch in one call where
+ * `batched`, counting both. Mirrors the Python `BatchedRAM` test fixture.
+ */
+export class BatchedRAM extends RAMVFS {
+  override readonly cachesReads: boolean = true
+  readonly reads: string[] = []
+  readonly batches: string[][] = []
+
+  constructor(readonly batched = true) {
+    super()
+    this.store.dirs.add('/')
+    this.store.dirs.add('/secret')
+    for (const name of ['a', 'b', 'secret/c']) {
+      this.store.files.set(`/${name}`, new TextEncoder().encode(`${name.slice(-1)}\n`))
+    }
+  }
+
+  override supports(name: string): boolean {
+    return name === 'readMany' ? this.batched : super.supports(name)
+  }
+
+  override read(
+    path: PathSpec,
+    index?: IndexCacheStore,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    this.reads.push(path.virtual)
+    return super.read(path, index, offset, size)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    this.reads.push(path.virtual)
+    return super.readStream(path, index)
+  }
+
+  override readMany(paths: PathSpec[]): Promise<Map<string, Uint8Array>> {
+    this.batches.push(paths.map((path) => path.virtual))
+    return Promise.resolve(
+      new Map(
+        paths.map((path) => [
+          path.virtual,
+          this.store.files.get(`/${stripSlash(path.vfsPath)}`) ?? new Uint8Array(),
+        ]),
+      ),
+    )
+  }
 }

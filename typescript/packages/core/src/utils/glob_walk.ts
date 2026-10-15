@@ -598,9 +598,10 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
   targetStat?: TargetStat,
   access?: SessionAccess,
   follow?: FollowOperands,
+  resolved?: (found: PathSpec[]) => void,
 ): ResolveGlobOp<A> {
-  return async (accessor, paths, index) =>
-    resolveGlobWith(
+  return async (accessor, paths, index) => {
+    const found = await resolveGlobWith(
       readdir,
       accessor,
       paths,
@@ -612,6 +613,9 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
       access,
       follow,
     )
+    resolved?.(found)
+    return found
+  }
 }
 
 // The line's operand resolution over a word's matches. A followed name keeps

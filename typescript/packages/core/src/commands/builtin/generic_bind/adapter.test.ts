@@ -43,6 +43,9 @@ import { runWithRevisions } from '../../../observe/context.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { makeResolveGlob } from '../../../utils/glob_walk.ts'
+import { BatchedRAM } from '../../../test-utils.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const accessor = {} as never
 // No namespace facts, which is what a command bound outside a workspace
@@ -950,4 +953,22 @@ describe('fileSize', () => {
     )
     expect(found).toBeNull()
   })
+})
+
+// Twin of test_a_glob_read_warms_the_operands_after_it.
+it('warms the operands after a glob read', async () => {
+  const vfs = new BatchedRAM()
+  const names = Array.from({ length: 12 }, (_, i) => `/f${String(i).padStart(2, '0')}`)
+  for (const name of names) vfs.store.files.set(name, new TextEncoder().encode('x\n'))
+  const parser = await getTestParser()
+  const ws = new Workspace({ '/r': vfs }, { shellParserFactory: () => Promise.resolve(parser) })
+  try {
+    const out = await ws.shell('cat /r/f*')
+    expect(new TextDecoder().decode(out.stdout)).toBe('x\n'.repeat(12))
+  } finally {
+    await ws.close()
+  }
+  const warmed = names.slice(1).map((name) => `/r${name}`)
+  expect(vfs.reads).toEqual(['/r/f00'])
+  expect(vfs.batches).toEqual([warmed.slice(0, 8), warmed.slice(8)])
 })

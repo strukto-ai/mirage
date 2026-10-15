@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import replace
 from typing import cast
 
@@ -21,6 +21,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     dispatched_slots,
+    read_ahead,
 )
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
@@ -51,6 +52,7 @@ def _none_below(path: str) -> list[str]:
 def dispatch_io(
     dispatch: DispatchFn,
     bound: MountView | None = None,
+    paths: Sequence[PathSpec] = (),
 ) -> CommandIO:
     """Bind a generic's IO to workspace operations.
 
@@ -63,7 +65,10 @@ def dispatch_io(
         bound (MountView | None): set for a walk kept on one filesystem
             (``du -x``): a listing then leaves out the roots of the
             mounts below it, which the walk must neither list nor stat.
+        paths (Sequence[PathSpec]): the command's operands, which its
+            whole reads warm ahead of themselves (``read_ahead``).
     """
+    ahead, noted = read_ahead(dispatch, paths)
 
     async def readdir(
         accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
@@ -89,13 +94,14 @@ def dispatch_io(
         info, _ = await dispatch("stat", path)
         if cast(FileStat, info).type == FileType.DIRECTORY:
             raise eisdir(path)
+        await ahead(path)
         data, _ = await dispatch("read", path)
         return await materialize(data) or b""
 
     def read_stream(
         accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
-        return _caller_stream(dispatch, current_caller(), path)
+        return _caller_stream(dispatch, current_caller(), path, ahead)
 
     return CommandIO(
         readdir=readdir,
@@ -103,6 +109,7 @@ def dispatch_io(
         read_bytes=read_bytes,
         read_stream=read_stream,
         is_mounted=_mounted,
+        glob_resolved=noted,
         # No cap of its own: a du walk charges each entry to the mount
         # serving it, at that mount's cap (see WalkBudget).
         max_du_entries=None,
@@ -113,7 +120,10 @@ def dispatch_io(
 
 
 async def _caller_stream(
-    dispatch: DispatchFn, caller: Caller, path: PathSpec
+    dispatch: DispatchFn,
+    caller: Caller,
+    path: PathSpec,
+    ahead: Callable[[PathSpec], Awaitable[None]],
 ) -> AsyncIterator[bytes]:
     """A streamed read that opens as the command that asked for it.
 
@@ -125,12 +135,15 @@ async def _caller_stream(
         dispatch (DispatchFn): policy-checked operation dispatcher.
         caller (Caller): the asking command's caller.
         path (PathSpec): the file.
+        ahead (Callable[[PathSpec], Awaitable[None]]): what the read
+            awaits first (``read_ahead``).
     """
     token = bind_caller(caller)
     try:
         info, _ = await dispatch("stat", path)
         if cast(FileStat, info).type == FileType.DIRECTORY:
             raise eisdir(path)
+        await ahead(path)
         data, _ = await dispatch("read", path, stream=True)
     finally:
         reset_caller(token)
@@ -206,7 +219,9 @@ async def run_dispatch(
     )
     io_ops = replace(
         dispatch_io(
-            dispatch, ns.mounts if ns is not None and bounded else None
+            dispatch,
+            ns.mounts if ns is not None and bounded else None,
+            paths,
         ),
         glob_follow=ns.follow_operands if ns is not None else None,
     )

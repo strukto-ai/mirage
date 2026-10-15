@@ -714,6 +714,27 @@ class BaseVFS:
         """
         raise enotsup(self.name, "search", paths[0] if paths else "")
 
+    async def read_many(
+        self,
+        paths: list[PathSpec],
+        limit: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> dict[str, bytes]:
+        """Read several whole files in one request, for a read-ahead.
+
+        Keyed by each answered path's ``virtual``. A file may be left out
+        (one larger than ``limit`` bytes, one the request could not
+        read), and its own read answers it later; an error of the whole
+        request is raised. Each file read is recorded as ``read`` records
+        it, fingerprint included, so the read cache keeps its token.
+
+        Args:
+            paths (list[PathSpec]): the files, all on this mount.
+            limit (int): the most bytes worth fetching for one file.
+            index (IndexCacheStore): the mount's index.
+        """
+        raise enotsup(self.name, "read", paths[0] if paths else "")
+
     @vfs_call(effect=Effect.READ, target=Target.DIR, subtree=True)
     async def files_containing(
         self,

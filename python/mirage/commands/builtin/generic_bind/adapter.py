@@ -12,9 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import functools
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Sequence,
+)
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, NoReturn, Protocol, overload
@@ -70,6 +77,9 @@ from mirage.view.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# How many operands a whole read warms ahead of itself (``read_ahead``).
+READ_AHEAD = 8
 
 
 class GenericCommandFn(Protocol):
@@ -400,6 +410,75 @@ def command_io(vfs: BaseVFS) -> CommandIO:
     )
 
 
+def read_ahead(
+    dispatch: DispatchFn, paths: Sequence[PathSpec]
+) -> tuple[
+    Callable[[PathSpec], Awaitable[None]], Callable[[list[PathSpec]], None]
+]:
+    """What a command's whole read of an operand awaits first, and what
+    learns the operands its globs resolve to.
+
+    A command reads its operands in turn, each whole once the one before
+    is done. On a whole read of one, the next ``READ_AHEAD`` go to the
+    dispatcher as one ``read_many``, which keeps the small files among
+    them in the read cache (one request where the store reads a batch),
+    and the batch after goes once half of that one is read. A read whose
+    file is still being warmed waits for it, so it is served warm instead
+    of fetching the file again. No bytes are held here: a write in
+    between drops the cached copy as it drops any. A path that is not an
+    operand warms nothing.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        paths (Sequence[PathSpec]): its operands as typed; the names
+            each glob resolves to follow them in the order resolved.
+    """
+    operands: list[PathSpec] = []
+    order: dict[str, int] = {}
+    warming: dict[str, asyncio.Future[None]] = {}
+    sent = 1
+
+    def noted(found: list[PathSpec]) -> None:
+        for path in found:
+            if path.pattern is None and path.virtual not in order:
+                order[path.virtual] = len(operands)
+                operands.append(path)
+
+    async def warmed(path: PathSpec) -> None:
+        nonlocal sent
+        at = order.get(path.virtual)
+        if at is None:
+            return
+        start = max(sent, at + 1)
+        if start < len(operands) and start <= at + READ_AHEAD // 2:
+            batch = operands[start : start + READ_AHEAD]
+            sent = start + len(batch)
+            task = asyncio.ensure_future(_warm(dispatch, batch))
+            for p in batch:
+                warming[p.virtual] = task
+        pending = warming.get(path.virtual)
+        if pending is not None:
+            await asyncio.shield(pending)
+
+    noted(list(paths))
+    return warmed, noted
+
+
+async def _warm(dispatch: DispatchFn, paths: list[PathSpec]) -> None:
+    """Ask the dispatcher to keep ``paths`` in the read cache.
+
+    A failure is logged and dropped: each read that follows meets it.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        paths (list[PathSpec]): the files, at least one.
+    """
+    try:
+        await dispatch("read_many", paths[0], paths=paths[1:])
+    except Exception as exc:
+        logger.debug("read-ahead from %s failed: %s", paths[0], exc)
+
+
 async def _dispatched_bytes(
     dispatch: DispatchFn,
     accessor: Accessor | None,
@@ -407,6 +486,8 @@ async def _dispatched_bytes(
     index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
+    *,
+    ahead: Callable[[PathSpec], Awaitable[None]] | None = None,
 ) -> bytes:
     """A command's whole or ranged read of the stored bytes, at the dispatcher.
 
@@ -417,7 +498,11 @@ async def _dispatched_bytes(
         index (IndexCacheStore): unused; the mount brings its own.
         offset (int): first byte of the window.
         size (int | None): window length, None for the rest.
+        ahead (Callable[[PathSpec], Awaitable[None]] | None): what a
+            whole read awaits first (``read_ahead``).
     """
+    if ahead is not None and (offset, size) == (0, None):
+        await ahead(path)
     data, _ = await dispatch(
         "read", path, filetype=None, offset=offset, size=size
     )
@@ -429,6 +514,8 @@ async def _dispatched_stream(
     accessor: Accessor | None,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
+    *,
+    ahead: Callable[[PathSpec], Awaitable[None]] | None = None,
 ) -> AsyncIterator[bytes]:
     """A command's streamed read of the stored bytes, at the dispatcher.
 
@@ -439,7 +526,11 @@ async def _dispatched_stream(
         accessor (Accessor | None): unused; the dispatcher finds the mount.
         path (PathSpec): the file.
         index (IndexCacheStore): unused; the mount brings its own.
+        ahead (Callable[[PathSpec], Awaitable[None]] | None): what the
+            read awaits first (``read_ahead``).
     """
+    if ahead is not None:
+        await ahead(path)
     data, _ = await dispatch("read", path, stream=True, filetype=None)
     source = ensure_stream(data)
     try:
@@ -574,7 +665,11 @@ def dispatched_slots(
     }
 
 
-def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
+def dispatched_io(
+    ops: CommandIO,
+    dispatch: DispatchFn | None,
+    paths: Sequence[PathSpec] = (),
+) -> CommandIO:
     """Return ``ops`` whose reads, writes and one-call walks go through the
     dispatcher.
 
@@ -592,6 +687,8 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
     Args:
         ops (CommandIO): the mount's table.
         dispatch (DispatchFn | None): the command's dispatcher.
+        paths (Sequence[PathSpec]): the command's operands, which its
+            whole reads warm ahead of themselves (``read_ahead``).
     """
     if dispatch is None:
         refused: dict[str, Any] = {
@@ -602,11 +699,15 @@ def dispatched_io(ops: CommandIO, dispatch: DispatchFn | None) -> CommandIO:
             if getattr(ops, slot) is not None
         }
         return replace(ops, **refused)
-    reader = functools.partial(_dispatched_bytes, dispatch)
+    ahead, noted = read_ahead(dispatch, paths)
+    reader = functools.partial(_dispatched_bytes, dispatch, ahead=ahead)
     return replace(
         ops,
+        glob_resolved=noted,
         read_bytes=reader,
-        read_stream=functools.partial(_dispatched_stream, dispatch),
+        read_stream=functools.partial(
+            _dispatched_stream, dispatch, ahead=ahead
+        ),
         read_range=reader if ops.read_range is not None else None,
         # A walk lists the name it is handed, never a link's target: its
         # own readdir reaches the backend past the namespace, so the

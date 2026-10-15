@@ -20,10 +20,10 @@ import { materialize, OpReport } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
-import { dispatched, render } from '../../test-utils.ts'
+import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { POLICY_WRITE_OPS } from './constants.ts'
+import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { enoent, erofs } from '../../errors/fs.ts'
@@ -2232,6 +2232,73 @@ describe('a hide filters a one-call read', () => {
         '/two/d/secret/b.txt',
       ])
       expect([one.batches, two.batches]).toEqual([[], []])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_read_ahead_keeps_what_one_batch_answers.
+  it('keeps what one read-ahead batch answers', async () => {
+    const vfs = new BatchedRAM()
+    const ws = new Workspace({ '/r': vfs })
+    const session = new SessionState({
+      sessionId: 'agent',
+      visibility: { paths: { paths: ['/r/secret'] } },
+    })
+    try {
+      const data = await runWithSession(session, async () => {
+        await ws.dispatch('read_many', '/r/a', [], {
+          paths: [PathSpec.fromStrPath('/r/b'), PathSpec.fromStrPath('/r/secret/c')],
+        })
+        return ws.dispatch('read', '/r/b')
+      })
+      expect(vfs.batches).toEqual([['/r/a', '/r/b']])
+      expect([DEC.decode(data as Uint8Array), vfs.reads]).toEqual(['b\n', []])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_read_ahead_reads_only_the_files_listed_small.
+  it('reads ahead only the files listed small', async () => {
+    const vfs = new BatchedRAM(false)
+    vfs.store.files.set('/big', new Uint8Array(READ_AHEAD_BYTES + 1))
+    const ws = new Workspace({ '/r': vfs })
+    try {
+      await ws.mount('/r').index.setDir(
+        '/r',
+        (
+          [
+            ['a', 2],
+            ['big', READ_AHEAD_BYTES + 1],
+          ] as const
+        ).map(([name, size]) => [
+          name,
+          new IndexEntry({ id: name, name, resourceType: 'file', size }),
+        ]),
+      )
+      await ws.dispatch('read_many', '/r/a', [], {
+        paths: [PathSpec.fromStrPath('/r/big'), PathSpec.fromStrPath('/r/b')],
+      })
+      expect(vfs.reads).toEqual(['/r/a'])
+      await ws.dispatch('read', '/r/a')
+      expect(vfs.reads).toEqual(['/r/a'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_read_ahead_fetches_nothing_a_policy_could_refuse.
+  it('reads ahead nothing a policy could refuse', async () => {
+    const vfs = new BatchedRAM()
+    const locked: Policy = {
+      preVfs: (ctx: VfsContext) =>
+        ctx.path.virtual.startsWith('/data/locked/') ? { kind: 'deny', reason: 'locked\n' } : null,
+    }
+    const ws = new Workspace({ '/r': vfs }, { policies: [locked] })
+    try {
+      await ws.dispatch('read_many', '/r/a', [], { paths: [PathSpec.fromStrPath('/r/b')] })
+      expect([vfs.batches, vfs.reads]).toEqual([[], []])
     } finally {
       await ws.close()
     }

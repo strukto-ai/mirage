@@ -778,7 +778,7 @@ class MountEntry:
                 )
             paths = self._keyed_paths(cmd_name, paths)
             flags = self._keyed_flags(flag_kwargs)
-            opts = self._command_opts(cmd_name, flags, context)
+            opts = self._command_opts(cmd_name, flags, context, paths)
             with self._command_scope(context):
                 for cmd in handlers:
                     refusal = self._read_only_refusal(cmd_name, cmd, flags)
@@ -920,6 +920,7 @@ class MountEntry:
         cmd_name: str,
         flags: dict[str, FlagValue],
         context: ExecContext,
+        paths: list[PathSpec],
     ) -> CommandOpts:
         """The one typed bag a handler reads, built here and nowhere else.
 
@@ -931,6 +932,8 @@ class MountEntry:
             cmd_name (str): command name.
             flags (dict[str, FlagValue]): the keyed flags.
             context (ExecContext): the invocation's execution context.
+            paths (list[PathSpec]): the command's operands, which its
+                whole reads warm ahead of themselves.
         """
         mount_prefix = self.prefix.rstrip("/")
         cwd = context.cwd
@@ -948,7 +951,7 @@ class MountEntry:
             mount_prefix=mount_prefix,
             index=self.index,
             io=dataclasses.replace(
-                dispatched_io(self.io, context.dispatch),
+                dispatched_io(self.io, context.dispatch, paths),
                 access=context.access,
             ),
             dispatch=context.dispatch,
@@ -1449,6 +1452,39 @@ class MountEntry:
                         ),
                         self._op_timeout("search"),
                         "search",
+                    )
+            finally:
+                reset_caller(token)
+
+    async def read_many(
+        self, paths: list[str], limit: int
+    ) -> dict[str, bytes]:
+        """Read several whole files on this mount in one request, under
+        the mount's ``read`` timeout.
+
+        For the dispatcher's read-ahead, once it has walked and followed
+        each path; keyed by virtual path, a file left out is read on its
+        own later.
+
+        Args:
+            paths (list[str]): the files, as virtual paths.
+            limit (int): the most bytes worth fetching for one file.
+        """
+        async with self.use():
+            token = bind_caller(
+                dataclasses.replace(
+                    self._on_mount(current_caller()),
+                    revisions=self.revisions or None,
+                )
+            )
+            try:
+                with host_io():
+                    return await run_with_timeout(
+                        self.vfs.read_many(
+                            [self._scope(p) for p in paths], limit, self.index
+                        ),
+                        self._op_timeout("read"),
+                        "read",
                     )
             finally:
                 reset_caller(token)

@@ -230,7 +230,13 @@ describe('handleCrossMount — stream/fanout via runSingle', () => {
     const [out, io] = await handleCrossMount('sort', paths, [], {}, dispatch, native, null)
     expect(io.exitCode).toBe(0)
     expect(decode(await materialize(out))).toBe('a\nb\n')
-    expect(dispatch.mock.calls.map(([op]) => op)).toEqual(['stat', 'read', 'stat', 'read'])
+    expect(dispatch.mock.calls.map(([op]) => op)).toEqual([
+      'stat',
+      'read_many',
+      'read',
+      'stat',
+      'read',
+    ])
     expect(native).not.toHaveBeenCalled()
   })
 })

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
+import { isFolderKind } from '../../cache/index/config.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -112,6 +113,7 @@ import {
   NATIVE_WALK_OPS,
   NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
+  READ_AHEAD_BYTES,
   SERIAL_WRITE_OPS,
   SETATTR_KEYS,
   STAMP_WRITE_OPS,
@@ -199,6 +201,34 @@ function visibleAnswer(
     return (result as PathSpec[]).filter((hit) => pathVisible(vis, hit.virtual))
   }
   return (result as [string, string][]).filter(([hit]) => pathVisible(vis, hit))
+}
+
+/**
+ * Whether a read-ahead fetches `path`, asked of the mount's index alone: a
+ * file its listing sizes within READ_AHEAD_BYTES, and where the store reads a
+ * batch, also a file the listing does not size. Mirrors Python's
+ * `_fits_read_ahead`.
+ */
+async function fitsReadAhead(
+  mount: MountEntry,
+  path: PathSpec,
+  batched: boolean,
+): Promise<boolean> {
+  const entry = (await mount.index.get(path.virtual)).entry ?? null
+  if (entry !== null && isFolderKind(entry.resourceType)) return false
+  const size = entry?.size ?? null
+  return size === null ? batched : size <= READ_AHEAD_BYTES
+}
+
+/**
+ * The bytes a batch read answered for `virtual`, null when it left the file
+ * out. Mirrors Python's `_answered`.
+ */
+async function answered(
+  batch: Promise<Map<string, Uint8Array>>,
+  virtual: string,
+): Promise<Uint8Array | null> {
+  return (await batch).get(virtual) ?? null
 }
 
 /**
@@ -679,6 +709,11 @@ export class Dispatcher {
     }
     if (name === 'read' && (stream !== undefined || direct !== undefined)) kwargs = own
     if (name === 'stat' && fresh !== undefined) kwargs = own
+    if (name === 'read_many') {
+      const { paths } = (kwargs ?? {}) as { paths?: PathSpec[] }
+      await this.readMany([path, ...(paths ?? [])], issuer)
+      return [null, new IOResult()]
+    }
     const { scopes, ...searched } = (kwargs ?? {}) as { scopes?: PathSpec[] }
     if (name === 'search' && scopes !== undefined) {
       kwargs = searched
@@ -896,6 +931,108 @@ export class Dispatcher {
     return (await boundary.complete(mark, first.path, false, visible, issuer)) as
       | [string, string][]
       | null
+  }
+
+  /**
+   * Keep the small files `typed` names in the read cache, for the reads a
+   * command is about to make of them; nothing is answered. Each read that
+   * follows still meets every check of its own and is served what this kept,
+   * so nothing is fetched where a check could refuse that read before its
+   * backend is asked: nothing in a dry run or while a coded preVfs policy
+   * speaks for the session (the rule a one-call walk meets in `declines`),
+   * and no path the session hides or a path rule reaches. A file already
+   * kept, one a renderer answers, one pinned to a revision and one on a mount
+   * that keeps no reads is passed over. A store that reads a batch
+   * (`readMany`) is asked once for the rest of its files; any other is asked
+   * for each file its listing sizes within READ_AHEAD_BYTES. A failure is
+   * logged and dropped: the read that follows meets it itself. Mirrors
+   * Python's Dispatcher._read_many.
+   */
+  private async readMany(typed: readonly PathSpec[], issuer: symbol | undefined): Promise<void> {
+    if (
+      this.explaining() !== null ||
+      (await this.policies.wantsFor('preVfs', this.sessionId(), this.lineRunning()))
+    ) {
+      return
+    }
+    await this.prepare()
+    const gate = this.caller?.ruleGate ?? null
+    const batches = new Map<string, [MountEntry, CacheManager, PathSpec[]]>()
+    for (const path of typed) {
+      let call: Call
+      try {
+        call = await this.walk('read', path, [], {}, null, undefined, issuer)
+        this.follow(call)
+      } catch (err) {
+        console.debug(`read-ahead passes over ${path.virtual}: ${String(err)}`)
+        continue
+      }
+      const mount = this.namespace.tryMountFor(call.path.virtual)
+      const manager = mount === null ? null : this.filler(call, mount, mount.vfs)
+      if (
+        mount === null ||
+        manager === null ||
+        mount.retiring ||
+        mount.revisions.has(call.path.virtual) ||
+        (gate !== null && (gate.scopes(path.virtual) || gate.scopes(call.path.virtual)))
+      ) {
+        continue
+      }
+      const batch = batches.get(mount.prefix) ?? [mount, manager, []]
+      batch[2].push(call.path)
+      batches.set(mount.prefix, batch)
+    }
+    const warm = async (): Promise<void> => {
+      for (const [mount, manager, paths] of batches.values()) {
+        await mount.ensureReady()
+        const batched = mount.vfs.supports('readMany')
+        const wanted: PathSpec[] = []
+        for (const p of paths) {
+          if (!(await manager.isCached(p)) && (await fitsReadAhead(mount, p, batched))) {
+            wanted.push(p)
+          }
+        }
+        if (wanted.length === 0) continue
+        let settle: (answers: Promise<Map<string, Uint8Array>>) => void = () => undefined
+        const answers = new Promise<Map<string, Uint8Array>>((resolve) => {
+          settle = resolve
+        })
+        // Each fill takes its generation, and the place its records start,
+        // before the one request goes out: a write landing while it runs
+        // keeps none of it.
+        const fills = wanted.map((p) => {
+          const filetype = getExtension(p.virtual)
+          return manager.fill(
+            p,
+            batched
+              ? () => answered(answers, p.virtual)
+              : () =>
+                  mount.call(
+                    'read',
+                    p.virtual,
+                    [],
+                    filetype === null ? {} : { filetype },
+                    this.access,
+                  ),
+          )
+        })
+        if (batched) {
+          settle(
+            mount.readMany(
+              wanted.map((p) => p.virtual),
+              READ_AHEAD_BYTES,
+            ),
+          )
+        }
+        for (const outcome of await Promise.allSettled(fills)) {
+          if (outcome.status === 'rejected') {
+            console.debug(`read-ahead dropped: ${String(outcome.reason)}`)
+          }
+        }
+      }
+    }
+    if (activeRecords() === undefined) await runWithRecording(warm)
+    else await warm()
   }
 
   /**

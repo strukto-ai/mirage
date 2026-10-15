@@ -26,7 +26,7 @@ import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { dispatchedSlots, type GenericCommand } from './adapter.ts'
+import { dispatchedSlots, readAhead, type GenericCommand } from './adapter.ts'
 import type { CommandIO } from '../../config.ts'
 
 /** Use the workspace's policy-checked operations as a generic IO adapter.
@@ -36,7 +36,12 @@ import type { CommandIO } from '../../config.ts'
  * filesystem, `du -x`) a listing also leaves out the roots of the mounts
  * below it, which the walk must neither list nor stat. Mirrors Python's
  * dispatch_io. */
-export function dispatchIO(dispatch: DispatchFn, bound?: MountView): CommandIO {
+export function dispatchIO(
+  dispatch: DispatchFn,
+  bound?: MountView,
+  paths: readonly PathSpec[] = [],
+): CommandIO {
+  const [ahead, noted] = readAhead(dispatch, paths)
   return {
     readdir: async (_accessor, path) => {
       let entries = (await dispatch('readdir', path))[0] as string[]
@@ -51,10 +56,12 @@ export function dispatchIO(dispatch: DispatchFn, bound?: MountView): CommandIO {
     readBytes: async (_accessor, path) => {
       if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
         throw eisdir(path)
+      await ahead(path)
       return materialize((await dispatch('read', path))[0] as ByteSource)
     },
-    readStream: (_accessor, path) => callerStream(dispatch, currentCaller(), path),
+    readStream: (_accessor, path) => callerStream(dispatch, currentCaller(), path, ahead),
     isMounted: () => true,
+    globResolved: noted,
     // No cap of its own: a du walk charges each entry to the mount serving
     // it, at that mount's cap (see WalkBudget).
     maxDuEntries: null,
@@ -65,15 +72,18 @@ export function dispatchIO(dispatch: DispatchFn, bound?: MountView): CommandIO {
 /** A streamed read that opens as the command that asked for it: at the first
  * pull, which can come after that command ended, so under the command's
  * caller, as a `fresh` mount trusts only the listings that command made.
- * Mirrors Python's _caller_stream. */
+ * `ahead` is what the read awaits first (`readAhead`). Mirrors Python's
+ * _caller_stream. */
 async function* callerStream(
   dispatch: DispatchFn,
   caller: Caller,
   path: PathSpec,
+  ahead: (path: PathSpec) => Promise<void>,
 ): AsyncIterable<Uint8Array> {
   const data = await runWithCaller(caller, async () => {
     if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
       throw eisdir(path)
+    await ahead(path)
     return (await dispatch('read', path, [], { stream: true }))[0] as ByteSource
   })
   yield* chunks(data)
@@ -131,7 +141,7 @@ export async function runDispatch(
     else if (Array.isArray(value))
       rebased[key] = value.map((item) => (item instanceof PathSpec ? whole(item) : item))
   }
-  const io = dispatchIO(dispatch, bounded ? ns?.mounts : undefined)
+  const io = dispatchIO(dispatch, bounded ? ns?.mounts : undefined, paths.map(whole))
   const result = await builder.fn(
     ns?.followOperands === undefined ? io : { ...io, globFollow: ns.followOperands },
     new NOOPAccessor(),

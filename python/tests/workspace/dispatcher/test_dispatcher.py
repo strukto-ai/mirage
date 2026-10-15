@@ -65,11 +65,14 @@ from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import SearchQuery, VfsCall
 from mirage.workspace import Workspace
-from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
+from mirage.workspace.dispatcher.constants import (
+    POLICY_WRITE_OPS,
+    READ_AHEAD_BYTES,
+)
 from mirage.workspace.dispatcher.dispatcher import Dispatcher, _MountChannel
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
-from tests.fixtures.vfs_io import dispatched, override, render
+from tests.fixtures.vfs_io import BatchedRAM, dispatched, override, render
 
 
 class DenyLocked(Policy):
@@ -2273,6 +2276,59 @@ async def test_a_hide_drops_a_hit_whose_name_reads_like_a_score():
     finally:
         reset_current_session(token)
     assert "/ram/d/n:12" not in [hit for hit, _ in records]
+
+
+@pytest.mark.asyncio
+async def test_a_read_ahead_keeps_what_one_batch_answers():
+    vfs = BatchedRAM()
+    session = SessionState(
+        session_id="agent",
+        visibility=Visibility(paths=HiddenPaths(paths=("/r/secret",))),
+    )
+    token = set_current_session(session)
+    try:
+        with Workspace({"/r/": vfs}) as ws:
+            await ws.dispatch(
+                "read_many",
+                _path("/r/a"),
+                paths=[_path("/r/b"), _path("/r/secret/c")],
+            )
+            data, _ = await ws.dispatch("read", _path("/r/b"))
+    finally:
+        reset_current_session(token)
+    assert vfs.batches == [["/r/a", "/r/b"]]
+    assert (data, vfs.reads) == (b"b\n", [])
+
+
+@pytest.mark.asyncio
+async def test_a_read_ahead_reads_only_the_files_listed_small():
+    vfs = BatchedRAM(batched=False)
+    vfs._store.files["/big"] = b"x" * (READ_AHEAD_BYTES + 1)
+    ws = Workspace({"/r/": vfs})
+    try:
+        await ws.mount("/r/").index.set_dir(
+            "/r",
+            [
+                (n, IndexEntry(id=n, name=n, resource_type="file", size=s))
+                for n, s in [("a", 2), ("big", READ_AHEAD_BYTES + 1)]
+            ],
+        )
+        await ws.dispatch(
+            "read_many", _path("/r/a"), paths=[_path("/r/big"), _path("/r/b")]
+        )
+        assert vfs.reads == ["/r/a"]
+        await ws.dispatch("read", _path("/r/a"))
+        assert vfs.reads == ["/r/a"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_read_ahead_fetches_nothing_a_policy_could_refuse():
+    vfs = BatchedRAM()
+    with Workspace({"/r/": vfs}, policies=[DenyLocked()]) as ws:
+        await ws.dispatch("read_many", _path("/r/a"), paths=[_path("/r/b")])
+    assert (vfs.batches, vfs.reads) == ([], [])
 
 
 @pytest.mark.asyncio

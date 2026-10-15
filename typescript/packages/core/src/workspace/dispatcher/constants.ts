@@ -148,6 +148,12 @@ export const HIDE_FILTERED_OPS: ReadonlySet<string> = new Set([
   'files_containing',
 ])
 
+// The most bytes a read-ahead fetches for one file, as its listing sizes it.
+// A larger file is left to the read that names it, and so is a file the
+// listing does not size, unless its store reads a batch (`readMany`), which
+// leaves out what passes this itself.
+export const READ_AHEAD_BYTES = 1 << 20
+
 // Ops that open the regular file they name with O_CREAT, which answers a
 // slash-terminated name (`x/`, only ever a directory) with EISDIR.
 export const FILE_CREATE_OPS = callNames(VFS_CALLS, { effects: [Effect.WRITE], creates: true })

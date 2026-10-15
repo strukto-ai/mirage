@@ -129,7 +129,9 @@ class CommandIO:
     per backend; the target stat lets a trailing-slash glob follow a link
     the way bash does instead of keeping every link it cannot see
     through. ``glob_follow`` is the line's operand resolution, which a
-    typed word's matches take as the names typed would.
+    typed word's matches take as the names typed would, and
+    ``glob_resolved`` is told what each resolution answers, the operands
+    the dispatched table warms a command's reads ahead of.
     """
 
     readdir: ReaddirOp
@@ -169,6 +171,7 @@ class CommandIO:
     glob_children: ChildMounts | None = None
     glob_target_stat: LinkTargetStat | None = None
     glob_follow: FollowOperands | None = None
+    glob_resolved: Callable[[list[PathSpec]], None] | None = None
 
     @property
     def resolve_glob(self) -> ResolveGlobOp:
@@ -180,6 +183,7 @@ class CommandIO:
             self.glob_target_stat,
             self.access,
             self.glob_follow,
+            self.glob_resolved,
         )
 
 
