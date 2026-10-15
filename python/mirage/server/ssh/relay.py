@@ -14,11 +14,13 @@
 
 import asyncio
 import sys
+from collections.abc import Callable
 
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+from mirage.concurrency.limiter import run_blocking
 from mirage.server.ssh.constants import TUNNEL_CHUNK
 
 
@@ -101,24 +103,29 @@ async def pump(
 
 
 async def relay_codex(
-    host: str, port: int, url: str, headers: dict[str, str]
+    host: str, port: int, url: str, token: Callable[[], str]
 ) -> None:
     """Serve ``codex exec-server forward`` on ``host:port``, until stopped.
 
     Each connection forward opens is carried to the workspace's
     codex-exec route, one message for one message, logged in by the
-    bearer token forward cannot send itself.
+    bearer token forward cannot send itself, asked for anew on every
+    connection. A connection with an ``Origin`` header comes from a
+    browser page, never from forward, and is refused before it reaches
+    the token.
 
     Args:
         host (str): the address to listen on.
         port (int): the port to listen on; 0 picks a free one.
         url (str): the workspace's ``/v1/workspaces/{id}/codex-exec``
             URL, as ``ws://`` or ``wss://``.
-        headers (dict[str, str]): request headers, the bearer token among
-            them.
+        token (Callable[[], str]): the bearer token, asked for on every
+            connection; empty sends none.
     """
 
     async def carry(incoming: ServerConnection) -> None:
+        bearer = await run_blocking(token)
+        headers = {"Authorization": f"Bearer {bearer}"} if bearer else {}
         try:
             upstream = await connect(
                 url,
@@ -154,7 +161,7 @@ async def relay_codex(
                     continue
 
     async with serve(
-        carry, host, port, max_size=None, compression=None
+        carry, host, port, origins=[None], max_size=None, compression=None
     ) as server:
         for sock in server.sockets:
             address, bound = sock.getsockname()[:2]

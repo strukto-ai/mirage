@@ -150,7 +150,7 @@ mirage login
 | `mirage logout` | Forget the login. |
 
 - Every command sends the login's token, `ssh-proxy` and `codex-exec` included, but only to the server it was made for. `MIRAGE_TOKEN` or `auth_token` wins over it.
-- The CLI refreshes the token when it ends, and asks you to log in again 30 days after you signed in. A running `mcp` or `rpc` relay asks for it on every request, so it keeps working past a refresh.
+- The CLI refreshes the token when it ends, and asks you to log in again 30 days after you signed in. A running `mcp` or `rpc` relay asks for it on every request, and `codex-exec` on every connection, so they keep working past a refresh.
 - A server that publishes no login, such as the one the CLI starts on your machine, needs none, and `mirage login` says so.
 
 ## Config

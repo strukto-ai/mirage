@@ -75,13 +75,12 @@ def codex_exec_cmd(
         except DaemonUnreachable as e:
             fail(str(e))
         base = client.settings.url
-        token = client.token()
+        token = client.token
     url = (
         "ws"
         + base.removeprefix("http")
         + (f"/v1/workspaces/{quote(workspace_id, safe='')}/codex-exec")
     )
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
     from mirage.server.ssh.relay import relay_codex
 
-    asyncio.run(relay_codex(host.strip("[]"), int(port), url, headers))
+    asyncio.run(relay_codex(host.strip("[]"), int(port), url, token))

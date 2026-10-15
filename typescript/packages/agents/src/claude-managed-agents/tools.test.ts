@@ -82,6 +82,11 @@ describe('mirageTools', () => {
     await expect(run(tools.bash, { command: 'echo nope >&2; exit 3' })).rejects.toThrow(ToolError)
   })
 
+  it('refuses a restart rather than faking one', async () => {
+    const tools = toolsFor()
+    await expect(run(tools.bash, { restart: true })).rejects.toThrow(/not supported/)
+  })
+
   it('turns a command past its timeout into a tool error', async () => {
     const tools = toolsFor()
     await expect(run(tools.bash, { command: 'sleep 5', timeout_ms: 50 })).rejects.toThrow(

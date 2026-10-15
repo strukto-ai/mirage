@@ -62,7 +62,11 @@ export function mirageTools(
           },
         },
         run: async ({ command, restart, timeout_ms }) => {
-          if (restart === true) return 'bash session restarted'
+          if (restart === true) {
+            throw new ToolError(
+              'bash: restart is not supported; the Mirage session keeps its working directory and variables',
+            )
+          }
           if (command === undefined || command === '') {
             throw new ToolError('bash: command is required')
           }

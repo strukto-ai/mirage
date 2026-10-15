@@ -12,6 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.agents.claude_managed_agents.tools import mirage_tools
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mirage.agents.claude_managed_agents.tools import mirage_tools
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.agents.claude_managed_agents.tools": ("mirage_tools",),
+}
+_MODULE_OF = {
+    name: module for module, names in _EXPORTS.items() for name in names
+}
 
 __all__ = ["mirage_tools"]
+
+
+def __getattr__(name: str) -> Any:
+    module = _MODULE_OF.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

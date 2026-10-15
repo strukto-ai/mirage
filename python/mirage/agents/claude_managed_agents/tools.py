@@ -91,7 +91,10 @@ def mirage_tools(
         timeout_ms: int | None = None,
     ) -> str:
         if restart:
-            return "bash session restarted"
+            raise ToolError(
+                "bash: restart is not supported; the Mirage session keeps "
+                "its working directory and variables"
+            )
         if not command:
             raise ToolError("bash: command is required")
         timeout = timeout_ms / 1000 if timeout_ms else None

@@ -303,8 +303,12 @@ async def test_codex_exec_relays_forward_for_the_cli(tmp_path, monkeypatch):
                 init = await _codex_call(
                     ws, 1, "initialize", {"clientName": "forward"}, []
                 )
+            with pytest.raises(InvalidStatus) as browser:
+                async with connect(listening, origin="http://evil.example"):
+                    pass
         finally:
             child.terminate()
             await child.wait()
     assert listening.startswith("ws://127.0.0.1:")
     assert "sessionId" in init["result"]
+    assert browser.value.response.status_code == 403

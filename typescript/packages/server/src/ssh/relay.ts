@@ -90,50 +90,92 @@ export async function relaySsh(url: string, headers: Record<string, string>): Pr
  * Serve `codex exec-server forward` on `host:port` until the process stops.
  * Each connection forward opens is carried to the workspace's codex-exec
  * route, one message for one message, logged in by the bearer token forward
- * cannot send itself. `url` is the workspace's
- * `/v1/workspaces/:id/codex-exec` URL as `ws://` or `wss://`; port 0 picks a
- * free one.
+ * cannot send itself, asked for anew on every connection. A connection with
+ * an `Origin` header comes from a browser page, never from forward, and is
+ * refused before it reaches the token. Each side waits for the other to take
+ * a message before it reads the next, so a slow reader holds nothing up in
+ * memory. `url` is the workspace's `/v1/workspaces/:id/codex-exec` URL as
+ * `ws://` or `wss://`; port 0 picks a free one.
  */
 export async function relayCodex(
   host: string,
   port: number,
   url: string,
-  headers: Record<string, string>,
+  token: () => Promise<string>,
 ): Promise<void> {
-  const server = new WebSocketServer({ host, port, perMessageDeflate: false })
+  const server = new WebSocketServer({
+    host,
+    port,
+    perMessageDeflate: false,
+    verifyClient: (info, done) => {
+      if (info.req.headers.origin === undefined) done(true)
+      else done(false, 403, 'Origin not allowed')
+    },
+  })
   server.on('connection', (incoming: WebSocket) => {
-    const upstream = new WebSocket(url, { headers, perMessageDeflate: false })
     const held: [Buffer, boolean][] = []
-    incoming.on('message', (data: Buffer, isBinary: boolean) => {
-      if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary })
-      else held.push([data, isBinary])
-    })
-    upstream.once('open', () => {
-      for (const [data, isBinary] of held.splice(0)) upstream.send(data, { binary: isBinary })
-    })
-    upstream.on('message', (data: Buffer, isBinary: boolean) => {
-      incoming.send(data, { binary: isBinary })
-    })
-    upstream.once('unexpected-response', (req, res) => {
-      let body = ''
-      res.on('data', (chunk: Buffer) => (body += chunk.toString()))
-      res.on('end', () => {
-        req.destroy()
-        const status = String(res.statusCode)
-        process.stderr.write(`mirage: codex-exec: the server refused: ${status} ${body.trim()}\n`)
-        incoming.close(1011, `the server refused: ${status}`)
-      })
-    })
-    upstream.on('error', (error: Error) => {
-      process.stderr.write(`mirage: codex-exec: ${error.message}\n`)
+    let upstream: WebSocket | null = null
+    const fail = (message: string): void => {
+      process.stderr.write(`mirage: codex-exec: ${message}\n`)
       incoming.close(1011)
+    }
+    incoming.on('error', (error: Error) => {
+      process.stderr.write(`mirage: codex-exec: ${error.message}\n`)
+      upstream?.close()
     })
-    upstream.once('close', () => {
-      incoming.close()
+    incoming.on('message', (data: Buffer, isBinary: boolean) => {
+      incoming.pause()
+      if (upstream?.readyState === WebSocket.OPEN) {
+        upstream.send(data, { binary: isBinary }, () => {
+          incoming.resume()
+        })
+      } else {
+        held.push([data, isBinary])
+      }
     })
     incoming.once('close', () => {
-      upstream.close()
+      upstream?.close()
     })
+    token().then(
+      (bearer) => {
+        if (incoming.readyState !== WebSocket.OPEN) return
+        const headers: Record<string, string> =
+          bearer === '' ? {} : { Authorization: `Bearer ${bearer}` }
+        const socket = new WebSocket(url, { headers, perMessageDeflate: false })
+        upstream = socket
+        socket.once('open', () => {
+          for (const [data, isBinary] of held.splice(0)) socket.send(data, { binary: isBinary })
+          incoming.resume()
+        })
+        socket.on('message', (data: Buffer, isBinary: boolean) => {
+          socket.pause()
+          incoming.send(data, { binary: isBinary }, () => {
+            socket.resume()
+          })
+        })
+        socket.once('unexpected-response', (req, res) => {
+          let body = ''
+          res.on('data', (chunk: Buffer) => (body += chunk.toString()))
+          res.on('end', () => {
+            req.destroy()
+            const status = String(res.statusCode)
+            process.stderr.write(
+              `mirage: codex-exec: the server refused: ${status} ${body.trim()}\n`,
+            )
+            incoming.close(1011, `the server refused: ${status}`)
+          })
+        })
+        socket.on('error', (error: Error) => {
+          fail(error.message)
+        })
+        socket.once('close', () => {
+          incoming.close()
+        })
+      },
+      (error: unknown) => {
+        fail(error instanceof Error ? error.message : String(error))
+      },
+    )
   })
   await new Promise<void>((resolve, reject) => {
     server.once('listening', () => {

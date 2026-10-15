@@ -193,12 +193,21 @@ describe('a relative path', () => {
     await ops.shell('mkdir -p /w && cd /w')
     const wrote = await ops.write('a.txt', 'hello\n')
     const read = await ops.read('a.txt')
-    const edited = await ops.edit('../w/a.txt', 'hello', 'hi')
+    const edited = await ops.edit('a.txt', 'hello', 'hi')
     expect(wrote.content[0]?.text).toBe('Written: /w/a.txt')
     expect(read.content[0]?.text).toBe('     1\thello\n')
     expect(edited.content[0]?.text).toBe('Edited: /w/a.txt (1 occurrence(s))')
     expect(await ws.vfs.cat('/w/a.txt')).toBe('hi\n')
     expect(await ws.vfs.exists('/a.txt')).toBe(false)
+  })
+
+  it('follows a link before its dots', async () => {
+    await ops.shell(
+      'mkdir -p /data/dir /src && echo far > /data/config.txt' +
+        ' && echo near > /src/config.txt && ln -s /data/dir /src/link && cd /src',
+    )
+    const read = await ops.read('link/../config.txt')
+    expect(read.content[0]?.text).toBe('     1\tfar\n')
   })
 })
 

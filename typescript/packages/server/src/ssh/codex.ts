@@ -917,6 +917,9 @@ export async function serveCodexSocket(
       resolve()
     })
   })
+  socket.on('error', (err: Error) => {
+    console.debug(`codex: socket error on ${entry.id}`, err)
+  })
   const sessionId = newSessionId()
   let queue: Promise<CodexChannel | null> = openSession(entry.runner.ws, sessionId).then(
     () =>

@@ -74,6 +74,13 @@ async def test_a_failing_command_is_a_tool_error(tools):
 
 
 @pytest.mark.asyncio
+async def test_a_restart_is_refused_rather_than_faked(tools):
+    with pytest.raises(ToolError) as refused:
+        await tools["bash"].call({"restart": True})
+    assert "not supported" in str(refused.value)
+
+
+@pytest.mark.asyncio
 async def test_a_command_past_its_timeout_is_a_tool_error(tools):
     with pytest.raises(ToolError) as failed:
         await tools["bash"].call({"command": "sleep 5", "timeout_ms": 50})

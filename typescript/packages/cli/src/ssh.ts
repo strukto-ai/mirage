@@ -73,11 +73,8 @@ export function registerCodexExecCommand(program: Command): void {
         fail(error instanceof Error ? error.message : String(error))
       }
       const base = client.settings.url
-      const token = await client.token()
       const url = `ws${base.slice('http'.length)}/v1/workspaces/${encodeURIComponent(workspace)}/codex-exec`
-      const headers: Record<string, string> =
-        token === '' ? {} : { Authorization: `Bearer ${token}` }
       const { relayCodex } = await import('@struktoai/mirage-server/ssh/relay')
-      await relayCodex(host.replace(/^\[|\]$/g, ''), Number(port), url, headers)
+      await relayCodex(host.replace(/^\[|\]$/g, ''), Number(port), url, () => client.token())
     })
 }

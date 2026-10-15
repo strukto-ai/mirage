@@ -73,6 +73,6 @@ Then [send input](https://developers.openai.com/api/docs/guides/agents-api/sessi
 ## How it behaves
 
 - Each connection runs in a fresh session under the workspace's default profile, closed when the connection ends. A reconnect starts a new session; the files stay.
-- `mirage codex-exec` lets in any connection on its port, as you. Keep it on loopback.
+- `mirage codex-exec` lets in any connection on its port, as you, and refuses one from a browser page. Keep it on loopback.
 - On a hosted server, run [`mirage login`](/home/access/cli#log-in) first; the relay sends that token.
 - The Agents API is in beta, and the protocol follows Codex 0.147, as Codex over [SSH](/typescript/agents/codex#ssh) does.

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn } from 'node:child_process'
+import { request } from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -144,8 +145,30 @@ describe('mirage codex-exec', () => {
         ws.addEventListener('error', reject)
       })
       ws.close()
+      const browser = await new Promise<number>((resolve, reject) => {
+        const req = request(listening.replace('ws://', 'http://'), {
+          headers: {
+            Connection: 'Upgrade',
+            Upgrade: 'websocket',
+            'Sec-WebSocket-Version': '13',
+            'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+            Origin: 'http://evil.example',
+          },
+        })
+        req.on('response', (res) => {
+          resolve(res.statusCode ?? 0)
+          res.resume()
+        })
+        req.on('upgrade', (_res, socket) => {
+          socket.destroy()
+          resolve(101)
+        })
+        req.on('error', reject)
+        req.end()
+      })
       expect(listening).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/)
       expect(answer.result).toHaveProperty('sessionId')
+      expect(browser).toBe(403)
     } finally {
       child.kill()
     }

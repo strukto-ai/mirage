@@ -20,7 +20,8 @@ import { patternMatches } from '../../policy/match/pattern.ts'
 import { MOUNT_MODE_RANK, MountMode } from '../../types.ts'
 import { isEacces } from '../../errors/fs.ts'
 import { pathVisible } from '../../utils/hidden.ts'
-import { gnuDirname, resolvePath } from '../../utils/path.ts'
+import { gnuDirname } from '../../utils/path.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
@@ -254,11 +255,11 @@ export class MirageToolOperations {
     return ioResult(await this.session.shell(command, this.lineOptions(signal)))
   }
 
-  /** Read a file as line-numbered text; a relative path resolves against the session's cwd. */
+  /** Read a file as line-numbered text; a relative path is taken under the session's cwd, spelled as given. */
   read(given: string, offset = 0, limit = 2000): Promise<ToolResult> {
     return oneCall(this.session, async (vfs) => {
       const versions = (await this.versions()).through(vfs)
-      const path = resolvePath(given, this.session.state.cwd)
+      const path = given.startsWith('/') ? given : `${rstripSlash(this.session.state.cwd)}/${given}`
       let data: Uint8Array
       try {
         data = await versions.read(path)
@@ -281,7 +282,7 @@ export class MirageToolOperations {
     limit = 2000,
   ): Promise<ToolResult | WorkspaceMediaRead> {
     const versions = await this.versions()
-    const path = resolvePath(given, this.session.state.cwd)
+    const path = given.startsWith('/') ? given : `${rstripSlash(this.session.state.cwd)}/${given}`
     let data: Uint8Array
     try {
       data = await versions.read(path)
@@ -326,12 +327,12 @@ export class MirageToolOperations {
    * new file is created with its missing parents. An existing one is
    * overwritten only when the agent was shown all of it and it did not
    * change since, so a write never clobbers text the agent has not seen. A
-   * relative path resolves against the session's cwd.
+   * relative path is taken under the session's cwd, spelled as given.
    */
   write(given: string, content: string): Promise<ToolResult> {
     return oneCall(this.session, async (vfs) => {
       const versions = (await this.versions()).through(vfs)
-      const path = resolvePath(given, this.session.state.cwd)
+      const path = given.startsWith('/') ? given : `${rstripSlash(this.session.state.cwd)}/${given}`
       let present: boolean
       try {
         present = await versions.vfs.exists(path)
@@ -352,7 +353,7 @@ export class MirageToolOperations {
     })
   }
 
-  /** Replace a string in an existing file; a relative path resolves against the session's cwd. */
+  /** Replace a string in an existing file; a relative path is taken under the session's cwd, spelled as given. */
   edit(
     given: string,
     oldString: string,
@@ -361,7 +362,7 @@ export class MirageToolOperations {
   ): Promise<ToolResult> {
     return oneCall(this.session, async (vfs) => {
       const versions = (await this.versions()).through(vfs)
-      const path = resolvePath(given, this.session.state.cwd)
+      const path = given.startsWith('/') ? given : `${rstripSlash(this.session.state.cwd)}/${given}`
       let content: string
       try {
         content = decode(await versions.readForEdit(path))
