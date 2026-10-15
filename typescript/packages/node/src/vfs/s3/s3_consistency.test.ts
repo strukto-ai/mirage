@@ -29,6 +29,7 @@ const BOUNDED: ReadSpec = { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL }
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { Reconciler } from '@struktoai/mirage-core/workspace/reconcile'
 import { Workspace } from '../../workspace.ts'
 import type { S3Config } from './config.ts'
 import { installS3Mock, type S3Mock } from './mock.ts'
@@ -485,11 +486,10 @@ describe('S3 cache consistency (mocked)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
       await ws.shell('cat /s3/c.txt')
-      const mount = ws.mount('/s3')
-      const real = mount.callKeyed.bind(mount)
-      vi.spyOn(mount, 'callKeyed').mockImplementation((...args) =>
-        args[0] === 'stat' ? Promise.reject(new TypeError('probe bug')) : real(...args),
-      )
+      vi.spyOn(
+        Reconciler.prototype as unknown as { probe: () => Promise<never> },
+        'probe',
+      ).mockRejectedValue(new TypeError('probe bug'))
       const ls = await ws.shell('ls -l /s3/c.txt; echo survived')
       expect(ls.exitCode).toBe(0)
       expect(DEC.decode(ls.stdout).endsWith('/s3/c.txt\nsurvived\n')).toBe(true)

@@ -116,6 +116,7 @@ from mirage.workspace.dispatcher.constants import (
     CALLS,
     COPY_OPS,
     DESTINATION_OPS,
+    DIRECTORY_OPEN_OPS,
     DISPATCH_READ_OPS,
     DISPATCH_WRITE_OPS,
     ENTRY_CREATE_OPS,
@@ -662,6 +663,29 @@ def _retracted(virtual: str) -> bool:
     return rec is not None and rec.op in RETRACT_FINGERPRINT_OPS
 
 
+def _spelled_under(call: "_Call", entries: list[str]) -> list[str]:
+    """A listing's names spelled under the directory the caller asked for.
+
+    Listing a link to a directory lists the directory it reaches, and
+    readdir names its children under the path it was handed, as a walk
+    through the link spells them.
+
+    Args:
+        call (_Call): the readdir that ran.
+        entries (list[str]): its names, under the followed directory.
+    """
+    if call.walked is None:
+        return entries
+    asked = call.walked.virtual.rstrip("/")
+    reached = call.path.virtual.rstrip("/")
+    return [
+        asked + entry[len(reached) :]
+        if entry.startswith(reached + "/")
+        else entry
+        for entry in entries
+    ]
+
+
 def _operands(name: str, kwargs: dict[str, Any]) -> list[tuple[str, PathSpec]]:
     """A custom function's other path arguments, by keyword.
 
@@ -707,6 +731,9 @@ class _Call:
         fresh (bool): whether a stat asks the backend past the mount's
             index, through a throwaway store as a ``read: fresh`` probe
             does, with the index's rows only as hints.
+        walked (PathSpec | None): the path before a link at its final
+            name was followed, the one a listing's names are spelled
+            under; None when nothing was followed.
     """
 
     name: str
@@ -723,6 +750,7 @@ class _Call:
     stream: bool = False
     direct: bool = False
     fresh: bool = False
+    walked: PathSpec | None = None
 
     @property
     def window(self) -> tuple[int, int | None]:
@@ -1354,6 +1382,10 @@ class Dispatcher:
         # walked, once both walks have answered for hidden space: here
         # for an op on the name itself and for a destination, in
         # ``_follow`` for the rest.
+        if typed.virtual.endswith("/") or typed.raw_path.endswith("/"):
+            # A trailing slash names the directory a link at the final
+            # name reaches, as path resolution reads ``link/``.
+            kwargs.pop("nofollow", None)
         no_follow = name in NO_FOLLOW_OPS or bool(kwargs.get("nofollow"))
         if rule_gate is not None and no_follow:
             _judge(rule_gate, typed, path, typed_dst, dst)
@@ -1428,9 +1460,16 @@ class Dispatcher:
                 if call.rule_gate is not None:
                     _judge(call.rule_gate, dst)
                 call.dst = call.kwargs["dst"] = dst
+        if (
+            nofollow
+            and call.name in DIRECTORY_OPEN_OPS
+            and self._namespace.is_link(call.path.virtual)
+        ):
+            raise enotdir(call.path.virtual)
         if call.name not in NO_FOLLOW_OPS and not nofollow:
             followed = _follow_or_loop(self._namespace, call.path, True)
             if followed != call.path.virtual:
+                call.walked = call.path
                 call.path = PathSpec.from_str_path(followed)
                 if not path_visible(call.vis, call.path.virtual):
                     raise hidden_refusal(
@@ -2107,24 +2146,34 @@ class Dispatcher:
             result (Any): the backend's answer.
         """
         if call.name == "readdir":
-            return _visible_entries(
-                merge_readdir(
-                    call.vis,
-                    result,
-                    [
-                        m.prefix
-                        for m in self._namespace.registry.visible_mounts()
-                    ],
-                    self._namespace,
+            return _spelled_under(
+                call,
+                _visible_entries(
+                    merge_readdir(
+                        call.vis,
+                        result,
+                        [
+                            m.prefix
+                            for m in self._namespace.registry.visible_mounts()
+                        ],
+                        self._namespace,
+                        call.path.virtual,
+                    ),
                     call.path.virtual,
+                    call.vis,
                 ),
-                call.path.virtual,
-                call.vis,
             )
         if call.name == "stat" and isinstance(result, FileStat):
+            name = call.path.virtual.rstrip("/").rsplit("/", 1)[-1]
+            if result.name == "/" and name:
+                # A mount's root answers as the backend's own root; in
+                # the namespace it is the name it is mounted at.
+                result = result.model_copy(update={"name": name})
             return merge_overlay_stat(
                 self._namespace.meta_for(call.path.virtual), result
             )
+        if call.name == "read_tree" and isinstance(result, dict):
+            result = self._with_links(call.path, result)
         # A tree read keys its entries below the path; a search names each
         # hit itself, and a store can rank a hit from outside the scope (a
         # whole table, a filter it ignores), so every hit is checked.
@@ -2138,6 +2187,29 @@ class Dispatcher:
         ):
             return _visible_answer(call.name, call.vis, call.path, result)
         return result
+
+    def _with_links(
+        self, path: PathSpec, tree: dict[str, FileStat]
+    ) -> dict[str, FileStat]:
+        """A subtree read with the links the namespace holds below
+        ``path`` on the same mount, each as the link it is.
+
+        No backend stores a link, so a walk that reads the subtree in one
+        call meets them only here, as a listing meets them in ``readdir``.
+
+        Args:
+            path (PathSpec): the directory the read answered for.
+            tree (dict[str, FileStat]): the backend's answer, keyed below
+                ``path``.
+        """
+        base = path.virtual.rstrip("/")
+        owner = self._namespace.try_mount_for(path.virtual)
+        merged = dict(tree)
+        for virtual, row in self._namespace.link_stats_below(path.virtual):
+            if self._namespace.try_mount_for(virtual) is not owner:
+                continue
+            merged.setdefault(virtual[len(base) + 1 :], row)
+        return merged
 
     async def _settle_write(
         self,

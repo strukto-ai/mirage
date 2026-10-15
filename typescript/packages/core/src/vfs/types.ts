@@ -73,7 +73,7 @@ export interface VfsCall {
 }
 
 export type ReaddirOp<A extends Accessor = Accessor> = ReaddirFn<
-  [accessor: A, path: PathSpec, index?: IndexCacheStore]
+  [accessor: A, path: PathSpec, index?: IndexCacheStore, nofollow?: boolean]
 >
 
 export type ReadBytesOp<A extends Accessor = Accessor> = ReadBytesFn<

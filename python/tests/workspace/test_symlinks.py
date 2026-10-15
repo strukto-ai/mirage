@@ -512,6 +512,26 @@ async def test_find_lists_symlinks():
 
 
 @pytest.mark.asyncio
+async def test_ls_dash_upper_l_reports_what_each_listed_link_leads_to():
+    ws = await _seeded()
+    r = await ws.shell("ls -lL /data")
+    kinds = {
+        line.split()[-1]: line[0]
+        for line in r.stdout.decode().splitlines()[1:]
+    }
+    assert kinds == {"dir": "d", "dlink": "d", "link.txt": "-"}
+
+
+@pytest.mark.asyncio
+async def test_find_empty_counts_a_link_as_an_entry():
+    ws = await _seeded()
+    await ws.shell("mkdir -p /data/hold")
+    await ws.shell("ln -s /data/dir /data/hold/lk")
+    r = await ws.shell("find /data -empty")
+    assert r.stdout.decode() == ""
+
+
+@pytest.mark.asyncio
 async def test_find_type_l_matches_only_links():
     ws = await _seeded()
     r = await ws.shell("find /data -type l")

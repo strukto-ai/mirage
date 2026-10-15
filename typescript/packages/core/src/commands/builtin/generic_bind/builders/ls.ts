@@ -16,6 +16,7 @@ import { lsGeneric } from '../../generic/ls.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { treeWalk } from '../../utils/tree.ts'
+import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import {
   type GenericCommand,
@@ -32,7 +33,8 @@ const ls: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const { readTree } = ops
   const [readdir, stat] = treeWalk<string[], FileStat>(
     !recursive || readTree === undefined ? undefined : (p) => readTree(accessor, p, idx),
-    (p: PathSpec) => ops.readdir(accessor, p, idx),
+    (p: PathSpec, _index?: IndexCacheStore, nofollow?: boolean) =>
+      ops.readdir(accessor, p, idx, nofollow),
     (p: PathSpec) => ops.stat(accessor, p, idx),
   )
   return lsGeneric(resolved, opts, readdir, overlaidStat(stat, opts.ns?.statOverlay))

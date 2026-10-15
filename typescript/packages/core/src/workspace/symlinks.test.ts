@@ -594,6 +594,29 @@ describe('symlinks (namespace-backed)', () => {
     await ws.close()
   })
 
+  it('ls -L reports what each listed link leads to', async () => {
+    const ws = await seeded()
+    const r = await ws.shell('ls -lL /data')
+    const kinds = Object.fromEntries(
+      dec(r.stdout)
+        .trimEnd()
+        .split('\n')
+        .slice(1)
+        .map((line): [string, string] => [line.split(' ').at(-1) ?? '', line[0] ?? '']),
+    )
+    expect(kinds).toEqual({ dir: 'd', dlink: 'd', 'link.txt': '-' })
+    await ws.close()
+  })
+
+  it('find -empty counts a link as an entry', async () => {
+    const ws = await seeded()
+    await ws.shell('mkdir -p /data/hold')
+    await ws.shell('ln -s /data/dir /data/hold/lk')
+    const r = await ws.shell('find /data -empty')
+    expect(dec(r.stdout)).toBe('')
+    await ws.close()
+  })
+
   it('ls -R lists links and does not descend them', async () => {
     const ws = await dangling()
     const out = dec((await ws.shell('ls -R /data')).stdout)

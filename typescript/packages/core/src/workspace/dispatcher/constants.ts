@@ -173,6 +173,11 @@ export const HIDDEN_CREATE_OPS: ReadonlySet<string> = new Set([
   ...ENTRY_CREATE_OPS,
 ])
 
+// Ops that open their path as a directory. Under the caller's `nofollow` a
+// link at the final name is ENOTDIR, as open(2) answers a link with
+// O_DIRECTORY | O_NOFOLLOW.
+export const DIRECTORY_OPEN_OPS: ReadonlySet<string> = new Set(['readdir', 'read_tree'])
+
 // Ops with lstat semantics: they act on the entry named by the path, so
 // no stat surface (dispatch, the Files facade, FUSE) may rewrite their
 // operand through the symlink table.

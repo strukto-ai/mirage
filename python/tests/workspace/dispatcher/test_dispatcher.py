@@ -2124,6 +2124,37 @@ async def test_a_write_during_a_stream_keeps_none_of_it():
         assert (got, tape.reads) == (b"new", 0)
 
 
+@pytest.mark.asyncio
+async def test_a_subtree_read_names_the_links_on_its_own_mount():
+    # No backend stores a link, so the walk a subtree read stands in for
+    # meets them only here; one below a nested mount is that mount's.
+    ws = Workspace(
+        {"/base/": RAMVFS(), "/base/inner/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo hi > /base/f.txt")
+    await ws.shell("ln -s /base/f.txt /base/kept")
+    await ws.shell("ln -s /base/f.txt /base/inner/lnk")
+    tree, _ = await ws.dispatch(
+        "read_tree", PathSpec.from_str_path("/base"), nofollow=True
+    )
+    assert sorted(tree) == ["f.txt", "kept"]
+    assert tree["kept"].type is FileType.SYMLINK
+
+
+@pytest.mark.asyncio
+async def test_a_listing_that_does_not_follow_stops_at_a_link():
+    # As open(2) answers a link with O_DIRECTORY | O_NOFOLLOW. A listing
+    # that follows names the children under the link it was handed.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /data/d && echo hi > /data/d/f.txt")
+    await ws.shell("ln -s /data/d /data/dlink")
+    link = PathSpec.from_str_path("/data/dlink")
+    with pytest.raises(NotADirectoryError):
+        await ws.dispatch("readdir", link, nofollow=True)
+    listed, _ = await ws.dispatch("readdir", link)
+    assert listed == ["/data/dlink/f.txt"]
+
+
 class _LostReply(Tape):
     """A store whose write lands and whose reply then breaks off."""
 

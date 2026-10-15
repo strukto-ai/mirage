@@ -18,6 +18,7 @@ import { chunks } from '../../../../io/cooperative.ts'
 import { concat as concatBytes } from '../../../../utils/bytes.ts'
 import { isStdin } from '../../utils/stream.ts'
 import type { TransferLinks } from '../cp.ts'
+import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { LinkView } from '../../../../view/types.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { eisdir, isFsError } from '../../../../errors/fs.ts'
@@ -148,9 +149,11 @@ export function statOp(dispatch: DispatchFn): (p: PathSpec) => Promise<FileStat>
   }
 }
 
-export function readdirOp(dispatch: DispatchFn): (p: PathSpec) => Promise<string[]> {
-  return async (p: PathSpec) => {
-    const [entries] = await dispatch('readdir', p)
+export function readdirOp(
+  dispatch: DispatchFn,
+): (p: PathSpec, index?: IndexCacheStore, nofollow?: boolean) => Promise<string[]> {
+  return async (p: PathSpec, _index?: IndexCacheStore, nofollow?: boolean) => {
+    const [entries] = await dispatch('readdir', p, [], nofollow === true ? { nofollow } : {})
     return (entries as string[] | null) ?? []
   }
 }

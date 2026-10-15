@@ -26,7 +26,11 @@ const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'EL
 
 export type ReadTree = (path: PathSpec) => Promise<Map<string, FileStat> | null>
 
-export type WalkCall<R> = (path: PathSpec, index?: IndexCacheStore) => Promise<R>
+export type WalkCall<R> = (
+  path: PathSpec,
+  index?: IndexCacheStore,
+  nofollow?: boolean,
+) => Promise<R>
 
 /**
  * Let the mount that owns `path` refuse a command about to read every file
@@ -127,7 +131,7 @@ export function treeWalk<D, S>(
     }
     return null
   }
-  const treeReaddir: WalkCall<D> = async (path, index) => {
+  const treeReaddir: WalkCall<D> = async (path, index, nofollow) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     let hit = answerable(path) ? covering(virtual) : null
     if (hit === null && !asked.has(virtual) && path.pattern === null) {
@@ -154,7 +158,7 @@ export function treeWalk<D, S>(
         return listing.map((name) => base + name) as D
       }
     }
-    return readdir(path, index)
+    return readdir(path, index, nofollow)
   }
   const treeStat: WalkCall<S> = async (path, index) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'

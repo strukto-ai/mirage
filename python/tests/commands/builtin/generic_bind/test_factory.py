@@ -139,8 +139,8 @@ def _owes_nothing(parent: str) -> list[str]:
 @pytest.mark.asyncio
 async def test_namespace_globs_stamp_the_link_target_stat():
     # The command tier's `*/` asks the namespace what a link points at,
-    # so the invocation's target_stat rides the adapter beside the child
-    # names, stamped per invocation exactly like glob_children.
+    # so the invocation's target_stat rides the adapter, stamped per
+    # invocation. The listing already names the namespace's children.
     seen: list[CommandIO] = []
 
     async def capture(ops, accessor, paths, texts, opts):
@@ -166,7 +166,6 @@ async def test_namespace_globs_stamp_the_link_target_stat():
         [],
         replace(opts, io=_ops(_CountingBackend(b""))),
     )
-    assert seen[0].glob_children is _owes_nothing
     assert seen[0].glob_target_stat is _no_target
 
 

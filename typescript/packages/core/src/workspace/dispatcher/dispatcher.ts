@@ -104,6 +104,7 @@ import {
   CALLS,
   COPY_OPS,
   DESTINATION_OPS,
+  DIRECTORY_OPEN_OPS,
   DISPATCH_READ_OPS,
   DISPATCH_WRITE_OPS,
   ENTRY_CREATE_OPS,
@@ -557,6 +558,26 @@ interface Call {
    * as hints.
    */
   fresh: boolean
+  /**
+   * The path before a link at its final name was followed, the one a
+   * listing's names are spelled under; null when nothing was followed.
+   */
+  walked: PathSpec | null
+}
+
+/**
+ * A listing's names spelled under the directory the caller asked for.
+ * Listing a link to a directory lists the directory it reaches, and readdir
+ * names its children under the path it was handed, as a walk through the
+ * link spells them. Mirrors Python's `_spelled_under`.
+ */
+function spelledUnder(call: Call, entries: string[]): string[] {
+  if (call.walked === null) return entries
+  const asked = call.walked.virtual.replace(/\/+$/, '')
+  const reached = call.path.virtual.replace(/\/+$/, '')
+  return entries.map((entry) =>
+    entry.startsWith(`${reached}/`) ? asked + entry.slice(reached.length) : entry,
+  )
 }
 
 /** The filetype a read is rendered as, null for none. */
@@ -1161,6 +1182,13 @@ export class Dispatcher {
     // The command's gate judges each spelling, as handed in and as walked,
     // once both walks have answered for hidden space: here for an op on the
     // name itself and for a destination, in `follow` for the rest.
+    if ((typed.virtual.endsWith('/') || typed.rawPath.endsWith('/')) && kwargs !== undefined) {
+      // A trailing slash names the directory a link at the final name
+      // reaches, as path resolution reads `link/`.
+      const rest = { ...kwargs }
+      delete rest.nofollow
+      kwargs = rest
+    }
     const noFollow = NO_FOLLOW_OPS.has(name) || kwargs?.nofollow === true
     if (ruleGate !== null && noFollow) judge(ruleGate, typed, path, typedDst, dstArg)
     else if (ruleGate !== null) judge(ruleGate, typedDst, dstArg)
@@ -1180,6 +1208,7 @@ export class Dispatcher {
       stream: false,
       direct: false,
       fresh: false,
+      walked: null,
     }
   }
 
@@ -1238,9 +1267,13 @@ export class Dispatcher {
         call.args = [dst, ...(call.args ?? []).slice(1)]
       }
     }
+    if (nofollow && DIRECTORY_OPEN_OPS.has(call.name) && this.namespace.isLink(call.path.virtual)) {
+      throw enotdir(call.path.virtual)
+    }
     if (!NO_FOLLOW_OPS.has(call.name) && !nofollow) {
       const followed = followOrLoop(this.namespace, call.path, true)
       if (followed !== call.path.virtual) {
+        call.walked = call.path
         call.path = PathSpec.fromStrPath(followed)
         if (!pathVisible(call.vis, call.path.virtual)) {
           throw hiddenRefusal(call.vis, call.path.virtual, HIDDEN_CREATE_OPS.has(call.name))
@@ -1879,20 +1912,30 @@ export class Dispatcher {
    */
   private filter(call: Call, result: unknown): unknown {
     if (call.name === 'readdir' && Array.isArray(result)) {
-      return visibleEntries(
-        mergeReaddir(
-          call.vis,
-          result,
-          this.namespace.mountPrefixes(),
-          this.namespace,
+      return spelledUnder(
+        call,
+        visibleEntries(
+          mergeReaddir(
+            call.vis,
+            result,
+            this.namespace.mountPrefixes(),
+            this.namespace,
+            call.path.virtual,
+          ),
           call.path.virtual,
+          call.vis,
         ),
-        call.path.virtual,
-        call.vis,
       )
     }
     if (call.name === 'stat' && result instanceof FileStat) {
-      return mergeOverlayStat(this.namespace.metaFor(call.path.virtual), result)
+      const name = call.path.virtual.replace(/\/+$/, '').split('/').pop() ?? ''
+      // A mount's root answers as the backend's own root; in the namespace
+      // it is the name it is mounted at.
+      const row = result.name === '/' && name !== '' ? result.with({ name }) : result
+      return mergeOverlayStat(this.namespace.metaFor(call.path.virtual), row)
+    }
+    if (call.name === 'read_tree' && result instanceof Map) {
+      result = this.withLinks(call.path, result as Map<string, FileStat>)
     }
     // A tree read keys its entries below the path; a search names each hit
     // itself, and a store can rank a hit from outside the scope (a whole
@@ -1906,6 +1949,24 @@ export class Dispatcher {
       return visibleAnswer(call.name, call.vis, call.path, result)
     }
     return result
+  }
+
+  /**
+   * A subtree read with the links the namespace holds below `path` on the
+   * same mount, each as the link it is. No backend stores a link, so a walk
+   * that reads the subtree in one call meets them only here, as a listing
+   * meets them in `readdir`. Mirrors Python's Dispatcher._with_links.
+   */
+  private withLinks(path: PathSpec, tree: Map<string, FileStat>): Map<string, FileStat> {
+    const base = path.virtual.replace(/\/+$/, '')
+    const owner = this.namespace.tryMountFor(path.virtual)
+    const merged = new Map(tree)
+    for (const [virtual, row] of this.namespace.linkStatsBelow(path.virtual)) {
+      if (this.namespace.tryMountFor(virtual) !== owner) continue
+      const rel = virtual.slice(base.length + 1)
+      if (!merged.has(rel)) merged.set(rel, row)
+    }
+    return merged
   }
 
   /**

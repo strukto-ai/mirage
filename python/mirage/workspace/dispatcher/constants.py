@@ -147,6 +147,11 @@ HIDDEN_CREATE_OPS = FILE_CREATE_OPS | ENTRY_CREATE_OPS
 # requested/residual split and the overlay write read the same names.
 SETATTR_KEYS = ("mode", "uid", "gid", "atime", "mtime")
 
+# Ops that open their path as a directory. Under the caller's ``nofollow``
+# a link at the final name is ENOTDIR, as open(2) answers a link with
+# O_DIRECTORY | O_NOFOLLOW.
+DIRECTORY_OPEN_OPS = frozenset({"readdir", "read_tree"})
+
 # Ops with lstat semantics: they act on the entry named by the path, so
 # no stat surface (dispatch, the Files facade, FUSE) may rewrite their
 # operand through the symlink table.

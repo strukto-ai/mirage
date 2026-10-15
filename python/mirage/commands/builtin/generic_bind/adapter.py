@@ -50,6 +50,7 @@ from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
     eisdir,
+    enoent,
     enotsup,
     walk_refusal,
 )
@@ -363,7 +364,13 @@ def command_io(vfs: BaseVFS) -> CommandIO:
     read_bytes = _without_accessor(_reader(vfs))
     streams = vfs.supports("read_stream")
     return CommandIO(
-        readdir=_without_accessor(vfs.readdir),
+        # A VFS holds no link, so a listing's ``nofollow`` (the
+        # dispatcher's to honor) has nothing here to stop at.
+        readdir=_without_accessor(
+            lambda path, index=NULL_INDEX, nofollow=False: vfs.readdir(
+                path, index=index
+            )
+        ),
         read_bytes=read_bytes,
         stat=_without_accessor(vfs.stat),
         read_stream=(
@@ -539,6 +546,52 @@ async def _dispatched_stream(
         await close_quietly(source)
 
 
+async def _dispatched_stat(
+    dispatch: DispatchFn,
+    accessor: Accessor | None,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> FileStat:
+    """A command's stat of the entry at ``path``, at the dispatcher.
+
+    The entry itself, as lstat answers: a link at the final name is the
+    link, a trailing slash reaches what it names. The dispatcher merges
+    the namespace's overlay into the row.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        accessor (Accessor | None): unused; the dispatcher finds the mount.
+        path (PathSpec): the path.
+        index (IndexCacheStore): unused; the mount brings its own.
+    """
+    found, _ = await dispatch("stat", path, nofollow=True)
+    if not isinstance(found, FileStat):
+        raise enoent(path)
+    return found
+
+
+async def _dispatched_exists(
+    dispatch: DispatchFn,
+    accessor: Accessor | None,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> bool:
+    """Whether an entry is at ``path``, as :func:`_dispatched_stat`
+    answers.
+
+    Args:
+        dispatch (DispatchFn): the command's dispatcher.
+        accessor (Accessor | None): unused; the dispatcher finds the mount.
+        path (PathSpec): the path.
+        index (IndexCacheStore): unused; the mount brings its own.
+    """
+    try:
+        await _dispatched_stat(dispatch, accessor, path)
+    except FileNotFoundError:
+        return False
+    return True
+
+
 async def dispatched_call(
     dispatch: DispatchFn, name: str, path: PathSpec, /, **kwargs: Any
 ) -> Any:
@@ -562,6 +615,7 @@ async def dispatched_call(
 # command's positional arguments after the path are called there.
 # ``index`` is the mount's own at the dispatcher, so it is dropped.
 _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "readdir": ("readdir", ("index",)),
     "write": ("write", ("data", "index")),
     "append": ("append", ("data", "index")),
     "pwrite": ("pwrite", ("data", "offset", "index")),
@@ -587,6 +641,7 @@ _DISPATCHED_SLOTS: dict[str, tuple[str, tuple[str, ...]]] = {
 # The slots that change the mount: with no dispatcher there is nowhere to
 # judge and settle them.
 _DISPATCHED_WRITES = frozenset(_DISPATCHED_SLOTS) - {
+    "readdir",
     "first_lines",
     "last_lines",
     "line_count",
@@ -703,14 +758,16 @@ def dispatched_io(
     return replace(
         ops,
         glob_resolved=noted,
+        stat=functools.partial(_dispatched_stat, dispatch),
+        exists=functools.partial(_dispatched_exists, dispatch),
         read_bytes=reader,
         read_stream=functools.partial(
             _dispatched_stream, dispatch, ahead=ahead
         ),
         read_range=reader if ops.read_range is not None else None,
-        # A walk lists the name it is handed, never a link's target: its
-        # own readdir reaches the backend past the namespace, so the
-        # subtree read does not follow a link at the final name either.
+        # A subtree read stops at a link at the final name (ENOTDIR): it
+        # cannot pass through one, so a walk that follows links lists
+        # them directory by directory instead.
         read_tree=(
             functools.partial(
                 _slot_call,

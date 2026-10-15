@@ -50,6 +50,7 @@ import { FileStat, FileType, PathSpec, type SetAttrFields, type WalkProbe } from
 import {
   eacces,
   eisdir,
+  enoent,
   enotsup,
   isDotWalkError,
   isEnoent,
@@ -411,6 +412,32 @@ async function* dispatchedStream(
 }
 
 /**
+ * A command's stat of the entry at `path`, at the dispatcher: the entry
+ * itself, as lstat answers, so a link at the final name is the link and a
+ * trailing slash reaches what it names. The dispatcher merges the
+ * namespace's overlay into the row. Mirrors Python's `_dispatched_stat`.
+ */
+async function dispatchedStat(dispatch: DispatchFn, path: PathSpec): Promise<FileStat> {
+  const [found] = await dispatch('stat', path, [], { nofollow: true })
+  if (!(found instanceof FileStat)) throw enoent(path)
+  return found
+}
+
+/**
+ * Whether an entry is at `path`, as `dispatchedStat` answers. Mirrors
+ * Python's `_dispatched_exists`.
+ */
+async function dispatchedExists(dispatch: DispatchFn, path: PathSpec): Promise<boolean> {
+  try {
+    await dispatchedStat(dispatch, path)
+  } catch (err) {
+    if (isEnoent(err)) return false
+    throw err
+  }
+  return true
+}
+
+/**
  * Send one call to the dispatcher and hand back its answer: the one way a
  * command's slot, a cross-mount run and a relayed command reach a mount.
  * Mirrors Python's `dispatched_call`.
@@ -445,6 +472,16 @@ async function dispatchedSearchMany(
 // Each slot the dispatcher answers: the dispatcher function it sends and how
 // a command's arguments travel there. Mirrors Python's `_DISPATCHED_SLOTS`.
 const DISPATCHED_SLOTS = {
+  readdir:
+    (dispatch: DispatchFn): CommandIO['readdir'] =>
+    async (_accessor, path, _index, nofollow) =>
+      (await dispatchedCall(
+        dispatch,
+        'readdir',
+        path,
+        [],
+        nofollow === true ? { nofollow } : {},
+      )) as string[],
   write:
     (dispatch: DispatchFn): CommandIO['write'] =>
     async (_accessor, path, data) => {
@@ -538,9 +575,9 @@ const DISPATCHED_SLOTS = {
   readTree:
     (dispatch: DispatchFn): CommandIO['readTree'] =>
     async (_accessor, path) =>
-      // A walk lists the name it is handed, never a link's target: its own
-      // readdir reaches the backend past the namespace, so the subtree read
-      // does not follow a link at the final name either.
+      // A subtree read stops at a link at the final name (ENOTDIR): it cannot
+      // pass through one, so a walk that follows links lists them directory
+      // by directory instead.
       (await dispatchedCall(dispatch, 'read_tree', path, [], {
         nofollow: true,
       })) as Map<string, FileStat> | null,
@@ -565,6 +602,7 @@ const DISPATCHED_WRITES: ReadonlySet<string> = new Set(
   (Object.keys(DISPATCHED_SLOTS) as (keyof typeof DISPATCHED_SLOTS)[]).filter(
     (slot) =>
       ![
+        'readdir',
         'firstLines',
         'lastLines',
         'lineCount',
@@ -643,6 +681,8 @@ export function dispatchedIo(
           },
         }),
     globResolved: noted,
+    stat: (_accessor, path) => dispatchedStat(dispatch, path),
+    exists: (_accessor, path) => dispatchedExists(dispatch, path),
     readBytes: (_accessor, path) => dispatchedBytes(dispatch, path, 0, null, ahead),
     readStream: (_accessor, path) => dispatchedStream(dispatch, path, ahead),
     ...(ops.readRange === undefined
@@ -1072,9 +1112,9 @@ export function refuseReveal(src: PathSpec, dst: PathSpec, access?: SessionAcces
 function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): CommandIO<A> {
   const guarded: CommandIO<A> = {
     ...ops,
-    readdir: async (accessor, path, index) => {
+    readdir: async (accessor, path, index, nofollow) => {
       refuseHidden(path, false, ops.access)
-      return visibleChildren(await ops.readdir(accessor, path, index), path, ops.access)
+      return visibleChildren(await ops.readdir(accessor, path, index, nofollow), path, ops.access)
     },
   }
   const ex = ops.exists

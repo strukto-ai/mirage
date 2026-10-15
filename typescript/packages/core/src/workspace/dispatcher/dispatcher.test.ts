@@ -2086,6 +2086,51 @@ describe('a write and the cached bytes', () => {
   })
 })
 
+describe('a link at the final name', () => {
+  async function linked(mounts: Record<string, RAMVFS>): Promise<Workspace> {
+    const parser = await getTestParser()
+    return new Workspace(mounts, {
+      mode: MountMode.WRITE,
+      shellParserFactory: () => Promise.resolve(parser),
+    })
+  }
+
+  it('a subtree read names the links on its own mount', async () => {
+    // No backend stores a link, so the walk a subtree read stands in for
+    // meets them only here; one below a nested mount is that mount's.
+    const ws = await linked({ '/base/': new RAMVFS(), '/base/inner/': new RAMVFS() })
+    try {
+      await ws.shell('echo hi > /base/f.txt')
+      await ws.shell('ln -s /base/f.txt /base/kept')
+      await ws.shell('ln -s /base/f.txt /base/inner/lnk')
+      const tree = (await ws.dispatch('read_tree', '/base', [], { nofollow: true })) as Map<
+        string,
+        FileStat
+      >
+      expect([...tree.keys()].sort()).toEqual(['f.txt', 'kept'])
+      expect(tree.get('kept')?.type).toBe(FileType.SYMLINK)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a listing that does not follow stops at a link', async () => {
+    // As open(2) answers a link with O_DIRECTORY | O_NOFOLLOW. A listing
+    // that follows names the children under the link it was handed.
+    const ws = await linked({ '/data/': new RAMVFS() })
+    try {
+      await ws.shell('mkdir /data/d && echo hi > /data/d/f.txt')
+      await ws.shell('ln -s /data/d /data/dlink')
+      await expect(
+        ws.dispatch('readdir', '/data/dlink', [], { nofollow: true }),
+      ).rejects.toMatchObject({ code: 'ENOTDIR' })
+      expect(await ws.dispatch('readdir', '/data/dlink')).toEqual(['/data/dlink/f.txt'])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('a command reads at the dispatcher', () => {
   it.each([
     'cat /d/a.txt',

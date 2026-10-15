@@ -561,15 +561,12 @@ def test_a_routing_probe_failure_never_takes_the_line():
     async def run() -> list[tuple[int, bytes]]:
         with patch_s3_session(session):
             await ws.shell("cat /s3/a.txt")
-            mount = ws.namespace.mount_for("/s3/a.txt")
-            real = mount.call
+            reconciler = ws.namespace.registry._reconciler
 
-            async def broken(op, path, **kwargs):
-                if op == "stat":
-                    raise TypeError("probe bug")
-                return await real(op, path, **kwargs)
+            async def broken(mount, path):
+                raise TypeError("probe bug")
 
-            mount.call = broken
+            reconciler._probe = broken
             results = []
             for line in (
                 "ls -l /s3/a.txt; echo survived",
