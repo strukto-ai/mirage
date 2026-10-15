@@ -9,7 +9,7 @@ icon: /images/claude-logo.svg
 ## Install
 
 ```bash
-uv add 'mirage-ai[claude-managed-agents]'
+uv add 'mirage-ai[claude-managed-agents,redis]'
 ```
 
 ## Run a worker
@@ -22,11 +22,15 @@ import os
 
 from anthropic import AsyncAnthropic
 
-from mirage import Workspace
+from mirage import MountMode, Workspace
 from mirage.agents.claude_managed_agents import mirage_tools
-from mirage.vfs.s3 import S3Config, S3VFS
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.redis import RedisVFS
 
-ws = Workspace({"/s3": S3VFS(S3Config(bucket="my-bucket"))})
+ws = Workspace(
+    {"/workspace": RAMVFS(), "/redis": RedisVFS(url="redis://localhost:6379/0")},
+    mode=MountMode.WRITE,
+)
 
 worker = AsyncAnthropic().beta.environments.work.worker(
     environment_id=os.environ["ANTHROPIC_ENVIRONMENT_ID"],
