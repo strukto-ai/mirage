@@ -22,7 +22,12 @@ from mirage.core.gdrive.resolve import (
     resolve_key,
     resolve_parent,
 )
-from mirage.core.google.drive import delete_file, list_files, patch_file
+from mirage.core.google.drive import (
+    delete_file,
+    get_file,
+    list_files,
+    patch_file,
+)
 from mirage.errors.fs import enoent, enotempty
 from mirage.types import PathSpec
 
@@ -55,9 +60,13 @@ async def rename(
     name = drive_target_name(posixpath.basename(dst.vfs_path), src_node)
     add_parents = dst_parent_id if dst_parent_id != src_parent_id else None
     remove_parents = src_parent_id if add_parents else None
+    # Drive stamps a rename as an edit, so the time goes back as rename(2)
+    # keeps it. Drive has no conditional update; reading it just before
+    # leaves one request for another writer's edit to land in.
     body = {"name": name}
-    if src_node.modified:
-        body["modifiedTime"] = src_node.modified
+    modified = (await get_file(token_manager, src_node.id)).get("modifiedTime")
+    if modified:
+        body["modifiedTime"] = modified
     await patch_file(
         token_manager,
         src_node.id,

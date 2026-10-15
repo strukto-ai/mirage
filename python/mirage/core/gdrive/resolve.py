@@ -97,7 +97,6 @@ class DriveNode:
     name: str
     mime_type: str
     drive_id: str | None = None
-    modified: str = ""
 
     @property
     def is_folder(self) -> bool:
@@ -156,7 +155,6 @@ def node_from_item(item: dict[str, Any], drive_id: str | None) -> DriveNode:
         name=item["name"],
         mime_type=item.get("mimeType", ""),
         drive_id=item.get("driveId") or drive_id,
-        modified=item.get("modifiedTime", ""),
     )
 
 

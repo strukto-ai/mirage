@@ -16,7 +16,7 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { invalidateAfterMove } from '../../cache/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../errors/fs.ts'
-import { deleteFile, listFiles, patchFile } from '../google/drive.ts'
+import { deleteFile, getFile, listFiles, patchFile } from '../google/drive.ts'
 import { driveTargetName, eaccesOnDenied, isFolder, resolveKey, resolveParent } from './resolve.ts'
 
 async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
@@ -44,8 +44,12 @@ async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
   const name = driveTargetName(basename, srcNode)
   const move = dstParentId !== srcParentId
+  // Drive stamps a rename as an edit, so the time goes back as rename(2)
+  // keeps it. Drive has no conditional update; reading it just before leaves
+  // one request for another writer's edit to land in.
+  const modified = (await getFile(tm, srcNode.id)).modifiedTime
   await patchFile(tm, srcNode.id, {
-    body: srcNode.modified ? { name, modifiedTime: srcNode.modified } : { name },
+    body: modified ? { name, modifiedTime: modified } : { name },
     ...(move ? { addParents: dstParentId, removeParents: srcParentId } : {}),
   })
   // A folder carries a subtree under both names. dst also loses one when

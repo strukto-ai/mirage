@@ -229,7 +229,7 @@ _PATCH_TARGETS = {
     unlink_mod: ("delete_file",),
     rmdir_mod: ("delete_file", "list_files"),
     rm_mod: ("delete_file",),
-    rename_mod: ("delete_file", "list_files", "patch_file"),
+    rename_mod: ("delete_file", "get_file", "list_files", "patch_file"),
     tree_mod: ("list_files",),
     stat_mod: ("get_file",),
     copy_mod: ("copy_file", "create_folder", "delete_file", "list_files"),
