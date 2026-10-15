@@ -15,9 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { GmailAccessor } from '../../accessor/gmail.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { stat } from './stat.ts'
@@ -37,36 +35,21 @@ function spec(virtual: string): PathSpec {
   })
 }
 
-async function warm(index: RAMIndexCacheStore): Promise<void> {
-  await index.setDir('/gmail', [
-    [
-      'INBOX',
-      new IndexEntry({
-        id: 'INBOX',
-        name: 'INBOX',
-        resourceType: 'gmail/label',
-        vfsName: 'INBOX',
-      }),
-    ],
-  ])
-  await index.setDir('/gmail/INBOX', [
-    [
-      '2026-04-12',
-      new IndexEntry({
-        id: '2026-04-12',
-        name: '2026-04-12',
-        resourceType: 'gmail/date',
-        vfsName: '2026-04-12',
-      }),
-    ],
-  ])
-}
+// The rows the listings name: the label and a day it minted.
+const inbox = new FileStat({
+  name: 'INBOX',
+  type: FileType.DIRECTORY,
+  extra: { label_id: 'INBOX' },
+})
+const day = new FileStat({
+  name: '2026-04-12',
+  type: FileType.DIRECTORY,
+  extra: { label_id: 'INBOX' },
+})
 
 describe('gmail stat of a day directory', () => {
   it('answers a day the label listing minted', async () => {
-    const index = new RAMIndexCacheStore()
-    await warm(index)
-    const result = await stat(makeAccessor(), spec('/gmail/INBOX/2026-04-12'), index)
+    const result = await stat(makeAccessor(), spec('/gmail/INBOX/2026-04-12'), day, inbox)
     expect(result.type).toBe(FileType.DIRECTORY)
     expect(result.name).toBe('2026-04-12')
   })
@@ -76,10 +59,9 @@ describe('gmail stat of a day directory', () => {
     // minted this day; the date query answers for any well-formed one, so the
     // label's existence is the proof rather than the window. Nothing is
     // fetched, which is why no API mock is needed.
-    const index = new RAMIndexCacheStore()
-    await warm(index)
-    const result = await stat(makeAccessor(), spec('/gmail/INBOX/2020-01-01'), index)
+    const result = await stat(makeAccessor(), spec('/gmail/INBOX/2020-01-01'), null, inbox)
     expect(result.type).toBe(FileType.DIRECTORY)
     expect(result.name).toBe('2020-01-01')
+    expect(result.extra.label_id).toBe('INBOX')
   })
 })

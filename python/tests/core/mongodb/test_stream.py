@@ -21,7 +21,6 @@ import pytest
 from bson import Decimal128, ObjectId, Timestamp
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.mongodb.stream import (
     follow,
     last_lines,
@@ -40,11 +39,6 @@ VIEW_DOCS_PATH = "/db1/views/myview/documents.jsonl"
 async def _gen(items):
     for item in items:
         yield item
-
-
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
 
 
 @pytest.fixture(autouse=True)
@@ -91,8 +85,8 @@ def _path(s: str) -> PathSpec:
     return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
-async def _followed(acc, path, index=None, n=0):
-    stream = await follow(acc, _path(path), n, index)
+async def _followed(acc, path, n=0):
+    stream = await follow(acc, _path(path), n)
     assert stream is not None
     return stream
 
@@ -105,11 +99,11 @@ async def _collect(gen):
 
 
 @pytest.mark.asyncio
-async def test_read_stream_yields_one_jsonl_line_per_doc(accessor, index):
+async def test_read_stream_yields_one_jsonl_line_per_doc(accessor):
     oid_a, oid_b = ObjectId(), ObjectId()
     docs = [{"_id": oid_a, "title": "A"}, {"_id": oid_b, "title": "B"}]
     with _patched_iter(docs):
-        data = await _collect(read_stream(accessor, _path(DOCS_PATH), index))
+        data = await _collect(read_stream(accessor, _path(DOCS_PATH)))
     lines = [line for line in data.decode().split("\n") if line]
     assert len(lines) == 2
     first = json.loads(lines[0])
@@ -118,9 +112,7 @@ async def test_read_stream_yields_one_jsonl_line_per_doc(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_stream_preserves_bson_types_via_extended_json(
-    accessor, index
-):
+async def test_read_stream_preserves_bson_types_via_extended_json(accessor):
     docs = [
         {
             "_id": ObjectId("65f0000000000000000000a1"),
@@ -131,7 +123,7 @@ async def test_read_stream_preserves_bson_types_via_extended_json(
         }
     ]
     with _patched_iter(docs):
-        data = await _collect(read_stream(accessor, _path(DOCS_PATH), index))
+        data = await _collect(read_stream(accessor, _path(DOCS_PATH)))
     parsed = json.loads(data.decode().strip())
     assert parsed["_id"] == {"$oid": "65f0000000000000000000a1"}
     assert "$date" in parsed["date"]
@@ -139,18 +131,16 @@ async def test_read_stream_preserves_bson_types_via_extended_json(
 
 
 @pytest.mark.asyncio
-async def test_read_stream_empty_yields_nothing(accessor, index):
+async def test_read_stream_empty_yields_nothing(accessor):
     with _patched_iter([]):
         chunks = []
-        async for chunk in read_stream(accessor, _path(DOCS_PATH), index):
+        async for chunk in read_stream(accessor, _path(DOCS_PATH)):
             chunks.append(chunk)
     assert chunks == []
 
 
 @pytest.mark.asyncio
-async def test_read_stream_short_circuits_when_consumer_closes(
-    accessor, index
-):
+async def test_read_stream_short_circuits_when_consumer_closes(accessor):
     consumed: list[int] = []
 
     async def _instrumented(*_args, **_kwargs):
@@ -159,45 +149,43 @@ async def test_read_stream_short_circuits_when_consumer_closes(
             yield {"_id": ObjectId(), "i": i}
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=_instrumented):
-        gen = read_stream(accessor, _path(DOCS_PATH), index)
+        gen = read_stream(accessor, _path(DOCS_PATH))
         await gen.__anext__()
         await gen.aclose()
     assert len(consumed) <= 2
 
 
 @pytest.mark.asyncio
-async def test_read_stream_works_on_view_documents_path(accessor, index):
+async def test_read_stream_works_on_view_documents_path(accessor):
     oid = ObjectId()
     docs = [{"_id": oid, "v": 1}]
     with _patched_iter(docs):
-        data = await _collect(
-            read_stream(accessor, _path(VIEW_DOCS_PATH), index)
-        )
+        data = await _collect(read_stream(accessor, _path(VIEW_DOCS_PATH)))
     parsed = json.loads(data.decode().strip())
     assert parsed["v"] == 1
     assert parsed["_id"] == {"$oid": str(oid)}
 
 
 @pytest.mark.asyncio
-async def test_read_stream_directory_path_raises(accessor, index):
+async def test_read_stream_directory_path_raises(accessor):
     with _patched_iter([]):
         with pytest.raises(FileNotFoundError):
-            async for _ in read_stream(accessor, _path("/db1"), index):
+            async for _ in read_stream(accessor, _path("/db1")):
                 pass
 
 
 @pytest.mark.asyncio
-async def test_read_stream_schema_json_path_raises(accessor, index):
+async def test_read_stream_schema_json_path_raises(accessor):
     with _patched_iter([]):
         with pytest.raises(FileNotFoundError):
             async for _ in read_stream(
-                accessor, _path("/db1/collections/coll1/schema.json"), index
+                accessor, _path("/db1/collections/coll1/schema.json")
             ):
                 pass
 
 
 @pytest.mark.asyncio
-async def test_read_stream_elides_configured_top_level_field(index):
+async def test_read_stream_elides_configured_top_level_field():
     cfg = MongoDBConfig(
         uri="mongodb://localhost:27017",
         elide_fields={"db1.coll1": ["vector"]},
@@ -206,7 +194,7 @@ async def test_read_stream_elides_configured_top_level_field(index):
     oid = ObjectId()
     docs = [{"_id": oid, "title": "hi", "vector": [0.1, 0.2, 0.3, 0.4, 0.5]}]
     with _patched_iter(docs):
-        data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
+        data = await _collect(read_stream(acc, _path(DOCS_PATH)))
     parsed = json.loads(data.decode().strip())
     assert parsed["title"] == "hi"
     assert "vector" not in parsed
@@ -214,7 +202,7 @@ async def test_read_stream_elides_configured_top_level_field(index):
 
 
 @pytest.mark.asyncio
-async def test_read_stream_elides_configured_nested_path(index):
+async def test_read_stream_elides_configured_nested_path():
     cfg = MongoDBConfig(
         uri="mongodb://localhost:27017",
         elide_fields={"db1.coll1": ["metadata.embedding"]},
@@ -230,14 +218,14 @@ async def test_read_stream_elides_configured_nested_path(index):
         }
     ]
     with _patched_iter(docs):
-        data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
+        data = await _collect(read_stream(acc, _path(DOCS_PATH)))
     parsed = json.loads(data.decode().strip())
     assert parsed["metadata"]["tag"] == "alpha"
     assert "embedding" not in parsed["metadata"]
 
 
 @pytest.mark.asyncio
-async def test_read_stream_elision_isolated_to_configured_collection(index):
+async def test_read_stream_elision_isolated_to_configured_collection():
     cfg = MongoDBConfig(
         uri="mongodb://localhost:27017",
         elide_fields={"db1.other_coll": ["vector"]},
@@ -245,17 +233,17 @@ async def test_read_stream_elision_isolated_to_configured_collection(index):
     acc = MongoDBAccessor(config=cfg)
     docs = [{"_id": ObjectId(), "vector": [1.0, 2.0]}]
     with _patched_iter(docs):
-        data = await _collect(read_stream(acc, _path(DOCS_PATH), index))
+        data = await _collect(read_stream(acc, _path(DOCS_PATH)))
     parsed = json.loads(data.decode().strip())
     assert parsed["vector"] == [1.0, 2.0]
 
 
 @pytest.mark.asyncio
-async def test_follow_yields_one_jsonl_line_per_insert(accessor, index):
+async def test_follow_yields_one_jsonl_line_per_insert(accessor):
     oid_a, oid_b = ObjectId(), ObjectId()
     docs = [{"_id": oid_a, "title": "A"}, {"_id": oid_b, "title": "B"}]
     with _patched_watch(docs):
-        data = await _collect(await _followed(accessor, DOCS_PATH, index))
+        data = await _collect(await _followed(accessor, DOCS_PATH))
     lines = [line for line in data.decode().split("\n") if line]
     assert len(lines) == 2
     assert json.loads(lines[0])["_id"] == {"$oid": str(oid_a)}
@@ -263,7 +251,7 @@ async def test_follow_yields_one_jsonl_line_per_insert(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_follow_preserves_bson_types(accessor, index):
+async def test_follow_preserves_bson_types(accessor):
     docs = [
         {
             "_id": ObjectId("65f0000000000000000000a1"),
@@ -274,7 +262,7 @@ async def test_follow_preserves_bson_types(accessor, index):
         }
     ]
     with _patched_watch(docs):
-        data = await _collect(await _followed(accessor, DOCS_PATH, index))
+        data = await _collect(await _followed(accessor, DOCS_PATH))
     parsed = json.loads(data.decode().strip())
     assert parsed["_id"] == {"$oid": "65f0000000000000000000a1"}
     assert "$date" in parsed["date"]
@@ -282,16 +270,16 @@ async def test_follow_preserves_bson_types(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_follow_empty_yields_nothing(accessor, index):
+async def test_follow_empty_yields_nothing(accessor):
     with _patched_watch([]):
         chunks = []
-        async for chunk in await _followed(accessor, DOCS_PATH, index):
+        async for chunk in await _followed(accessor, DOCS_PATH):
             chunks.append(chunk)
     assert chunks == []
 
 
 @pytest.mark.asyncio
-async def test_follow_short_circuits_when_consumer_closes(accessor, index):
+async def test_follow_short_circuits_when_consumer_closes(accessor):
     consumed: list[int] = []
 
     async def _instrumented(*_args, **_kwargs):
@@ -306,7 +294,7 @@ async def test_follow_short_circuits_when_consumer_closes(accessor, index):
             new=AsyncMock(return_value=([], Timestamp(1, 1))),
         ),
     ):
-        gen = await _followed(accessor, DOCS_PATH, index)
+        gen = await _followed(accessor, DOCS_PATH)
         await gen.__anext__()
         await close_quietly(gen)
     assert len(consumed) <= 2
@@ -314,7 +302,7 @@ async def test_follow_short_circuits_when_consumer_closes(accessor, index):
 
 @pytest.mark.asyncio
 async def test_follow_reads_the_last_documents_at_the_time_it_follows_from(
-    accessor, index
+    accessor,
 ):
     at = Timestamp(42, 1)
     snapshot = AsyncMock(
@@ -337,7 +325,7 @@ async def test_follow_reads_the_last_documents_at_the_time_it_follows_from(
         patch("mirage.core.mongodb.stream.iter_inserts", new=_inserts),
         patch("mirage.core.mongodb.stream.find_snapshot", new=snapshot),
     ):
-        gen = await _followed(accessor, DOCS_PATH, index, n=2)
+        gen = await _followed(accessor, DOCS_PATH, n=2)
         assert seen == []
         data = await _collect(gen)
     assert data.decode().splitlines() == [
@@ -352,32 +340,30 @@ async def test_follow_reads_the_last_documents_at_the_time_it_follows_from(
 
 
 @pytest.mark.asyncio
-async def test_follow_without_last_lines_still_starts_at_a_snapshot(
-    accessor, index
-):
+async def test_follow_without_last_lines_still_starts_at_a_snapshot(accessor):
     snapshot = AsyncMock(return_value=([{"_id": 8}], Timestamp(5, 1)))
     with (
         _patched_watch([{"_id": 9}]),
         patch("mirage.core.mongodb.stream.find_snapshot", new=snapshot),
     ):
-        data = await _collect(await _followed(accessor, DOCS_PATH, index))
+        data = await _collect(await _followed(accessor, DOCS_PATH))
     assert data == b'{"_id": 9}\n'
     assert snapshot.await_args.kwargs["limit"] == 1
 
 
 @pytest.mark.asyncio
 async def test_follow_leaves_a_server_outside_a_replica_set_to_the_polls(
-    accessor, index
+    accessor,
 ):
     with patch(
         "mirage.core.mongodb.stream.find_snapshot",
         new=AsyncMock(return_value=None),
     ):
-        assert await follow(accessor, _path(DOCS_PATH), 2, index) is None
+        assert await follow(accessor, _path(DOCS_PATH), 2) is None
 
 
 @pytest.mark.asyncio
-async def test_follow_prints_an_insert_that_renders_like_a_printed_one(index):
+async def test_follow_prints_an_insert_that_renders_like_a_printed_one():
     acc = MongoDBAccessor(
         config=MongoDBConfig(
             uri="mongodb://localhost:27017",
@@ -387,17 +373,15 @@ async def test_follow_prints_an_insert_that_renders_like_a_printed_one(index):
     with _patched_watch(
         [{"_id": 2, "name": "gus"}], last=[{"_id": 1, "name": "gus"}]
     ):
-        data = await _collect(await _followed(acc, DOCS_PATH, index, n=1))
+        data = await _collect(await _followed(acc, DOCS_PATH, n=1))
     assert data == b'{"name": "gus"}\n{"name": "gus"}\n'
 
 
 @pytest.mark.asyncio
-async def test_follow_leaves_a_view_or_a_directory_to_the_polls(
-    accessor, index
-):
+async def test_follow_leaves_a_view_or_a_directory_to_the_polls(accessor):
     with _patched_watch([]):
         for path in ("/db1", VIEW_DOCS_PATH):
-            assert await follow(accessor, _path(path), 5, index) is None
+            assert await follow(accessor, _path(path), 5) is None
 
 
 @pytest.mark.asyncio
@@ -462,7 +446,7 @@ async def test_last_lines_past_the_ceiling_is_efbig():
 
 
 @pytest.mark.asyncio
-async def test_last_lines_applies_elision(index):
+async def test_last_lines_applies_elision():
     cfg = MongoDBConfig(
         uri="mongodb://localhost:27017",
         elide_fields={"db1.coll1": ["vector"]},
@@ -498,7 +482,7 @@ async def test_line_count_counts_the_documents(accessor):
 
 
 @pytest.mark.asyncio
-async def test_follow_applies_elision(index):
+async def test_follow_applies_elision():
     cfg = MongoDBConfig(
         uri="mongodb://localhost:27017",
         elide_fields={"db1.coll1": ["vector"]},
@@ -507,7 +491,7 @@ async def test_follow_applies_elision(index):
     oid = ObjectId()
     docs = [{"_id": oid, "title": "live", "vector": [0.1, 0.2, 0.3]}]
     with _patched_watch(docs):
-        data = await _collect(await _followed(acc, DOCS_PATH, index))
+        data = await _collect(await _followed(acc, DOCS_PATH))
     parsed = json.loads(data.decode().strip())
     assert parsed["title"] == "live"
     assert "vector" not in parsed

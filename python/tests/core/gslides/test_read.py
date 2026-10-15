@@ -17,13 +17,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gslides.read import read
-from mirage.core.gslides.stat import stat
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
@@ -31,13 +30,8 @@ def accessor():
     return GSlidesAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_read_auto_bootstraps_from_empty_index(accessor, index):
+async def test_a_read_no_listing_named_resolves_by_id(accessor):
     files = [
         {
             "mimeType": "application/vnd.google-apps.presentation",
@@ -67,12 +61,12 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             virtual="/gslides/owned/2026-04-01_Deck__slide1.gslide.json",
             directory="/gslides/owned/2026-04-01_Deck__slide1.gslide.json",
         )
-        result = await read(accessor, path, index)
+        result = await read(accessor, path)
         assert b"slide1" in result
 
 
 @pytest.mark.asyncio
-async def test_read_missing_file_raises_by_id(accessor, index):
+async def test_read_missing_file_raises_by_id(accessor):
     with (
         patch(
             "mirage.core.google.entry.get_file",
@@ -93,7 +87,7 @@ async def test_read_missing_file_raises_by_id(accessor, index):
             directory="/gslides/owned/Missing__xyz.gslide.json",
         )
         with pytest.raises(FileNotFoundError):
-            await read(accessor, path, index)
+            await read(accessor, path)
 
 
 @pytest.mark.asyncio
@@ -101,44 +95,46 @@ async def test_read_missing_file_raises_by_id(accessor, index):
     ("stamp", "token"),
     [("2026-04-01T00:00:00.000Z", "2026-04-01T00:00:00.000Z"), ("", None)],
 )
-async def test_read_records_the_token_stat_reports(
-    accessor, index, stamp, token
-):
+async def test_read_records_the_token_stat_reports(accessor, stamp, token):
     # read: fresh compares this record with stat's fingerprint, so both take
-    # the entry's modified stamp, and an entry without one stamps nothing.
-    name = "2026-04-01_My_Deck__d1.gslide.json"
-    target = "/gslides/owned/" + name
-    await index.set_dir(
-        "/gslides/owned",
-        [
-            (
-                name,
-                IndexEntry(
-                    id="d1",
-                    name="My Deck",
-                    resource_type="gslides/file",
-                    remote_time=stamp,
-                    vfs_name=name,
-                ),
-            ),
-        ],
-    )
-    path = PathSpec(
-        vfs_path=mount_key(target, "/gslides"),
-        virtual=target,
-        directory=target,
-    )
+    # the file's modified stamp, and a file without one stamps nothing.
+    item = {
+        "mimeType": "application/vnd.google-apps.presentation",
+        "id": "d1",
+        "name": "My Deck",
+        "modifiedTime": stamp,
+        "owners": [{"me": True}],
+    }
+    mounted = Mounted(GSlidesVFS, accessor, "/gslides")
     scope = RecordingScope()
     try:
-        with patch(
-            "mirage.core.gslides.read.read_presentation",
-            new_callable=AsyncMock,
-            return_value=b'{"presentationId":"d1"}',
+        with (
+            patch(
+                "mirage.core.google.readdir.list_all_files",
+                new_callable=AsyncMock,
+                return_value=([item], True),
+            ),
+            patch(
+                "mirage.core.google.entry.get_file",
+                new_callable=AsyncMock,
+                return_value=item,
+            ),
+            patch(
+                "mirage.core.gslides.read.read_presentation",
+                new_callable=AsyncMock,
+                return_value=b'{"presentationId":"d1"}',
+            ),
         ):
-            data = await read(accessor, path, index)
+            (target,) = await mounted.readdir("/owned")
+            path = PathSpec(
+                vfs_path=mount_key(target, "/gslides"),
+                virtual=target,
+                directory=target,
+            )
+            data = await read(accessor, path)
+            info = await mounted.stat(path)
     finally:
         scope.close()
-    info = await stat(accessor, path, index)
 
     assert [
         (r.op, r.path, r.source, r.bytes, r.fingerprint) for r in scope.records

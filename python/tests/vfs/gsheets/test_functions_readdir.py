@@ -12,14 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.gsheets import GSheetsAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gsheets import GSheetsVFS
+from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
 
@@ -43,28 +44,33 @@ def accessor():
     return GSheetsAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+@pytest.mark.asyncio
+async def test_readdir_root(accessor):
+    result = await readdir(accessor, _scope("/gsheets"))
+    assert [row.name for row in result] == ["owned", "shared"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
-    result = await readdir(accessor, _scope("/gsheets"), index=index)
-    assert result == ["/gsheets/owned", "/gsheets/shared"]
-
-
-@pytest.mark.asyncio
-async def test_readdir_owned_serves_cached_listing(accessor, index):
-    entry = IndexEntry(
-        id="sheet1",
-        name="Budget",
-        resource_type="gsheets/sheet",
-        remote_time="2026-04-01T00:00:00Z",
-        vfs_name="Budget__sheet1.gsheet.json",
-    )
-    await index.set_dir(
-        "/gsheets/owned", [("Budget__sheet1.gsheet.json", entry)]
-    )
-    result = await readdir(accessor, _scope("/gsheets/owned"), index=index)
-    assert "/gsheets/owned/Budget__sheet1.gsheet.json" in result
+async def test_a_listed_corpus_is_listed_once(accessor):
+    mounted = Mounted(GSheetsVFS, accessor, "/gsheets")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=(
+            [
+                {
+                    "mimeType": "application/vnd.google-apps.spreadsheet",
+                    "id": "sheet1",
+                    "name": "Budget",
+                    "modifiedTime": "2026-04-01T00:00:00Z",
+                    "owners": [{"me": True}],
+                }
+            ],
+            True,
+        ),
+    ) as listed:
+        first = await mounted.readdir(_scope("/gsheets/owned"))
+        again = await mounted.readdir(_scope("/gsheets/owned"))
+    assert first == again and len(first) == 1
+    assert "sheet1" in first[0]
+    listed.assert_awaited_once()

@@ -17,7 +17,6 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.email.client import (
     INTERNAL_DATE_KEY,
     fetch_headers,
@@ -26,8 +25,10 @@ from mirage.core.email.client import (
 from mirage.core.email.folders import list_folders
 from mirage.core.email.render import message_json_bytes
 from mirage.core.email.scope import detect_scope
-from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
+from mirage.core.hierarchy.readdir import Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.hierarchy.stat import entry_stat
+from mirage.types import ContentType, DirListing, FileStat, FileType
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, sanitize_label
 
 TITLE_MAX = 80
@@ -88,58 +89,45 @@ def _date_bucket(message: dict[str, Any]) -> str:
     return internal if internal is not None else EPOCH_DATE
 
 
+ATTACHMENT = entry_stat("attachment_id")
+
+
 def _date_children(
     headers: list[dict[str, Any]],
-) -> tuple[
-    list[tuple[str, IndexEntry]], dict[str, list[tuple[str, IndexEntry]]]
-]:
+) -> tuple[list[FileStat], dict[str, list[FileStat]]]:
     """One date directory's children, plus its attachment-dir seeds.
 
     Args:
         headers (list[dict]): the date's fetched message headers.
     """
-    children: list[tuple[str, IndexEntry]] = []
-    seeds: dict[str, list[tuple[str, IndexEntry]]] = {}
+    children: list[FileStat] = []
+    seeds: dict[str, list[FileStat]] = {}
     for hdr in headers:
         uid = hdr["uid"]
         subject = hdr.get("subject", "") or "No Subject"
         filename = _msg_filename(subject, uid)
         children.append(
-            (
-                filename,
-                IndexEntry(
-                    id=uid,
-                    name=subject,
-                    resource_type="email/message",
-                    vfs_name=filename,
-                    size=len(message_json_bytes(hdr)),
-                ),
+            FileStat(
+                name=filename,
+                type=FileType.FILE,
+                content=ContentType.JSON,
+                size=len(message_json_bytes(hdr)),
+                extra={"uid": uid},
             )
         )
         attachments = hdr.get("attachments", [])
         if attachments:
             att_dir_name = filename.replace(".email.json", "")
             children.append(
-                (
-                    att_dir_name,
-                    IndexEntry(
-                        id=uid,
-                        name=att_dir_name,
-                        resource_type="email/attachment_dir",
-                        vfs_name=att_dir_name,
-                    ),
+                FileStat(
+                    name=att_dir_name,
+                    type=FileType.DIRECTORY,
+                    extra={"uid": uid},
                 )
             )
             seeds[att_dir_name] = [
-                (
-                    att["filename"],
-                    IndexEntry(
-                        id=att["filename"],
-                        name=att["filename"],
-                        resource_type="email/attachment",
-                        vfs_name=att["filename"],
-                        size=att.get("size"),
-                    ),
+                ATTACHMENT(
+                    att["filename"], att["filename"], size=att.get("size")
                 )
                 for att in attachments
             ]
@@ -157,41 +145,20 @@ async def _folder_headers(
 
 async def _list_root(accessor: EmailAccessor, match: ScopeMatch) -> Listed:
     folders = await list_folders(accessor)
-    return [
-        (
-            name,
-            IndexEntry(
-                id=name,
-                name=name,
-                resource_type="email/folder",
-                vfs_name=name,
-            ),
-        )
-        for name in folders
-    ]
+    return [FileStat(name=name, type=FileType.DIRECTORY) for name in folders]
 
 
 async def _list_folder(
-    accessor: EmailAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: EmailAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    headers_list = await _folder_headers(accessor, own.id)
+    headers_list = await _folder_headers(accessor, match.slots["folder"])
     date_groups: dict[str, list[dict[str, Any]]] = {}
     for hdr in headers_list:
         date_groups.setdefault(_date_bucket(hdr), []).append(hdr)
-    entries: list[tuple[str, IndexEntry]] = []
-    seeds: dict[str, list[tuple[str, IndexEntry]]] = {}
+    entries: list[FileStat] = []
+    seeds: dict[str, list[FileStat]] = {}
     for date_str in sorted(date_groups.keys(), reverse=True):
-        entries.append(
-            (
-                date_str,
-                IndexEntry(
-                    id=date_str,
-                    name=date_str,
-                    resource_type="email/date",
-                    vfs_name=date_str,
-                ),
-            )
-        )
+        entries.append(FileStat(name=date_str, type=FileType.DIRECTORY))
         children, att_seeds = _date_children(date_groups[date_str])
         seeds[date_str] = children
         for att_dir, att_entries in att_seeds.items():
@@ -200,10 +167,10 @@ async def _list_folder(
 
 
 async def _list_day(
-    accessor: EmailAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: EmailAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
     # Normally served from the folder lister's seed; reached only when
-    # the index evicted the day listing while the date entry survived.
+    # the index evicted the day listing while the date's row survived.
     headers_list = await _folder_headers(accessor, match.slots["folder"])
     day = match.slots["day"]
     children, att_seeds = _date_children(
@@ -213,11 +180,11 @@ async def _list_day(
 
 
 async def _list_attachment_dir(
-    accessor: EmailAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: EmailAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
     # Same eviction fallback: one header fetch rebuilds the listing.
     headers_list = await fetch_headers(
-        accessor, match.slots["folder"], [own.id]
+        accessor, match.slots["folder"], [str(own.extra["uid"])]
     )
     for hdr in headers_list:
         _, seeds = _date_children([hdr])

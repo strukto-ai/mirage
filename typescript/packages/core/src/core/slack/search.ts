@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SlackAccessor } from '../../accessor/slack.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
-import { parseIdName } from '../../utils/naming.ts'
 import { recordQueries } from '../../utils/record_search.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
+import { rowAt, rowsOf } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { compactJsonBytes } from '../render/json.ts'
 import { listChannels } from './channels.ts'
@@ -572,12 +570,11 @@ export async function filesContaining(
   accessor: SlackAccessor,
   text: string,
   under: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const queries = recordQueries(text, RECORD_KEYS, true)
   if (queries === null) return null
   try {
-    return await search(accessor, text, queries, under, index)
+    return await search(accessor, text, queries, under)
   } catch (err) {
     // fetch rejects with a TypeError when the connection fails and a
     // DOMException when its timeout aborts it
@@ -608,7 +605,6 @@ async function search(
   text: string,
   queries: readonly string[],
   under: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const scopes = under.map((scope) => [scope, detectScope(scope)] as const)
   if (scopes.some(([, match]) => match.kind === 'day')) return null
@@ -626,9 +622,8 @@ async function search(
     const containers = CONTAINERS[match.kind]
     if (containers !== undefined) {
       for (const container of containers) {
-        for (const path of await readdir(accessor, mountedPath(scope, `/${container}`), index)) {
-          const name = path.slice(path.lastIndexOf('/') + 1)
-          dirs.set(parseIdName(name)[1], `${container}/${name}`)
+        for (const row of rowsOf(await readdir(accessor, mountedPath(scope, `/${container}`)))) {
+          dirs.set(String(row.extra.channel_id), `${container}/${row.name}`)
         }
       }
       within = ''
@@ -636,10 +631,10 @@ async function search(
       const container = match.slots.container ?? ''
       const dirname = scope.mountPath.split('/').filter((part) => part !== '')[1] ?? ''
       const channel = mountedPath(scope, `/${container}/${dirname}`)
-      const entry = await resolveEntry(readdir, accessor, channel, index)
+      const [entry] = await rowAt(readdir, accessor, channel)
       if (entry === null) return null
-      dirs.set(entry.id, `${container}/${dirname}`)
-      within = container === 'channels' ? `in:#${entry.name} ` : ''
+      dirs.set(String(entry.extra.channel_id), `${container}/${dirname}`)
+      within = container === 'channels' ? `in:#${String(entry.extra.name)} ` : ''
     } else continue
     if (searched !== null && [...dirs.keys()].some((id) => !searched.has(id))) return null
     const hits = await hitsOf(accessor, within, queries, reaction)

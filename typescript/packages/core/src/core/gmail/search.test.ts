@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { GmailVFS } from '../../vfs/gmail/gmail.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
@@ -224,12 +224,12 @@ class CountingGmail extends GmailVFS {
   readonly reads: string[] = []
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
     if (path.vfsPath.endsWith('.gmail.json')) this.reads.push(path.vfsPath.split('__').pop() ?? '')
-    return super.read(path, index, offset, size)
+    return super.read(path, handed, offset, size)
   }
 }
 

@@ -15,11 +15,10 @@
 from typing import Any
 
 from mirage.accessor.jaeger import JaegerAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.jaeger.read import read as _read
 from mirage.core.jaeger.readdir import readdir as _readdir
 from mirage.core.jaeger.stat import stat as _stat
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.jaeger.config import JaegerConfig
@@ -41,25 +40,19 @@ class JaegerVFS(BaseVFS):
         self.config = config
         self.accessor = JaegerAccessor(self.config)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

@@ -4,11 +4,12 @@ import pytest
 from pydantic import SecretStr
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.mem0.read import read
-from mirage.core.mem0.readdir import readdir
 from mirage.types import PathSpec
+from mirage.vfs.mem0 import Mem0VFS
 from mirage.vfs.mem0.config import Mem0Config
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
 
 class FakeClient:
@@ -44,28 +45,29 @@ def _accessor():
     return acc
 
 
+def _mounted(acc: Mem0Accessor) -> Workspace:
+    return Workspace({"/mem/": vfs_over(Mem0VFS, acc)})
+
+
 @pytest.mark.asyncio
-async def test_read_full_json_from_cache_no_get():
+async def test_read_full_json_from_the_listing_no_get():
     acc = _accessor()
-    index = RAMIndexCacheStore()
-    root = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
-    await readdir(acc, root, index)
-    fpath = PathSpec(
-        virtual="/mem/aaa.json", directory="/mem", vfs_path="aaa.json"
+    ws = _mounted(acc)
+    await ws.dispatch("readdir", PathSpec.from_str_path("/mem"))
+    data, _ = await ws.dispatch(
+        "read", PathSpec.from_str_path("/mem/aaa.json")
     )
-    data = json.loads(await read(acc, fpath, index))
-    assert data["categories"] == ["food"]
+    assert json.loads(data)["categories"] == ["food"]
     assert acc._client.get_calls == 0
 
 
 @pytest.mark.asyncio
 async def test_a_cold_read_resolves_through_the_scoped_listing():
     acc = _accessor()
-    fpath = PathSpec(
-        virtual="/mem/aaa.json", directory="/mem", vfs_path="aaa.json"
+    data, _ = await _mounted(acc).dispatch(
+        "read", PathSpec.from_str_path("/mem/aaa.json")
     )
-    data = json.loads(await read(acc, fpath, RAMIndexCacheStore()))
-    assert data["id"] == "aaa"
+    assert json.loads(data)["id"] == "aaa"
     assert acc._client.get_calls == 0
 
 
@@ -75,11 +77,10 @@ async def test_a_memory_outside_the_scope_is_enoent():
     read used to fetch any id in the file name, so ``cat`` served another
     user's memory that ``ls`` never showed."""
     acc = _accessor()
-    fpath = PathSpec(
-        virtual="/mem/zzz.json", directory="/mem", vfs_path="zzz.json"
-    )
     with pytest.raises(FileNotFoundError):
-        await read(acc, fpath, RAMIndexCacheStore())
+        await _mounted(acc).dispatch(
+            "read", PathSpec.from_str_path("/mem/zzz.json")
+        )
     assert acc._client.get_calls == 0
 
 
@@ -91,5 +92,4 @@ async def test_read_root_is_eisdir():
         await read(
             acc,
             PathSpec(virtual="/mem", directory="/mem", vfs_path=""),
-            RAMIndexCacheStore(),
         )

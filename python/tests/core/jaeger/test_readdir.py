@@ -17,25 +17,23 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.jaeger import JaegerAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.jaeger.readdir import readdir
 from mirage.core.render.json import json_bytes
-from mirage.types import PathSpec
+from mirage.types import DirListing, FileType, PathSpec
 from mirage.vfs.jaeger.config import JaegerConfig
-from tests.fixtures.index_spy import WindowSpy
 
 TRACE_A = "a" * 32
 TRACE_B = "b" * 32
 
 
+def _names(listed):
+    rows = listed.entries if isinstance(listed, DirListing) else listed
+    return [row.name for row in rows]
+
+
 @pytest.fixture
 def accessor():
     return JaegerAccessor(config=JaegerConfig())
-
-
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
 
 
 def spec(path: str) -> PathSpec:
@@ -44,23 +42,23 @@ def spec(path: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
-    assert await readdir(accessor, spec(""), index) == ["/services"]
+async def test_readdir_root(accessor):
+    assert _names(await readdir(accessor, spec(""))) == ["services"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_services(accessor, index):
+async def test_readdir_services(accessor):
     with patch(
         "mirage.core.jaeger.readdir.fetch_services",
         new_callable=AsyncMock,
         return_value=["checkout", "search"],
     ):
-        result = await readdir(accessor, spec("services"), index)
-    assert result == ["/services/checkout", "/services/search"]
+        result = await readdir(accessor, spec("services"))
+    assert _names(result) == ["checkout", "search"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_service_children(accessor, index):
+async def test_readdir_service_children(accessor):
     operations = ["GET /cart", "POST /cart"]
     with (
         patch(
@@ -74,17 +72,14 @@ async def test_readdir_service_children(accessor, index):
             return_value=operations,
         ),
     ):
-        result = await readdir(accessor, spec("services/checkout"), index)
-    assert result == [
-        "/services/checkout/operations.json",
-        "/services/checkout/traces",
-    ]
-    lookup = await index.get("/services/checkout/operations.json")
-    assert lookup.entry.size == len(json_bytes(operations))
+        result = await readdir(accessor, spec("services/checkout"))
+    assert _names(result) == ["operations.json", "traces"]
+    assert result[0].size == len(json_bytes(operations))
+    assert result[1].type is FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_readdir_unknown_service_raises(accessor, index):
+async def test_readdir_unknown_service_raises(accessor):
     # The operations endpoint answers 200 with an empty list for a service
     # that was never seen, so existence has to come from the service list.
     with patch(
@@ -93,11 +88,11 @@ async def test_readdir_unknown_service_raises(accessor, index):
         return_value=["checkout"],
     ):
         with pytest.raises(FileNotFoundError):
-            await readdir(accessor, spec("services/nope"), index)
+            await readdir(accessor, spec("services/nope"))
 
 
 @pytest.mark.asyncio
-async def test_readdir_traces(accessor, index):
+async def test_readdir_traces(accessor):
     with patch(
         "mirage.core.jaeger.readdir.fetch_services",
         new_callable=AsyncMock,
@@ -108,17 +103,12 @@ async def test_readdir_traces(accessor, index):
             new_callable=AsyncMock,
             return_value=[{"traceID": TRACE_A}, {"traceID": TRACE_B}],
         ):
-            result = await readdir(
-                accessor, spec("services/checkout/traces"), index
-            )
-    assert result == [
-        f"/services/checkout/traces/{TRACE_A}.json",
-        f"/services/checkout/traces/{TRACE_B}.json",
-    ]
+            result = await readdir(accessor, spec("services/checkout/traces"))
+    assert _names(result) == [f"{TRACE_A}.json", f"{TRACE_B}.json"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_traces_stores_rendered_size(accessor, index):
+async def test_readdir_traces_stores_rendered_size(accessor):
     trace = {
         "traceID": TRACE_A,
         "spans": [{"spanID": "s1", "operationName": "GET /pay"}],
@@ -134,14 +124,13 @@ async def test_readdir_traces_stores_rendered_size(accessor, index):
             new_callable=AsyncMock,
             return_value=[trace],
         ):
-            await readdir(accessor, spec("services/checkout/traces"), index)
-    lookup = await index.get(f"/services/checkout/traces/{TRACE_A}.json")
-    assert lookup.entry is not None
-    assert lookup.entry.size == len(json_bytes(trace))
+            listed = await readdir(accessor, spec("services/checkout/traces"))
+    assert listed.entries[0].size == len(json_bytes(trace))
+    assert listed.entries[0].extra == {"trace_id": TRACE_A}
 
 
 @pytest.mark.asyncio
-async def test_readdir_traces_skips_malformed_ids(accessor, index):
+async def test_readdir_traces_skips_malformed_ids(accessor):
     with patch(
         "mirage.core.jaeger.readdir.fetch_services",
         new_callable=AsyncMock,
@@ -156,14 +145,12 @@ async def test_readdir_traces_skips_malformed_ids(accessor, index):
                 {},
             ],
         ):
-            result = await readdir(
-                accessor, spec("services/checkout/traces"), index
-            )
-    assert result == [f"/services/checkout/traces/{TRACE_A}.json"]
+            result = await readdir(accessor, spec("services/checkout/traces"))
+    assert _names(result) == [f"{TRACE_A}.json"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_traces_threads_configured_window(index):
+async def test_readdir_traces_threads_configured_window():
     configured = JaegerAccessor(
         config=JaegerConfig(
             default_trace_limit=5,
@@ -177,44 +164,27 @@ async def test_readdir_traces_threads_configured_window(index):
         return_value=["checkout"],
     ):
         with patch("mirage.core.jaeger.readdir.fetch_traces", fake):
-            await readdir(configured, spec("services/checkout/traces"), index)
+            await readdir(configured, spec("services/checkout/traces"))
     assert fake.await_args.kwargs["limit"] == 5
     assert fake.await_args.kwargs["from_timestamp"] == "2026-01-01T00:00:00Z"
 
 
 @pytest.mark.asyncio
-async def test_readdir_dotfile_raises(accessor, index):
+async def test_readdir_dotfile_raises(accessor):
     with pytest.raises(FileNotFoundError):
-        await readdir(accessor, spec("services/.hidden"), index)
+        await readdir(accessor, spec("services/.hidden"))
 
 
 @pytest.mark.asyncio
-async def test_readdir_unknown_path_raises(accessor, index):
+async def test_readdir_unknown_path_raises(accessor):
     with pytest.raises(FileNotFoundError):
-        await readdir(accessor, spec("traces"), index)
-
-
-@pytest.mark.asyncio
-async def test_readdir_service_fetches_operations_once(accessor, index):
-    fetch = AsyncMock(return_value=["GET /cart"])
-    with (
-        patch(
-            "mirage.core.jaeger.readdir.fetch_services",
-            new_callable=AsyncMock,
-            return_value=["checkout"],
-        ),
-        patch("mirage.core.jaeger.readdir.fetch_operations", fetch),
-    ):
-        await readdir(accessor, spec("services/checkout"), index)
-        await readdir(accessor, spec("services/checkout"), index)
-    assert fetch.await_count == 1
+        await readdir(accessor, spec("traces"))
 
 
 @pytest.mark.asyncio
 async def test_a_trace_listing_is_written_as_a_window(accessor):
     # The listing is the newest default_trace_limit traces; an older trace
     # that falls off it is still in Jaeger.
-    index = WindowSpy()
     with patch(
         "mirage.core.jaeger.readdir.fetch_services",
         new_callable=AsyncMock,
@@ -225,5 +195,6 @@ async def test_a_trace_listing_is_written_as_a_window(accessor):
             new_callable=AsyncMock,
             return_value=[{"traceID": TRACE_A}],
         ):
-            await readdir(accessor, spec("services/checkout/traces"), index)
-    assert index.windows["/services/checkout/traces"] is True
+            listed = await readdir(accessor, spec("services/checkout/traces"))
+    assert isinstance(listed, DirListing)
+    assert listed.window is True

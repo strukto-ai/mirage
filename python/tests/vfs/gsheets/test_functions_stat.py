@@ -12,14 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.gsheets import GSheetsAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gsheets import GSheetsVFS
+from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
 
@@ -43,50 +44,46 @@ def accessor():
     return GSheetsAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_stat_root_is_directory(accessor, index):
-    result = await stat(accessor, _scope("/gsheets"), index=index)
+async def test_stat_root_is_directory(accessor):
+    result = await stat(accessor, _scope("/gsheets"))
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_sheet(accessor, index):
-    await index.set_dir(
-        "/gsheets/owned",
-        [
-            (
-                "Budget__sheet1.gsheet.json",
-                IndexEntry(
-                    id="sheet1",
-                    name="Budget",
-                    resource_type="gsheets/sheet",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="Budget__sheet1.gsheet.json",
-                ),
-            )
-        ],
-    )
-    result = await stat(
-        accessor,
-        _scope("/gsheets/owned/Budget__sheet1.gsheet.json"),
-        index=index,
-    )
-    assert result.name == "Budget__sheet1.gsheet.json"
+async def test_stat_sheet(accessor):
+    mounted = Mounted(GSheetsVFS, accessor, "/gsheets")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=(
+            [
+                {
+                    "mimeType": "application/vnd.google-apps.spreadsheet",
+                    "id": "sheet1",
+                    "name": "Budget",
+                    "modifiedTime": "2026-04-01T00:00:00Z",
+                    "owners": [{"me": True}],
+                }
+            ],
+            True,
+        ),
+    ):
+        (target,) = await mounted.readdir(_scope("/gsheets/owned"))
+        result = await mounted.stat(_scope(target))
+    assert result.name == target.rsplit("/", 1)[-1]
     assert result.extra["doc_id"] == "sheet1"
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor, index):
-    await index.set_dir("/gsheets/owned", [])
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            _scope("/gsheets/owned/Nonexistent__sheet9.gsheet.json"),
-            index=index,
-        )
+async def test_stat_not_found(accessor):
+    mounted = Mounted(GSheetsVFS, accessor, "/gsheets")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=([], True),
+    ):
+        await mounted.readdir(_scope("/gsheets/owned"))
+        with pytest.raises(FileNotFoundError):
+            await mounted.stat(_scope("/gsheets/owned/Nonexistent__x9.json"))

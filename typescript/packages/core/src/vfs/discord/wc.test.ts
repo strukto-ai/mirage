@@ -12,49 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { materialize } from '../../io/types.ts'
-import { PathSpec } from '../../types.ts'
-import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
-import { generic } from '../../commands/builtin/generic_bind/factory.ts'
+import { FakeDiscordTransport, runDiscord } from './_test_util.ts'
 
-const DISCORD_WC = [generic('wc')]
-
-const DEC = new TextDecoder()
-
-async function runWc(
-  paths: PathSpec[],
-  flags: Record<string, string | boolean | number | string[]>,
-  options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
-): Promise<string> {
-  const cmd = DISCORD_WC[0]
-  if (cmd === undefined) throw new Error('wc not registered')
-  const transport = options.transport ?? new FakeDiscordTransport()
-  const vfs = makeFakeVfs(transport)
-  const result = await cmd.fn(vfs.accessor, paths, [], {
-    stdin: null,
-    flags,
-    io: commandIo(vfs),
-    cwd: '/',
-    ...(options.index !== undefined ? { index: options.index } : {}),
-  })
-  if (result === null) return ''
-  const [out] = result
-  if (out === null) return ''
-  const buf = out instanceof Uint8Array ? out : await materialize(out as AsyncIterable<Uint8Array>)
-  return DEC.decode(buf)
-}
+const CHAT = '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl'
 
 describe('discord wc', () => {
   it('supports -l flag (line count)', async () => {
-    const idx = new RAMIndexCacheStore()
-    await seedGuild(idx, '/mnt/discord', 'My Server__G1', 'G1')
-    await seedChannel(idx, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', {
-      dates: ['2016-04-30'],
-    })
     const transport = new FakeDiscordTransport((_m, endpoint) => {
       if (endpoint === '/channels/C1/messages') {
         return [
@@ -64,21 +28,7 @@ describe('discord wc', () => {
       }
       return null
     })
-    const out = await runWc(
-      [
-        new PathSpec({
-          virtual: '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-          directory: '/mnt/discord/My Server__G1/channels/general__C1/',
-          resolved: false,
-          vfsPath: mountKey(
-            '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-            '/mnt/discord',
-          ),
-        }),
-      ],
-      { lines: true },
-      { index: idx, transport },
-    )
-    expect(out).toBe('2 /mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl\n')
+    const out = await runDiscord(transport, `wc -l "${CHAT}"`, ['2016-04-30'])
+    expect(out.stdout).toBe(`2 ${CHAT}\n`)
   })
 })

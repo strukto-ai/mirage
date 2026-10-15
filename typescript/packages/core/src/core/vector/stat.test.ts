@@ -15,14 +15,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { Accessor } from '../../accessor/base.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { ContentType, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { Codec, PATH_SAFE } from '../hierarchy/codec.ts'
 import { makeDetectScope, type ScopeMatch } from '../hierarchy/scope.ts'
 import { makeRead } from './read.ts'
-import { makeReaddir, dirEntry } from './readdir.ts'
 import { blobLeaf, filtersOf, rowScopes } from './scope.ts'
 import { makeStat } from './stat.ts'
 import type { VectorTree } from './types.ts'
@@ -39,20 +36,16 @@ const DETECT = makeDetectScope(
   ),
 )
 
-function children(_accessor: Stub, match: ScopeMatch): Promise<[string, IndexEntry][]> {
+function children(_accessor: Stub, match: ScopeMatch): Promise<FileStat[]> {
   const label = filtersOf(['label'], match).label
-  if (label === undefined) return Promise.resolve([['cat', dirEntry('stub', 'cat')]])
-  const entry = new IndexEntry({
-    id: '1',
-    name: '1.txt',
-    resourceType: 'stub/row_text',
-    vfsName: '1.txt',
-  })
-  return Promise.resolve(label === 'cat' ? [['1.txt', entry]] : [])
+  if (label === undefined) {
+    return Promise.resolve([new FileStat({ name: 'cat', type: FileType.DIRECTORY })])
+  }
+  const row = new FileStat({ name: '1.txt', type: FileType.FILE })
+  return Promise.resolve(label === 'cat' ? [row] : [])
 }
 
 const TREE: VectorTree<Stub> = {
-  vfs: 'stub',
   detect: () => DETECT,
   pinned: () => null,
   searchLimit: () => 10,
@@ -72,8 +65,7 @@ const TREE: VectorTree<Stub> = {
   hit: () => [[], new Uint8Array()],
 }
 
-const readdir = makeReaddir(TREE)
-const stat = makeStat(TREE, readdir, makeRead(TREE))
+const stat = makeStat(TREE, makeRead(TREE))
 
 function ps(path: string): PathSpec {
   return new PathSpec({ vfsPath: stripSlash(path), virtual: path, directory: path })
@@ -92,29 +84,12 @@ describe('vector stat', () => {
     },
   )
 
-  it('serves a seeded size without a read', async () => {
+  it('sizes a row by its read', async () => {
+    // A row a listing names is answered by the mount from that listing; one
+    // it does not reaches here and is rendered, so the size is exact.
     const accessor = new Stub()
-    const index = new RAMIndexCacheStore()
-    await index.put(
-      '/animals/cat/1.txt',
-      new IndexEntry({
-        id: '1',
-        name: '1.txt',
-        resourceType: 'stub/row_text',
-        vfsName: '1.txt',
-        size: 999,
-      }),
-    )
-    const s = await stat(accessor, ps('/animals/cat/1.txt'), index)
-    expect([s.size, s.content, accessor.reads]).toEqual([999, ContentType.TEXT, 0])
-  })
-
-  it('sizes an unsized entry by its read', async () => {
-    const accessor = new Stub()
-    const index = new RAMIndexCacheStore()
-    await readdir(accessor, ps('/animals/cat'), index)
-    const s = await stat(accessor, ps('/animals/cat/1.txt'), index)
-    expect([s.size, accessor.reads]).toEqual(['row 1\n'.length, 1])
+    const s = await stat(accessor, ps('/animals/cat/1.txt'))
+    expect([s.size, s.content, accessor.reads]).toEqual(['row 1\n'.length, ContentType.TEXT, 1])
   })
 
   it('types a leaf by its scope', async () => {

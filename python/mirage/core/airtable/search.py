@@ -17,15 +17,12 @@ import logging
 import aiohttp
 
 from mirage.accessor.airtable import AirtableAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.airtable.client import list_records
 from mirage.core.airtable.errors import AirtableAPIError
 from mirage.core.airtable.normalize import records_jsonl
-from mirage.core.airtable.readdir import readdir, schema_table
+from mirage.core.airtable.readdir import schema_table
 from mirage.core.airtable.scope import detect_scope
-from mirage.core.hierarchy.probe import resolve_entry
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.record_search import record_queries
 
 logger = logging.getLogger(__name__)
@@ -81,7 +78,7 @@ async def lines_containing(
     accessor: AirtableAccessor,
     path: PathSpec,
     text: str,
-    index: IndexCacheStore,
+    entry: FileStat | None,
 ) -> bytes | None:
     """The lines of a table's records.jsonl or a view's file that may hold
     ``text``, in the order a plain read lists them.
@@ -105,16 +102,13 @@ async def lines_containing(
         accessor (AirtableAccessor): the account.
         path (PathSpec): the file grep would read.
         text (str): plain text every match holds.
-        index (IndexCacheStore): the listings that prove the path.
+        entry (FileStat | None): the row the parent's listing holds,
+            which proves the path.
     """
     match = detect_scope(path)
-    if match.kind not in ("records", "view"):
+    if match.kind not in ("records", "view") or entry is None:
         return None
-    if index is NULL_INDEX or index is None:
-        index = RAMIndexCacheStore()
     try:
-        if await resolve_entry(readdir, accessor, path, index) is None:
-            return None
         table = await schema_table(accessor, match)
     except FileNotFoundError:
         return None

@@ -15,12 +15,11 @@
 from typing import Any
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.trello.read import read as _read
 from mirage.core.trello.readdir import readdir as _readdir
 from mirage.core.trello.search import files_containing as _files_containing
 from mirage.core.trello.stat import stat as _stat
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.trello.config import TrelloConfig
@@ -49,31 +48,30 @@ class TrelloVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         if not whole_word or not self.config.content_search:
             return None
-        return await _files_containing(self.accessor, text, [path], index)
+        return await _files_containing(self.accessor, text, [path])
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        parent: FileStat | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path, None, parent)
         return slice_window(data, offset, size)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

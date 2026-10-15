@@ -12,23 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry } from '../../cache/index/config.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { epochToIso } from '../../utils/dates.ts'
 import { makeIdName } from '../../utils/naming.ts'
+import { compactJsonBytes } from '../render/json.ts'
+import type { DiscordChannel } from './channels.ts'
+import type { DiscordGuild } from './guilds.ts'
 import { DISCORD_EPOCH } from './history.ts'
-
-export const DiscordResourceType = Object.freeze({
-  GUILD: 'discord/guild',
-  CHANNEL: 'discord/channel',
-  MEMBER: 'discord/member',
-  HISTORY: 'discord/history',
-  DATE_DIR: 'discord/date_dir',
-  CHAT_JSONL: 'discord/chat_jsonl',
-  FILES_DIR: 'discord/files_dir',
-  FILE: 'discord/file',
-} as const)
-
-export type DiscordResourceType = (typeof DiscordResourceType)[keyof typeof DiscordResourceType]
+import type { DiscordMember } from './members.ts'
 
 export function guildDirname(g: { id: string; name?: string }): string {
   return makeIdName(g.name ?? '', g.id, true)
@@ -40,45 +31,6 @@ export function channelDirname(c: { id: string; name?: string }): string {
 
 export function memberFilename(m: { id: string; name?: string }): string {
   return makeIdName(m.name ?? '', m.id, true, '.json')
-}
-
-export const DiscordIndexEntry = {
-  guild(g: { id: string; name?: string }): IndexEntry {
-    return new IndexEntry({
-      id: g.id,
-      name: g.name ?? '',
-      resourceType: DiscordResourceType.GUILD,
-      vfsName: guildDirname(g),
-    })
-  },
-  channel(c: { id: string; name?: string }): IndexEntry {
-    return new IndexEntry({
-      id: c.id,
-      name: c.name ?? '',
-      resourceType: DiscordResourceType.CHANNEL,
-      vfsName: channelDirname(c),
-    })
-  },
-  member(m: { id: string; name?: string }, size?: number): IndexEntry {
-    return new IndexEntry({
-      id: m.id,
-      name: m.name ?? '',
-      resourceType: DiscordResourceType.MEMBER,
-      vfsName: memberFilename(m),
-      ...(size !== undefined ? { size } : {}),
-    })
-  },
-  // channel_id rides extra so the day and files listers can query the
-  // history API without re-resolving the channel through its parent.
-  history(channelId: string, date: string): IndexEntry {
-    return new IndexEntry({
-      id: `${channelId}:${date}`,
-      name: date,
-      resourceType: DiscordResourceType.HISTORY,
-      vfsName: date,
-      extra: { channel_id: channelId },
-    })
-  },
 }
 
 export function snowflakeToDate(snowflake: string): string {
@@ -100,4 +52,39 @@ export function snowflakeToIso(snowflake: string): string | null {
     return null
   }
   return epochToIso(Number(ms / 1000n))
+}
+
+export function guildEntry(g: DiscordGuild): FileStat {
+  return new FileStat({
+    name: guildDirname(g),
+    type: FileType.DIRECTORY,
+    extra: { guild_id: g.id },
+  })
+}
+
+export function channelEntry(c: DiscordChannel): FileStat {
+  const last = typeof c.last_message_id === 'string' ? c.last_message_id : ''
+  return new FileStat({
+    name: channelDirname(c),
+    type: FileType.DIRECTORY,
+    modified: snowflakeToIso(last),
+    extra: { channel_id: c.id, last_message_id: last },
+  })
+}
+
+export function memberEntry(m: DiscordMember): FileStat {
+  const id = m.user?.id ?? ''
+  return new FileStat({
+    name: memberFilename({ id, name: m.user?.username ?? '' }),
+    type: FileType.FILE,
+    content: ContentType.JSON,
+    size: compactJsonBytes(m).byteLength,
+    extra: { user_id: id },
+  })
+}
+
+// channel_id rides extra so the day and files listers can query the history
+// API without re-resolving the channel through its parent.
+export function historyEntry(channelId: string, date: string): FileStat {
+  return new FileStat({ name: date, type: FileType.DIRECTORY, extra: { channel_id: channelId } })
 }

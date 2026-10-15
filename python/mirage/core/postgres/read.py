@@ -20,7 +20,6 @@ import asyncpg
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.read import make_read, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.postgres import client
@@ -31,10 +30,9 @@ from mirage.core.postgres._schema_json import (
 from mirage.core.postgres.readdir import entity_guard
 from mirage.core.postgres.scope import detect_scope
 from mirage.core.postgres.semantic import build_entity_semantic_json
-from mirage.core.postgres.stat import stat
 from mirage.core.render.json import ecma_numbers
 from mirage.errors.fs import efbig
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 def _entity_kind(match: ScopeMatch) -> str:
@@ -45,7 +43,8 @@ async def _read_database_json(
     accessor: PostgresAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     doc = await build_database_json(accessor)
     return orjson.dumps(doc, option=orjson.OPT_INDENT_2)
@@ -55,7 +54,8 @@ async def _read_entity_schema(
     accessor: PostgresAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     doc = await build_entity_schema_json(
         accessor,
@@ -70,7 +70,8 @@ async def _read_entity_semantic(
     accessor: PostgresAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     doc = await build_entity_semantic_json(
         accessor,
@@ -85,7 +86,8 @@ async def _read_entity_rows(
     accessor: PostgresAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
     limit: int | None,
     offset: int | None,
 ) -> bytes:
@@ -193,7 +195,6 @@ async def _first_rows(
     match: ScopeMatch,
     path: PathSpec,
     n: int,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     """The first ``n`` rows of a relation's rows.jsonl, by a ``LIMIT``.
 
@@ -207,7 +208,6 @@ async def _first_rows(
         match (ScopeMatch): the rows file's match.
         path (PathSpec): the file.
         n (int): how many rows, at least 1.
-        index (IndexCacheStore): unused; the rows are queried by name.
     """
     cap = accessor.config.max_read_rows
     data = await read_rows(
@@ -236,7 +236,6 @@ async def _last_rows(
     match: ScopeMatch,
     path: PathSpec,
     n: int,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     """The last ``n`` rows of a relation's rows.jsonl: off the end of its
     primary key where it has one, otherwise by a ``COUNT(*)`` and an
@@ -250,7 +249,6 @@ async def _last_rows(
         match (ScopeMatch): the rows file's match.
         path (PathSpec): the file.
         n (int): how many rows, at least 1.
-        index (IndexCacheStore): unused; the rows are queried by name.
     """
     schema, entity = match.slots["schema"], match.slots["entity"]
     cap = accessor.config.max_read_rows
@@ -279,7 +277,6 @@ async def _row_count(
     accessor: PostgresAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> int:
     """How many rows a relation holds, one line each in its rows.jsonl,
     by a ``COUNT(*)``.
@@ -288,7 +285,6 @@ async def _row_count(
         accessor (PostgresAccessor): backend handle.
         match (ScopeMatch): the rows file's match.
         path (PathSpec): the file.
-        index (IndexCacheStore): unused; the rows are queried by name.
     """
     pool = await accessor.pool()
     async with pool.acquire() as conn:
@@ -505,5 +501,5 @@ read = make_read(
         "entity_semantic": _read_entity_semantic,
     },
     windowed={"entity_rows": _read_entity_rows},
-    stat=stat,
+    parented=True,
 )

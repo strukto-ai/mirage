@@ -2,10 +2,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.slug_tree.rows import dir_rows
 from mirage.core.slug_tree.tree import SlugTree
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import gnu_basename
 
@@ -16,17 +15,17 @@ def spec(virtual: str) -> PathSpec:
     return PathSpec.from_str_path(virtual, mount_key(virtual, "/knowledge"))
 
 
-def file_entry(path: str, size: int) -> IndexEntry:
-    return IndexEntry(
-        id=path.strip("/"),
+def file_row(path: str, size: int) -> FileStat:
+    return FileStat(
         name=gnu_basename(path),
-        resource_type="file",
+        type=FileType.FILE,
         size=size,
+        extra={"slug": path.strip("/")},
     )
 
 
-async def load_rows(accessor, prefix):
-    return dir_rows(FILES, prefix, file_entry)
+async def load_rows(accessor):
+    return dir_rows(FILES, file_row)
 
 
 @pytest.fixture
@@ -37,8 +36,3 @@ def load() -> AsyncMock:
 @pytest.fixture
 def tree(load) -> SlugTree:
     return SlugTree(load)
-
-
-@pytest.fixture
-def index() -> RAMIndexCacheStore:
-    return RAMIndexCacheStore()

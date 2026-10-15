@@ -256,6 +256,9 @@ export interface ListResult {
   partialEntries?: string[] | null
   status?: LookupStatus | null
   version?: string | null
+  // A capped window (the newest messages, the last days): served as the
+  // listing but proves nothing absent.
+  window?: boolean
 }
 
 /** The directory row, the twin of the pydantic `IndexDirectory`. */
@@ -265,6 +268,7 @@ export const IndexDirectorySchema = z.object({
   generation: z.string(),
   partial: z.boolean().default(false),
   version: z.string().nullable().default(null),
+  window: z.boolean().default(false),
 })
 
 export type IndexDirectory = z.output<typeof IndexDirectorySchema>

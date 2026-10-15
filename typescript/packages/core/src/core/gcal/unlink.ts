@@ -13,24 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GCalAccessor } from '../../accessor/gcal.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
+import type { FileStat } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeUnlink } from '../hierarchy/unlink.ts'
 import { deleteEvent } from './client.ts'
-import { calendarIndex, readdir } from './readdir.ts'
+import { calendarIndex } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
 const WRITABLE_ROLES = new Set(['owner', 'writer'])
 
 /**
- * Delete the event the entry names, on the slotted calendar.
+ * Delete the event the row names, on the slotted calendar.
  *
- * The entry already carries the event id (rm resolves through the name the
+ * The row already carries the event id (rm resolves through the name the
  * listing produced), so only the calendar's id and write role are looked up
  * here.
  */
-async function del(accessor: GCalAccessor, match: ScopeMatch, entry: IndexEntry): Promise<void> {
+async function del(accessor: GCalAccessor, match: ScopeMatch, entry: FileStat): Promise<void> {
   const calendars = await calendarIndex(accessor)
   const calendar = calendars.get(match.slots.calendar ?? '')
   if (calendar === undefined) throw enoent(match.vfsPath)
@@ -38,7 +38,7 @@ async function del(accessor: GCalAccessor, match: ScopeMatch, entry: IndexEntry)
   if (typeof role !== 'string' || !WRITABLE_ROLES.has(role)) throw eacces(match.vfsPath)
   const calId = calendar.id
   if (typeof calId !== 'string') throw enoent(match.vfsPath)
-  await deleteEvent(accessor.tokenManager, calId, entry.id)
+  await deleteEvent(accessor.tokenManager, calId, String(entry.extra.event_id))
 }
 
-export const unlink = makeUnlink(detectScope, readdir, { deleters: { event: del } })
+export const unlink = makeUnlink(detectScope, { deleters: { event: del } })

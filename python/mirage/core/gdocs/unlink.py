@@ -13,18 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexEntry
-from mirage.core.gdocs.readdir import readdir
 from mirage.core.gdocs.scope import detect_scope
 from mirage.core.google.drive import delete_file
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.unlink import make_unlink
+from mirage.types import FileStat
 
 
 async def _delete(
-    accessor: GDocsAccessor, match: ScopeMatch, entry: IndexEntry
+    accessor: GDocsAccessor, match: ScopeMatch, entry: FileStat
 ) -> None:
-    await delete_file(accessor.token_manager, entry.id)
+    await delete_file(accessor.token_manager, match.slots["file_id"])
 
 
-unlink = make_unlink(detect_scope, readdir, deleters={"file": _delete})
+unlink = make_unlink(detect_scope, deleters={"file": _delete})

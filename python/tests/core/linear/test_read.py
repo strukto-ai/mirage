@@ -18,15 +18,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.read import read
-from mirage.core.linear.readdir import readdir
-from mirage.core.linear.stat import stat
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.vfs.linear import LinearVFS
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
-_TEAM = "/teams/ENG__Engineering__TEAM1"
 _ISSUE_PATH = (
     "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json"
 )
@@ -37,34 +35,14 @@ def accessor():
     return LinearAccessor(LinearConfig(api_key="lin_api_test"))
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
-def _entry(name: str, ident: str, kind: str) -> tuple[str, IndexEntry]:
-    return (
-        name,
-        IndexEntry(
-            id=ident, name=name, resource_type=f"linear/{kind}", vfs_name=name
-        ),
-    )
-
-
-async def _seed(index: RAMIndexCacheStore, issue: bool = False) -> None:
-    # The listings a traversal would have left: a read proves the file's
-    # directory exists through them before fetching by the ids in the path.
-    await index.set_dir(
-        "/teams", [_entry("ENG__Engineering__TEAM1", "TEAM1", "team")]
-    )
-    if issue:
-        await index.set_dir(
-            _TEAM + "/issues", [_entry("ENG-123__ISSUE1", "ISSUE1", "issue")]
-        )
+# The directory a read is under, as the mount hands its row: a read
+# proves the file's directory exists through it before fetching by the
+# ids in the path.
+DIR = FileStat(name="dir", type=FileType.DIRECTORY)
 
 
 @pytest.mark.asyncio
-async def test_read_team_json(accessor, index):
+async def test_read_team_json(accessor):
     teams = [
         {
             "id": "TEAM1",
@@ -84,7 +62,6 @@ async def test_read_team_json(accessor, index):
             },
         }
     ]
-    await _seed(index)
     with patch(
         "mirage.core.linear.readdir.list_teams",
         new_callable=AsyncMock,
@@ -93,7 +70,7 @@ async def test_read_team_json(accessor, index):
         result = await read(
             accessor,
             PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1/team.json"),
-            index,
+            parent=DIR,
         )
     payload = json.loads(result)
     assert payload["team_id"] == "TEAM1"
@@ -102,7 +79,7 @@ async def test_read_team_json(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_issue_json(accessor, index):
+async def test_read_issue_json(accessor):
     issue = {
         "id": "ISSUE1",
         "identifier": "ENG-123",
@@ -149,7 +126,6 @@ async def test_read_issue_json(accessor, index):
             ]
         },
     }
-    await _seed(index, issue=True)
     with patch(
         "mirage.core.linear.read.get_issue",
         new_callable=AsyncMock,
@@ -158,7 +134,7 @@ async def test_read_issue_json(accessor, index):
         result = await read(
             accessor,
             PathSpec.from_str_path(_ISSUE_PATH),
-            index,
+            parent=DIR,
         )
     payload = json.loads(result)
     assert payload["issue_id"] == "ISSUE1"
@@ -166,7 +142,7 @@ async def test_read_issue_json(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_comments_jsonl(accessor, index):
+async def test_read_comments_jsonl(accessor):
     issue = {
         "id": "ISSUE1",
         "identifier": "ENG-123",
@@ -203,7 +179,6 @@ async def test_read_comments_jsonl(accessor, index):
             },
         }
     ]
-    await _seed(index, issue=True)
     with (
         patch(
             "mirage.core.linear.read.get_issue",
@@ -222,7 +197,7 @@ async def test_read_comments_jsonl(accessor, index):
                 "/teams/ENG__Engineering__TEAM1"
                 "/issues/ENG-123__ISSUE1/comments.jsonl"
             ),
-            index,
+            parent=DIR,
         )
     line = json.loads(result.decode().strip())
     assert line["comment_id"] == "COMMENT1"
@@ -230,7 +205,7 @@ async def test_read_comments_jsonl(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_project_json_includes_issue_refs(accessor, index):
+async def test_read_project_json_includes_issue_refs(accessor):
     teams = [
         {
             "id": "TEAM1",
@@ -268,7 +243,6 @@ async def test_read_project_json_includes_issue_refs(accessor, index):
             },
         }
     ]
-    await _seed(index)
     with (
         patch(
             "mirage.core.linear.read.list_teams",
@@ -292,7 +266,7 @@ async def test_read_project_json_includes_issue_refs(accessor, index):
                 "/teams/ENG__Engineering__TEAM1"
                 "/projects/Agent-Data-Plane__PROJ1.json"
             ),
-            index,
+            parent=DIR,
         )
     payload = json.loads(result)
     assert payload["team_key"] == "ENG"
@@ -306,16 +280,17 @@ T2 = {"id": "TEAM2", "key": "FIN", "name": "Finance"}
 
 
 @pytest.mark.asyncio
-async def test_a_team_outside_team_ids_is_absent_on_every_surface(index):
+async def test_a_team_outside_team_ids_is_absent_on_every_surface():
     """The teams listing drops a team ``team_ids`` leaves out, and the
     issue read used to fetch straight by the id in the path: ``cat``
     served an issue of a team ``ls`` and ``stat`` reported absent."""
     accessor = LinearAccessor(
         LinearConfig(api_key="lin_api_test", team_ids=["TEAM1"])
     )
+    ws = Workspace({"/linear/": vfs_over(LinearVFS, accessor)})
     get_issue = AsyncMock(return_value={"id": "ISSUE9"})
     list_members = AsyncMock(return_value=[{"id": "U9", "name": "Eve"}])
-    secret = "/teams/FIN__Finance__TEAM2"
+    secret = "/linear/teams/FIN__Finance__TEAM2"
     with (
         patch(
             "mirage.core.linear.readdir.list_teams",
@@ -327,16 +302,15 @@ async def test_a_team_outside_team_ids_is_absent_on_every_surface(index):
         issue_json = PathSpec.from_str_path(
             secret + "/issues/FIN-9__ISSUE9/issue.json"
         )
-        for surface in (read, stat):
+        for op in ("read", "stat"):
             with pytest.raises(FileNotFoundError):
-                await surface(accessor, issue_json, index)
+                await ws.dispatch(op, issue_json)
         with pytest.raises(FileNotFoundError):
-            await readdir(accessor, PathSpec.from_str_path(secret), index)
+            await ws.dispatch("readdir", PathSpec.from_str_path(secret))
         with pytest.raises(FileNotFoundError):
-            await read(
-                accessor,
+            await ws.dispatch(
+                "read",
                 PathSpec.from_str_path(secret + "/members/Eve__U9.json"),
-                index,
             )
     get_issue.assert_not_awaited()
     list_members.assert_not_awaited()

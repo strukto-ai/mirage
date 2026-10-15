@@ -15,9 +15,9 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import { IndexEntry, type Evicted, type SetDirOptions } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
+import { mountDiscord } from '../../vfs/discord/_test_util.ts'
+import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import {
   DiscordApiError,
   type DiscordMethod,
@@ -57,22 +57,24 @@ class FakeDiscordTransport implements DiscordTransport {
   }
 }
 
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
-  }
-}
-
 function spec(virtual: string, prefix = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
+}
+
+const GUILD = '/mnt/discord/My Server__G1'
+const CHANNEL = `${GUILD}/channels/general__C1`
+const GUILDS = [{ id: 'G1', name: 'My Server' }]
+
+async function listed(ws: Workspace, path: string): Promise<string[]> {
+  return (await ws.dispatch('readdir', path)) as string[]
+}
+
+async function statOf(ws: Workspace, path: string): Promise<FileStat> {
+  return (await ws.dispatch('stat', path)) as FileStat
+}
+
+function api(answers: Record<string, DiscordResponse>): FakeDiscordTransport {
+  return new FakeDiscordTransport((_m, endpoint) => answers[endpoint] ?? null)
 }
 
 describe('snowflakeToDate', () => {
@@ -125,285 +127,132 @@ describe('dateRangeDescending', () => {
 })
 
 describe('readdir root', () => {
-  it('lists guilds and populates the index', async () => {
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/users/@me/guilds') {
-        return [
-          { id: 'G1', name: 'My Server' },
-          { id: 'G2', name: 'Other' },
-        ]
-      }
-      return null
+  it('lists guilds as rows carrying their ids', async () => {
+    const t = api({
+      '/users/@me/guilds': [
+        { id: 'G1', name: 'My Server' },
+        { id: 'G2', name: 'Other' },
+      ],
     })
-    const idx = new RAMIndexCacheStore()
-    const out = await readdir(new DiscordAccessor(t), spec('/mnt/discord', '/mnt/discord'), idx)
-    expect(out).toEqual(['/mnt/discord/My Server__G1', '/mnt/discord/Other__G2'])
-    const listing = await idx.listDir('/mnt/discord')
-    expect(listing.entries).toEqual(['/mnt/discord/My Server__G1', '/mnt/discord/Other__G2'])
-    const lookup = await idx.get('/mnt/discord/My Server__G1')
-    expect(lookup.entry?.id).toBe('G1')
-    expect(lookup.entry?.resourceType).toBe('discord/guild')
+    const ws = mountDiscord(t)
+    expect(await listed(ws, '/mnt/discord')).toEqual([GUILD, '/mnt/discord/Other__G2'])
+    expect((await statOf(ws, GUILD)).extra.guild_id).toBe('G1')
+    expect(t.calls).toHaveLength(1)
   })
 
-  it('returns from cache without API call on second invocation', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord', [
-      [
-        'My Server__G1',
-        new IndexEntry({
-          id: 'G1',
-          name: 'My Server',
-          resourceType: 'discord/guild',
-          vfsName: 'My Server__G1',
-        }),
-      ],
-    ])
-    const t = new FakeDiscordTransport(() => {
-      throw new Error('should not be called')
-    })
-    const out = await readdir(new DiscordAccessor(t), spec('/mnt/discord', '/mnt/discord'), idx)
-    expect(out).toEqual(['/mnt/discord/My Server__G1'])
-    expect(t.calls).toHaveLength(0)
+  it('answers a second listing from the first', async () => {
+    const t = api({ '/users/@me/guilds': GUILDS })
+    const ws = mountDiscord(t)
+    await listed(ws, '/mnt/discord')
+    expect(await listed(ws, '/mnt/discord')).toEqual([GUILD])
+    expect(t.calls).toHaveLength(1)
   })
 })
 
 describe('readdir /<guild>', () => {
-  it('returns the channels/members pair after auto-bootstrap', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/users/@me/guilds') return [{ id: 'G1', name: 'My Server' }]
-      return null
-    })
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1', '/mnt/discord'),
-      idx,
-    )
-    expect(out).toEqual([
-      '/mnt/discord/My Server__G1/channels',
-      '/mnt/discord/My Server__G1/members',
-    ])
-    const endpoints = t.calls.map((c) => c.endpoint)
-    expect(endpoints).toContain('/users/@me/guilds')
+  it('lists the channels/members pair under a listed guild', async () => {
+    const t = api({ '/users/@me/guilds': GUILDS })
+    expect(await listed(mountDiscord(t), GUILD)).toEqual([`${GUILD}/channels`, `${GUILD}/members`])
+    expect(t.calls.map((c) => c.endpoint)).toContain('/users/@me/guilds')
   })
 
   it('throws ENOENT when the guild does not exist', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/users/@me/guilds') return []
-      return null
+    const t = api({ '/users/@me/guilds': [] })
+    await expect(listed(mountDiscord(t), '/mnt/discord/Missing__GX')).rejects.toMatchObject({
+      code: 'ENOENT',
     })
-    await expect(
-      readdir(new DiscordAccessor(t), spec('/mnt/discord/Missing__GX', '/mnt/discord'), idx),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('returns the channels/members pair once the guild is proven', async () => {
-    const t = new FakeDiscordTransport((_m, endpoint) =>
-      endpoint === '/users/@me/guilds' ? [{ id: 'G1', name: 'Whatever' }] : null,
-    )
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/Whatever__G1', '/mnt/discord'),
-    )
-    expect(out).toEqual(['/mnt/discord/Whatever__G1/channels', '/mnt/discord/Whatever__G1/members'])
   })
 
   it('throws ENOENT for a bogus guild', async () => {
-    const t = new FakeDiscordTransport((_m, endpoint) =>
-      endpoint === '/users/@me/guilds' ? [{ id: 'G1', name: 'Whatever' }] : null,
-    )
-    await expect(
-      readdir(new DiscordAccessor(t), spec('/mnt/discord/Nope__G9', '/mnt/discord')),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    const t = api({ '/users/@me/guilds': GUILDS })
+    await expect(listed(mountDiscord(t), '/mnt/discord/Nope__G9')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })
 
 describe('readdir /<guild>/channels', () => {
-  it('lists channels filtered to text-like types and stores last_message_id as remoteTime', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord', [
-      [
-        'My Server__G1',
-        new IndexEntry({
-          id: 'G1',
-          name: 'My Server',
-          resourceType: 'discord/guild',
-          vfsName: 'My Server__G1',
-        }),
+  it('lists channels filtered to text-like types and keeps last_message_id on the row', async () => {
+    const t = api({
+      '/users/@me/guilds': GUILDS,
+      '/guilds/G1/channels': [
+        { id: 'C1', name: 'general', type: 0, last_message_id: '175928847299117056' },
+        { id: 'C2', name: 'voice', type: 2 },
+        { id: 'C3', name: 'announcements', type: 5 },
       ],
-    ])
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/guilds/G1/channels') {
-        return [
-          { id: 'C1', name: 'general', type: 0, last_message_id: '175928847299117056' },
-          { id: 'C2', name: 'voice', type: 2 },
-          { id: 'C3', name: 'announcements', type: 5 },
-        ]
-      }
-      return null
     })
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
-      idx,
-    )
-    expect(out).toEqual([
-      '/mnt/discord/My Server__G1/channels/general__C1',
-      '/mnt/discord/My Server__G1/channels/announcements__C3',
+    const ws = mountDiscord(t)
+    expect(await listed(ws, `${GUILD}/channels`)).toEqual([
+      CHANNEL,
+      `${GUILD}/channels/announcements__C3`,
     ])
-    const lookup = await idx.get('/mnt/discord/My Server__G1/channels/general__C1')
-    expect(lookup.entry?.id).toBe('C1')
-    expect(lookup.entry?.resourceType).toBe('discord/channel')
-    expect(lookup.entry?.remoteTime).toBe('175928847299117056')
-    const announce = await idx.get('/mnt/discord/My Server__G1/channels/announcements__C3')
-    expect(announce.entry?.remoteTime).toBe('')
+    const general = await statOf(ws, CHANNEL)
+    expect(general.extra.channel_id).toBe('C1')
+    expect(general.extra.last_message_id).toBe('175928847299117056')
+    const announce = await statOf(ws, `${GUILD}/channels/announcements__C3`)
+    expect(announce.extra.last_message_id).toBe('')
   })
 
-  it('throws ENOENT when no index is provided', async () => {
-    const t = new FakeDiscordTransport(() => null)
+  it('throws ENOENT under a guild no listing names', async () => {
     await expect(
-      readdir(new DiscordAccessor(t), spec('/mnt/discord/My Server__G1/channels', '/mnt/discord')),
+      listed(mountDiscord(new FakeDiscordTransport(() => null)), `${GUILD}/channels`),
     ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('auto-bootstraps the root listing when guild not in cache', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/users/@me/guilds') return [{ id: 'G1', name: 'My Server' }]
-      if (endpoint === '/guilds/G1/channels') {
-        return [{ id: 'C1', name: 'general', type: 0 }]
-      }
-      return null
-    })
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
-      idx,
-    )
-    expect(out).toEqual(['/mnt/discord/My Server__G1/channels/general__C1'])
-    const endpoints = t.calls.map((c) => c.endpoint)
-    expect(endpoints).toContain('/users/@me/guilds')
-    expect(endpoints).toContain('/guilds/G1/channels')
   })
 })
 
 describe('readdir /<guild>/members', () => {
-  it('lists members with discord/member resourceType', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord', [
-      [
-        'My Server__G1',
-        new IndexEntry({
-          id: 'G1',
-          name: 'My Server',
-          resourceType: 'discord/guild',
-          vfsName: 'My Server__G1',
-        }),
+  it('lists members as rows carrying their user ids', async () => {
+    const t = api({
+      '/users/@me/guilds': GUILDS,
+      '/guilds/G1/members': [
+        { user: { id: 'U1', username: 'alice' } },
+        { user: { id: 'U2', username: 'bob' } },
+        { user: undefined },
       ],
-    ])
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/guilds/G1/members') {
-        return [
-          { user: { id: 'U1', username: 'alice' } },
-          { user: { id: 'U2', username: 'bob' } },
-          { user: undefined },
-        ]
-      }
-      return null
     })
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/members', '/mnt/discord'),
-      idx,
-    )
-    expect(out).toEqual([
-      '/mnt/discord/My Server__G1/members/alice__U1.json',
-      '/mnt/discord/My Server__G1/members/bob__U2.json',
+    const ws = mountDiscord(t)
+    expect(await listed(ws, `${GUILD}/members`)).toEqual([
+      `${GUILD}/members/alice__U1.json`,
+      `${GUILD}/members/bob__U2.json`,
     ])
-    const lookup = await idx.get('/mnt/discord/My Server__G1/members/alice__U1.json')
-    expect(lookup.entry?.id).toBe('U1')
-    expect(lookup.entry?.resourceType).toBe('discord/member')
-    expect(lookup.entry?.name).toBe('alice')
+    expect((await statOf(ws, `${GUILD}/members/alice__U1.json`)).extra.user_id).toBe('U1')
   })
 
-  it('stores the rendered member size on each listing entry', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord', [
-      [
-        'My Server__G1',
-        new IndexEntry({
-          id: 'G1',
-          name: 'My Server',
-          resourceType: 'discord/guild',
-          vfsName: 'My Server__G1',
-        }),
-      ],
-    ])
+  it('sizes each member row as rendered', async () => {
     const member = { user: { id: 'U1', username: 'alice' }, nick: 'al' }
-    const t = new FakeDiscordTransport((_m, endpoint) =>
-      endpoint === '/guilds/G1/members' ? [member] : null,
+    const ws = mountDiscord(api({ '/users/@me/guilds': GUILDS, '/guilds/G1/members': [member] }))
+    await listed(ws, `${GUILD}/members`)
+    expect((await statOf(ws, `${GUILD}/members/alice__U1.json`)).size).toBe(
+      compactJsonBytes(member).byteLength,
     )
-    await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/members', '/mnt/discord'),
-      idx,
-    )
-    const lookup = await idx.get('/mnt/discord/My Server__G1/members/alice__U1.json')
-    expect(lookup.entry?.size).toBe(compactJsonBytes(member).byteLength)
   })
 })
 
+const CHANNELS = [{ id: 'C1', name: 'general', type: 0, last_message_id: '175928847299117056' }]
+
 describe('readdir /<guild>/channels/<ch>/<date>', () => {
-  it('stores the rendered chat.jsonl size on the date listing', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My Server__G1/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'discord/channel',
-          vfsName: 'general__C1',
-          remoteTime: '175928847299117056',
-        }),
-      ],
-    ])
+  it('sizes chat.jsonl as rendered on the date listing', async () => {
     const messages = [
       { id: '175758114816000001', content: 'hello', attachments: [] },
       { id: '175758114816000002', content: 'world', attachments: [] },
     ]
-    const t = new FakeDiscordTransport((_m, endpoint) =>
-      endpoint === '/channels/C1/messages' ? messages : null,
+    const ws = mountDiscord(
+      api({
+        '/users/@me/guilds': GUILDS,
+        '/guilds/G1/channels': CHANNELS,
+        '/channels/C1/messages': messages,
+      }),
     )
-    await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/general__C1/2016-04-30', '/mnt/discord'),
-      idx,
+    await listed(ws, `${CHANNEL}/2016-04-30`)
+    expect((await statOf(ws, `${CHANNEL}/2016-04-30/chat.jsonl`)).size).toBe(
+      jsonlBytes(messages).byteLength,
     )
-    const lookup = await idx.get(
-      '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-    )
-    expect(lookup.entry?.size).toBe(jsonlBytes(messages).byteLength)
   })
 
   it('skips tombstoned attachments in the files listing', async () => {
     // Tombstoned and access-restricted attachments carry an id but no
     // download URL and no byte size; listing them would surface phantom
     // files that ENOENT on read.
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My Server__G1/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'discord/channel',
-          vfsName: 'general__C1',
-          remoteTime: '175928847299117056',
-        }),
-      ],
-    ])
     const messages = [
       {
         id: '175758114816000001',
@@ -416,184 +265,74 @@ describe('readdir /<guild>/channels/<ch>/<date>', () => {
         ],
       },
     ]
-    const t = new FakeDiscordTransport((_m, endpoint) =>
-      endpoint === '/channels/C1/messages' ? messages : null,
+    const ws = mountDiscord(
+      api({
+        '/users/@me/guilds': GUILDS,
+        '/guilds/G1/channels': CHANNELS,
+        '/channels/C1/messages': messages,
+      }),
     )
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/files', '/mnt/discord'),
-      idx,
-    )
-    expect(out).toEqual([
-      '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/files/kept__A1.txt',
+    expect(await listed(ws, `${CHANNEL}/2016-04-30/files`)).toEqual([
+      `${CHANNEL}/2016-04-30/files/kept__A1.txt`,
     ])
   })
 })
 
 describe('readdir /<guild>/channels/<ch>', () => {
   it('returns 30 dates in descending order using last_message_id', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My Server__G1/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'discord/channel',
-          vfsName: 'general__C1',
-          remoteTime: '175928847299117056',
-        }),
-      ],
-    ])
-    const t = new FakeDiscordTransport(() => null)
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
-      idx,
-    )
+    const t = api({ '/users/@me/guilds': GUILDS, '/guilds/G1/channels': CHANNELS })
+    const ws = mountDiscord(t)
+    const out = await listed(ws, CHANNEL)
     expect(out).toHaveLength(30)
-    expect(out[0]).toBe('/mnt/discord/My Server__G1/channels/general__C1/2016-04-30')
-    expect(out[1]).toBe('/mnt/discord/My Server__G1/channels/general__C1/2016-04-29')
-    expect(out[29]).toBe('/mnt/discord/My Server__G1/channels/general__C1/2016-04-01')
-    const lookup = await idx.get('/mnt/discord/My Server__G1/channels/general__C1/2016-04-30')
-    expect(lookup.entry?.id).toBe('C1:2016-04-30')
-    expect(lookup.entry?.resourceType).toBe('discord/history')
-    expect(t.calls).toHaveLength(0)
+    expect(out[0]).toBe(`${CHANNEL}/2016-04-30`)
+    expect(out[1]).toBe(`${CHANNEL}/2016-04-29`)
+    expect(out[29]).toBe(`${CHANNEL}/2016-04-01`)
+    expect((await statOf(ws, `${CHANNEL}/2016-04-30`)).extra.channel_id).toBe('C1')
+    expect(t.calls.map((c) => c.endpoint)).not.toContain('/channels/C1/messages')
   })
 
   it('falls back to today UTC when last_message_id is empty', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My Server__G1/channels', [
-      [
-        'empty__C2',
-        new IndexEntry({
-          id: 'C2',
-          name: 'empty',
-          resourceType: 'discord/channel',
-          vfsName: 'empty__C2',
-          remoteTime: '',
-        }),
-      ],
-    ])
-    const t = new FakeDiscordTransport(() => null)
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/empty__C2', '/mnt/discord'),
-      idx,
-    )
+    const t = api({
+      '/users/@me/guilds': GUILDS,
+      '/guilds/G1/channels': [{ id: 'C2', name: 'empty', type: 0 }],
+    })
+    const out = await listed(mountDiscord(t), `${GUILD}/channels/empty__C2`)
     expect(out).toHaveLength(30)
     const now = new Date()
     const yyyy = now.getUTCFullYear().toString().padStart(4, '0')
     const mm = (now.getUTCMonth() + 1).toString().padStart(2, '0')
     const dd = now.getUTCDate().toString().padStart(2, '0')
-    expect(out[0]).toBe(`/mnt/discord/My Server__G1/channels/empty__C2/${yyyy}-${mm}-${dd}`)
-  })
-
-  it('returns from cache without API call when listDir hits', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My Server__G1/channels/general__C1', [
-      [
-        '2024-01-01',
-        new IndexEntry({
-          id: 'general__C1:2024-01-01',
-          name: '2024-01-01',
-          resourceType: 'discord/date_dir',
-          vfsName: '2024-01-01',
-        }),
-      ],
-    ])
-    const t = new FakeDiscordTransport(() => {
-      throw new Error('should not be called')
-    })
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
-      idx,
-    )
-    expect(out).toEqual(['/mnt/discord/My Server__G1/channels/general__C1/2024-01-01'])
-    expect(t.calls).toHaveLength(0)
-  })
-
-  it('auto-bootstraps the parent channels listing when not in cache', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord', [
-      [
-        'My Server__G1',
-        new IndexEntry({
-          id: 'G1',
-          name: 'My Server',
-          resourceType: 'discord/guild',
-          vfsName: 'My Server__G1',
-        }),
-      ],
-    ])
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/guilds/G1/channels') {
-        return [{ id: 'C1', name: 'general', type: 0, last_message_id: '175928847299117056' }]
-      }
-      return null
-    })
-    const out = await readdir(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
-      idx,
-    )
-    expect(out).toHaveLength(30)
-    expect(out[0]).toBe('/mnt/discord/My Server__G1/channels/general__C1/2016-04-30')
-    const endpoints = t.calls.map((c) => c.endpoint)
-    expect(endpoints).toContain('/guilds/G1/channels')
+    expect(out[0]).toBe(`${GUILD}/channels/empty__C2/${yyyy}-${mm}-${dd}`)
   })
 })
 
 describe('readdir unrecognized paths', () => {
+  const t = api({
+    '/users/@me/guilds': GUILDS,
+    '/guilds/G1/channels': CHANNELS,
+    '/channels/C1/messages': [],
+  })
+
   it('raises ENOENT for non-date 4-segment paths', async () => {
-    const idx = new RAMIndexCacheStore()
     // 4-segment with non-date last part — must not match the date_dir rule,
     // and an unrecognized shape is ENOENT rather than an empty listing that
     // reads as a real, empty directory.
-    const t = new FakeDiscordTransport(() => null)
-    await expect(
-      readdir(
-        new DiscordAccessor(t),
-        spec('/mnt/discord/My Server__G1/channels/general__C1/extra', '/mnt/discord'),
-        idx,
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(listed(mountDiscord(t), `${CHANNEL}/extra`)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('raises ENOTDIR for a file path', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t = new FakeDiscordTransport(() => null)
-    await expect(
-      readdir(
-        new DiscordAccessor(t),
-        spec(
-          '/mnt/discord/My Server__G1/channels/general__C1/2026-06-01/chat.jsonl',
-          '/mnt/discord',
-        ),
-        idx,
-      ),
-    ).rejects.toMatchObject({ code: 'ENOTDIR' })
+    await expect(listed(mountDiscord(t), `${CHANNEL}/2026-06-01/chat.jsonl`)).rejects.toMatchObject(
+      { code: 'ENOTDIR' },
+    )
   })
 })
 
 describe('readdir channel and sealed-day windows', () => {
-  it('writes a channel and a sealed day as windows', async () => {
+  it('lists a channel and a sealed day as windows', async () => {
     // The channel lists the last 30 days, and a 403/404/429 seals an empty
     // day: neither is the backend saying anything outside it is gone.
-    const idx = new WindowSpy()
-    await idx.setDir('/mnt/discord/My Server__G1/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'discord/channel',
-          vfsName: 'general__C1',
-          remoteTime: '175928847299117056',
-        }),
-      ],
-    ])
     const sealed: DiscordTransport = {
       call: (_method, endpoint) =>
         endpoint === '/channels/C1/messages'
@@ -601,29 +340,38 @@ describe('readdir channel and sealed-day windows', () => {
           : Promise.resolve(null),
     }
     const accessor = new DiscordAccessor(sealed)
-    const channel = '/mnt/discord/My Server__G1/channels/general__C1'
-    await readdir(accessor, spec(channel, '/mnt/discord'), idx)
-    expect(await readdir(accessor, spec(`${channel}/2016-04-30`, '/mnt/discord'), idx)).toEqual([])
-    expect(idx.windows.get(channel)).toBe(true)
-    expect(idx.windows.get(`${channel}/2016-04-30`)).toBe(true)
+    const extra = { channel_id: 'C1', last_message_id: '175928847299117056' }
+    const channel = await readdir(
+      accessor,
+      spec(CHANNEL, '/mnt/discord'),
+      new FileStat({ name: 'general__C1', type: FileType.DIRECTORY, extra }),
+    )
+    const day = await readdir(
+      accessor,
+      spec(`${CHANNEL}/2016-04-30`, '/mnt/discord'),
+      new FileStat({ name: '2016-04-30', type: FileType.DIRECTORY, extra: { channel_id: 'C1' } }),
+    )
+    expect(channel).toBeInstanceOf(DirListing)
+    expect((channel as DirListing).window).toBe(true)
+    expect(day).toBeInstanceOf(DirListing)
+    expect((day as DirListing).entries).toEqual([])
+    expect((day as DirListing).window).toBe(true)
   })
 })
 
 describe('listFiles of a sealed day', () => {
   // Reached when the files listing was evicted but the day survived; a soft
   // error there must not evict the attachments it listed before.
-  it('writes the files listing as a window too', async () => {
+  it('lists the files as a window too', async () => {
     const sealed: DiscordTransport = {
       call: (_method, endpoint) =>
         endpoint === '/channels/C1/messages'
           ? Promise.reject(new DiscordApiError(endpoint, 403, 'Missing Access'))
           : Promise.resolve(null),
     }
-    const own = new IndexEntry({
-      id: 'C1:2016-04-30',
+    const own = new FileStat({
       name: 'files',
-      resourceType: 'discord/files',
-      vfsName: 'files',
+      type: FileType.DIRECTORY,
       extra: { channel_id: 'C1' },
     })
     const listing = await listFiles(
@@ -635,6 +383,6 @@ describe('listFiles of a sealed day', () => {
       } as never,
       own,
     )
-    expect((listing as { window?: boolean }).window).toBe(true)
+    expect((listing as DirListing).window).toBe(true)
   })
 })

@@ -21,8 +21,8 @@ import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 
 import { redactGmailConfig, type GmailConfig, type GmailConfigRedacted } from './config.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { DirListing, PathSpec, FileStat } from '../../types.ts'
+import type { Handed } from '../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gmailReaddir } from '../../core/gmail/readdir.ts'
 import { buildDeltaHook } from '../../core/gmail/watch.ts'
@@ -48,6 +48,12 @@ export class GmailVFS extends BaseVFS {
   override readonly writePrompt: string = WRITE_PROMPT
   // The listing keeps each message's text; an attachment is read as usual.
   override readonly searchable: readonly string[] = ['*/*/*.gmail.json']
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry'],
+    stat: ['entry', 'parent'],
+  } as const
   readonly config: GmailConfig
   override readonly accessor: GmailAccessor
 
@@ -58,17 +64,17 @@ export class GmailVFS extends BaseVFS {
     this.accessor = new GmailAccessor({ tokenManager: tm, config })
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return gmailReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return gmailReaddir(this.accessor, path, handed?.entry)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await gmailRead(this.accessor, path, index)
+    const data = await gmailRead(this.accessor, path, handed?.entry)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
@@ -76,18 +82,17 @@ export class GmailVFS extends BaseVFS {
     return buildDeltaHook(this.accessor)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return gmailStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return gmailStat(this.accessor, path, handed?.entry, handed?.parent)
   }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     _opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (this.config.contentSearch !== true) return Promise.resolve(null)
-    return gmailFilesContaining(this.accessor, text, [path], index)
+    return gmailFilesContaining(this.accessor, text, [path])
   }
 
   override getState(): Promise<GmailVFSState> {

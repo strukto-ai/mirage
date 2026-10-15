@@ -12,32 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from collections.abc import Awaitable, Callable
+
 from mirage.core.hierarchy.bind import per_accessor
 from mirage.core.hierarchy.probe import A, ReaddirFn
 from mirage.core.hierarchy.readdir import Listed, Lister
 from mirage.core.hierarchy.readdir import make_readdir as hierarchy_readdir
 from mirage.core.hierarchy.scope import ROOT, ScopeMatch
 from mirage.core.vector.types import VectorTree
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.glob_walk import has_glob_prefix
 
 PATTERN_KINDS = {ROOT: has_glob_prefix, "group": has_glob_prefix}
 
 
-def dir_entry(vfs: str, name: str) -> IndexEntry:
-    """A table or group directory's index entry.
-
-    Args:
-        vfs (str): the VFS name, which spells the resource type.
-        name (str): the directory's rendered name.
-    """
-    return IndexEntry(
-        id=name, name=name, resource_type=f"{vfs}/group", vfs_name=name
-    )
-
-
-def make_readdir(tree: VectorTree[A]) -> ReaddirFn[A]:
+def make_readdir(
+    tree: VectorTree[A],
+) -> Callable[[A, PathSpec], Awaitable[Listed]]:
     """Build a store's readdir: the catalog at the root, its own below.
 
     Args:
@@ -50,7 +41,7 @@ def make_readdir(tree: VectorTree[A]) -> ReaddirFn[A]:
         # Table names come from the catalog, not from a capped query, so
         # a glob here has nothing to narrow.
         return [
-            (name, dir_entry(tree.vfs, name))
+            FileStat(name=name, type=FileType.DIRECTORY)
             for name in await tree.list_tables(accessor)
         ]
 
@@ -63,9 +54,7 @@ def make_readdir(tree: VectorTree[A]) -> ReaddirFn[A]:
 
     readdir_for = per_accessor(build)
 
-    async def readdir(
-        accessor: A, path_spec: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await readdir_for(accessor)(accessor, path_spec, index)
+    async def readdir(accessor: A, path_spec: PathSpec) -> Listed:
+        return await readdir_for(accessor)(accessor, path_spec)
 
     return readdir

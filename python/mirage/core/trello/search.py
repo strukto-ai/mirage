@@ -17,14 +17,12 @@ import logging
 import aiohttp
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.hierarchy.probe import resolve_entry
+from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.trello.client import search_cards
 from mirage.core.trello.readdir import readdir
 from mirage.core.trello.scope import detect_scope
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.record_search import may_hold, record_queries
 
@@ -47,23 +45,26 @@ WALKED = frozenset(
 
 
 async def _cards(
-    accessor: TrelloAccessor, scope: PathSpec, index: IndexCacheStore
-) -> list[PathSpec] | None:
-    """Each card directory under ``scope``; None for a scope inside a
-    card.
+    accessor: TrelloAccessor,
+    scope: PathSpec,
+    entry: FileStat | None,
+    parent: FileStat | None,
+) -> list[tuple[PathSpec, FileStat | None]] | None:
+    """Each card directory under ``scope``, with the row its list's
+    listing names; None for a scope inside a card.
     """
     kind = detect_scope(scope).kind
     if kind == "card":
-        return [scope]
+        return [(scope, entry)]
     if kind in ("card_json", "comments_jsonl"):
         return None
     if kind not in WALKED and kind != "cards":
         return []
     base = scope.mount_path.rstrip("/")
-    found: list[PathSpec] = []
-    for listed in await readdir(accessor, scope, index):
-        child = mounted_path(scope, f"{base}/{listed.rsplit('/', 1)[-1]}")
-        below = await _cards(accessor, child, index)
+    found: list[tuple[PathSpec, FileStat | None]] = []
+    for row in rows_of(await readdir(accessor, scope, entry, parent)):
+        child = mounted_path(scope, f"{base}/{row.name}")
+        below = await _cards(accessor, child, row, entry)
         if below is None:
             return None
         found.extend(below)
@@ -71,10 +72,7 @@ async def _cards(
 
 
 async def files_containing(
-    accessor: TrelloAccessor,
-    text: str,
-    under: list[PathSpec],
-    index: IndexCacheStore,
+    accessor: TrelloAccessor, text: str, under: list[PathSpec]
 ) -> list[PathSpec] | None:
     """The ``card.json`` files under ``under`` whose card Trello's search
     names, or whose other fields hold ``text``.
@@ -83,20 +81,18 @@ async def files_containing(
     is asked on its own, and a card is read when each word is either
     named there or held by the text the listing kept
     (``unsearched_text``): the rest of its JSON (ids, due date, flags,
-    link), and the words of those two the search may split otherwise. A
-    read fetches the card as it is now, so the kept text is checked
-    against listings made for this search rather than the walk's, which
-    may be older; a card those listings no longer hold is read. The text
-    goes through ``record_queries`` for its key names and escapes. None
-    when the text cannot be searched, a scope lies inside a card, a
-    search answers a full page or fails, or nothing is found, since Trello
-    indexes a write some time after it lands.
+    link), and the words of those two the search may split otherwise. The
+    walk lists each directory from Trello, so the kept text is checked
+    against the cards as they are now. The text goes through
+    ``record_queries`` for its key names and escapes. None when the text
+    cannot be searched, a scope lies inside a card, a search answers a
+    full page or fails, or nothing is found, since Trello indexes a write
+    some time after it lands.
 
     Args:
         accessor (TrelloAccessor): the account.
         text (str): the whole word or words searched for.
         under (list[PathSpec]): the directories walked.
-        index (IndexCacheStore): the mount's index.
     """
     queries = record_queries(text, RECORD_KEYS, whole_word=True)
     if queries is None:
@@ -112,18 +108,19 @@ async def files_containing(
             if len(cards) >= SEARCH_LIMIT:
                 return None
             named[word] = {str(card.get("id")) for card in cards}
-        fresh = RAMIndexCacheStore()
         for scope in under:
-            walked = await _cards(accessor, scope, index)
+            entry, parent = await row_at(readdir, accessor, scope)
+            walked = await _cards(accessor, scope, entry, parent)
             if walked is None:
                 return None
-            for path in walked:
-                entry = await resolve_entry(readdir, accessor, path, fresh)
-                if entry is not None:
-                    kept = entry.extra.get("unsearched")
+            for path, row in walked:
+                if row is not None:
+                    kept = row.extra.get("unsearched")
                     if not isinstance(kept, str):
                         return None
-                    if not may_hold(asked, named, entry.id, kept):
+                    if not may_hold(
+                        asked, named, str(row.extra.get("card_id")), kept
+                    ):
                         continue
                 found.append(
                     mounted_path(

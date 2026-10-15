@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { FileStat, FileType } from '../../types.ts'
 import { ensureDirSizes } from './sizes.ts'
 
 interface Chunk {
@@ -52,14 +52,8 @@ function fakeAccessor(collection: FakeCollection): ChromaAccessor {
   } as unknown as ChromaAccessor
 }
 
-function fileEntry(name: string, slug: string): IndexEntry {
-  return new IndexEntry({
-    id: slug,
-    name,
-    resourceType: 'file',
-    vfsName: name,
-    extra: { slug, source_size: 999 },
-  })
+function fileEntry(name: string, slug: string): FileStat {
+  return new FileStat({ name, type: FileType.FILE, extra: { slug, source_size: 999 } })
 }
 
 const CHUNKS: Record<string, Chunk[]> = {

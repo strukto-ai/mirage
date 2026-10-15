@@ -17,11 +17,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.email.readdir import _date_bucket, readdir
 from mirage.core.email.render import message_json_bytes
-from mirage.types import PathSpec
-from tests.fixtures.index_spy import WindowSpy
+from mirage.types import FileStat, FileType, PathSpec
 
 HEADERS = [
     {
@@ -57,13 +55,12 @@ def accessor():
     return SimpleNamespace(config=SimpleNamespace(max_messages=50))
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+# The folder's row, as the mount root's listing names it.
+FOLDER = FileStat(name="INBOX", type=FileType.DIRECTORY)
 
 
 @pytest.mark.asyncio
-async def test_readdir_folder_sizes_messages(accessor, index):
+async def test_readdir_folder_sizes_messages(accessor):
     with (
         patch(
             "mirage.core.email.readdir.list_folders",
@@ -81,22 +78,19 @@ async def test_readdir_folder_sizes_messages(accessor, index):
             return_value=HEADERS,
         ),
     ):
-        result = await readdir(
+        listed = await readdir(
             accessor,
             PathSpec(vfs_path="INBOX", virtual="/INBOX", directory="/INBOX"),
-            index,
+            FOLDER,
         )
 
-    assert result == ["/INBOX/2024-01-15"]
-    listing = await index.list_dir("/INBOX/2024-01-15")
-    lookup = await index.get(listing.entries[0])
-    assert lookup.entry.size == len(message_json_bytes(HEADERS[0]))
+    assert [row.name for row in listed.entries] == ["2024-01-15"]
+    (message,) = listed.seeds["2024-01-15"]
+    assert message.size == len(message_json_bytes(HEADERS[0]))
 
 
 @pytest.mark.asyncio
-async def test_readdir_buckets_a_dateless_message_by_internaldate(
-    accessor, index
-):
+async def test_readdir_buckets_a_dateless_message_by_internaldate(accessor):
     # Without INTERNALDATE every message a sender left undated lands in
     # one 1970 directory, which is the mount's only organizing axis.
     with (
@@ -116,13 +110,13 @@ async def test_readdir_buckets_a_dateless_message_by_internaldate(
             return_value=NO_DATE_HEADERS,
         ),
     ):
-        result = await readdir(
+        listed = await readdir(
             accessor,
             PathSpec(vfs_path="INBOX", virtual="/INBOX", directory="/INBOX"),
-            index,
+            FOLDER,
         )
 
-    assert result == ["/INBOX/2026-08-07"]
+    assert [row.name for row in listed.entries] == ["2026-08-07"]
 
 
 def test_date_bucket_prefers_the_header():
@@ -193,10 +187,9 @@ def test_date_bucket_keeps_the_calendar_date_as_written():
 
 
 @pytest.mark.asyncio
-async def test_a_folder_and_its_seeded_days_are_written_as_windows(accessor):
+async def test_a_folder_and_its_seeded_days_are_windows(accessor):
     # The folder fetch stops at max_messages, so its days, and the days
     # seeded from it, name only the messages that fit.
-    index = WindowSpy()
     with (
         patch(
             "mirage.core.email.readdir.list_folders",
@@ -214,20 +207,20 @@ async def test_a_folder_and_its_seeded_days_are_written_as_windows(accessor):
             return_value=HEADERS,
         ),
     ):
-        await readdir(
+        listed = await readdir(
             accessor,
             PathSpec(vfs_path="INBOX", virtual="/INBOX", directory="/INBOX"),
-            index,
+            FOLDER,
         )
-    assert index.windows["/INBOX"] is True
-    assert index.windows["/INBOX/2024-01-15"] is True
+    # A listing's seeds are kept with its own window.
+    assert listed.window is True
+    assert "2024-01-15" in listed.seeds
 
 
 @pytest.mark.asyncio
 async def test_a_day_relisted_after_its_listing_went_is_a_window(accessor):
     # With the day's own listing dropped, the day lister runs itself rather
     # than the folder's seed answering for it.
-    index = WindowSpy()
     with (
         patch(
             "mirage.core.email.readdir.list_folders",
@@ -245,20 +238,13 @@ async def test_a_day_relisted_after_its_listing_went_is_a_window(accessor):
             return_value=HEADERS,
         ),
     ):
-        await readdir(
-            accessor,
-            PathSpec(vfs_path="INBOX", virtual="/INBOX", directory="/INBOX"),
-            index,
-        )
-        await index.invalidate_dir("/INBOX/2024-01-15")
-        index.windows.clear()
-        await readdir(
+        listed = await readdir(
             accessor,
             PathSpec(
                 vfs_path="INBOX/2024-01-15",
                 virtual="/INBOX/2024-01-15",
                 directory="/INBOX/2024-01-15",
             ),
-            index,
+            FileStat(name="2024-01-15", type=FileType.DIRECTORY),
         )
-    assert index.windows["/INBOX/2024-01-15"] is True
+    assert listed.window is True

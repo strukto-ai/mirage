@@ -14,11 +14,15 @@
 
 import { describe, expect, it } from 'vitest'
 import { LinearAccessor } from '../../accessor/linear.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { LinearTransport } from './client.ts'
 import { readdir } from './readdir.ts'
+
+function names(listed: readonly FileStat[] | DirListing): string[] {
+  return rowsOf(listed).map((row) => row.name)
+}
 
 class NoopTransport implements LinearTransport {
   graphql(): Promise<Record<string, unknown>> {
@@ -35,30 +39,18 @@ describe('linear readdir unrecognized paths', () => {
     // Returning [] made `ls` and `tree` report a bogus path as real-but-empty,
     // and left `rg` without a message.
     await expect(
-      readdir(
-        new LinearAccessor(new NoopTransport()),
-        spec('/__nf_missing__'),
-        new RAMIndexCacheStore(),
-      ),
+      readdir(new LinearAccessor(new NoopTransport()), spec('/__nf_missing__')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('throws ENOENT for an unrecognized nested path', async () => {
     await expect(
-      readdir(
-        new LinearAccessor(new NoopTransport()),
-        spec('/teams/x/nope/deeper'),
-        new RAMIndexCacheStore(),
-      ),
+      readdir(new LinearAccessor(new NoopTransport()), spec('/teams/x/nope/deeper')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('lists the virtual root without calling the api', async () => {
-    const out = await readdir(
-      new LinearAccessor(new NoopTransport()),
-      spec('/'),
-      new RAMIndexCacheStore(),
-    )
-    expect(out).toEqual(['/teams'])
+    const out = await readdir(new LinearAccessor(new NoopTransport()), spec('/'))
+    expect(names(out)).toEqual(['teams'])
   })
 })

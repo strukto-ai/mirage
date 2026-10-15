@@ -15,7 +15,8 @@
 import math
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.cache.index import IndexCacheStore
+from mirage.core.hierarchy.probe import rows_of
 from mirage.core.mem0.client import search_memories
 from mirage.core.mem0.readdir import readdir
 from mirage.core.mem0.scope import detect_scope
@@ -81,11 +82,18 @@ async def search_memories_rendered(
     return lines
 
 
+async def _listed_paths(
+    accessor: Mem0Accessor, path: PathSpec, *_: IndexCacheStore
+) -> list[str]:
+    folder = path.virtual.rstrip("/")
+    return [
+        f"{folder}/{row.name}"
+        for row in rows_of(await readdir(accessor, path))
+    ]
+
+
 async def search_many(
-    accessor: Mem0Accessor,
-    paths: list[PathSpec],
-    query: SearchQuery,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: Mem0Accessor, paths: list[PathSpec], query: SearchQuery
 ) -> list[tuple[str, str]]:
     validate_options(query, {"top_k", "method", "threshold"})
     top_k = int_option(query, "top_k", accessor.config.default_search_limit)
@@ -99,7 +107,7 @@ async def search_many(
     targets = (
         []
         if any(not p.vfs_path.strip("/") for p in paths)
-        else await make_resolve_glob(readdir)(accessor, paths, index)
+        else await make_resolve_glob(_listed_paths)(accessor, paths)
     )
     ids: set[str] | None = (
         None if any(not p.vfs_path.strip("/") for p in paths) else set()
@@ -121,9 +129,6 @@ async def search_many(
 
 
 async def search_resource(
-    accessor: Mem0Accessor,
-    path: PathSpec,
-    query: SearchQuery,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: Mem0Accessor, path: PathSpec, query: SearchQuery
 ) -> list[tuple[str, str]]:
-    return await search_many(accessor, [path], query, index)
+    return await search_many(accessor, [path], query)

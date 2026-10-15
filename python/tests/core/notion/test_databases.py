@@ -18,17 +18,15 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.notion import read as notion_read
 from mirage.core.notion import readdir as notion_readdir
 from mirage.core.notion import resolve as notion_resolve
 from mirage.core.notion.client import NotionAPIError
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.normalize import normalize_database, to_json_bytes
-from mirage.core.notion.read import read
-from mirage.core.notion.readdir import readdir
-from mirage.core.notion.stat import stat
-from mirage.types import ContentType, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.vfs.notion import NotionVFS
+from tests.fixtures.mounted import Mounted
 
 DATABASE_ID = "db123"
 SOURCE_ID = "ds789"
@@ -52,6 +50,18 @@ DATA_SOURCE = {
     "parent": {"type": "database_id", "database_id": DATABASE_ID},
     "properties": {"Name": {"type": "title"}},
 }
+
+
+async def readdir(accessor: NotionAccessor, path: PathSpec, *_) -> list[str]:
+    return await Mounted(NotionVFS, accessor).readdir(path)
+
+
+async def stat(accessor: NotionAccessor, path: PathSpec, *_) -> FileStat:
+    return await Mounted(NotionVFS, accessor).stat(path)
+
+
+async def read(accessor: NotionAccessor, path: PathSpec, *_) -> bytes:
+    return await Mounted(NotionVFS, accessor).read(path)
 
 
 @pytest.fixture
@@ -101,9 +111,7 @@ async def test_readdir_databases_lists_database_directories(
     monkeypatch.setattr(
         notion_readdir, "get_database", AsyncMock(return_value=DATABASE)
     )
-    entries = await readdir(
-        accessor, PathSpec.from_str_path("/databases"), RAMIndexCacheStore()
-    )
+    entries = await readdir(accessor, PathSpec.from_str_path("/databases"))
     assert entries == [DB_DIR]
 
 
@@ -140,16 +148,11 @@ async def test_readdir_database_dir_sizes_database_json_from_the_database(
     monkeypatch.setattr(
         notion_readdir, "get_database", AsyncMock(return_value=DATABASE)
     )
-    index = RAMIndexCacheStore()
-    await readdir(accessor, PathSpec.from_str_path("/databases"), index)
-    await readdir(accessor, PathSpec.from_str_path(DB_DIR), index)
-    lookup = await index.get(f"{DB_DIR}/database.json")
-    assert lookup.entry is not None
+    mounted = Mounted(NotionVFS, accessor)
+    await mounted.readdir("/databases")
+    await mounted.readdir(DB_DIR)
     expected = to_json_bytes(normalize_database(DATABASE))
-    assert lookup.entry.size == len(expected)
-    result = await stat(
-        accessor, PathSpec.from_str_path(f"{DB_DIR}/database.json"), index
-    )
+    result = await mounted.stat(f"{DB_DIR}/database.json")
     assert result.size == len(expected)
 
 
@@ -254,9 +257,7 @@ async def test_stat_database_dir_resolves_through_the_listing(
     monkeypatch.setattr(
         notion_readdir, "get_database", AsyncMock(return_value=DATABASE)
     )
-    result = await stat(
-        accessor, PathSpec.from_str_path(DB_DIR), RAMIndexCacheStore()
-    )
+    result = await stat(accessor, PathSpec.from_str_path(DB_DIR))
     assert result.name == f"Tasks__{DATABASE_ID}"
     assert result.type == FileType.DIRECTORY
     assert result.modified == "2026-01-02T00:00:00Z"
@@ -268,9 +269,7 @@ async def test_stat_data_source_dir(accessor, monkeypatch):
     monkeypatch.setattr(
         notion_readdir, "get_database", AsyncMock(return_value=DATABASE)
     )
-    result = await stat(
-        accessor, PathSpec.from_str_path(SOURCE_DIR), RAMIndexCacheStore()
-    )
+    result = await stat(accessor, PathSpec.from_str_path(SOURCE_DIR))
     assert result.name == f"Tasks__{SOURCE_ID}"
     assert result.type == FileType.DIRECTORY
     assert result.extra == {"data_source_id": SOURCE_ID}
@@ -349,7 +348,6 @@ async def test_stat_database_row_dir(accessor, monkeypatch):
     result = await stat(
         accessor,
         PathSpec.from_str_path(f"{SOURCE_DIR}/Row-A__{ROW_ID}"),
-        RAMIndexCacheStore(),
     )
     assert result.name == f"Row-A__{ROW_ID}"
     assert result.type == FileType.DIRECTORY
@@ -380,7 +378,6 @@ async def test_stat_database_row_dir_that_is_not_this_row(
         await stat(
             accessor,
             PathSpec.from_str_path(f"{SOURCE_DIR}/{segment}"),
-            RAMIndexCacheStore(),
         )
 
 
@@ -401,7 +398,6 @@ async def test_stat_database_row_dir_notion_does_not_know(
         await stat(
             accessor,
             PathSpec.from_str_path(f"{SOURCE_DIR}/Row-A__{ROW_ID}"),
-            RAMIndexCacheStore(),
         )
 
 
@@ -415,7 +411,6 @@ async def test_stat_rows_jsonl_through_the_data_source_listing(
     result = await stat(
         accessor,
         PathSpec.from_str_path(f"{SOURCE_DIR}/rows.jsonl"),
-        RAMIndexCacheStore(),
     )
     assert result.type == FileType.FILE
     assert result.content == ContentType.TEXT
@@ -436,7 +431,6 @@ async def test_stat_row_page_json_without_fetching_blocks(
     result = await stat(
         accessor,
         PathSpec.from_str_path(f"{SOURCE_DIR}/Row-A__{ROW_ID}/page.json"),
-        RAMIndexCacheStore(),
     )
     assert result.type == FileType.FILE
     assert result.content == ContentType.JSON
@@ -483,6 +477,5 @@ async def test_paths_must_be_listed_by_their_parent(
 ):
     suffix = "/database.json" if directory.count("/") == 2 else "/rows.jsonl"
     path = directory + suffix if operation is read else directory
-    for index in (RAMIndexCacheStore(), None):
-        with pytest.raises(FileNotFoundError):
-            await operation(accessor, PathSpec.from_str_path(path), index)
+    with pytest.raises(FileNotFoundError):
+        await operation(accessor, PathSpec.from_str_path(path))

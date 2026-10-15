@@ -12,13 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { PathSpec } from '../../types.ts'
+import { enoent } from '../../errors/fs.ts'
+import { FileType, type FileStat, type PathSpec } from '../../types.ts'
 import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../utils/glob_walk.ts'
-import { mountPrefixOf, rekey } from '../../utils/key_prefix.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import type { SlugTree } from './tree.ts'
+import { listingAt, treeKey, type SlugTree } from './tree.ts'
 
 export function validateQuery(query: string, topK: number): void {
   if (query === '') throw new Error('search: query is required')
@@ -26,25 +25,33 @@ export function validateQuery(query: string, topK: number): void {
   if (topK <= 0) throw new Error('search: top-k must be positive')
 }
 
-/** Every file a search scope covers, keyed by entry id. */
+/** Every file a search scope covers, keyed by its slug. */
 export async function targetEntries<A>(
   tree: SlugTree<A>,
   accessor: A,
   paths: readonly PathSpec[],
-  index?: IndexCacheStore,
-): Promise<Map<string, IndexEntry>> {
-  const targets = new Map<string, IndexEntry>()
+): Promise<Map<string, FileStat>> {
+  const rows = await tree.load(accessor)
+  const targets = new Map<string, FileStat>()
   for (const path of paths) {
-    const resolved = await tree.resolve(accessor, path, index)
-    if (!resolved.isDir) {
-      targets.set(resolved.entry.id, resolved.entry)
+    const key = treeKey(path)
+    if (rows.has(key)) {
+      const stem = key === '/' ? '' : key
+      for (const [folder, children] of rows) {
+        if (folder !== key && !folder.startsWith(stem + '/')) continue
+        for (const row of children) {
+          if (row.type !== FileType.DIRECTORY) {
+            targets.set(stripSlash(`${folder === '/' ? '' : folder}/${row.name}`), row)
+          }
+        }
+      }
       continue
     }
-    for (const child of await tree.walk(accessor, path, index)) {
-      const childSpec = PathSpec.fromStrPath(child, rekey(path.virtual, path.vfsPath, child))
-      const childResolved = await tree.resolve(accessor, childSpec, index)
-      if (!childResolved.isDir) targets.set(childResolved.entry.id, childResolved.entry)
-    }
+    const cut = key.lastIndexOf('/')
+    const name = key.slice(cut + 1)
+    const found = (rows.get(key.slice(0, cut) || '/') ?? []).find((row) => row.name === name)
+    if (found === undefined) throw enoent(path.virtual)
+    targets.set(stripSlash(key), found)
   }
   return targets
 }
@@ -52,20 +59,25 @@ export async function targetEntries<A>(
 /**
  * The paths a batch search covers and the prefix its hits print under. A
  * scope at the mount root covers the whole collection, which the backend
- * searches unfiltered, so it resolves to no paths at all.
+ * searches unfiltered, so it resolves to no paths at all. Globs expand
+ * against one load of the tree.
  */
 export async function searchScope<A>(
   tree: SlugTree<A>,
   accessor: A,
   paths: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<[PathSpec[], string]> {
   const first = paths[0]
   if (first === undefined) throw new Error('search: at least one scope is required')
   const prefix = mountPrefixOf(first.virtual, first.vfsPath)
   if (paths.some((p) => stripSlash(p.vfsPath) === '')) return [[], prefix]
+  const rows = await tree.load(accessor)
+  const listed = (_accessor: A, path: PathSpec): Promise<string[]> => {
+    const base = path.virtual.replace(/\/+$/, '')
+    return Promise.resolve(listingAt(rows, path).entries.map((row) => `${base}/${row.name}`))
+  }
   return [
-    await resolveGlobWith(tree.readdir, accessor, paths, index, DEFAULT_MAX_GLOB_MATCHES),
+    await resolveGlobWith(listed, accessor, paths, undefined, DEFAULT_MAX_GLOB_MATCHES),
     prefix,
   ]
 }

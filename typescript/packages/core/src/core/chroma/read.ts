@@ -13,21 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { eisdir } from '../../errors/fs.ts'
 import { fileEntry, joinLines } from '../slug_tree/read.ts'
 import { scalarString } from '../slug_tree/rows.ts'
 import { iterPageChunks, pageChunks } from './client.ts'
 import { renderPage } from './render.ts'
-import { CHROMA_TREE } from './tree.ts'
 
-async function pageSlug(
-  accessor: ChromaAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string> {
-  const slug = scalarString((await fileEntry(CHROMA_TREE, accessor, path, index)).extra.slug)
+function pageSlug(path: PathSpec, entry: FileStat | null): string {
+  const slug = scalarString(fileEntry(path, entry).extra.slug)
   if (slug === null) throw eisdir(path.virtual)
   return slug
 }
@@ -35,15 +29,15 @@ async function pageSlug(
 export async function read(
   accessor: ChromaAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
 ): Promise<Uint8Array> {
-  return renderPage(await pageChunks(accessor, await pageSlug(accessor, path, index)))
+  return renderPage(await pageChunks(accessor, pageSlug(path, entry)))
 }
 
 export async function* readStream(
   accessor: ChromaAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
 ): AsyncIterable<Uint8Array> {
-  yield* joinLines(iterPageChunks(accessor, await pageSlug(accessor, path, index)))
+  yield* joinLines(iterPageChunks(accessor, pageSlug(path, entry)))
 }

@@ -16,13 +16,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandOpts
-from mirage.io.types import materialize
-from mirage.types import PathSpec
 from mirage.vfs.gmail import GmailVFS
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
 LABELS = [{"id": "INBOX", "type": "system"}]
 
@@ -43,18 +39,8 @@ RAW_MESSAGE = {
 }
 
 
-def _find_command():
-    return generic("find").fn
-
-
-def _spec(virtual: str) -> PathSpec:
-    return PathSpec(
-        virtual=virtual, directory=virtual, vfs_path=virtual.strip("/")
-    )
-
-
-async def _run(paths, *texts: str, **flags) -> list[str]:
-    find = _find_command()
+async def _run(line: str) -> list[str]:
+    ws = Workspace({"/gmail/": vfs_over(GmailVFS, AsyncMock())})
     with (
         patch(
             "mirage.core.gmail.readdir.list_labels",
@@ -72,23 +58,14 @@ async def _run(paths, *texts: str, **flags) -> list[str]:
             return_value=RAW_MESSAGE,
         ),
     ):
-        stdout, _io = await find(
-            AsyncMock(),
-            paths,
-            list(texts),
-            CommandOpts(
-                io=io_for(GmailVFS, AsyncMock()),
-                index=RAMIndexCacheStore(),
-                flags={**flags},
-            ),
-        )
-        data = await materialize(stdout)
-    return data.decode().splitlines()
+        result = await ws.shell(line)
+        data = await result.stdout_str()
+    return [line.removeprefix("/gmail") for line in data.splitlines()]
 
 
 @pytest.mark.asyncio
 async def test_type_f_lists_attachments():
-    lines = await _run([_spec("/")], type="f")
+    lines = await _run("find /gmail -type f")
     assert "/INBOX/2025-08-04/Report__m1.gmail.json" in lines
     assert "/INBOX/2025-08-04/Report__m1/report.pdf" in lines
     assert "/INBOX/2025-08-04/Report__m1" not in lines
@@ -96,6 +73,6 @@ async def test_type_f_lists_attachments():
 
 @pytest.mark.asyncio
 async def test_type_d_lists_attachment_dir_not_attachment():
-    lines = await _run([_spec("/")], type="d")
+    lines = await _run("find /gmail -type d")
     assert "/INBOX/2025-08-04/Report__m1" in lines
     assert "/INBOX/2025-08-04/Report__m1/report.pdf" not in lines

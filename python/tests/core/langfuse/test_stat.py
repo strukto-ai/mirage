@@ -18,30 +18,13 @@ import pytest
 from langfuse.api.core.api_error import ApiError
 
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.langfuse.stat import stat
 from mirage.core.render.json import json_bytes, jsonl_bytes
-from mirage.types import ContentType, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.vfs.langfuse.config import LangfuseConfig
-
-
-async def seed_dir(index, virtual_key: str, names: list[str]) -> None:
-    await index.set_dir(
-        virtual_key,
-        [
-            (
-                name,
-                IndexEntry(
-                    id=name,
-                    name=name,
-                    resource_type="langfuse/x",
-                    vfs_name=name,
-                ),
-            )
-            for name in names
-        ],
-    )
+from mirage.vfs.langfuse.langfuse import LangfuseVFS
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
 
 @pytest.fixture
@@ -54,179 +37,132 @@ def accessor():
         return LangfuseAccessor(config=config)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+def _path(virtual: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=virtual.lstrip("/"), virtual=virtual, directory=virtual
+    )
+
+
+async def mounted_stat(accessor: LangfuseAccessor, path: str) -> FileStat:
+    """``path``'s stat through a mount, which lists its parent to hand
+    the backend the row there.
+
+    Args:
+        accessor (LangfuseAccessor): the mount's accessor.
+        path (str): the path below the mount.
+    """
+    ws = Workspace({"/lf/": vfs_over(LangfuseVFS, accessor)})
+    try:
+        row, _ = await ws.dispatch(
+            "stat", PathSpec.from_str_path(f"/lf{path}")
+        )
+        return row
+    finally:
+        await ws.close()
+
+
+def listed(fetch: str, rows: list[dict[str, object]]):
+    return patch(
+        f"mirage.core.langfuse.readdir.{fetch}",
+        new_callable=AsyncMock,
+        return_value=rows,
+    )
 
 
 @pytest.mark.asyncio
-async def test_stat_root(accessor, index):
-    result = await stat(
-        accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
-    )
+async def test_stat_root(accessor):
+    result = await stat(accessor, _path("/"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
-async def test_stat_traces_dir(accessor, index):
-    result = await stat(
-        accessor,
-        PathSpec(vfs_path="traces", virtual="/traces", directory="/traces"),
-        index,
-    )
+async def test_stat_traces_dir(accessor):
+    result = await stat(accessor, _path("/traces"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "traces"
 
 
 @pytest.mark.asyncio
-async def test_stat_trace_file(accessor, index):
-    await seed_dir(index, "/traces", ["abc.json"])
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path="traces/abc.json",
-            virtual="/traces/abc.json",
-            directory="/traces/abc.json",
-        ),
-        index,
-    )
+async def test_stat_trace_file(accessor):
+    with listed("fetch_traces", [{"id": "abc"}]):
+        result = await mounted_stat(accessor, "/traces/abc.json")
     assert result.content == ContentType.JSON
     assert result.name == "abc.json"
 
 
 @pytest.mark.asyncio
-async def test_stat_session_dir(accessor, index):
-    await seed_dir(index, "/sessions", ["sid1"])
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path="sessions/sid1",
-            virtual="/sessions/sid1",
-            directory="/sessions/sid1",
-        ),
-        index,
-    )
+async def test_stat_session_dir(accessor):
+    with listed("fetch_sessions", [{"id": "sid1"}]):
+        result = await mounted_stat(accessor, "/sessions/sid1")
     assert result.type == FileType.DIRECTORY
     assert result.extra["session_id"] == "sid1"
 
 
 @pytest.mark.asyncio
-async def test_stat_prompt_version_file(accessor, index):
-    await seed_dir(index, "/prompts/summarize", ["1.json"])
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path="prompts/summarize/1.json",
-            virtual="/prompts/summarize/1.json",
-            directory="/prompts/summarize/1.json",
-        ),
-        index,
-    )
+async def test_stat_prompt_version_file(accessor):
+    with listed("fetch_prompts", [{"name": "summarize", "versions": [1]}]):
+        result = await mounted_stat(accessor, "/prompts/summarize/1.json")
     assert result.content == ContentType.JSON
     assert result.name == "1.json"
 
 
 @pytest.mark.asyncio
-async def test_stat_dataset_items(accessor, index):
+async def test_stat_dataset_items(accessor):
     items = [{"id": "i-1", "input": "a"}]
-    with patch(
-        "mirage.core.langfuse.readdir.fetch_dataset_items",
-        new_callable=AsyncMock,
-        return_value=items,
+    with (
+        listed("fetch_datasets", [{"name": "qa-eval"}]),
+        listed("fetch_dataset_items", items),
     ):
-        result = await stat(
-            accessor,
-            PathSpec(
-                vfs_path="datasets/qa-eval/items.jsonl",
-                virtual="/datasets/qa-eval/items.jsonl",
-                directory="/datasets/qa-eval/items.jsonl",
-            ),
-            index,
-        )
+        result = await mounted_stat(accessor, "/datasets/qa-eval/items.jsonl")
     assert result.content == ContentType.TEXT
     assert result.name == "items.jsonl"
     assert result.size == len(jsonl_bytes(items))
 
 
 @pytest.mark.asyncio
-async def test_stat_dotfile_raises(accessor, index):
+async def test_stat_dotfile_raises(accessor):
     with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            PathSpec(
-                vfs_path=".hidden", virtual="/.hidden", directory="/.hidden"
-            ),
-            index,
-        )
+        await stat(accessor, _path("/.hidden"))
 
 
 @pytest.mark.asyncio
-async def test_stat_dataset_runs_dir(accessor, index):
-    with patch(
-        "mirage.core.langfuse.readdir.fetch_dataset_items",
-        new_callable=AsyncMock,
-        return_value=[],
+async def test_stat_dataset_runs_dir(accessor):
+    with (
+        listed("fetch_datasets", [{"name": "qa-eval"}]),
+        listed("fetch_dataset_items", []),
     ):
-        result = await stat(
-            accessor,
-            PathSpec(
-                vfs_path="datasets/qa-eval/runs",
-                virtual="/datasets/qa-eval/runs",
-                directory="/datasets/qa-eval/runs",
-            ),
-            index,
-        )
+        result = await mounted_stat(accessor, "/datasets/qa-eval/runs")
     assert result.type == FileType.DIRECTORY
     assert result.name == "runs"
 
 
 @pytest.mark.asyncio
-async def test_stat_unlisted_trace_raises(accessor, index):
+async def test_stat_unlisted_trace_raises(accessor):
     # A recognizable path shape is not evidence the trace exists: an id
     # absent from the parent listing is asked of the API (the listing is
     # bounded), and the API's 404 is ENOENT, not a confident stat.
-    await seed_dir(index, "/traces", ["present.json"])
-    with patch(
-        "mirage.core.langfuse.read.fetch_trace",
-        new_callable=AsyncMock,
-        side_effect=ApiError(status_code=404, body={"message": "nope"}),
+    with (
+        listed("fetch_traces", [{"id": "present"}]),
+        patch(
+            "mirage.core.langfuse.read.fetch_trace",
+            new_callable=AsyncMock,
+            side_effect=ApiError(status_code=404, body={"message": "nope"}),
+        ),
     ):
         with pytest.raises(FileNotFoundError):
-            await stat(
-                accessor,
-                PathSpec(
-                    vfs_path="traces/absent.json",
-                    virtual="/traces/absent.json",
-                    directory="/traces/absent.json",
-                ),
-                index,
-            )
+            await mounted_stat(accessor, "/traces/absent.json")
 
 
 @pytest.mark.asyncio
-async def test_stat_unlisted_prompt_version_raises(accessor, index):
-    await seed_dir(index, "/prompts/summarize", ["1.json"])
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            PathSpec(
-                vfs_path="prompts/summarize/9.json",
-                virtual="/prompts/summarize/9.json",
-                directory="/prompts/summarize/9.json",
-            ),
-            index,
-        )
-
-
-def _trace_path(virtual: str) -> PathSpec:
-    return PathSpec(
-        vfs_path=virtual.lstrip("/"), virtual=virtual, directory=virtual
-    )
+async def test_stat_unlisted_prompt_version_raises(accessor):
+    with listed("fetch_prompts", [{"name": "summarize", "versions": [1]}]):
+        with pytest.raises(FileNotFoundError):
+            await mounted_stat(accessor, "/prompts/summarize/9.json")
 
 
 @pytest.mark.asyncio
-async def test_stat_finds_a_trace_the_bounded_listing_left_out(index):
+async def test_stat_finds_a_trace_the_bounded_listing_left_out():
     """read fetches a trace by id whatever the listing holds, so stat
     must too: the listing is one page of default_trace_limit traces."""
     config = LangfuseConfig(
@@ -236,36 +172,26 @@ async def test_stat_finds_a_trace_the_bounded_listing_left_out(index):
         accessor = LangfuseAccessor(config=config)
     trace = {"id": "t_old", "name": "chat"}
     with (
-        patch(
-            "mirage.core.langfuse.readdir.fetch_traces",
-            new_callable=AsyncMock,
-            return_value=[{"id": "t_new"}],
-        ),
+        listed("fetch_traces", [{"id": "t_new"}]),
         patch(
             "mirage.core.langfuse.read.fetch_trace",
             new_callable=AsyncMock,
             return_value=trace,
         ) as fetch,
     ):
-        listed = await stat(accessor, _trace_path("/traces/t_new.json"), index)
+        shown = await mounted_stat(accessor, "/traces/t_new.json")
         fetch.assert_not_awaited()
-        older = await stat(accessor, _trace_path("/traces/t_old.json"), index)
-    assert listed.type == FileType.FILE and listed.size is None
+        older = await mounted_stat(accessor, "/traces/t_old.json")
+    assert shown.type == FileType.FILE and shown.size is None
     assert older.type == FileType.FILE
     assert older.content == ContentType.JSON
     assert older.size == len(json_bytes(trace))
 
 
 @pytest.mark.asyncio
-async def test_stat_of_a_trace_the_api_does_not_have_is_enoent(
-    accessor, index
-):
+async def test_stat_of_a_trace_the_api_does_not_have_is_enoent(accessor):
     with (
-        patch(
-            "mirage.core.langfuse.readdir.fetch_traces",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
+        listed("fetch_traces", []),
         patch(
             "mirage.core.langfuse.read.fetch_trace",
             new_callable=AsyncMock,
@@ -273,17 +199,14 @@ async def test_stat_of_a_trace_the_api_does_not_have_is_enoent(
         ),
     ):
         with pytest.raises(FileNotFoundError):
-            await stat(accessor, _trace_path("/traces/gone.json"), index)
+            await mounted_stat(accessor, "/traces/gone.json")
 
 
 @pytest.mark.asyncio
-async def test_stat_refuses_another_sessions_trace(accessor, index):
+async def test_stat_refuses_another_sessions_trace(accessor):
     with (
-        patch(
-            "mirage.core.langfuse.readdir.fetch_traces",
-            new_callable=AsyncMock,
-            return_value=[],
-        ),
+        listed("fetch_sessions", [{"id": "s1"}]),
+        listed("fetch_traces", []),
         patch(
             "mirage.core.langfuse.read.fetch_trace",
             new_callable=AsyncMock,
@@ -291,4 +214,4 @@ async def test_stat_refuses_another_sessions_trace(accessor, index):
         ),
     ):
         with pytest.raises(FileNotFoundError):
-            await stat(accessor, _trace_path("/sessions/s1/t1.json"), index)
+            await mounted_stat(accessor, "/sessions/s1/t1.json")

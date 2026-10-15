@@ -51,79 +51,77 @@ async def invalid_documents(config):
     ]
 
 
+def _names(rows, folder: str) -> list[str]:
+    return [row.name for row in rows[folder]]
+
+
+def _row(rows, folder: str, name: str):
+    return next(row for row in rows[folder] if row.name == name)
+
+
 @pytest.mark.asyncio
-async def test_ensure_tree_keeps_the_source_size_in_extra(
-    monkeypatch, dify_accessor, dify_index
+async def test_load_tree_keeps_the_source_size_in_extra(
+    monkeypatch, dify_accessor
 ):
     tree_calls["documents"] = 0
     monkeypatch.setattr(tree, "list_all_documents", counted_documents)
 
-    await tree.DIFY_TREE.ensure(dify_accessor, dify_index, "/knowledge/")
+    rows = await tree.load_tree(dify_accessor)
 
-    root = await dify_index.list_dir("/knowledge")
-    guides = await dify_index.list_dir("/knowledge/guides")
-    quickstart = await dify_index.get("/knowledge/guides/quickstart")
-    readme = await dify_index.get("/knowledge/README.md")
-
-    assert root.entries == ["/knowledge/README.md", "/knowledge/guides"]
-    assert guides.entries == ["/knowledge/guides/quickstart"]
-    assert quickstart.entry.id == "doc-1"
-    assert quickstart.entry.size is None
-    assert quickstart.entry.extra["source_size"] == 333
-    assert quickstart.entry.extra["slug"] == "guides/quickstart"
-    assert quickstart.entry.extra["raw_slug"] == "guides/quickstart"
-    assert quickstart.entry.extra["has_slug"] is True
-    assert readme.entry.id == "doc-6"
-    assert readme.entry.extra["source_size"] is None
-    assert readme.entry.extra["raw_slug"] == "README.md"
-    assert readme.entry.extra["has_slug"] is False
-
-    await tree.DIFY_TREE.ensure(dify_accessor, dify_index, "/knowledge/")
+    quickstart = _row(rows, "/guides", "quickstart")
+    readme = _row(rows, "/", "README.md")
+    assert _names(rows, "/") == ["README.md", "guides"]
+    assert _names(rows, "/guides") == ["quickstart"]
+    assert quickstart.extra["document_id"] == "doc-1"
+    assert quickstart.size is None
+    assert quickstart.extra["source_size"] == 333
+    assert quickstart.extra["slug"] == "guides/quickstart"
+    assert quickstart.extra["raw_slug"] == "guides/quickstart"
+    assert quickstart.extra["has_slug"] is True
+    assert quickstart.modified == "2024-05-21T09:00:00Z"
+    assert readme.extra["document_id"] == "doc-6"
+    assert readme.extra["source_size"] is None
+    assert readme.extra["raw_slug"] == "README.md"
+    assert readme.extra["has_slug"] is False
     assert tree_calls["documents"] == 1
 
 
 @pytest.mark.asyncio
-async def test_ensure_tree_skips_duplicate_slug(
-    monkeypatch, caplog, dify_accessor, dify_index
+async def test_load_tree_skips_duplicate_slug(
+    monkeypatch, caplog, dify_accessor
 ):
     monkeypatch.setattr(tree, "list_all_documents", duplicate_documents)
 
-    await tree.DIFY_TREE.ensure(dify_accessor, dify_index, "")
+    rows = await tree.load_tree(dify_accessor)
 
-    root = await dify_index.list_dir("/")
-    kept = await dify_index.get("/same")
-    assert root.entries == ["/same"]
-    assert kept.entry.id == "doc-1"
+    assert _names(rows, "/") == ["same"]
+    assert _row(rows, "/", "same").extra["document_id"] == "doc-1"
     assert "Skipping duplicate Dify document slug" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_ensure_tree_skips_path_collision(
-    monkeypatch, caplog, dify_accessor, dify_index
+async def test_load_tree_skips_path_collision(
+    monkeypatch, caplog, dify_accessor
 ):
     monkeypatch.setattr(tree, "list_all_documents", collision_documents)
 
-    await tree.DIFY_TREE.ensure(dify_accessor, dify_index, "")
+    rows = await tree.load_tree(dify_accessor)
 
-    root = await dify_index.list_dir("/")
-    kept = await dify_index.get("/foo")
-    skipped = await dify_index.get("/foo/bar")
-    assert root.entries == ["/foo"]
-    assert kept.entry.id == "doc-1"
-    assert skipped.entry is None
+    assert _names(rows, "/") == ["foo"]
+    assert _row(rows, "/", "foo").extra["document_id"] == "doc-1"
+    assert "/foo" not in rows
     assert "Skipping Dify document path collision" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_ensure_tree_skips_invalid_documents(
-    monkeypatch, caplog, dify_accessor, dify_index
+async def test_load_tree_skips_invalid_documents(
+    monkeypatch, caplog, dify_accessor
 ):
     monkeypatch.setattr(tree, "list_all_documents", invalid_documents)
 
-    await tree.DIFY_TREE.ensure(dify_accessor, dify_index, "")
+    rows = await tree.load_tree(dify_accessor)
 
-    root = await dify_index.list_dir("/")
-    assert root.entries == ["/valid"]
+    assert _names(rows, "/") == ["valid"]
     assert caplog.text.count("Skipping invalid Dify document") == 4
 
 

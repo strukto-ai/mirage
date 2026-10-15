@@ -13,32 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { ContentType, FileType, PathSpec } from '../../types.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
+import { ContentType, FileType, type FileStat } from '../../types.ts'
+import { AirtableVFS } from '../../vfs/airtable/airtable.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { FakeAirtable, makeAccessor } from './_test_util.ts'
-import { read } from './read.ts'
-import { stat } from './stat.ts'
 
 const ROOT = '/at'
 const BASE = `${ROOT}/bases/Product_Roadmap__appRoadmapBase001`
 const TABLE = `${BASE}/Features__tblFeatures000001`
 
-function spec(virtual: string): PathSpec {
-  return new PathSpec({
-    virtual,
-    directory: virtual.slice(0, virtual.lastIndexOf('/')),
-    vfsPath: mountKey(virtual, ROOT),
+function mounted(): Workspace {
+  const vfs = Object.assign(new AirtableVFS({ token: 'pat' }), {
+    accessor: makeAccessor(new FakeAirtable()),
   })
+  return new Workspace({ [`${ROOT}/`]: vfs })
+}
+
+async function statAt(ws: Workspace, path: string): Promise<FileStat> {
+  return (await ws.dispatch('stat', path)) as FileStat
 }
 
 describe('airtable stat', () => {
   it('sizes json leaves at their rendered byte length', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
-    const index = new RAMIndexCacheStore()
+    const ws = mounted()
     for (const leaf of [`${BASE}/base.json`, `${TABLE}/table.json`]) {
-      const info = await stat(accessor, spec(leaf), index)
-      const body = await read(accessor, spec(leaf), index)
+      const info = await statAt(ws, leaf)
+      const body = (await ws.dispatch('read', leaf)) as Uint8Array
       expect(info.type).toBe(FileType.FILE)
       expect(info.content).toBe(ContentType.JSON)
       expect(info.size).toBe(body.byteLength)
@@ -46,34 +46,24 @@ describe('airtable stat', () => {
   })
 
   it('leaves record files size-unknown', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
-    const index = new RAMIndexCacheStore()
-    const records = await stat(accessor, spec(`${TABLE}/records.jsonl`), index)
-    const view = await stat(
-      accessor,
-      spec(`${TABLE}/views/Done_shipped__viwDone0000000001.jsonl`),
-      index,
-    )
+    const ws = mounted()
+    const records = await statAt(ws, `${TABLE}/records.jsonl`)
+    const view = await statAt(ws, `${TABLE}/views/Done_shipped__viwDone0000000001.jsonl`)
     expect(records.size).toBeNull()
     expect(view.size).toBeNull()
     expect(view.extra).toEqual({ view_id: 'viwDone0000000001' })
   })
 
   it('stats directories as directories', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
-    const index = new RAMIndexCacheStore()
+    const ws = mounted()
     for (const path of [`${ROOT}/bases`, BASE, TABLE, `${TABLE}/views`]) {
-      expect((await stat(accessor, spec(path), index)).type).toBe(FileType.DIRECTORY)
+      expect((await statAt(ws, path)).type).toBe(FileType.DIRECTORY)
     }
   })
 
   it('answers ENOENT for an unlisted view', async () => {
     await expect(
-      stat(
-        makeAccessor(new FakeAirtable()),
-        spec(`${TABLE}/views/Gone__viwGone0000000001.jsonl`),
-        new RAMIndexCacheStore(),
-      ),
+      statAt(mounted(), `${TABLE}/views/Gone__viwGone0000000001.jsonl`),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

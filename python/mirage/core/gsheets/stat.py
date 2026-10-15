@@ -14,10 +14,7 @@
 
 from mirage.core.google.stat import make_app_stat
 from mirage.core.gsheets.constants import MIME
-from mirage.core.gsheets.readdir import readdir
 from mirage.core.gsheets.scope import detect_scope
 from mirage.vfs.gsheets.sheet_entry import make_filename
 
-stat = make_app_stat(
-    MIME, detect_scope, readdir, "gsheets/file", make_filename
-)
+stat = make_app_stat(MIME, detect_scope, make_filename)

@@ -36,6 +36,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private readonly children = new Map<string, string[]>()
   private readonly expiry = new Map<string, number>()
   private readonly partial = new Set<string>()
+  private readonly windowed = new Set<string>()
   private readonly tombstones = new Map<string, Evicted[]>()
   private readonly versions = new Map<string, string>()
   private readonly lock = new KeyLock()
@@ -57,6 +58,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       this.children.set(path, [...keys])
       this.expiry.set(path, expiresAt.getTime())
       this.partial.delete(path)
+      this.windowed.delete(path)
       this.stamp(path, version)
     }
   }
@@ -94,6 +96,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         this.children.set(folder, [vfsPath])
         this.expiry.set(folder, now + this.ttl * 1000)
         this.partial.add(folder)
+        this.windowed.delete(folder)
         this.versions.delete(folder)
       } else if (!children.includes(vfsPath)) {
         const at = children.findIndex((child) => compareCodePoints(child, vfsPath) > 0)
@@ -124,7 +127,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     const children = this.children.get(vfsPath) ?? []
     const version = this.versions.get(vfsPath) ?? null
     if (this.partial.has(vfsPath)) return Promise.resolve({ partialEntries: children, version })
-    return Promise.resolve({ entries: children, version })
+    return Promise.resolve({ entries: children, version, window: this.windowed.has(vfsPath) })
   }
 
   setDir(
@@ -201,6 +204,8 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       this.stamp(vfsPath, partial ? null : version)
       if (partial) this.partial.add(vfsPath)
       else this.partial.delete(vfsPath)
+      if (partial || evict) this.windowed.delete(vfsPath)
+      else this.windowed.add(vfsPath)
       return Promise.resolve(gone)
     })
   }
@@ -248,6 +253,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     this.expiry.delete(vfsPath)
     this.children.delete(vfsPath)
     this.partial.delete(vfsPath)
+    this.windowed.delete(vfsPath)
     this.versions.delete(vfsPath)
     return Promise.resolve()
   }
@@ -289,6 +295,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       if (underPath(key, vfsPath) && !excluded.some((prefix) => underPath(key, prefix))) {
         this.expiry.delete(key)
         this.partial.delete(key)
+        this.windowed.delete(key)
         this.versions.delete(key)
       }
     }
@@ -305,6 +312,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     this.children.clear()
     this.expiry.clear()
     this.partial.clear()
+    this.windowed.clear()
     this.tombstones.clear()
     this.versions.clear()
     this.lock.clear()

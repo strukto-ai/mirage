@@ -12,14 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
 
@@ -43,28 +44,33 @@ def accessor():
     return GSlidesAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+@pytest.mark.asyncio
+async def test_readdir_root(accessor):
+    result = await readdir(accessor, _scope("/gslides"))
+    assert [row.name for row in result] == ["owned", "shared"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
-    result = await readdir(accessor, _scope("/gslides"), index=index)
-    assert result == ["/gslides/owned", "/gslides/shared"]
-
-
-@pytest.mark.asyncio
-async def test_readdir_owned_serves_cached_listing(accessor, index):
-    entry = IndexEntry(
-        id="slide1",
-        name="Deck",
-        resource_type="gslides/slide",
-        remote_time="2026-04-01T00:00:00Z",
-        vfs_name="Deck__slide1.gslide.json",
-    )
-    await index.set_dir(
-        "/gslides/owned", [("Deck__slide1.gslide.json", entry)]
-    )
-    result = await readdir(accessor, _scope("/gslides/owned"), index=index)
-    assert "/gslides/owned/Deck__slide1.gslide.json" in result
+async def test_a_listed_corpus_is_listed_once(accessor):
+    mounted = Mounted(GSlidesVFS, accessor, "/gslides")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=(
+            [
+                {
+                    "mimeType": "application/vnd.google-apps.presentation",
+                    "id": "slide1",
+                    "name": "Deck",
+                    "modifiedTime": "2026-04-01T00:00:00Z",
+                    "owners": [{"me": True}],
+                }
+            ],
+            True,
+        ),
+    ) as listed:
+        first = await mounted.readdir(_scope("/gslides/owned"))
+        again = await mounted.readdir(_scope("/gslides/owned"))
+    assert first == again and len(first) == 1
+    assert "slide1" in first[0]
+    listed.assert_awaited_once()

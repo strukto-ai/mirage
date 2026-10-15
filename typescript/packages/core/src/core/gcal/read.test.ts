@@ -13,22 +13,45 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import type { GCalAccessor } from '../../accessor/gcal.ts'
+import type { Workspace } from '../../workspace/workspace/workspace.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
 import { API, EVENTS, HK, makeAccessor, spec } from './_test_util.ts'
 
 vi.mock('./client.ts', async () => (await import('./_test_util.ts')).CLIENT)
 
-const { read, readMany } = await import('./read.ts')
+const { readMany } = await import('./read.ts')
+const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
+const { Workspace: MountWorkspace } = await import('../../workspace/workspace/workspace.ts')
+const MOUNTS = new WeakMap<GCalAccessor, Workspace>()
+
+// The one mount a test asks an accessor through, at /m, so the listings one
+// call keeps answer the next, as they do for a command.
+function mounted(accessor: GCalAccessor): Workspace {
+  let ws = MOUNTS.get(accessor)
+  if (ws === undefined) {
+    const vfs = Object.assign(new GCalVFS(accessor.config), { accessor })
+    ws = new MountWorkspace({ '/m/': vfs }, { mode: MountMode.WRITE })
+    MOUNTS.set(accessor, ws)
+  }
+  return ws
+}
+
+// The mounted spelling of a path below the mount.
+function at(path: PathSpec): string {
+  return path.virtual === '/' ? '/m' : `/m${path.virtual}`
+}
+
+async function read(accessor: GCalAccessor, path: PathSpec): Promise<Uint8Array> {
+  return (await mounted(accessor).dispatch('read', at(path))) as Uint8Array
+}
 
 const WEEK = '/primary/2026-08-10--2026-08-16'
 const PHD = 'aaaa1__0900-1030_PhD_Defense.gcal.json'
 const DATED_PHD = 'aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json'
 
-let index: RAMIndexCacheStore
-
 beforeEach(() => {
   API.reset()
-  index = new RAMIndexCacheStore()
 })
 
 function parsed(bytes: Uint8Array): Record<string, unknown> {
@@ -43,9 +66,7 @@ describe('gcal read', () => {
   ])('serves the unmodified API payload on a %i-day mount', async (size, path) => {
     // The names are a view; the payload, original offsets included, is what
     // an absolute-instant comparison is made against.
-    expect(parsed(await read(makeAccessor({ bucket_days: size }), spec(path), index))).toEqual(
-      EVENTS[0],
-    )
+    expect(parsed(await read(makeAccessor({ bucket_days: size }), spec(path)))).toEqual(EVENTS[0])
     // Only the day the name is on is queried, whatever the bucket's size.
     expect(API.listed).toEqual([
       ['integ@example.com', '2026-08-11T00:00:00+08:00', '2026-08-12T00:00:00+08:00'],
@@ -64,16 +85,16 @@ describe('gcal read', () => {
       { calendarTimeZone: 'America/Los_Angeles', bucketTimeZone: HK },
     ],
   ])('renders %s with the role and bucket zone', async (path, fields) => {
-    expect(parsed(await read(makeAccessor(), spec(path), index))).toMatchObject(fields)
+    expect(parsed(await read(makeAccessor(), spec(path)))).toMatchObject(fields)
   })
 
   it('reports a directory read as absence, the mount root as EISDIR', async () => {
     // A probed directory shape is no proof the node exists; the mount root,
     // which exists by construction, is the one EISDIR.
-    await expect(read(makeAccessor(), spec('/primary'), index)).rejects.toMatchObject({
+    await expect(read(makeAccessor(), spec('/primary'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    await expect(read(makeAccessor(), spec('/'), index)).rejects.toMatchObject({
+    await expect(read(makeAccessor(), spec('/'))).rejects.toMatchObject({
       code: 'EISDIR',
     })
   })
@@ -89,7 +110,7 @@ describe('gcal read', () => {
     [7, `${WEEK}/aaaa1__2026-08-18_0900-1030_PhD_Defense.gcal.json`],
     [7, `/primary/2026-08-11/${PHD}`],
   ])('is ENOENT on a %i-day mount for %s', async (size, path) => {
-    await expect(read(makeAccessor({ bucket_days: size }), spec(path), index)).rejects.toThrow()
+    await expect(read(makeAccessor({ bucket_days: size }), spec(path))).rejects.toThrow()
   })
 })
 

@@ -13,14 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
+import { DirListing, FileStat, FileType } from '../../types.ts'
 import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import { globPrefix, globStemPrefix } from '../../utils/glob_walk.ts'
 import { keptText } from '../../utils/record_search.ts'
-import type { DirListing, Listed } from '../hierarchy/readdir.ts'
+import type { Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { blobBytes } from '../vector/read.ts'
-import { dirEntry } from '../vector/readdir.ts'
 import { filtersOf, tableOf } from '../vector/scope.ts'
 import { groupName, rowStem } from './naming.ts'
 import { fieldValue } from './payload.ts'
@@ -40,64 +39,53 @@ function blobSize(value: unknown): number | null {
   }
 }
 
-function rowEntries(rows: QdrantRow[], config: QdrantConfigResolved): [string, IndexEntry][] {
+function rowFiles(rows: QdrantRow[], config: QdrantConfigResolved): FileStat[] {
   // The scroll already carries every payload, so each file's exact rendered
-  // size and text are free here; stat serves the size from the index instead
-  // of refetching one row per file, and grep checks the text instead of
-  // reading it.
-  const entries: [string, IndexEntry][] = []
+  // size and text are free here; the mount serves the size from the listing
+  // instead of refetching one row per file, and grep checks the text instead
+  // of reading it.
+  const listed: FileStat[] = []
   for (const row of rows) {
-    const id = String(row[config.idField])
     const stem = rowStem(row, config)
     const rendered = renderJson(row, config)
-    entries.push([
-      `${stem}.json`,
-      new IndexEntry({
-        id,
+    listed.push(
+      new FileStat({
         name: `${stem}.json`,
-        resourceType: 'qdrant/row_json',
-        vfsName: `${stem}.json`,
+        type: FileType.FILE,
         size: rendered.byteLength,
         extra: keptText(rendered),
       }),
-    ])
+    )
     if (
       config.textField !== null &&
       fieldValue(row, config.textField) !== null &&
       fieldValue(row, config.textField) !== undefined
     ) {
       const text = renderText(row, config)
-      entries.push([
-        `${stem}.txt`,
-        new IndexEntry({
-          id,
+      listed.push(
+        new FileStat({
           name: `${stem}.txt`,
-          resourceType: 'qdrant/row_text',
-          vfsName: `${stem}.txt`,
+          type: FileType.FILE,
           size: text.byteLength,
           extra: keptText(text),
         }),
-      ])
+      )
     }
     if (
       config.blobField !== null &&
       fieldValue(row, config.blobField) !== null &&
       fieldValue(row, config.blobField) !== undefined
     ) {
-      const blobName = `${stem}.${config.blobExt}`
-      entries.push([
-        blobName,
-        new IndexEntry({
-          id,
-          name: blobName,
-          resourceType: 'qdrant/row_blob',
-          vfsName: blobName,
+      listed.push(
+        new FileStat({
+          name: `${stem}.${config.blobExt}`,
+          type: FileType.FILE,
           size: blobSize(fieldValue(row, config.blobField)),
         }),
-      ])
+      )
     }
   }
-  return entries
+  return listed
 }
 
 /**
@@ -160,29 +148,19 @@ export async function children(
       displayPrefix,
       basename,
     )
-    const listing: DirListing = {
-      entries: names
-        .map((name) => groupName(name, basename))
-        .filter((name) => name.startsWith(displayPrefix))
-        .map((rendered): [string, IndexEntry] => {
-          return [rendered, dirEntry('qdrant', rendered)]
-        }),
-      seeds: {},
-      partial: displayPrefix !== '',
-      window: true,
-    }
-    if (new Set(listing.entries.map(([name]) => name)).size !== listing.entries.length) {
+    const rendered = names
+      .map((name) => groupName(name, basename))
+      .filter((name) => name.startsWith(displayPrefix))
+    if (new Set(rendered).size !== rendered.length) {
       throw new Error('qdrant: basenameFields produced a path collision')
     }
-    return listing
+    return new DirListing({
+      entries: rendered.map((name) => new FileStat({ name, type: FileType.DIRECTORY })),
+      partial: displayPrefix !== '',
+      window: true,
+    })
   }
   const prefix = rowPrefix(pattern, config)
   const rows = await rowsMatching(accessor, table, filters, config.maxRows, prefix)
-  const listing: DirListing = {
-    entries: rowEntries(rows, config),
-    seeds: {},
-    partial: prefix !== '',
-    window: true,
-  }
-  return listing
+  return new DirListing({ entries: rowFiles(rows, config), partial: prefix !== '', window: true })
 }

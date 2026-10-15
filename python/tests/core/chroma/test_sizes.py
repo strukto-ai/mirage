@@ -1,19 +1,18 @@
 import pytest
 
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore
-from mirage.core.chroma.read import read
+from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.chroma.sizes import ensure_dir_sizes
-from mirage.core.chroma.stat import stat
-from mirage.core.chroma.tree import CHROMA_TREE
+from mirage.types import FileStat, FileType
+from mirage.vfs.chroma import ChromaVFS
 from tests.core.chroma.conftest import FakeCollection, accessor_for
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.mark.asyncio
-async def test_stat_size_matches_read(
-    chroma_accessor, chroma_index, quickstart_path
-):
-    result = await stat(chroma_accessor, quickstart_path, chroma_index)
-    body = await read(chroma_accessor, quickstart_path, chroma_index)
+async def test_stat_size_matches_read(chroma_accessor, quickstart_path):
+    mount = Mounted(ChromaVFS, chroma_accessor, "/knowledge")
+    result = await mount.stat(quickstart_path)
+    body = await mount.read(quickstart_path)
 
     assert result.size == len(body)
     # The producer's own number stays visible, but never as the size.
@@ -22,28 +21,31 @@ async def test_stat_size_matches_read(
 
 @pytest.mark.asyncio
 async def test_stat_sizes_the_whole_directory_in_one_scan(
-    chroma_accessor, chroma_collection, chroma_index, quickstart_path
+    chroma_accessor, chroma_collection, quickstart_path
 ):
-    await CHROMA_TREE.ensure(chroma_accessor, chroma_index, "/knowledge")
+    mount = Mounted(ChromaVFS, chroma_accessor, "/knowledge")
+    await mount.readdir("/guides")
     before = len(chroma_collection.get_calls)
 
-    await stat(chroma_accessor, quickstart_path, chroma_index)
+    await mount.stat(quickstart_path)
     scans = len(chroma_collection.get_calls) - before
-    await stat(chroma_accessor, quickstart_path, chroma_index)
+    await mount.stat(quickstart_path)
 
     assert scans == 1
-    # The second stat is served from the index, so no further scan happens.
+    # The second stat is served from the sized row, so no further scan
+    # happens.
     assert len(chroma_collection.get_calls) - before == 1
 
 
 @pytest.mark.asyncio
 async def test_stat_sizes_a_chunkless_page_as_empty(
-    chroma_accessor, chroma_collection, chroma_index, quickstart_path
+    chroma_accessor, chroma_collection, quickstart_path
 ):
     chroma_collection.chunks["guides/quickstart"] = []
+    mount = Mounted(ChromaVFS, chroma_accessor, "/knowledge")
 
-    result = await stat(chroma_accessor, quickstart_path, chroma_index)
-    body = await read(chroma_accessor, quickstart_path, chroma_index)
+    result = await mount.stat(quickstart_path)
+    body = await mount.read(quickstart_path)
 
     assert result.size == len(body) == 0
 
@@ -59,10 +61,9 @@ async def test_several_chunkless_pages_cost_one_scan():
         [
             (
                 name,
-                IndexEntry(
-                    id=f"guides/{name}",
+                FileStat(
                     name=name,
-                    resource_type="file",
+                    type=FileType.FILE,
                     extra={"slug": f"guides/{name}"},
                 ),
             )

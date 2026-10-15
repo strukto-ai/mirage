@@ -13,39 +13,32 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.hierarchy.probe import assert_parent
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
 from mirage.core.notion.normalize import page_segment_name
-from mirage.core.notion.readdir import readdir
-from mirage.core.notion.resolve import guard_row, resolve_row
+from mirage.core.notion.resolve import resolve_row
 from mirage.core.notion.scope import detect_scope
+from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-
-
-def _page_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.DIRECTORY,
-        modified=entry.remote_time or None,
-        extra={"page_id": entry.id},
-    )
 
 
 async def _row_stat(
     accessor: NotionAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> FileStat:
-    await assert_parent(stat, accessor, path, index)
+    # No listing names a row: its data source lists it as a line of
+    # rows.jsonl, so a row proves itself against the data source the
+    # mount hands as its parent, once; the mount hands what it proved.
+    if entry is not None:
+        return entry
+    if parent is None:
+        raise enoent(path.virtual)
     page = await resolve_row(accessor, match, path.virtual)
-    name = page_segment_name(page)
     return FileStat(
-        name=name,
+        name=page_segment_name(page),
         type=FileType.DIRECTORY,
         modified=page.get("last_edited_time") or None,
         extra={"page_id": page.get("id", "")},
@@ -56,95 +49,17 @@ async def _row_json_stat(
     accessor: NotionAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> FileStat:
-    await assert_parent(stat, accessor, path, index)
+    if parent is None:
+        raise enoent(path.virtual)
     return FileStat(
         name="page.json", type=FileType.FILE, content=ContentType.JSON
     )
 
 
-def _page_json_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.FILE,
-        content=ContentType.JSON,
-        size=entry.size,
-    )
-
-
-def _database_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.DIRECTORY,
-        modified=entry.remote_time or None,
-        extra={"database_id": entry.id},
-    )
-
-
-def _database_json_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.FILE,
-        content=ContentType.JSON,
-        size=entry.size,
-        extra={"database_id": match.slots["database_id"]},
-    )
-
-
-def _data_source_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.DIRECTORY,
-        modified=entry.remote_time or None,
-        extra={"data_source_id": entry.id},
-    )
-
-
-def _data_source_json_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.FILE,
-        content=ContentType.JSON,
-        size=entry.size,
-        extra={"data_source_id": match.slots["data_source_id"]},
-    )
-
-
-def _rows_jsonl_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.FILE,
-        content=ContentType.TEXT,
-        size=entry.size,
-        extra={"data_source_id": match.slots["data_source_id"]},
-    )
-
-
 stat = make_stat(
     detect_scope,
-    readdir,
     overrides={"row": _row_stat, "row_json": _row_json_stat},
-    guards={kind: guard_row for kind in ("page", "page_json")},
-    entry_stats={
-        "page": _page_stat,
-        "page_json": _page_json_stat,
-        "database": _database_stat,
-        "database_json": _database_json_stat,
-        "data_source": _data_source_stat,
-        "data_source_json": _data_source_json_stat,
-        "rows_jsonl": _rows_jsonl_stat,
-    },
 )

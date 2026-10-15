@@ -13,26 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 import aiohttp
 
 from mirage.accessor.google_api import GoogleApiAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.google.constants import RENDERED_WORDS, TOP_LEVEL_DIRS
 from mirage.core.google.drive import search_files
-from mirage.core.hierarchy.probe import ReaddirFn, entries_under
-from mirage.types import PathSpec
+from mirage.types import DirListing, FileStat, PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.record_search import record_queries
 
 logger = logging.getLogger(__name__)
 
 A = TypeVar("A", bound=GoogleApiAccessor)
-
-
-def _no_folder(entry: IndexEntry) -> bool:
-    return False
 
 
 def drive_queries(text: str, vocabulary: frozenset[str]) -> list[str] | None:
@@ -52,12 +47,11 @@ def drive_queries(text: str, vocabulary: frozenset[str]) -> list[str] | None:
 
 async def files_containing(
     accessor: A,
-    readdir: ReaddirFn[A],
+    readdir: Callable[[A, PathSpec], Awaitable[list[FileStat] | DirListing]],
     mime: str,
     vocabulary: frozenset[str],
     text: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     """The Docs, Sheets or Slides files under ``under`` Drive full-text
     search names.
@@ -76,12 +70,11 @@ async def files_containing(
 
     Args:
         accessor (GoogleApiAccessor): backend handle.
-        readdir (ReaddirFn): the app's readdir.
+        readdir (Callable): the app's readdir.
         mime (str): the app's MIME type.
         vocabulary (frozenset[str]): the app's API words, lowercased.
         text (str): the whole word searched for.
         under (list[PathSpec]): the directories walked.
-        index (IndexCacheStore): the mount's index.
     """
     queries = drive_queries(text, vocabulary)
     if queries is None:
@@ -109,15 +102,18 @@ async def files_containing(
                 return None
             named.update(ids)
         for corpus in corpora:
-            walked = await entries_under(
-                readdir, accessor, corpus, index, _no_folder
-            )
-            # An unfinished listing caches its entries but not the
-            # directory, and grep's own walk lists it again.
-            listing = await index.list_dir(corpus.virtual.rstrip("/"))
-            if walked is None or listing.entries is None:
+            listed = await readdir(accessor, corpus)
+            # An unfinished listing is not the directory, and grep's own
+            # walk lists it again.
+            if isinstance(listed, DirListing) and listed.partial:
                 return None
-            found.extend(path for path, entry in walked if entry.id in named)
+            rows = listed.entries if isinstance(listed, DirListing) else listed
+            base = corpus.mount_path.rstrip("/")
+            found.extend(
+                mounted_path(corpus, f"{base}/{row.name}")
+                for row in rows
+                if row.extra.get("doc_id") in named
+            )
     except (OSError, aiohttp.ClientError) as exc:
         logger.debug("drive search failed (%s); reading every file", exc)
         return None

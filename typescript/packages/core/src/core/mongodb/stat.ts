@@ -14,27 +14,10 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { makeStat } from '../hierarchy/stat.ts'
-import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { databaseGuard, entityGuard, readdir } from './readdir.ts'
-import { detectScope, entityKind } from './scope.ts'
+import { EXTRAS, databaseGuard, entityGuard } from './readdir.ts'
+import { detectScope } from './scope.ts'
 
-function databaseExtra(match: ScopeMatch): Record<string, string> {
-  return { database: match.slots.database ?? '' }
-}
-
-function kindDirExtra(match: ScopeMatch): Record<string, string> {
-  return { database: match.slots.database ?? '', kind: entityKind(match) }
-}
-
-function entityExtra(match: ScopeMatch): Record<string, string> {
-  return {
-    database: match.slots.database ?? '',
-    kind: entityKind(match),
-    name: match.slots.name ?? '',
-  }
-}
-
-export const stat = makeStat<MongoDBAccessor>(detectScope, readdir, {
+export const stat = makeStat<MongoDBAccessor>(detectScope, {
   guards: {
     database: databaseGuard,
     kind_dir: databaseGuard,
@@ -43,12 +26,5 @@ export const stat = makeStat<MongoDBAccessor>(detectScope, readdir, {
     entity: entityGuard,
     documents: entityGuard,
   },
-  extras: {
-    database: databaseExtra,
-    kind_dir: kindDirExtra,
-    database_json: databaseExtra,
-    schema_json: entityExtra,
-    entity: entityExtra,
-    documents: entityExtra,
-  },
+  extras: EXTRAS,
 })

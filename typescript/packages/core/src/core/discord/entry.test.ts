@@ -13,11 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { ContentType, FileType } from '../../types.ts'
+import { compactJsonBytes } from '../render/json.ts'
 import {
   channelDirname,
-  DiscordIndexEntry,
-  DiscordResourceType,
+  channelEntry,
   guildDirname,
+  guildEntry,
+  historyEntry,
+  memberEntry,
   memberFilename,
 } from './entry.ts'
 
@@ -65,68 +69,51 @@ describe('memberFilename', () => {
   })
 })
 
-describe('DiscordIndexEntry', () => {
-  it('guild() returns IndexEntry with discord/guild resourceType', () => {
-    const entry = DiscordIndexEntry.guild({ id: 'G1', name: 'My Server' })
-    expect(entry.id).toBe('G1')
-    expect(entry.name).toBe('My Server')
-    expect(entry.resourceType).toBe(DiscordResourceType.GUILD)
-    expect(entry.resourceType).toBe('discord/guild')
-    expect(entry.vfsName).toBe('My Server__G1')
+describe('discord rows', () => {
+  it('guildEntry() names the guild dir and carries its id', () => {
+    const row = guildEntry({ id: 'G1', name: 'My Server' })
+    expect(row.name).toBe('My Server__G1')
+    expect(row.type).toBe(FileType.DIRECTORY)
+    expect(row.extra).toEqual({ guild_id: 'G1' })
   })
 
-  it('guild() handles missing name', () => {
-    const entry = DiscordIndexEntry.guild({ id: 'G2' })
-    expect(entry.name).toBe('')
-    expect(entry.vfsName).toBe('unknown__G2')
+  it('guildEntry() handles missing name', () => {
+    expect(guildEntry({ id: 'G2' }).name).toBe('unknown__G2')
   })
 
-  it('channel() returns IndexEntry with discord/channel resourceType', () => {
-    const entry = DiscordIndexEntry.channel({ id: 'C1', name: 'general' })
-    expect(entry.id).toBe('C1')
-    expect(entry.name).toBe('general')
-    expect(entry.resourceType).toBe(DiscordResourceType.CHANNEL)
-    expect(entry.resourceType).toBe('discord/channel')
-    expect(entry.vfsName).toBe('general__C1')
+  it('channelEntry() carries its id and newest message', () => {
+    const row = channelEntry({ id: '1', name: 'general', last_message_id: '4194304' })
+    expect(row.name).toBe('general__1')
+    expect(row.type).toBe(FileType.DIRECTORY)
+    expect(row.modified).toBe('2015-01-01T00:00:00Z')
+    expect(row.extra).toEqual({ channel_id: '1', last_message_id: '4194304' })
   })
 
-  it('channel() handles missing name', () => {
-    const entry = DiscordIndexEntry.channel({ id: 'C2' })
-    expect(entry.name).toBe('')
-    expect(entry.vfsName).toBe('unknown__C2')
+  it('channelEntry() handles missing name and no message', () => {
+    const row = channelEntry({ id: 'C2' })
+    expect(row.name).toBe('unknown__C2')
+    expect(row.modified).toBeNull()
+    expect(row.extra).toEqual({ channel_id: 'C2', last_message_id: '' })
   })
 
-  it('member() returns IndexEntry with discord/member resourceType', () => {
-    const entry = DiscordIndexEntry.member({ id: 'M1', name: 'alice' })
-    expect(entry.id).toBe('M1')
-    expect(entry.name).toBe('alice')
-    expect(entry.resourceType).toBe(DiscordResourceType.MEMBER)
-    expect(entry.resourceType).toBe('discord/member')
-    expect(entry.vfsName).toBe('alice__M1.json')
+  it('memberEntry() is the rendered member file', () => {
+    const member = { user: { id: 'M1', username: 'alice' } }
+    const row = memberEntry(member)
+    expect(row.name).toBe('alice__M1.json')
+    expect(row.type).toBe(FileType.FILE)
+    expect(row.content).toBe(ContentType.JSON)
+    expect(row.size).toBe(compactJsonBytes(member).byteLength)
+    expect(row.extra).toEqual({ user_id: 'M1' })
   })
 
-  it('member() handles missing name', () => {
-    const entry = DiscordIndexEntry.member({ id: 'M2' })
-    expect(entry.name).toBe('')
-    expect(entry.vfsName).toBe('unknown__M2.json')
+  it('memberEntry() handles missing name', () => {
+    expect(memberEntry({ user: { id: 'M2' } }).name).toBe('unknown__M2.json')
   })
 
-  it('history() returns IndexEntry with discord/history resourceType', () => {
-    const entry = DiscordIndexEntry.history('C1', '2026-04-25')
-    expect(entry.id).toBe('C1:2026-04-25')
-    expect(entry.name).toBe('2026-04-25')
-    expect(entry.resourceType).toBe(DiscordResourceType.HISTORY)
-    expect(entry.resourceType).toBe('discord/history')
-    expect(entry.vfsName).toBe('2026-04-25')
-    expect(entry.extra).toEqual({ channel_id: 'C1' })
-  })
-})
-
-describe('DiscordResourceType', () => {
-  it('exposes the four entity types', () => {
-    expect(DiscordResourceType.GUILD).toBe('discord/guild')
-    expect(DiscordResourceType.CHANNEL).toBe('discord/channel')
-    expect(DiscordResourceType.MEMBER).toBe('discord/member')
-    expect(DiscordResourceType.HISTORY).toBe('discord/history')
+  it('historyEntry() is a day dir carrying its channel', () => {
+    const row = historyEntry('C1', '2026-04-25')
+    expect(row.name).toBe('2026-04-25')
+    expect(row.type).toBe(FileType.DIRECTORY)
+    expect(row.extra).toEqual({ channel_id: 'C1' })
   })
 })

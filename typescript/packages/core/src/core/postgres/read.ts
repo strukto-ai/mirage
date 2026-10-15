@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 import { efbig } from '../../errors/fs.ts'
 import { jsonBytes } from '../render/json.ts'
@@ -41,7 +40,6 @@ import { entityGuard } from './readdir.ts'
 import { buildDatabaseJson, buildEntitySchemaJson } from './_schema_json.ts'
 import { buildEntitySemanticJson } from './semantic.ts'
 import { detectScope } from './scope.ts'
-import { stat } from './stat.ts'
 
 export interface ReadOptions {
   limit?: number | null
@@ -65,7 +63,8 @@ export interface ReadOptions {
 export async function* readStream(
   accessor: PostgresAccessor,
   path: PathSpec | string,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
   options: ReadOptions = {},
 ): AsyncIterable<Uint8Array> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
@@ -80,7 +79,7 @@ export async function* readStream(
     columns = await columnNames(accessor, schema, entity)
   }
   if (pk.length === 0) {
-    yield await read(accessor, path, index, options)
+    yield await read(accessor, path, entry, parent, options)
     return
   }
   const cfg = accessor.config
@@ -162,8 +161,14 @@ const readEntitySemantic: Reader<PostgresAccessor> = async (accessor, match) =>
     ),
   )
 
-const readEntityRows: WindowedReader<PostgresAccessor> = (accessor, match, path, _index, window) =>
-  readRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '', path, window)
+const readEntityRows: WindowedReader<PostgresAccessor> = (
+  accessor,
+  match,
+  path,
+  _entry,
+  _parent,
+  window,
+) => readRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '', path, window)
 
 const kitRead = makeRead<PostgresAccessor>(
   detectScope,
@@ -172,17 +177,18 @@ const kitRead = makeRead<PostgresAccessor>(
     entity_schema: readEntitySchema,
     entity_semantic: readEntitySemantic,
   },
-  { windowed: { entity_rows: readEntityRows }, stat },
+  { windowed: { entity_rows: readEntityRows }, parented: true },
 )
 
 export async function read(
   accessor: PostgresAccessor,
   path: PathSpec | string,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
   options: ReadOptions = {},
 ): Promise<Uint8Array> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
-  return kitRead(accessor, spec, index, options)
+  return kitRead(accessor, spec, entry, parent, options)
 }
 
 /**
@@ -264,7 +270,6 @@ async function firstRows(
   match: ScopeMatch,
   path: PathSpec,
   n: number,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const cap = accessor.config.maxReadRows
   const data = await readRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '', path, {
@@ -287,7 +292,6 @@ async function lastRows(
   match: ScopeMatch,
   path: PathSpec,
   n: number,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const schema = match.slots.schema ?? ''
   const entity = match.slots.entity ?? ''
@@ -316,12 +320,7 @@ async function lastRows(
  * How many rows a relation holds, one line each in its rows.jsonl, by a
  * `COUNT(*)`. Mirrors `_row_count` in `mirage/core/postgres/read.py`.
  */
-function rowCount(
-  accessor: PostgresAccessor,
-  match: ScopeMatch,
-  _path: PathSpec,
-  _index?: IndexCacheStore,
-): Promise<number> {
+function rowCount(accessor: PostgresAccessor, match: ScopeMatch, _path: PathSpec): Promise<number> {
   return countRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '')
 }
 

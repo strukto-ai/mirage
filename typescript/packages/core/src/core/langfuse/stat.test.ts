@@ -14,11 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { LangfuseAccessor } from '../../accessor/langfuse.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { ContentType, FileType, PathSpec } from '../../types.ts'
+import { ContentType, FileType, PathSpec, type FileStat } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { LangfuseApiError, type LangfuseTransport } from './client.ts'
 import { jsonBytes } from '../render/json.ts'
+import { LangfuseVFS } from '../../vfs/langfuse/langfuse.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { stat } from './stat.ts'
 
 // A trace fetch the table does not hold is the API's 404, the way the
@@ -47,6 +48,20 @@ function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: stripSlash(virtual) })
 }
 
+// `path`'s stat through a mount, which lists its parent to hand the backend
+// the row there.
+async function mountedStat(over: LangfuseAccessor, path: string): Promise<FileStat> {
+  const vfs = Object.assign(new LangfuseVFS({ publicKey: 'pk', secretKey: 'sk' }), {
+    accessor: over,
+  })
+  const ws = new Workspace({ '/lf/': vfs })
+  try {
+    return (await ws.dispatch('stat', `/lf${path}`)) as FileStat
+  } finally {
+    await ws.close()
+  }
+}
+
 const TRACES = { '/api/public/traces': { data: [{ id: 'present' }] } }
 const PROMPTS = {
   '/api/public/v2/prompts': { data: [{ name: 'greeting', versions: [1], type: 'text' }] },
@@ -54,11 +69,7 @@ const PROMPTS = {
 
 describe('langfuse stat existence', () => {
   it('stats a trace that appears in its parent listing', async () => {
-    const s = await stat(
-      accessor(new StaticTransport(TRACES)),
-      spec('/traces/present.json'),
-      new RAMIndexCacheStore(),
-    )
+    const s = await mountedStat(accessor(new StaticTransport(TRACES)), '/traces/present.json')
     expect(s.content).toBe(ContentType.JSON)
     expect(s.name).toBe('present.json')
   })
@@ -68,44 +79,28 @@ describe('langfuse stat existence', () => {
     // absent from the parent listing is asked of the API (the listing is
     // bounded), and the API's 404 is ENOENT, not a confident stat.
     await expect(
-      stat(
-        accessor(new StaticTransport(TRACES)),
-        spec('/traces/absent.json'),
-        new RAMIndexCacheStore(),
-      ),
+      mountedStat(accessor(new StaticTransport(TRACES)), '/traces/absent.json'),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('raises ENOENT for a prompt version that was never published', async () => {
     await expect(
-      stat(
-        accessor(new StaticTransport(PROMPTS)),
-        spec('/prompts/greeting/9.json'),
-        new RAMIndexCacheStore(),
-      ),
+      mountedStat(accessor(new StaticTransport(PROMPTS)), '/prompts/greeting/9.json'),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('stats a published prompt version', async () => {
-    const s = await stat(
-      accessor(new StaticTransport(PROMPTS)),
-      spec('/prompts/greeting/1.json'),
-      new RAMIndexCacheStore(),
-    )
+    const s = await mountedStat(accessor(new StaticTransport(PROMPTS)), '/prompts/greeting/1.json')
     expect(s.content).toBe(ContentType.JSON)
   })
 
   it('stats the mount root without consulting the api', async () => {
-    const s = await stat(accessor(new StaticTransport({})), spec('/'), new RAMIndexCacheStore())
+    const s = await stat(accessor(new StaticTransport({})), spec('/'))
     expect(s.type).toBe(FileType.DIRECTORY)
   })
 
   it('stats a top-level directory without consulting the api', async () => {
-    const s = await stat(
-      accessor(new StaticTransport({})),
-      spec('/traces'),
-      new RAMIndexCacheStore(),
-    )
+    const s = await stat(accessor(new StaticTransport({})), spec('/traces'))
     expect(s.type).toBe(FileType.DIRECTORY)
     expect(s.name).toBe('traces')
   })
@@ -121,10 +116,9 @@ describe('langfuse stat of a trace the bounded listing left out', () => {
       '/api/public/traces/t_old': trace,
     })
     const bounded = new LangfuseAccessor(transport, { defaultTraceLimit: 1 })
-    const index = new RAMIndexCacheStore()
-    const listed = await stat(bounded, spec('/traces/t_new.json'), index)
+    const listed = await mountedStat(bounded, '/traces/t_new.json')
     expect(transport.paths).toEqual(['/api/public/traces'])
-    const older = await stat(bounded, spec('/traces/t_old.json'), index)
+    const older = await mountedStat(bounded, '/traces/t_old.json')
     expect(listed.type).toBe(FileType.FILE)
     expect(listed.size).toBeNull()
     expect(older.type).toBe(FileType.FILE)
@@ -134,10 +128,11 @@ describe('langfuse stat of a trace the bounded listing left out', () => {
 
   it("refuses another session's trace", async () => {
     const transport = new StaticTransport({
+      '/api/public/sessions': { data: [{ id: 's1' }] },
       '/api/public/traces/t1': { id: 't1', sessionId: 's2' },
     })
-    await expect(
-      stat(accessor(transport), spec('/sessions/s1/t1.json'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(mountedStat(accessor(transport), '/sessions/s1/t1.json')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

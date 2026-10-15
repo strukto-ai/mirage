@@ -17,7 +17,6 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.gmail.date_query import (
     date_dir_to_gmail_query,
     span_to_gmail_query,
@@ -31,8 +30,10 @@ from mirage.core.gmail.messages import (
     message_json_bytes,
 )
 from mirage.core.gmail.scope import detect_scope
-from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
+from mirage.core.hierarchy.readdir import Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.hierarchy.stat import entry_stat
+from mirage.types import ContentType, DirListing, FileStat, FileType
 from mirage.utils.glob_walk import glob_span, has_glob_span
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length, sanitize_label
 
@@ -81,47 +82,37 @@ def _date_from_internal(internal_date: str) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
-def _attachment_entries(
-    payload: dict[str, Any],
-) -> list[tuple[str, IndexEntry]]:
-    entries: list[tuple[str, IndexEntry]] = []
-    for att in _extract_attachments(payload):
-        att_name = _attachment_filename(att["attachment_id"], att["filename"])
-        entries.append(
-            (
-                att_name,
-                IndexEntry(
-                    id=att["attachment_id"],
-                    name=att["filename"],
-                    resource_type="gmail/attachment",
-                    vfs_name=att_name,
-                    size=att["size"],
-                ),
-            )
+ATTACHMENT = entry_stat("attachment_id")
+
+
+def _attachment_entries(payload: dict[str, Any]) -> list[FileStat]:
+    return [
+        ATTACHMENT(
+            _attachment_filename(att["attachment_id"], att["filename"]),
+            att["attachment_id"],
+            size=att["size"],
         )
-    return entries
+        for att in _extract_attachments(payload)
+    ]
 
 
 def _date_children(
     raws: list[dict[str, Any]],
     keep_text: bool,
-) -> tuple[
-    list[tuple[str, IndexEntry]], dict[str, list[tuple[str, IndexEntry]]]
-]:
+) -> tuple[list[FileStat], dict[str, list[FileStat]]]:
     """One date directory's children, plus its attachment-dir seeds.
 
     Args:
         raws (list[dict]): the date's full message payloads.
-        keep_text (bool): whether each message's entry keeps its
-            rendered text, lowercased, for grep (``content_search``).
+        keep_text (bool): whether each message's row keeps its rendered
+            text, lowercased, for grep (``content_search``).
     """
-    children: list[tuple[str, IndexEntry]] = []
-    seeds: dict[str, list[tuple[str, IndexEntry]]] = {}
+    children: list[FileStat] = []
+    seeds: dict[str, list[FileStat]] = {}
     for raw in raws:
         mid = raw["id"]
         headers = raw.get("payload", {}).get("headers", [])
         subject = _extract_header(headers, "Subject") or "No Subject"
-        filename = _msg_filename(subject, mid)
         size_estimate = raw.get("sizeEstimate")
         rendered = message_json_bytes(raw)
         # The listing already fetched the full message, so the exact
@@ -129,37 +120,29 @@ def _date_children(
         # the source message size and stays in extra. The kept text
         # leaves the labels out, the one field that changes after the
         # listing, which a search declines to rule on instead.
-        extra: dict[str, Any] = {}
+        extra: dict[str, Any] = {"message_id": mid}
         if keep_text:
             unlabeled = message_json_bytes({**raw, "labelIds": []})
             extra["text"] = unlabeled.decode().lower()
         if size_estimate is not None:
             extra["size_estimate"] = size_estimate
         children.append(
-            (
-                filename,
-                IndexEntry(
-                    id=mid,
-                    name=subject,
-                    resource_type="gmail/message",
-                    vfs_name=filename,
-                    size=len(rendered),
-                    extra=extra,
-                ),
+            FileStat(
+                name=_msg_filename(subject, mid),
+                type=FileType.FILE,
+                content=ContentType.JSON,
+                size=len(rendered),
+                extra=extra,
             )
         )
         att_entries = _attachment_entries(raw.get("payload", {}))
         if att_entries:
             att_dir = _attach_dir_name(subject, mid)
             children.append(
-                (
-                    att_dir,
-                    IndexEntry(
-                        id=mid,
-                        name=att_dir,
-                        resource_type="gmail/attachment_dir",
-                        vfs_name=att_dir,
-                    ),
+                FileStat(
+                    name=att_dir,
+                    type=FileType.DIRECTORY,
+                    extra={"message_id": mid},
                 )
             )
             seeds[att_dir] = att_entries
@@ -179,54 +162,44 @@ async def _group_by_date(
 
 async def _list_root(accessor: GmailAccessor, match: ScopeMatch) -> Listed:
     labels = await list_labels(accessor.token_manager)
-    entries: list[tuple[str, IndexEntry]] = []
-    for lb in labels:
-        if lb.get("type") == "system":
-            name = lb["id"]
-        else:
-            name = lb.get("name", lb["id"])
-        entries.append(
-            (
-                name,
-                IndexEntry(
-                    id=lb["id"],
-                    name=name,
-                    resource_type="gmail/label",
-                    vfs_name=name,
-                ),
-            )
+    return [
+        FileStat(
+            name=(
+                lb["id"]
+                if lb.get("type") == "system"
+                else lb.get("name", lb["id"])
+            ),
+            type=FileType.DIRECTORY,
+            extra={"label_id": lb["id"]},
         )
-    return entries
+        for lb in labels
+    ]
 
 
 async def _list_label(
-    accessor: GmailAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: GmailAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
     # The bare listing is a window, the most recent MAX_MESSAGES, so the
     # day dirs it mints are whichever days those fell on. A glob pushes
     # its own span into the query instead of filtering that window,
     # which is the only way to reach a day older than it.
     span = glob_span(match.pattern)
+    label_id = str(own.extra["label_id"])
     msg_ids = await list_messages(
         accessor.token_manager,
-        label_id=own.id,
+        label_id=label_id,
         query=span_to_gmail_query(*span) if span else None,
         max_results=MAX_MESSAGES,
     )
     groups = await _group_by_date(accessor, msg_ids)
-    entries: list[tuple[str, IndexEntry]] = []
-    seeds: dict[str, list[tuple[str, IndexEntry]]] = {}
+    entries: list[FileStat] = []
+    seeds: dict[str, list[FileStat]] = {}
     for date_str in sorted(groups.keys(), reverse=True):
         entries.append(
-            (
-                date_str,
-                IndexEntry(
-                    id=date_str,
-                    name=date_str,
-                    resource_type="gmail/date",
-                    vfs_name=date_str,
-                    extra={"label_id": own.id},
-                ),
+            FileStat(
+                name=date_str,
+                type=FileType.DIRECTORY,
+                extra={"label_id": label_id},
             )
         )
         children, att_seeds = _date_children(
@@ -241,17 +214,17 @@ async def _list_label(
 
 
 async def _list_day(
-    accessor: GmailAccessor, match: ScopeMatch, label: IndexEntry
+    accessor: GmailAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    # The proof is the label entry, not the day's own: a date query
-    # answers for any well-formed day, including days the label's
-    # bounded recent listing never minted.
+    # The day's row carries its label: one the label's bounded recent
+    # listing minted, or one stat makes for any well-formed day under a
+    # real label, since a date query answers for any day.
     date_query = date_dir_to_gmail_query(match.slots["day"])
     if date_query is None:
         return []
     msg_ids = await list_messages(
         accessor.token_manager,
-        label_id=label.id,
+        label_id=str(own.extra["label_id"]),
         query=date_query,
         max_results=MAX_MESSAGES,
     )
@@ -263,9 +236,11 @@ async def _list_day(
 
 
 async def _list_attachment_dir(
-    accessor: GmailAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: GmailAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    raw = await get_message_raw(accessor.token_manager, own.id)
+    raw = await get_message_raw(
+        accessor.token_manager, str(own.extra["message_id"])
+    )
     return _attachment_entries(raw.get("payload", {}))
 
 
@@ -274,8 +249,8 @@ readdir = make_readdir(
     listers={"root": _list_root},
     entry_listers={
         "label": _list_label,
+        "day": _list_day,
         "attachment_dir": _list_attachment_dir,
     },
-    parent_entry_listers={"day": _list_day},
     pattern_kinds={"label": has_glob_span},
 )

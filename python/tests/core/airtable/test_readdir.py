@@ -14,11 +14,13 @@
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.airtable.readdir import readdir
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.airtable import AirtableVFS
+from mirage.workspace import Workspace
 from tests.fixtures.airtable_api import make_accessor
+from tests.fixtures.vfs_io import vfs_over
 
 ROOT = "/at"
 BASE = f"{ROOT}/bases/Product_Roadmap__appRoadmapBase001"
@@ -31,40 +33,51 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
+def _names(rows: list[FileStat]) -> list[str]:
+    return [row.name for row in rows]
+
+
+def _mounted(**overrides) -> Workspace:
+    return Workspace(
+        {f"{ROOT}/": vfs_over(AirtableVFS, make_accessor(**overrides))}
+    )
+
+
 @pytest.mark.asyncio
 async def test_the_root_is_the_bases_directory(airtable_api):
-    listed = await readdir(
-        make_accessor(), _spec(f"{ROOT}/"), RAMIndexCacheStore()
-    )
-    assert listed == [f"{ROOT}/bases"]
+    listed = await readdir(make_accessor(), _spec(f"{ROOT}/"))
+    assert _names(listed) == ["bases"]
 
 
 @pytest.mark.asyncio
 async def test_bases_list_as_named_directories(airtable_api):
-    listed = await readdir(
-        make_accessor(), _spec(f"{ROOT}/bases"), RAMIndexCacheStore()
-    )
-    assert listed == [
-        f"{ROOT}/bases/Product_Roadmap__appRoadmapBase001",
-        f"{ROOT}/bases/Ops_Finance__appOpsFinance0001",
+    listed = await readdir(make_accessor(), _spec(f"{ROOT}/bases"))
+    assert _names(listed) == [
+        "Product_Roadmap__appRoadmapBase001",
+        "Ops_Finance__appOpsFinance0001",
     ]
 
 
 @pytest.mark.asyncio
 async def test_a_base_lists_base_json_and_its_tables(airtable_api):
-    index = RAMIndexCacheStore()
-    listed = await readdir(make_accessor(), _spec(BASE), index)
-    assert listed == [f"{BASE}/base.json", TABLE]
+    accessor = make_accessor()
+    base, _ = await readdir(accessor, _spec(f"{ROOT}/bases"))
+    listed = await readdir(accessor, _spec(BASE), base)
+    assert _names(listed.entries) == [
+        "base.json",
+        "Features__tblFeatures000001",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_one_schema_call_seeds_every_table_and_views_dir(airtable_api):
-    accessor = make_accessor()
-    index = RAMIndexCacheStore()
-    await readdir(accessor, _spec(BASE), index)
+    ws = _mounted()
+    await ws.dispatch("readdir", PathSpec.from_str_path(BASE))
     before = len(airtable_api.calls)
-    table = await readdir(accessor, _spec(TABLE), index)
-    views = await readdir(accessor, _spec(f"{TABLE}/views"), index)
+    table, _ = await ws.dispatch("readdir", PathSpec.from_str_path(TABLE))
+    views, _ = await ws.dispatch(
+        "readdir", PathSpec.from_str_path(f"{TABLE}/views")
+    )
     assert len(airtable_api.calls) == before
     assert table == [
         f"{TABLE}/table.json",
@@ -79,21 +92,20 @@ async def test_one_schema_call_seeds_every_table_and_views_dir(airtable_api):
 
 @pytest.mark.asyncio
 async def test_a_cold_table_listing_warms_through_its_base(airtable_api):
-    listed = await readdir(make_accessor(), _spec(TABLE), RAMIndexCacheStore())
+    listed, _ = await _mounted().dispatch(
+        "readdir", PathSpec.from_str_path(TABLE)
+    )
     assert f"{TABLE}/records.jsonl" in listed
 
 
 @pytest.mark.asyncio
 async def test_an_unknown_or_out_of_scope_base_is_enoent(airtable_api):
     with pytest.raises(FileNotFoundError):
-        await readdir(
-            make_accessor(),
-            _spec(f"{ROOT}/bases/X__appNope000000001"),
-            RAMIndexCacheStore(),
+        await _mounted().dispatch(
+            "readdir",
+            PathSpec.from_str_path(f"{ROOT}/bases/X__appNope000000001"),
         )
     with pytest.raises(FileNotFoundError):
-        await readdir(
-            make_accessor(base_ids=["appOpsFinance0001"]),
-            _spec(BASE),
-            RAMIndexCacheStore(),
+        await _mounted(base_ids=["appOpsFinance0001"]).dispatch(
+            "readdir", PathSpec.from_str_path(BASE)
         )

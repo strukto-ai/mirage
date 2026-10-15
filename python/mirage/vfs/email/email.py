@@ -15,14 +15,13 @@
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.email.config import EmailConfig
 from mirage.core.email.read import read as _read
 from mirage.core.email.read import read_many as _read_many
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.search import files_containing as _files_containing
 from mirage.core.email.stat import stat as _stat
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.email.prompt import PROMPT, WRITE_PROMPT
@@ -51,18 +50,18 @@ class EmailVFS(BaseVFS):
         self.accessor = EmailAccessor(config)
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path, entry)
         return slice_window(data, offset, size)
 
     async def read_many(
@@ -74,9 +73,9 @@ class EmailVFS(BaseVFS):
         return await _read_many(self.accessor, paths, limit, index)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
     async def files_containing(
         self,
@@ -85,7 +84,6 @@ class EmailVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         if not self.config.content_search:
             return None

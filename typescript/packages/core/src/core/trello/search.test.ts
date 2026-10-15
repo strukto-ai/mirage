@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../accessor/trello.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { TrelloTransport } from './client.ts'
 import { unsearchedText } from './normalize.ts'
@@ -82,12 +81,9 @@ async function ask(
   reply?: Record<string, unknown> | Error,
 ): Promise<[PathSpec[] | null, string[]]> {
   const transport = new FakeTransport(named, reply)
-  const out = await filesContaining(
-    new TrelloAccessor(transport, { contentSearch: true }),
-    text,
-    [under],
-    new RAMIndexCacheStore(),
-  )
+  const out = await filesContaining(new TrelloAccessor(transport, { contentSearch: true }), text, [
+    under,
+  ])
   return [out, transport.searched]
 }
 
@@ -121,13 +117,12 @@ describe('trello filesContaining', () => {
   })
 
   // A read fetches the card as it is now, so the kept text is checked against
-  // listings made for the search, not the ones the walk cached; a card gone
-  // since is read.
+  // listings made for the search, not the ones the command walked; a card gone
+  // since is not read.
   it('finds a text changed since the listing', async () => {
     const transport = new FakeTransport({ numbat: ['c1'] })
     const accessor = new TrelloAccessor(transport, { contentSearch: true })
-    const index = new RAMIndexCacheStore()
-    const search = () => filesContaining(accessor, 'numbat', [scope()], index)
+    const search = () => filesContaining(accessor, 'numbat', [scope()])
     await search()
     transport.listed = CARDS.map((card) =>
       card.id === 'c2' ? { ...card, desc: 'See numbat.io' } : card,
@@ -139,7 +134,7 @@ describe('trello filesContaining', () => {
     ])
     transport.listed = CARDS.slice(0, 1)
     out = await search()
-    expect(out).toHaveLength(CARDS.length)
+    expect(out?.map((p) => p.vfsPath)).toEqual([`${LIST}/cards/Fix_login__c1/card.json`])
   })
 
   it('names a card scope its own card.json', async () => {

@@ -17,14 +17,12 @@ import logging
 import aiohttp
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.hierarchy.probe import resolve_entry
+from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.linear.client import search_issues
 from mirage.core.linear.readdir import readdir
 from mirage.core.linear.scope import detect_scope
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.record_search import may_hold, record_queries
 
@@ -51,31 +49,59 @@ def _child(directory: PathSpec, name: str) -> PathSpec:
     )
 
 
+Walked = list[tuple[PathSpec, FileStat, FileStat | None]]
+
+
+async def _listed(
+    accessor: LinearAccessor,
+    directory: PathSpec,
+    entry: FileStat | None,
+    parent: FileStat | None,
+) -> Walked:
+    """A directory's children, each with its row and the directory's.
+
+    Args:
+        accessor (LinearAccessor): the workspace.
+        directory (PathSpec): the directory.
+        entry (FileStat | None): its row.
+        parent (FileStat | None): its parent's row.
+    """
+    rows = rows_of(await readdir(accessor, directory, entry, parent))
+    return [(_child(directory, row.name), row, entry) for row in rows]
+
+
 async def _walked(
-    accessor: LinearAccessor, scope: PathSpec, index: IndexCacheStore
-) -> tuple[list[PathSpec], list[PathSpec]] | None:
+    accessor: LinearAccessor, scope: PathSpec
+) -> tuple[Walked, Walked] | None:
     """The ``issues`` directories and the kept-text directories under
-    ``scope``; None for a scope inside an issue.
+    ``scope``, each with its row and its team's; None for a scope inside
+    an issue.
     """
     match = detect_scope(scope)
     if match.kind in (ROOT, "teams"):
-        root = mounted_path(scope, "/teams")
-        teams = [
-            _child(root, name.rsplit("/", 1)[-1])
-            for name in await readdir(accessor, root, index)
-        ]
-    elif match.kind == "team":
-        teams = [scope]
-    elif match.kind == "issues":
-        return [scope], []
-    elif match.kind in KEPT_DIRS:
-        return [], [scope]
+        teams = await _listed(
+            accessor, mounted_path(scope, "/teams"), None, None
+        )
+    elif match.kind in ("team", "issues", *KEPT_DIRS):
+        entry, parent = await row_at(readdir, accessor, scope)
+        if entry is None:
+            return None
+        if match.kind == "issues":
+            return [(scope, entry, parent)], []
+        if match.kind != "team":
+            return [], [(scope, entry, parent)]
+        teams = [(scope, entry, parent)]
     else:
         return None
-    return (
-        [_child(team, "issues") for team in teams],
-        [_child(team, kind) for team in teams for kind in KEPT_DIRS],
-    )
+    issue_dirs: Walked = []
+    kept_dirs: Walked = []
+    for team, row, _ in teams:
+        for child in await _listed(accessor, team, row, None):
+            if child[1].name == "issues":
+                issue_dirs.append(child)
+            elif child[1].name in KEPT_DIRS:
+                kept_dirs.append(child)
+    return issue_dirs, kept_dirs
 
 
 async def _named(
@@ -108,7 +134,6 @@ async def files_containing(
     accessor: LinearAccessor,
     text: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
     *,
     ask_linear: bool,
 ) -> list[PathSpec] | None:
@@ -127,25 +152,23 @@ async def files_containing(
     without ``ask_linear``, when the text cannot be searched, a search
     fails or answers a full page, or nothing is found, since Linear
     indexes a write some time after it lands. A member, project, cycle or
-    document file is read when the text its listing entry kept
-    (``kept_text``) holds ``text`` in any case, or when it was too large
-    to keep. A read fetches the record as it is now, so the kept text is
-    checked against listings made for this search rather than the walk's,
-    which may be older; a file those listings no longer hold is read. None
-    for a text that is not ASCII or a scope inside an issue.
+    document file is read when the text its row kept (``kept_text``)
+    holds ``text`` in any case, or when it was too large to keep. The
+    walk lists each directory from Linear, so the kept text is checked
+    against the records as they are now. None for a text that is not
+    ASCII or a scope inside an issue.
 
     Args:
         accessor (LinearAccessor): the workspace.
         text (str): plain text every match holds.
         under (list[PathSpec]): the directories walked.
-        index (IndexCacheStore): the mount's index.
         ask_linear (bool): whether Linear's issue search may be asked,
             for a whole word with ``content_search``.
     """
     if not text.isascii():
         return None
     try:
-        return await _found(accessor, text.lower(), under, index, ask_linear)
+        return await _found(accessor, text.lower(), under, ask_linear)
     except (OSError, aiohttp.ClientError, RuntimeError, ValueError) as exc:
         logger.debug("linear listing failed (%s); reading every file", exc)
         return None
@@ -155,41 +178,35 @@ async def _found(
     accessor: LinearAccessor,
     needle: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
     ask_linear: bool,
 ) -> list[PathSpec] | None:
-    issue_dirs: list[PathSpec] = []
-    kept_dirs: list[PathSpec] = []
+    issue_dirs: Walked = []
+    kept_dirs: Walked = []
     for scope in under:
-        walked = await _walked(accessor, scope, index)
+        walked = await _walked(accessor, scope)
         if walked is None:
             return None
         issue_dirs += walked[0]
         kept_dirs += walked[1]
-    issues = [
-        _child(directory, listed.rsplit("/", 1)[-1])
-        for directory in issue_dirs
-        for listed in await readdir(accessor, directory, index)
-    ]
-    fresh = RAMIndexCacheStore()
+    issues: Walked = []
+    for directory, row, above in issue_dirs:
+        issues += await _listed(accessor, directory, row, above)
     answer = await _named(accessor, needle) if ask_linear and issues else None
     held: list[PathSpec] = []
     if answer is not None:
-        for path in issues:
-            entry = await resolve_entry(readdir, accessor, path, fresh)
-            kept = None if entry is None else entry.extra.get("unsearched")
-            if (
-                entry is None
-                or not isinstance(kept, str)
-                or may_hold(*answer, entry.id, kept)
+        for path, row, _ in issues:
+            kept = row.extra.get("unsearched")
+            if not isinstance(kept, str) or may_hold(
+                *answer, str(row.extra.get("issue_id")), kept
             ):
                 held.append(path)
-    found = [_child(path, "issue.json") for path in held or issues]
-    for directory in kept_dirs:
-        for listed in await readdir(accessor, directory, index):
-            child = _child(directory, listed.rsplit("/", 1)[-1])
-            entry = await resolve_entry(readdir, accessor, child, fresh)
-            kept = None if entry is None else entry.extra.get("text")
+    found = [
+        _child(path, "issue.json")
+        for path in held or [path for path, _, _ in issues]
+    ]
+    for directory, row, above in kept_dirs:
+        for path, child, _ in await _listed(accessor, directory, row, above):
+            kept = child.extra.get("text")
             if not isinstance(kept, str) or needle in kept:
-                found.append(child)
+                found.append(path)
     return found

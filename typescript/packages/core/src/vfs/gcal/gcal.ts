@@ -13,17 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import { GCalAccessor } from '../../accessor/gcal.ts'
 
 import { bucketName, bucketStart } from '../../core/gcal/day.ts'
 import { TokenManager } from '../../core/google/client.ts'
 
 import { BUCKET_PROMPT, DAY_PROMPT, PROMPT, WRITE_PROMPT } from './prompt.ts'
-import { VFSName } from '../../types.ts'
+import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactGCalConfig, type GCalConfig, type GCalConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gcalReaddir } from '../../core/gcal/readdir.ts'
 import { filesContaining as gcalFilesContaining } from '../../core/gcal/search.ts'
@@ -52,6 +52,12 @@ export interface GCalVFSState {
 }
 
 export class GCalVFS extends BaseVFS {
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    stat: ['entry'],
+    unlink: ['entry'],
+  } as const
+
   override readonly name: string = VFSName.GCAL
   override readonly cachesReads: boolean = true
   // Shorter than the other Google mounts: a calendar is edited by other
@@ -73,17 +79,17 @@ export class GCalVFS extends BaseVFS {
     this.prompt = treePrompt(config.bucketDays) + this.accessor.timeRange.prompt()
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return gcalReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
+    return gcalReaddir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await gcalRead(this.accessor, path, index)
+    const data = await gcalRead(this.accessor, path)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
@@ -99,18 +105,17 @@ export class GCalVFS extends BaseVFS {
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || !this.config.contentSearch) return Promise.resolve(null)
-    return gcalFilesContaining(this.accessor, text, [path], index)
+    return gcalFilesContaining(this.accessor, text, [path])
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return gcalStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return gcalStat(this.accessor, path, handed?.entry)
   }
 
-  override unlink(path: PathSpec, index?: IndexCacheStore): Promise<void> {
-    return gcalUnlink(this.accessor, path, index)
+  override unlink(path: PathSpec, handed?: Handed): Promise<void> {
+    return gcalUnlink(this.accessor, path, handed?.entry)
   }
 
   override getState(): Promise<GCalVFSState> {

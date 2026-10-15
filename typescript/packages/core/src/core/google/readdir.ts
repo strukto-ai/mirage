@@ -13,9 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -23,12 +21,12 @@ import type { DetectFn } from '../hierarchy/scope.ts'
 import { TOP_LEVEL_DIRS } from './constants.ts'
 import { globToModifiedRange } from './date_glob.ts'
 import { listAllFiles } from './drive.ts'
+import { appFile } from './entry.ts'
 
 export type AppReaddir = (
   accessor: GoogleApiAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<string[]>
+) => Promise<FileStat[] | DirListing>
 
 /**
  * The readdir of a Google app mount: its corpora and their files. Sheets,
@@ -40,9 +38,8 @@ export function makeAppReaddir(
   mime: string,
   detectScope: DetectFn,
   makeFilename: (title: string, fileId: string, modifiedTime: string) => string,
-  resourceType: string,
 ): AppReaddir {
-  return async (accessor, path, index) => {
+  return async (accessor, path) => {
     const prefix = mountPrefixOf(path.virtual, path.vfsPath)
     const modifiedRange = path.pattern ? globToModifiedRange(path.pattern) : null
     let p = path.pattern ? path.directory : path.virtual
@@ -51,19 +48,15 @@ export function makeAppReaddir(
       if (prefix.endsWith('/') || rest === '' || rest.startsWith('/')) p = rest || '/'
     }
     const key = stripSlash(p)
-    const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
 
     // Bespoke below the classifier: the date-glob push-down filters the
-    // Drive query itself, and a filtered or incomplete listing must not be
-    // cached as the directory, which the kit readdir has no notion of.
+    // Drive query itself, and a filtered or incomplete listing is no listing
+    // of the directory, which the kit readdir has no notion of.
     const match = detectScope(p)
-    if (match.kind === 'root') return TOP_LEVEL_DIRS.map((d) => `${prefix}/${d}`)
-    if (match.kind !== 'corpus') throw enoent(path.virtual)
-
-    if (index !== undefined && modifiedRange === null) {
-      const cached = await index.listDir(virtualKey)
-      if (cached.entries !== undefined && cached.entries !== null) return cached.entries
+    if (match.kind === 'root') {
+      return TOP_LEVEL_DIRS.map((d) => new FileStat({ name: d, type: FileType.DIRECTORY }))
     }
+    if (match.kind !== 'corpus') throw enoent(path.virtual)
 
     const { files, complete } = await listAllFiles(accessor.tokenManager, {
       mimeType: mime,
@@ -71,42 +64,17 @@ export function makeAppReaddir(
       modifiedBefore: modifiedRange ? modifiedRange[1] : null,
     })
     const isOwned = key === 'owned'
-    const entries: [string, IndexEntry][] = []
-    const names: string[] = []
+    const rows: FileStat[] = []
     for (const f of files) {
       const firstOwner = (f.owners ?? [])[0] ?? {}
       if ((firstOwner.me === true) !== isOwned) continue
-      const filename = makeFilename(f.name, f.id, f.modifiedTime ?? '')
-      const sourceSize = Number.parseInt(f.size ?? f.quotaBytesUsed ?? '0', 10)
-      // size stays null: Drive reports the source document's storage size, not
-      // the rendered JSON length (FileStat.size must be render-derived or
-      // null, see the CLAUDE.md FUSE rules). The source size lives in extra.
-      entries.push([
-        filename,
-        new IndexEntry({
-          id: f.id,
-          name: f.name,
-          resourceType,
-          remoteTime: f.modifiedTime ?? '',
-          vfsName: filename,
-          extra: Number.isFinite(sourceSize) && sourceSize > 0 ? { source_size: sourceSize } : {},
-        }),
-      ])
-      names.push(`${prefix}/${key}/${filename}`)
+      rows.push(appFile(makeFilename(f.name, f.id, f.modifiedTime ?? ''), f))
     }
-
-    if (index !== undefined) {
-      // A modified-range listing is a filtered view rather than the directory,
-      // and an incomplete all-corpora search is a directory Drive could not
-      // finish reading. Neither may stand in for the directory: caching one
-      // would pin a short listing until it expires. The entries are real
-      // either way, so cache those and let the next readdir re-list.
-      if (modifiedRange !== null || !complete) {
-        for (const [name, entry] of entries) await index.put(`${virtualKey}/${name}`, entry)
-      } else {
-        await index.setDir(virtualKey, entries)
-      }
-    }
-    return names
+    // A modified-range listing is a filtered view rather than the directory,
+    // and an incomplete all-corpora search is a directory Drive could not
+    // finish reading. Neither may stand in for the directory: keeping one
+    // would pin a short listing until it expires. The rows are real either
+    // way.
+    return new DirListing({ entries: rows, partial: modifiedRange !== null || !complete })
   }
 }

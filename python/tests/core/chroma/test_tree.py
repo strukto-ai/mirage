@@ -7,26 +7,19 @@ from mirage.core.chroma import tree
 
 
 @pytest.mark.asyncio
-async def test_ensure_tree_builds_prefixed_entries_from_path_tree(
-    chroma_accessor, chroma_index
-):
-    await tree.CHROMA_TREE.ensure(chroma_accessor, chroma_index, "/knowledge/")
+async def test_load_tree_lays_out_rows_from_the_path_tree(chroma_accessor):
+    rows = await tree.load_tree(chroma_accessor)
 
-    root = await chroma_index.list_dir("/knowledge")
-    guides = await chroma_index.list_dir("/knowledge/guides")
-    api = await chroma_index.list_dir("/knowledge/api")
-    quickstart = await chroma_index.get("/knowledge/guides/quickstart")
-
-    assert root.entries == ["/knowledge/api", "/knowledge/guides"]
-    assert guides.entries == ["/knowledge/guides/quickstart"]
-    assert api.entries == ["/knowledge/api/reference"]
-    assert quickstart.entry.id == "guides/quickstart"
+    assert [row.name for row in rows["/"]] == ["api", "guides"]
+    assert [row.name for row in rows["/api"]] == ["reference"]
+    (quickstart,) = rows["/guides"]
+    assert quickstart.name == "quickstart"
     # The path tree's own size never becomes the byte length: it describes
     # the producer's source document, so it rides in extra and the size is
     # measured later, from the rendered chunks.
-    assert quickstart.entry.size is None
-    assert quickstart.entry.remote_time == "2026-02-01T00:00:00Z"
-    assert quickstart.entry.extra == {
+    assert quickstart.size is None
+    assert quickstart.modified == "2026-02-01T00:00:00Z"
+    assert quickstart.extra == {
         "slug": "guides/quickstart",
         "source_size": 12,
         "created_at": "2026-01-01T00:00:00Z",
@@ -42,7 +35,7 @@ def test_parse_path_tree_accepts_gzip_base64():
 
 def test_build_dir_entries_rejects_duplicate_and_collision():
     with pytest.raises(ValueError, match="Duplicate Chroma path"):
-        tree.build_dir_entries({"a": {}, "/a/": {}}, "")
+        tree.build_dir_entries({"a": {}, "/a/": {}})
 
     with pytest.raises(ValueError, match="Path collision"):
-        tree.build_dir_entries({"a": {}, "a/b": {}}, "")
+        tree.build_dir_entries({"a": {}, "a/b": {}})

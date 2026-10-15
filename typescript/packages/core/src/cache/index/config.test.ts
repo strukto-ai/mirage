@@ -85,6 +85,7 @@ describe('IndexDirectory JSON', () => {
       generation: 'g:d',
       partial: false,
       version: null,
+      window: false,
     })
   })
 

@@ -15,14 +15,13 @@
 from typing import Any
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gmail.read import read as _read
 from mirage.core.gmail.readdir import readdir as _readdir
 from mirage.core.gmail.search import files_containing as _files_containing
 from mirage.core.gmail.stat import stat as _stat
 from mirage.core.gmail.watch import build_delta_hook
 from mirage.core.google.client import TokenManager
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gmail.config import GmailConfig
@@ -54,27 +53,30 @@ class GmailVFS(BaseVFS):
         self.accessor = GmailAccessor(self.config, self._token_manager)
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path, entry)
         return slice_window(data, offset, size)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry, parent)
 
     async def files_containing(
         self,
@@ -83,11 +85,10 @@ class GmailVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         if not self.config.content_search:
             return None
-        return await _files_containing(self.accessor, text, [path], index)
+        return await _files_containing(self.accessor, text, [path])
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

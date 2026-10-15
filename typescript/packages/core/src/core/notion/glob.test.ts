@@ -14,14 +14,39 @@
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { NotionTransport } from './client.ts'
 import { NotionAccessor } from '../../accessor/notion.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { readdir as notionReaddir } from './readdir.ts'
 import { stat as notionStat } from './stat.ts'
 
-const resolveNotionGlob = makeResolveGlob(notionReaddir, undefined, undefined, notionStat)
+// The rows a mount would hand for `path`: its own and its folder's, as the
+// listings above them name them, for a segment an id names.
+function handed(path: PathSpec): [FileStat | null, FileStat | null] {
+  const pieces = path.virtual.replace(/\/$/, '').split('/')
+  const row = (name: string) =>
+    name.includes('__') ? new FileStat({ name, type: FileType.DIRECTORY }) : null
+  return [row(pieces.at(-1) ?? ''), row(pieces.at(-2) ?? '')]
+}
+
+async function listedPaths(accessor: NotionAccessor, path: PathSpec): Promise<string[]> {
+  const base = (path.pattern !== null ? path.dir : path).virtual.replace(/\/$/, '')
+  const listed = await notionReaddir(
+    accessor,
+    path,
+    ...handed(path.pattern !== null ? path.dir : path),
+  )
+  return rowsOf(listed).map((row) => `${base}/${row.name}`)
+}
+
+const resolveNotionGlob = makeResolveGlob(
+  listedPaths,
+  undefined,
+  undefined,
+  (accessor: NotionAccessor, path: PathSpec) => notionStat(accessor, path, ...handed(path)),
+)
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []

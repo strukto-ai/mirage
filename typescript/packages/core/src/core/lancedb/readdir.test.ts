@@ -15,13 +15,16 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import type { LanceDriver, LanceRow } from './types.ts'
 import { renderCard } from './render.ts'
 import { readdir } from './tree.ts'
+
+function names(listed: readonly FileStat[] | DirListing): string[] {
+  return rowsOf(listed).map((row) => row.name)
+}
 
 const ROW: LanceRow = {
   id: 1,
@@ -53,20 +56,6 @@ function makeAccessor(): { accessor: LanceDBAccessor; rowsMatching: ReturnType<t
   return { accessor: new LanceDBAccessor(driver, config), rowsMatching }
 }
 
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
-  }
-}
-
 function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: virtual.replace(/^\//, '') })
 }
@@ -74,24 +63,21 @@ function spec(virtual: string): PathSpec {
 describe('lancedb readdir sizes', () => {
   it('selects every column except the vector and blob ones', async () => {
     const { accessor, rowsMatching } = makeAccessor()
-    await readdir(accessor, spec('/animals/cat/big'), new RAMIndexCacheStore())
+    await readdir(accessor, spec('/animals/cat/big'))
     expect(rowsMatching.mock.calls[0]?.[2]).toEqual(['id', 'label', 'kind', 'name'])
   })
 
   it('seeds the exact card size and leaves the blob unsized', async () => {
     const { accessor } = makeAccessor()
-    const idx = new RAMIndexCacheStore()
-    await readdir(accessor, spec('/animals/cat/big'), idx)
-    const card = await idx.get('/animals/cat/big/1.md')
-    expect(card.entry?.size).toBe(renderCard(ROW, config).byteLength)
-    const blob = await idx.get('/animals/cat/big/1.png')
-    expect(blob.entry?.size).toBeNull()
+    const listed = rowsOf(await readdir(accessor, spec('/animals/cat/big')))
+    expect(listed.find((row) => row.name === '1.md')?.size).toBe(renderCard(ROW, config).byteLength)
+    expect(listed.find((row) => row.name === '1.png')?.size).toBeNull()
   })
 
-  it('lists without an index when none is given', async () => {
+  it("lists a leaf's row files", async () => {
     const { accessor } = makeAccessor()
     const out = await readdir(accessor, spec('/animals/cat/big'))
-    expect(out).toEqual(['/animals/cat/big/1.md', '/animals/cat/big/1.png'])
+    expect(names(out)).toEqual(['1.md', '1.png'])
   })
 })
 
@@ -139,39 +125,38 @@ function globbed(virtual: string, pattern: string): PathSpec {
   })
 }
 
-function ids(paths: string[]): string[] {
-  return paths.map((p) => (p.split('/').pop() ?? '').split('.')[0] ?? '')
+function ids(listed: readonly FileStat[] | DirListing): string[] {
+  return rowsOf(listed).map((row) => row.name.split('.')[0] ?? '')
 }
 
 describe('lancedb readdir narrows a capped listing', () => {
   it('pushes a row glob prefix into the query', async () => {
     // The cap covers doc-000..doc-004, so filtering it would answer nothing.
     const { accessor, rowsMatching } = wideAccessor()
-    const out = await readdir(accessor, globbed('/all', 'doc-03*'), new RAMIndexCacheStore())
+    const out = await readdir(accessor, globbed('/all', 'doc-03*'))
     expect(ids(out)).toEqual(['doc-030', 'doc-031', 'doc-032', 'doc-033', 'doc-034'])
     expect(rowsMatching.mock.calls[0]?.[5]).toBe('doc-03')
   })
 
   it('cuts the prefix at the suffix so a leaf glob cannot ask for a dot', async () => {
     const { accessor, rowsMatching } = wideAccessor()
-    await readdir(accessor, globbed('/all', 'doc-039.m*'), new RAMIndexCacheStore())
+    await readdir(accessor, globbed('/all', 'doc-039.m*'))
     expect(rowsMatching.mock.calls[0]?.[5]).toBe('doc-039')
   })
 
   it('sends no prefix for a glob with no literal head', async () => {
     const { accessor, rowsMatching } = wideAccessor()
-    const out = await readdir(accessor, globbed('/all', '*9.md'), new RAMIndexCacheStore())
+    const out = await readdir(accessor, globbed('/all', '*9.md'))
     expect(ids(out)).toEqual(['doc-000', 'doc-001', 'doc-002', 'doc-003', 'doc-004'])
     expect(rowsMatching.mock.calls[0]?.[5]).toBe('')
   })
 
   it('does not cache a narrowed listing as the directory', async () => {
     const { accessor } = wideAccessor()
-    const idx = new RAMIndexCacheStore()
-    await readdir(accessor, globbed('/all', 'doc-03*'), idx)
-    const listed = await idx.listDir('/all/')
-    expect(listed.entries === undefined || listed.entries === null).toBe(true)
-    const plain = await readdir(accessor, spec('/all'), idx)
+    const narrowed = await readdir(accessor, globbed('/all', 'doc-03*'))
+    expect((narrowed as DirListing).partial).toBe(true)
+    const plain = await readdir(accessor, spec('/all'))
+    expect((plain as DirListing).partial).toBe(false)
     expect(ids(plain)).toEqual(['doc-000', 'doc-001', 'doc-002', 'doc-003', 'doc-004'])
   })
 })
@@ -207,9 +192,7 @@ describe('lancedb group values holding a slash', () => {
     // `a/b` renders as `a∕b` and `a∕b` as `a⁄∕b`, so neither hides the other.
     const { accessor } = slashedAccessor()
     const out = await readdir(accessor, spec('/animals'))
-    expect(new Set(out)).toEqual(
-      new Set(['/animals/a∕b', '/animals/a⁄∕b', '/animals/⁄', '/animals/⁄.env']),
-    )
+    expect(new Set(names(out))).toEqual(new Set(['a∕b', 'a⁄∕b', '⁄', '⁄.env']))
   })
 
   it('filter a rendered directory for exactly its own value', async () => {
@@ -223,7 +206,7 @@ describe('lancedb group values holding a slash', () => {
   it('push the decoded value prefix down and keep only the rendered matches', async () => {
     const { accessor, distinct } = slashedAccessor()
     const out = await readdir(accessor, globbed('/animals', 'a∕*'))
-    expect(out).toEqual(['/animals/a∕b'])
+    expect(names(out)).toEqual(['a∕b'])
     expect(distinct.mock.calls[0]?.[4]).toBe('a/')
   })
 
@@ -285,8 +268,8 @@ describe('lancedb group globs past the cap', () => {
     // query; the cap counts the renderings that match rather than the rows at
     // the head of the table. The plain listing stays capped.
     const { accessor, distinct } = crowdedAccessor()
-    expect(await readdir(accessor, spec('/'))).toEqual(['/all'])
-    expect(await readdir(accessor, globbed('/', '⁄*'))).toEqual(['/⁄', '/⁄.env'])
+    expect(names(await readdir(accessor, spec('/')))).toEqual(['all'])
+    expect(names(await readdir(accessor, globbed('/', '⁄*')))).toEqual(['⁄', '⁄.env'])
     expect(distinct.mock.calls[1]?.[4]).toBe('')
   })
 
@@ -295,7 +278,7 @@ describe('lancedb group globs past the cap', () => {
     // loses nothing, and the cap counts the renderings that really start
     // with `a⁄` rather than the rows the LIKE let through.
     const { accessor, distinct } = crowdedAccessor()
-    expect(await readdir(accessor, globbed('/', 'a⁄*'))).toEqual(['/a⁄∕x'])
+    expect(names(await readdir(accessor, globbed('/', 'a⁄*')))).toEqual(['a⁄∕x'])
     expect(distinct.mock.calls[0]?.[4]).toBe('a')
   })
 })
@@ -304,11 +287,8 @@ describe('lancedb capped listings', () => {
   it('writes groups and rows as windows', async () => {
     // Groups and rows are read up to maxRows, so a row outside the head of
     // the table is not gone because a listing no longer names it.
-    const index = new WindowSpy()
     const acc = makeAccessor().accessor
-    await readdir(acc, spec('/animals'), index)
-    await readdir(acc, spec('/animals/cat/big'), index)
-    expect(index.windows.get('/animals')).toBe(true)
-    expect(index.windows.get('/animals/cat/big')).toBe(true)
+    expect(((await readdir(acc, spec('/animals'))) as DirListing).window).toBe(true)
+    expect(((await readdir(acc, spec('/animals/cat/big'))) as DirListing).window).toBe(true)
   })
 })

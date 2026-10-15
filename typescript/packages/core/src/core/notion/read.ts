@@ -26,7 +26,6 @@ import {
   toJsonBytes,
 } from './normalize.ts'
 import { listBlockTree, getDataSource, getDatabase, getPage, queryDataSource } from './pages.ts'
-import { stat } from './stat.ts'
 import { detectScope } from './scope.ts'
 
 async function readPageJson(
@@ -75,5 +74,5 @@ export const read = makeRead<NotionAccessor>(
     data_source_json: readDataSourceJson,
     rows_jsonl: readRowsJsonl,
   },
-  { stat },
+  { parented: true },
 )

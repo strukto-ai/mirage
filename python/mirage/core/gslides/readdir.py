@@ -12,13 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.gslides import GSlidesAccessor
 from mirage.core.google.readdir import make_app_readdir
 from mirage.core.gslides.constants import MIME
 from mirage.core.gslides.scope import detect_scope
-from mirage.core.hierarchy.probe import ReaddirFn
 from mirage.vfs.gslides.slide_entry import make_filename
 
-readdir: ReaddirFn[GSlidesAccessor] = make_app_readdir(
-    MIME, detect_scope, make_filename, "gslides/file"
-)
+readdir = make_app_readdir(MIME, detect_scope, make_filename)

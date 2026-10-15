@@ -15,7 +15,6 @@
 from datetime import date, datetime, timedelta, timezone
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.gcal.client import list_calendars, list_events
 from mirage.core.gcal.day import (
     SPAN_SEP,
@@ -34,7 +33,14 @@ from mirage.core.hierarchy.scope import ROOT
 from mirage.core.render.json import compact_json_bytes, compact_json_text
 from mirage.core.time_range import TimeRange, parse_time
 from mirage.errors.fs import enoent
-from mirage.types import JsonValue, PathSpec
+from mirage.types import (
+    ContentType,
+    DirListing,
+    FileStat,
+    FileType,
+    JsonValue,
+    PathSpec,
+)
 from mirage.utils.glob_walk import glob_prefix, literal_span
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.record_search import non_plain_words
@@ -46,10 +52,6 @@ from mirage.vfs.gcal.event_entry import (
     make_event_filename,
 )
 
-CALENDAR_DIR = "gcal/calendar_dir"
-CALENDAR_JSON = "gcal/calendar_json"
-BUCKET_DIR = "gcal/bucket_dir"
-EVENT = "gcal/event"
 FREE_BUSY_ROLE = "freeBusyReader"
 # The text Calendar's search reads that the listing does not keep.
 SEARCHED_FIELDS = ("summary", "description", "location")
@@ -271,10 +273,10 @@ def event_entries(
     free_busy: bool,
     dated: bool,
     unsearched: bool = False,
-) -> list[tuple[str, IndexEntry]]:
-    """Build the index entries for one bucket directory.
+) -> list[FileStat]:
+    """Build the rows of one bucket directory.
 
-    An event gets one entry for each of the bucket's days it covers, so a
+    An event gets one row for each of the bucket's days it covers, so a
     multi-day bucket lists what its day directories would, flattened.
 
     Args:
@@ -284,13 +286,10 @@ def event_entries(
         free_busy (bool): whether the calendar hides event details.
         dated (bool): whether the names carry their day, as a multi-day
             bucket's do.
-        unsearched (bool): whether each entry keeps the text Calendar's
+        unsearched (bool): whether each row keeps the text Calendar's
             search does not read (``unsearched_text``), for grep.
-
-    Returns:
-        list[tuple[str, IndexEntry]]: (filename, entry) pairs.
     """
-    rows: list[tuple[str, IndexEntry]] = []
+    rows: list[FileStat] = []
     for event in events:
         event_id = event.get("id")
         if not isinstance(event_id, str) or not event_id:
@@ -304,7 +303,9 @@ def event_entries(
         )
         updated = event.get("updated")
         size = len(compact_json_bytes(event))
-        extra = {"unsearched": unsearched_text(event)} if unsearched else {}
+        extra: dict[str, JsonValue] = {"event_id": event_id}
+        if unsearched:
+            extra["unsearched"] = unsearched_text(event)
         for day in days_covered(span, tz):
             if day not in days:
                 continue
@@ -315,44 +316,32 @@ def event_entries(
                 day if dated else None,
             )
             rows.append(
-                (
-                    name,
-                    IndexEntry(
-                        id=event_id,
-                        name=title,
-                        resource_type=EVENT,
-                        remote_time=(
-                            updated if isinstance(updated, str) else ""
-                        ),
-                        vfs_name=name,
-                        size=size,
-                        extra=extra,
-                    ),
+                FileStat(
+                    name=name,
+                    type=FileType.FILE,
+                    content=ContentType.JSON,
+                    modified=updated if isinstance(updated, str) else None,
+                    size=size,
+                    extra=extra,
                 )
             )
     return rows
 
 
 async def readdir(
-    accessor: GCalAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+    accessor: GCalAccessor, path_spec: PathSpec
+) -> list[FileStat] | DirListing:
     """List one level of the calendar tree.
 
     Args:
         accessor (GCalAccessor): the mount's accessor.
         path_spec (PathSpec): the directory being listed.
-        index (IndexCacheStore): the mount's index cache.
-
-    Returns:
-        list[str]: virtual paths of the directory's children.
     """
     path = path_spec
-    prefix, key, virtual_key = normalize(path)
+    _, key, _ = normalize(path)
     # Bespoke below the classifier: the date-glob push-down filters the
-    # events query itself, and a globbed listing must not be cached as
-    # the directory, which the kit readdir has no notion of.
+    # events query itself, and a globbed listing is no listing of the
+    # directory, which the kit readdir has no notion of.
     match = detect_scope(key)
     if match.kind not in (ROOT, "calendar", "bucket"):
         raise enoent(path.virtual)
@@ -360,20 +349,10 @@ async def readdir(
     tz = bucket_zone(accessor, calendars)
 
     if match.kind == ROOT:
-        entries = [
-            (
-                name,
-                IndexEntry(
-                    id=str(entry.get("id") or name),
-                    name=name,
-                    resource_type=CALENDAR_DIR,
-                    vfs_name=name,
-                ),
-            )
-            for name, entry in sorted(calendars.items())
+        return [
+            FileStat(name=name, type=FileType.DIRECTORY)
+            for name in sorted(calendars)
         ]
-        await index.set_dir(virtual_key, entries)
-        return [f"{prefix}/{name}" for name, _ in entries]
 
     entry = calendars.get(match.slots["calendar"])
     if entry is None:
@@ -405,38 +384,25 @@ async def readdir(
                 if first.isoformat() <= day <= last.isoformat():
                     start = bucket_start(date.fromisoformat(day), size)
                     seen.add(bucket_name(start, size))
-        rows: list[tuple[str, IndexEntry]] = [
-            (
-                CALENDAR_FILE,
-                IndexEntry(
-                    id=f"{cal_id}:calendar",
-                    name=CALENDAR_FILE,
-                    resource_type=CALENDAR_JSON,
-                    vfs_name=CALENDAR_FILE,
-                    size=len(calendar_payload(entry, tz)),
-                ),
+        rows = [
+            FileStat(
+                name=CALENDAR_FILE,
+                type=FileType.FILE,
+                content=ContentType.JSON,
+                size=len(calendar_payload(entry, tz)),
             )
         ]
-        for name in sorted(seen):
-            rows.append(
-                (
-                    name,
-                    IndexEntry(
-                        id=f"{cal_id}:{name}",
-                        name=name,
-                        resource_type=BUCKET_DIR,
-                        vfs_name=name,
-                    ),
-                )
-            )
-        if path.pattern:
-            # A globbed listing is a filtered view, not the directory: caching
-            # it as the directory would pin a short listing until it expires.
-            for name, row in rows:
-                await index.put(f"{virtual_key}/{name}", row)
-        else:
-            await index.set_dir(virtual_key, rows)
-        return [f"{prefix}/{key}/{name}" for name, _ in rows]
+        rows.extend(
+            FileStat(name=name, type=FileType.DIRECTORY)
+            for name in sorted(seen)
+        )
+        # The buckets holding events in the listed span: a bucket outside
+        # it, or one with no event, is still a directory its path reaches,
+        # so the listing proves nothing absent. A globbed listing is a
+        # filtered view on top of that.
+        return DirListing(
+            entries=rows, partial=bool(path.pattern), window=True
+        )
 
     days = scoped_bucket(accessor, match.slots["bucket"], tz, path.virtual)
     time_min, time_max = day_bounds(days[0], tz, len(days))
@@ -448,7 +414,7 @@ async def readdir(
         tz,
         scope=accessor.time_range,
     )
-    rows = event_entries(
+    return event_entries(
         events,
         days,
         tz,
@@ -456,5 +422,3 @@ async def readdir(
         dated=size > 1,
         unsearched=accessor.config.content_search,
     )
-    await index.set_dir(virtual_key, rows)
-    return [f"{prefix}/{key}/{name}" for name, _ in rows]

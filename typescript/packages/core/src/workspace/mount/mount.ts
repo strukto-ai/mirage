@@ -101,6 +101,7 @@ import {
 import { ebusy, enotdir, enotsup, isEnoent } from '../../errors/fs.ts'
 import { HANDED, STORED_OPS } from './constants.ts'
 import {
+  beyondWindow,
   entryAt,
   folderOf,
   indexKey,
@@ -925,9 +926,13 @@ export class MountEntry {
     return rstripSlash(this.prefix) || '/'
   }
 
-  /** The directory holding `scope`, keyed below this mount; a glob word stands for the directory it lists. */
+  /**
+   * The directory holding `scope`, keyed below this mount; a glob word stands
+   * for the directory it lists, and the root holds itself.
+   */
   private folder(scope: PathSpec): PathSpec {
     const target = scope.pattern !== null ? scope.dir : scope
+    if (indexKey(this.prefix, target) === this.rootKey) return target
     const virtual = rstripSlash(target.virtual)
     return this.scope(virtual.slice(0, virtual.lastIndexOf('/')) || '/')
   }
@@ -950,7 +955,28 @@ export class MountEntry {
       const probed = this.cacheManager.probedStat(scope)
       if (probed !== null) return probed
     }
-    return entryAt(index, key, () => this.listed(this.folder(scope), index))
+    const row = await entryAt(index, key, () => this.listed(this.folder(scope), index))
+    if (row === null && (await beyondWindow(index, key))) return this.beyond(scope, index)
+    return row
+  }
+
+  /**
+   * What is at a path its folder's window leaves out: the backend's stat of
+   * it, handed what is at its parent; null when nothing is. Mirrors Python's
+   * `_beyond`.
+   */
+  private async beyond(scope: PathSpec, index: IndexCacheStore): Promise<FileStat | null> {
+    const handed: { -readonly [K in keyof Handed]: Handed[K] } = {}
+    if (this.wants('stat').includes('parent')) {
+      handed.parent = await this.entry(this.folder(scope), index)
+    }
+    try {
+      return await this.vfs.stat(scope, handed)
+    } catch (err) {
+      if (!isEnoent(err)) throw err
+      console.debug(`nothing beyond the window at ${scope.virtual}: ${String(err)}`)
+      return null
+    }
   }
 
   /**
@@ -970,7 +996,7 @@ export class MountEntry {
   private async statAt(index: IndexCacheStore, path: PathSpec): Promise<FileStat> {
     if (!this.vfs.listsStats) return this.vfs.stat(path, index)
     const key = indexKey(this.prefix, path)
-    const stored = key === this.rootKey ? null : await storedStat(index, key)
+    const stored = key === this.rootKey ? null : this.whole(await storedStat(index, key))
     if (stored !== null) return stored
     return this.vfs.stat(path, (await this.handedFor('stat', path, null, index)) ?? {})
   }
@@ -1012,7 +1038,10 @@ export class MountEntry {
    * Run one level with the stats its function declares. A stat a stored
    * listing handed in may be stale: the backend answering ENOENT for it drops
    * the listings it came from, which lists them again, and the level runs once
-   * more. A level handed nothing is not run again. Mirrors Python's `_run`.
+   * more. A level handed nothing is not run again, nor a stat the listings
+   * found nothing at: the backend agrees with them. `found` is the stats
+   * already found for this level, null to find them here. Mirrors Python's
+   * `_run`.
    */
   private async run(
     name: string,
@@ -1021,15 +1050,21 @@ export class MountEntry {
     args: readonly unknown[],
     kwargs: OpKwargs,
     index: IndexCacheStore,
+    found: Handed | null = null,
   ): Promise<unknown> {
     // A rename's or a copy's destination is its first argument; a function
     // is handed a stat there only where it declares one.
     const dst = args[0] instanceof PathSpec ? args[0] : null
-    const handed = await this.handedFor(name, scope, dst, index)
+    const handed = found ?? (await this.handedFor(name, scope, dst, index))
     try {
       return await call(scope, args, handed === null ? kwargs : { ...kwargs, handed })
     } catch (err) {
-      if (handed === null || !isEnoent(err) || !HANDED.some((stat) => handed[stat] != null))
+      if (
+        handed === null ||
+        !isEnoent(err) ||
+        !HANDED.some((stat) => handed[stat] != null) ||
+        (name === 'stat' && handed.entry == null)
+      )
         throw err
     }
     await this.forget(scope, dst, index)
@@ -1058,12 +1093,29 @@ export class MountEntry {
    */
   private async stored(name: string, scope: PathSpec, index: IndexCacheStore): Promise<unknown> {
     const key = indexKey(this.prefix, scope)
-    if (name === 'readdir') return storedListing(index, key)
+    if (name === 'readdir') return storedListing(index, key, scope.pattern !== null)
     if (name === 'read_tree') return this.namesOnly ? null : storedTree(index, key)
     if (key === this.rootKey) return null
-    const row = await storedStat(index, key)
+    const row = this.whole(await storedStat(index, key))
     if (row === null || !this.namesOnly) return row
     return this.cacheManager?.listingTrusted(folderOf(key)) === true ? row : null
+  }
+
+  /**
+   * A stored row that answers a stat whole, null for one the backend must
+   * finish: a file with no size, on a VFS whose stat sizes every file (chroma
+   * sizes a folder's pages on its first stat). Mirrors Python's `_whole`.
+   */
+  private whole(row: FileStat | null): FileStat | null {
+    if (
+      row !== null &&
+      row.size === null &&
+      row.type === FileType.FILE &&
+      this.vfs.sizesAlwaysKnown
+    ) {
+      return null
+    }
+    return row
   }
 
   /**
@@ -1079,15 +1131,15 @@ export class MountEntry {
     )
   }
 
-  /** A streamed read handed what is at its path, found on the first pull. */
+  /** A streamed read handed the stats it declares, found on the first pull. */
   private async *readEntryStream(
     vfs: BaseVFS,
     scope: PathSpec,
     index: IndexCacheStore,
     signal: AbortSignal | undefined,
   ): AsyncIterable<Uint8Array> {
-    const entry = await this.entry(scope, index)
-    yield* vfs.readStream(scope, { entry }, signal)
+    const handed = (await this.handedFor('readStream', scope, null, index)) ?? {}
+    yield* vfs.readStream(scope, handed, signal)
   }
 
   /**
@@ -1114,12 +1166,20 @@ export class MountEntry {
     taken(name, kwargs)
     this.requireWritable(name, scope, [...args, ...Object.values(kwargs)], access)
     const index = kwargs.index ?? this.index
+    let found: Handed | null = null
     if (vfs.listsStats && STORED_OPS.has(name)) {
-      const stored = await this.stored(name, scope, index)
+      let stored = await this.stored(name, scope, index)
+      if (stored === null && name === 'readdir') {
+        // Finding the rows a listing is handed lists its parent, whose
+        // fetch may have proved this listing too (a seed).
+        found = await this.handedFor(name, scope, null, index)
+        stored = await this.stored(name, scope, index)
+      }
       if (stored !== null) return stored
     }
     for (const call of levels) {
-      const result = await this.run(name, call, scope, args, kwargs, index)
+      const result = await this.run(name, call, scope, args, kwargs, index, found)
+      found = null
       if (result === null || result === undefined) continue
       const kept = vfs.listsStats ? await this.kept(name, scope, index, result) : result
       if (name === 'stat') this.noteLive(scope, index, kept)
@@ -1196,7 +1256,7 @@ export class MountEntry {
     const signal = callerSignal()
     const stream = withMountContext(
       withPullTimeout(
-        vfs.listsStats && this.wants('readStream').includes('entry')
+        vfs.listsStats && this.wants('readStream').length > 0
           ? this.readEntryStream(vfs, scope, this.index, signal)
           : vfs.readStream(scope, this.index, signal),
         limit?.timeoutSeconds ?? null,

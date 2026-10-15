@@ -15,8 +15,7 @@
 import logging
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.cache.index import IndexEntry
-from mirage.core.hierarchy.readdir import DirListing, Listed
+from mirage.core.hierarchy.readdir import Listed
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.qdrant.naming import group_name, row_stem
 from mirage.core.qdrant.payload import field_value
@@ -29,9 +28,8 @@ from mirage.core.qdrant.query import (
 from mirage.core.qdrant.render import render_json, render_text
 from mirage.core.qdrant.types import QdrantRow
 from mirage.core.vector.read import blob_bytes
-from mirage.core.vector.readdir import dir_entry
 from mirage.core.vector.scope import filters_of, table_of
-from mirage.types import JsonValue
+from mirage.types import DirListing, FileStat, FileType, JsonValue
 from mirage.utils.glob_walk import glob_prefix, glob_stem_prefix
 from mirage.utils.record_search import kept_text
 from mirage.vfs.qdrant.config import QdrantConfig
@@ -52,29 +50,21 @@ def _blob_size(value: JsonValue) -> int | None:
         return None
 
 
-def _row_entries(
-    rows: list[QdrantRow], config: QdrantConfig
-) -> list[tuple[str, IndexEntry]]:
+def _row_files(rows: list[QdrantRow], config: QdrantConfig) -> list[FileStat]:
     # The scroll already carries every payload, so each file's exact
-    # rendered size and text are free here; stat serves the size from the
-    # index instead of refetching one row per file, and grep checks the
-    # text instead of reading it.
-    entries: list[tuple[str, IndexEntry]] = []
+    # rendered size and text are free here; the mount serves the size from
+    # the listing instead of refetching one row per file, and grep checks
+    # the text instead of reading it.
+    listed: list[FileStat] = []
     for row in rows:
-        rid = str(row[config.id_field])
         stem = row_stem(row, config)
         rendered = render_json(row, config)
-        entries.append(
-            (
-                f"{stem}.json",
-                IndexEntry(
-                    id=rid,
-                    name=f"{stem}.json",
-                    resource_type="qdrant/row_json",
-                    vfs_name=f"{stem}.json",
-                    size=len(rendered),
-                    extra=kept_text(rendered),
-                ),
+        listed.append(
+            FileStat(
+                name=f"{stem}.json",
+                type=FileType.FILE,
+                size=len(rendered),
+                extra=kept_text(rendered),
             )
         )
         if (
@@ -82,37 +72,26 @@ def _row_entries(
             and field_value(row, config.text_field) is not None
         ):
             text = render_text(row, config)
-            entries.append(
-                (
-                    f"{stem}.txt",
-                    IndexEntry(
-                        id=rid,
-                        name=f"{stem}.txt",
-                        resource_type="qdrant/row_text",
-                        vfs_name=f"{stem}.txt",
-                        size=len(text),
-                        extra=kept_text(text),
-                    ),
+            listed.append(
+                FileStat(
+                    name=f"{stem}.txt",
+                    type=FileType.FILE,
+                    size=len(text),
+                    extra=kept_text(text),
                 )
             )
         if (
             config.blob_field
             and field_value(row, config.blob_field) is not None
         ):
-            blob_name = f"{stem}.{config.blob_ext}"
-            entries.append(
-                (
-                    blob_name,
-                    IndexEntry(
-                        id=rid,
-                        name=blob_name,
-                        resource_type="qdrant/row_blob",
-                        vfs_name=blob_name,
-                        size=_blob_size(field_value(row, config.blob_field)),
-                    ),
+            listed.append(
+                FileStat(
+                    name=f"{stem}.{config.blob_ext}",
+                    type=FileType.FILE,
+                    size=_blob_size(field_value(row, config.blob_field)),
                 )
             )
-    return entries
+    return listed
 
 
 def _row_prefix(pattern: str | None, config: QdrantConfig) -> str:
@@ -197,7 +176,10 @@ async def children(
                 "qdrant: basename_fields produced a path collision"
             )
         return DirListing(
-            entries=[(name, dir_entry("qdrant", name)) for name in rendered],
+            entries=[
+                FileStat(name=name, type=FileType.DIRECTORY)
+                for name in rendered
+            ],
             partial=bool(display_prefix),
             window=True,
         )
@@ -208,5 +190,5 @@ async def children(
     # Read up to max_rows, so a row outside the head of the collection is
     # not gone because a listing no longer names it.
     return DirListing(
-        entries=_row_entries(rows, config), partial=bool(prefix), window=True
+        entries=_row_files(rows, config), partial=bool(prefix), window=True
     )

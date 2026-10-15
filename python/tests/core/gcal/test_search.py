@@ -14,7 +14,6 @@
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gcal.client import PAGE_LIMIT
 from mirage.core.gcal.search import files_containing
 from tests.fixtures.gcal_api import (
@@ -50,9 +49,7 @@ def _day(event_id: str, summary: str, **fields: str) -> dict:
 
 async def _ids(text: str, under: str = "/", **config: str | int) -> list:
     accessor = make_accessor(content_search=True, **config)
-    out = await files_containing(
-        accessor, text, [spec(under)], RAMIndexCacheStore()
-    )
+    out = await files_containing(accessor, text, [spec(under)])
     if out is None:
         return None
     return sorted(p.virtual.rsplit("/", 1)[-1].split("__")[0] for p in out)
@@ -111,9 +108,7 @@ async def test_reads_every_file_when_it_cannot_say(monkeypatch, text, under):
 async def test_a_listing_without_kept_text_reads_every_file(monkeypatch):
     _api(monkeypatch, EVENTS)
     accessor = make_accessor()
-    out = await files_containing(
-        accessor, "lunch", [spec("/")], RAMIndexCacheStore()
-    )
+    out = await files_containing(accessor, "lunch", [spec("/")])
     assert out is None
 
 
@@ -138,10 +133,9 @@ async def test_a_text_changed_since_the_listing_is_found(monkeypatch):
     events = list(EVENTS)
     _api(monkeypatch, events)
     accessor = make_accessor(content_search=True)
-    index = RAMIndexCacheStore()
 
     async def ids(text: str) -> list | None:
-        out = await files_containing(accessor, text, [spec("/")], index)
+        out = await files_containing(accessor, text, [spec("/")])
         if out is None:
             return None
         return sorted(p.virtual.rsplit("/", 1)[-1].split("__")[0] for p in out)

@@ -21,8 +21,7 @@ vi.mock('./drive.ts', async () => {
 })
 
 import { GoogleApiAccessor } from '../../accessor/google_api.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { MIME } from '../gsheets/constants.ts'
 import { detectScope } from '../gsheets/scope.ts'
@@ -47,7 +46,6 @@ const READDIR = makeAppReaddir(
   MIME,
   detectScope,
   (title, fileId, modified) => `${title}.${fileId}.${modified.slice(0, 4)}`,
-  'x/file',
 )
 
 function spec(virtual: string): PathSpec {
@@ -60,20 +58,18 @@ describe('makeAppReaddir', () => {
       files: FILES,
       complete: true,
     } as Awaited<ReturnType<typeof drive.listAllFiles>>)
-    const index = new RAMIndexCacheStore()
-    expect(await READDIR(ACCESSOR, spec('/m/owned'), index)).toEqual(['/m/owned/Mine.a1.2026'])
+    const out = (await READDIR(ACCESSOR, spec('/m/owned'))) as DirListing
+    expect(out.partial).toBe(false)
+    expect(out.entries.map((row) => row.name)).toEqual(['Mine.a1.2026'])
     expect(vi.mocked(drive.listAllFiles).mock.calls[0]?.[1]?.mimeType).toBe(MIME)
-    const entry = (await index.get('/m/owned/Mine.a1.2026')).entry
-    expect(entry?.resourceType).toBe('x/file')
-    expect(entry?.extra).toEqual({ source_size: 12 })
+    expect(out.entries[0]?.size).toBeNull()
+    expect(out.entries[0]?.extra).toEqual({ doc_id: 'a1', doc_name: 'Mine', source_size: 12 })
   })
 
   it('lists the corpora at the root without a request', async () => {
     vi.mocked(drive.listAllFiles).mockClear()
-    expect(await READDIR(ACCESSOR, spec('/m'), new RAMIndexCacheStore())).toEqual([
-      '/m/owned',
-      '/m/shared',
-    ])
+    const out = (await READDIR(ACCESSOR, spec('/m'))) as FileStat[]
+    expect(out.map((row) => row.name)).toEqual(['owned', 'shared'])
     expect(drive.listAllFiles).not.toHaveBeenCalled()
   })
 })

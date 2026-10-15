@@ -17,10 +17,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdocs.unlink import unlink
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
@@ -29,27 +27,8 @@ def accessor():
     return GDocsAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_unlink_calls_delete_with_doc_id(accessor, index):
-    await index.set_dir(
-        "/gdocs/owned",
-        [
-            (
-                "Foo__doc1.gdoc.json",
-                IndexEntry(
-                    id="doc1",
-                    name="Foo",
-                    resource_type="gdocs/file",
-                    vfs_name="Foo__doc1.gdoc.json",
-                ),
-            ),
-        ],
-    )
+async def test_unlink_calls_delete_with_doc_id(accessor):
     with patch(
         "mirage.core.gdocs.unlink.delete_file", new_callable=AsyncMock
     ) as mock_delete:
@@ -62,16 +41,14 @@ async def test_unlink_calls_delete_with_doc_id(accessor, index):
                 virtual="/gdocs/owned/Foo__doc1.gdoc.json",
                 directory="/gdocs/owned/Foo__doc1.gdoc.json",
             ),
-            index,
+            FileStat(name="Foo__doc1.gdoc.json", type=FileType.FILE),
         )
         mock_delete.assert_awaited_once()
         assert mock_delete.await_args.args[1] == "doc1"
-    listing = await index.list_dir("/gdocs/owned")
-    assert listing.entries is None or listing.entries == []
 
 
 @pytest.mark.asyncio
-async def test_unlink_virtual_dir_raises(accessor, index):
+async def test_unlink_virtual_dir_raises(accessor):
     with pytest.raises(IsADirectoryError):
         await unlink(
             accessor,
@@ -80,12 +57,11 @@ async def test_unlink_virtual_dir_raises(accessor, index):
                 virtual="/gdocs/owned",
                 directory="/gdocs/owned",
             ),
-            index,
         )
 
 
 @pytest.mark.asyncio
-async def test_unlink_missing_raises(accessor, index):
+async def test_unlink_missing_raises(accessor):
     files = []
     with patch(
         "mirage.core.google.readdir.list_all_files",
@@ -102,5 +78,4 @@ async def test_unlink_missing_raises(accessor, index):
                     virtual="/gdocs/owned/Nope__doc9.gdoc.json",
                     directory="/gdocs/owned/Nope__doc9.gdoc.json",
                 ),
-                index,
             )

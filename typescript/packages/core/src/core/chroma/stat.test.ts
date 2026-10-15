@@ -14,9 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { stat } from './stat.ts'
 
@@ -38,22 +37,19 @@ function accessorCounting(calls: unknown[]): ChromaAccessor {
   } as unknown as ChromaAccessor
 }
 
+// The listings a mount keeps: the page's folder, its row left unsized.
+const quickstart = new FileStat({
+  name: 'quickstart',
+  type: FileType.FILE,
+  extra: { slug: 'guides/quickstart' },
+})
+
 async function seededIndex(): Promise<RAMIndexCacheStore> {
   const index = new RAMIndexCacheStore()
   await index.setDir('/knowledge', [
-    ['guides', new IndexEntry({ id: 'guides', name: 'guides', resourceType: 'folder' })],
+    ['guides', new FileStat({ name: 'guides', type: FileType.DIRECTORY })],
   ])
-  await index.setDir('/knowledge/guides', [
-    [
-      'quickstart',
-      new IndexEntry({
-        id: 'guides/quickstart',
-        name: 'quickstart',
-        resourceType: 'file',
-        extra: { slug: 'guides/quickstart' },
-      }),
-    ],
-  ])
+  await index.setDir('/knowledge/guides', [['quickstart', quickstart]])
   return index
 }
 
@@ -66,8 +62,11 @@ const path = new PathSpec({
 describe('chroma stat', () => {
   it('stat sizes the rendered page with one scan', async () => {
     const calls: unknown[] = []
-    const result = await stat(accessorCounting(calls), path, await seededIndex())
+    const index = await seededIndex()
+    const result = await stat(accessorCounting(calls), path, quickstart, index)
     expect(result.size).toBe(5)
     expect(calls).toHaveLength(1)
+    const kept: unknown = (await index.get(QUICKSTART)).entry
+    expect(kept instanceof FileStat ? kept.size : null).toBe(5)
   })
 })

@@ -16,19 +16,23 @@ import lancedb
 import pytest
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.lancedb.tree import read, readdir
-from mirage.types import PathSpec
+from mirage.types import DirListing, FileStat, PathSpec
 from mirage.vfs.lancedb.config import LanceDBConfig
-from tests.fixtures.index_spy import WindowSpy
 
 
 def _ps(path: str) -> PathSpec:
     return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
-def _names(paths: list[str]) -> set[str]:
-    return {p.rsplit("/", 1)[-1] for p in paths}
+def _names(listed: list[FileStat] | DirListing) -> set[str]:
+    rows = listed.entries if isinstance(listed, DirListing) else listed
+    return {row.name for row in rows}
+
+
+def _row(listed: list[FileStat] | DirListing, name: str) -> FileStat:
+    rows = listed.entries if isinstance(listed, DirListing) else listed
+    return next(row for row in rows if row.name == name)
 
 
 @pytest.mark.asyncio
@@ -60,15 +64,10 @@ async def test_leaf_seeds_the_card_size_its_read_renders(accessor):
     # The widened select must render the card byte-identically to the full
     # row read() fetches; blob values are not fetched, so the blob stays
     # unsized.
-    index = RAMIndexCacheStore()
-    await readdir(accessor, _ps("/animals/cat/big"), index)
-    card = await index.get("/animals/cat/big/1.md")
-    assert card.entry is not None
+    listed = await readdir(accessor, _ps("/animals/cat/big"))
     data = await read(accessor, _ps("/animals/cat/big/1.md"))
-    assert card.entry.size == len(data)
-    blob = await index.get("/animals/cat/big/1.png")
-    assert blob.entry is not None
-    assert blob.entry.size is None
+    assert _row(listed, "1.md").size == len(data)
+    assert _row(listed, "1.png").size is None
 
 
 def _globbed(path: str, pattern: str) -> PathSpec:
@@ -132,11 +131,10 @@ async def test_a_glob_with_no_literal_head_stays_capped(capped):
 
 @pytest.mark.asyncio
 async def test_a_narrowed_listing_is_not_cached_as_the_directory(capped):
-    index = RAMIndexCacheStore()
-    await readdir(capped, _globbed("/all", "doc-03*"), index)
-    listing = await index.list_dir("/all/")
-    assert listing.entries is None
-    plain = await readdir(capped, _ps("/all"), index)
+    narrowed = await readdir(capped, _globbed("/all", "doc-03*"))
+    assert narrowed.partial is True
+    plain = await readdir(capped, _ps("/all"))
+    assert plain.partial is False
     assert _names(plain) == {f"doc-00{i}.md" for i in range(CAP)}
 
 
@@ -331,8 +329,5 @@ async def test_a_glob_head_cut_inside_an_escape_counts_matches(crowded):
 async def test_a_capped_listing_is_written_as_a_window(accessor):
     # Groups and rows are read up to max_rows, so a row outside the head of
     # the table is not gone because a listing no longer names it.
-    index = WindowSpy()
-    await readdir(accessor, _ps("/animals"), index)
-    await readdir(accessor, _ps("/animals/cat/big"), index)
-    assert index.windows["/animals"] is True
-    assert index.windows["/animals/cat/big"] is True
+    assert (await readdir(accessor, _ps("/animals"))).window is True
+    assert (await readdir(accessor, _ps("/animals/cat/big"))).window is True

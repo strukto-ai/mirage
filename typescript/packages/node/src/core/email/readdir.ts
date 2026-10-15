@@ -12,13 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
-import {
-  makeReaddir,
-  type DirListing,
-  type Listed,
-} from '@struktoai/mirage-core/core/hierarchy/readdir'
+import { makeReaddir, type Listed } from '@struktoai/mirage-core/core/hierarchy/readdir'
 import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
+import { entryStat } from '@struktoai/mirage-core/core/hierarchy/stat'
+import { ContentType, DirListing, FileStat, FileType } from '@struktoai/mirage-core/types'
 import { NAME_MAX_BYTES, byteLength, sanitizeLabel } from '@struktoai/mirage-core/utils/sanitize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { EmailAccessor } from '../../accessor/email.ts'
@@ -113,51 +110,35 @@ export function dateBucket(message: FetchedMessage): string {
   return parseDate(message.date) ?? parseDate(message.internalDate) ?? EPOCH_DATE
 }
 
+const ATTACHMENT = entryStat('attachment_id')
+
 /** One date directory's children, plus its attachment-dir seeds. */
 function dateChildren(headers: readonly FetchedMessage[]): {
-  children: [string, IndexEntry][]
-  seeds: Record<string, [string, IndexEntry][]>
+  children: FileStat[]
+  seeds: Map<string, FileStat[]>
 } {
-  const children: [string, IndexEntry][] = []
-  const seeds: Record<string, [string, IndexEntry][]> = {}
+  const children: FileStat[] = []
+  const seeds = new Map<string, FileStat[]>()
   for (const hdr of headers) {
     const uid = hdr.uid
     const subject = hdr.subject || 'No Subject'
     const filename = msgFilename(subject, uid)
-    children.push([
-      filename,
-      new IndexEntry({
-        id: uid,
-        name: subject,
-        resourceType: 'email/message',
-        vfsName: filename,
+    children.push(
+      new FileStat({
+        name: filename,
+        type: FileType.FILE,
+        content: ContentType.JSON,
         size: messageJsonBytes(hdr).byteLength,
+        extra: { uid },
       }),
-    ])
+    )
     const attachments = hdr.attachments
     if (attachments.length > 0) {
       const attDirName = filename.replace('.email.json', '')
-      children.push([
+      children.push(new FileStat({ name: attDirName, type: FileType.DIRECTORY, extra: { uid } }))
+      seeds.set(
         attDirName,
-        new IndexEntry({
-          id: uid,
-          name: attDirName,
-          resourceType: 'email/attachment_dir',
-          vfsName: attDirName,
-        }),
-      ])
-      seeds[attDirName] = attachments.map(
-        (att) =>
-          [
-            att.filename,
-            new IndexEntry({
-              id: att.filename,
-              name: att.filename,
-              resourceType: 'email/attachment',
-              vfsName: att.filename,
-              size: att.size,
-            }),
-          ] as [string, IndexEntry],
+        attachments.map((att) => ATTACHMENT(att.filename, att.filename, { size: att.size })),
       )
     }
   }
@@ -174,26 +155,15 @@ async function folderHeaders(
 
 async function listRoot(accessor: EmailAccessor, _match: ScopeMatch): Promise<Listed | null> {
   const folders = await listFolders(accessor)
-  return folders.map(
-    (name) =>
-      [
-        name,
-        new IndexEntry({
-          id: name,
-          name,
-          resourceType: 'email/folder',
-          vfsName: name,
-        }),
-      ] as [string, IndexEntry],
-  )
+  return folders.map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
 }
 
 async function listFolder(
   accessor: EmailAccessor,
-  _match: ScopeMatch,
-  own: IndexEntry,
+  match: ScopeMatch,
+  _own: FileStat,
 ): Promise<Listed> {
-  const headersList = await folderHeaders(accessor, own.id)
+  const headersList = await folderHeaders(accessor, match.slots.folder ?? '')
   const dateGroups = new Map<string, FetchedMessage[]>()
   for (const hdr of headersList) {
     const dateStr = dateBucket(hdr)
@@ -205,51 +175,42 @@ async function listFolder(
     bucket.push(hdr)
   }
   const sortedDates = [...dateGroups.keys()].sort(compareCodePoints).reverse()
-  const entries: [string, IndexEntry][] = []
-  const seeds: Record<string, [string, IndexEntry][]> = {}
+  const entries: FileStat[] = []
+  const seeds = new Map<string, FileStat[]>()
   for (const dateStr of sortedDates) {
-    entries.push([
-      dateStr,
-      new IndexEntry({
-        id: dateStr,
-        name: dateStr,
-        resourceType: 'email/date',
-        vfsName: dateStr,
-      }),
-    ])
+    entries.push(new FileStat({ name: dateStr, type: FileType.DIRECTORY }))
     const { children, seeds: attSeeds } = dateChildren(dateGroups.get(dateStr) ?? [])
-    seeds[dateStr] = children
-    for (const [attDir, attEntries] of Object.entries(attSeeds)) {
-      seeds[`${dateStr}/${attDir}`] = attEntries
-    }
+    seeds.set(dateStr, children)
+    for (const [attDir, attEntries] of attSeeds) seeds.set(`${dateStr}/${attDir}`, attEntries)
   }
-  return { entries, seeds, window: true }
+  return new DirListing({ entries, seeds, window: true })
 }
 
 async function listDay(
   accessor: EmailAccessor,
   match: ScopeMatch,
-  _own: IndexEntry,
+  _own: FileStat,
 ): Promise<Listed> {
   // Normally served from the folder lister's seed; reached only when the
-  // index evicted the day listing while the date entry survived.
+  // index evicted the day listing while the date's row survived.
   const headersList = await folderHeaders(accessor, match.slots.folder ?? '')
   const day = match.slots.day ?? ''
   const { children, seeds } = dateChildren(headersList.filter((hdr) => dateBucket(hdr) === day))
-  const listing: DirListing = { entries: children, seeds, window: true }
-  return listing
+  return new DirListing({ entries: children, seeds, window: true })
 }
 
 async function listAttachmentDir(
   accessor: EmailAccessor,
   match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
   // Same eviction fallback: one header fetch rebuilds the listing.
-  const headersList = await fetchHeaders(accessor, match.slots.folder ?? '', [own.id])
+  const headersList = await fetchHeaders(accessor, match.slots.folder ?? '', [
+    String(own.extra.uid),
+  ])
   for (const hdr of headersList) {
     const { seeds } = dateChildren([hdr])
-    for (const attEntries of Object.values(seeds)) return attEntries
+    for (const attEntries of seeds.values()) return attEntries
   }
   return []
 }

@@ -18,8 +18,6 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.slack.client import download_file, download_file_stream
@@ -39,17 +37,18 @@ from mirage.core.time_range import (
 )
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _read_chat(
     accessor: SlackAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     await guard_day(accessor, match, path.virtual)
-    channel_id = await day_channel_id(readdir, accessor, path, index)
+    channel_id = day_channel_id(path, entry, parent)
     return await get_history_jsonl(
         accessor.config,
         channel_id,
@@ -63,22 +62,21 @@ async def _read_user(
     accessor: SlackAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
     user = await get_user_profile(
-        accessor.config, entry.id, session=accessor.pool
+        accessor.config, str(entry.extra["user_id"]), session=accessor.pool
     )
     return user_json_bytes(user)
 
 
 async def _blob_url(
-    accessor: SlackAccessor, path: PathSpec, index: IndexCacheStore
+    accessor: SlackAccessor, path: PathSpec, entry: FileStat | None
 ) -> str:
     await guard_day(accessor, detect_scope(path), path.virtual)
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
     url = entry.extra.get("url_private_download")
@@ -91,9 +89,10 @@ async def _read_blob(
     accessor: SlackAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    url = await _blob_url(accessor, path, index)
+    url = await _blob_url(accessor, path, entry)
     return await download_file(
         accessor.config, url, 0, None, session=accessor.pool
     )
@@ -103,11 +102,12 @@ async def _read_blob_range(
     accessor: SlackAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
     offset: int,
     size: int | None,
 ) -> bytes:
-    url = await _blob_url(accessor, path, index)
+    url = await _blob_url(accessor, path, entry)
     return await download_file(
         accessor.config, url, offset, size, session=accessor.pool
     )
@@ -136,22 +136,24 @@ read_range = make_read_range(
 async def read_stream(
     accessor: SlackAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Stream attachments; preserve the rendered order of JSON records.
 
     Args:
         accessor (SlackAccessor): backend accessor.
         path (PathSpec): file to read.
-        index (IndexCacheStore): cached directory entries.
+        entry (FileStat | None): the file's row, as its listing names it.
+        parent (FileStat | None): its folder's row.
     """
     if detect_scope(path).kind == "file_blob":
-        url = await _blob_url(accessor, path, index)
+        url = await _blob_url(accessor, path, entry)
         source = download_file_stream(
             accessor.config, url, session=accessor.pool
         )
     else:
-        source = chunks(await read(accessor, path, index))
+        source = chunks(await read(accessor, path, entry, parent))
     async with aclosing(source):
         async for chunk in source:
             yield chunk
@@ -163,7 +165,8 @@ async def _follow_chat(
     path: PathSpec,
     n: int,
     interval: float,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> AsyncIterator[bytes]:
     """A channel or DM day's last ``n`` messages, then each one posted to it,
     asked for every ``interval`` seconds while the day lasts
@@ -175,10 +178,11 @@ async def _follow_chat(
         path (PathSpec): the chat.jsonl.
         n (int): how many of its last lines come first, 0 for none.
         interval (float): seconds between two asks.
-        index (IndexCacheStore): cached directory entries.
+        entry (FileStat | None): the file's row, as its day lists it.
+        parent (FileStat | None): the day's row.
     """
     await guard_day(accessor, match, path.virtual)
-    channel_id = await day_channel_id(readdir, accessor, path, index)
+    channel_id = day_channel_id(path, entry, parent)
     day = match.slots["day"]
     fetch = partial(
         fetch_messages_for_day,

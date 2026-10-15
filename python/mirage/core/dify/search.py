@@ -2,7 +2,6 @@ import logging
 from typing import Any
 
 from mirage.accessor.dify import DifyAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dify.client import dify_post
 from mirage.core.dify.read import segment_text
 from mirage.core.dify.tree import DIFY_TREE, SLUG_NOUN
@@ -37,7 +36,6 @@ async def search_segments(
     accessor: DifyAccessor,
     query: str,
     paths: list[PathSpec],
-    index: IndexCacheStore = NULL_INDEX,
     method: str = "semantic",
     top_k: int = 10,
     threshold: float = 0.0,
@@ -56,7 +54,7 @@ async def search_segments(
     has_name_based_target = False
     if paths:
         conditions, has_name_based_target = await metadata_conditions(
-            accessor, paths, index
+            accessor, paths
         )
         if not conditions:
             return []
@@ -98,9 +96,8 @@ def validate_args(
 async def metadata_conditions(
     accessor: DifyAccessor,
     paths: list[PathSpec],
-    index: IndexCacheStore = NULL_INDEX,
 ) -> tuple[list[dict[str, Any]], bool]:
-    targets = await target_entries(DIFY_TREE, accessor, paths, index)
+    targets = await target_entries(DIFY_TREE, accessor, paths)
     slug_values: list[str] = []
     name_values: list[str] = []
     for entry in targets.values():
@@ -213,18 +210,16 @@ async def search_many(
     accessor: DifyAccessor,
     paths: list[PathSpec],
     query: SearchQuery,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> list[tuple[str, str]]:
     validate_options(query, {"top_k", "method", "threshold"})
     top_k = int_option(query, "top_k", 10)
     method = text_option(query, "method", "semantic")
     threshold = float_option(query, "threshold", 0.0)
-    targets, prefix = await search_scope(DIFY_TREE, accessor, paths, index)
+    targets, prefix = await search_scope(DIFY_TREE, accessor, paths)
     return await search_segments(
         accessor,
         query.query,
         targets,
-        index,
         top_k=top_k,
         mount_prefix=prefix,
         method=method,
@@ -236,6 +231,5 @@ async def search_resource(
     accessor: DifyAccessor,
     path: PathSpec,
     query: SearchQuery,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> list[tuple[str, str]]:
-    return await search_many(accessor, [path], query, index)
+    return await search_many(accessor, [path], query)

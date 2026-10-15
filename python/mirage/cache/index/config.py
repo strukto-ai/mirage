@@ -154,6 +154,7 @@ class ListResult(BaseModel):
     partial_entries: list[str] | None = None
     status: LookupStatus | None = None
     version: str | None = None
+    window: bool = False
 
 
 class IndexDirectory(BaseModel):
@@ -162,6 +163,7 @@ class IndexDirectory(BaseModel):
     generation: str
     partial: bool = False
     version: str | None = None
+    window: bool = False
 
 
 class IndexConfig(BaseModel):

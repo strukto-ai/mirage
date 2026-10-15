@@ -1,7 +1,5 @@
 import type { Accessor } from '../accessor/base.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../types.ts'
-import { ancestorEntry, resolveEntry, type ReaddirFn } from './hierarchy/probe.ts'
 import type { Guard } from './hierarchy/readdir.ts'
 import type { ScopeMatch } from './hierarchy/scope.ts'
 import type { StatHook } from './hierarchy/stat.ts'
@@ -97,41 +95,45 @@ export function guardDay(
 /**
  * The channel a day's chat.jsonl reads, proven by the listing.
  *
- * The typed `name__id` dirname is only trusted once the listing proves it,
- * so a fabricated channel id is ENOENT rather than a raw API error. A sealed
- * day lists nothing but the file still reads through the channel,
- * reproducing the API's own answer for the fetch. Mirrors Python's
- * `day_channel_id`.
+ * The typed `name__id` dirname is only trusted once a listing proves it, so a
+ * fabricated channel id is ENOENT rather than a raw API error. The file's row
+ * carries its channel, and so does its day's, which a day the window does not
+ * list still has: a sealed day lists nothing but the file still reads through
+ * the channel, reproducing the API's own answer for the fetch. Mirrors
+ * Python's `day_channel_id`.
  */
-export async function dayChannelId<A extends Accessor>(
-  readdir: ReaddirFn<A>,
-  accessor: A,
+export function dayChannelId(
   path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string> {
-  const entry = await resolveEntry(readdir, accessor, path, index)
-  if (entry !== null) return entry.id.split(':', 1)[0] ?? ''
-  const channel = await ancestorEntry(readdir, accessor, path, index, 2)
-  if (channel === null) throw enoent(path)
-  return channel.id
+  entry: FileStat | null,
+  parent: FileStat | null,
+): string {
+  for (const row of [entry, parent]) {
+    const channel = row?.extra.channel_id
+    if (typeof channel === 'string' && channel !== '') return channel
+  }
+  throw enoent(path)
 }
 
 /**
  * Stat a day directory, which resolves beyond the listed window.
  *
  * The parent listing synthesizes a bounded window of recent days, but the API
- * answers a range query for any date, so a well-formed day under a parent that
- * exists is a directory whether or not the window lists it. A bogus parent
- * chain is ENOENT. `guard` refuses a day outside the mount's scope before any
- * lookup, `guardDay` on a scoped mount. Mirrors Python's `day_stat`.
+ * answers a range query for any date, so a well-formed day under a channel or
+ * label that exists is a directory whether or not the window lists it,
+ * carrying its parent's ids as a listed day does. A bogus parent chain is
+ * ENOENT. `guard` refuses a day outside the mount's scope before any lookup,
+ * `guardDay` on a scoped mount. Mirrors Python's `day_stat`.
  */
-export function dayStat<A extends Accessor>(readdir: ReaddirFn<A>, guard?: Guard<A>): StatHook<A> {
-  return async (accessor, match, path, index) => {
+export function dayStat<A extends Accessor>(guard?: Guard<A>): StatHook<A> {
+  return async (accessor, match, path, entry, parent) => {
     if (guard !== undefined) await guard(accessor, match, path.virtual)
-    const entry = await resolveEntry(readdir, accessor, path, index)
-    if (entry !== null) return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
-    if ((await ancestorEntry(readdir, accessor, path, index, 1)) === null) throw enoent(path)
-    return new FileStat({ name: match.slots.day ?? '', type: FileType.DIRECTORY })
+    if (entry !== null) return entry
+    if (parent === null) throw enoent(path)
+    return new FileStat({
+      name: match.slots.day ?? '',
+      type: FileType.DIRECTORY,
+      extra: { ...parent.extra },
+    })
   }
 }
 

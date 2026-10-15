@@ -17,9 +17,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.airtable.search import lines_containing
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from tests.fixtures.airtable_api import ROADMAP, make_accessor
 
@@ -29,6 +28,10 @@ RECORDS = f"{TABLE}/records.jsonl"
 DONE = f"{TABLE}/views/Done_shipped__viwDone0000000001.jsonl"
 CELLS = ("RECORD_ID()", '{Name} & ""', '{Status} & ""')
 DONE_IDS = [f"rec{n:014d}" for n in (1, 3, 5, 7)]
+
+
+# The file's row as its folder's listing names it, which the mount hands.
+ROW = FileStat(name="file", type=FileType.FILE)
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -59,9 +62,7 @@ def _status_holds(query: str):
 @pytest.mark.asyncio
 async def test_only_the_records_a_formula_names_are_listed(airtable_api):
     airtable_api.formulas[_formula("one")] = _status_holds("one")
-    out = await lines_containing(
-        make_accessor(), _spec(RECORDS), "one", RAMIndexCacheStore()
-    )
+    out = await lines_containing(make_accessor(), _spec(RECORDS), "one", ROW)
     assert _ids(out) == DONE_IDS
     call = airtable_api.record_calls()[-1]
     assert call["filterByFormula"] == _formula("one")
@@ -71,9 +72,7 @@ async def test_only_the_records_a_formula_names_are_listed(airtable_api):
 @pytest.mark.asyncio
 async def test_a_view_file_lists_what_the_view_and_formula_name(airtable_api):
     airtable_api.formulas[_formula("ure")] = lambda r: True
-    out = await lines_containing(
-        make_accessor(), _spec(DONE), "ure", RAMIndexCacheStore()
-    )
+    out = await lines_containing(make_accessor(), _spec(DONE), "ure", ROW)
     assert _ids(out) == DONE_IDS
     assert airtable_api.record_calls()[-1]["view"] == "viwDone0000000001"
 
@@ -96,16 +95,9 @@ async def test_a_text_with_a_space_is_asked_of_a_table_with_links(
     cells = (*CELLS, '{Summary} & ""')
     airtable_api.formulas[_formula("lone plan", cells)] = lambda r: False
     accessor = make_accessor()
-    out = await lines_containing(
-        accessor, _spec(RECORDS), "lone plan", RAMIndexCacheStore()
-    )
+    out = await lines_containing(accessor, _spec(RECORDS), "lone plan", ROW)
     assert out == b""
-    assert (
-        await lines_containing(
-            accessor, _spec(RECORDS), "one", RAMIndexCacheStore()
-        )
-        is None
-    )
+    assert await lines_containing(accessor, _spec(RECORDS), "one", ROW) is None
 
 
 @pytest.mark.asyncio
@@ -123,9 +115,9 @@ async def test_a_text_with_a_space_is_asked_of_a_table_with_links(
     ],
 )
 async def test_an_unsure_answer_reads_the_file(airtable_api, text, virtual):
-    out = await lines_containing(
-        make_accessor(), _spec(virtual), text, RAMIndexCacheStore()
-    )
+    # A view no listing names is handed no row.
+    row = None if "Nope" in virtual else ROW
+    out = await lines_containing(make_accessor(), _spec(virtual), text, row)
     assert out is None
 
 
@@ -136,7 +128,7 @@ async def test_more_matches_than_the_cap_read_the_file(airtable_api):
         make_accessor(max_read_records=2),
         _spec(RECORDS),
         "one",
-        RAMIndexCacheStore(),
+        ROW,
     )
     assert out is None
 
@@ -151,7 +143,5 @@ async def test_a_failed_listing_reads_the_file(
         "mirage.core.airtable.search.list_records",
         AsyncMock(side_effect=error),
     )
-    out = await lines_containing(
-        make_accessor(), _spec(RECORDS), "one", RAMIndexCacheStore()
-    )
+    out = await lines_containing(make_accessor(), _spec(RECORDS), "one", ROW)
     assert out is None

@@ -13,49 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../accessor/gmail.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
-import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
-import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { entryStat, makeStat } from '../hierarchy/stat.ts'
+import { makeStat } from '../hierarchy/stat.ts'
 import { dayStat } from '../time_range.ts'
-import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
-function labelStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.DIRECTORY,
-    extra: { label_id: entry.id },
-  })
-}
-
-function messageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: ContentType.JSON,
-    size: entry.size,
-    extra: {
-      message_id: entry.id,
-      ...('size_estimate' in entry.extra ? { size_estimate: entry.extra.size_estimate } : {}),
-    },
-  })
-}
-
-function attachmentDirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.DIRECTORY,
-    extra: { message_id: entry.id },
-  })
-}
-
-export const stat = makeStat<GmailAccessor>(detectScope, readdir, {
-  entryStats: {
-    label: labelStat,
-    message: messageStat,
-    attachment_dir: attachmentDirStat,
-    attachment: entryStat('attachment_id'),
-  },
-  overrides: { day: dayStat(readdir) },
-})
+export const stat = makeStat<GmailAccessor>(detectScope, { overrides: { day: dayStat() } })

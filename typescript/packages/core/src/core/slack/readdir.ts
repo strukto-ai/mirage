@@ -14,8 +14,10 @@
 
 import { guardDay } from '../time_range.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { makeReaddir, type DirListing, type Listed } from '../hierarchy/readdir.ts'
+import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
+import { epochToIso } from '../../utils/dates.ts'
+import { contentTypeForMime } from '../../utils/filetype.ts'
+import { makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonlBytes } from '../render/json.ts'
 import { listChannels, listDms } from './channels.ts'
@@ -128,24 +130,35 @@ export function dateRange(
   return dates
 }
 
+function slackModified(remoteTime: string | number | null | undefined): string | null {
+  if (remoteTime === null || remoteTime === undefined || remoteTime === '' || remoteTime === 0) {
+    return null
+  }
+  const ts = typeof remoteTime === 'number' ? remoteTime : Number.parseFloat(remoteTime)
+  if (Number.isNaN(ts) || ts <= 0) return null
+  return epochToIso(ts)
+}
+
+function conversation(
+  dirname: string,
+  convo: { id: string; created?: number | null },
+  name: string,
+): FileStat {
+  const created = convo.created ?? 0
+  return new FileStat({
+    name: dirname,
+    type: FileType.DIRECTORY,
+    modified: slackModified(created),
+    extra: { channel_id: convo.id, name, created },
+  })
+}
+
 async function listChannelsRoot(
   accessor: SlackAccessor,
   _match: ScopeMatch,
 ): Promise<Listed | null> {
   const channels = await listChannels(accessor)
-  return channels.map((ch) => {
-    const dirname = channelDirname(ch)
-    return [
-      dirname,
-      new IndexEntry({
-        id: ch.id,
-        name: ch.name ?? '',
-        resourceType: 'slack/channel',
-        vfsName: dirname,
-        remoteTime: String(ch.created ?? 0),
-      }),
-    ] as [string, IndexEntry]
-  })
+  return channels.map((ch) => conversation(channelDirname(ch), ch, ch.name ?? ''))
 }
 
 async function listDmsRoot(accessor: SlackAccessor, _match: ScopeMatch): Promise<Listed | null> {
@@ -154,46 +167,34 @@ async function listDmsRoot(accessor: SlackAccessor, _match: ScopeMatch): Promise
   const userMap: Record<string, string> = {}
   for (const u of users) userMap[u.id] = u.name ?? u.id
   return dms.map((dm) => {
-    const dirname = dmDirname(dm, userMap)
     const uid = dm.user ?? ''
-    return [
-      dirname,
-      new IndexEntry({
-        id: dm.id,
-        name: userMap[uid] ?? uid,
-        resourceType: 'slack/dm',
-        vfsName: dirname,
-        remoteTime: String(dm.created ?? 0),
-      }),
-    ] as [string, IndexEntry]
+    return conversation(dmDirname(dm, userMap), dm, userMap[uid] ?? uid)
   })
 }
 
 async function listUsersRoot(accessor: SlackAccessor, _match: ScopeMatch): Promise<Listed | null> {
   const users = await listUsers(accessor)
-  return users.map((u) => {
-    const filename = userFilename(u)
-    return [
-      filename,
-      new IndexEntry({
-        id: u.id,
-        name: u.name ?? '',
-        resourceType: 'slack/user',
-        vfsName: filename,
+  return users.map(
+    (u) =>
+      new FileStat({
+        name: userFilename(u),
+        type: FileType.FILE,
+        content: ContentType.JSON,
         size: userJsonBytes(u).byteLength,
+        extra: { user_id: u.id },
       }),
-    ] as [string, IndexEntry]
-  })
+  )
 }
 
 async function listChannelDays(
   accessor: SlackAccessor,
   match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
-  const created = Number.parseInt(own.remoteTime !== '' ? own.remoteTime : '0', 10)
+  const channelId = String(own.extra.channel_id)
+  const created = Number(own.extra.created ?? 0) || 0
   const span = globSpan(match.pattern)
-  const latestTs = await latestMessageTs(accessor, own.id)
+  const latestTs = await latestMessageTs(accessor, channelId)
   let dates: string[]
   if (latestTs !== null && accessor.timeRange.bounded) {
     const start = created || accessor.timeRange.start
@@ -201,7 +202,7 @@ async function listChannelDays(
     if (start !== null) first = new Date(start * 1000).toISOString().slice(0, 10)
     else if (span !== null) first = span[0]
     else {
-      const earliest = await earliestMessageTs(accessor, own.id, latestTs)
+      const earliest = await earliestMessageTs(accessor, channelId, latestTs)
       first = new Date(earliest * 1000).toISOString().slice(0, 10)
     }
     dates = accessor.timeRange
@@ -214,20 +215,10 @@ async function listChannelDays(
   } else {
     dates = []
   }
-  const entries = dates.map(
-    (d) =>
-      [
-        d,
-        new IndexEntry({
-          id: `${own.id}:${d}`,
-          name: d,
-          resourceType: 'slack/date_dir',
-          vfsName: d,
-          extra: { channel_id: own.id },
-        }),
-      ] as [string, IndexEntry],
+  const rows = dates.map(
+    (d) => new FileStat({ name: d, type: FileType.DIRECTORY, extra: { channel_id: channelId } }),
   )
-  return { entries, seeds: {}, partial: span !== null, window: true }
+  return new DirListing({ entries: rows, partial: span !== null, window: true })
 }
 
 /**
@@ -245,24 +236,10 @@ async function dayListing(
   try {
     messages = await fetchMessagesForDay(accessor, channelId, dateStr)
   } catch (err) {
-    if (isSoftHistoryError(err)) return { entries: [], seeds: {}, window: true }
+    if (isSoftHistoryError(err)) return new DirListing({ entries: [], window: true })
     throw err
   }
-  const chatEntry = new IndexEntry({
-    id: `${channelId}:${dateStr}:chat`,
-    name: 'chat.jsonl',
-    resourceType: 'slack/chat_jsonl',
-    vfsName: 'chat.jsonl',
-    size: jsonlBytes(messages).byteLength,
-  })
-  const filesEntry = new IndexEntry({
-    id: `${channelId}:${dateStr}:files`,
-    name: 'files',
-    resourceType: 'slack/files_dir',
-    vfsName: 'files',
-    extra: { channel_id: channelId, date: dateStr },
-  })
-  const fileEntries: [string, IndexEntry][] = []
+  const blobs: FileStat[] = []
   for (const msg of messages) {
     const files = (msg.files as { id?: string }[] | undefined) ?? []
     for (const fmeta of files) {
@@ -282,18 +259,17 @@ async function dayListing(
       // sizesAlwaysKnown contract.
       if (meta.id === undefined || meta.id === '') continue
       if (meta.size === undefined || !meta.url_private_download) continue
-      const blob = fileBlobName(meta)
-      fileEntries.push([
-        blob,
-        new IndexEntry({
-          id: meta.id,
-          name: meta.title ?? meta.name ?? '',
-          resourceType: 'slack/file',
-          vfsName: blob,
+      const mimetype = meta.mimetype ?? ''
+      blobs.push(
+        new FileStat({
+          name: fileBlobName(meta),
+          type: FileType.FILE,
+          content: contentTypeForMime(mimetype),
           size: meta.size,
-          remoteTime: String(meta.timestamp ?? ''),
+          modified: slackModified(meta.timestamp),
           extra: {
-            mimetype: meta.mimetype ?? '',
+            file_id: meta.id,
+            mimetype,
             url_private_download: meta.url_private_download ?? '',
             filetype: meta.filetype ?? '',
             ts: typeof msg.ts === 'string' ? msg.ts : '',
@@ -301,37 +277,48 @@ async function dayListing(
             date: dateStr,
           },
         }),
-      ])
+      )
     }
   }
-  return {
+  return new DirListing({
     entries: [
-      ['chat.jsonl', chatEntry],
-      ['files', filesEntry],
+      new FileStat({
+        name: 'chat.jsonl',
+        type: FileType.FILE,
+        content: ContentType.TEXT,
+        size: jsonlBytes(messages).byteLength,
+        extra: { channel_id: channelId },
+      }),
+      new FileStat({
+        name: 'files',
+        type: FileType.DIRECTORY,
+        extra: { channel_id: channelId, date: dateStr },
+      }),
     ],
-    seeds: { files: fileEntries },
-  }
+    seeds: new Map([['files', blobs]]),
+  })
 }
 
-function listDay(accessor: SlackAccessor, match: ScopeMatch, channel: IndexEntry): Promise<Listed> {
-  // The proof is the channel entry, not the day's own: any well-formed date
-  // under a real channel fetches, including dates outside the bounded window
-  // the channel listing mints.
-  return dayListing(accessor, channel.id, match.slots.day ?? '')
+function listDay(accessor: SlackAccessor, match: ScopeMatch, own: FileStat): Promise<Listed> {
+  // The day's row carries its channel: one the bounded window lists, or one
+  // stat makes for any well-formed date under a real channel, so a date
+  // outside the window fetches too.
+  return dayListing(accessor, String(own.extra.channel_id), match.slots.day ?? '')
 }
 
 export async function listFiles(
   accessor: SlackAccessor,
   match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
   // Normally served from the day lister's seed; reached only when the index
-  // evicted the files listing while the day's entries survived.
-  const fromExtra = typeof own.extra.channel_id === 'string' ? own.extra.channel_id : ''
-  const channelId = fromExtra !== '' ? fromExtra : (own.id.split(':', 1)[0] ?? '')
-  const listing = await dayListing(accessor, channelId, match.slots.day ?? '')
+  // evicted the files listing while the day's rows survived.
+  const listing = await dayListing(accessor, String(own.extra.channel_id), match.slots.day ?? '')
   // A soft-error day proves nothing about its attachments either.
-  return { entries: [...(listing.seeds.files ?? [])], seeds: {}, window: listing.window === true }
+  return new DirListing({
+    entries: [...(listing.seeds.get('files') ?? [])],
+    window: listing.window,
+  })
 }
 
 export const readdir = makeReaddir<SlackAccessor>(detectScope, {
@@ -342,9 +329,9 @@ export const readdir = makeReaddir<SlackAccessor>(detectScope, {
   },
   entryListers: {
     channel: listChannelDays,
+    day: listDay,
     files: listFiles,
   },
-  parentEntryListers: { day: listDay },
   staticRoot: VIRTUAL_ROOTS,
   guards: { day: guardDay, files: guardDay },
   patternKinds: { channel: hasGlobSpan },

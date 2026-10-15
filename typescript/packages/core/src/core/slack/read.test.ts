@@ -15,9 +15,7 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
 import { follow, read, readMany, readStream } from './read.ts'
 
@@ -51,21 +49,27 @@ function spec(virtual: string, prefix = ''): PathSpec {
 
 const decoder = new TextDecoder()
 
+// A day's row as its conversation's listing names it, carrying the channel.
+function dayRow(channel: string): FileStat {
+  return new FileStat({
+    name: '2026-04-24',
+    type: FileType.DIRECTORY,
+    extra: { channel_id: channel },
+  })
+}
+
+// A user's row as the users listing names it.
+const USER = new FileStat({ name: 'alice__U1.json', type: FileType.FILE, extra: { user_id: 'U1' } })
+
+// An attachment's row as its day's files listing names it.
+const BLOB = new FileStat({
+  name: 'report__F1.txt',
+  type: FileType.FILE,
+  extra: { file_id: 'F1', url_private_download: 'https://cdn.test/report' },
+})
+
 describe('read jsonl branch', () => {
-  it('reads channel jsonl bytes via getHistoryJsonl when parent cached', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: '0',
-        }),
-      ],
-    ])
+  it('reads channel jsonl bytes through the channel its day carries', async () => {
     const t = new FakeTransport((endpoint) => {
       if (endpoint === 'conversations.history') {
         return {
@@ -81,7 +85,8 @@ describe('read jsonl branch', () => {
     const out = await read(
       new SlackAccessor(t),
       spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
-      idx,
+      null,
+      dayRow('C1'),
     )
     const text = decoder.decode(out)
     const lines = text.trimEnd().split('\n')
@@ -92,20 +97,7 @@ describe('read jsonl branch', () => {
     expect(histCall?.params?.channel).toBe('C1')
   })
 
-  it('reads dm jsonl bytes when parent cached', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/dms', [
-      [
-        'alice__D1',
-        new IndexEntry({
-          id: 'D1',
-          name: 'alice',
-          resourceType: 'slack/dm',
-          vfsName: 'alice__D1',
-          remoteTime: '0',
-        }),
-      ],
-    ])
+  it('reads dm jsonl bytes through the dm its day carries', async () => {
     const t = new FakeTransport((endpoint) => {
       if (endpoint === 'conversations.history') {
         return { ok: true, messages: [{ ts: '1776988850.0', text: 'hi' }] }
@@ -115,7 +107,8 @@ describe('read jsonl branch', () => {
     const out = await read(
       new SlackAccessor(t),
       spec('/mnt/slack/dms/alice__D1/2026-04-24/chat.jsonl', '/mnt/slack'),
-      idx,
+      null,
+      dayRow('D1'),
     )
     const text = decoder.decode(out).trimEnd()
     expect(JSON.parse(text)).toMatchObject({ ts: '1776988850.0', text: 'hi' })
@@ -123,24 +116,12 @@ describe('read jsonl branch', () => {
     expect(histCall?.params?.channel).toBe('D1')
   })
 
-  it('throws ENOENT for jsonl path when index is undefined', async () => {
+  it('throws ENOENT for a chat.jsonl no listing names', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     await expect(
       read(
         new SlackAccessor(t),
         spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('throws ENOENT for jsonl path when parent not cached', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t = new FakeTransport(() => ({ ok: true }))
-    await expect(
-      read(
-        new SlackAccessor(t),
-        spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
-        idx,
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -148,18 +129,6 @@ describe('read jsonl branch', () => {
 
 describe('read users branch', () => {
   it('returns JSON-stringified user profile bytes', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/users', [
-      [
-        'alice__U1.json',
-        new IndexEntry({
-          id: 'U1',
-          name: 'alice',
-          resourceType: 'slack/user',
-          vfsName: 'alice__U1.json',
-        }),
-      ],
-    ])
     const t = new FakeTransport((endpoint) => {
       if (endpoint === 'users.info') {
         return {
@@ -172,7 +141,7 @@ describe('read users branch', () => {
     const out = await read(
       new SlackAccessor(t),
       spec('/mnt/slack/users/alice__U1.json', '/mnt/slack'),
-      idx,
+      USER,
     )
     const parsed = JSON.parse(decoder.decode(out)) as Record<string, unknown>
     expect(parsed).toMatchObject({ id: 'U1', name: 'alice', real_name: 'Alice A' })
@@ -180,18 +149,10 @@ describe('read users branch', () => {
     expect(infoCall?.params?.user).toBe('U1')
   })
 
-  it('throws ENOENT for users path without index', async () => {
+  it('throws ENOENT for a user no listing names', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     await expect(
       read(new SlackAccessor(t), spec('/mnt/slack/users/alice__U1.json', '/mnt/slack')),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('throws ENOENT for users path when not in cache', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t = new FakeTransport(() => ({ ok: true }))
-    await expect(
-      read(new SlackAccessor(t), spec('/mnt/slack/users/alice__U1.json', '/mnt/slack'), idx),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
@@ -224,25 +185,12 @@ it('closes an attachment stream before fetching its tail', async () => {
       closed = true
     }
   }
-  const index = new RAMIndexCacheStore()
   const path = spec('/channels/general__C1/2026-04-24/files/report__F1.txt')
-  await index.setDir(path.virtual.slice(0, path.virtual.lastIndexOf('/')), [
-    [
-      'report__F1.txt',
-      new IndexEntry({
-        id: 'F1',
-        name: 'report.txt',
-        vfsName: 'report__F1.txt',
-        resourceType: 'slack/file',
-        extra: { url_private_download: 'https://cdn.test/report' },
-      }),
-    ],
-  ])
   try {
     const stream = readStream(
       new SlackAccessor({ call: () => Promise.resolve({ ok: true }), downloadFileStream: source }),
       path,
-      index,
+      BLOB,
     )
     const first = await stream.next()
     if (first.done) throw new Error('attachment stream ended before its first chunk')
@@ -255,27 +203,14 @@ it('closes an attachment stream before fetching its tail', async () => {
 })
 
 it('uses bounded buffered downloads when a custom transport has no stream method', async () => {
-  const index = new RAMIndexCacheStore()
   const path = spec('/channels/general__C1/2026-04-24/files/report__F1.txt')
   const bytes = new Uint8Array(40_000).fill(65)
   const downloadFile = vi.fn().mockResolvedValue(bytes)
-  await index.setDir(path.virtual.slice(0, path.virtual.lastIndexOf('/')), [
-    [
-      'report__F1.txt',
-      new IndexEntry({
-        id: 'F1',
-        name: 'report.txt',
-        vfsName: 'report__F1.txt',
-        resourceType: 'slack/file',
-        extra: { url_private_download: 'https://cdn.test/report' },
-      }),
-    ],
-  ])
   const received: Uint8Array[] = []
   for await (const chunk of readStream(
     new SlackAccessor({ call: () => Promise.resolve({ ok: true }), downloadFile }),
     path,
-    index,
+    BLOB,
   ))
     received.push(chunk)
   expect(received.map((chunk) => chunk.byteLength)).toEqual([16384, 16384, 7232])
@@ -285,19 +220,6 @@ it('uses bounded buffered downloads when a custom transport has no stream method
 
 describe('follow', () => {
   it('prints the last lines, then asks after the last one seen', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: '0',
-        }),
-      ],
-    ])
     const t = new FakeTransport((endpoint, params) => {
       if (endpoint !== 'conversations.history') return { ok: true }
       if (params?.oldest === '1776989000.0') {
@@ -316,7 +238,8 @@ describe('follow', () => {
       spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
       1,
       0.001,
-      idx,
+      null,
+      dayRow('C1'),
     )
     if (stream === null) throw new Error('the chat day was not followed')
     const it = stream[Symbol.asyncIterator]()

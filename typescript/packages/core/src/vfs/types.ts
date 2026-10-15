@@ -174,7 +174,6 @@ export type SearchOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   query: SearchQuery,
-  index?: IndexCacheStore,
 ) => Promise<[string, string][] | null>
 
 /** Optional batch callback preserves ranking and limits across scopes. */
@@ -182,7 +181,6 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
   accessor: A,
   paths: PathSpec[],
   query: SearchQuery,
-  index?: IndexCacheStore,
 ) => Promise<[string, string][] | null>
 
 /** Files under `path` whose content may contain `text`; null when the search cannot answer for every file. */

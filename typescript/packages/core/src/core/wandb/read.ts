@@ -1,16 +1,23 @@
 import type { WandbAccessor } from '../../accessor/wandb.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { jsonBytes, jsonlBytes } from '../render/json.ts'
 import { LEAVES, parts, runVars } from './pathing.ts'
 import { RUN, RUN_CONFIG, RUN_SUMMARY } from './queries.ts'
 import { runMetadata } from './metadata.ts'
-import { stat } from './stat.ts'
+import { parentSpec, rowsOf } from '../hierarchy/probe.ts'
+import { readdir } from './readdir.ts'
+async function isDirectory(
+  accessor: WandbAccessor,
+  path: PathSpec,
+  name: string,
+): Promise<boolean> {
+  const listed = rowsOf(await readdir(accessor, parentSpec(path)))
+  return listed.some((row) => row.name === name && row.type === FileType.DIRECTORY)
+}
 export async function* readStream(
   accessor: WandbAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
 ): AsyncGenerator<Uint8Array> {
   const ps = parts(accessor, path)
   if (ps.length > 4 && ps[3] === 'files') {
@@ -25,8 +32,7 @@ export async function* readStream(
     }
   }
   if (ps.length !== 4 || !LEAVES.includes(ps[3] ?? '')) {
-    const info = await stat(accessor, path, index)
-    if (info.type === FileType.DIRECTORY) throw eisdir(path)
+    if (ps.length === 0 || (await isDirectory(accessor, path, ps.at(-1) ?? ''))) throw eisdir(path)
     throw enoent(path)
   }
   const variables = runVars(ps)
@@ -47,14 +53,10 @@ export async function* readStream(
     yield jsonBytes(typeof raw === 'string' ? JSON.parse(raw) : raw)
   }
 }
-export async function read(
-  accessor: WandbAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<Uint8Array> {
+export async function read(accessor: WandbAccessor, path: PathSpec): Promise<Uint8Array> {
   const chunks: Uint8Array[] = []
   let size = 0
-  for await (const chunk of readStream(accessor, path, index)) {
+  for await (const chunk of readStream(accessor, path)) {
     chunks.push(chunk)
     size += chunk.length
   }

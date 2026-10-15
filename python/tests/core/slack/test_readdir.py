@@ -18,12 +18,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.core.hierarchy.probe import rows_of
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.readdir import _date_range, readdir
 from mirage.core.time_range import TimeRange
-from mirage.types import PathSpec
-from tests.fixtures.index_spy import WindowSpy
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 
 
 @pytest.fixture
@@ -36,23 +35,44 @@ def accessor(config):
     return SlackAccessor(config=config)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
-@pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
-    result = await readdir(
-        accessor,
-        PathSpec(vfs_path="", virtual="/", directory="/"),
-        index=index,
+def _channel(
+    dirname: str = "general__C001", created: int = 0, name: str = "general"
+) -> FileStat:
+    """A conversation's row as its container's listing names it."""
+    return FileStat(
+        name=dirname,
+        type=FileType.DIRECTORY,
+        extra={
+            "channel_id": dirname.rsplit("__", 1)[1],
+            "name": name,
+            "created": created,
+        },
     )
-    assert result == ["/channels", "/dms", "/users"]
+
+
+DAY = FileStat(
+    name="2026-04-10", type=FileType.DIRECTORY, extra={"channel_id": "C001"}
+)
+
+
+def _spec(virtual: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=virtual.strip("/"), virtual=virtual, directory=virtual
+    )
+
+
+def _paths(listed: list[FileStat] | DirListing, folder: str) -> list[str]:
+    return [f"{folder.rstrip('/')}/{row.name}" for row in rows_of(listed)]
 
 
 @pytest.mark.asyncio
-async def test_readdir_channels(accessor, index):
+async def test_readdir_root(accessor):
+    result = await readdir(accessor, _spec("/"))
+    assert _paths(result, "/") == ["/channels", "/dms", "/users"]
+
+
+@pytest.mark.asyncio
+async def test_readdir_channels(accessor):
     channels = [
         {"id": "C001", "name": "general"},
         {"id": "C002", "name": "random"},
@@ -62,12 +82,8 @@ async def test_readdir_channels(accessor, index):
         new_callable=AsyncMock,
         return_value=channels,
     ):
-        result = await readdir(
-            accessor,
-            PathSpec(
-                vfs_path="channels", virtual="/channels", directory="/channels"
-            ),
-            index=index,
+        result = _paths(
+            await readdir(accessor, _spec("/channels")), "/channels"
         )
 
     assert "/channels/general__C001" in result
@@ -75,7 +91,7 @@ async def test_readdir_channels(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_users(accessor, index):
+async def test_readdir_users(accessor):
     users = [
         {"id": "U001", "name": "alice"},
         {"id": "U002", "name": "bob"},
@@ -85,53 +101,28 @@ async def test_readdir_users(accessor, index):
         new_callable=AsyncMock,
         return_value=users,
     ):
-        result = await readdir(
-            accessor,
-            PathSpec(vfs_path="users", virtual="/users", directory="/users"),
-            index=index,
-        )
+        result = _paths(await readdir(accessor, _spec("/users")), "/users")
 
     assert "/users/alice__U001.json" in result
     assert "/users/bob__U002.json" in result
 
 
 @pytest.mark.asyncio
-async def test_readdir_channel_dates(accessor, index):
-    await index.set_dir(
-        "/channels",
-        [
-            (
-                "general__C001",
-                IndexEntry(
-                    id="C001",
-                    name="general",
-                    resource_type="slack/channel",
-                    vfs_name="general__C001",
-                ),
-            ),
-        ],
-    )
-
+async def test_readdir_channel_dates(accessor):
     now = datetime.now(timezone.utc)
     with patch(
         "mirage.core.slack.readdir._latest_message_ts",
         new_callable=AsyncMock,
         return_value=now.timestamp(),
     ):
-        result = await readdir(
-            accessor,
-            PathSpec(
-                vfs_path="channels/general__C001",
-                virtual="/channels/general__C001",
-                directory="/channels/general__C001",
-            ),
-            index=index,
+        listed = await readdir(
+            accessor, _spec("/channels/general__C001"), _channel()
         )
-
+    result = _paths(listed, "/channels/general__C001")
     assert len(result) >= 1
     assert all(not r.endswith(".jsonl") for r in result)
-    assert all(r.startswith("/channels/general__C001/") for r in result)
     assert result[0].endswith(now.strftime("%Y-%m-%d"))
+    assert listed.entries[0].extra == {"channel_id": "C001"}
 
 
 def test_date_range_recent():
@@ -185,7 +176,7 @@ def test_date_range_glob_span_outside_the_channel_is_empty():
 
 
 @pytest.mark.asyncio
-async def test_readdir_channels_stores_created(accessor, index):
+async def test_readdir_channels_keeps_created(accessor):
     channels = [
         {"id": "C001", "name": "general", "created": 1700000000},
     ]
@@ -194,180 +185,54 @@ async def test_readdir_channels_stores_created(accessor, index):
         new_callable=AsyncMock,
         return_value=channels,
     ):
-        await readdir(
-            accessor,
-            PathSpec(
-                vfs_path="channels", virtual="/channels", directory="/channels"
-            ),
-            index=index,
-        )
-    lookup = await index.get("/channels/general__C001")
-    assert lookup.entry is not None
-    assert lookup.entry.remote_time == "1700000000"
+        (row,) = await readdir(accessor, _spec("/channels"))
+    assert row.extra["created"] == 1700000000
+    assert row.modified is not None
 
 
 @pytest.mark.asyncio
-async def test_readdir_channel_dates_with_created(accessor, index):
-    await index.set_dir(
-        "/channels",
-        [
-            (
-                "general__C001",
-                IndexEntry(
-                    id="C001",
-                    name="general",
-                    resource_type="slack/channel",
-                    remote_time="1700000000",
-                    vfs_name="general__C001",
-                ),
-            ),
-        ],
-    )
+async def test_readdir_channel_dates_with_created(accessor):
     now = datetime.now(timezone.utc)
     with patch(
         "mirage.core.slack.readdir._latest_message_ts",
         new_callable=AsyncMock,
         return_value=now.timestamp(),
     ):
-        result = await readdir(
+        listed = await readdir(
             accessor,
-            PathSpec(
-                vfs_path="channels/general__C001",
-                virtual="/channels/general__C001",
-                directory="/channels/general__C001",
-            ),
-            index=index,
+            _spec("/channels/general__C001"),
+            _channel(created=1700000000),
         )
+    result = _paths(listed, "/channels/general__C001")
     assert len(result) == 90
     assert all(not r.endswith(".jsonl") for r in result)
     assert result[0].endswith(now.strftime("%Y-%m-%d"))
 
 
 @pytest.mark.asyncio
-async def test_readdir_channel_dates_cached_in_entries(accessor, index):
-    await index.set_dir(
-        "/channels",
-        [
-            (
-                "general__C001",
-                IndexEntry(
-                    id="C001",
-                    name="general",
-                    resource_type="slack/channel",
-                    remote_time="1700000000",
-                    vfs_name="general__C001",
-                ),
-            ),
-        ],
-    )
-    now = datetime.now(timezone.utc)
-    with patch(
-        "mirage.core.slack.readdir._latest_message_ts",
-        new_callable=AsyncMock,
-        return_value=now.timestamp(),
-    ):
-        await readdir(
-            accessor,
-            PathSpec(
-                vfs_path="channels/general__C001",
-                virtual="/channels/general__C001",
-                directory="/channels/general__C001",
-            ),
-            index=index,
-        )
-    listing = await index.list_dir("/channels/general__C001")
-    assert listing.entries is not None
-    assert len(listing.entries) == 90
-    assert all(not e.endswith(".jsonl") for e in listing.entries)
-
-
-@pytest.mark.asyncio
-async def test_readdir_date_dir_returns_chat_and_files(accessor, index):
-    await index.set_dir(
-        "/channels",
-        [
-            (
-                "general__C001",
-                IndexEntry(
-                    id="C001",
-                    name="general",
-                    resource_type="slack/channel",
-                    vfs_name="general__C001",
-                    remote_time="1700000000",
-                ),
-            ),
-        ],
-    )
-    await index.set_dir(
-        "/channels/general__C001",
-        [
-            (
-                "2026-04-10",
-                IndexEntry(
-                    id="C001:2026-04-10",
-                    name="2026-04-10",
-                    resource_type="slack/date_dir",
-                    vfs_name="2026-04-10",
-                ),
-            ),
-        ],
-    )
-
+async def test_readdir_date_dir_returns_chat_and_files(accessor):
     with patch(
         "mirage.core.slack.readdir.fetch_messages_for_day",
         new_callable=AsyncMock,
         return_value=[],
     ):
-        result = await readdir(
+        listed = await readdir(
             accessor,
-            PathSpec(
-                vfs_path="channels/general__C001/2026-04-10",
-                virtual="/channels/general__C001/2026-04-10",
-                directory="/channels/general__C001/2026-04-10",
-            ),
-            index=index,
+            _spec("/channels/general__C001/2026-04-10"),
+            DAY,
         )
 
-    assert sorted(result) == [
+    assert sorted(_paths(listed, "/channels/general__C001/2026-04-10")) == [
         "/channels/general__C001/2026-04-10/chat.jsonl",
         "/channels/general__C001/2026-04-10/files",
     ]
 
 
 @pytest.mark.asyncio
-async def test_readdir_skips_unreadable_file_payloads(accessor, index):
+async def test_readdir_skips_unreadable_file_payloads(accessor):
     # Tombstoned and access-restricted file payloads carry an id but no
     # download URL and no size; they must not be listed, or sizes_always_known
     # would be false and read() would ENOENT on a listed file.
-    await index.set_dir(
-        "/channels",
-        [
-            (
-                "general__C001",
-                IndexEntry(
-                    id="C001",
-                    name="general",
-                    resource_type="slack/channel",
-                    vfs_name="general__C001",
-                    remote_time="1700000000",
-                ),
-            ),
-        ],
-    )
-    await index.set_dir(
-        "/channels/general__C001",
-        [
-            (
-                "2026-04-10",
-                IndexEntry(
-                    id="C001:2026-04-10",
-                    name="2026-04-10",
-                    resource_type="slack/date_dir",
-                    vfs_name="2026-04-10",
-                ),
-            ),
-        ],
-    )
     messages = [
         {
             "ts": "1775000000.000100",
@@ -395,50 +260,29 @@ async def test_readdir_skips_unreadable_file_payloads(accessor, index):
         new_callable=AsyncMock,
         return_value=messages,
     ):
-        await readdir(
+        listed = await readdir(
             accessor,
-            PathSpec(
-                vfs_path="channels/general__C001/2026-04-10",
-                virtual="/channels/general__C001/2026-04-10",
-                directory="/channels/general__C001/2026-04-10",
-            ),
-            index=index,
+            _spec("/channels/general__C001/2026-04-10"),
+            DAY,
         )
-    listing = await index.list_dir("/channels/general__C001/2026-04-10/files")
-    assert listing.entries == [
-        "/channels/general__C001/2026-04-10/files/report__F1.pdf"
-    ]
-    lookup = await index.get(
-        "/channels/general__C001/2026-04-10/files/report__F1.pdf"
-    )
-    assert lookup.entry is not None
-    assert lookup.entry.size == 12
+    (blob,) = listed.seeds["files"]
+    assert blob.name == "report__F1.pdf"
+    assert blob.size == 12
 
 
-async def _dm_without_created(index) -> SlackAccessor:
-    await index.set_dir(
-        "/dms",
-        [
-            (
-                "alice__D001",
-                IndexEntry(
-                    id="D001",
-                    name="alice",
-                    resource_type="slack/dm",
-                    vfs_name="alice__D001",
-                ),
-            ),
-        ],
-    )
+def _dm_without_created() -> SlackAccessor:
     return SlackAccessor(
         SlackConfig(token="xoxb-test-token"),
         TimeRange.from_strings(None, "2026-06-02T00:00:00Z"),
     )
 
 
+DM = _channel("alice__D001", name="alice")
+
+
 @pytest.mark.asyncio
-async def test_end_scoped_glob_listing_skips_the_history_scan(index):
-    accessor = await _dm_without_created(index)
+async def test_end_scoped_glob_listing_skips_the_history_scan():
+    accessor = _dm_without_created()
     latest = datetime(2026, 6, 20, tzinfo=timezone.utc).timestamp()
     with (
         patch(
@@ -448,7 +292,7 @@ async def test_end_scoped_glob_listing_skips_the_history_scan(index):
         ),
         patch("mirage.core.slack.readdir.cursor_pages") as pages,
     ):
-        result = await readdir(
+        listed = await readdir(
             accessor,
             PathSpec(
                 virtual="/dms/alice__D001/2026-05-*",
@@ -456,19 +300,18 @@ async def test_end_scoped_glob_listing_skips_the_history_scan(index):
                 vfs_path="dms/alice__D001/2026-05-*",
                 pattern="2026-05-*",
             ),
-            index=index,
+            DM,
         )
     pages.assert_not_called()
+    result = _paths(listed, "/dms/alice__D001")
     assert len(result) == 31
     assert result[0] == "/dms/alice__D001/2026-05-31"
     assert result[-1] == "/dms/alice__D001/2026-05-01"
 
 
 @pytest.mark.asyncio
-async def test_end_scoped_bare_listing_pages_only_history_before_the_end(
-    index,
-):
-    accessor = await _dm_without_created(index)
+async def test_end_scoped_bare_listing_pages_only_history_before_the_end():
+    accessor = _dm_without_created()
     latest = datetime(2026, 6, 20, tzinfo=timezone.utc).timestamp()
     first = datetime(2026, 5, 30, 12, tzinfo=timezone.utc).timestamp()
     end = datetime(2026, 6, 2, tzinfo=timezone.utc).timestamp()
@@ -486,17 +329,9 @@ async def test_end_scoped_bare_listing_pages_only_history_before_the_end(
         ),
         patch("mirage.core.slack.readdir.cursor_pages", new=pages),
     ):
-        result = await readdir(
-            accessor,
-            PathSpec(
-                vfs_path="dms/alice__D001",
-                virtual="/dms/alice__D001",
-                directory="/dms/alice__D001",
-            ),
-            index=index,
-        )
+        listed = await readdir(accessor, _spec("/dms/alice__D001"), DM)
     assert asked == [{"channel": "D001", "limit": 200, "latest": f"{end:.6f}"}]
-    assert result == [
+    assert _paths(listed, "/dms/alice__D001") == [
         "/dms/alice__D001/2026-06-01",
         "/dms/alice__D001/2026-05-31",
         "/dms/alice__D001/2026-05-30",
@@ -504,40 +339,19 @@ async def test_end_scoped_bare_listing_pages_only_history_before_the_end(
 
 
 @pytest.mark.asyncio
-async def test_a_channel_listing_is_written_as_a_window(accessor):
+async def test_a_channel_listing_is_a_window(accessor):
     # The bare listing covers the last 90 days only; a day that falls out
     # of it still exists and is still readable by path.
-    index = WindowSpy()
-    await index.set_dir(
-        "/channels",
-        [
-            (
-                "general__C001",
-                IndexEntry(
-                    id="C001",
-                    name="general",
-                    resource_type="slack/channel",
-                    vfs_name="general__C001",
-                ),
-            ),
-        ],
-    )
     now = datetime.now(timezone.utc)
     with patch(
         "mirage.core.slack.readdir._latest_message_ts",
         new_callable=AsyncMock,
         return_value=now.timestamp(),
     ):
-        await readdir(
-            accessor,
-            PathSpec(
-                vfs_path="channels/general__C001",
-                virtual="/channels/general__C001",
-                directory="/channels/general__C001",
-            ),
-            index=index,
+        listed = await readdir(
+            accessor, _spec("/channels/general__C001"), _channel()
         )
-    assert index.windows["/channels/general__C001"] is True
+    assert listed.window is True
 
 
 FILES_DIR = "/channels/general__C001/2026-04-10/files"
@@ -555,56 +369,22 @@ REPORT = {
 }
 
 
-async def _list_files_dir(accessor, index, messages) -> list[str]:
-    await index.set_dir(
-        "/channels",
-        [
-            (
-                "general__C001",
-                IndexEntry(
-                    id="C001",
-                    name="general",
-                    resource_type="slack/channel",
-                    vfs_name="general__C001",
-                    remote_time="1700000000",
-                ),
-            ),
-        ],
-    )
-    await index.set_dir(
-        "/channels/general__C001",
-        [
-            (
-                "2026-04-10",
-                IndexEntry(
-                    id="C001:2026-04-10",
-                    name="2026-04-10",
-                    resource_type="slack/date_dir",
-                    vfs_name="2026-04-10",
-                ),
-            ),
-        ],
+async def _list_files_dir(accessor, messages) -> list[FileStat]:
+    files = FileStat(
+        name="files",
+        type=FileType.DIRECTORY,
+        extra={"channel_id": "C001", "date": "2026-04-10"},
     )
     with patch(
         "mirage.core.slack.readdir.fetch_messages_for_day",
         new_callable=AsyncMock,
         return_value=messages,
     ):
-        return await readdir(
-            accessor,
-            PathSpec(
-                vfs_path=FILES_DIR.lstrip("/"),
-                virtual=FILES_DIR,
-                directory=FILES_DIR,
-            ),
-            index=index,
-        )
+        return rows_of(await readdir(accessor, _spec(FILES_DIR), files))
 
 
 @pytest.mark.asyncio
-async def test_files_dir_lists_attachments_and_indexes_their_url(
-    accessor, index
-):
+async def test_files_dir_lists_attachments_and_keeps_their_url(accessor):
     messages = [
         {
             "type": "message",
@@ -619,21 +399,19 @@ async def test_files_dir_lists_attachments_and_indexes_their_url(
             "text": "no file here",
         },
     ]
-    result = await _list_files_dir(accessor, index, messages)
-    assert result == [f"{FILES_DIR}/report__F1ABC.pdf"]
-    blob = await index.get(f"{FILES_DIR}/report__F1ABC.pdf")
-    assert blob.entry is not None
-    assert blob.entry.id == "F1ABC"
-    assert blob.entry.size == 4096
-    assert blob.entry.extra["mimetype"] == "application/pdf"
-    assert "url_private_download" in blob.entry.extra
-    assert blob.entry.extra["filetype"] == "pdf"
-    assert blob.entry.extra["ts"] == "1712707200.0"
+    (blob,) = await _list_files_dir(accessor, messages)
+    assert blob.name == "report__F1ABC.pdf"
+    assert blob.extra["file_id"] == "F1ABC"
+    assert blob.size == 4096
+    assert blob.extra["mimetype"] == "application/pdf"
+    assert "url_private_download" in blob.extra
+    assert blob.extra["filetype"] == "pdf"
+    assert blob.extra["ts"] == "1712707200.0"
 
 
 @pytest.mark.asyncio
-async def test_files_dir_empty_on_no_attachments(accessor, index):
+async def test_files_dir_empty_on_no_attachments(accessor):
     messages = [
         {"type": "message", "user": "U1", "ts": "1712707200.0", "text": "hi"}
     ]
-    assert await _list_files_dir(accessor, index, messages) == []
+    assert await _list_files_dir(accessor, messages) == []

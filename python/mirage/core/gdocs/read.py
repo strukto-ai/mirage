@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.gdocs.constants import MIME
 from mirage.core.gdocs.scope import detect_scope
 from mirage.core.google.client import TokenManager, docs_base, google_get
@@ -22,7 +21,7 @@ from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import compact_json_bytes
 from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.vfs.gdocs.doc_entry import make_filename
 
 TABS_CONTENT_PARAM = "true"
@@ -56,26 +55,21 @@ async def _read_file(
     accessor: GDocsAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    entry = await resolve_app_entry(
-        accessor.token_manager,
-        match,
-        path,
-        index,
-        MIME,
-        "gdocs/file",
-        make_filename,
+    row = entry or await resolve_app_entry(
+        accessor.token_manager, match, path, MIME, make_filename
     )
     timer = start_op()
-    data = await read_doc(accessor.token_manager, entry.id)
+    data = await read_doc(accessor.token_manager, match.slots["file_id"])
     record(
         "read",
         path.virtual,
         "gdocs",
         len(data),
         timer,
-        fingerprint=entry.remote_time or None,
+        fingerprint=row.fingerprint,
     )
     return data
 

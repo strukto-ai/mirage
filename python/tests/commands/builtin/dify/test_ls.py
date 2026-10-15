@@ -1,15 +1,13 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandOpts
 from mirage.core.dify import tree
-from mirage.io.types import materialize
 from mirage.vfs.dify import DifyVFS
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
 from .conftest import document
-
-ls = generic("ls").fn
 
 
 async def list_basic_documents(accessor):
@@ -20,23 +18,18 @@ async def list_basic_documents(accessor):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("flags", [{}, {"args_l": True}], ids=["ls", "ls -l"])
-async def test_ls_lists_the_virtual_tree(
-    monkeypatch, dify_accessor, dify_index, knowledge_root, flags
-):
+@pytest.mark.parametrize("line", ["ls /knowledge", "ls -l /knowledge"])
+async def test_ls_lists_the_virtual_tree(monkeypatch, dify_accessor, line):
     monkeypatch.setattr(tree, "list_all_documents", list_basic_documents)
+    dify_accessor.close = AsyncMock()
+    ws = Workspace({"/knowledge/": vfs_over(DifyVFS, dify_accessor)})
+    try:
+        result = await ws.shell(line)
+        output = await result.stdout_str()
+    finally:
+        await ws.close()
 
-    stdout, io = await ls(
-        dify_accessor,
-        [knowledge_root],
-        [],
-        CommandOpts(
-            io=io_for(DifyVFS, dify_accessor), index=dify_index, flags=flags
-        ),
-    )
-
-    output = (await materialize(stdout)).decode()
     rows = [r for r in output.splitlines() if not r.startswith("total ")]
     assert [row.split()[-1] for row in rows] == ["README.md", "guides"]
     assert output.endswith("\n")
-    assert io.exit_code == 0
+    assert result.exit_code == 0

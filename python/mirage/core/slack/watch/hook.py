@@ -78,8 +78,8 @@ class SlackEventHook:
     ``file_id``, ``file_deleted`` sends ``file_id`` and the deletion's
     own ``event_ts``. Asking Slack does not recover it either, since
     ``files.info`` on a deleted file answers with the ``file_deleted``
-    error. What does recover it is this mount's own index, which stores
-    each blob's Slack id as ``IndexEntry.id``, so a reverse lookup
+    error. What does recover it is this mount's own index, whose rows
+    carry each blob's Slack id as ``extra["file_id"]``, so a reverse lookup
     names the exact path; and a file the index has never seen is one
     nothing has cached, so there is nothing to invalidate. The hook
     simply is not handed the index today. Until it is, both ride the

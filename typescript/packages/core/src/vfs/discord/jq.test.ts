@@ -12,54 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { materialize } from '../../io/types.ts'
-import { PathSpec } from '../../types.ts'
-import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
-import { generic } from '../../commands/builtin/generic_bind/factory.ts'
+import { FakeDiscordTransport, runDiscord } from './_test_util.ts'
 
-const DISCORD_JQ = [generic('jq')]
-
-const DEC = new TextDecoder()
-
-async function runJq(
-  paths: PathSpec[],
-  texts: string[],
-  flags: Record<string, string | boolean | number | string[]>,
-  options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
-): Promise<{ stdout: string; exitCode: number }> {
-  const cmd = DISCORD_JQ[0]
-  if (cmd === undefined) throw new Error('jq not registered')
-  const transport = options.transport ?? new FakeDiscordTransport()
-  const vfs = makeFakeVfs(transport)
-  const result = await cmd.fn(vfs.accessor, paths, texts, {
-    stdin: null,
-    flags,
-    io: commandIo(vfs),
-    cwd: '/',
-    ...(options.index !== undefined ? { index: options.index } : {}),
-  })
-  if (result === null) return { stdout: '', exitCode: 0 }
-  const [out, io] = result
-  const buf =
-    out === null
-      ? new Uint8Array()
-      : out instanceof Uint8Array
-        ? out
-        : await materialize(out as AsyncIterable<Uint8Array>)
-  return { stdout: DEC.decode(buf), exitCode: io.exitCode }
-}
+const CHAT = '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl'
 
 describe('discord jq', () => {
   it('extracts .content from each jsonl message', async () => {
-    const idx = new RAMIndexCacheStore()
-    await seedGuild(idx, '/mnt/discord', 'My Server__G1', 'G1')
-    await seedChannel(idx, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', {
-      dates: ['2016-04-30'],
-    })
     const transport = new FakeDiscordTransport((_m, endpoint) => {
       if (endpoint === '/channels/C1/messages') {
         return [
@@ -69,22 +28,7 @@ describe('discord jq', () => {
       }
       return null
     })
-    const out = await runJq(
-      [
-        new PathSpec({
-          virtual: '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-          directory: '/mnt/discord/My Server__G1/channels/general__C1/',
-          resolved: false,
-          vfsPath: mountKey(
-            '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-            '/mnt/discord',
-          ),
-        }),
-      ],
-      ['.content'],
-      { raw_output: true },
-      { index: idx, transport },
-    )
+    const out = await runDiscord(transport, `jq -r .content "${CHAT}"`, ['2016-04-30'])
     const lines = out.stdout.split('\n').filter((s) => s !== '')
     expect(lines).toEqual(['hello', 'world'])
   })

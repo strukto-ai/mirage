@@ -13,20 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
-from functools import partial
 from typing import Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.cache.index.config import ListedMiss
-from mirage.cache.index.warm import entry_or_listed_miss
-from mirage.errors.fs import enoent
-from mirage.types import PathSpec, StatFn
-from mirage.utils.key_prefix import (
-    mount_key,
-    mount_prefix_of,
-    mounted_path,
-)
+from mirage.types import DirListing, FileStat, FileType, PathSpec
+from mirage.utils.key_prefix import mount_key, mount_prefix_of, mounted_path
 
 A = TypeVar("A", bound=Accessor)
 A_contra = TypeVar("A_contra", bound=Accessor, contravariant=True)
@@ -38,8 +29,9 @@ class ReaddirFn(Protocol[A_contra]):
         accessor: A_contra,
         path_spec: PathSpec,
         /,
-        index: IndexCacheStore = ...,
-    ) -> Awaitable[list[str]]: ...
+        entry: FileStat | None = ...,
+        parent: FileStat | None = ...,
+    ) -> Awaitable[list[FileStat] | DirListing]: ...
 
 
 def parent_spec(path: PathSpec) -> PathSpec:
@@ -57,187 +49,83 @@ def parent_spec(path: PathSpec) -> PathSpec:
     )
 
 
-async def assert_listed(
-    readdir: ReaddirFn[A], accessor: A, path: PathSpec, index: IndexCacheStore
-) -> None:
-    """Raise ENOENT unless the path appears in its parent's listing.
-
-    Every path shape a fixed hierarchy serves is recognizable from the
-    text alone, but a recognizable shape is not evidence the entry
-    exists. The parent listing is index-cached, so validating costs one
-    listing per directory rather than one API call per stat.
+def rows_of(listed: list[FileStat] | DirListing) -> list[FileStat]:
+    """The listed directory's own children, whichever shape listed them.
 
     Args:
-        readdir (ReaddirFn): the backend's readdir.
-        accessor (Accessor): backend accessor.
-        path (PathSpec): VFS-relative path being stat'd.
-        index (IndexCacheStore): index cache.
-
-    Raises:
-        FileNotFoundError: the entry is absent from its parent listing.
+        listed (list[FileStat] | DirListing): a readdir's answer.
     """
-    entries = await readdir(accessor, parent_spec(path), index=index)
-    names = {entry.rstrip("/").rsplit("/", 1)[-1] for entry in entries}
-    if path.vfs_path.rstrip("/").rsplit("/", 1)[-1] not in names:
-        raise enoent(path.virtual)
+    return listed.entries if isinstance(listed, DirListing) else listed
 
 
-async def assert_parent(
-    stat: StatFn, accessor: A, path: PathSpec, index: IndexCacheStore
-) -> None:
-    """Raise ENOENT for ``path`` unless its parent directory exists.
-
-    The parent is proven the way the backend's own stat proves it (a
-    guard, the listing chain, or construction for a fixed directory), so
-    a container its listing refuses reads as absent to everything inside
-    it. That is where a mount's id filters live: a board outside
-    ``board_ids`` or a schema outside ``schemas`` is simply not listed,
-    and a reader that went straight to the id in the path served it
-    anyway.
+def is_directory(row: FileStat) -> bool:
+    """Whether a listed row is a directory to walk into.
 
     Args:
-        stat (StatFn): the backend's stat.
-        accessor (Accessor): backend accessor.
-        path (PathSpec): the file about to be read.
-        index (IndexCacheStore): index cache.
-
-    Raises:
-        FileNotFoundError: the parent directory does not exist.
+        row (FileStat): the row.
     """
-    try:
-        await stat(accessor, parent_spec(path), index)
-    except FileNotFoundError as exc:
-        # Named as the file the caller asked for, the way GNU reports
-        # `cat missing/f` against the operand rather than its directory.
-        raise enoent(path.virtual) from exc
+    return row.type is FileType.DIRECTORY
 
 
-async def listed_size(index: IndexCacheStore, path: PathSpec) -> int | None:
-    """Return the size the parent listing recorded for this path.
-
-    Args:
-        index (IndexCacheStore): index cache.
-        path (PathSpec): VFS-relative path being stat'd.
-    """
-    # assert_listed has just populated the parent directory, so any size
-    # the listing computed is already in the index.
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    lookup = await index.get(prefix + "/" + path.vfs_path)
-    return lookup.entry.size if lookup.entry is not None else None
-
-
-async def resolve_entry(
-    readdir: ReaddirFn[A], accessor: A, path: PathSpec, index: IndexCacheStore
-) -> IndexEntry | None:
-    """Resolve the path's index entry, listing its parent when cold.
-
-    Id-addressed backends can only turn a path into an id through the
-    index, so the entry is the proof of existence AND the id source; this
-    wraps ``entry_or_warm`` with the parent-readdir warm every such
-    backend used to spell by hand.
-
-    Args:
-        readdir (ReaddirFn): the backend's readdir.
-        accessor (Accessor): backend accessor.
-        path (PathSpec): VFS-relative path being resolved.
-        index (IndexCacheStore): index cache.
-    """
-    found = await resolve_listed_entry(readdir, accessor, path, index)
-    return None if found is ListedMiss.UNTRUSTED else found
-
-
-async def resolve_listed_entry(
-    readdir: ReaddirFn[A], accessor: A, path: PathSpec, index: IndexCacheStore
-) -> IndexEntry | ListedMiss | None:
-    """``resolve_entry`` for a backend that can ask by path.
-
-    A name missing from a cached listing the running command did not
-    fetch answers ``ListedMiss.UNTRUSTED`` (``entry_or_listed_miss``).
-
-    Args:
-        readdir (ReaddirFn): the backend's readdir.
-        accessor (Accessor): backend accessor.
-        path (PathSpec): VFS-relative path being resolved.
-        index (IndexCacheStore): index cache.
-    """
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    key = path.vfs_path.strip("/")
-    virtual_key = prefix + "/" + key if key else prefix or "/"
-    parent_virtual = virtual_key.rsplit("/", 1)[0] or "/"
-    warm = None
-    if parent_virtual != virtual_key:
-        warm = partial(
-            readdir,
-            accessor,
-            PathSpec(
-                virtual=parent_virtual,
-                directory=parent_virtual,
-                vfs_path=mount_key(parent_virtual, prefix),
-            ),
-            index=index,
-        )
-    return await entry_or_listed_miss(index, virtual_key, warm)
-
-
-async def ancestor_entry(
-    readdir: ReaddirFn[A],
-    accessor: A,
-    path: PathSpec,
-    index: IndexCacheStore,
-    up: int,
-) -> IndexEntry | None:
-    """Resolve the index entry ``up`` levels above the path.
-
-    Args:
-        readdir (ReaddirFn): the backend's readdir.
-        accessor (Accessor): backend accessor.
-        path (PathSpec): the path to climb from.
-        index (IndexCacheStore): index cache.
-        up (int): how many levels to climb.
-    """
-    virtual = path.virtual.rstrip("/")
-    for _ in range(up):
-        virtual = virtual.rsplit("/", 1)[0]
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    spec = PathSpec(
-        virtual=virtual, directory=virtual, vfs_path=mount_key(virtual, prefix)
-    )
-    return await resolve_entry(readdir, accessor, spec, index)
-
-
-async def entries_under(
+async def rows_under(
     readdir: ReaddirFn[A],
     accessor: A,
     directory: PathSpec,
-    index: IndexCacheStore,
-    is_dir: Callable[[IndexEntry], bool],
-) -> list[tuple[PathSpec, IndexEntry]] | None:
-    """Every entry below ``directory`` with its index entry.
-
-    The walk lists through the index, so a search that answers by id
-    pays for the listings grep's own walk reads next. None when a listed
-    name has no entry.
+    entry: FileStat | None,
+    parent: FileStat | None = None,
+    is_dir: Callable[[FileStat], bool] = is_directory,
+) -> list[tuple[PathSpec, FileStat]]:
+    """Every row below ``directory``, walked through the backend's own
+    listings, each directory handed the row its parent's listing named.
 
     Args:
         readdir (ReaddirFn): the backend's readdir.
         accessor (Accessor): backend accessor.
         directory (PathSpec): the directory walked.
-        index (IndexCacheStore): index cache.
-        is_dir (Callable[[IndexEntry], bool]): whether an entry is a
-            directory to walk into.
+        entry (FileStat | None): what is at ``directory``.
+        parent (FileStat | None): what is at its parent.
+        is_dir (Callable[[FileStat], bool]): whether a row is a directory
+            to walk into.
     """
-    found: list[tuple[PathSpec, IndexEntry]] = []
-    pending = [directory]
+    found: list[tuple[PathSpec, FileStat]] = []
+    pending = [(directory, entry, parent)]
     while pending:
-        current = pending.pop()
+        current, row, above = pending.pop()
         base = current.mount_path.rstrip("/")
-        for listed in await readdir(accessor, current, index):
-            name = listed.rstrip("/").rsplit("/", 1)[-1]
-            child = mounted_path(current, f"{base}/{name}")
-            entry = await resolve_entry(readdir, accessor, child, index)
-            if entry is None:
-                return None
-            found.append((child, entry))
-            if is_dir(entry):
-                pending.append(child)
+        for child in rows_of(await readdir(accessor, current, row, above)):
+            path = mounted_path(current, f"{base}/{child.name}")
+            found.append((path, child))
+            if is_dir(child):
+                pending.append((path, child, row))
     return found
+
+
+async def row_at(
+    readdir: ReaddirFn[A], accessor: A, path: PathSpec
+) -> tuple[FileStat | None, FileStat | None]:
+    """What is at ``path`` and at its parent, as each level's listing
+    names it, listed from the mount root down: a walk that starts below
+    the root hands its first directory these.
+
+    The mount root is no listing's child, so it answers nothing; a name
+    a level does not list answers no row at ``path``.
+
+    Args:
+        readdir (ReaddirFn): the backend's readdir.
+        accessor (Accessor): backend accessor.
+        path (PathSpec): the path.
+    """
+    key = path.mount_path.strip("/")
+    entry: FileStat | None = None
+    parent: FileStat | None = None
+    current = mounted_path(path, "/")
+    for name in key.split("/") if key else []:
+        listed = rows_of(await readdir(accessor, current, entry, parent))
+        row = next((row for row in listed if row.name == name), None)
+        if row is None:
+            return None, entry
+        entry, parent = row, entry
+        current = mounted_path(
+            path, f"{current.mount_path.rstrip('/')}/{name}"
+        )
+    return entry, parent

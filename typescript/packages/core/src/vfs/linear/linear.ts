@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import { LinearAccessor } from '../../accessor/linear.ts'
 
 import { filesContaining as linearFilesContaining } from '../../core/linear/search.ts'
@@ -21,9 +22,8 @@ import { redactLinearConfig } from '../../core/linear/config.ts'
 import type { LinearConfig, LinearConfigRedacted } from '../../core/linear/config.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
-import { VFSName } from '../../types.ts'
+import { type DirListing, VFSName } from '../../types.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as linearReaddir } from '../../core/linear/readdir.ts'
 import { read as linearRead } from '../../core/linear/read.ts'
@@ -35,6 +35,13 @@ export interface LinearVFSState {
 }
 
 export class LinearVFS extends BaseVFS {
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['parent'],
+    stat: ['entry'],
+  } as const
+
   override readonly name: string = VFSName.LINEAR
   override readonly cachesReads: boolean = true
   // Every file is sized at its parent's readdir from the listing payload
@@ -70,33 +77,31 @@ export class LinearVFS extends BaseVFS {
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     return linearFilesContaining(
       this.accessor,
       text,
       [path],
-      index,
       opts.wholeWord && this.config.contentSearch === true,
     )
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return linearReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return linearReaddir(this.accessor, path, handed?.entry)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await linearRead(this.accessor, path, index)
+    const data = await linearRead(this.accessor, path, null, handed?.parent)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return linearStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return linearStat(this.accessor, path, handed?.entry)
   }
 
   override getState(): Promise<LinearVFSState> {

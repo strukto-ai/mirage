@@ -12,29 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { materialize } from '../../io/types.ts'
-import { PathSpec } from '../../types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { FakeSlackTransport, makeFakeVfs } from './_test_util.ts'
-import { generic } from '../../commands/builtin/generic_bind/factory.ts'
-
-const SLACK_LS = [generic('ls')]
-
-const DEC = new TextDecoder()
 
 // Regression guard for the Python-side bug fixed in PR #48: `ls` (no args)
 // after `cd /slack/...` would return [] because the cwd PathSpec was rebuilt
-// without preserving the mount prefix. TS doesn't reproduce the bug today
-// (opts.cwd is a string and opts.mountPrefix is set separately by
-// Mount.runCommand), but this test pins the contract so a future refactor
-// that drops `prefix: opts.mountPrefix ?? ''` from slack/ls.ts surfaces
-// immediately.
+// without preserving the mount prefix.
 describe('slack ls (no args) after cd preserves mount prefix', () => {
-  it('cwd=/slack/channels/general__C1 + mountPrefix=/slack returns date entries', async () => {
-    const idx = new RAMIndexCacheStore()
+  it('cwd=/slack/channels/general__C1 returns date entries', async () => {
     const channelsPage = {
       ok: true,
       channels: [{ id: 'C1', name: 'general', created: 1700000000 }],
@@ -50,48 +37,18 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
       if (endpoint === 'conversations.history') return historyPage
       throw new Error(`unexpected ${endpoint}`)
     })
-    const vfs = makeFakeVfs(transport)
-    const cmd = SLACK_LS[0]
-    if (cmd === undefined) throw new Error('ls not registered')
-    // Prime parent so the channel is cached (mirrors what `cd` would force)
-    await cmd.fn(
-      vfs.accessor,
-      [
-        new PathSpec({
-          virtual: '/slack/channels',
-          directory: '/slack/channels',
-          resolved: false,
-          vfsPath: mountKey('/slack/channels', '/slack'),
-        }),
-      ],
-      [],
-      {
-        stdin: null,
-        flags: {},
-        io: commandIo(vfs),
-        cwd: '/slack/channels',
-        mountPrefix: '/slack',
-        index: idx,
-      },
+    const ws = new Workspace(
+      { '/slack/': makeFakeVfs(transport) },
+      { shellParser: await getTestParser() },
     )
-
-    // Now: ls (no args) with cwd = the channel directory, mountPrefix = /slack
-    const out = await cmd.fn(vfs.accessor, [], [], {
-      stdin: null,
-      flags: {},
-      io: commandIo(vfs),
-      cwd: '/slack/channels/general__C1',
-      mountPrefix: '/slack',
-      index: idx,
-    })
-    expect(out).not.toBeNull()
-    const [bytes] = out as [Uint8Array, unknown]
-    const stdout =
-      bytes instanceof Uint8Array
-        ? DEC.decode(bytes)
-        : DEC.decode(await materialize(bytes as AsyncIterable<Uint8Array>))
-    expect(stdout.trim()).not.toBe('')
-    const first = stdout.trim().split('\n')[0] ?? ''
-    expect(first).toMatch(/^\d{4}-\d{2}-\d{2}/)
+    try {
+      const io = await ws.shell('cd /slack/channels/general__C1 && ls')
+      const stdout = new TextDecoder().decode(io.stdout)
+      expect(stdout.trim()).not.toBe('')
+      const first = stdout.trim().split('\n')[0] ?? ''
+      expect(first).toMatch(/^\d{4}-\d{2}-\d{2}/)
+    } finally {
+      await ws.close()
+    }
   })
 })

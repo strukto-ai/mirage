@@ -13,9 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDocsAccessor } from '../../accessor/gdocs.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { docsBase, type TokenManager, googleGet } from '../google/client.ts'
 import { resolveAppEntry } from '../google/entry.ts'
 import { MIME } from './constants.ts'
@@ -46,21 +45,14 @@ async function readFile(
   accessor: GDocsAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const entry = await resolveAppEntry(
-    accessor.tokenManager,
-    match,
-    path,
-    index,
-    MIME,
-    'gdocs/file',
-    makeFilename,
-  )
+  const row =
+    entry ?? (await resolveAppEntry(accessor.tokenManager, match, path, MIME, makeFilename))
   const timer = startOp()
-  const data = await readDoc(accessor.tokenManager, entry.id)
+  const data = await readDoc(accessor.tokenManager, match.slots.file_id ?? '')
   record('read', path.virtual, 'gdocs', data.length, timer, {
-    fingerprint: entry.remoteTime !== '' ? entry.remoteTime : null,
+    fingerprint: row.fingerprint,
   })
   return data
 }

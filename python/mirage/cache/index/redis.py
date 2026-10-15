@@ -750,7 +750,11 @@ class RedisIndexCacheStore(IndexCacheStore):
             return ListResult(
                 partial_entries=listing.entries, version=listing.version
             )
-        return ListResult(entries=listing.entries, version=listing.version)
+        return ListResult(
+            entries=listing.entries,
+            version=listing.version,
+            window=listing.window,
+        )
 
     async def set_dir(
         self,
@@ -819,6 +823,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             generation=f"{generation}:{directory_generation}",
             partial=partial,
             version=None if partial else version,
+            window=not partial and not evict,
         )
         if not evict:
             pipe = self._client.pipeline()

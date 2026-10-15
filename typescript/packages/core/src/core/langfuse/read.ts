@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { makeRead } from '../hierarchy/read.ts'
@@ -52,7 +51,6 @@ async function readTrace(
   accessor: LangfuseAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   return jsonBytes(await fetchTraceFile(accessor, match, path))
 }
@@ -61,7 +59,6 @@ async function readPromptVersion(
   accessor: LangfuseAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   // The scope's codec only matches plain ASCII integers, so the parse here
   // cannot fail.
@@ -77,7 +74,6 @@ async function readDatasetItems(
   accessor: LangfuseAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const items = await fetchOrEnoent(
     fetchDatasetItems(accessor.transport, match.slots.dataset_name ?? ''),
@@ -90,7 +86,6 @@ async function readDatasetRun(
   accessor: LangfuseAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const runs = await fetchOrEnoent(
     fetchDatasetRuns(accessor.transport, match.slots.dataset_name ?? ''),

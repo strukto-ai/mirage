@@ -18,18 +18,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.read import read
-from mirage.core.trello.readdir import readdir
-from mirage.core.trello.stat import stat
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.vfs.trello import TrelloVFS
 from mirage.vfs.trello.config import TrelloConfig
-
-CARDS = (
-    "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
-    "/lists/Backlog__l1/cards"
-)
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
 
 @pytest.fixture
@@ -37,32 +31,23 @@ def accessor():
     return TrelloAccessor(TrelloConfig(api_key="key", api_token="token"))
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+# The directory a read is under, as the mount hands its row: a read
+# proves the file's directory exists through it before fetching by the
+# ids in the path.
+DIR = FileStat(name="dir", type=FileType.DIRECTORY)
 
 
-def _entry(name: str, ident: str, kind: str) -> tuple[str, IndexEntry]:
-    return (
-        name,
-        IndexEntry(
-            id=ident, name=name, resource_type=f"trello/{kind}", vfs_name=name
-        ),
-    )
+def _mounted(accessor: TrelloAccessor) -> Workspace:
+    return Workspace({"/trello/": vfs_over(TrelloVFS, accessor)})
 
 
-async def _seed_card(index: RAMIndexCacheStore) -> None:
-    # The listing a traversal would have left: a read proves the card's
-    # directory exists through it before fetching the card by its id.
-    await index.set_dir(CARDS, [_entry("Fix_login__c1", "c1", "card")])
+def _at(path: str) -> PathSpec:
+    return PathSpec.from_str_path("/trello" + path)
 
 
 @pytest.mark.asyncio
-async def test_read_workspace_json(accessor, index):
+async def test_read_workspace_json(accessor):
     workspaces = [{"id": "ws1", "displayName": "Engineering", "name": "eng"}]
-    await index.set_dir(
-        "/workspaces", [_entry("Engineering__ws1", "ws1", "workspace")]
-    )
     with patch(
         "mirage.core.trello.read.list_workspaces",
         new_callable=AsyncMock,
@@ -73,7 +58,7 @@ async def test_read_workspace_json(accessor, index):
             PathSpec.from_str_path(
                 "/workspaces/Engineering__ws1/workspace.json"
             ),
-            index,
+            parent=DIR,
         )
     payload = json.loads(result)
     assert payload["workspace_id"] == "ws1"
@@ -81,7 +66,7 @@ async def test_read_workspace_json(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_card_json(accessor, index):
+async def test_read_card_json(accessor):
     card = {
         "id": "c1",
         "name": "Fix login",
@@ -96,7 +81,6 @@ async def test_read_card_json(accessor, index):
         "shortUrl": "https://trello.com/c/abc",
         "members": [{"id": "m1", "username": "alice"}],
     }
-    await _seed_card(index)
     with patch(
         "mirage.core.trello.read.get_card",
         new_callable=AsyncMock,
@@ -108,7 +92,7 @@ async def test_read_card_json(accessor, index):
                 "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
                 "/lists/Backlog__l1/cards/Fix_login__c1/card.json"
             ),
-            index,
+            parent=DIR,
         )
     payload = json.loads(result)
     assert payload["card_id"] == "c1"
@@ -116,7 +100,7 @@ async def test_read_card_json(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_comments_jsonl(accessor, index):
+async def test_read_comments_jsonl(accessor):
     comments = [
         {
             "id": "act1",
@@ -125,7 +109,6 @@ async def test_read_comments_jsonl(accessor, index):
             "data": {"text": "This needs fixing"},
         }
     ]
-    await _seed_card(index)
     with patch(
         "mirage.core.trello.read.list_card_comments",
         new_callable=AsyncMock,
@@ -137,7 +120,7 @@ async def test_read_comments_jsonl(accessor, index):
                 "/workspaces/Engineering__ws1/boards/Product_Roadmap__b1"
                 "/lists/Backlog__l1/cards/Fix_login__c1/comments.jsonl"
             ),
-            index,
+            parent=DIR,
         )
     line = json.loads(result.decode().strip())
     assert line["comment_id"] == "act1"
@@ -145,11 +128,9 @@ async def test_read_comments_jsonl(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_missing_path(accessor, index):
+async def test_read_missing_path(accessor):
     with pytest.raises(FileNotFoundError):
-        await read(
-            accessor, PathSpec.from_str_path("/nonexistent/path"), index
-        )
+        await read(accessor, PathSpec.from_str_path("/nonexistent/path"))
 
 
 WS1 = {"id": "ws1", "displayName": "Engineering", "name": "eng"}
@@ -160,7 +141,7 @@ SECRET = "/workspaces/Engineering__ws1/boards/Secret__b2"
 
 
 @pytest.mark.asyncio
-async def test_a_board_outside_board_ids_is_absent_on_every_surface(index):
+async def test_a_board_outside_board_ids_is_absent_on_every_surface():
     """The listing drops a board ``board_ids`` leaves out, and the read
     used to go straight to the id in the path: ``cat`` served a board
     ``ls`` and ``stat`` both reported absent."""
@@ -173,6 +154,7 @@ async def test_a_board_outside_board_ids_is_absent_on_every_surface(index):
         ]
     )
     get_card = AsyncMock(return_value={"id": "c9", "name": "Payroll"})
+    ws = _mounted(accessor)
     with (
         patch(
             "mirage.core.trello.readdir.list_workspaces",
@@ -185,38 +167,35 @@ async def test_a_board_outside_board_ids_is_absent_on_every_surface(index):
         patch("mirage.core.trello.read.get_board", get_board),
         patch("mirage.core.trello.read.get_card", get_card),
     ):
-        board_json = PathSpec.from_str_path(SECRET + "/board.json")
-        for surface in (read, stat):
+        board_json = _at(SECRET + "/board.json")
+        for op in ("read", "stat"):
             with pytest.raises(FileNotFoundError):
-                await surface(accessor, board_json, index)
+                await ws.dispatch(op, board_json)
         with pytest.raises(FileNotFoundError):
-            await readdir(accessor, PathSpec.from_str_path(SECRET), index)
+            await ws.dispatch("readdir", _at(SECRET))
         with pytest.raises(FileNotFoundError):
-            await read(
-                accessor,
-                PathSpec.from_str_path(
-                    SECRET + "/lists/Todo__l9/cards/Payroll__c9/card.json"
-                ),
-                index,
+            await ws.dispatch(
+                "read",
+                _at(SECRET + "/lists/Todo__l9/cards/Payroll__c9/card.json"),
             )
         get_board.assert_not_awaited()
         get_card.assert_not_awaited()
-        scoped = await read(
-            accessor,
-            PathSpec.from_str_path(
+        scoped, _ = await ws.dispatch(
+            "read",
+            _at(
                 "/workspaces/Engineering__ws1/boards"
                 "/Product_Roadmap__b1/board.json"
             ),
-            index,
         )
     assert json.loads(scoped)["board_id"] == "b1"
 
 
 @pytest.mark.asyncio
-async def test_a_workspace_outside_workspace_id_is_absent_to_read(index):
+async def test_a_workspace_outside_workspace_id_is_absent_to_read():
     accessor = TrelloAccessor(
         TrelloConfig(api_key="key", api_token="token", workspace_id="ws1")
     )
+    ws = _mounted(accessor)
     with (
         patch(
             "mirage.core.trello.readdir.list_workspaces",
@@ -228,30 +207,23 @@ async def test_a_workspace_outside_workspace_id_is_absent_to_read(index):
         ),
     ):
         with pytest.raises(FileNotFoundError):
-            await read(
-                accessor,
-                PathSpec.from_str_path(
-                    "/workspaces/Finance__ws2/workspace.json"
-                ),
-                index,
+            await ws.dispatch(
+                "read", _at("/workspaces/Finance__ws2/workspace.json")
             )
-        scoped = await read(
-            accessor,
-            PathSpec.from_str_path(
-                "/workspaces/Engineering__ws1/workspace.json"
-            ),
-            index,
+        scoped, _ = await ws.dispatch(
+            "read", _at("/workspaces/Engineering__ws1/workspace.json")
         )
     assert json.loads(scoped)["workspace_id"] == "ws1"
 
 
 @pytest.mark.asyncio
-async def test_a_dot_led_board_title_is_listed_and_addressable(index):
+async def test_a_dot_led_board_title_is_listed_and_addressable():
     """``sanitize_name`` kept a leading dot, so a board titled ``.plan``
     rendered ``.plan__b1``: the kit drops a dot-led name from the listing
     and classifies it as hidden, so the board was neither listed nor
     readable, with no error anywhere."""
     accessor = TrelloAccessor(TrelloConfig(api_key="key", api_token="token"))
+    ws = _mounted(accessor)
     board = {"id": "b1", "name": ".plan"}
     with (
         patch(
@@ -266,10 +238,15 @@ async def test_a_dot_led_board_title_is_listed_and_addressable(index):
             "mirage.core.trello.read.get_board", AsyncMock(return_value=board)
         ),
     ):
-        boards = PathSpec.from_str_path("/workspaces/Engineering__ws1/boards")
-        listed = await readdir(accessor, boards, index)
-        assert listed == ["/workspaces/Engineering__ws1/boards/plan__b1"]
+        listed, _ = await ws.dispatch(
+            "readdir", _at("/workspaces/Engineering__ws1/boards")
+        )
+        assert listed == [
+            "/trello/workspaces/Engineering__ws1/boards/plan__b1"
+        ]
         board_json = PathSpec.from_str_path(listed[0] + "/board.json")
-        assert (await stat(accessor, board_json, index)).name == "board.json"
-        payload = json.loads(await read(accessor, board_json, index))
+        row, _ = await ws.dispatch("stat", board_json)
+        assert row.name == "board.json"
+        data, _ = await ws.dispatch("read", board_json)
+        payload = json.loads(data)
     assert payload["board_name"] == ".plan"

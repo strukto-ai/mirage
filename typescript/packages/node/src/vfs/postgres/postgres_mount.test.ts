@@ -192,6 +192,18 @@ describe('PostgresVFS mount integration', () => {
     expect(byName.name?.nullable).toBe(true)
   })
 
+  // A read stands on the entity row the mount hands it, so a table under a
+  // schema no listing names reads as absent without a query, and one under a
+  // listed schema reads.
+  it('reads only what its listings name', async () => {
+    const r = await ws.shell('cat /pg/secret/tables/users/schema.json')
+    expect(r.exitCode).toBe(1)
+    const queried = pools.flatMap((pool) => pool.query.mock.calls.map(([sql]) => String(sql)))
+    expect(queried.some((sql) => sql.includes('information_schema.columns'))).toBe(false)
+    const listed = await ws.shell('cat /pg/public/tables/users/schema.json')
+    expect(new TextDecoder().decode(listed.stdout)).toContain('"users"')
+  })
+
   it('cat /pg/public/tables/users/rows.jsonl returns JSONL when small', async () => {
     const r = await ws.shell('cat /pg/public/tables/users/rows.jsonl')
     expect(r.exitCode).toBe(0)

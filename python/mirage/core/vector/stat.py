@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.bind import per_accessor
-from mirage.core.hierarchy.probe import A, ReaddirFn
+from mirage.core.hierarchy.probe import A
 from mirage.core.hierarchy.read import ReadFn
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import StatHook
@@ -30,15 +29,16 @@ def _name_of(path: PathSpec) -> str:
     return stripped.rsplit("/", 1)[-1] or "/"
 
 
-def make_stat(
-    tree: VectorTree[A], readdir: ReaddirFn[A], read: ReadFn
-) -> StatFn:
+def make_stat(tree: VectorTree[A], read: ReadFn) -> StatFn:
     """Build a store's stat: a group proves its table, a row its bytes.
+
+    A row a listing names is answered by the mount from that listing,
+    which carries its rendered size; one no listing names is rendered
+    here, so the size is exact either way.
 
     Args:
         tree (VectorTree[A]): the store's hooks.
-        readdir (ReaddirFn[A]): the store's readdir, for the kit's probes.
-        read (ReadFn): the store's read, sizing a row the index lacks.
+        read (ReadFn): the store's read, sizing a row.
     """
 
     async def table_guard(
@@ -49,19 +49,16 @@ def make_stat(
             raise enoent(virtual)
 
     async def stat_row(
-        accessor: A, match: ScopeMatch, path: PathSpec, index: IndexCacheStore
+        accessor: A,
+        match: ScopeMatch,
+        path: PathSpec,
+        entry: FileStat | None,
+        parent: FileStat | None,
     ) -> FileStat:
         await table_guard(accessor, match, path.virtual)
-        # The row-dir readdir seeds exact rendered sizes; an unsized entry
-        # or a cold index falls back to rendering the row, so the size is
-        # exact either way.
-        lookup = await index.get(path.virtual.rstrip("/"))
-        size = lookup.entry.size if lookup.entry is not None else None
-        if size is None:
-            size = len(await read(accessor, path, index))
         return FileStat(
             name=_name_of(path),
-            size=size,
+            size=len(await read(accessor, path)),
             type=FileType.FILE,
             content=match.scope.filetype if match.scope is not None else None,
         )
@@ -73,16 +70,13 @@ def make_stat(
     def build(accessor: A) -> StatFn:
         return hierarchy_stat(
             tree.detect(accessor),
-            readdir,
             guards={"group": table_guard},
             overrides=overrides,
         )
 
     stat_for = per_accessor(build)
 
-    async def stat(
-        accessor: A, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await stat_for(accessor)(accessor, path, index)
+    async def stat(accessor: A, path: PathSpec) -> FileStat:
+        return await stat_for(accessor)(accessor, path)
 
     return stat

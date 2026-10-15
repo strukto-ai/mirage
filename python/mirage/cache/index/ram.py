@@ -43,6 +43,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._children: dict[str, list[str]] = {}
         self._expiry: dict[str, datetime] = {}
         self._partial: set[str] = set()
+        self._windows: set[str] = set()
         self._tombstones: dict[str, list[Evicted]] = {}
         self._versions: dict[str, str] = {}
 
@@ -63,6 +64,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         )
         self._expiry.update({path: expires_at for path in children})
         self._partial.difference_update(children)
+        self._windows.difference_update(children)
         for path in children:
             self._stamp(path, version)
 
@@ -102,6 +104,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 self._children[folder] = [vfs_path]
                 self._expiry[folder] = now + timedelta(seconds=self._ttl)
                 self._partial.add(folder)
+                self._windows.discard(folder)
                 self._versions.pop(folder, None)
             elif vfs_path not in children:
                 bisect.insort(children, vfs_path)
@@ -130,7 +133,11 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         version = self._versions.get(vfs_path)
         if vfs_path in self._partial:
             return ListResult(partial_entries=children or [], version=version)
-        return ListResult(entries=children or [], version=version)
+        return ListResult(
+            entries=children or [],
+            version=version,
+            window=vfs_path in self._windows,
+        )
 
     async def set_dir(
         self,
@@ -225,6 +232,10 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 self._partial.add(vfs_path)
             else:
                 self._partial.discard(vfs_path)
+            if partial or evict:
+                self._windows.discard(vfs_path)
+            else:
+                self._windows.add(vfs_path)
             return gone
 
     def _evict(
@@ -282,6 +293,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._expiry.pop(vfs_path, None)
         self._children.pop(vfs_path, None)
         self._partial.discard(vfs_path)
+        self._windows.discard(vfs_path)
         self._versions.pop(vfs_path, None)
 
     async def invalidate_prefix(
@@ -335,6 +347,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         ]:
             self._expiry.pop(exp_key, None)
             self._partial.discard(exp_key)
+            self._windows.discard(exp_key)
             self._versions.pop(exp_key, None)
 
     async def invalidate(self) -> None:
@@ -347,6 +360,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._children.clear()
         self._expiry.clear()
         self._partial.clear()
+        self._windows.clear()
         self._tombstones.clear()
         self._versions.clear()
         self._clear_locks()

@@ -15,13 +15,12 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { LinearAccessor } from '../../accessor/linear.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { FileStat } from '../../types.ts'
 import { ContentType, FileType, PathSpec } from '../../types.ts'
+import { LinearVFS } from '../../vfs/linear/linear.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { LinearTransport } from './client.ts'
-import { read } from './read.ts'
-import { readdir } from './readdir.ts'
+import { normalizeIssue, normalizeTeam, toJsonBytes } from './normalize.ts'
 import { Slot } from '../hierarchy/scope.ts'
 import { detectScope } from './scope.ts'
 import { stat } from './stat.ts'
@@ -36,55 +35,18 @@ function spec(virtual: string, prefix = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
-describe('linear stat modified', () => {
-  it('returns modified from the cached team entry', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/teams', [
-      [
-        'ENG__Engineering__TEAM1',
-        new IndexEntry({
-          id: 'TEAM1',
-          name: 'Engineering',
-          resourceType: 'linear/team',
-          remoteTime: '2026-04-05T00:00:00Z',
-          vfsName: 'ENG__Engineering__TEAM1',
-        }),
-      ],
-    ])
-    const s = await stat(
-      new LinearAccessor(new NoopTransport()),
-      spec('/teams/ENG__Engineering__TEAM1'),
-      idx,
-    )
-    expect(s.type).toBe(FileType.DIRECTORY)
-    expect(s.extra.team_id).toBe('TEAM1')
-    expect(s.modified).toBe('2026-04-05T00:00:00Z')
+describe('linear stat', () => {
+  it('stats the root and teams without a call', async () => {
+    const accessor = new LinearAccessor(new NoopTransport())
+    expect((await stat(accessor, spec('/'))).type).toBe(FileType.DIRECTORY)
+    expect((await stat(accessor, spec('/teams'))).type).toBe(FileType.DIRECTORY)
   })
 
-  it('reports the pushed-down size for a cached issue.json entry', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/teams/ENG__Engineering__TEAM1/issues/ENG-1__ISSUE1', [
-      [
-        'issue.json',
-        new IndexEntry({
-          id: 'ISSUE1',
-          name: 'issue.json',
-          resourceType: 'linear/issue_json',
-          remoteTime: '2026-04-05T00:00:00Z',
-          vfsName: 'issue.json',
-          size: 321,
-        }),
-      ],
-    ])
-    const s = await stat(
-      new LinearAccessor(new NoopTransport()),
-      spec('/teams/ENG__Engineering__TEAM1/issues/ENG-1__ISSUE1/issue.json'),
-      idx,
-    )
-    expect(s.content).toBe(ContentType.JSON)
-    expect(s.size).toBe(321)
-    expect(s.modified).toBe('2026-04-05T00:00:00Z')
-    expect(s.extra.issue_id).toBe('ISSUE1')
+  it('is ENOENT for a path no shape names', async () => {
+    const accessor = new LinearAccessor(new NoopTransport())
+    await expect(stat(accessor, spec('/nonexistent/path'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })
 
@@ -228,39 +190,95 @@ class FixtureTransport implements LinearTransport {
   }
 }
 
-async function walkNodes(
-  accessor: LinearAccessor,
-  idx: RAMIndexCacheStore,
-): Promise<[string, FileStat][]> {
-  const stack = ['/']
+const ISSUE_DIR = '/teams/ENG__Engineering__TEAM1/issues/ENG-1__ISSUE1'
+
+function mounted(accessor: LinearAccessor): Workspace {
+  const vfs = Object.assign(new LinearVFS({ apiKey: 'lin_api_test' }), { accessor })
+  return new Workspace({ '/linear/': vfs })
+}
+
+async function statAt(accessor: LinearAccessor, path: string): Promise<FileStat> {
+  return (await mounted(accessor).dispatch('stat', '/linear' + path)) as FileStat
+}
+
+// Every node below the mount, keyed by its path below it.
+async function walkNodes(ws: Workspace): Promise<[string, FileStat][]> {
+  const stack = ['/linear']
   const nodes: [string, FileStat][] = []
   while (stack.length > 0) {
     const current = stack.pop()
     if (current === undefined) break
-    const listing = await readdir(accessor, spec(current), idx)
-    for (const child of listing) {
-      const s = await stat(accessor, spec(child), idx)
+    for (const child of (await ws.dispatch('readdir', current)) as string[]) {
+      const s = (await ws.dispatch('stat', child)) as FileStat
       if (s.type === FileType.DIRECTORY) stack.push(child)
-      nodes.push([child, s])
+      nodes.push([child.slice('/linear'.length), s])
     }
   }
   return nodes
 }
+
+describe('linear stat of a listed row', () => {
+  it('answers a team with its id and time', async () => {
+    const s = await statAt(
+      new LinearAccessor(new FixtureTransport()),
+      '/teams/ENG__Engineering__TEAM1',
+    )
+    expect(s.type).toBe(FileType.DIRECTORY)
+    expect(s.extra.team_id).toBe('TEAM1')
+    expect(s.modified).toBe('2026-04-05T00:00:00Z')
+  })
+
+  it('answers an issue directory with its id and time', async () => {
+    const s = await statAt(new LinearAccessor(new FixtureTransport()), ISSUE_DIR)
+    expect(s.type).toBe(FileType.DIRECTORY)
+    expect(s.extra.issue_id).toBe('ISSUE1')
+    expect(s.modified).toBe('2026-04-03T00:00:00Z')
+  })
+
+  it('reports the rendered size of issue.json', async () => {
+    const s = await statAt(new LinearAccessor(new FixtureTransport()), ISSUE_DIR + '/issue.json')
+    expect(s.content).toBe(ContentType.JSON)
+    expect(s.size).toBe(toJsonBytes(normalizeIssue(ISSUES[0] ?? {})).length)
+    expect(s.modified).toBe('2026-04-03T00:00:00Z')
+    expect(s.extra.issue_id).toBe('ISSUE1')
+  })
+
+  it('times comments.jsonl by its newest comment', async () => {
+    const s = await statAt(
+      new LinearAccessor(new FixtureTransport()),
+      ISSUE_DIR + '/comments.jsonl',
+    )
+    expect(s.content).toBe(ContentType.TEXT)
+    expect(s.modified).toBe('2026-04-03T12:00:00Z')
+  })
+
+  it('reports the rendered size of team.json', async () => {
+    // The team-dir listing computes team.json's size from the team object
+    // the find already fetched, so stat answers the rendered byte length.
+    const s = await statAt(
+      new LinearAccessor(new FixtureTransport()),
+      '/teams/ENG__Engineering__TEAM1/team.json',
+    )
+    expect(s.content).toBe(ContentType.JSON)
+    expect(s.size).toBe(toJsonBytes(normalizeTeam(TEAM)).length)
+    expect(s.modified).toBe('2026-04-05T00:00:00Z')
+    expect(s.extra.team_id).toBe('TEAM1')
+  })
+})
 
 describe('linear size push-down', () => {
   it('stat size equals the read byte length for every file in the tree', async () => {
     // The fskit invariant: whatever size stat reports at lookup must equal
     // the byte length a read delivers, for every file in the tree.
     const transport = new FixtureTransport()
-    const accessor = new LinearAccessor(transport)
-    const idx = new RAMIndexCacheStore()
-    const files = (await walkNodes(accessor, idx)).filter(([, s]) => s.type !== FileType.DIRECTORY)
+    const ws = mounted(new LinearAccessor(transport))
+    const files = (await walkNodes(ws)).filter(([, s]) => s.type !== FileType.DIRECTORY)
     expect(files.length).toBe(9)
     // Sizing never refetches an issue: the issues listing already carries the
     // payloads, so walking the whole tree costs no per-file issue fetch.
     expect(transport.issueFetches).toBe(0)
     for (const [child, s] of files) {
-      const body = await read(accessor, spec(child), idx)
+      const body = (await ws.dispatch('read', '/linear' + child)) as Uint8Array
       expect(s.size, child).toBe(body.length)
     }
   })
@@ -272,8 +290,7 @@ describe('linear size push-down', () => {
 // its slot and trello's member say `member_id`.
 describe('linear stat extra', () => {
   it('names the id the path carries', async () => {
-    const accessor = new LinearAccessor(new FixtureTransport())
-    const nodes = await walkNodes(accessor, new RAMIndexCacheStore())
+    const nodes = await walkNodes(mounted(new LinearAccessor(new FixtureTransport())))
     expect(nodes.some(([path]) => path.includes('/members/'))).toBe(true)
     for (const [path, s] of nodes) {
       const match = detectScope(spec(path))
@@ -284,7 +301,7 @@ describe('linear stat extra', () => {
         seg instanceof Slot && seg.idKey !== null ? [seg.idKey] : [],
       )
       const idKey = idKeys[idKeys.length - 1] ?? ''
-      expect(s.extra, path).toEqual({ [idKey]: match.slots[idKey] })
+      expect(s.extra[idKey], path).toBe(match.slots[idKey])
     }
   })
 })

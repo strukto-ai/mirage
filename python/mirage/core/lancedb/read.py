@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.read import Reader
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.lancedb.query import row_record
@@ -22,7 +21,7 @@ from mirage.core.lancedb.types import LanceRow
 from mirage.core.vector.read import blob_bytes
 from mirage.core.vector.scope import table_of
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _row_of(
@@ -44,7 +43,8 @@ async def _read_card(
     accessor: LanceDBAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     row = await _row_of(accessor, match, path.virtual)
     return render_card(row, accessor.config)
@@ -54,7 +54,8 @@ async def _read_blob(
     accessor: LanceDBAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     config = accessor.config
     if not config.blob_column:

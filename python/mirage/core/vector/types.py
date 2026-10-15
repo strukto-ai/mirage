@@ -39,8 +39,6 @@ class VectorTree(Generic[A]):
     its readers, and how a ranked row spells its path and body.
 
     Args:
-        vfs (str): the VFS name, which spells the group entries'
-            resource type.
         detect (Callable[[A], DetectFn]): the mount's classifier.
         pinned (Callable[[A], str | None]): the table the config pins.
         search_limit (Callable[[A], int]): the default ``top_k``.
@@ -58,7 +56,6 @@ class VectorTree(Generic[A]):
             path segments below its table, and its body.
     """
 
-    vfs: str
     detect: Callable[[A], DetectFn]
     pinned: Callable[[A], str | None]
     search_limit: Callable[[A], int]

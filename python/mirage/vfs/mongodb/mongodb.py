@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mongodb.read import read as _read
 from mirage.core.mongodb.read import stream_any as _read_stream
 from mirage.core.mongodb.readdir import readdir as _readdir
@@ -28,7 +27,7 @@ from mirage.core.mongodb.stream import follow as _follow
 from mirage.core.mongodb.stream import last_lines as _last_lines
 from mirage.core.mongodb.stream import line_count as _line_count
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
@@ -49,59 +48,38 @@ class MongoDBVFS(BaseVFS):
         self.config = config
         self.accessor = MongoDBAccessor(self.config)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
-    def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path)
 
     async def lines_containing(
-        self,
-        path: PathSpec,
-        text: str,
-        *,
-        ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
+        self, path: PathSpec, text: str, *, ignore_case: bool
     ) -> ByteSource | None:
         return await _lines_containing(self.accessor, path, text)
 
-    async def last_lines(
-        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
-    ) -> bytes | None:
-        return await _last_lines(self.accessor, path, n, index)
+    async def last_lines(self, path: PathSpec, n: int) -> bytes | None:
+        return await _last_lines(self.accessor, path, n)
 
-    async def line_count(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int | None:
-        return await _line_count(self.accessor, path, index)
+    async def line_count(self, path: PathSpec) -> int | None:
+        return await _line_count(self.accessor, path)
 
     async def follow(
-        self,
-        path: PathSpec,
-        n: int,
-        interval: float,
-        index: IndexCacheStore = NULL_INDEX,
+        self, path: PathSpec, n: int, interval: float
     ) -> AsyncIterator[bytes] | None:
-        return await _follow(self.accessor, path, n, index)
+        return await _follow(self.accessor, path, n)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

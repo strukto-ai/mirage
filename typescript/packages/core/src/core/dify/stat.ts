@@ -13,28 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
-import { directoryStat } from '../slug_tree/stat.ts'
-import { DIFY_TREE } from './tree.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { treeStat } from '../slug_tree/stat.ts'
 
-export async function stat(
-  accessor: DifyAccessor,
+export function stat(
+  _accessor: DifyAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
 ): Promise<FileStat> {
-  const resolved = await DIFY_TREE.resolve(accessor, path, index)
-  if (resolved.isDir) return directoryStat(resolved)
-  const created = resolved.entry.remoteTime !== '' ? resolved.entry.remoteTime : null
-  return new FileStat({
-    name: resolved.entry.name,
-    type: FileType.FILE,
-    content: ContentType.TEXT,
-    size: null,
-    modified: created,
-    birthtime: created,
-    fingerprint: null,
-    revision: null,
-    extra: { ...resolved.entry.extra, document_id: resolved.entry.id },
-  })
+  return Promise.resolve(treeStat(path, entry))
 }

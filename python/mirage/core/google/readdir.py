@@ -12,17 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from mirage.accessor.google_api import GoogleApiAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.google.constants import TOP_LEVEL_DIRS
 from mirage.core.google.date_glob import glob_to_modified_range
 from mirage.core.google.drive import list_all_files
-from mirage.core.hierarchy.probe import ReaddirFn
+from mirage.core.google.entry import app_file
 from mirage.core.hierarchy.scope import DetectFn
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 
@@ -30,8 +29,9 @@ def make_app_readdir(
     mime: str,
     detect_scope: DetectFn,
     make_filename: Callable[[str, str, str], str],
-    resource_type: str,
-) -> ReaddirFn[GoogleApiAccessor]:
+) -> Callable[
+    [GoogleApiAccessor, PathSpec], Awaitable[list[FileStat] | DirListing]
+]:
     """The readdir of a Google app mount: its corpora and their files.
 
     Sheets, Docs and Slides list the same tree, one Drive query per
@@ -43,15 +43,11 @@ def make_app_readdir(
         detect_scope (DetectFn): the app's path classifier.
         make_filename (Callable[[str, str, str], str]): the app's file
             name from a title, a file id and a modified time.
-        resource_type (str): the index entry's resource type.
     """
 
     async def readdir(
-        accessor: GoogleApiAccessor,
-        path_spec: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> list[str]:
-        virtual = path_spec.virtual
+        accessor: GoogleApiAccessor, path_spec: PathSpec
+    ) -> list[FileStat] | DirListing:
         modified_range = None
         prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
         if path_spec.pattern:
@@ -62,23 +58,20 @@ def make_app_readdir(
             if prefix.endswith("/") or rest == "" or rest.startswith("/"):
                 path = rest or "/"
         key = path.strip("/")
-        virtual_key = prefix + "/" + key if key else prefix or "/"
 
         # Bespoke below the classifier: the date-glob push-down filters
         # the Drive query itself, and a filtered or incomplete listing
-        # must not be cached as the directory, which the kit readdir has
-        # no notion of.
+        # is no listing of the directory, which the kit readdir has no
+        # notion of.
         match = detect_scope(path)
         if match.kind == "root":
-            return [f"{prefix}/{d}" for d in TOP_LEVEL_DIRS]
+            return [
+                FileStat(name=d, type=FileType.DIRECTORY)
+                for d in TOP_LEVEL_DIRS
+            ]
 
         if match.kind != "corpus":
-            raise enoent(virtual)
-
-        if not modified_range:
-            cached = await index.list_dir(virtual_key)
-            if cached.entries is not None:
-                return cached.entries
+            raise enoent(path_spec.virtual)
 
         files, complete = await list_all_files(
             accessor.token_manager,
@@ -87,42 +80,21 @@ def make_app_readdir(
             modified_before=modified_range[1] if modified_range else None,
         )
         is_owned = key == "owned"
-        entries = []
+        rows = []
         for f in files:
             owners = f.get("owners", [])
             first_owner = owners[0] if owners else {}
-            file_owned = first_owner.get("me", False)
-            if file_owned != is_owned:
+            if first_owner.get("me", False) != is_owned:
                 continue
-            filename = make_filename(
-                f["name"], f["id"], f.get("modifiedTime", "")
-            )
-            source_size = int(f.get("size") or f.get("quotaBytesUsed") or 0)
-            # size stays None: Drive reports the source document's storage
-            # size, not the rendered JSON length (FileStat.size must be
-            # render-derived or None, see the CLAUDE.md FUSE rules). The
-            # source size lives in extra.
-            entry = IndexEntry(
-                id=f["id"],
-                name=f["name"],
-                resource_type=resource_type,
-                remote_time=f.get("modifiedTime", ""),
-                vfs_name=filename,
-                extra={"source_size": source_size} if source_size else {},
-            )
-            entries.append((filename, entry))
-
-        if modified_range or not complete:
-            # A modified-range listing is a filtered view rather than the
-            # directory, and an incomplete all-corpora search is a
-            # directory Drive could not finish reading. Neither may stand
-            # in for the directory: caching one would pin a short listing
-            # until it expires. The entries are real either way, so cache
-            # those and let the next readdir re-list.
-            for name, entry in entries:
-                await index.put(f"{virtual_key}/{name}", entry)
-        else:
-            await index.set_dir(virtual_key, entries)
-        return [f"{prefix}/{key}/{name}" for name, _ in entries]
+            name = make_filename(f["name"], f["id"], f.get("modifiedTime", ""))
+            rows.append(app_file(name, f))
+        # A modified-range listing is a filtered view rather than the
+        # directory, and an incomplete all-corpora search is a directory
+        # Drive could not finish reading. Neither may stand in for the
+        # directory: keeping one would pin a short listing until it
+        # expires. The rows are real either way.
+        return DirListing(
+            entries=rows, partial=bool(modified_range) or not complete
+        )
 
     return readdir

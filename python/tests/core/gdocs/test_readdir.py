@@ -17,11 +17,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.gdocs.readdir import readdir
-from mirage.core.gdocs.stat import stat
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gdocs import GDocsVFS
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
@@ -30,12 +29,24 @@ def accessor():
 
 
 @pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+def mounted(accessor):
+    return Mounted(GDocsVFS, accessor, "/gdocs")
+
+
+async def readdir(
+    accessor: GDocsAccessor, path: PathSpec, mounted: Mounted
+) -> list[str]:
+    return await mounted.readdir(path)
+
+
+async def stat(
+    accessor: GDocsAccessor, path: PathSpec, mounted: Mounted
+) -> FileStat:
+    return await mounted.stat(path)
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
+async def test_readdir_root(accessor, mounted):
     result = await readdir(
         accessor,
         PathSpec(
@@ -43,13 +54,13 @@ async def test_readdir_root(accessor, index):
             virtual="/gdocs",
             directory="/gdocs",
         ),
-        index,
+        mounted,
     )
     assert result == ["/gdocs/owned", "/gdocs/shared"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned(accessor, index):
+async def test_readdir_owned(accessor, mounted):
     files = [
         {
             "id": "doc1",
@@ -70,14 +81,14 @@ async def test_readdir_owned(accessor, index):
                 virtual="/gdocs/owned",
                 directory="/gdocs/owned",
             ),
-            index,
+            mounted,
         )
         assert len(result) == 1
         assert "doc1" in result[0]
 
 
 @pytest.mark.asyncio
-async def test_readdir_shared(accessor, index):
+async def test_readdir_shared(accessor, mounted):
     files = [
         {
             "id": "doc2",
@@ -98,14 +109,14 @@ async def test_readdir_shared(accessor, index):
                 virtual="/gdocs/shared",
                 directory="/gdocs/shared",
             ),
-            index,
+            mounted,
         )
         assert len(result) == 1
         assert "doc2" in result[0]
 
 
 @pytest.mark.asyncio
-async def test_readdir_file_path_raises(accessor, index):
+async def test_readdir_file_path_raises(accessor, mounted):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
@@ -114,12 +125,12 @@ async def test_readdir_file_path_raises(accessor, index):
                 virtual="/gdocs/owned/file.gdoc.json",
                 directory="/gdocs/owned/file.gdoc.json",
             ),
-            index,
+            mounted,
         )
 
 
 @pytest.mark.asyncio
-async def test_readdir_invalid_path_raises(accessor, index):
+async def test_readdir_invalid_path_raises(accessor, mounted):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
@@ -128,12 +139,12 @@ async def test_readdir_invalid_path_raises(accessor, index):
                 virtual="/gdocs/bogus",
                 directory="/gdocs/bogus",
             ),
-            index,
+            mounted,
         )
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_pushes_modified_range(accessor, index):
+async def test_readdir_owned_pushes_modified_range(accessor, mounted):
     captured = {}
 
     async def fake_list(token_manager, mime_type=None, **kwargs):
@@ -150,7 +161,7 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
                 directory="/gdocs/owned",
                 pattern="2026-05-*",
             ),
-            index,
+            mounted,
         )
 
     assert captured["modified_after"] == "2026-05-01T00:00:00Z"
@@ -158,7 +169,7 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_filtered_does_not_cache(accessor, index):
+async def test_readdir_owned_filtered_does_not_cache(accessor, mounted):
     files = [
         {
             "id": "may",
@@ -199,7 +210,7 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
                 directory="/gdocs/owned",
                 pattern="2026-05-*",
             ),
-            index,
+            mounted,
         )
         result = await readdir(
             accessor,
@@ -208,7 +219,7 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
                 virtual="/gdocs/owned",
                 directory="/gdocs/owned",
             ),
-            index,
+            mounted,
         )
 
     assert call_count["n"] == 2
@@ -216,7 +227,7 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
+async def test_readdir_owned_glob_matches_a_whole_listing(accessor, mounted):
     full_files = [
         {
             "id": "may",
@@ -255,9 +266,9 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
                 virtual="/gdocs/owned",
                 directory="/gdocs/owned",
             ),
-            index,
+            mounted,
         )
-        await readdir(
+        matched = await readdir(
             accessor,
             PathSpec(
                 vfs_path=mount_key("/gdocs/owned/2026-05-*", "/gdocs"),
@@ -265,14 +276,17 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
                 directory="/gdocs/owned",
                 pattern="2026-05-*",
             ),
-            index,
+            mounted,
         )
 
-    assert call_count["n"] == 2
+    # The whole corpus is already listed, so the glob is matched against
+    # it rather than asked of Drive again.
+    assert call_count["n"] == 1
+    assert len(matched) == 1 and "may" in matched[0]
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_no_pattern_omits_range(accessor, index):
+async def test_readdir_owned_no_pattern_omits_range(accessor, mounted):
     captured = {}
 
     async def fake_list(token_manager, mime_type=None, **kwargs):
@@ -287,7 +301,7 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
                 virtual="/gdocs/owned",
                 directory="/gdocs/owned",
             ),
-            index,
+            mounted,
         )
 
     assert captured.get("modified_after") is None
@@ -295,7 +309,7 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
+async def test_readdir_owned_non_date_pattern_omits_range(accessor, mounted):
     captured = {}
 
     async def fake_list(token_manager, mime_type=None, **kwargs):
@@ -311,7 +325,7 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
                 directory="/gdocs/owned",
                 pattern="*foo*",
             ),
-            index,
+            mounted,
         )
 
     assert captured.get("modified_after") is None
@@ -319,7 +333,7 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_filtered_then_stat_succeeds(accessor, index):
+async def test_readdir_filtered_then_stat_succeeds(accessor, mounted):
     files = [
         {
             "id": "may1",
@@ -349,7 +363,7 @@ async def test_readdir_filtered_then_stat_succeeds(accessor, index):
                 directory="/gdocs/shared",
                 pattern="2026-05-*",
             ),
-            index,
+            mounted,
         )
         assert len(listed) == 1
         matched = listed[0]
@@ -360,16 +374,17 @@ async def test_readdir_filtered_then_stat_succeeds(accessor, index):
                 virtual=matched,
                 directory=matched,
             ),
-            index,
+            mounted,
         )
     assert result.extra["doc_id"] == "may1"
-    # The filtered result cannot prove the full parent is fresh.
+    # The filtered result is not the directory, but the rows it lists
+    # are real, so the stat is answered from them.
     assert mock_list.await_count == 1
-    mock_get.assert_awaited_once_with(None, "may1")
+    mock_get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_newest_first_across_cache(accessor, index):
+async def test_readdir_owned_newest_first_across_cache(accessor, mounted):
     """Relies on API mock newest-first, mirroring orderBy modifiedTime desc."""
     files = [
         {
@@ -403,7 +418,7 @@ async def test_readdir_owned_newest_first_across_cache(accessor, index):
                 virtual="/gdocs/owned",
                 directory="/gdocs/owned",
             ),
-            index,
+            mounted,
         )
         second = await readdir(
             accessor,
@@ -412,7 +427,7 @@ async def test_readdir_owned_newest_first_across_cache(accessor, index):
                 virtual="/gdocs/owned",
                 directory="/gdocs/owned",
             ),
-            index,
+            mounted,
         )
         assert mock_list.call_count == 1
     assert first == second
@@ -422,7 +437,7 @@ async def test_readdir_owned_newest_first_across_cache(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
+async def test_readdir_entry_size_none_source_size_in_extra(accessor, mounted):
     files = [
         {
             "id": "doc1",
@@ -444,25 +459,27 @@ async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
                 virtual="/gdocs/owned",
                 directory="/gdocs/owned",
             ),
-            index,
+            mounted,
         )
 
-    # Drive's source size never becomes the entry size: the rendered
+    # Drive's source size never becomes the row's size: the rendered
     # JSON length is unknown until read.
-    entry = (await index.get(result[0])).entry
-    assert entry.size is None
-    assert entry.extra["source_size"] == 1234
+    row = await mounted.stat(
+        PathSpec.from_str_path(result[0], mount_key(result[0], "/gdocs"))
+    )
+    assert row.size is None
+    assert row.extra["source_size"] == 1234
 
 
 @pytest.mark.asyncio
 async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
-    accessor, index
+    accessor, mounted
 ):
     """Drive reporting a corpus it skipped means the listing is short.
 
-    Caching it would pin the short listing until it expires, so a Shared
-    Drive document stays invisible long after the cause clears. The entries
-    are real, so they stay cached; only the directory is withheld.
+    Keeping it would pin the short listing until it expires, so a Shared
+    Drive document stays invisible long after the cause clears: the next
+    listing asks Drive again until one finishes.
     """
     files = [
         {
@@ -482,12 +499,14 @@ async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
         virtual="/gdocs/owned",
         directory="/gdocs/owned",
     )
-    with patch("mirage.core.google.readdir.list_all_files", new=fake_list):
-        listed = await readdir(accessor, owned, index)
+    listings = AsyncMock(side_effect=fake_list)
+    with patch("mirage.core.google.readdir.list_all_files", new=listings):
+        listed = await readdir(accessor, owned, mounted)
         assert len(listed) == 1
-        assert (await index.list_dir("/gdocs/owned")).entries is None
-        assert (await index.get(listed[0])).entry.id == "d1"
+        await readdir(accessor, owned, mounted)
+        assert listings.await_count == 2
 
         complete["v"] = True
-        await readdir(accessor, owned, index)
-        assert (await index.list_dir("/gdocs/owned")).entries is not None
+        await readdir(accessor, owned, mounted)
+        await readdir(accessor, owned, mounted)
+        assert listings.await_count == 3

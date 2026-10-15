@@ -36,7 +36,6 @@ export type Leaf = readonly [kind: string, codec: Codec, filetype: ContentType]
  * `VectorTree` in `mirage/core/vector/types.py`.
  */
 export interface VectorTree<A extends Accessor> {
-  readonly vfs: string
   readonly detect: (accessor: A) => DetectFn
   readonly pinned: (accessor: A) => string | null
   readonly searchLimit: (accessor: A) => number

@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { enoent } from '../../errors/fs.ts'
+import { FileStat, FileType } from '../../types.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { databaseExists, entityExists, listCollections, listDatabases } from './client.ts'
 import { detectScope, entityKind } from './scope.ts'
-import { KIND_TO_DIR, KIND_TO_RESOURCE_TYPE, RESOURCE_TYPE_DATABASE } from './types.ts'
+import { KIND_TO_DIR } from './types.ts'
 
 export const ENTITY_FILES = ['schema.json', 'documents.jsonl'] as const
 
@@ -49,54 +49,55 @@ export async function entityGuard(
   if (!exists) throw enoent(virtual)
 }
 
-async function listRoot(
-  accessor: MongoDBAccessor,
-  _match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
-  const dbs = await listDatabases(accessor)
-  return dbs.map((db) => [
-    db,
-    new IndexEntry({ id: db, name: db, resourceType: RESOURCE_TYPE_DATABASE, vfsName: db }),
-  ])
+function databaseExtra(match: ScopeMatch): Record<string, string> {
+  return { database: match.slots.database ?? '' }
 }
 
-function listDatabase(
-  _accessor: MongoDBAccessor,
-  _match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
+function kindDirExtra(match: ScopeMatch): Record<string, string> {
+  return { database: match.slots.database ?? '', kind: entityKind(match) }
+}
+
+function entityExtra(match: ScopeMatch): Record<string, string> {
+  return {
+    database: match.slots.database ?? '',
+    kind: entityKind(match),
+    name: match.slots.name ?? '',
+  }
+}
+
+// What each kind's stat carries in `extra`, listed or not.
+export const EXTRAS = {
+  database: databaseExtra,
+  kind_dir: kindDirExtra,
+  database_json: databaseExtra,
+  schema_json: entityExtra,
+  entity: entityExtra,
+  documents: entityExtra,
+}
+
+function dirs(names: readonly string[]): FileStat[] {
+  return names.map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
+}
+
+async function listRoot(accessor: MongoDBAccessor, _match: ScopeMatch): Promise<FileStat[]> {
+  return dirs(await listDatabases(accessor))
+}
+
+function listDatabase(_accessor: MongoDBAccessor, _match: ScopeMatch): Promise<FileStat[]> {
   // database.json, collections/ and views/ exist by construction under
   // every database that exists at all (the guard has already run).
-  const names = ['database.json', ...Object.values(KIND_TO_DIR)]
-  return Promise.resolve(
-    names.map((name): [string, IndexEntry] => [
-      name,
-      new IndexEntry({ id: name, name, resourceType: 'mongodb/database_entry', vfsName: name }),
-    ]),
-  )
-}
-
-async function listKindDir(
-  accessor: MongoDBAccessor,
-  match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
-  const kind = entityKind(match)
-  const names = await listCollections(accessor, match.slots.database ?? '', kind)
-  return names.map((name) => [
-    name,
-    new IndexEntry({ id: name, name, resourceType: KIND_TO_RESOURCE_TYPE[kind], vfsName: name }),
+  return Promise.resolve([
+    new FileStat({ name: 'database.json', type: FileType.FILE }),
+    ...dirs(Object.values(KIND_TO_DIR)),
   ])
 }
 
-function listEntityFiles(
-  _accessor: MongoDBAccessor,
-  _match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
-  return Promise.resolve(
-    ENTITY_FILES.map((name): [string, IndexEntry] => [
-      name,
-      new IndexEntry({ id: name, name, resourceType: 'mongodb/entity_file', vfsName: name }),
-    ]),
-  )
+async function listKindDir(accessor: MongoDBAccessor, match: ScopeMatch): Promise<FileStat[]> {
+  return dirs(await listCollections(accessor, match.slots.database ?? '', entityKind(match)))
+}
+
+function listEntityFiles(_accessor: MongoDBAccessor, _match: ScopeMatch): Promise<FileStat[]> {
+  return Promise.resolve(ENTITY_FILES.map((name) => new FileStat({ name, type: FileType.FILE })))
 }
 
 export const readdir = makeReaddir<MongoDBAccessor>(detectScope, {
@@ -111,4 +112,5 @@ export const readdir = makeReaddir<MongoDBAccessor>(detectScope, {
     kind_dir: databaseGuard,
     entity: entityGuard,
   },
+  extras: EXTRAS,
 })

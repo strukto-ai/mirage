@@ -510,7 +510,13 @@ for (const backend of ['ram', 'redis']) {
         ])
         expect(await store.setDir('/dir', [['b', entry('b')]], null, { window: true })).toEqual([])
         expect((await store.get('/dir/a')).entry).toBeDefined()
-        expect((await store.listDir('/dir')).entries).toEqual(['/dir/b'])
+        const listing = await store.listDir('/dir')
+        expect(listing.entries).toEqual(['/dir/b'])
+        // It is kept a window, so nothing reads it as proof of absence; a
+        // complete listing after it is no window.
+        expect(listing.window).toBe(true)
+        await store.setDir('/dir', [['b', entry('b')]])
+        expect((await store.listDir('/dir')).window).toBe(false)
       })
 
       // The partial listing never claimed "a", so a later full listing has

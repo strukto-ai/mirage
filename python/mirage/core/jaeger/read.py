@@ -15,7 +15,6 @@
 from typing import Any
 
 from mirage.accessor.jaeger import JaegerAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.jaeger.client import (
@@ -27,7 +26,7 @@ from mirage.core.jaeger.readdir import assert_service
 from mirage.core.jaeger.scope import detect_scope
 from mirage.core.render.json import json_bytes
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 def _has_service(trace: dict[str, Any], service: str) -> bool:
@@ -59,7 +58,8 @@ async def _read_operations(
     accessor: JaegerAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     service = match.slots["service"]
     await assert_service(accessor, service, path.virtual)
@@ -71,7 +71,8 @@ async def _read_trace(
     accessor: JaegerAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     service = match.slots["service"]
     await assert_service(accessor, service, path.virtual)

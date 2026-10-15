@@ -14,6 +14,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { FileType, type FileStat } from '../../types.ts'
+import type { DirRows } from '../slug_tree/types.ts'
 import { buildDirEntries, epochText, extractDocumentSize, extractSlug } from './tree.ts'
 
 function doc(overrides: Record<string, unknown>): Record<string, unknown> {
@@ -37,18 +39,8 @@ const QUICKSTART = doc({
 
 const CHANGELOG = doc({ id: 'doc-changelog', name: 'CHANGELOG.md', doc_metadata: [] })
 
-function entryFor(
-  entries: Map<
-    string,
-    [
-      string,
-      { name: string; resourceType: string; size: number | null; extra: Record<string, unknown> },
-    ][]
-  >,
-  dir: string,
-  name: string,
-) {
-  return (entries.get(dir) ?? []).find(([n]) => n === name)?.[1]
+function entryFor(entries: DirRows, dir: string, name: string): FileStat | undefined {
+  return entries.get(dir)?.find((row) => row.name === name)
 }
 
 describe('extractSlug', () => {
@@ -90,18 +82,19 @@ describe('epochText', () => {
 
 describe('buildDirEntries', () => {
   it('maps slugs to a directory tree with file entries', () => {
-    const entries = buildDirEntries([QUICKSTART, CHANGELOG], '', 'slug')
+    const entries = buildDirEntries([QUICKSTART, CHANGELOG], 'slug')
     expect([...entries.keys()].sort()).toEqual(['/', '/guides'])
 
     const guides = entryFor(entries, '/', 'guides')
-    expect(guides?.resourceType).toBe('folder')
+    expect(guides?.type).toBe(FileType.DIRECTORY)
 
     const changelog = entryFor(entries, '/', 'CHANGELOG.md')
-    expect(changelog?.resourceType).toBe('file')
+    expect(changelog?.type).toBe(FileType.FILE)
     expect(changelog?.extra.has_slug).toBe(false)
 
     const quickstart = entryFor(entries, '/guides', 'quickstart')
-    expect(quickstart?.resourceType).toBe('file')
+    expect(quickstart?.type).toBe(FileType.FILE)
+    expect(quickstart?.extra.document_id).toBe('doc-quickstart')
     expect(quickstart?.extra.slug).toBe('guides/quickstart')
     expect(quickstart?.extra.has_slug).toBe(true)
     expect(quickstart?.size).toBeNull()
@@ -111,10 +104,10 @@ describe('buildDirEntries', () => {
   it('drops the deeper document whose ancestor is itself a file', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const leaf = doc({ id: 'leaf', name: 'L', doc_metadata: [{ name: 'slug', value: 'guides' }] })
-    const entries = buildDirEntries([QUICKSTART, leaf], '', 'slug')
+    const entries = buildDirEntries([QUICKSTART, leaf], 'slug')
     // 'guides' is a file, so 'guides/quickstart' is dropped and no '/guides'
     // directory is created (mirrors python skip_path_collisions).
-    expect(entryFor(entries, '/', 'guides')?.resourceType).toBe('file')
+    expect(entryFor(entries, '/', 'guides')?.type).toBe(FileType.FILE)
     expect(entries.has('/guides')).toBe(false)
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()

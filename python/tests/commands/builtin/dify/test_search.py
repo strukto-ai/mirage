@@ -48,7 +48,7 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
             document("doc-2", "Auth", "guides/auth.md"),
         ]
 
-    async def search_segments(accessor, query, paths, index, **kwargs):
+    async def search_segments(accessor, query, paths, **kwargs):
         calls.append((paths, kwargs))
         return [("/knowledge/a", "api"), ("/knowledge/b", "auth")]
 
@@ -87,7 +87,7 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
 
     calls: list[tuple[list[PathSpec], dict]] = []
 
-    async def search_segments(accessor, query, paths, index, **kwargs):
+    async def search_segments(accessor, query, paths, **kwargs):
         calls.append((paths, kwargs))
         return [("/knowledge/a", "dataset")]
 

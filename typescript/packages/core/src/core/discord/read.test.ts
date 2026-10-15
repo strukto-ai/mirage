@@ -15,9 +15,7 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
 import { snowflakeAt } from './history.ts'
 import { follow, read, readMany, readStream } from './read.ts'
@@ -57,21 +55,28 @@ function spec(virtual: string, prefix = ''): PathSpec {
 
 const decoder = new TextDecoder()
 
+const CHAT = '/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl'
+const MEMBER = '/mnt/discord/My Server__G1/members/alice__U1.json'
+
+// The rows the listings name: chat.jsonl and its day carry their channel.
+const chatRow = new FileStat({
+  name: 'chat.jsonl',
+  type: FileType.FILE,
+  extra: { channel_id: 'C1' },
+})
+const dayRow = new FileStat({
+  name: '2024-01-15',
+  type: FileType.DIRECTORY,
+  extra: { channel_id: 'C1' },
+})
+const aliceRow = new FileStat({
+  name: 'alice__U1.json',
+  type: FileType.FILE,
+  extra: { user_id: 'U1' },
+})
+
 describe('read history jsonl branch', () => {
-  it('reads channel jsonl bytes via getHistoryJsonl when channel cached', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My Server__G1/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'discord/channel',
-          vfsName: 'general__C1',
-          remoteTime: '',
-        }),
-      ],
-    ])
+  it('reads channel jsonl bytes for the channel its row names', async () => {
     const t = new FakeDiscordTransport((_m, endpoint) => {
       if (endpoint === '/channels/C1/messages') {
         return [
@@ -81,11 +86,7 @@ describe('read history jsonl branch', () => {
       }
       return null
     })
-    const out = await read(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl', '/mnt/discord'),
-      idx,
-    )
+    const out = await read(new DiscordAccessor(t), spec(CHAT, '/mnt/discord'), chatRow, dayRow)
     const text = decoder.decode(out).trimEnd()
     const lines = text.split('\n')
     expect(lines).toHaveLength(2)
@@ -95,60 +96,16 @@ describe('read history jsonl branch', () => {
     expect(histCall).toBeDefined()
   })
 
-  it('throws ENOENT for jsonl path when index is undefined', async () => {
+  it('throws ENOENT for jsonl path when no row names its channel', async () => {
     const t = new FakeDiscordTransport(() => null)
-    await expect(
-      read(
-        new DiscordAccessor(t),
-        spec(
-          '/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl',
-          '/mnt/discord',
-        ),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('throws ENOENT for jsonl path when channel not in cache', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t = new FakeDiscordTransport(() => null)
-    await expect(
-      read(
-        new DiscordAccessor(t),
-        spec(
-          '/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl',
-          '/mnt/discord',
-        ),
-        idx,
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(read(new DiscordAccessor(t), spec(CHAT, '/mnt/discord'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })
 
 describe('read members branch', () => {
   it('returns JSON-stringified member bytes for matching user id', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord', [
-      [
-        'My Server__G1',
-        new IndexEntry({
-          id: 'G1',
-          name: 'My Server',
-          resourceType: 'discord/guild',
-          vfsName: 'My Server__G1',
-        }),
-      ],
-    ])
-    await idx.setDir('/mnt/discord/My Server__G1/members', [
-      [
-        'alice__U1.json',
-        new IndexEntry({
-          id: 'U1',
-          name: 'alice',
-          resourceType: 'discord/member',
-          vfsName: 'alice__U1.json',
-        }),
-      ],
-    ])
     const t = new FakeDiscordTransport((_m, endpoint) => {
       if (endpoint === '/guilds/G1/members') {
         return [
@@ -158,11 +115,7 @@ describe('read members branch', () => {
       }
       return null
     })
-    const out = await read(
-      new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
-      idx,
-    )
+    const out = await read(new DiscordAccessor(t), spec(MEMBER, '/mnt/discord'), aliceRow)
     const parsed = JSON.parse(decoder.decode(out)) as Record<string, unknown>
     expect(parsed).toMatchObject({
       user: { id: 'U1', username: 'alice' },
@@ -172,75 +125,14 @@ describe('read members branch', () => {
     expect(memCall).toBeDefined()
   })
 
-  it('throws ENOENT for members path when index is undefined', async () => {
+  it('throws ENOENT for members path when no row is handed', async () => {
     const t = new FakeDiscordTransport(() => null)
-    await expect(
-      read(
-        new DiscordAccessor(t),
-        spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(read(new DiscordAccessor(t), spec(MEMBER, '/mnt/discord'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
-  it('throws ENOENT for members path when member not in cache', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t = new FakeDiscordTransport(() => null)
-    await expect(
-      read(
-        new DiscordAccessor(t),
-        spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
-        idx,
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('throws ENOENT for members path when guild not in cache', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My Server__G1/members', [
-      [
-        'alice__U1.json',
-        new IndexEntry({
-          id: 'U1',
-          name: 'alice',
-          resourceType: 'discord/member',
-          vfsName: 'alice__U1.json',
-        }),
-      ],
-    ])
-    const t = new FakeDiscordTransport(() => null)
-    await expect(
-      read(
-        new DiscordAccessor(t),
-        spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
-        idx,
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('throws ENOENT when no member matches the cached user id', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord', [
-      [
-        'My Server__G1',
-        new IndexEntry({
-          id: 'G1',
-          name: 'My Server',
-          resourceType: 'discord/guild',
-          vfsName: 'My Server__G1',
-        }),
-      ],
-    ])
-    await idx.setDir('/mnt/discord/My Server__G1/members', [
-      [
-        'alice__U1.json',
-        new IndexEntry({
-          id: 'U1',
-          name: 'alice',
-          resourceType: 'discord/member',
-          vfsName: 'alice__U1.json',
-        }),
-      ],
-    ])
+  it('throws ENOENT when no member matches the handed user id', async () => {
     const t = new FakeDiscordTransport((_m, endpoint) => {
       if (endpoint === '/guilds/G1/members') {
         return [{ user: { id: 'U2', username: 'bob' } }]
@@ -248,11 +140,7 @@ describe('read members branch', () => {
       return null
     })
     await expect(
-      read(
-        new DiscordAccessor(t),
-        spec('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
-        idx,
-      ),
+      read(new DiscordAccessor(t), spec(MEMBER, '/mnt/discord'), aliceRow),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
@@ -289,22 +177,14 @@ it('closes an attachment stream before fetching its tail', async () => {
     { highWaterMark: 0 },
   )
   vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(body)))
-  const index = new RAMIndexCacheStore()
   const path = spec('/Guild__G1/channels/general__C1/2026-04-24/files/report__F1.txt')
-  await index.setDir(path.virtual.slice(0, path.virtual.lastIndexOf('/')), [
-    [
-      'report__F1.txt',
-      new IndexEntry({
-        id: 'F1',
-        name: 'report.txt',
-        vfsName: 'report__F1.txt',
-        resourceType: 'discord/attachment',
-        extra: { url: 'https://cdn.test/report' },
-      }),
-    ],
-  ])
+  const row = new FileStat({
+    name: 'report__F1.txt',
+    type: FileType.FILE,
+    extra: { attachment_id: 'F1', url: 'https://cdn.test/report' },
+  })
   try {
-    const stream = readStream(new DiscordAccessor(new FakeDiscordTransport()), path, index)
+    const stream = readStream(new DiscordAccessor(new FakeDiscordTransport()), path, row)
     const first = await stream.next()
     if (first.done) throw new Error('attachment stream ended before its first chunk')
     expect(new TextDecoder().decode(first.value)).toBe('first\n')
@@ -317,19 +197,6 @@ it('closes an attachment stream before fetching its tail', async () => {
 
 describe('follow', () => {
   it('prints the last lines, then asks after the last one seen', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/discord/My Server__G1/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'discord/channel',
-          vfsName: 'general__C1',
-          remoteTime: '',
-        }),
-      ],
-    ])
     const day = [
       { id: '1196400000000000000', content: 'world' },
       { id: '1196300000000000000', content: 'hello' },
@@ -344,10 +211,11 @@ describe('follow', () => {
     })
     const stream = await follow(
       new DiscordAccessor(t),
-      spec('/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl', '/mnt/discord'),
+      spec(CHAT, '/mnt/discord'),
       1,
       0.001,
-      idx,
+      chatRow,
+      dayRow,
     )
     if (stream === null) throw new Error('the chat day was not followed')
     const it = stream[Symbol.asyncIterator]()

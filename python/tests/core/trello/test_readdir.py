@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.normalize import (
     normalize_card,
     normalize_workspace,
@@ -30,7 +29,10 @@ from mirage.core.trello.readdir import (
     readdir,
 )
 from mirage.types import PathSpec
+from mirage.vfs.trello import TrelloVFS
 from mirage.vfs.trello.config import TrelloConfig
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
 
 @pytest.fixture
@@ -38,49 +40,53 @@ def accessor():
     return TrelloAccessor(TrelloConfig(api_key="k", api_token="t"))
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+def _mounted(accessor: TrelloAccessor) -> Workspace:
+    return Workspace({"/trello/": vfs_over(TrelloVFS, accessor)})
+
+
+def _at(path: str) -> PathSpec:
+    return PathSpec.from_str_path("/trello" + path)
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
+async def test_readdir_root(accessor):
     result = await readdir(
-        accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
+        accessor, PathSpec(vfs_path="", virtual="/", directory="/")
     )
-    assert result == ["/workspaces"]
+    assert [row.name for row in result] == ["workspaces"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_workspace_dir_carries_sized_workspace_json(
-    accessor, index
-):
+async def test_readdir_workspace_dir_carries_sized_workspace_json(accessor):
     ws = {"id": "ws1", "displayName": "Engineering"}
     with patch(
         "mirage.core.trello.readdir.list_workspaces",
         new_callable=AsyncMock,
         return_value=[ws],
     ):
-        result = await readdir(
+        (row,) = await readdir(
             accessor,
             PathSpec(
-                vfs_path="workspaces/Engineering__ws1",
-                virtual="/workspaces/Engineering__ws1",
-                directory="/workspaces/Engineering__ws1",
+                vfs_path="workspaces",
+                virtual="/workspaces",
+                directory="/workspaces",
             ),
-            index,
         )
-    assert result == [
-        "/workspaces/Engineering__ws1/workspace.json",
-        "/workspaces/Engineering__ws1/boards",
-    ]
-    lookup = await index.get("/workspaces/Engineering__ws1/workspace.json")
-    assert lookup.entry is not None
-    assert lookup.entry.size == len(to_json_bytes(normalize_workspace(ws)))
+    workspace_json, boards = await readdir(
+        accessor,
+        PathSpec(
+            vfs_path="workspaces/Engineering__ws1",
+            virtual="/workspaces/Engineering__ws1",
+            directory="/workspaces/Engineering__ws1",
+        ),
+        row,
+    )
+    assert (workspace_json.name, boards.name) == ("workspace.json", "boards")
+    assert workspace_json.size == len(to_json_bytes(normalize_workspace(ws)))
 
 
 @pytest.mark.asyncio
-async def test_readdir_card_dir_carries_sized_card_json(accessor, index):
+async def test_readdir_card_dir_carries_sized_card_json(accessor):
     card = {
         "id": "c1",
         "name": "Fix login",
@@ -116,33 +122,30 @@ async def test_readdir_card_dir_carries_sized_card_json(accessor, index):
             return_value=[card],
         ),
     ):
-        result = await readdir(
-            accessor,
-            PathSpec(
-                vfs_path=f"{base.strip('/')}/cards/Fix_login__c1",
-                virtual=f"{base}/cards/Fix_login__c1",
-                directory=f"{base}/cards/Fix_login__c1",
-            ),
-            index,
+        listed, _ = await _mounted(accessor).dispatch(
+            "readdir", _at(f"{base}/cards/Fix_login__c1")
         )
-    assert result == [
-        f"{base}/cards/Fix_login__c1/card.json",
-        f"{base}/cards/Fix_login__c1/comments.jsonl",
+        card_json, _ = await _mounted(accessor).dispatch(
+            "stat", _at(f"{base}/cards/Fix_login__c1/card.json")
+        )
+        comments, _ = await _mounted(accessor).dispatch(
+            "stat", _at(f"{base}/cards/Fix_login__c1/comments.jsonl")
+        )
+    assert listed == [
+        f"/trello{base}/cards/Fix_login__c1/card.json",
+        f"/trello{base}/cards/Fix_login__c1/comments.jsonl",
     ]
-    lookup = await index.get(f"{base}/cards/Fix_login__c1/card.json")
-    assert lookup.entry is not None
-    assert lookup.entry.size == len(to_json_bytes(normalize_card(card)))
-    comments = await index.get(f"{base}/cards/Fix_login__c1/comments.jsonl")
-    assert comments.entry is not None
-    assert comments.entry.size is None
+    assert card_json.size == len(to_json_bytes(normalize_card(card)))
+    assert comments.size is None
 
 
 @pytest.mark.asyncio
-async def test_readdir_traversal_never_refetches_a_listing(accessor, index):
-    # Entering a directory a traversal just listed resolves through the
-    # cached parent listing; the old find chain re-fetched every ancestor
+async def test_readdir_traversal_never_refetches_a_listing(accessor):
+    # Entering a directory a traversal just listed is handed the row the
+    # parent listing kept; the old find chain re-fetched every ancestor
     # listing per directory, which made a recursive walk quadratic in
     # listing payloads.
+    ws = _mounted(accessor)
     cards = [{"id": f"c{i}", "name": f"Card {i}"} for i in range(3)]
     base = "/workspaces/Engineering__ws1/boards/Roadmap__b1/lists/Doing__l1"
     with (
@@ -167,25 +170,9 @@ async def test_readdir_traversal_never_refetches_a_listing(accessor, index):
             return_value=cards,
         ) as cards_mock,
     ):
-        listed = await readdir(
-            accessor,
-            PathSpec(
-                vfs_path=f"{base.strip('/')}/cards",
-                virtual=f"{base}/cards",
-                directory=f"{base}/cards",
-            ),
-            index,
-        )
+        listed, _ = await ws.dispatch("readdir", _at(f"{base}/cards"))
         for card_dir in listed:
-            await readdir(
-                accessor,
-                PathSpec(
-                    vfs_path=card_dir.strip("/"),
-                    virtual=card_dir,
-                    directory=card_dir,
-                ),
-                index,
-            )
+            await ws.dispatch("readdir", PathSpec.from_str_path(card_dir))
     assert ws_mock.await_count == 1
     assert boards_mock.await_count == 1
     assert lists_mock.await_count == 1
@@ -193,28 +180,22 @@ async def test_readdir_traversal_never_refetches_a_listing(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_unknown_workspace_raises(accessor, index):
+async def test_readdir_unknown_workspace_raises(accessor):
     # No listed workspace carries the typed `label__id` dirname, so the
-    # kit's entry resolution comes back empty and reports ENOENT.
+    # mount hands no row and the kit reports ENOENT.
     with patch(
         "mirage.core.trello.readdir.list_workspaces",
         new_callable=AsyncMock,
         return_value=[{"id": "ws1", "displayName": "Engineering"}],
     ):
         with pytest.raises(FileNotFoundError):
-            await readdir(
-                accessor,
-                PathSpec(
-                    vfs_path="workspaces/Ghost__nope/boards",
-                    virtual="/workspaces/Ghost__nope/boards",
-                    directory="/workspaces/Ghost__nope/boards",
-                ),
-                index,
+            await _mounted(accessor).dispatch(
+                "readdir", _at("/workspaces/Ghost__nope/boards")
             )
 
 
 @pytest.mark.asyncio
-async def test_readdir_unrecognized_path_raises(accessor, index):
+async def test_readdir_unrecognized_path_raises(accessor):
     # Returning [] for an unknown path made `ls` and `tree` report a bogus path
     # as real-but-empty, and left `rg` without a message.
     with pytest.raises(FileNotFoundError):
@@ -225,12 +206,11 @@ async def test_readdir_unrecognized_path_raises(accessor, index):
                 virtual="/__nf_missing__",
                 directory="/__nf_missing__",
             ),
-            index,
         )
 
 
 @pytest.mark.asyncio
-async def test_readdir_unrecognized_nested_path_raises(accessor, index):
+async def test_readdir_unrecognized_nested_path_raises(accessor):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
@@ -239,7 +219,6 @@ async def test_readdir_unrecognized_nested_path_raises(accessor, index):
                 virtual="/workspaces/w/nope/deeper",
                 directory="/workspaces/w/nope/deeper",
             ),
-            index,
         )
 
 

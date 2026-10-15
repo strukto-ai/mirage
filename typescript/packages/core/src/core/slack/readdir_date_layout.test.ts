@@ -15,9 +15,11 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import type { DirListing } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
 import { readdir } from './readdir.ts'
 
@@ -38,166 +40,75 @@ function p(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, PREFIX) })
 }
 
+// A day's row as its channel's listing names it.
+function dayRow(channel: string): FileStat {
+  return new FileStat({
+    name: '2024-01-01',
+    type: FileType.DIRECTORY,
+    extra: { channel_id: channel },
+  })
+}
+
+const HISTORY: SlackResponse = {
+  ok: true,
+  messages: [
+    {
+      ts: '1704067300.0',
+      text: 'hi',
+      files: [
+        {
+          id: 'F1',
+          name: 'design.pdf',
+          size: 12,
+          mimetype: 'application/pdf',
+          url_private_download: 'https://files.slack.com/F1',
+          timestamp: 100,
+        },
+      ],
+    },
+  ],
+  response_metadata: { next_cursor: '' },
+}
+
 describe('readdir: date directory layout', () => {
-  it('readdir(<chan>/<date>) returns ["chat.jsonl", "files"] and seals via fetch_day', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir(`${PREFIX}/channels`, [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: '0',
-        }),
-      ],
-    ])
-    await idx.setDir(`${PREFIX}/channels/general__C1`, [
-      [
-        '2024-01-01',
-        new IndexEntry({
-          id: 'C1:2024-01-01',
-          name: '2024-01-01',
-          resourceType: 'slack/date_dir',
-          vfsName: '2024-01-01',
-        }),
-      ],
-    ])
+  it('readdir(<chan>/<date>) returns ["chat.jsonl", "files"] and seeds the files', async () => {
     const t = new FakeTransport((endpoint) => {
-      if (endpoint === 'conversations.history') {
+      if (endpoint === 'conversations.history') return HISTORY
+      throw new Error(`unexpected ${endpoint}`)
+    })
+    const day = `${PREFIX}/channels/general__C1/2024-01-01`
+    const out = (await readdir(new SlackAccessor(t), p(day), dayRow('C1'))) as DirListing
+    expect(rowsOf(out).map((row) => `${day}/${row.name}`)).toEqual([
+      `${day}/chat.jsonl`,
+      `${day}/files`,
+    ])
+    expect((out.seeds.get('files') ?? []).map((row) => row.name)).toEqual(['design__F1.pdf'])
+  })
+
+  it('readdir(<chan>/<date>/files) is served from the day listing', async () => {
+    const t = new FakeTransport((endpoint) => {
+      if (endpoint === 'conversations.list') {
         return {
           ok: true,
-          messages: [
-            {
-              ts: '1704067300.0',
-              text: 'hi',
-              files: [
-                {
-                  id: 'F1',
-                  name: 'design.pdf',
-                  size: 12,
-                  mimetype: 'application/pdf',
-                  url_private_download: 'https://files.slack.com/F1',
-                  timestamp: 100,
-                },
-              ],
-            },
-          ],
+          channels: [{ id: 'C1', name: 'general', created: 0 }],
           response_metadata: { next_cursor: '' },
         }
       }
+      if (endpoint === 'conversations.history') return HISTORY
       throw new Error(`unexpected ${endpoint}`)
     })
-    const out = await readdir(
-      new SlackAccessor(t),
-      p(`${PREFIX}/channels/general__C1/2024-01-01`),
-      idx,
-    )
-    expect(out).toEqual([
-      `${PREFIX}/channels/general__C1/2024-01-01/chat.jsonl`,
-      `${PREFIX}/channels/general__C1/2024-01-01/files`,
-    ])
-    const filesListing = await idx.listDir(`${PREFIX}/channels/general__C1/2024-01-01/files`)
-    expect(filesListing.entries).toEqual([
-      `${PREFIX}/channels/general__C1/2024-01-01/files/design__F1.pdf`,
-    ])
-  })
-
-  it('readdir(<chan>/<date>/files) returns cached blob names', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir(`${PREFIX}/channels`, [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: '0',
-        }),
-      ],
-    ])
-    await idx.setDir(`${PREFIX}/channels/general__C1`, [
-      [
-        '2024-01-01',
-        new IndexEntry({
-          id: 'C1:2024-01-01',
-          name: '2024-01-01',
-          resourceType: 'slack/date_dir',
-          vfsName: '2024-01-01',
-        }),
-      ],
-    ])
-    await idx.setDir(`${PREFIX}/channels/general__C1/2024-01-01`, [
-      [
-        'chat.jsonl',
-        new IndexEntry({
-          id: 'C1:2024-01-01:chat',
-          name: 'chat.jsonl',
-          resourceType: 'slack/chat_jsonl',
-          vfsName: 'chat.jsonl',
-        }),
-      ],
-      [
-        'files',
-        new IndexEntry({
-          id: 'C1:2024-01-01:files',
-          name: 'files',
-          resourceType: 'slack/files_dir',
-          vfsName: 'files',
-        }),
-      ],
-    ])
-    await idx.setDir(`${PREFIX}/channels/general__C1/2024-01-01/files`, [
-      [
-        'spec__F1.pdf',
-        new IndexEntry({
-          id: 'F1',
-          name: 'spec.pdf',
-          resourceType: 'slack/file',
-          vfsName: 'spec__F1.pdf',
-          extra: { mimetype: 'application/pdf' },
-        }),
-      ],
-    ])
-    const t = new FakeTransport(() => {
-      throw new Error('should not be called')
+    const ws = new Workspace({
+      [`${PREFIX}/`]: new SlackVFSBase({ accessor: new SlackAccessor(t) }),
     })
-    const out = await readdir(
-      new SlackAccessor(t),
-      p(`${PREFIX}/channels/general__C1/2024-01-01/files`),
-      idx,
-    )
-    expect(out).toEqual([`${PREFIX}/channels/general__C1/2024-01-01/files/spec__F1.pdf`])
-    expect(t.calls).toHaveLength(0)
+    const day = `${PREFIX}/channels/general__C1/2024-01-01`
+    await ws.dispatch('readdir', day)
+    const before = t.calls.length
+    const out = await ws.dispatch('readdir', `${day}/files`)
+    expect(out).toEqual([`${day}/files/design__F1.pdf`])
+    expect(t.calls).toHaveLength(before)
   })
 
   it('readdir(<chan>/<date>) seals empty when conversations.history hits not_in_channel', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir(`${PREFIX}/channels`, [
-      [
-        'priv__CX',
-        new IndexEntry({
-          id: 'CX',
-          name: 'priv',
-          resourceType: 'slack/channel',
-          vfsName: 'priv__CX',
-          remoteTime: '0',
-        }),
-      ],
-    ])
-    await idx.setDir(`${PREFIX}/channels/priv__CX`, [
-      [
-        '2024-01-01',
-        new IndexEntry({
-          id: 'CX:2024-01-01',
-          name: '2024-01-01',
-          resourceType: 'slack/date_dir',
-          vfsName: '2024-01-01',
-        }),
-      ],
-    ])
     const t = new FakeTransport(() => {
       const err = new Error('Slack API error (conversations.history): not_in_channel')
       return err
@@ -205,8 +116,8 @@ describe('readdir: date directory layout', () => {
     const out = await readdir(
       new SlackAccessor(t),
       p(`${PREFIX}/channels/priv__CX/2024-01-01`),
-      idx,
+      dayRow('CX'),
     )
-    expect(out).toEqual([])
+    expect(rowsOf(out)).toEqual([])
   })
 })

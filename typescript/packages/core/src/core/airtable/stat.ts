@@ -12,19 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ContentType, FileType } from '../../types.ts'
-import { entryStat, makeStat } from '../hierarchy/stat.ts'
-import { readdir } from './readdir.ts'
+import { makeStat } from '../hierarchy/stat.ts'
 import { detectScope } from './scope.ts'
 
-export const stat = makeStat(detectScope, readdir, {
-  entryStats: {
-    base: entryStat('base_id', FileType.DIRECTORY),
-    base_json: entryStat('base_id', ContentType.JSON),
-    table: entryStat('table_id', FileType.DIRECTORY),
-    table_json: entryStat('table_id', ContentType.JSON),
-    records: entryStat('table_id', ContentType.TEXT),
-    views: entryStat('table_id', FileType.DIRECTORY),
-    view: entryStat('view_id', ContentType.TEXT),
-  },
-})
+export const stat = makeStat(detectScope)

@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { JaegerAccessor, type JaegerAccessorConfig } from '../../accessor/jaeger.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { JaegerTransport } from './client.ts'
@@ -73,11 +72,7 @@ describe('jaeger read', () => {
       ...SERVICES,
       [`/api/traces/${TRACE_A}`]: { data: [doc] },
     })
-    const bytes = await read(
-      accessor(transport),
-      spec(`/services/checkout/traces/${TRACE_A}.json`),
-      new RAMIndexCacheStore(),
-    )
+    const bytes = await read(accessor(transport), spec(`/services/checkout/traces/${TRACE_A}.json`))
     expect(JSON.parse(DEC.decode(bytes))).toEqual(doc)
   })
 
@@ -94,11 +89,7 @@ describe('jaeger read', () => {
       [`/api/traces/${TRACE_A}`]: { data: [doc] },
     })
     await expect(
-      read(
-        accessor(transport),
-        spec(`/services/search/traces/${TRACE_A}.json`),
-        new RAMIndexCacheStore(),
-      ),
+      read(accessor(transport), spec(`/services/search/traces/${TRACE_A}.json`)),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -108,66 +99,44 @@ describe('jaeger read', () => {
       [`/api/traces/${TRACE_A}`]: { data: [{ traceID: TRACE_A }] },
     })
     await expect(
-      read(
-        accessor(transport),
-        spec(`/services/nope/traces/${TRACE_A}.json`),
-        new RAMIndexCacheStore(),
-      ),
+      read(accessor(transport), spec(`/services/nope/traces/${TRACE_A}.json`)),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('renders the operations list', async () => {
     const ops = [{ name: 'POST /checkout', spanKind: 'server' }]
     const transport = new RecordingTransport({ ...SERVICES, '/api/operations': { data: ops } })
-    const bytes = await read(
-      accessor(transport),
-      spec('/services/checkout/operations.json'),
-      new RAMIndexCacheStore(),
-    )
+    const bytes = await read(accessor(transport), spec('/services/checkout/operations.json'))
     expect(JSON.parse(DEC.decode(bytes))).toEqual(ops)
   })
 
   it('treats a malformed trace id as ENOENT without calling the api', async () => {
     const transport = new RecordingTransport(SERVICES)
     await expect(
-      read(
-        accessor(transport),
-        spec('/services/checkout/traces/zzz.json'),
-        new RAMIndexCacheStore(),
-      ),
+      read(accessor(transport), spec('/services/checkout/traces/zzz.json')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
     expect(transport.calls.some((c) => c.path.startsWith('/api/traces/'))).toBe(false)
   })
 
   it('maps a missing trace to ENOENT', async () => {
     await expect(
-      read(
-        accessor(new ThrowingTransport(404)),
-        spec(`/services/checkout/traces/${TRACE_A}.json`),
-        new RAMIndexCacheStore(),
-      ),
+      read(accessor(new ThrowingTransport(404)), spec(`/services/checkout/traces/${TRACE_A}.json`)),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('lets a server error propagate', async () => {
     // A server fault must not read as "this trace does not exist".
     await expect(
-      read(
-        accessor(new ThrowingTransport(500)),
-        spec(`/services/checkout/traces/${TRACE_A}.json`),
-        new RAMIndexCacheStore(),
-      ),
+      read(accessor(new ThrowingTransport(500)), spec(`/services/checkout/traces/${TRACE_A}.json`)),
     ).rejects.toBeInstanceOf(JaegerApiError)
   })
 
   it('raises ENOENT for an unknown service and EISDIR for a directory', async () => {
     const t = new RecordingTransport(SERVICES)
-    await expect(
-      read(accessor(t), spec('/services/nope/operations.json'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(read(accessor(t), spec('/services/nope/operations.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
     // A matched directory kind is a real node being read as a file.
-    await expect(
-      read(accessor(t), spec('/services'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
+    await expect(read(accessor(t), spec('/services'))).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })

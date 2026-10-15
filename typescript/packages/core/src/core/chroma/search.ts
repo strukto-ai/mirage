@@ -14,7 +14,6 @@
 
 import type { Where } from 'chromadb'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountPrefixOf, mountedPath } from '../../utils/key_prefix.ts'
 import { scoreFromDistance } from '../../utils/score.ts'
@@ -31,7 +30,6 @@ export async function searchSegments(
   accessor: ChromaAccessor,
   query: string,
   paths: readonly PathSpec[],
-  index?: IndexCacheStore,
   topK = 10,
   mountPrefix = '',
 ): Promise<[string, string][]> {
@@ -43,7 +41,7 @@ export async function searchSegments(
   let scopedSlugs: Set<string> | null = null
   let where: Where | undefined
   if (paths.length > 0) {
-    scopedSlugs = new Set((await targetEntries(CHROMA_TREE, accessor, paths, index)).keys())
+    scopedSlugs = new Set((await targetEntries(CHROMA_TREE, accessor, paths)).keys())
     if (scopedSlugs.size === 0) return []
     where = {
       [accessor.config.slugField]: { $in: [...scopedSlugs].sort(compareCodePoints) },
@@ -103,21 +101,19 @@ export async function searchMany(
   accessor: ChromaAccessor,
   paths: PathSpec[],
   query: SearchQuery,
-  index?: IndexCacheStore,
 ): Promise<[string, string][]> {
   validateOptions(query, ['top_k'])
   const topK = intOption(query, 'top_k', 10)
-  const [targets, prefix] = await searchScope(CHROMA_TREE, accessor, paths, index)
-  return searchSegments(accessor, query.query, targets, index, topK, prefix)
+  const [targets, prefix] = await searchScope(CHROMA_TREE, accessor, paths)
+  return searchSegments(accessor, query.query, targets, topK, prefix)
 }
 
 export function searchResource(
   accessor: ChromaAccessor,
   path: PathSpec,
   query: SearchQuery,
-  index?: IndexCacheStore,
 ): Promise<[string, string][]> {
-  return searchMany(accessor, [path], query, index)
+  return searchMany(accessor, [path], query)
 }
 
 /**
@@ -133,14 +129,13 @@ export async function filesContaining(
   text: string,
   under: readonly PathSpec[],
   ignoreCase: boolean,
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const [first] = under
   if (ignoreCase || first === undefined) return null
   const field = accessor.config.slugField
   let where: Where | undefined
   if (under.every((scope) => stripSlash(scope.mountPath) !== '')) {
-    const walked = await targetEntries(CHROMA_TREE, accessor, under, index)
+    const walked = await targetEntries(CHROMA_TREE, accessor, under)
     if (walked.size === 0) return []
     where = { [field]: { $in: [...walked.keys()].sort(compareCodePoints) } } as Where
   }

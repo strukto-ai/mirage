@@ -17,11 +17,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gslides.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
@@ -29,13 +29,8 @@ def accessor():
     return GSlidesAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_stat_root(accessor, index):
+async def test_stat_root(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -43,14 +38,13 @@ async def test_stat_root(accessor, index):
             virtual="/gslides",
             directory="/gslides",
         ),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
-async def test_stat_owned_dir(accessor, index):
+async def test_stat_owned_dir(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -58,48 +52,37 @@ async def test_stat_owned_dir(accessor, index):
             virtual="/gslides/owned",
             directory="/gslides/owned",
         ),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "owned"
 
 
 @pytest.mark.asyncio
-async def test_stat_deck_from_cache(accessor, index):
-    await index.set_dir(
-        "/gslides/owned",
-        [
-            (
-                "2026-04-01_My_Deck__d1.gslide.json",
-                IndexEntry(
-                    id="d1",
-                    name="My Deck",
-                    resource_type="gslides/file",
-                    remote_time="2026-04-01T00:00:00.000Z",
-                    vfs_name="2026-04-01_My_Deck__d1.gslide.json",
-                    size=2048,
-                ),
-            ),
-        ],
-    )
-    target = "/gslides/owned/2026-04-01_My_Deck__d1.gslide.json"
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key(target, "/gslides"),
-            virtual=target,
-            directory=target,
-        ),
-        index,
-    )
+async def test_stat_deck_from_the_listing(accessor):
+    stamp = "2026-04-01T00:00:00.000Z"
+    item = {
+        "mimeType": "application/vnd.google-apps.presentation",
+        "id": "d1",
+        "name": "My Deck",
+        "modifiedTime": stamp,
+        "owners": [{"me": True}],
+    }
+    mounted = Mounted(GSlidesVFS, accessor, "/gslides")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=([item], True),
+    ):
+        (target,) = await mounted.readdir("/owned")
+        result = await mounted.stat(target.removeprefix("/gslides"))
+    assert target == "/gslides/owned/2026-04-01_My_Deck__d1.gslide.json"
     assert result.content == ContentType.JSON
     assert result.extra["doc_id"] == "d1"
-    assert result.size == 2048
-    assert result.fingerprint == "2026-04-01T00:00:00.000Z"
+    assert result.fingerprint == stamp
 
 
 @pytest.mark.asyncio
-async def test_stat_cache_miss_fetches_metadata_by_id(accessor, index):
+async def test_stat_cache_miss_fetches_metadata_by_id(accessor):
     files = [
         {
             "mimeType": "application/vnd.google-apps.presentation",
@@ -123,7 +106,6 @@ async def test_stat_cache_miss_fetches_metadata_by_id(accessor, index):
                 virtual=target,
                 directory=target,
             ),
-            index,
         )
     assert result.content == ContentType.JSON
     assert result.extra["doc_id"] == "d1"
@@ -131,7 +113,7 @@ async def test_stat_cache_miss_fetches_metadata_by_id(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found_after_fallback(accessor, index):
+async def test_stat_not_found_after_fallback(accessor):
     files = [
         {
             "mimeType": "application/vnd.google-apps.presentation",
@@ -156,5 +138,4 @@ async def test_stat_not_found_after_fallback(accessor, index):
                     virtual="/gslides/owned/nope.gslide.json",
                     directory="/gslides/owned/nope.gslide.json",
                 ),
-                index,
             )

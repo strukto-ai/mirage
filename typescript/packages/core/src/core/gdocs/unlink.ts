@@ -13,15 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDocsAccessor } from '../../accessor/gdocs.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
+import type { FileStat } from '../../types.ts'
 import { deleteFile } from '../google/drive.ts'
 import { makeUnlink } from '../hierarchy/unlink.ts'
-import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 
-async function del(accessor: GDocsAccessor, _match: ScopeMatch, entry: IndexEntry): Promise<void> {
-  await deleteFile(accessor.tokenManager, entry.id)
+async function del(accessor: GDocsAccessor, match: ScopeMatch, _entry: FileStat): Promise<void> {
+  await deleteFile(accessor.tokenManager, match.slots.file_id ?? '')
 }
 
-export const unlink = makeUnlink(detectScope, readdir, { deleters: { file: del } })
+export const unlink = makeUnlink(detectScope, { deleters: { file: del } })

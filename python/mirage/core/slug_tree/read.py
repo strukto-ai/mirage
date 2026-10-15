@@ -14,28 +14,28 @@
 
 from collections.abc import AsyncIterator
 
-from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.slug_tree.tree import SlugTree
-from mirage.core.slug_tree.types import A
-from mirage.errors.fs import eisdir
-from mirage.types import PathSpec
+from mirage.errors.fs import eisdir, enoent
+from mirage.types import FileStat, FileType, PathSpec
 
 
-async def file_entry(
-    tree: SlugTree[A], accessor: A, path: PathSpec, index: IndexCacheStore
-) -> IndexEntry:
-    """The index entry of a file path; a folder is EISDIR.
+def file_entry(path: PathSpec, entry: FileStat | None) -> FileStat:
+    """What is at the file ``path``, as its folder's listing named it.
 
     Args:
-        tree (SlugTree[A]): the backend's tree.
-        accessor (A): the mount's accessor.
-        path (PathSpec): the path to read.
-        index (IndexCacheStore): the mount's index.
+        path (PathSpec): the file.
+        entry (FileStat | None): what is at the path.
+
+    Raises:
+        FileNotFoundError: nothing is there.
+        IsADirectoryError: a folder is.
     """
-    resolved = await tree.resolve(accessor, path, index)
-    if resolved.is_dir:
+    if not path.mount_path.strip("/"):
         raise eisdir(path.virtual)
-    return resolved.entry
+    if entry is None:
+        raise enoent(path.virtual)
+    if entry.type is FileType.DIRECTORY:
+        raise eisdir(path.virtual)
+    return entry
 
 
 async def join_lines(parts: AsyncIterator[str]) -> AsyncIterator[bytes]:

@@ -12,34 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '../../cache/index/config.ts'
+import type { FileStat } from '../../types.ts'
 
-/** Each folder's `[name, entry]` rows, keyed by the folder's virtual key. */
-export type DirRows = Map<string, [string, IndexEntry][]>
+/** Each folder's rows, keyed by the folder's tree path. */
+export type DirRows = Map<string, FileStat[]>
 
-/** Fetch a backend's whole document list and lay it out under a mount prefix. */
-export type LoadRows<A> = (accessor: A, prefix: string) => Promise<DirRows>
-
-export interface ResolvedDirectory {
-  readonly isDir: true
-  readonly virtualKey: string
-  readonly mountPrefix: string
-  readonly children: string[] | undefined
-}
-
-export interface ResolvedFile {
-  readonly isDir: false
-  readonly virtualKey: string
-  readonly mountPrefix: string
-  readonly entry: IndexEntry
-}
-
-export type ResolvedPath = ResolvedDirectory | ResolvedFile
-
-export interface WalkOptions {
-  includeRoot?: boolean
-  maxDepth?: number | null
-  stripPrefix?: boolean
-  ignoreMissing?: boolean
-  depth?: number
-}
+/** Fetch a backend's whole document list and lay out each folder's rows. */
+export type LoadRows<A> = (accessor: A) => Promise<DirRows>

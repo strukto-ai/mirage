@@ -32,7 +32,6 @@ function tree(
   drops = (rank: number, threshold: number) => rank < threshold,
 ): VectorTree<Accessor> {
   return {
-    vfs: 'stub',
     detect: () => {
       throw new Error('unused')
     },

@@ -15,9 +15,10 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
-import { IndexEntry, type Evicted, type SetDirOptions } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import type { DirListing } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SlackApiError, type SlackResponse, type SlackTransport } from './client.ts'
 import { latestMessageTs, listFiles, readdir } from './readdir.ts'
 
@@ -31,20 +32,6 @@ class FakeTransport implements SlackTransport {
     const result = this.responder(endpoint)
     if (result instanceof Error) return Promise.reject(result)
     return Promise.resolve(result)
-  }
-}
-
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
   }
 }
 
@@ -91,7 +78,6 @@ describe('latestMessageTs soft errors', () => {
 
 describe('readdir on inaccessible channel', () => {
   it('returns [] dates instead of throwing when conversations.history fails', async () => {
-    const idx = new RAMIndexCacheStore()
     const channelsPage = {
       ok: true,
       channels: [{ id: 'C_INACCESSIBLE', name: 'private', created: 1 }],
@@ -104,55 +90,37 @@ describe('readdir on inaccessible channel', () => {
       }
       throw new Error(`unexpected ${endpoint}`)
     })
-    const accessor = new SlackAccessor(t)
-    // Prime parent (mirrors a prior `ls /slack/channels`).
-    await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/slack/channels',
-        directory: '/slack/channels',
-        vfsPath: mountKey('/slack/channels', '/slack'),
-      }),
-      idx,
-    )
-    const dates = await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/slack/channels/private__C_INACCESSIBLE',
-        directory: '/slack/channels/private__C_INACCESSIBLE',
-        vfsPath: mountKey('/slack/channels/private__C_INACCESSIBLE', '/slack'),
-      }),
-      idx,
-    )
+    const ws = new Workspace({ '/slack/': new SlackVFSBase({ accessor: new SlackAccessor(t) }) })
+    // Lists the channels first, as a prior `ls /slack/channels` does.
+    await ws.dispatch('readdir', '/slack/channels')
+    const dates = await ws.dispatch('readdir', '/slack/channels/private__C_INACCESSIBLE')
     expect(dates).toEqual([])
   })
 })
 
 describe('readdir of a soft-error day', () => {
-  it('writes the empty day as a window', async () => {
+  it('lists the empty day as a window', async () => {
     // An empty day from not_in_channel is not the backend saying the day's
     // messages are gone, so it must not evict what an earlier listing held.
-    const idx = new WindowSpy()
-    const channelsPage = {
-      ok: true,
-      channels: [{ id: 'C_INACCESSIBLE', name: 'foo', created: 1 }],
-      response_metadata: { next_cursor: '' },
-    }
     const t = new FakeTransport((endpoint) => {
-      if (endpoint === 'conversations.list') return channelsPage
       if (endpoint === 'conversations.history') {
         return new SlackApiError('conversations.history', 'not_in_channel')
       }
       throw new Error(`unexpected ${endpoint}`)
     })
     const day = '/slack/channels/foo__C_INACCESSIBLE/2026-05-10'
-    const out = await readdir(
+    const own = new FileStat({
+      name: '2026-05-10',
+      type: FileType.DIRECTORY,
+      extra: { channel_id: 'C_INACCESSIBLE' },
+    })
+    const out = (await readdir(
       new SlackAccessor(t),
       new PathSpec({ virtual: day, directory: day, vfsPath: mountKey(day, '/slack') }),
-      idx,
-    )
-    expect(out).toEqual([])
-    expect(idx.windows.get(day)).toBe(true)
+      own,
+    )) as DirListing
+    expect(out.entries).toEqual([])
+    expect(out.window).toBe(true)
   })
 })
 
@@ -166,11 +134,9 @@ describe('listFiles of a soft-error day', () => {
       }
       throw new Error(`unexpected ${endpoint}`)
     })
-    const own = new IndexEntry({
-      id: 'C1:2026-05-10',
+    const own = new FileStat({
       name: 'files',
-      resourceType: 'slack/files',
-      vfsName: 'files',
+      type: FileType.DIRECTORY,
       extra: { channel_id: 'C1' },
     })
     const listing = await listFiles(
@@ -182,6 +148,6 @@ describe('listFiles of a soft-error day', () => {
       } as never,
       own,
     )
-    expect((listing as { window?: boolean }).window).toBe(true)
+    expect((listing as DirListing).window).toBe(true)
   })
 })

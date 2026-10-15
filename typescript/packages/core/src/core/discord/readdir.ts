@@ -14,24 +14,22 @@
 
 import { guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { makeReaddir, type DirListing, type Listed } from '../hierarchy/readdir.ts'
+import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
+import { contentTypeForMime } from '../../utils/filetype.ts'
+import { makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listChannels } from './channels.ts'
 import { DiscordApiError } from './client.ts'
-import { DiscordIndexEntry, DiscordResourceType } from './entry.ts'
+import { channelEntry, guildEntry, historyEntry, memberEntry, snowflakeToDate } from './entry.ts'
 import { fileBlobName } from './files.ts'
 import { listGuilds } from './guilds.ts'
 import { listMessagesForDay } from './history.ts'
 import { listMembers } from './members.ts'
-import { compactJsonBytes, jsonlBytes } from '../render/json.ts'
+import { jsonlBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
-import { snowflakeToDate } from './entry.ts'
 
 const SOFT_HTTP_STATUSES = new Set([403, 404, 429])
-
-const CONTAINER_TYPE = 'discord/container'
 
 /**
  * The channel's day directories, newest first.
@@ -80,84 +78,59 @@ function isSoftError(err: unknown): boolean {
   return err instanceof DiscordApiError && SOFT_HTTP_STATUSES.has(err.status)
 }
 
-function containerEntry(name: string, guildId: string): IndexEntry {
-  return new IndexEntry({
-    id: guildId,
-    name,
-    resourceType: CONTAINER_TYPE,
-    vfsName: name,
-  })
+function containerEntry(name: string, guildId: string): FileStat {
+  return new FileStat({ name, type: FileType.DIRECTORY, extra: { guild_id: guildId } })
 }
 
 async function listRoot(accessor: DiscordAccessor, _match: ScopeMatch): Promise<Listed | null> {
-  const guilds = await listGuilds(accessor)
-  return guilds.map((g) => {
-    const entry = DiscordIndexEntry.guild(g)
-    return [entry.vfsName, entry] as [string, IndexEntry]
-  })
+  return (await listGuilds(accessor)).map(guildEntry)
 }
 
 function listGuildContainers(
   _accessor: DiscordAccessor,
   _match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
-  return Promise.resolve<[string, IndexEntry][]>([
-    ['channels', containerEntry('channels', own.id)],
-    ['members', containerEntry('members', own.id)],
-  ])
+  const guildId = String(own.extra.guild_id)
+  return Promise.resolve([containerEntry('channels', guildId), containerEntry('members', guildId)])
 }
 
 async function listChannelsDir(
   accessor: DiscordAccessor,
   _match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
-  const channels = await listChannels(accessor, own.id)
-  return channels.map((c) => {
-    const base = DiscordIndexEntry.channel(c)
-    const lastMsgId = typeof c.last_message_id === 'string' ? c.last_message_id : ''
-    const entry = lastMsgId !== '' ? base.copyWith({ remoteTime: lastMsgId }) : base
-    return [entry.vfsName, entry] as [string, IndexEntry]
-  })
+  return (await listChannels(accessor, String(own.extra.guild_id))).map(channelEntry)
 }
 
 async function listMembersDir(
   accessor: DiscordAccessor,
   _match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
-  const members = await listMembers(accessor, own.id)
-  const entries: [string, IndexEntry][] = []
-  for (const m of members) {
-    const user = m.user
-    if (user === undefined || user.id === '') continue
-    // The listing already carries the whole member payload read() renders,
-    // so the exact size is free here.
-    const entry = DiscordIndexEntry.member(
-      { id: user.id, name: user.username ?? '' },
-      compactJsonBytes(m).byteLength,
-    )
-    entries.push([entry.vfsName, entry])
-  }
-  return entries
+  const members = await listMembers(accessor, String(own.extra.guild_id))
+  return members.filter((m) => m.user !== undefined && m.user.id !== '').map(memberEntry)
 }
 
 function listChannelDays(
   accessor: DiscordAccessor,
   match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
-  const lastMsgId = own.remoteTime
+  const channelId = String(own.extra.channel_id)
+  const lastMsgId = typeof own.extra.last_message_id === 'string' ? own.extra.last_message_id : ''
   const endDate = lastMsgId !== '' ? snowflakeToDate(lastMsgId) : todayUtc()
   const span = globSpan(match.pattern)
   const dates = accessor.timeRange.bounded
-    ? accessor.timeRange.listingDays(snowflakeToDate(own.id), endDate, span)
+    ? accessor.timeRange.listingDays(snowflakeToDate(channelId), endDate, span)
     : dateRangeDescending(endDate, 30, span)
-  const entries = dates.map(
-    (d) => [d, DiscordIndexEntry.history(own.id, d)] as [string, IndexEntry],
+  return Promise.resolve(
+    new DirListing({
+      entries: dates.map((d) => historyEntry(channelId, d)),
+      partial: span !== null,
+      window: true,
+    }),
   )
-  return Promise.resolve({ entries, seeds: {}, partial: span !== null, window: true })
 }
 
 /**
@@ -175,26 +148,14 @@ async function dayListing(
   try {
     messages = await listMessagesForDay(accessor, channelId, dateStr)
   } catch (e) {
-    if (isSoftError(e)) return { entries: [], seeds: {}, window: true }
+    // A soft error is not the channel saying the day's messages are gone,
+    // so the empty day must not evict what it held.
+    if (isSoftError(e)) return new DirListing({ entries: [], window: true })
     throw e
   }
   // The day's messages are already in hand, so chat.jsonl's exact rendered
   // size is free here; read() renders the same messages the same way.
-  const chatEntry = new IndexEntry({
-    id: `${channelId}:${dateStr}:chat`,
-    name: 'chat.jsonl',
-    resourceType: DiscordResourceType.CHAT_JSONL,
-    vfsName: 'chat.jsonl',
-    size: jsonlBytes(messages).byteLength,
-  })
-  const filesEntry = new IndexEntry({
-    id: `${channelId}:${dateStr}:files`,
-    name: 'files',
-    resourceType: DiscordResourceType.FILES_DIR,
-    vfsName: 'files',
-    extra: { channel_id: channelId, date: dateStr },
-  })
-  const fileEntries: [string, IndexEntry][] = []
+  const blobs: FileStat[] = []
   for (const msg of messages) {
     const atts = (msg.attachments ?? []) as {
       id: string
@@ -210,60 +171,66 @@ async function dayListing(
       // on them, so listing them would surface phantom files with unknown
       // sizes. Mirrors the slack guard.
       if (!att.id || !att.url || att.size === undefined) continue
-      const blobName = fileBlobName(att)
-      fileEntries.push([
-        blobName,
-        new IndexEntry({
-          id: att.id,
-          name: att.filename ?? '',
-          resourceType: DiscordResourceType.FILE,
-          vfsName: blobName,
+      const mimetype = att.content_type ?? ''
+      blobs.push(
+        new FileStat({
+          name: fileBlobName(att),
+          type: FileType.FILE,
+          content: contentTypeForMime(mimetype),
           size: att.size,
           extra: {
+            attachment_id: att.id,
+            content_type: mimetype,
             url: att.url,
             proxy_url: att.proxy_url ?? '',
-            content_type: att.content_type ?? '',
             message_id: msg.id,
             author: (msg.author as { username?: string } | undefined)?.username ?? '',
             channel_id: channelId,
             date: dateStr,
           },
         }),
-      ])
+      )
     }
   }
-  return {
+  return new DirListing({
     entries: [
-      ['chat.jsonl', chatEntry],
-      ['files', filesEntry],
+      new FileStat({
+        name: 'chat.jsonl',
+        type: FileType.FILE,
+        content: ContentType.TEXT,
+        size: jsonlBytes(messages).byteLength,
+        extra: { channel_id: channelId },
+      }),
+      new FileStat({
+        name: 'files',
+        type: FileType.DIRECTORY,
+        extra: { channel_id: channelId, date: dateStr },
+      }),
     ],
-    seeds: { files: fileEntries },
-  }
+    seeds: new Map([['files', blobs]]),
+  })
 }
 
-function listDay(
-  accessor: DiscordAccessor,
-  match: ScopeMatch,
-  channel: IndexEntry,
-): Promise<Listed> {
-  // The proof is the channel entry, not the day's own: any well-formed date
-  // under a real channel fetches, including dates outside the bounded window
-  // the channel listing mints.
-  return dayListing(accessor, channel.id, match.slots.day ?? '')
+function listDay(accessor: DiscordAccessor, match: ScopeMatch, own: FileStat): Promise<Listed> {
+  // The day's row carries its channel: one the bounded window lists, or one
+  // stat makes for any well-formed date under a real channel, so a date
+  // outside the window fetches too.
+  return dayListing(accessor, String(own.extra.channel_id), match.slots.day ?? '')
 }
 
 export async function listFiles(
   accessor: DiscordAccessor,
   match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
   // Normally served from the day lister's seed; reached only when the index
-  // evicted the files listing while the day's entries survived.
-  const fromExtra = typeof own.extra.channel_id === 'string' ? own.extra.channel_id : ''
-  const channelId = fromExtra !== '' ? fromExtra : (own.id.split(':', 1)[0] ?? '')
-  const listing = await dayListing(accessor, channelId, match.slots.day ?? '')
+  // evicted the files listing while the day's rows survived.
+  const listing = await dayListing(accessor, String(own.extra.channel_id), match.slots.day ?? '')
   // A soft-error day proves nothing about its attachments either.
-  return { entries: [...(listing.seeds.files ?? [])], seeds: {}, window: listing.window === true }
+  return new DirListing({
+    entries: [...(listing.seeds.get('files') ?? [])],
+    window: listing.window,
+  })
 }
 
 export const readdir = makeReaddir<DiscordAccessor>(detectScope, {
@@ -273,9 +240,9 @@ export const readdir = makeReaddir<DiscordAccessor>(detectScope, {
     channels_dir: listChannelsDir,
     members_dir: listMembersDir,
     channel: listChannelDays,
+    day: listDay,
     files: listFiles,
   },
-  parentEntryListers: { day: listDay },
   guards: { day: guardDay, files: guardDay },
   patternKinds: { channel: hasGlobSpan },
   leafError: 'enotdir',

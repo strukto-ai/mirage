@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { read as mongodbRead, streamAny as mongodbStream } from '../../core/mongodb/read.ts'
 import { readdir as mongodbReaddir } from '../../core/mongodb/readdir.ts'
 import { linesContaining as mongodbLinesContaining } from '../../core/mongodb/search.ts'
@@ -24,59 +23,60 @@ import {
   lineCount as mongodbLineCount,
 } from '../../core/mongodb/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 
 /**
  * MongoDB's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
 export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return mongodbReaddir(this.accessor, path, index)
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    stat: ['entry'],
+  } as const
+
+  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
+    return mongodbReaddir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await mongodbRead(this.accessor, path, index)
+    const data = await mongodbRead(this.accessor, path)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return mongodbStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return mongodbStat(this.accessor, path, handed?.entry)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return mongodbStream(this.accessor, path, index)
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    return mongodbStream(this.accessor, path)
   }
 
   override linesContaining(path: PathSpec, text: string): Promise<ByteSource | null> {
     return mongodbLinesContaining(this.accessor, path, text)
   }
 
-  override lastLines(
-    path: PathSpec,
-    n: number,
-    index?: IndexCacheStore,
-  ): Promise<Uint8Array | null> {
-    return mongodbLastLines(this.accessor, path, n, index)
+  override lastLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
+    return mongodbLastLines(this.accessor, path, n)
   }
 
-  override lineCount(path: PathSpec, index?: IndexCacheStore): Promise<number | null> {
-    return mongodbLineCount(this.accessor, path, index)
+  override lineCount(path: PathSpec): Promise<number | null> {
+    return mongodbLineCount(this.accessor, path)
   }
 
   override follow(
     path: PathSpec,
     n: number,
     _interval: number,
-    index?: IndexCacheStore,
   ): Promise<AsyncIterable<Uint8Array> | null> {
-    return mongodbFollow(this.accessor, path, n, index)
+    return mongodbFollow(this.accessor, path, n)
   }
 }

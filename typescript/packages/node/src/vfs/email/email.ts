@@ -24,8 +24,8 @@ import {
   type EmailConfigRedacted,
 } from '../../core/email/config.ts'
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
-import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { sliceWindow } from '@struktoai/mirage-core/utils/ranges'
 import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { read as emailRead, readMany as emailReadMany } from '../../core/email/read.ts'
@@ -49,6 +49,12 @@ export class EmailVFS extends BaseVFS {
   override readonly writePrompt: string = WRITE_PROMPT
   // IMAP search names messages; an attachment is read as usual.
   override readonly searchable: readonly string[] = ['*/*/*.email.json']
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry'],
+    stat: ['entry'],
+  } as const
   readonly config: EmailConfig
   override readonly accessor: EmailAccessor
 
@@ -63,17 +69,17 @@ export class EmailVFS extends BaseVFS {
     await super.close()
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return emailReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return emailReaddir(this.accessor, path, handed?.entry)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await emailRead(this.accessor, path, index)
+    const data = await emailRead(this.accessor, path, handed?.entry)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
@@ -85,8 +91,8 @@ export class EmailVFS extends BaseVFS {
     return emailReadMany(this.accessor, paths, limit, index)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return emailStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return emailStat(this.accessor, path, handed?.entry)
   }
 
   override filesContaining(

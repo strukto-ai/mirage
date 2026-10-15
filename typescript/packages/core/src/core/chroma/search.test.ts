@@ -1,6 +1,5 @@
 import { expect, it, vi } from 'vitest'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { ioFor } from '../../test-utils.ts'
 import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
 import { PathSpec } from '../../types.ts'
@@ -90,8 +89,7 @@ it('asks only the walked pages below the mount root', async () => {
     directory: '/knowledge/api',
     vfsPath: 'api',
   })
-  const index = new RAMIndexCacheStore()
-  expect(await filesContaining(accessor, 'first', [api], false, index)).toEqual([])
+  expect(await filesContaining(accessor, 'first', [api], false)).toEqual([])
   expect(get).toHaveBeenLastCalledWith(
     expect.objectContaining({ where: { page_slug: { $in: ['api/reference'] } } }),
   )

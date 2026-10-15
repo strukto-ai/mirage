@@ -55,18 +55,9 @@ export const NOT_A_REPLICA_SET = 123
 // The databases the server keeps for itself, never listed on a mount.
 export const SYSTEM_DATABASES: ReadonlySet<string> = new Set(['admin', 'local', 'config'])
 
-export const RESOURCE_TYPE_DATABASE = 'mongodb/database'
-const RESOURCE_TYPE_COLLECTION = 'mongodb/collection'
-const RESOURCE_TYPE_VIEW = 'mongodb/view'
-
 export const KIND_TO_DIR: Record<EntityKind, string> = {
   [EntityKind.COLLECTION]: 'collections',
   [EntityKind.VIEW]: 'views',
-}
-
-export const KIND_TO_RESOURCE_TYPE: Record<EntityKind, string> = {
-  [EntityKind.COLLECTION]: RESOURCE_TYPE_COLLECTION,
-  [EntityKind.VIEW]: RESOURCE_TYPE_VIEW,
 }
 
 export const KIND_DIR_NAMES: Record<string, EntityKind> = Object.fromEntries(

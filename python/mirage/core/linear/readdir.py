@@ -15,9 +15,9 @@
 from typing import Any
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.hierarchy.stat import entry_stat
 from mirage.core.linear.client import (
     list_issue_comments,
     list_team_cycles,
@@ -49,6 +49,7 @@ from mirage.core.linear.pathing import (
 )
 from mirage.core.linear.scope import detect_scope
 from mirage.core.render.json import jsonl_bytes_by_created_at
+from mirage.types import ContentType, FileStat, FileType
 from mirage.utils.record_search import kept_text
 
 TEAM_DIRS = ("members", "issues", "projects", "cycles", "documents")
@@ -68,49 +69,48 @@ async def filtered_teams(accessor: LinearAccessor) -> list[dict[str, Any]]:
     ]
 
 
+TEAM = entry_stat("team_id", FileType.DIRECTORY)
+TEAM_JSON = entry_stat("team_id", ContentType.JSON)
+MEMBER = entry_stat("member_id", ContentType.JSON)
+ISSUE = entry_stat("issue_id", FileType.DIRECTORY)
+ISSUE_JSON = entry_stat("issue_id", ContentType.JSON)
+COMMENTS = entry_stat("issue_id", ContentType.TEXT)
+PROJECT = entry_stat("project_id", ContentType.JSON)
+CYCLE = entry_stat("cycle_id", ContentType.JSON)
+DOCUMENT = entry_stat("document_id", ContentType.JSON)
+
+
 async def _list_teams_dir(
     accessor: LinearAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
-    entries = []
-    for team in await filtered_teams(accessor):
-        dirname = team_dirname(team)
-        # team.json renders the team object this listing already fetched,
-        # so its exact size rides the directory entry, and the key/name
-        # ride along for the project renders below it.
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=team["id"],
-                    name=team.get("name") or team.get("key") or team["id"],
-                    resource_type="linear/team",
-                    remote_time=team.get("updatedAt") or "",
-                    vfs_name=dirname,
-                    extra={
-                        "team_key": team.get("key"),
-                        "team_name": team.get("name"),
-                        "json_size": len(to_json_bytes(normalize_team(team))),
-                    },
-                ),
-            )
+) -> list[FileStat]:
+    # team.json renders the team object this listing already fetched,
+    # so its exact size rides the directory's row, and the key/name
+    # ride along for the project renders below it.
+    return [
+        TEAM(
+            team_dirname(team),
+            team["id"],
+            modified=team.get("updatedAt"),
+            extra={
+                "team_key": team.get("key"),
+                "team_name": team.get("name"),
+                "json_size": len(to_json_bytes(normalize_team(team))),
+            },
         )
-    return entries
+        for team in await filtered_teams(accessor)
+    ]
 
 
 async def _list_team(
-    accessor: LinearAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
-    entries = [
-        (
+    accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
+    team_id = match.slots["team_id"]
+    rows = [
+        TEAM_JSON(
             "team.json",
-            IndexEntry(
-                id=entry.id,
-                name="team.json",
-                resource_type="linear/team_json",
-                remote_time=entry.remote_time,
-                vfs_name="team.json",
-                size=entry.extra.get("json_size"),
-            ),
+            team_id,
+            size=entry.extra.get("json_size"),
+            modified=entry.modified,
         )
     ]
     for name in TEAM_DIRS:
@@ -122,129 +122,94 @@ async def _list_team(
                 "team_key": entry.extra.get("team_key"),
                 "team_name": entry.extra.get("team_name"),
             }
-        entries.append(
-            (
-                name,
-                IndexEntry(
-                    id=entry.id,
-                    name=name,
-                    resource_type=f"linear/{name}_dir",
-                    vfs_name=name,
-                    extra=extra,
-                ),
-            )
-        )
-    return entries
+        rows.append(FileStat(name=name, type=FileType.DIRECTORY, extra=extra))
+    return rows
 
 
 async def _list_members(
-    accessor: LinearAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     users = await list_team_members(
         accessor.config, match.slots["team_id"], session=accessor.pool
     )
-    entries = []
+    rows = []
     for user in users:
-        filename = member_filename(user)
         rendered = to_json_bytes(normalize_user(user))
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=user["id"],
-                    name=user.get("name")
-                    or user.get("displayName")
-                    or user["id"],
-                    resource_type="linear/user",
-                    remote_time=user.get("updatedAt") or "",
-                    vfs_name=filename,
-                    size=len(rendered),
-                    extra=kept_text(rendered),
-                ),
+        rows.append(
+            MEMBER(
+                member_filename(user),
+                user["id"],
+                size=len(rendered),
+                modified=user.get("updatedAt"),
+                extra=kept_text(rendered),
             )
         )
-    return entries
+    return rows
 
 
 async def _list_issues(
-    accessor: LinearAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     issues = await list_team_issues(
         accessor.config, match.slots["team_id"], session=accessor.pool
     )
-    entries = []
+    rows = []
     for issue in issues:
-        dirname = issue_dirname(issue)
         extra: dict[str, Any] = {
             "issue_key": issue.get("identifier"),
             "json_size": len(to_json_bytes(normalize_issue(issue))),
         }
         if accessor.config.content_search:
             extra["unsearched"] = unsearched_text(issue)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=issue["id"],
-                    name=issue.get("identifier") or issue["id"],
-                    resource_type="linear/issue",
-                    remote_time=issue.get("updatedAt") or "",
-                    vfs_name=dirname,
-                    extra=extra,
-                ),
+        rows.append(
+            ISSUE(
+                issue_dirname(issue),
+                issue["id"],
+                modified=issue.get("updatedAt"),
+                extra=extra,
             )
         )
-    return entries
+    return rows
 
 
 async def _list_issue(
-    accessor: LinearAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     # issue.json renders the issue the team listing already fetched;
     # comments.jsonl costs the one bounded comments call, paid only when
     # this directory is entered.
-    issue_id = entry.id
+    issue_id = match.slots["issue_id"]
     comments = await list_issue_comments(
         accessor.config, issue_id, session=accessor.pool
     )
-    rows = [
+    rendered = [
         normalize_comment(
             comment, issue_id=issue_id, issue_key=entry.extra.get("issue_key")
         )
         for comment in comments
     ]
     comments_time = max(
-        (row.get("updated_at") or "" for row in rows), default=""
+        (row.get("updated_at") or "" for row in rendered), default=""
     )
     return [
-        (
+        ISSUE_JSON(
             "issue.json",
-            IndexEntry(
-                id=issue_id,
-                name="issue.json",
-                resource_type="linear/issue_json",
-                remote_time=entry.remote_time,
-                vfs_name="issue.json",
-                size=entry.extra.get("json_size"),
-            ),
+            issue_id,
+            size=entry.extra.get("json_size"),
+            modified=entry.modified,
         ),
-        (
+        COMMENTS(
             "comments.jsonl",
-            IndexEntry(
-                id=issue_id,
-                name="comments.jsonl",
-                resource_type="linear/comments",
-                remote_time=comments_time or entry.remote_time,
-                vfs_name="comments.jsonl",
-                size=len(jsonl_bytes_by_created_at(rows)),
-            ),
+            issue_id,
+            size=len(jsonl_bytes_by_created_at(rendered)),
+            modified=comments_time or entry.modified,
         ),
     ]
 
 
 async def _list_projects(
-    accessor: LinearAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     team_id = match.slots["team_id"]
     projects = await list_team_projects(
         accessor.config, team_id, session=accessor.pool
@@ -252,7 +217,7 @@ async def _list_projects(
     team_issues = await list_team_issues(
         accessor.config, team_id, session=accessor.pool
     )
-    entries = []
+    rows = []
     for project in projects:
         rendered = to_json_bytes(
             normalize_project(
@@ -263,77 +228,59 @@ async def _list_projects(
                 issues=project_issue_rows(team_issues, project.get("id")),
             )
         )
-        filename = project_filename(project)
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=project["id"],
-                    name=project.get("name") or project["id"],
-                    resource_type="linear/project",
-                    remote_time=project.get("updatedAt") or "",
-                    vfs_name=filename,
-                    size=len(rendered),
-                    extra=kept_text(rendered),
-                ),
+        rows.append(
+            PROJECT(
+                project_filename(project),
+                project["id"],
+                size=len(rendered),
+                modified=project.get("updatedAt"),
+                extra=kept_text(rendered),
             )
         )
-    return entries
+    return rows
 
 
 async def _list_cycles(
-    accessor: LinearAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     team_id = match.slots["team_id"]
     cycles = await list_team_cycles(
         accessor.config, team_id, session=accessor.pool
     )
-    entries = []
+    rows = []
     for cycle in cycles:
-        filename = cycle_filename(cycle)
         rendered = to_json_bytes(normalize_cycle(cycle, team_id=team_id))
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=cycle["id"],
-                    name=cycle.get("name") or cycle["id"],
-                    resource_type="linear/cycle",
-                    remote_time=cycle.get("updatedAt") or "",
-                    vfs_name=filename,
-                    size=len(rendered),
-                    extra=kept_text(rendered),
-                ),
+        rows.append(
+            CYCLE(
+                cycle_filename(cycle),
+                cycle["id"],
+                size=len(rendered),
+                modified=cycle.get("updatedAt"),
+                extra=kept_text(rendered),
             )
         )
-    return entries
+    return rows
 
 
 async def _list_documents(
-    accessor: LinearAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     documents = await list_team_documents(
         accessor.config, match.slots["team_id"], session=accessor.pool
     )
-    entries = []
+    rows = []
     for document in documents:
-        filename = document_filename(document)
         rendered = to_json_bytes(normalize_document(document))
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=document["id"],
-                    name=document.get("title") or document["id"],
-                    resource_type="linear/document",
-                    remote_time=document.get("updatedAt") or "",
-                    vfs_name=filename,
-                    size=len(rendered),
-                    extra=kept_text(rendered),
-                ),
+        rows.append(
+            DOCUMENT(
+                document_filename(document),
+                document["id"],
+                size=len(rendered),
+                modified=document.get("updatedAt"),
+                extra=kept_text(rendered),
             )
         )
-    return entries
+    return rows
 
 
 readdir = make_readdir(

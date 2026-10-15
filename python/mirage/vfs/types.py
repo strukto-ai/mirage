@@ -397,7 +397,6 @@ class SearchOp(Protocol):
         path: PathSpec,
         query: SearchQuery,
         /,
-        index: IndexCacheStore = ...,
     ) -> Awaitable[list[tuple[str, str]] | None]: ...
 
 
@@ -410,7 +409,6 @@ class SearchManyOp(Protocol):
         paths: list[PathSpec],
         query: SearchQuery,
         /,
-        index: IndexCacheStore = ...,
     ) -> Awaitable[list[tuple[str, str]] | None]: ...
 
 

@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FakeAirtable, ROADMAP, makeAccessor } from './_test_util.ts'
 import { linesContaining } from './search.ts'
@@ -26,6 +25,9 @@ const DONE = `${TABLE}/views/Done_shipped__viwDone0000000001.jsonl`
 const CELLS = ['RECORD_ID()', '{Name} & ""', '{Status} & ""']
 const DONE_IDS = [1, 3, 5, 7].map((n) => `rec${String(n).padStart(14, '0')}`)
 const DEC = new TextDecoder()
+
+// The file's row as its folder's listing names it, which the mount hands.
+const ROW = new FileStat({ name: 'file', type: FileType.FILE })
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({
@@ -59,12 +61,7 @@ describe('airtable linesContaining', () => {
   it('lists only the records a formula names', async () => {
     const fake = new FakeAirtable()
     fake.formulas[formula('one')] = statusHolds('one')
-    const out = await linesContaining(
-      makeAccessor(fake),
-      spec(RECORDS),
-      'one',
-      new RAMIndexCacheStore(),
-    )
+    const out = await linesContaining(makeAccessor(fake), spec(RECORDS), 'one', ROW)
     expect(ids(out)).toEqual(DONE_IDS)
     const call = fake.recordCalls().at(-1)
     expect(call?.filterByFormula).toBe(formula('one'))
@@ -74,12 +71,7 @@ describe('airtable linesContaining', () => {
   it('lists what the view and the formula name for a view file', async () => {
     const fake = new FakeAirtable()
     fake.formulas[formula('ure')] = () => true
-    const out = await linesContaining(
-      makeAccessor(fake),
-      spec(DONE),
-      'ure',
-      new RAMIndexCacheStore(),
-    )
+    const out = await linesContaining(makeAccessor(fake), spec(DONE), 'ure', ROW)
     expect(ids(out)).toEqual(DONE_IDS)
     expect(fake.recordCalls().at(-1)?.view).toBe('viwDone0000000001')
   })
@@ -96,16 +88,9 @@ describe('airtable linesContaining', () => {
     )
     fake.formulas[formula('lone plan', [...CELLS, '{Summary} & ""'])] = () => false
     const accessor = makeAccessor(fake)
-    const out = await linesContaining(
-      accessor,
-      spec(RECORDS),
-      'lone plan',
-      new RAMIndexCacheStore(),
-    )
+    const out = await linesContaining(accessor, spec(RECORDS), 'lone plan', ROW)
     expect(out).toEqual(new Uint8Array())
-    expect(
-      await linesContaining(accessor, spec(RECORDS), 'one', new RAMIndexCacheStore()),
-    ).toBeNull()
+    expect(await linesContaining(accessor, spec(RECORDS), 'one', ROW)).toBeNull()
   })
 
   it.each([
@@ -120,12 +105,9 @@ describe('airtable linesContaining', () => {
   ])('reads the file for %j at %s', async (text, virtual) => {
     const warn = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     try {
-      const out = await linesContaining(
-        makeAccessor(new FakeAirtable()),
-        spec(virtual),
-        text,
-        new RAMIndexCacheStore(),
-      )
+      // A view no listing names is handed no row.
+      const row = virtual.includes('Nope') ? null : ROW
+      const out = await linesContaining(makeAccessor(new FakeAirtable()), spec(virtual), text, row)
       expect(out).toBeNull()
     } finally {
       warn.mockRestore()
@@ -144,12 +126,7 @@ describe('airtable linesContaining', () => {
     )
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     try {
-      const out = await linesContaining(
-        makeAccessor(fake),
-        spec(RECORDS),
-        'one',
-        new RAMIndexCacheStore(),
-      )
+      const out = await linesContaining(makeAccessor(fake), spec(RECORDS), 'one', ROW)
       expect(out).toBeNull()
     } finally {
       debug.mockRestore()
@@ -163,7 +140,7 @@ describe('airtable linesContaining', () => {
       makeAccessor(fake, { maxReadRecords: 2 }),
       spec(RECORDS),
       'one',
-      new RAMIndexCacheStore(),
+      ROW,
     )
     expect(out).toBeNull()
   })

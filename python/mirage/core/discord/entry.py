@@ -13,21 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 
-from mirage.cache.index.config import IndexEntry
 from mirage.core.discord.history import DISCORD_EPOCH
 from mirage.core.render.json import compact_json_bytes
+from mirage.types import ContentType, FileStat, FileType
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.naming import make_id_name
-
-
-class DiscordResourceType(str, Enum):
-    GUILD = "discord/guild"
-    CHANNEL = "discord/channel"
-    MEMBER = "discord/member"
-    HISTORY = "discord/history"
 
 
 def guild_dirname(g: dict[str, Any]) -> str:
@@ -69,43 +61,38 @@ def snowflake_to_iso(snowflake: str) -> str | None:
     return epoch_to_iso(ms // 1000)
 
 
-def guild_entry(g: dict[str, Any]) -> IndexEntry:
-    return IndexEntry(
-        id=g["id"],
-        name=g.get("name", ""),
-        resource_type=DiscordResourceType.GUILD,
-        vfs_name=guild_dirname(g),
+def guild_entry(g: dict[str, Any]) -> FileStat:
+    return FileStat(
+        name=guild_dirname(g),
+        type=FileType.DIRECTORY,
+        extra={"guild_id": g["id"]},
     )
 
 
-def channel_entry(c: dict[str, Any]) -> IndexEntry:
-    return IndexEntry(
-        id=c["id"],
-        name=c.get("name", ""),
-        resource_type=DiscordResourceType.CHANNEL,
-        vfs_name=channel_dirname(c),
-        remote_time=c.get("last_message_id", "") or "",
+def channel_entry(c: dict[str, Any]) -> FileStat:
+    last = c.get("last_message_id", "") or ""
+    return FileStat(
+        name=channel_dirname(c),
+        type=FileType.DIRECTORY,
+        modified=snowflake_to_iso(last),
+        extra={"channel_id": c["id"], "last_message_id": last},
     )
 
 
-def member_entry(m: dict[str, Any]) -> IndexEntry:
+def member_entry(m: dict[str, Any]) -> FileStat:
     user = m.get("user", {})
-    return IndexEntry(
-        id=user.get("id", ""),
-        name=user.get("username", ""),
-        resource_type=DiscordResourceType.MEMBER,
-        vfs_name=member_filename(m),
+    return FileStat(
+        name=member_filename(m),
+        type=FileType.FILE,
+        content=ContentType.JSON,
         size=len(compact_json_bytes(m)),
+        extra={"user_id": user.get("id", "")},
     )
 
 
-def history_entry(channel_id: str, date: str) -> IndexEntry:
+def history_entry(channel_id: str, date: str) -> FileStat:
     # channel_id rides extra so the day and files listers can query the
     # history API without re-resolving the channel through its parent.
-    return IndexEntry(
-        id=f"{channel_id}:{date}",
-        name=date,
-        resource_type=DiscordResourceType.HISTORY,
-        vfs_name=date,
-        extra={"channel_id": channel_id},
+    return FileStat(
+        name=date, type=FileType.DIRECTORY, extra={"channel_id": channel_id}
     )

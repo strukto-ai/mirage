@@ -15,10 +15,8 @@
 import { chunks } from '../../io/cooperative.ts'
 import { dayChannelId, followedDay, guardDay, readDays } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { downloadFile, downloadFileStream } from './files.ts'
@@ -30,7 +28,6 @@ import {
   type DiscordMessage,
 } from './history.ts'
 import { listMembers } from './members.ts'
-import { readdir } from './readdir.ts'
 import { compactJsonBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
 
@@ -38,10 +35,11 @@ async function readChat(
   accessor: DiscordAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
+  parent: FileStat | null,
 ): Promise<Uint8Array> {
   await guardDay(accessor, match, path.virtual)
-  const channelId = await dayChannelId(readdir, accessor, path, index)
+  const channelId = dayChannelId(path, entry, parent)
   return getHistoryJsonl(accessor, channelId, match.slots.day ?? '')
 }
 
@@ -49,13 +47,12 @@ async function readMember(
   accessor: DiscordAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const entry = await resolveEntry(readdir, accessor, path, index)
   if (entry === null) throw enoent(path)
   const members = await listMembers(accessor, match.slots.guild_id ?? '')
   for (const m of members) {
-    if (m.user?.id === entry.id) return compactJsonBytes(m)
+    if (m.user?.id === entry.extra.user_id) return compactJsonBytes(m)
   }
   throw enoent(path)
 }
@@ -63,10 +60,9 @@ async function readMember(
 async function blobUrl(
   accessor: DiscordAccessor,
   path: PathSpec,
-  index: IndexCacheStore | undefined,
+  entry: FileStat | null,
 ): Promise<string> {
   await guardDay(accessor, detectScope(path), path.virtual)
-  const entry = await resolveEntry(readdir, accessor, path, index)
   if (entry === null) throw enoent(path)
   const extra = entry.extra
   const direct = typeof extra.url === 'string' ? extra.url : ''
@@ -80,20 +76,21 @@ async function readBlob(
   accessor: DiscordAccessor,
   _match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
-  return downloadFile(await blobUrl(accessor, path, index), 0, null)
+  return downloadFile(await blobUrl(accessor, path, entry), 0, null)
 }
 
 async function readBlobRange(
   accessor: DiscordAccessor,
   _match: ScopeMatch,
   path: PathSpec,
-  index: IndexCacheStore | undefined,
+  entry: FileStat | null,
+  parent: FileStat | null,
   offset: number,
   size: number | null,
 ): Promise<Uint8Array> {
-  return downloadFile(await blobUrl(accessor, path, index), offset, size)
+  return downloadFile(await blobUrl(accessor, path, entry), offset, size)
 }
 
 export const read = makeRead<DiscordAccessor>(detectScope, {
@@ -113,14 +110,15 @@ export const readRange = makeReadRange<DiscordAccessor>(detectScope, read, {
 export async function* readStream(
   accessor: DiscordAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
   signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array, void> {
   if (detectScope(path).kind === 'file_blob') {
-    const url = await blobUrl(accessor, path, index)
+    const url = await blobUrl(accessor, path, entry)
     yield* downloadFileStream(url, signal)
   } else {
-    yield* chunks(await read(accessor, path, index), signal)
+    yield* chunks(await read(accessor, path, entry, parent), signal)
   }
 }
 
@@ -135,10 +133,11 @@ async function followChat(
   path: PathSpec,
   n: number,
   interval: number,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
 ): Promise<AsyncIterable<Uint8Array>> {
   await guardDay(accessor, match, path.virtual)
-  const channelId = await dayChannelId(readdir, accessor, path, index)
+  const channelId = dayChannelId(path, entry, parent)
   const day = match.slots.day ?? ''
   const [, end] = accessor.timeRange.dayBounds(day)
   return followedDay<DiscordMessage>(

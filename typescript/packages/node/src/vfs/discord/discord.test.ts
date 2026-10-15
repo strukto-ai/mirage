@@ -91,15 +91,12 @@ describe('DiscordVFS (node)', () => {
     const r = new DiscordVFS({ token: 'bot-test' })
     const out = await ops(r).readdir(
       new PathSpec({
-        virtual: '/mnt/discord/My Server__G1/channels',
-        directory: '/mnt/discord/My Server__G1/channels',
-        vfsPath: mountKey('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
+        virtual: '/My Server__G1/channels',
+        directory: '/My Server__G1/channels',
+        vfsPath: 'My Server__G1/channels',
       }),
     )
-    expect(out).toEqual([
-      '/mnt/discord/My Server__G1/channels/general__C1',
-      '/mnt/discord/My Server__G1/channels/eng__C2',
-    ])
+    expect(out).toEqual(['/My Server__G1/channels/general__C1', '/My Server__G1/channels/eng__C2'])
     const calls = fetchMock.mock.calls.map((c) => urlOf((c as unknown[])[0]))
     expect(calls.some((u) => u.includes('/users/@me/guilds'))).toBe(true)
     expect(calls.some((u) => u.includes('/guilds/G1/channels'))).toBe(true)

@@ -12,11 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { resolveEntry } from '@struktoai/mirage-core/core/hierarchy/probe'
 import { makeRead } from '@struktoai/mirage-core/core/hierarchy/read'
 import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchAttachment, fetchHeaders, fetchMessage } from './client.ts'
@@ -28,11 +26,10 @@ async function readMessage(
   accessor: EmailAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const entry = await resolveEntry(readdir, accessor, path, index)
   if (entry === null) throw enoent(path)
-  const msg = await fetchMessage(accessor, match.slots.folder ?? '', entry.id)
+  const msg = await fetchMessage(accessor, match.slots.folder ?? '', String(entry.extra.uid))
   return messageJsonBytes(msg)
 }
 
@@ -40,15 +37,14 @@ async function readAttachment(
   accessor: EmailAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const entry = await resolveEntry(readdir, accessor, path, index)
   if (entry === null) throw enoent(path)
   const data = await fetchAttachment(
     accessor,
     match.slots.folder ?? '',
     match.slots.uid ?? '',
-    entry.vfsName,
+    entry.name,
   )
   if (data === null) throw enoent(path)
   return data

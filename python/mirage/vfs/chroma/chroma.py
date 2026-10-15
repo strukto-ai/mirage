@@ -9,7 +9,7 @@ from mirage.core.chroma.search import files_containing as _files_containing
 from mirage.core.chroma.search import search_many, search_resource
 from mirage.core.chroma.stat import stat as _stat
 from mirage.core.chroma.tree import CHROMA_TREE
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.chroma.config import ChromaConfig
@@ -36,37 +36,37 @@ class ChromaVFS(BaseVFS):
         self.accessor = ChromaAccessor(config)
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path, entry)
         return slice_window(data, offset, size)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await _stat(self.accessor, path, index)
-
-    def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
-
-    async def search(
         self,
         path: PathSpec,
-        query: SearchQuery,
+        entry: FileStat | None = None,
         index: IndexCacheStore = NULL_INDEX,
+    ) -> FileStat:
+        return await _stat(self.accessor, path, entry, index)
+
+    def read_stream(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path, entry)
+
+    async def search(
+        self, path: PathSpec, query: SearchQuery
     ) -> list[tuple[str, str]] | None:
-        return await search_resource(self.accessor, path, query, index)
+        return await search_resource(self.accessor, path, query)
 
     async def files_containing(
         self,
@@ -75,19 +75,15 @@ class ChromaVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         return await _files_containing(
-            self.accessor, text, [path], ignore_case, index
+            self.accessor, text, [path], ignore_case
         )
 
     async def search_many(
-        self,
-        paths: list[PathSpec],
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
+        self, paths: list[PathSpec], query: SearchQuery
     ) -> list[tuple[str, str]] | None:
-        return await search_many(self.accessor, paths, query, index)
+        return await search_many(self.accessor, paths, query)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config, needs_override=True)

@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.normalize import unsearched_text
 from mirage.core.linear.search import SEARCH_LIMIT, files_containing
@@ -65,7 +64,6 @@ async def _ask(
     under: list[PathSpec] | None = None,
     reply: "JsonValue | Exception" = None,
     ask_linear: bool = True,
-    index: RAMIndexCacheStore | None = None,
     issues: list[dict] = ISSUES,
     documents: list[dict] = DOCUMENTS,
 ):
@@ -101,7 +99,6 @@ async def _ask(
             accessor,
             text,
             under or [_scope()],
-            index or RAMIndexCacheStore(),
             ask_linear=ask_linear,
         )
     return out, [call.args[2]["term"] for call in found.await_args_list]
@@ -162,28 +159,24 @@ async def test_a_document_is_read_when_its_text_holds_it(ask_linear):
 
 
 # A read fetches the record as it is now, so the kept text is checked
-# against listings made for the search, not the ones the walk cached; an
-# issue gone since is read.
+# against listings made for the search, not the ones the command walked;
+# an issue gone since is not read.
 @pytest.mark.asyncio
 async def test_a_text_changed_since_the_listing_is_found():
-    index = RAMIndexCacheStore()
-    await _ask("numbat", {"numbat": ["I1"]}, index=index)
+    await _ask("numbat", {"numbat": ["I1"]})
     changed = _issue("I2", "Write release notes", "Blocked", "See numbat.io")
     out, _ = await _ask(
         "numbat",
         {"numbat": ["I1"]},
-        index=index,
         issues=[ISSUES[0], changed, ISSUES[2]],
         documents=[DOCUMENTS[0], {**DOCUMENTS[1], "content": "Numbat"}],
     )
     assert out is not None
     assert _issues(out) == ["ENG-1__I1", "ENG-2__I2"]
     assert [name for name in _documents(out) if "D2" in name]
-    out, _ = await _ask(
-        "numbat", {"numbat": ["I1"]}, index=index, issues=ISSUES[:1]
-    )
+    out, _ = await _ask("numbat", {"numbat": ["I1"]}, issues=ISSUES[:1])
     assert out is not None
-    assert _issues(out) == ALL_ISSUES
+    assert _issues(out) == ["ENG-1__I1"]
 
 
 # Without an answer from Linear every issue is read; a scope inside an issue

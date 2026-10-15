@@ -12,21 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.airtable.readdir import readdir
 from mirage.core.airtable.scope import detect_scope
-from mirage.core.hierarchy.stat import entry_stat, make_stat
-from mirage.types import ContentType, FileType
+from mirage.core.hierarchy.stat import make_stat
 
-stat = make_stat(
-    detect_scope,
-    readdir,
-    entry_stats={
-        "base": entry_stat("base_id", FileType.DIRECTORY),
-        "base_json": entry_stat("base_id", ContentType.JSON),
-        "table": entry_stat("table_id", FileType.DIRECTORY),
-        "table_json": entry_stat("table_id", ContentType.JSON),
-        "records": entry_stat("table_id", ContentType.TEXT),
-        "views": entry_stat("table_id", FileType.DIRECTORY),
-        "view": entry_stat("view_id", ContentType.TEXT),
-    },
-)
+stat = make_stat(detect_scope)

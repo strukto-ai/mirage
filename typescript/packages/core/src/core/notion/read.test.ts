@@ -1,5 +1,3 @@
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +12,9 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { NotionTransport } from './client.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import { read as rawOperation } from './read.ts'
@@ -91,7 +88,7 @@ describe('notion read', () => {
       last_edited_time: '2024-02-03T00:00:00Z',
     })
     const path = `/databases/Tasks__${dbId}/database.json`
-    const bytes = await read(makeAccessor(transport), spec(path), undefined)
+    const bytes = await read(makeAccessor(transport), spec(path))
     const decoded = decodeJson(bytes) as Record<string, unknown>
     expect(decoded.database_id).toBe(dbIdDashed)
     expect(decoded.title).toBe('Tasks')
@@ -117,7 +114,7 @@ describe('notion read', () => {
       properties: { Name: { type: 'title' } },
     })
     const path = `/databases/Tasks__${dbId}/Tasks__${dsId}/data_source.json`
-    const bytes = await read(makeAccessor(transport), spec(path), undefined)
+    const bytes = await read(makeAccessor(transport), spec(path))
     const decoded = decodeJson(bytes) as Record<string, unknown>
     expect(decoded.data_source_id).toBe('cccc1111-2222-3333-4444-555566667777')
     expect(decoded.database_id).toBe('bbbb1111-2222-3333-4444-555566667777')
@@ -142,7 +139,7 @@ describe('notion read', () => {
       next_cursor: null,
     })
     const path = `/databases/Tasks__${dbId}/Tasks__${dsId}/rows.jsonl`
-    const bytes = await read(makeAccessor(transport), spec(path), undefined)
+    const bytes = await read(makeAccessor(transport), spec(path))
     const lines = new TextDecoder().decode(bytes).split('\n')
     expect(lines).toHaveLength(2)
     expect(lines[1]).toBe('')
@@ -177,7 +174,7 @@ describe('notion read', () => {
       next_cursor: null,
     })
     const path = `/databases/Tasks__bbbb1111222233334444555566667777/Tasks__cccc1111222233334444555566667777/rows.jsonl`
-    const bytes = await read(makeAccessor(transport), spec(path), undefined)
+    const bytes = await read(makeAccessor(transport), spec(path))
     expect(bytes.byteLength).toBe(0)
   })
 
@@ -197,9 +194,10 @@ describe('notion read', () => {
       next_cursor: null,
     })
     const path = `/databases/Tasks__bbbb1111222233334444555566667777/Tasks__cccc1111222233334444555566667777/Row_A__${PAGE_ID_DASHED}/page.json`
-    const decoded = decodeJson(
-      await read(makeAccessor(transport), spec(path), undefined),
-    ) as Record<string, unknown>
+    const decoded = decodeJson(await read(makeAccessor(transport), spec(path))) as Record<
+      string,
+      unknown
+    >
     expect(decoded.page_id).toBe(PAGE_ID_DASHED)
     expect(decoded.markdown).toBe('')
   })
@@ -220,7 +218,7 @@ describe('notion read', () => {
       next_cursor: null,
     })
     const path = `/pages/My_Page__${PAGE_ID_DASHED}/page.json`
-    const bytes = await read(makeAccessor(transport), spec(path), undefined)
+    const bytes = await read(makeAccessor(transport), spec(path))
     expect(bytes).toBeInstanceOf(Uint8Array)
     const decoded = decodeJson(bytes) as Record<string, unknown>
     expect(decoded.page_id).toBe(PAGE_ID_DASHED)
@@ -255,7 +253,6 @@ describe('notion read', () => {
     const bytes = await read(
       makeAccessor(transport),
       new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/notion') }),
-      undefined,
     )
     const decoded = decodeJson(bytes) as Record<string, unknown>
     expect(decoded.page_id).toBe(PAGE_ID_DASHED)
@@ -268,7 +265,7 @@ describe('notion read', () => {
     // A probed directory shape is no proof the node exists, so a page
     // dir read reports absence; only the roots, which exist by
     // construction, answer EISDIR.
-    await expect(read(makeAccessor(transport), spec('/pages'), undefined)).rejects.toMatchObject({
+    await expect(read(makeAccessor(transport), spec('/pages'))).rejects.toMatchObject({
       code: 'EISDIR',
     })
     const cases = [
@@ -279,7 +276,7 @@ describe('notion read', () => {
     for (const original of cases) {
       let captured: unknown = null
       try {
-        await read(makeAccessor(transport), spec(original), undefined)
+        await read(makeAccessor(transport), spec(original))
       } catch (err) {
         captured = err
       }
@@ -293,7 +290,7 @@ describe('notion read', () => {
     const transport = new FakeTransport()
     let captured: unknown = null
     try {
-      await read(makeAccessor(transport), spec('/page.json'), undefined)
+      await read(makeAccessor(transport), spec('/page.json'))
     } catch (err) {
       captured = err
     }
@@ -306,7 +303,7 @@ describe('notion read', () => {
     const transport = new FakeTransport()
     let captured: unknown = null
     try {
-      await read(makeAccessor(transport), spec('/pages/no-id/page.json'), undefined)
+      await read(makeAccessor(transport), spec('/pages/no-id/page.json'))
     } catch (err) {
       captured = err
     }
@@ -334,11 +331,7 @@ it.each([
     has_more: false,
     next_cursor: null,
   })
-  const data = await read(
-    makeAccessor(transport),
-    spec('/databases/DB__db/DS__ds/rows.jsonl'),
-    undefined,
-  )
+  const data = await read(makeAccessor(transport), spec('/databases/DB__db/DS__ds/rows.jsonl'))
   const row = JSON.parse(new TextDecoder().decode(data)) as {
     properties: { Amount: { number: number } }
   }
@@ -346,25 +339,12 @@ it.each([
   expect(new TextDecoder().decode(data)).toContain(`"number":${spelling}}`)
 })
 
-async function read(accessor: NotionAccessor, path: PathSpec, index?: IndexCacheStore) {
-  const cache = index ?? new RAMIndexCacheStore()
-  const pieces = path.virtual.replace(/\/$/, '').split('/')
-  const count = pieces.length - 1
-  for (let i = 1; i < count; i++) {
-    const key = pieces.slice(0, i + 1).join('/')
-    const name = pieces[i] ?? ''
-    if (name.includes('__') && (await cache.get(key)).entry == null)
-      await cache.setPartialDir(key.slice(0, key.lastIndexOf('/')) || '/', [
-        [
-          name,
-          new IndexEntry({
-            id: name.split('__').at(-1) ?? '',
-            name,
-            vfsName: name,
-            resourceType: 'notion/container',
-          }),
-        ],
-      ])
-  }
-  return rawOperation(accessor, path, cache)
+// What the mount hands a read: the row of the folder holding the file, as
+// the listing above it names it, for a folder an id names.
+async function read(accessor: NotionAccessor, path: PathSpec) {
+  const folder = path.virtual.replace(/\/$/, '').split('/').at(-2) ?? ''
+  const parent = folder.includes('__')
+    ? new FileStat({ name: folder, type: FileType.DIRECTORY })
+    : null
+  return rawOperation(accessor, path, null, parent)
 }

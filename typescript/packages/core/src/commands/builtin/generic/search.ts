@@ -65,7 +65,6 @@ export function makeSearch(
         accessor,
         defaultPaths(paths, opts.cwd, opts.mountPrefix ?? ''),
         { query, options: options(fl) },
-        opts.index ?? undefined,
       )
       return [out, new IOResult()]
     } catch (err) {

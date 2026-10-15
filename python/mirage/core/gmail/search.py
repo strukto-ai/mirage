@@ -19,12 +19,11 @@ import re
 import aiohttp
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.gmail.readdir import readdir
 from mirage.core.gmail.scope import detect_scope
-from mirage.core.hierarchy.probe import resolve_entry
+from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mounted_path
 
 logger = logging.getLogger(__name__)
@@ -62,25 +61,15 @@ def _child_of(directory: PathSpec, name: str) -> PathSpec:
     )
 
 
-async def _label_ids(
-    accessor: GmailAccessor, scope: PathSpec, index: IndexCacheStore
-) -> set[str] | None:
-    """The account's label ids, lowercased, from the mount root's listing;
-    None when the listing does not hold one.
+async def _label_ids(accessor: GmailAccessor, scope: PathSpec) -> set[str]:
+    """The account's label ids, lowercased, from the mount root's listing.
+
+    Args:
+        accessor (GmailAccessor): the account.
+        scope (PathSpec): any path on the mount.
     """
-    root = mounted_path(scope, "/")
-    ids: set[str] = set()
-    for listed in await readdir(accessor, root, index):
-        entry = await resolve_entry(
-            readdir,
-            accessor,
-            _child_of(root, listed.rsplit("/", 1)[-1]),
-            index,
-        )
-        if entry is None:
-            return None
-        ids.add(entry.id.lower())
-    return ids
+    listed = await readdir(accessor, mounted_path(scope, "/"))
+    return {str(row.extra["label_id"]).lower() for row in rows_of(listed)}
 
 
 def _in_labels(needle: str, labels: set[str]) -> bool:
@@ -97,7 +86,6 @@ async def files_containing(
     accessor: GmailAccessor,
     text: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     """The message files under ``under`` whose text holds ``text`` in any
     case.
@@ -116,29 +104,30 @@ async def files_containing(
         accessor (GmailAccessor): the account.
         text (str): plain text every match holds.
         under (list[PathSpec]): the directories walked.
-        index (IndexCacheStore): the listings the walk filled.
     """
     if not text.isascii() or not under:
         return None
     needle = text.lower()
     found: list[PathSpec] = []
-    pending = [scope for scope in under if detect_scope(scope).kind in WALKED]
     try:
-        labels = await _label_ids(accessor, under[0], index)
-        if labels is None or _in_labels(needle, labels):
+        labels = await _label_ids(accessor, under[0])
+        if _in_labels(needle, labels):
             return None
+        pending: list[tuple[PathSpec, FileStat | None]] = []
+        for scope in under:
+            if detect_scope(scope).kind in WALKED:
+                pending.append(
+                    (scope, (await row_at(readdir, accessor, scope))[0])
+                )
         while pending:
-            current = pending.pop()
-            for listed in await readdir(accessor, current, index):
-                child = _child_of(current, listed.rsplit("/", 1)[-1])
+            current, row = pending.pop()
+            for child_row in rows_of(await readdir(accessor, current, row)):
+                child = _child_of(current, child_row.name)
                 kind = detect_scope(child).kind
                 if kind in WALKED:
-                    pending.append(child)
+                    pending.append((child, child_row))
                 elif kind == "message":
-                    entry = await resolve_entry(
-                        readdir, accessor, child, index
-                    )
-                    kept = None if entry is None else entry.extra.get("text")
+                    kept = child_row.extra.get("text")
                     if not isinstance(kept, str):
                         return None
                     if needle in kept:

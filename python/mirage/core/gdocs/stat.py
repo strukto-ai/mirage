@@ -13,9 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.gdocs.constants import MIME
-from mirage.core.gdocs.readdir import readdir
 from mirage.core.gdocs.scope import detect_scope
 from mirage.core.google.stat import make_app_stat
 from mirage.vfs.gdocs.doc_entry import make_filename
 
-stat = make_app_stat(MIME, detect_scope, readdir, "gdocs/file", make_filename)
+stat = make_app_stat(MIME, detect_scope, make_filename)

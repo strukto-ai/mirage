@@ -13,25 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../accessor/gmail.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { getAttachment, getMessageRaw, messageJsonBytes } from './messages.ts'
-import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
 async function readMessage(
   accessor: GmailAccessor,
   _match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const entry = await resolveEntry(readdir, accessor, path, index)
   if (entry === null) throw enoent(path)
-  const raw = await getMessageRaw(accessor.tokenManager, entry.id)
+  const raw = await getMessageRaw(accessor.tokenManager, String(entry.extra.message_id))
   return messageJsonBytes(raw)
 }
 
@@ -39,14 +35,17 @@ async function readAttachment(
   accessor: GmailAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
   // The message id decodes from the attachment dir's `subject__id`
-  // segment; the attachment id only exists in the listing, so the entry
+  // segment; the attachment id only exists in the listing, so the row
   // stays the proof of existence AND the id source.
-  const entry = await resolveEntry(readdir, accessor, path, index)
   if (entry === null) throw enoent(path)
-  return getAttachment(accessor.tokenManager, match.slots.message_id ?? '', entry.id)
+  return getAttachment(
+    accessor.tokenManager,
+    match.slots.message_id ?? '',
+    String(entry.extra.attachment_id),
+  )
 }
 
 export const read = makeRead<GmailAccessor>(detectScope, {

@@ -14,29 +14,24 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { IndexView } from '../../cache/index/view.ts'
-import { PathSpec } from '../../types.ts'
+import type { DirListing } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { gnuBasename } from '../../utils/path.ts'
 import { dirRows } from './rows.ts'
-import { SlugTree, virtualKeyFor } from './tree.ts'
+import { SlugTree, treeKey } from './tree.ts'
 
 const FILES = new Map([
   ['/guides/quickstart', 5],
   ['/api/reference', 3],
 ])
 
-function fileEntry(path: string, size: number): IndexEntry {
-  return new IndexEntry({ id: path.slice(1), name: gnuBasename(path), resourceType: 'file', size })
+function fileRow(path: string, size: number): FileStat {
+  return new FileStat({ name: gnuBasename(path), type: FileType.FILE, size })
 }
 
 function fakeTree(): { tree: SlugTree<null>; load: ReturnType<typeof vi.fn> } {
-  const load = vi.fn((_accessor: null, prefix: string) =>
-    Promise.resolve(dirRows(FILES, prefix, fileEntry)),
-  )
+  const load = vi.fn((_accessor: null) => Promise.resolve(dirRows(FILES, fileRow)))
   return { tree: new SlugTree<null>(load), load }
 }
 
@@ -44,80 +39,50 @@ function pathAt(virtual: string): PathSpec {
   return new PathSpec({ vfsPath: mountKey(virtual, '/knowledge'), virtual, directory: virtual })
 }
 
-function refusing(index: RAMIndexCacheStore): IndexView {
-  return new IndexView(index, new RAMFileCacheStore(), '/knowledge', () => true, {
-    mayServeListing: () => Promise.resolve(false),
-  })
+function names(listing: DirListing): string[] {
+  return listing.entries.map((row) => row.name)
 }
 
-describe('slug tree readdir on an expired listing', () => {
-  // The tree is written whole, so an expired folder listing means the tree
-  // aged out, not that the folder is gone: refill and answer.
-  it('refilled rows respect index ownership', async () => {
+describe('slug tree readdir', () => {
+  it('lists folders and refuses the rest', async () => {
     const { tree } = fakeTree()
-    const view = new IndexView(
-      new RAMIndexCacheStore(),
-      new RAMFileCacheStore(),
-      '/knowledge',
-      (key) => !key.startsWith('/knowledge/guides'),
-    )
-    for (let i = 0; i < 2; i++) {
-      expect(await tree.readdir(null, pathAt('/knowledge'), view)).toEqual(['/knowledge/api'])
-    }
-  })
-
-  it('refills an expired folder under a live root', async () => {
-    const { tree } = fakeTree()
-    const index = new RAMIndexCacheStore()
-    await tree.readdir(null, pathAt('/knowledge/guides'), index)
-    await index.setDir('/knowledge/guides', [], new Date(Date.now() - 1000))
-    expect(await tree.readdir(null, pathAt('/knowledge/guides'), index)).toEqual([
-      '/knowledge/guides/quickstart',
-    ])
-  })
-
-  it('keeps a folder the tree lacks ENOENT', async () => {
-    const { tree } = fakeTree()
-    await expect(
-      tree.readdir(null, pathAt('/knowledge/nope'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(names(await tree.readdir(null, pathAt('/knowledge')))).toEqual(['api', 'guides'])
+    expect(names(await tree.readdir(null, pathAt('/knowledge/guides')))).toEqual(['quickstart'])
+    await expect(tree.readdir(null, pathAt('/knowledge/nope'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('refuses a file with ENOTDIR naming the path', async () => {
     const { tree } = fakeTree()
-    await expect(
-      tree.readdir(null, pathAt('/knowledge/guides/quickstart'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOTDIR', virtualPath: '/knowledge/guides/quickstart' })
+    await expect(tree.readdir(null, pathAt('/knowledge/guides/quickstart'))).rejects.toMatchObject({
+      code: 'ENOTDIR',
+      virtualPath: '/knowledge/guides/quickstart',
+    })
   })
 
-  // A read outside any command under fresh has every cached listing
-  // refused; answering ENOENT would fail every such ls of a subfolder.
-  it.each([
-    ['/knowledge', ['/knowledge/api', '/knowledge/guides']],
-    ['/knowledge/guides', ['/knowledge/guides/quickstart']],
-  ])('refills a refused listing once and answers: %s', async (path, children) => {
+  it('seeds every folder below from one fetch', async () => {
     const { tree, load } = fakeTree()
-    const view = refusing(new RAMIndexCacheStore())
-    for (let i = 0; i < 2; i++) {
-      load.mockClear()
-      expect(await tree.readdir(null, pathAt(path), view)).toEqual(children)
-      expect(load).toHaveBeenCalledTimes(1)
-    }
+    const listing = await tree.readdir(null, pathAt('/knowledge'))
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(
+      Object.fromEntries([...listing.seeds].map(([key, rows]) => [key, rows.map((r) => r.name)])),
+    ).toEqual({ api: ['reference'], guides: ['quickstart'] })
   })
 })
 
-describe('virtualKeyFor', () => {
+describe('treeKey', () => {
   it('maps the mount root and keeps prefixed paths', () => {
-    expect(virtualKeyFor(pathAt('/knowledge'))).toBe('/knowledge')
-    expect(virtualKeyFor(pathAt('/knowledge/'))).toBe('/knowledge')
-    expect(virtualKeyFor(pathAt('/knowledge/guides/auth.md'))).toBe('/knowledge/guides/auth.md')
+    expect(treeKey(pathAt('/knowledge'))).toBe('/')
+    expect(treeKey(pathAt('/knowledge/'))).toBe('/')
+    expect(treeKey(pathAt('/knowledge/guides/auth.md'))).toBe('/guides/auth.md')
   })
 
   it('normalizes when no prefix is set', () => {
     const ps = (virtual: string) =>
       new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '') })
-    expect(virtualKeyFor(ps('/guides/'))).toBe('/guides')
-    expect(virtualKeyFor(ps('/'))).toBe('/')
+    expect(treeKey(ps('/guides/'))).toBe('/guides')
+    expect(treeKey(ps('/'))).toBe('/')
   })
 
   it('uses the directory for glob patterns', () => {
@@ -128,6 +93,6 @@ describe('virtualKeyFor', () => {
       resolved: false,
       vfsPath: mountKey('/knowledge/guides/*.md', '/knowledge'),
     })
-    expect(virtualKeyFor(spec)).toBe('/knowledge/guides')
+    expect(treeKey(spec)).toBe('/guides')
   })
 })

@@ -12,9 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
+from mirage.types import PathSpec
 from mirage.vfs.postgres import PostgresConfig, PostgresVFS
+from mirage.workspace import Workspace
 from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
@@ -70,3 +75,51 @@ def test_vfs_get_state_redacts_dsn():
 def test_vfs_load_state_noop():
     res = PostgresVFS(PostgresConfig(dsn="postgres://localhost/db"))
     res.load_state({"type": "postgres"})
+
+
+@asynccontextmanager
+async def _fake_acquire():
+    yield MagicMock()
+
+
+async def _catalog_schemas(conn, allowlist):
+    return [
+        s for s in ("public", "secret") if allowlist is None or s in allowlist
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_mount_reads_only_what_its_listings_name():
+    """A read stands on the entity row the mount hands it, so a table
+    under a schema ``schemas`` leaves out reads as absent without a
+    query, and one under a listed schema reads."""
+    vfs = PostgresVFS(
+        PostgresConfig(dsn="postgres://localhost/db", schemas=["public"])
+    )
+    pool = MagicMock()
+    pool.acquire = lambda: _fake_acquire()
+    vfs.accessor.pool = AsyncMock(return_value=pool)
+    ws = Workspace({"/pg/": vfs})
+    built = AsyncMock(return_value={"name": "users"})
+    with (
+        patch(
+            "mirage.core.postgres.client.list_schemas",
+            AsyncMock(side_effect=_catalog_schemas),
+        ),
+        patch(
+            "mirage.core.postgres.client.list_tables",
+            AsyncMock(return_value=["users"]),
+        ),
+        patch("mirage.core.postgres.read.build_entity_schema_json", built),
+    ):
+        with pytest.raises(FileNotFoundError):
+            await ws.dispatch(
+                "read",
+                PathSpec.from_str_path("/pg/secret/tables/users/schema.json"),
+            )
+        built.assert_not_awaited()
+        data, _ = await ws.dispatch(
+            "read",
+            PathSpec.from_str_path("/pg/public/tables/users/schema.json"),
+        )
+    assert b'"users"' in data

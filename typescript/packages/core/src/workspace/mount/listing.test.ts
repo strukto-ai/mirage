@@ -21,7 +21,15 @@ import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { entryAt, indexKey, keepListing, storedListing, storedStat } from './listing.ts'
+import {
+  beyondWindow,
+  entryAt,
+  indexKey,
+  keepListing,
+  storedListing,
+  storedStat,
+  storedTree,
+} from './listing.ts'
 
 interface Node {
   name: string
@@ -394,5 +402,94 @@ describe('a kept listing', () => {
       pattern: '*.txt',
     })
     expect(indexKey('/m/', glob)).toBe('/m/a')
+  })
+})
+
+// A channel whose listing is a window of recent days, as Slack's is: a day
+// outside it is still there when its channel is. Mirrors Python's `Days`.
+class Days extends BaseVFS {
+  override readonly name: string = 'days'
+  override readonly listsStats: boolean = true
+  override readonly handed = { readdir: ['entry'], stat: ['entry', 'parent'] } as const
+  readonly calls: string[] = []
+
+  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
+    const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
+    this.calls.push(`list ${key}`)
+    if (key === '')
+      return Promise.resolve([new FileStat({ name: 'chan', type: FileType.DIRECTORY })])
+    if (key === 'chan') {
+      return Promise.resolve(
+        new DirListing({
+          entries: [new FileStat({ name: 'd3', type: FileType.DIRECTORY })],
+          window: true,
+        }),
+      )
+    }
+    return Promise.reject(enoent(path.virtual))
+  }
+
+  override stat(path: PathSpec, handed: Handed = {}): Promise<FileStat> {
+    const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
+    this.calls.push(`stat ${key}`)
+    if (key === '') return Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
+    if (handed.entry != null) return Promise.resolve(handed.entry)
+    const name = key.slice(key.lastIndexOf('/') + 1)
+    if (handed.parent != null && name.startsWith('d')) {
+      return Promise.resolve(new FileStat({ name, type: FileType.DIRECTORY }))
+    }
+    return Promise.reject(enoent(path.virtual))
+  }
+}
+
+describe('a window', () => {
+  it('proves nothing absent and answers no glob', async () => {
+    const index = new RAMIndexCacheStore()
+    const day = new FileStat({ name: 'd3', type: FileType.DIRECTORY })
+    await keepListing(index, '/w', new DirListing({ entries: [day], window: true }))
+    expect(await storedListing(index, '/w')).toEqual(['/w/d3'])
+    expect(await storedListing(index, '/w', true)).toBeNull()
+    expect(await storedStat(index, '/w/d1')).toBeNull()
+    expect(await beyondWindow(index, '/w/d1')).toBe(true)
+    expect(await beyondWindow(index, '/w/d3')).toBe(false)
+    expect(await storedTree(index, '/w')).toBeNull()
+  })
+
+  it('leaves a name beyond it to the backend', async () => {
+    const store = new Days()
+    const ws = new Workspace(
+      { '/w/': store },
+      { mode: MountMode.READ, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.dispatch('readdir', '/w/chan')
+      store.calls.length = 0
+      const day = (await ws.dispatch('stat', '/w/chan/d1')) as FileStat
+      expect(day.type).toBe(FileType.DIRECTORY)
+      // The window does not name d1, so the backend answers it, handed the
+      // channel its listing names: no listing is asked again.
+      expect(store.calls.length).toBeGreaterThan(0)
+      expect(store.calls.every((call) => call === 'stat chan/d1')).toBe(true)
+      await expect(ws.dispatch('stat', '/w/chan/x1')).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('lets a root stat list nothing outside the mount', async () => {
+    const store = new Days()
+    const ws = new Workspace(
+      { '/m/w/': store },
+      { mode: MountMode.READ, shellParser: await getTestParser() },
+    )
+    try {
+      const root = (await ws.dispatch('stat', '/m/w')) as FileStat
+      expect(root.type).toBe(FileType.DIRECTORY)
+      // The root holds itself, so the parent a stat is handed asks no
+      // listing.
+      expect(store.calls).toEqual(['stat '])
+    } finally {
+      await ws.close()
+    }
   })
 })

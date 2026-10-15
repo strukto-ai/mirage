@@ -67,7 +67,6 @@ def make_search(
             accessor,
             default_paths(paths, opts.cwd),
             SearchQuery(texts[0], options=options(fl)),
-            opts.index,
         )
         return output, IOResult()
 

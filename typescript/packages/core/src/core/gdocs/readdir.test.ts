@@ -22,12 +22,12 @@ vi.mock('../google/drive.ts', async () => {
 })
 
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type FileStat } from '../../types.ts'
+import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TokenManager } from '../google/client.ts'
 import * as drive from '../google/drive.ts'
-import { readdir } from './readdir.ts'
-import { stat } from './stat.ts'
 
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
@@ -35,6 +35,28 @@ const STUB_TOKEN_MANAGER = {
 
 function makeAccessor(): GDocsAccessor {
   return new GDocsAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+}
+
+// The account behind a mount at /gdocs, which keeps each listing as a command's
+// walk does.
+async function mounted(accessor: GDocsAccessor): Promise<Workspace> {
+  const vfs = Object.assign(
+    new GDocsVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),
+    { accessor },
+  )
+  return new Workspace({ '/gdocs/': vfs }, { shellParser: await getTestParser() })
+}
+
+// A directory's children through the mount; a glob word, the children it
+// matches.
+async function readdir(_accessor: GDocsAccessor, path: PathSpec, ws: Workspace): Promise<string[]> {
+  if (path.pattern === null) return (await ws.dispatch('readdir', path.virtual)) as string[]
+  const words = (await ws.shell(`echo ${path.virtual}`)).stdoutText.trim().split(/\s+/)
+  return words.length === 1 && words[0] === path.virtual ? [] : words
+}
+
+function stat(_accessor: GDocsAccessor, path: PathSpec, ws: Workspace): Promise<FileStat> {
+  return ws.dispatch('stat', path.virtual) as Promise<FileStat>
 }
 
 describe('gdocs readdir', () => {
@@ -47,7 +69,7 @@ describe('gdocs readdir', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
+    const ws = await mounted(accessor)
     await readdir(
       accessor,
       new PathSpec({
@@ -56,7 +78,7 @@ describe('gdocs readdir', () => {
         pattern: '2026-05-*',
         vfsPath: mountKey('/gdocs/owned/2026-05-*', '/gdocs'),
       }),
-      index,
+      ws,
     )
 
     expect(captured.modifiedAfter).toBe('2026-05-01T00:00:00Z')
@@ -72,7 +94,7 @@ describe('gdocs readdir', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
+    const ws = await mounted(accessor)
     await readdir(
       accessor,
       new PathSpec({
@@ -80,7 +102,7 @@ describe('gdocs readdir', () => {
         directory: '/gdocs/owned',
         vfsPath: mountKey('/gdocs/owned', '/gdocs'),
       }),
-      index,
+      ws,
     )
 
     expect(captured.modifiedAfter).toBeNull()
@@ -96,7 +118,7 @@ describe('gdocs readdir', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
+    const ws = await mounted(accessor)
     await readdir(
       accessor,
       new PathSpec({
@@ -105,7 +127,7 @@ describe('gdocs readdir', () => {
         pattern: '*foo*',
         vfsPath: mountKey('/gdocs/owned/*foo*', '/gdocs'),
       }),
-      index,
+      ws,
     )
 
     expect(captured.modifiedAfter).toBeNull()
@@ -136,7 +158,7 @@ describe('gdocs readdir', () => {
     }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
+    const ws = await mounted(accessor)
     await readdir(
       accessor,
       new PathSpec({
@@ -145,7 +167,7 @@ describe('gdocs readdir', () => {
         pattern: '2026-05-*',
         vfsPath: mountKey('/gdocs/owned/2026-05-*', '/gdocs'),
       }),
-      index,
+      ws,
     )
     const result = await readdir(
       accessor,
@@ -154,13 +176,13 @@ describe('gdocs readdir', () => {
         directory: '/gdocs/owned',
         vfsPath: mountKey('/gdocs/owned', '/gdocs'),
       }),
-      index,
+      ws,
     )
     expect(calls).toBe(2)
     expect(result.length).toBe(2)
   })
 
-  it('filtered listing populates per-entry index so stat succeeds', async () => {
+  it('answers a stat after a filtered listing', async () => {
     vi.mocked(drive.listAllFiles).mockResolvedValue({
       files: [
         {
@@ -182,7 +204,7 @@ describe('gdocs readdir', () => {
     })
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
+    const ws = await mounted(accessor)
     const listed = await readdir(
       accessor,
       new PathSpec({
@@ -191,11 +213,12 @@ describe('gdocs readdir', () => {
         pattern: '2026-05-*',
         vfsPath: mountKey('/gdocs/shared/2026-05-*', '/gdocs'),
       }),
-      index,
+      ws,
     )
     expect(listed.length).toBe(1)
     const matched = listed[0]
     if (matched === undefined) throw new Error('expected one match')
+    vi.mocked(drive.getFile).mockClear()
     const result = await stat(
       accessor,
       new PathSpec({
@@ -203,9 +226,12 @@ describe('gdocs readdir', () => {
         directory: matched,
         vfsPath: mountKey(matched, '/gdocs'),
       }),
-      index,
+      ws,
     )
+    // The filtered result is not the directory, but the rows it lists are
+    // real, so the stat is answered from them.
     expect(result.extra.doc_id).toBe('may1')
+    expect(drive.getFile).not.toHaveBeenCalled()
   })
 
   it('keeps entry size null, Drive source size lands in extra', async () => {
@@ -223,7 +249,7 @@ describe('gdocs readdir', () => {
     })
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
+    const ws = await mounted(accessor)
     const listed = await readdir(
       accessor,
       new PathSpec({
@@ -231,16 +257,13 @@ describe('gdocs readdir', () => {
         directory: '/gdocs/owned',
         vfsPath: mountKey('/gdocs/owned', '/gdocs'),
       }),
-      index,
+      ws,
     )
 
-    // Drive's source size never becomes the entry size: the rendered
+    // Drive's source size never becomes the row's size: the rendered
     // JSON length is unknown until read.
     const listedPath = listed[0]
     if (listedPath === undefined) throw new Error('expected one entry')
-    const entry = (await index.get(listedPath)).entry
-    expect(entry?.size).toBeNull()
-    expect(entry?.extra.source_size).toBe(1234)
     const result = await stat(
       accessor,
       new PathSpec({
@@ -248,7 +271,7 @@ describe('gdocs readdir', () => {
         directory: listedPath,
         vfsPath: mountKey(listedPath, '/gdocs'),
       }),
-      index,
+      ws,
     )
     expect(result.size).toBeNull()
     expect(result.extra.source_size).toBe(1234)
@@ -258,9 +281,9 @@ describe('gdocs readdir', () => {
 describe('gdocs incomplete search', () => {
   it('does not cache a short listing as the directory', async () => {
     // Drive reporting a corpus it skipped means the listing is short.
-    // Caching it would pin the short listing until it expires, so a Shared
-    // Drive document stays invisible long after the cause clears. The
-    // entries are real, so they stay cached; only the directory is withheld.
+    // Keeping it would pin the short listing until it expires, so a Shared
+    // Drive document stays invisible long after the cause clears: the next
+    // listing asks Drive again until one finishes.
     const files = [
       {
         id: 'd1',
@@ -270,23 +293,27 @@ describe('gdocs incomplete search', () => {
       },
     ]
     let complete = false
-    vi.mocked(drive.listAllFiles).mockImplementation((() =>
-      Promise.resolve({ files, complete })) as typeof drive.listAllFiles)
+    let listings = 0
+    vi.mocked(drive.listAllFiles).mockImplementation((() => {
+      listings += 1
+      return Promise.resolve({ files, complete })
+    }) as typeof drive.listAllFiles)
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
+    const ws = await mounted(accessor)
     const owned = new PathSpec({
       virtual: '/gdocs/owned',
       directory: '/gdocs/owned',
       vfsPath: mountKey('/gdocs/owned', '/gdocs'),
     })
-    const listed = await readdir(accessor, owned, index)
+    const listed = await readdir(accessor, owned, ws)
     expect(listed).toHaveLength(1)
-    expect((await index.listDir('/gdocs/owned')).entries).toBeUndefined()
-    expect((await index.get(listed[0] ?? '')).entry?.id).toBe('d1')
+    await readdir(accessor, owned, ws)
+    expect(listings).toBe(2)
 
     complete = true
-    await readdir(accessor, owned, index)
-    expect((await index.listDir('/gdocs/owned')).entries).toBeDefined()
+    await readdir(accessor, owned, ws)
+    await readdir(accessor, owned, ws)
+    expect(listings).toBe(3)
   })
 })

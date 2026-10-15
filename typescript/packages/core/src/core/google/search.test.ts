@@ -35,10 +35,7 @@ vi.mock('./drive.ts', async () => {
 })
 
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
 import { DOCS_WORDS } from '../../utils/generated/google_vocabulary.ts'
 import { driveQueries, filesContaining } from './search.ts'
 
@@ -51,18 +48,19 @@ const CORPORA: Record<string, [string, string][]> = {
   shared: [['c', 'doc-c']],
 }
 
-async function readdir(
-  _accessor: GoogleApiAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
-  const entries = (CORPORA[key] ?? []).map(([name, id]): [string, IndexEntry] => [
-    `${name}.gdoc.json`,
-    new IndexEntry({ id, name, resourceType: 'gdocs/file', vfsName: `${name}.gdoc.json` }),
-  ])
-  await index?.setDir(`/docs/${key}`, entries)
-  return entries.map(([name]) => `/docs/${key}/${name}`)
+function rows(key: string): FileStat[] {
+  return (CORPORA[key] ?? []).map(
+    ([name, id]) =>
+      new FileStat({
+        name: `${name}.gdoc.json`,
+        type: FileType.FILE,
+        extra: { doc_id: id, doc_name: name },
+      }),
+  )
+}
+
+function readdir(_accessor: GoogleApiAccessor, path: PathSpec): Promise<DirListing> {
+  return Promise.resolve(new DirListing({ entries: rows(path.vfsPath.replace(/^\/+|\/+$/g, '')) }))
 }
 
 function scope(vfsPath = ''): PathSpec {
@@ -72,7 +70,7 @@ function scope(vfsPath = ''): PathSpec {
 
 function ask(text: string, under: PathSpec[]): Promise<PathSpec[] | null> {
   const accessor = { tokenManager: null } as unknown as GoogleApiAccessor
-  return filesContaining(accessor, readdir, MIME, DOCS_WORDS, text, under, new RAMIndexCacheStore())
+  return filesContaining(accessor, readdir, MIME, DOCS_WORDS, text, under)
 }
 
 beforeEach(() => {
@@ -137,33 +135,17 @@ describe('google app filesContaining', () => {
     expect(drive.asked.map(([query]) => query)).toEqual(['notes', 'otes'])
   })
 
-  // Drive could not finish the listing, so its entries are cached but not the
-  // directory, and grep's own walk lists it again and may find more.
+  // Drive could not finish the listing, so it is not the directory, and
+  // grep's own walk lists it again and may find more.
   it('reads every file after an unfinished listing', async () => {
     drive.ids = ['a.gdoc.json']
-    const unfinished = async (
-      accessor: GoogleApiAccessor,
-      path: PathSpec,
-      index?: IndexCacheStore,
-    ): Promise<string[]> => {
-      const listed = await readdir(accessor, path, new RAMIndexCacheStore())
-      for (const name of listed) {
-        const leaf = name.split('/').at(-1) ?? name
-        await index?.put(name, new IndexEntry({ id: leaf, name: leaf, resourceType: 'gdocs/file' }))
-      }
-      return listed
-    }
+    const unfinished = (_accessor: GoogleApiAccessor, path: PathSpec): Promise<DirListing> =>
+      Promise.resolve(
+        new DirListing({ entries: rows(path.vfsPath.replace(/^\/+|\/+$/g, '')), partial: true }),
+      )
     const accessor = { tokenManager: null } as unknown as GoogleApiAccessor
     expect(
-      await filesContaining(
-        accessor,
-        unfinished,
-        MIME,
-        DOCS_WORDS,
-        'wombat',
-        [scope('owned')],
-        new RAMIndexCacheStore(),
-      ),
+      await filesContaining(accessor, unfinished, MIME, DOCS_WORDS, 'wombat', [scope('owned')]),
     ).toBeNull()
   })
 })

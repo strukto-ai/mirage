@@ -17,183 +17,28 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.hierarchy.scope import Slot
 from mirage.core.linear import read as linear_read
 from mirage.core.linear import readdir as linear_readdir
 from mirage.core.linear.config import LinearConfig
-from mirage.core.linear.normalize import normalize_team, to_json_bytes
-from mirage.core.linear.read import read
-from mirage.core.linear.readdir import readdir
+from mirage.core.linear.normalize import (
+    normalize_issue,
+    normalize_team,
+    to_json_bytes,
+)
 from mirage.core.linear.scope import detect_scope
 from mirage.core.linear.stat import stat
-from mirage.types import ContentType, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.vfs.linear import LinearVFS
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
-_COMMENTS_PATH = (
-    "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/comments.jsonl"
-)
-
-_ISSUE_PATH = (
-    "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1/issue.json"
-)
+_ISSUE_DIR = "/teams/ENG__Engineering__TEAM1/issues/ENG-1__ISSUE1"
 
 
 @pytest.fixture
 def accessor():
     return LinearAccessor(LinearConfig(api_key="lin_api_test"))
-
-
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
-@pytest.mark.asyncio
-async def test_stat_root(accessor, index):
-    result = await stat(accessor, PathSpec.from_str_path("/"), index)
-    assert result.type == FileType.DIRECTORY
-
-
-@pytest.mark.asyncio
-async def test_stat_teams(accessor, index):
-    result = await stat(accessor, PathSpec.from_str_path("/teams"), index)
-    assert result.type == FileType.DIRECTORY
-
-
-@pytest.mark.asyncio
-async def test_stat_team_entry(accessor, index):
-    await index.set_dir(
-        "/teams",
-        [
-            (
-                "ENG__Engineering__TEAM1",
-                IndexEntry(
-                    id="TEAM1",
-                    name="Engineering",
-                    resource_type="linear/team",
-                    remote_time="2026-04-05T00:00:00Z",
-                    vfs_name="ENG__Engineering__TEAM1",
-                ),
-            )
-        ],
-    )
-    result = await stat(
-        accessor,
-        PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1"),
-        index,
-    )
-    assert result.type == FileType.DIRECTORY
-    assert result.extra["team_id"] == "TEAM1"
-    assert result.modified == "2026-04-05T00:00:00Z"
-
-
-@pytest.mark.asyncio
-async def test_stat_issue_directory(accessor, index):
-    await index.set_dir(
-        "/teams/ENG__Engineering__TEAM1/issues",
-        [
-            (
-                "ENG-123__ISSUE1",
-                IndexEntry(
-                    id="ISSUE1",
-                    name="ENG-123",
-                    resource_type="linear/issue",
-                    remote_time="2026-04-05T00:00:00Z",
-                    vfs_name="ENG-123__ISSUE1",
-                ),
-            )
-        ],
-    )
-    result = await stat(
-        accessor,
-        PathSpec.from_str_path(
-            "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1"
-        ),
-        index,
-    )
-    assert result.type == FileType.DIRECTORY
-    assert result.extra["issue_id"] == "ISSUE1"
-    assert result.modified == "2026-04-05T00:00:00Z"
-
-
-@pytest.mark.asyncio
-async def test_stat_issue_json(accessor, index):
-    await index.set_dir(
-        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
-        [
-            (
-                "issue.json",
-                IndexEntry(
-                    id="ISSUE1",
-                    name="issue.json",
-                    resource_type="linear/issue_json",
-                    remote_time="2026-04-05T00:00:00Z",
-                    vfs_name="issue.json",
-                    size=321,
-                ),
-            )
-        ],
-    )
-    result = await stat(accessor, PathSpec.from_str_path(_ISSUE_PATH), index)
-    assert result.content == ContentType.JSON
-    assert result.size == 321
-    assert result.modified == "2026-04-05T00:00:00Z"
-    assert result.extra["issue_id"] == "ISSUE1"
-
-
-@pytest.mark.asyncio
-async def test_stat_comments_jsonl(accessor, index):
-    await index.set_dir(
-        "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1",
-        [
-            (
-                "comments.jsonl",
-                IndexEntry(
-                    id="ISSUE1",
-                    name="comments.jsonl",
-                    resource_type="linear/comments",
-                    remote_time="2026-04-06T00:00:00Z",
-                    vfs_name="comments.jsonl",
-                    size=57,
-                ),
-            )
-        ],
-    )
-    result = await stat(
-        accessor, PathSpec.from_str_path(_COMMENTS_PATH), index
-    )
-    assert result.content == ContentType.TEXT
-    assert result.size == 57
-    assert result.modified == "2026-04-06T00:00:00Z"
-
-
-@pytest.mark.asyncio
-async def test_stat_team_json_reports_rendered_size(
-    accessor, index, monkeypatch
-):
-    # The team-dir listing computes team.json's size from the team object
-    # the find already fetched, so stat answers the rendered byte length.
-    monkeypatch.setattr(
-        linear_readdir, "list_teams", AsyncMock(return_value=[_TEAM])
-    )
-    result = await stat(
-        accessor,
-        PathSpec.from_str_path("/teams/ENG__Engineering__TEAM1/team.json"),
-        index,
-    )
-    assert result.content == ContentType.JSON
-    assert result.size == len(to_json_bytes(normalize_team(_TEAM)))
-    assert result.modified == "2026-04-05T00:00:00Z"
-    assert result.extra["team_id"] == "TEAM1"
-
-
-@pytest.mark.asyncio
-async def test_stat_missing_path(accessor, index):
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor, PathSpec.from_str_path("/nonexistent/path"), index
-        )
 
 
 _TEAM = {
@@ -327,36 +172,6 @@ async def _comments_for(config, issue_id, session=None):
     return list(_COMMENTS.get(issue_id, []))
 
 
-async def _walk_nodes(accessor, index):
-    stack = ["/"]
-    nodes = []
-    while stack:
-        current = stack.pop()
-        listing = await readdir(
-            accessor,
-            PathSpec(
-                vfs_path=current.strip("/"), virtual=current, directory=current
-            ),
-            index,
-        )
-        for path in listing:
-            entry_stat = await stat(
-                accessor, PathSpec.from_str_path(path), index
-            )
-            if entry_stat.type == FileType.DIRECTORY:
-                stack.append(path)
-            nodes.append((path, entry_stat))
-    return nodes
-
-
-async def _walk_files(accessor, index):
-    return [
-        (path, entry_stat)
-        for path, entry_stat in await _walk_nodes(accessor, index)
-        if entry_stat.type != FileType.DIRECTORY
-    ]
-
-
 def _fake_tree(monkeypatch) -> dict[str, AsyncMock]:
     fakes = {
         "list_teams": AsyncMock(return_value=[_TEAM]),
@@ -375,21 +190,122 @@ def _fake_tree(monkeypatch) -> dict[str, AsyncMock]:
     return fakes
 
 
+def _mounted(accessor: LinearAccessor) -> Workspace:
+    return Workspace({"/linear/": vfs_over(LinearVFS, accessor)})
+
+
+async def _stat_at(accessor: LinearAccessor, path: str) -> FileStat:
+    row, _ = await _mounted(accessor).dispatch(
+        "stat", PathSpec.from_str_path("/linear" + path)
+    )
+    return row
+
+
 @pytest.mark.asyncio
-async def test_stat_size_matches_read_for_every_file(
-    accessor, index, monkeypatch
-):
+async def test_stat_root(accessor):
+    result = await stat(accessor, PathSpec.from_str_path("/"))
+    assert result.type == FileType.DIRECTORY
+
+
+@pytest.mark.asyncio
+async def test_stat_teams(accessor):
+    result = await stat(accessor, PathSpec.from_str_path("/teams"))
+    assert result.type == FileType.DIRECTORY
+
+
+@pytest.mark.asyncio
+async def test_stat_team_entry(accessor, monkeypatch):
+    _fake_tree(monkeypatch)
+    result = await _stat_at(accessor, "/teams/ENG__Engineering__TEAM1")
+    assert result.type == FileType.DIRECTORY
+    assert result.extra["team_id"] == "TEAM1"
+    assert result.modified == "2026-04-05T00:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_stat_issue_directory(accessor, monkeypatch):
+    _fake_tree(monkeypatch)
+    result = await _stat_at(accessor, _ISSUE_DIR)
+    assert result.type == FileType.DIRECTORY
+    assert result.extra["issue_id"] == "ISSUE1"
+    assert result.modified == "2026-04-03T00:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_stat_issue_json(accessor, monkeypatch):
+    _fake_tree(monkeypatch)
+    result = await _stat_at(accessor, _ISSUE_DIR + "/issue.json")
+    assert result.content == ContentType.JSON
+    assert result.size == len(to_json_bytes(normalize_issue(_ISSUES[0])))
+    assert result.modified == "2026-04-03T00:00:00Z"
+    assert result.extra["issue_id"] == "ISSUE1"
+
+
+@pytest.mark.asyncio
+async def test_stat_comments_jsonl(accessor, monkeypatch):
+    _fake_tree(monkeypatch)
+    result = await _stat_at(accessor, _ISSUE_DIR + "/comments.jsonl")
+    assert result.content == ContentType.TEXT
+    assert result.modified == "2026-04-03T12:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_stat_team_json_reports_rendered_size(accessor, monkeypatch):
+    # The team-dir listing computes team.json's size from the team object
+    # the find already fetched, so stat answers the rendered byte length.
+    _fake_tree(monkeypatch)
+    result = await _stat_at(
+        accessor, "/teams/ENG__Engineering__TEAM1/team.json"
+    )
+    assert result.content == ContentType.JSON
+    assert result.size == len(to_json_bytes(normalize_team(_TEAM)))
+    assert result.modified == "2026-04-05T00:00:00Z"
+    assert result.extra["team_id"] == "TEAM1"
+
+
+@pytest.mark.asyncio
+async def test_stat_missing_path(accessor):
+    with pytest.raises(FileNotFoundError):
+        await stat(accessor, PathSpec.from_str_path("/nonexistent/path"))
+
+
+async def _walk_nodes(ws: Workspace) -> list[tuple[str, FileStat]]:
+    """Every node below the mount, keyed by its path below it."""
+    stack = ["/linear"]
+    nodes = []
+    while stack:
+        current = stack.pop()
+        listing, _ = await ws.dispatch(
+            "readdir", PathSpec.from_str_path(current)
+        )
+        for path in listing:
+            row, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+            if row.type == FileType.DIRECTORY:
+                stack.append(path)
+            nodes.append((path.removeprefix("/linear"), row))
+    return nodes
+
+
+@pytest.mark.asyncio
+async def test_stat_size_matches_read_for_every_file(accessor, monkeypatch):
     # The fskit invariant: whatever size stat reports at lookup must equal
     # the byte length a read delivers, for every file in the tree.
     fakes = _fake_tree(monkeypatch)
-    files = await _walk_files(accessor, index)
+    ws = _mounted(accessor)
+    files = [
+        (path, row)
+        for path, row in await _walk_nodes(ws)
+        if row.type != FileType.DIRECTORY
+    ]
     assert len(files) == 9
     # Sizing never refetches an issue: the issues listing already carries the
     # payloads, so walking the whole tree costs no per-file issue fetch.
     fakes["get_issue"].assert_not_awaited()
-    for path, entry_stat in files:
-        body = await read(accessor, PathSpec.from_str_path(path), index)
-        assert entry_stat.size == len(body), path
+    for path, row in files:
+        body, _ = await ws.dispatch(
+            "read", PathSpec.from_str_path("/linear" + path)
+        )
+        assert row.size == len(body), path
 
 
 def _deepest_id_key(path: str) -> str:
@@ -404,15 +320,13 @@ def _deepest_id_key(path: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_stat_extra_names_the_id_the_path_carries(
-    accessor, index, monkeypatch
-):
+async def test_stat_extra_names_the_id_the_path_carries(accessor, monkeypatch):
     """Every id-addressed node's stat carries its id under the key its
     path slot names (team_id, member_id, issue_id, ...), the value the
     path encodes. The member kind wrote ``user_id`` while its slot and
     trello's member say ``member_id``."""
     _fake_tree(monkeypatch)
-    nodes = await _walk_nodes(accessor, index)
+    nodes = await _walk_nodes(_mounted(accessor))
     assert any("/members/" in path for path, _ in nodes)
     for path, entry_stat in nodes:
         match = detect_scope(PathSpec.from_str_path(path))
@@ -423,4 +337,4 @@ async def test_stat_extra_names_the_id_the_path_carries(
         ):
             continue
         id_key = _deepest_id_key(path)
-        assert entry_stat.extra == {id_key: match.slots[id_key]}, path
+        assert entry_stat.extra[id_key] == match.slots[id_key], path

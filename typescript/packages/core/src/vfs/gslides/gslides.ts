@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import { GSlidesAccessor } from '../../accessor/gslides.ts'
 
 import { TokenManager } from '../../core/google/client.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
-import { VFSName } from '../../types.ts'
+import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactGSlidesConfig, type GSlidesConfig, type GSlidesConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { SLIDES_WORDS } from '../../utils/generated/google_vocabulary.ts'
 import { filesContaining as googleFilesContaining } from '../../core/google/search.ts'
@@ -59,47 +59,43 @@ export class GSlidesVFS extends BaseVFS {
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
   }
 
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    unlink: ['entry'],
+  } as const
+
   override readonly renderers: Readonly<Record<string, string>> = { '.gslide.json': 'readDeck' }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
-    return googleFilesContaining(
-      this.accessor,
-      gslidesReaddir,
-      MIME,
-      SLIDES_WORDS,
-      text,
-      [path],
-      index,
-    )
+    return googleFilesContaining(this.accessor, gslidesReaddir, MIME, SLIDES_WORDS, text, [path])
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return gslidesReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
+    return gslidesReaddir(this.accessor, path)
   }
 
   /** Render the file as the JSON its `.gslide.json` name holds. */
   async readDeck(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await gslidesRead(this.accessor, path, index)
+    const data = await gslidesRead(this.accessor, path)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return gslidesStat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return gslidesStat(this.accessor, path)
   }
 
-  override unlink(path: PathSpec, index?: IndexCacheStore): Promise<void> {
-    return gslidesUnlink(this.accessor, path, index)
+  override unlink(path: PathSpec, handed?: Handed): Promise<void> {
+    return gslidesUnlink(this.accessor, path, handed?.entry)
   }
 
   override rename(src: PathSpec, dst: PathSpec, index?: IndexCacheStore): Promise<void> {

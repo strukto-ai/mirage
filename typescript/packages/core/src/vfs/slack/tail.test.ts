@@ -12,46 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { materialize } from '../../io/types.ts'
-import { PathSpec } from '../../types.ts'
-import { FakeSlackTransport, makeFakeVfs, seedChannel } from './_test_util.ts'
-import { generic } from '../../commands/builtin/generic_bind/factory.ts'
-
-const SLACK_TAIL = [generic('tail')]
-
-const DEC = new TextDecoder()
-
-async function runTail(
-  paths: PathSpec[],
-  flags: Record<string, string | boolean | number | string[]>,
-  options: { index?: RAMIndexCacheStore; transport?: FakeSlackTransport } = {},
-): Promise<string> {
-  const cmd = SLACK_TAIL[0]
-  if (cmd === undefined) throw new Error('tail not registered')
-  const transport = options.transport ?? new FakeSlackTransport()
-  const vfs = makeFakeVfs(transport)
-  const result = await cmd.fn(vfs.accessor, paths, [], {
-    stdin: null,
-    flags,
-    io: commandIo(vfs),
-    cwd: '/',
-    ...(options.index !== undefined ? { index: options.index } : {}),
-  })
-  if (result === null) return ''
-  const [out] = result
-  if (out === null) return ''
-  const buf = out instanceof Uint8Array ? out : await materialize(out as AsyncIterable<Uint8Array>)
-  return DEC.decode(buf)
-}
+import { FakeSlackTransport, runSlack } from './_test_util.ts'
 
 describe('slack tail', () => {
   it('returns last N lines with -n', async () => {
-    const idx = new RAMIndexCacheStore()
-    await seedChannel(idx, '/mnt/slack', 'general__C1', 'C1', { dates: ['2024-01-01'] })
     const transport = new FakeSlackTransport((endpoint) => {
       if (endpoint === 'conversations.history') {
         return {
@@ -66,19 +31,12 @@ describe('slack tail', () => {
       }
       return { ok: true }
     })
-    const out = await runTail(
-      [
-        new PathSpec({
-          virtual: '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
-          directory: '/mnt/slack/channels/general__C1/',
-          resolved: false,
-          vfsPath: mountKey('/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl', '/mnt/slack'),
-        }),
-      ],
-      { n: '2' },
-      { index: idx, transport },
+    const out = await runSlack(
+      transport,
+      'tail -n 2 /mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
+      ['2024-01-01'],
     )
-    const lines = out.trimEnd().split('\n')
+    const lines = out.stdout.trimEnd().split('\n')
     expect(lines).toHaveLength(2)
     expect(JSON.parse(lines[0] ?? '')).toMatchObject({ ts: '1704067203.000000', text: 'c' })
     expect(JSON.parse(lines[1] ?? '')).toMatchObject({ ts: '1704067204.000000', text: 'd' })

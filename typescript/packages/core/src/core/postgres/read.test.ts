@@ -24,7 +24,7 @@ vi.mock('./client.ts', () => ({
   fetchColumns: vi.fn(),
   fetchLastRows: vi.fn(),
   fetchRowsAfter: vi.fn(),
-  // A read proves the entity directory first, through the guards stat runs,
+  // The line calls prove the entity directory first, through the guards,
   // so the catalog those guards consult is faked too.
   listSchemas: vi.fn(),
   listTables: vi.fn(),
@@ -38,7 +38,7 @@ vi.mock('./_schema_json.ts', () => ({
 }))
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
@@ -56,6 +56,9 @@ function makeAccessor(
   const cfg = resolvePostgresConfig(cfgOverrides)
   return new PostgresAccessor(STUB_DRIVER, cfg)
 }
+
+// The entity directory a read is under, as the mount hands its row.
+const ENTITY = new FileStat({ name: 'users', type: FileType.DIRECTORY })
 
 function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes)
@@ -117,6 +120,8 @@ describe('read', () => {
         directory: '/pg/public/tables/users/',
         vfsPath: mountKey('/pg/public/tables/users/schema.json', '/pg'),
       }),
+      null,
+      ENTITY,
     )
     expect(_schema.buildEntitySchemaJson).toHaveBeenCalledWith(
       expect.anything(),
@@ -136,6 +141,8 @@ describe('read', () => {
           directory: '/pg/public/tables/users/',
           vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
         }),
+        null,
+        ENTITY,
       ),
     ).rejects.toMatchObject({ code: 'EFBIG', virtualPath: '/pg/public/tables/users/rows.jsonl' })
   })
@@ -153,6 +160,8 @@ describe('read', () => {
         directory: '/pg/public/tables/users/',
         vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
+      null,
+      ENTITY,
     )
     expect(decode(out)).toBe('{"id":1,"name":"a"}\n{"id":2,"name":"b"}\n')
   })
@@ -166,7 +175,8 @@ describe('read', () => {
         directory: '/pg/public/tables/users/',
         vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
-      undefined,
+      null,
+      ENTITY,
       { limit: 10, offset: 5 },
     )
     expect(client.fetchRows).toHaveBeenCalledWith(expect.anything(), 'public', 'users', {
@@ -188,6 +198,8 @@ describe('read', () => {
         directory: '/pg/public/tables/users/',
         vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
+      null,
+      ENTITY,
     )
     expect(decode(out)).toBe('{"ts":"2026-04-30T00:00:00.000Z"}\n')
   })
@@ -220,6 +232,8 @@ describe('read', () => {
         directory: '/pg/public/tables/users/',
         vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
+      null,
+      ENTITY,
     )
     expect(decode(out)).toBe('{"id":1}\n')
   })
@@ -240,6 +254,8 @@ describe('read', () => {
         directory: '/pg/public/tables/users/',
         vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
+      null,
+      ENTITY,
     )
     expect(decode(out).trim().split('\n')).toHaveLength(40)
   })
@@ -258,6 +274,8 @@ describe('read', () => {
           directory: '/pg/public/tables/users/',
           vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
         }),
+        null,
+        ENTITY,
       ),
     ).rejects.toMatchObject({ code: 'EFBIG', virtualPath: '/pg/public/tables/users/rows.jsonl' })
     expect(vi.mocked(client.fetchBoundedRows).mock.calls[0]?.[3]).toEqual({
@@ -276,6 +294,8 @@ describe('whole-read byte budget', () => {
       read(
         makeAccessor({ dsn: 'postgres://h/db', maxReadBytes: 100 }),
         PathSpec.fromStrPath('/public/tables/users/rows.jsonl'),
+        null,
+        ENTITY,
       ),
     ).rejects.toMatchObject({ code: 'EFBIG', virtualPath: '/public/tables/users/rows.jsonl' })
     expect(client.fetchRows).not.toHaveBeenCalled()
@@ -287,6 +307,8 @@ describe('whole-read byte budget', () => {
     const result = read(
       makeAccessor({ dsn: 'postgres://h/db', maxReadBytes }),
       PathSpec.fromStrPath('/public/tables/users/rows.jsonl'),
+      null,
+      ENTITY,
     )
     if (maxReadBytes === 10) await expect(result).rejects.toMatchObject({ code: 'EFBIG' })
     else expect(decode(await result)).toBe('{"x":"é"}\n')

@@ -297,14 +297,11 @@ export function commandIo(vfs: BaseVFS): CommandIO {
     ...(has('search')
       ? {
           search: {
-            search: withoutAccessor((p: PathSpec, q: SearchQuery, index?: IndexCacheStore) =>
-              vfs.search(p, q, index),
-            ),
+            search: withoutAccessor((p: PathSpec, q: SearchQuery) => vfs.search(p, q)),
             ...(has('searchMany')
               ? {
-                  searchMany: withoutAccessor(
-                    (ps: PathSpec[], q: SearchQuery, index?: IndexCacheStore) =>
-                      vfs.searchMany(ps, q, index),
+                  searchMany: withoutAccessor((ps: PathSpec[], q: SearchQuery) =>
+                    vfs.searchMany(ps, q),
                   ),
                 }
               : {}),

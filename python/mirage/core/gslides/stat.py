@@ -14,10 +14,7 @@
 
 from mirage.core.google.stat import make_app_stat
 from mirage.core.gslides.constants import MIME
-from mirage.core.gslides.readdir import readdir
 from mirage.core.gslides.scope import detect_scope
 from mirage.vfs.gslides.slide_entry import make_filename
 
-stat = make_app_stat(
-    MIME, detect_scope, readdir, "gslides/file", make_filename
-)
+stat = make_app_stat(MIME, detect_scope, make_filename)

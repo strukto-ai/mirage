@@ -12,19 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
+import { mountDiscord } from '../../vfs/discord/_test_util.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { readdir as discordReaddir } from './readdir.ts'
-import { stat as discordStat } from './stat.ts'
-import { DEFAULT_MAX_GLOB_MATCHES } from '../../utils/glob_walk.ts'
 
-const resolveDiscordGlob = makeResolveGlob(discordReaddir, undefined, undefined, discordStat)
+async function listedPaths(accessor: DiscordAccessor, path: PathSpec): Promise<string[]> {
+  const base = path.virtual.replace(/\/$/, '')
+  return rowsOf(await discordReaddir(accessor, path)).map((row) => `${base}/${row.name}`)
+}
+
+const resolveDiscordGlob = makeResolveGlob(listedPaths)
 
 class FakeDiscordTransport implements DiscordTransport {
   public readonly calls: { method: DiscordMethod; endpoint: string }[] = []
@@ -38,30 +41,9 @@ class FakeDiscordTransport implements DiscordTransport {
   }
 }
 
-async function seedChannelHistory(
-  idx: RAMIndexCacheStore,
-  prefix: string,
-  guildDir: string,
-  channelDir: string,
-  filenames: readonly string[],
-): Promise<void> {
-  const dir = `${prefix}/${guildDir}/channels/${channelDir}`
-  const entries: [string, IndexEntry][] = filenames.map((name) => [
-    name,
-    new IndexEntry({
-      id: `${channelDir}:${name}`,
-      name,
-      resourceType: 'discord/history',
-      vfsName: name,
-    }),
-  ])
-  await idx.setDir(dir, entries)
-}
-
 describe('resolveDiscordGlob', () => {
   it('passes through resolved PathSpec unchanged', async () => {
     const t = new FakeDiscordTransport()
-    const idx = new RAMIndexCacheStore()
     const resolved = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
       directory: '/mnt/discord/My Server__G1/channels/general__C1/',
@@ -71,7 +53,7 @@ describe('resolveDiscordGlob', () => {
       ),
       resolved: true,
     })
-    const out = await resolveDiscordGlob(new DiscordAccessor(t), [resolved], idx)
+    const out = await resolveDiscordGlob(new DiscordAccessor(t), [resolved])
     expect(out).toHaveLength(1)
     expect(out[0]).toBe(resolved)
     expect(t.calls).toHaveLength(0)
@@ -79,124 +61,36 @@ describe('resolveDiscordGlob', () => {
 
   it('passes through unresolved PathSpec with no pattern unchanged', async () => {
     const t = new FakeDiscordTransport()
-    const idx = new RAMIndexCacheStore()
     const noPattern = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/channels/general__C1',
       directory: '/mnt/discord/My Server__G1/channels/general__C1',
       vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
       resolved: false,
     })
-    const out = await resolveDiscordGlob(new DiscordAccessor(t), [noPattern], idx)
+    const out = await resolveDiscordGlob(new DiscordAccessor(t), [noPattern])
     expect(out).toHaveLength(1)
     expect(out[0]).toBe(noPattern)
     expect(t.calls).toHaveLength(0)
   })
+})
 
-  it('expands a pattern to matching entries via readdir', async () => {
-    const t = new FakeDiscordTransport()
-    const idx = new RAMIndexCacheStore()
-    await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', [
-      '2026-04-24.jsonl',
-      '2026-04-23.jsonl',
-      'README.md',
-    ])
-    const spec = new PathSpec({
-      virtual: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
-      directory: '/mnt/discord/My Server__G1/channels/general__C1',
-      pattern: '*.jsonl',
-      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1/*.jsonl', '/mnt/discord'),
-      resolved: false,
+describe('a glob through a mount', () => {
+  it("matches a channel's days by their names", async () => {
+    const t = new FakeDiscordTransport((_m, endpoint) => {
+      if (endpoint === '/users/@me/guilds') return [{ id: 'G1', name: 'srv' }]
+      if (endpoint === '/guilds/G1/channels') {
+        return [{ id: 'C1', name: 'general', type: 0, last_message_id: '175928847299117056' }]
+      }
+      return null
     })
-    const out = await resolveDiscordGlob(new DiscordAccessor(t), [spec], idx)
-    expect(out).toHaveLength(2)
-    const originals = out.map((p) => p.virtual).sort()
-    expect(originals).toEqual([
-      '/mnt/discord/My Server__G1/channels/general__C1/2026-04-23.jsonl',
-      '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
-    ])
-    for (const p of out) {
-      expect(mountPrefixOf(p.virtual, p.vfsPath)).toBe('/mnt/discord')
+    const ws = mountDiscord(t)
+    try {
+      const result = await ws.shell('echo /mnt/discord/srv__G1/channels/general__C1/2016-04-2*')
+      const days = result.stdoutText.split(/\s+/).filter((w) => w !== '')
+      expect(days).toHaveLength(10)
+      expect(days[0]).toBe('/mnt/discord/srv__G1/channels/general__C1/2016-04-20')
+    } finally {
+      await ws.close()
     }
-  })
-
-  it('keeps unmatched pattern word as literal', async () => {
-    const t = new FakeDiscordTransport()
-    const idx = new RAMIndexCacheStore()
-    await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', [
-      '2026-04-24.jsonl',
-      'README.md',
-    ])
-    const spec = new PathSpec({
-      virtual: '/mnt/discord/My Server__G1/channels/general__C1/*.csv',
-      directory: '/mnt/discord/My Server__G1/channels/general__C1',
-      pattern: '*.csv',
-      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1/*.csv', '/mnt/discord'),
-      resolved: false,
-    })
-    const out = await resolveDiscordGlob(new DiscordAccessor(t), [spec], idx)
-    // bash nullglob off: the unmatched glob word stays the literal
-    expect(out.map((p) => p.virtual)).toEqual([spec.virtual])
-    expect(out[0]?.resolved).toBe(true)
-    expect(out[0]?.pattern).toBeNull()
-  })
-
-  it('truncates matched entries at DEFAULT_MAX_GLOB_MATCHES', async () => {
-    const t = new FakeDiscordTransport()
-    const idx = new RAMIndexCacheStore()
-    const filenames: string[] = []
-    for (let i = 0; i < DEFAULT_MAX_GLOB_MATCHES + 5; i++) {
-      filenames.push(`file-${String(i).padStart(5, '0')}.jsonl`)
-    }
-    await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', filenames)
-    const spec = new PathSpec({
-      virtual: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
-      directory: '/mnt/discord/My Server__G1/channels/general__C1',
-      pattern: '*.jsonl',
-      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1/*.jsonl', '/mnt/discord'),
-      resolved: false,
-    })
-    const out = await resolveDiscordGlob(new DiscordAccessor(t), [spec], idx)
-    expect(out).toHaveLength(DEFAULT_MAX_GLOB_MATCHES)
-  })
-
-  it('handles a mix of resolved, pattern, and no-pattern PathSpecs', async () => {
-    const t = new FakeDiscordTransport()
-    const idx = new RAMIndexCacheStore()
-    await seedChannelHistory(idx, '/mnt/discord', 'My Server__G1', 'general__C1', [
-      '2026-04-24.jsonl',
-      '2026-04-23.jsonl',
-    ])
-    const resolved = new PathSpec({
-      virtual: '/mnt/discord/My Server__G1/members/alice__U1.json',
-      directory: '/mnt/discord/My Server__G1/members/',
-      vfsPath: mountKey('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
-      resolved: true,
-    })
-    const patterned = new PathSpec({
-      virtual: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
-      directory: '/mnt/discord/My Server__G1/channels/general__C1',
-      pattern: '*.jsonl',
-      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1/*.jsonl', '/mnt/discord'),
-      resolved: false,
-    })
-    const noPattern = new PathSpec({
-      virtual: '/mnt/discord/My Server__G1/channels/eng__C2',
-      directory: '/mnt/discord/My Server__G1/channels/eng__C2',
-      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/eng__C2', '/mnt/discord'),
-      resolved: false,
-    })
-    const out = await resolveDiscordGlob(
-      new DiscordAccessor(t),
-      [resolved, patterned, noPattern],
-      idx,
-    )
-    expect(out).toHaveLength(4)
-    expect(out[0]).toBe(resolved)
-    const middle = [out[1]?.virtual, out[2]?.virtual].sort()
-    expect(middle).toEqual([
-      '/mnt/discord/My Server__G1/channels/general__C1/2026-04-23.jsonl',
-      '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
-    ])
-    expect(out[3]).toBe(noPattern)
   })
 })

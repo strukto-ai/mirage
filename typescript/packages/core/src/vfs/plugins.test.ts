@@ -210,7 +210,7 @@ it('passes resource options through, and grep and rg never ask the search', asyn
   expect(await commandIo(vfs).search?.search(accessor, PATH, query)).toEqual([
     [`${PATH.virtual}/42`, 'deployment 42'],
   ])
-  expect(search).toHaveBeenCalledWith(PATH, query, undefined)
+  expect(search).toHaveBeenCalledWith(PATH, query)
   search.mockClear()
   const ws = new Workspace({ '/nested/data': vfs }, { shellParser: await getTestParser() })
   try {

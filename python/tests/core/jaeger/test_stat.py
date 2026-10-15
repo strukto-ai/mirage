@@ -17,11 +17,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.jaeger import JaegerAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.jaeger.stat import stat
 from mirage.core.render.json import json_bytes
-from mirage.types import ContentType, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.vfs.jaeger import JaegerVFS
 from mirage.vfs.jaeger.config import JaegerConfig
+from mirage.workspace import Workspace
 
 TRACE_A = "a" * 32
 TRACE_B = "b" * 32
@@ -30,11 +31,6 @@ TRACE_B = "b" * 32
 @pytest.fixture
 def accessor():
     return JaegerAccessor(config=JaegerConfig())
-
-
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
 
 
 def spec(path: str) -> PathSpec:
@@ -67,84 +63,85 @@ def listed_traces(ids):
 
 
 @pytest.mark.asyncio
-async def test_stat_root(accessor, index):
-    result = await stat(accessor, spec(""), index)
+async def test_stat_root(accessor):
+    result = await stat(accessor, spec(""))
     assert result.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_services_dir(accessor, index):
-    result = await stat(accessor, spec("services"), index)
+async def test_stat_services_dir(accessor):
+    result = await stat(accessor, spec("services"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "services"
 
 
 @pytest.mark.asyncio
-async def test_stat_service_dir(accessor, index):
+async def test_stat_service_dir(accessor):
     with known_service():
-        result = await stat(accessor, spec("services/checkout"), index)
+        result = await stat(accessor, spec("services/checkout"))
     assert result.type == FileType.DIRECTORY
     assert result.extra["service"] == "checkout"
 
 
 @pytest.mark.asyncio
-async def test_stat_unknown_service_raises(accessor, index):
+async def test_stat_unknown_service_raises(accessor):
     with known_service():
         with pytest.raises(FileNotFoundError):
-            await stat(accessor, spec("services/nope"), index)
+            await stat(accessor, spec("services/nope"))
+
+
+def mounted() -> Workspace:
+    return Workspace({"/j/": JaegerVFS(JaegerConfig())})
+
+
+async def mounted_stat(path: str) -> FileStat:
+    row, _ = await mounted().dispatch("stat", PathSpec.from_str_path(path))
+    return row
 
 
 @pytest.mark.asyncio
-async def test_stat_operations_file(accessor, index):
+async def test_stat_operations_file():
     operations = ["GET /cart"]
     with known_service():
         with listed_operations(operations):
-            result = await stat(
-                accessor, spec("services/checkout/operations.json"), index
-            )
+            result = await mounted_stat("/j/services/checkout/operations.json")
     assert result.content == ContentType.JSON
     # The service listing sized it, so stat agrees with what read returns.
     assert result.size == len(json_bytes(operations))
 
 
 @pytest.mark.asyncio
-async def test_stat_listed_trace(accessor, index):
+async def test_stat_listed_trace():
     with known_service():
         with listed_traces([TRACE_A]):
-            result = await stat(
-                accessor,
-                spec(f"services/checkout/traces/{TRACE_A}.json"),
-                index,
+            result = await mounted_stat(
+                f"/j/services/checkout/traces/{TRACE_A}.json"
             )
     assert result.content == ContentType.JSON
     assert result.extra["trace_id"] == TRACE_A
-    # The listing that proved existence also seeded the rendered size.
+    # The listing that proved existence also carried the rendered size.
     assert result.size == len(json_bytes({"traceID": TRACE_A}))
 
 
 @pytest.mark.asyncio
-async def test_stat_unlisted_trace_raises(accessor, index):
+async def test_stat_unlisted_trace_raises():
     # A well-formed id is not evidence the trace exists.
     with known_service():
         with listed_traces([TRACE_A]):
             with pytest.raises(FileNotFoundError):
-                await stat(
-                    accessor,
-                    spec(f"services/checkout/traces/{TRACE_B}.json"),
-                    index,
+                await mounted_stat(
+                    f"/j/services/checkout/traces/{TRACE_B}.json"
                 )
 
 
 @pytest.mark.asyncio
-async def test_stat_malformed_trace_id_raises(accessor, index):
+async def test_stat_malformed_trace_id_raises(accessor):
     with known_service():
         with pytest.raises(FileNotFoundError):
-            await stat(
-                accessor, spec("services/checkout/traces/zzz.json"), index
-            )
+            await stat(accessor, spec("services/checkout/traces/zzz.json"))
 
 
 @pytest.mark.asyncio
-async def test_stat_dotfile_raises(accessor, index):
+async def test_stat_dotfile_raises(accessor):
     with pytest.raises(FileNotFoundError):
-        await stat(accessor, spec("services/.hidden"), index)
+        await stat(accessor, spec("services/.hidden"))

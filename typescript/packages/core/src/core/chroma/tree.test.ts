@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { FileType } from '../../types.ts'
 
 import { encodeBase64 } from '../../utils/base64.ts'
 import { gzip } from '../../utils/compress.ts'
@@ -59,20 +60,18 @@ describe('parsePathTree', () => {
 
 describe('buildDirEntries', () => {
   it('builds directories and file entries', () => {
-    const entries = buildDirEntries(
-      {
-        'guides/auth.md': { size: 190, updated_at: '2026-02-15T00:00:00Z' },
-        'CHANGELOG.md': { size: 90 },
-      },
-      '/knowledge/',
-    )
-    expect([...entries.keys()].sort()).toEqual(['/knowledge', '/knowledge/guides'])
-    const root = entries.get('/knowledge') ?? []
-    expect(root.map(([name]) => name).sort()).toEqual(['CHANGELOG.md', 'guides'])
-    const guides = entries.get('/knowledge/guides') ?? []
+    const entries = buildDirEntries({
+      'guides/auth.md': { size: 190, updated_at: '2026-02-15T00:00:00Z' },
+      'CHANGELOG.md': { size: 90 },
+    })
+    expect([...entries.keys()].sort()).toEqual(['/', '/guides'])
+    const root = entries.get('/') ?? []
+    expect(root.map((row) => row.name).sort()).toEqual(['CHANGELOG.md', 'guides'])
+    const guides = entries.get('/guides') ?? []
     expect(guides).toHaveLength(1)
-    const auth = guides[0]?.[1]
-    expect(auth?.resourceType).toBe('file')
+    const auth = guides[0]
+    expect(auth?.type).toBe(FileType.FILE)
+    expect(auth?.modified).toBe('2026-02-15T00:00:00Z')
     // The path tree's own size never becomes the byte length: it describes
     // the producer's source document, so it rides in extra and the size is
     // measured later, from the rendered chunks.
@@ -83,12 +82,12 @@ describe('buildDirEntries', () => {
   })
 
   it('rejects duplicate paths', () => {
-    expect(() => buildDirEntries({ 'a.md': {}, '/a.md/': {} }, '')).toThrow(
+    expect(() => buildDirEntries({ 'a.md': {}, '/a.md/': {} })).toThrow(
       "Duplicate Chroma path 'a.md'",
     )
   })
 
   it('rejects file/directory collisions', () => {
-    expect(() => buildDirEntries({ a: {}, 'a/b.md': {} }, '')).toThrow('Path collision')
+    expect(() => buildDirEntries({ a: {}, 'a/b.md': {} })).toThrow('Path collision')
   })
 })

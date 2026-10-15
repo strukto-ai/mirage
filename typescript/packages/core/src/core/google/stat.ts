@@ -13,53 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
-import type { ReaddirFn } from '../hierarchy/probe.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import type { DetectFn, ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat } from '../hierarchy/stat.ts'
 import { resolveAppEntry } from './entry.ts'
 
 /**
- * The stat of a Google app mount: a file resolves through Drive. Sheets,
- * Docs and Slides stat the same tree and differ only in the MIME type a file
- * carries and what they name it. Mirrors Python's `make_app_stat`.
+ * The stat of a Google app mount: a file resolves through Drive. A file a
+ * corpus listing named is answered by the mount from that listing; one it did
+ * not is fetched by its id alone. Sheets, Docs and Slides stat the same tree
+ * and differ only in the MIME type a file carries and what they name it.
+ * Mirrors Python's `make_app_stat`.
  */
 export function makeAppStat<A extends GoogleApiAccessor>(
   mime: string,
   detectScope: DetectFn,
-  readdir: ReaddirFn<A>,
-  resourceType: string,
   makeFilename: (title: string, id: string, modified: string) => string,
 ): ReturnType<typeof makeStat<A>> {
-  const fileStat = async (
-    accessor: A,
-    match: ScopeMatch,
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<FileStat> => {
-    const entry = await resolveAppEntry(
-      accessor.tokenManager,
-      match,
-      path,
-      index,
-      mime,
-      resourceType,
-      makeFilename,
-    )
-    return new FileStat({
-      name: entry.vfsName !== '' ? entry.vfsName : entry.name,
-      type: FileType.FILE,
-      content: ContentType.JSON,
-      modified: entry.remoteTime,
-      size: entry.size,
-      fingerprint: entry.remoteTime !== '' ? entry.remoteTime : null,
-      extra: {
-        doc_id: entry.id,
-        doc_name: entry.name,
-        ...entry.extra,
-      },
-    })
-  }
-  return makeStat(detectScope, readdir, { overrides: { file: fileStat } })
+  const fileStat = (accessor: A, match: ScopeMatch, path: PathSpec): Promise<FileStat> =>
+    resolveAppEntry(accessor.tokenManager, match, path, mime, makeFilename)
+  return makeStat(detectScope, { overrides: { file: fileStat } })
 }

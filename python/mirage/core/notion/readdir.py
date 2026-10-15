@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.hierarchy.stat import entry_stat
 from mirage.core.notion.normalize import (
     data_source_segment_name,
     database_segment_name,
@@ -36,36 +36,31 @@ from mirage.core.notion.pathing import (
 )
 from mirage.core.notion.resolve import guard_row
 from mirage.core.notion.scope import detect_scope
+from mirage.types import DirListing, FileStat, FileType
+
+PAGE = entry_stat("page_id", FileType.DIRECTORY)
+DATABASE = entry_stat("database_id", FileType.DIRECTORY)
+DATA_SOURCE = entry_stat("data_source_id", FileType.DIRECTORY)
 
 
 async def _list_pages_root(
     accessor: NotionAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     pages = await search_pages(accessor.config, session=accessor.pool)
-    top_level = [
-        p for p in pages if p.get("parent", {}).get("type") == "workspace"
-    ]
-    entries = []
-    for page in top_level:
-        dirname = page_segment_name(page)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=page["id"],
-                    name=dirname,
-                    resource_type="notion/page",
-                    remote_time=page.get("last_edited_time", ""),
-                    vfs_name=dirname,
-                ),
-            )
+    return [
+        PAGE(
+            page_segment_name(page),
+            page["id"],
+            modified=page.get("last_edited_time"),
         )
-    return entries
+        for page in pages
+        if page.get("parent", {}).get("type") == "workspace"
+    ]
 
 
 async def _list_databases_root(
     accessor: NotionAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     # Search answers with data sources since 2025-09-03, so the set of
     # databases is their distinct parents. Each one still costs a
     # retrieve, because only the database object carries the title and
@@ -77,113 +72,80 @@ async def _list_databases_root(
         owner = data_source.get("parent", {}).get("database_id", "")
         if owner and owner not in seen:
             seen.append(owner)
-    entries = []
+    rows = []
     for database_id in seen:
         database = await get_database(
             accessor.config, database_id, session=accessor.pool
         )
-        dirname = database_segment_name(database)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=database_id,
-                    name=dirname,
-                    resource_type="notion/database",
-                    remote_time=database.get("last_edited_time", ""),
-                    vfs_name=dirname,
-                ),
+        rows.append(
+            DATABASE(
+                database_segment_name(database),
+                database_id,
+                modified=database.get("last_edited_time"),
             )
         )
-    return entries
+    return rows
 
 
 async def _list_page(
-    accessor: NotionAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: NotionAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     page_id = match.slots.get("page_id") or match.slots["row_id"]
     blocks = await list_block_children(
         accessor.config, page_id, session=accessor.pool
     )
-    child_pages = [b for b in blocks if b.get("type") == "child_page"]
-
     # page.json renders from get_page plus the *recursive* block tree
     # while this listing only holds one level of children, so sizing it
     # here would cost an extra call pair per page. It stays size-unknown
     # until a read hydrates it.
-    entries = [
-        (
-            "page.json",
-            IndexEntry(
-                id=f"{page_id}:page",
-                name="page.json",
-                resource_type="file",
-                vfs_name="page.json",
-            ),
-        )
-    ]
-    for child_block in child_pages:
+    rows = [FileStat(name="page.json", type=FileType.FILE)]
+    for child_block in blocks:
+        if child_block.get("type") != "child_page":
+            continue
         child_title = child_block.get("child_page", {}).get(
             "title", "untitled"
         )
-        child_id = child_block["id"]
-        dirname = format_segment(child_title, child_id)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=child_id,
-                    name=dirname,
-                    resource_type="notion/page",
-                    remote_time=child_block.get("last_edited_time", ""),
-                    vfs_name=dirname,
-                ),
+        rows.append(
+            PAGE(
+                format_segment(child_title, child_block["id"]),
+                child_block["id"],
+                modified=child_block.get("last_edited_time"),
             )
         )
-    return entries
+    return rows
 
 
 async def _list_database(
-    accessor: NotionAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: NotionAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     database_id = match.slots["database_id"]
     database = await get_database(
         accessor.config, database_id, session=accessor.pool
     )
     # database.json renders the database object this listing already
     # fetched, so its exact size is free here.
-    entries = [
-        (
-            "database.json",
-            IndexEntry(
-                id=f"{database_id}:database",
-                name="database.json",
-                resource_type="file",
-                vfs_name="database.json",
-                size=len(to_json_bytes(normalize_database(database))),
-            ),
+    rows = [
+        FileStat(
+            name="database.json",
+            type=FileType.FILE,
+            size=len(to_json_bytes(normalize_database(database))),
+            extra={"database_id": database_id},
         )
     ]
     for stub in database.get("data_sources", []):
-        dirname = data_source_segment_name(stub)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=stub["id"],
-                    name=dirname,
-                    resource_type="notion/data_source",
-                    remote_time=database.get("last_edited_time", ""),
-                    vfs_name=dirname,
-                ),
+        rows.append(
+            DATA_SOURCE(
+                data_source_segment_name(stub),
+                stub["id"],
+                modified=database.get("last_edited_time"),
             )
         )
-    return entries
+    return rows
 
 
 async def _list_data_source(
-    accessor: NotionAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: NotionAccessor, match: ScopeMatch, entry: FileStat
+) -> DirListing:
     data_source_id = match.slots["data_source_id"]
     data_source = await get_data_source(
         accessor.config, data_source_id, session=accessor.pool
@@ -192,27 +154,21 @@ async def _list_data_source(
     # hundred rows' cells a call, while a row directory costs calls of its
     # own to enter, so a walk over a table stays a walk over its pages of
     # query results. rows.jsonl stays size-unknown until a read renders it.
-    return [
-        (
-            "data_source.json",
-            IndexEntry(
-                id=f"{data_source_id}:data_source",
+    # A row is still a directory its path reaches, which this listing
+    # does not name, so the listing proves nothing absent.
+    extra = {"data_source_id": data_source_id}
+    return DirListing(
+        entries=[
+            FileStat(
                 name="data_source.json",
-                resource_type="file",
-                vfs_name="data_source.json",
+                type=FileType.FILE,
                 size=len(to_json_bytes(normalize_data_source(data_source))),
+                extra=extra,
             ),
-        ),
-        (
-            "rows.jsonl",
-            IndexEntry(
-                id=f"{data_source_id}:rows",
-                name="rows.jsonl",
-                resource_type="file",
-                vfs_name="rows.jsonl",
-            ),
-        ),
-    ]
+            FileStat(name="rows.jsonl", type=FileType.FILE, extra=extra),
+        ],
+        window=True,
+    )
 
 
 readdir = make_readdir(

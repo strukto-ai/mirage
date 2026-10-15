@@ -13,31 +13,30 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.gmail.messages import (
     get_attachment,
     get_message_raw,
     message_json_bytes,
 )
-from mirage.core.gmail.readdir import readdir
 from mirage.core.gmail.scope import detect_scope
-from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _read_message(
     accessor: GmailAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
-    raw = await get_message_raw(accessor.token_manager, entry.id)
+    raw = await get_message_raw(
+        accessor.token_manager, str(entry.extra["message_id"])
+    )
     return message_json_bytes(raw)
 
 
@@ -45,16 +44,18 @@ async def _read_attachment(
     accessor: GmailAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     # The message id decodes from the attachment dir's `subject__id`
-    # segment; the attachment id only exists in the listing, so the
-    # entry stays the proof of existence AND the id source.
-    entry = await resolve_entry(readdir, accessor, path, index)
+    # segment; the attachment id only exists in the listing, so the row
+    # stays the proof of existence AND the id source.
     if entry is None:
         raise enoent(path.virtual)
     return await get_attachment(
-        accessor.token_manager, match.slots["message_id"], entry.id
+        accessor.token_manager,
+        match.slots["message_id"],
+        str(entry.extra["attachment_id"]),
     )
 
 

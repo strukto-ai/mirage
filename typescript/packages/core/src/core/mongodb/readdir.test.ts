@@ -23,12 +23,16 @@ vi.mock('./client.ts', () => ({
 }))
 
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import * as client from './client.ts'
 import { stubMongoDriver } from './_test_util.ts'
 import { readdir } from './readdir.ts'
+
+function names(listed: readonly FileStat[] | DirListing): string[] {
+  return rowsOf(listed).map((row) => row.name)
+}
 
 const STUB_DRIVER = stubMongoDriver()
 
@@ -49,42 +53,29 @@ describe('readdir', () => {
   it('lists root: databases', async () => {
     vi.mocked(client.listDatabases).mockResolvedValue(['app', 'analytics'])
     const out = await readdir(makeAccessor(), ps('/mongo/'))
-    expect(out).toEqual(['/mongo/app', '/mongo/analytics'])
+    expect(names(out)).toEqual(['app', 'analytics'])
   })
 
   it('lists database: fixed [database.json, collections, views]', async () => {
     const out = await readdir(makeAccessor(), ps('/mongo/app'))
-    expect(out).toEqual(['/mongo/app/database.json', '/mongo/app/collections', '/mongo/app/views'])
+    expect(names(out)).toEqual(['database.json', 'collections', 'views'])
   })
 
   it('lists kind_dir (collections): collection names', async () => {
     vi.mocked(client.listCollections).mockResolvedValue(['users', 'orders'])
     const out = await readdir(makeAccessor(), ps('/mongo/app/collections'))
-    expect(out).toEqual(['/mongo/app/collections/users', '/mongo/app/collections/orders'])
+    expect(names(out)).toEqual(['users', 'orders'])
   })
 
   it('lists kind_dir (views): view names', async () => {
     vi.mocked(client.listCollections).mockResolvedValue(['recent'])
     const out = await readdir(makeAccessor(), ps('/mongo/app/views'))
-    expect(out).toEqual(['/mongo/app/views/recent'])
+    expect(names(out)).toEqual(['recent'])
   })
 
   it('lists entity (collection): [schema.json, documents.jsonl]', async () => {
     const out = await readdir(makeAccessor(), ps('/mongo/app/collections/users'))
-    expect(out).toEqual([
-      '/mongo/app/collections/users/schema.json',
-      '/mongo/app/collections/users/documents.jsonl',
-    ])
-  })
-
-  it('caches root listing in index when provided', async () => {
-    vi.mocked(client.listDatabases).mockResolvedValue(['app'])
-    const index = new RAMIndexCacheStore()
-    const accessor = makeAccessor()
-    await readdir(accessor, ps('/mongo/'), index)
-    vi.mocked(client.listDatabases).mockClear()
-    await readdir(accessor, ps('/mongo/'), index)
-    expect(client.listDatabases).not.toHaveBeenCalled()
+    expect(names(out)).toEqual(['schema.json', 'documents.jsonl'])
   })
 
   it('throws ENOENT for documents-leaf paths', async () => {

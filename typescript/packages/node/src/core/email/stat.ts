@@ -12,43 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
-import { entryStat, makeStat } from '@struktoai/mirage-core/core/hierarchy/stat'
-import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { ContentType, FileStat, FileType } from '@struktoai/mirage-core/types'
+import { makeStat } from '@struktoai/mirage-core/core/hierarchy/stat'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
-function dirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
-}
-
-function messageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: ContentType.JSON,
-    size: entry.size,
-    extra: { uid: entry.id },
-  })
-}
-
-function attachmentDirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.DIRECTORY,
-    extra: { uid: entry.id },
-  })
-}
-
-export const stat = makeStat<EmailAccessor>(detectScope, readdir, {
-  entryStats: {
-    folder: dirStat,
-    day: dirStat,
-    message: messageStat,
-    attachment_dir: attachmentDirStat,
-    attachment: entryStat('attachment_id'),
-  },
-})
+export const stat = makeStat<EmailAccessor>(detectScope)

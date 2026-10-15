@@ -3,12 +3,9 @@ from pydantic import SecretStr
 
 from mirage.commands.builtin.backends import commands_for
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.builtin.generic_bind.adapter import command_io
-from mirage.commands.config import CommandOpts
-from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
-from tests.fixtures.driver_ops import ops
+from mirage.workspace import Workspace
 
 
 class FakeClient:
@@ -54,14 +51,10 @@ async def _bytes(source):
 
 @pytest.mark.asyncio
 async def test_rg_recursive_by_default_matches_content():
-    res = _res()
-    p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
-    source, _io = await _command(res, "rg")(
-        res.accessor,
-        [p],
-        ["bananas"],
-        CommandOpts(io=command_io(res), index=ops(res).index),
-    )
-    out = await _bytes(source)
-    assert b"bananas" in out
-    assert b"sci-fi" not in out
+    # A memory reads from the row the scoped listing names, which the
+    # mount hands it.
+    ws = Workspace({"/mem/": _res()})
+    result = await ws.shell("rg bananas /mem")
+    out = await result.stdout_str()
+    assert "bananas" in out
+    assert "sci-fi" not in out

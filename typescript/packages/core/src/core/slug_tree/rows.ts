@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry } from '../../cache/index/config.ts'
+import { FileStat, FileType } from '../../types.ts'
 import { gnuBasename, parent } from '../../utils/path.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { DirRows } from './types.ts'
 
@@ -67,11 +67,10 @@ export function dropCollisions<V>(
   return kept
 }
 
-/** Lay files out as each folder's rows under a mount prefix. */
+/** Lay files out as each folder's rows, keyed by the folder's tree path. */
 export function dirRows<V>(
   files: ReadonlyMap<string, V>,
-  prefix: string,
-  fileEntry: (path: string, value: V) => IndexEntry,
+  fileRow: (path: string, value: V) => FileStat,
 ): DirRows {
   const directories = new Set<string>(['/'])
   for (const path of files.keys()) {
@@ -81,31 +80,19 @@ export function dirRows<V>(
     }
   }
   const rows: DirRows = new Map()
-  for (const directory of directories) rows.set(virtualPath(directory, prefix), [])
+  for (const directory of directories) rows.set(directory, [])
   for (const directory of [...directories].sort(compareCodePoints)) {
     if (directory === '/') continue
-    const entry = new IndexEntry({
-      id: stripSlash(directory),
-      name: gnuBasename(directory),
-      resourceType: 'folder',
-    })
-    rows.get(virtualPath(parent(directory), prefix))?.push([entry.name, entry])
+    rows.get(parent(directory))?.push(folderRow(gnuBasename(directory)))
   }
   for (const [path, value] of [...files].sort((a, b) => compareCodePoints(a[0], b[0]))) {
-    const entry = fileEntry(path, value)
-    rows.get(virtualPath(parent(path), prefix))?.push([entry.name, entry])
+    rows.get(parent(path))?.push(fileRow(path, value))
   }
+  for (const children of rows.values()) children.sort((a, b) => compareCodePoints(a.name, b.name))
   return rows
 }
 
-export function mountRoot(prefix: string): string {
-  const stripped = rstripSlash(prefix)
-  return stripped !== '' ? stripped : '/'
-}
-
-export function virtualPath(path: string, prefix: string): string {
-  const root = mountRoot(prefix)
-  if (path === '/') return root
-  if (root === '/') return path
-  return root + path
+/** A folder of the tree, which exists only as its listing. */
+export function folderRow(name: string): FileStat {
+  return new FileStat({ name, type: FileType.DIRECTORY, extra: { children_count: 0 } })
 }

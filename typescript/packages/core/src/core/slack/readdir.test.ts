@@ -15,9 +15,11 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
-import { IndexEntry, type Evicted, type SetDirOptions } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import type { DirListing } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
 import { dateRange, latestMessageTs, readdir } from './readdir.ts'
 
@@ -45,22 +47,32 @@ class FakeTransport implements SlackTransport {
   }
 }
 
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
-  }
-}
-
 function spec(virtual: string, prefix = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
+}
+
+function paths(listed: readonly FileStat[] | DirListing, folder: string): string[] {
+  return rowsOf(listed).map((row) => `${folder.replace(/\/$/, '')}/${row.name}`)
+}
+
+// A conversation's row as its container's listing names it.
+function conversationRow(dirname = 'general__C1', created = 0, name = 'general'): FileStat {
+  return new FileStat({
+    name: dirname,
+    type: FileType.DIRECTORY,
+    extra: { channel_id: dirname.split('__').at(-1) ?? '', name, created },
+  })
+}
+
+// A day's row as its channel's listing names it.
+const DAY = new FileStat({
+  name: '2026-04-10',
+  type: FileType.DIRECTORY,
+  extra: { channel_id: 'C1' },
+})
+
+function mounted(t: SlackTransport): Workspace {
+  return new Workspace({ '/mnt/slack/': new SlackVFSBase({ accessor: new SlackAccessor(t) }) })
 }
 
 describe('dateRange', () => {
@@ -137,19 +149,23 @@ describe('readdir root', () => {
   it('returns the three virtual roots for empty key with prefix', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     const out = await readdir(new SlackAccessor(t), spec('/mnt/slack', '/mnt/slack'))
-    expect(out).toEqual(['/mnt/slack/channels', '/mnt/slack/dms', '/mnt/slack/users'])
+    expect(paths(out, '/mnt/slack')).toEqual([
+      '/mnt/slack/channels',
+      '/mnt/slack/dms',
+      '/mnt/slack/users',
+    ])
     expect(t.calls).toHaveLength(0)
   })
 
   it('returns the three virtual roots for empty prefix', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     const out = await readdir(new SlackAccessor(t), spec('/'))
-    expect(out).toEqual(['/channels', '/dms', '/users'])
+    expect(paths(out, '/')).toEqual(['/channels', '/dms', '/users'])
   })
 })
 
 describe('readdir /channels', () => {
-  it('lists channels, populates index, returns dirnames', async () => {
+  it('lists channels with their ids and creation times', async () => {
     const t = new FakeTransport(() => ({
       ok: true,
       channels: [
@@ -158,40 +174,14 @@ describe('readdir /channels', () => {
       ],
       response_metadata: { next_cursor: '' },
     }))
-    const idx = new RAMIndexCacheStore()
-    const out = await readdir(new SlackAccessor(t), spec('/mnt/slack/channels', '/mnt/slack'), idx)
-    expect(out).toEqual(['/mnt/slack/channels/general__C1', '/mnt/slack/channels/eng__C2'])
-    const listing = await idx.listDir('/mnt/slack/channels')
-    expect(listing.entries).toEqual([
+    const out = await readdir(new SlackAccessor(t), spec('/mnt/slack/channels', '/mnt/slack'))
+    expect(paths(out, '/mnt/slack/channels')).toEqual([
       '/mnt/slack/channels/general__C1',
       '/mnt/slack/channels/eng__C2',
     ])
-    const lookup = await idx.get('/mnt/slack/channels/general__C1')
-    expect(lookup.entry?.id).toBe('C1')
-    expect(lookup.entry?.resourceType).toBe('slack/channel')
-    expect(lookup.entry?.remoteTime).toBe('1000')
-  })
-
-  it('returns from cache without API call when listDir hits', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: '1000',
-        }),
-      ],
-    ])
-    const t = new FakeTransport(() => {
-      throw new Error('should not be called')
-    })
-    const out = await readdir(new SlackAccessor(t), spec('/mnt/slack/channels', '/mnt/slack'), idx)
-    expect(out).toEqual(['/mnt/slack/channels/general__C1'])
-    expect(t.calls).toHaveLength(0)
+    const [row] = rowsOf(out)
+    expect(row?.extra).toEqual({ channel_id: 'C1', name: 'general', created: 1000 })
+    expect(row?.modified).not.toBeNull()
   })
 })
 
@@ -213,17 +203,14 @@ describe('readdir /dms', () => {
       }
       return { ok: true }
     })
-    const idx = new RAMIndexCacheStore()
-    const out = await readdir(new SlackAccessor(t), spec('/mnt/slack/dms', '/mnt/slack'), idx)
-    expect(out).toEqual(['/mnt/slack/dms/alice__D1'])
+    const out = await readdir(new SlackAccessor(t), spec('/mnt/slack/dms', '/mnt/slack'))
+    expect(paths(out, '/mnt/slack/dms')).toEqual(['/mnt/slack/dms/alice__D1'])
     const calls = t.calls.map((c) => c.endpoint)
     expect(calls).toContain('conversations.list')
     expect(calls).toContain('users.list')
     const listed = t.calls.find((c) => c.endpoint === 'conversations.list')
     expect(listed?.params?.types).toBe('im,mpim')
-    const lookup = await idx.get('/mnt/slack/dms/alice__D1')
-    expect(lookup.entry?.resourceType).toBe('slack/dm')
-    expect(lookup.entry?.name).toBe('alice')
+    expect(rowsOf(out)[0]?.extra.name).toBe('alice')
   })
 })
 
@@ -239,16 +226,17 @@ describe('readdir /users', () => {
         { id: 'U4', name: 'bob' },
       ],
     }))
-    const idx = new RAMIndexCacheStore()
-    const out = await readdir(new SlackAccessor(t), spec('/mnt/slack/users', '/mnt/slack'), idx)
-    expect(out).toEqual(['/mnt/slack/users/alice__U1.json', '/mnt/slack/users/bob__U4.json'])
-    const lookup = await idx.get('/mnt/slack/users/alice__U1.json')
-    expect(lookup.entry?.resourceType).toBe('slack/user')
+    const out = await readdir(new SlackAccessor(t), spec('/mnt/slack/users', '/mnt/slack'))
+    expect(paths(out, '/mnt/slack/users')).toEqual([
+      '/mnt/slack/users/alice__U1.json',
+      '/mnt/slack/users/bob__U4.json',
+    ])
+    expect(rowsOf(out)[0]?.extra.user_id).toBe('U1')
   })
 })
 
 describe('readdir channel/<id> (history dates)', () => {
-  it('throws ENOENT when no index is provided', async () => {
+  it('throws ENOENT with no row for the channel', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     await expect(
       readdir(new SlackAccessor(t), spec('/mnt/slack/channels/general__C1', '/mnt/slack')),
@@ -258,19 +246,6 @@ describe('readdir channel/<id> (history dates)', () => {
   it('returns date filenames bounded by latestMessageTs and created', async () => {
     const created = Date.UTC(2024, 0, 1) / 1000
     const latest = Date.UTC(2024, 0, 3) / 1000
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: String(created),
-        }),
-      ],
-    ])
     const t = new FakeTransport((endpoint) => {
       if (endpoint === 'conversations.history') {
         return { ok: true, messages: [{ ts: String(latest) }] }
@@ -280,22 +255,19 @@ describe('readdir channel/<id> (history dates)', () => {
     const out = await readdir(
       new SlackAccessor(t),
       spec('/mnt/slack/channels/general__C1', '/mnt/slack'),
-      idx,
+      conversationRow('general__C1', created),
     )
-    expect(out).toEqual([
+    expect(paths(out, '/mnt/slack/channels/general__C1')).toEqual([
       '/mnt/slack/channels/general__C1/2024-01-03',
       '/mnt/slack/channels/general__C1/2024-01-02',
       '/mnt/slack/channels/general__C1/2024-01-01',
     ])
-    const lookup = await idx.get('/mnt/slack/channels/general__C1/2024-01-02')
-    expect(lookup.entry?.id).toBe('C1:2024-01-02')
-    expect(lookup.entry?.resourceType).toBe('slack/date_dir')
+    expect(rowsOf(out)[1]?.extra).toEqual({ channel_id: 'C1' })
   })
 
-  it('auto-bootstraps parent listing when not in cache', async () => {
+  it('lists the channels above it through a mount', async () => {
     const created = Date.UTC(2024, 0, 1) / 1000
     const latest = Date.UTC(2024, 0, 2) / 1000
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport((endpoint) => {
       if (endpoint === 'conversations.list') {
         return {
@@ -309,11 +281,7 @@ describe('readdir channel/<id> (history dates)', () => {
       }
       return { ok: true }
     })
-    const out = await readdir(
-      new SlackAccessor(t),
-      spec('/mnt/slack/channels/general__C1', '/mnt/slack'),
-      idx,
-    )
+    const out = await mounted(t).dispatch('readdir', '/mnt/slack/channels/general__C1')
     expect(out).toEqual([
       '/mnt/slack/channels/general__C1/2024-01-02',
       '/mnt/slack/channels/general__C1/2024-01-01',
@@ -323,8 +291,7 @@ describe('readdir channel/<id> (history dates)', () => {
     expect(endpoints).toContain('conversations.history')
   })
 
-  it('throws ENOENT when channel is missing even after bootstrap', async () => {
-    const idx = new RAMIndexCacheStore()
+  it('throws ENOENT when no listing names the channel', async () => {
     const t = new FakeTransport((endpoint) => {
       if (endpoint === 'conversations.list') {
         return { ok: true, channels: [], response_metadata: { next_cursor: '' } }
@@ -332,60 +299,23 @@ describe('readdir channel/<id> (history dates)', () => {
       return { ok: true }
     })
     await expect(
-      readdir(new SlackAccessor(t), spec('/mnt/slack/channels/general__CX', '/mnt/slack'), idx),
+      mounted(t).dispatch('readdir', '/mnt/slack/channels/general__CX'),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('returns no dates when channel has no messages and no created', async () => {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: '0',
-        }),
-      ],
-    ])
     const t = new FakeTransport(() => ({ ok: true, messages: [] }))
     const out = await readdir(
       new SlackAccessor(t),
       spec('/mnt/slack/channels/general__C1', '/mnt/slack'),
-      idx,
+      conversationRow(),
     )
-    expect(out).toEqual([])
+    expect(rowsOf(out)).toEqual([])
   })
 
   it('skips tombstoned and access-restricted file payloads', async () => {
     // Such payloads carry an id but no download URL and no size; listing
     // them would surface phantom files and break sizesAlwaysKnown.
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: '1700000000',
-        }),
-      ],
-    ])
-    await idx.setDir('/mnt/slack/channels/general__C1', [
-      [
-        '2026-04-10',
-        new IndexEntry({
-          id: 'C1:2026-04-10',
-          name: '2026-04-10',
-          resourceType: 'slack/date_dir',
-          vfsName: '2026-04-10',
-        }),
-      ],
-    ])
     const t = new FakeTransport(() => ({
       ok: true,
       messages: [
@@ -404,17 +334,14 @@ describe('readdir channel/<id> (history dates)', () => {
         },
       ],
     }))
-    await readdir(
+    const listed = (await readdir(
       new SlackAccessor(t),
       spec('/mnt/slack/channels/general__C1/2026-04-10', '/mnt/slack'),
-      idx,
-    )
-    const listing = await idx.listDir('/mnt/slack/channels/general__C1/2026-04-10/files')
-    expect(listing.entries).toEqual([
-      '/mnt/slack/channels/general__C1/2026-04-10/files/report__F1.pdf',
-    ])
-    const lookup = await idx.get('/mnt/slack/channels/general__C1/2026-04-10/files/report__F1.pdf')
-    expect(lookup.entry?.size).toBe(12)
+      DAY,
+    )) as DirListing
+    const files = listed.seeds.get('files') ?? []
+    expect(files.map((row) => row.name)).toEqual(['report__F1.pdf'])
+    expect(files[0]?.size).toBe(12)
   })
 })
 
@@ -422,17 +349,7 @@ describe('readdir of an end-scoped conversation without a creation time', () => 
   const latest = Date.UTC(2026, 5, 20) / 1000
   const first = Date.UTC(2026, 4, 30, 12) / 1000
   const end = Date.UTC(2026, 5, 2) / 1000
-
-  async function dmWithoutCreated(): Promise<RAMIndexCacheStore> {
-    const idx = new RAMIndexCacheStore()
-    await idx.setDir('/mnt/slack/dms', [
-      [
-        'alice__D1',
-        new IndexEntry({ id: 'D1', name: 'alice', resourceType: 'slack/dm', vfsName: 'alice__D1' }),
-      ],
-    ])
-    return idx
-  }
+  const dm = conversationRow('alice__D1', 0, 'alice')
 
   function history(): FakeTransport {
     return new FakeTransport((endpoint, params) => {
@@ -448,15 +365,18 @@ describe('readdir of an end-scoped conversation without a creation time', () => 
 
   it('takes a glob span as its first day instead of scanning history', async () => {
     const t = history()
-    const out = await readdir(
-      new SlackAccessor(t, { endTime: '2026-06-02T00:00:00Z' }),
-      new PathSpec({
-        virtual: '/mnt/slack/dms/alice__D1/2026-05-*',
-        directory: '/mnt/slack/dms/alice__D1/',
-        vfsPath: mountKey('/mnt/slack/dms/alice__D1/2026-05-*', '/mnt/slack'),
-        pattern: '2026-05-*',
-      }),
-      await dmWithoutCreated(),
+    const out = paths(
+      await readdir(
+        new SlackAccessor(t, { endTime: '2026-06-02T00:00:00Z' }),
+        new PathSpec({
+          virtual: '/mnt/slack/dms/alice__D1/2026-05-*',
+          directory: '/mnt/slack/dms/alice__D1/',
+          vfsPath: mountKey('/mnt/slack/dms/alice__D1/2026-05-*', '/mnt/slack'),
+          pattern: '2026-05-*',
+        }),
+        dm,
+      ),
+      '/mnt/slack/dms/alice__D1',
     )
     expect(t.calls.filter((c) => c.params?.limit === '200')).toEqual([])
     expect(out).toHaveLength(31)
@@ -469,12 +389,12 @@ describe('readdir of an end-scoped conversation without a creation time', () => 
     const out = await readdir(
       new SlackAccessor(t, { endTime: '2026-06-02T00:00:00Z' }),
       spec('/mnt/slack/dms/alice__D1', '/mnt/slack'),
-      await dmWithoutCreated(),
+      dm,
     )
     expect(t.calls.filter((c) => c.params?.limit === '200').map((c) => c.params)).toEqual([
       { channel: 'D1', limit: '200', latest: end.toFixed(6) },
     ])
-    expect(out).toEqual([
+    expect(paths(out, '/mnt/slack/dms/alice__D1')).toEqual([
       '/mnt/slack/dms/alice__D1/2026-06-01',
       '/mnt/slack/dms/alice__D1/2026-05-31',
       '/mnt/slack/dms/alice__D1/2026-05-30',
@@ -483,30 +403,21 @@ describe('readdir of an end-scoped conversation without a creation time', () => 
 })
 
 describe('readdir channel window', () => {
-  it('writes a channel listing as a window', async () => {
+  it('lists a channel as a window', async () => {
     // The bare listing covers the last 90 days only; a day that falls out
     // of it still exists and is still readable by path.
     const created = Date.UTC(2024, 0, 1) / 1000
     const latest = Date.UTC(2024, 0, 3) / 1000
-    const idx = new WindowSpy()
-    await idx.setDir('/mnt/slack/channels', [
-      [
-        'general__C1',
-        new IndexEntry({
-          id: 'C1',
-          name: 'general',
-          resourceType: 'slack/channel',
-          vfsName: 'general__C1',
-          remoteTime: String(created),
-        }),
-      ],
-    ])
     const t = new FakeTransport((endpoint) =>
       endpoint === 'conversations.history'
         ? { ok: true, messages: [{ ts: String(latest) }] }
         : { ok: true },
     )
-    await readdir(new SlackAccessor(t), spec('/mnt/slack/channels/general__C1', '/mnt/slack'), idx)
-    expect(idx.windows.get('/mnt/slack/channels/general__C1')).toBe(true)
+    const out = await readdir(
+      new SlackAccessor(t),
+      spec('/mnt/slack/channels/general__C1', '/mnt/slack'),
+      conversationRow('general__C1', created),
+    )
+    expect((out as DirListing).window).toBe(true)
   })
 })

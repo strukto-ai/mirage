@@ -15,7 +15,6 @@
 import { makeAppStat } from '../google/stat.ts'
 import { makeFilename } from '../../vfs/gslides/slide_entry.ts'
 import { MIME } from './constants.ts'
-import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
-export const stat = makeAppStat(MIME, detectScope, readdir, 'gslides/file', makeFilename)
+export const stat = makeAppStat(MIME, detectScope, makeFilename)

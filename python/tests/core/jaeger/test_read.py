@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.jaeger import JaegerAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.jaeger.client import JaegerApiError
 from mirage.core.jaeger.read import read
 from mirage.types import PathSpec
@@ -30,11 +29,6 @@ TRACE_A = "a" * 32
 @pytest.fixture
 def accessor():
     return JaegerAccessor(config=JaegerConfig())
-
-
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
 
 
 def spec(path: str) -> PathSpec:
@@ -51,7 +45,7 @@ def known_service():
 
 
 @pytest.mark.asyncio
-async def test_read_trace(accessor, index):
+async def test_read_trace(accessor):
     doc = {
         "traceID": TRACE_A,
         "spans": [{"operationName": "POST /checkout", "processID": "p1"}],
@@ -66,13 +60,12 @@ async def test_read_trace(accessor, index):
             raw = await read(
                 accessor,
                 spec(f"services/checkout/traces/{TRACE_A}.json"),
-                index,
             )
     assert json.loads(raw) == doc
 
 
 @pytest.mark.asyncio
-async def test_read_trace_rejects_foreign_service(accessor, index):
+async def test_read_trace_rejects_foreign_service(accessor):
     # stat and ls report this path absent, so cat must agree; reading by id
     # would otherwise serve any trace through any service directory.
     doc = {
@@ -94,12 +87,11 @@ async def test_read_trace_rejects_foreign_service(accessor, index):
                 await read(
                     accessor,
                     spec(f"services/search/traces/{TRACE_A}.json"),
-                    index,
                 )
 
 
 @pytest.mark.asyncio
-async def test_read_trace_rejects_unknown_service(accessor, index):
+async def test_read_trace_rejects_unknown_service(accessor):
     with known_service():
         with patch(
             "mirage.core.jaeger.read.fetch_trace",
@@ -110,13 +102,12 @@ async def test_read_trace_rejects_unknown_service(accessor, index):
                 await read(
                     accessor,
                     spec(f"services/nope/traces/{TRACE_A}.json"),
-                    index,
                 )
     fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_read_operations(accessor, index):
+async def test_read_operations(accessor):
     ops = [{"name": "POST /checkout", "spanKind": "server"}]
     with known_service():
         with patch(
@@ -125,27 +116,25 @@ async def test_read_operations(accessor, index):
             return_value=ops,
         ):
             raw = await read(
-                accessor, spec("services/checkout/operations.json"), index
+                accessor, spec("services/checkout/operations.json")
             )
     assert json.loads(raw) == ops
 
 
 @pytest.mark.asyncio
-async def test_read_malformed_trace_id_is_enoent(accessor, index):
+async def test_read_malformed_trace_id_is_enoent(accessor):
     # A malformed id cannot name an existing trace, so it must not reach the
     # API and come back as a 400.
     fake = AsyncMock()
     with known_service():
         with patch("mirage.core.jaeger.read.fetch_trace", fake):
             with pytest.raises(FileNotFoundError):
-                await read(
-                    accessor, spec("services/checkout/traces/zzz.json"), index
-                )
+                await read(accessor, spec("services/checkout/traces/zzz.json"))
     fake.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_read_missing_trace_is_enoent(accessor, index):
+async def test_read_missing_trace_is_enoent(accessor):
     with known_service():
         with patch(
             "mirage.core.jaeger.read.fetch_trace",
@@ -156,12 +145,11 @@ async def test_read_missing_trace_is_enoent(accessor, index):
                 await read(
                     accessor,
                     spec(f"services/checkout/traces/{TRACE_A}.json"),
-                    index,
                 )
 
 
 @pytest.mark.asyncio
-async def test_read_server_error_propagates(accessor, index):
+async def test_read_server_error_propagates(accessor):
     # A server fault must not read as "this trace does not exist".
     with known_service():
         with patch(
@@ -173,19 +161,18 @@ async def test_read_server_error_propagates(accessor, index):
                 await read(
                     accessor,
                     spec(f"services/checkout/traces/{TRACE_A}.json"),
-                    index,
                 )
 
 
 @pytest.mark.asyncio
-async def test_read_unknown_service_is_enoent(accessor, index):
+async def test_read_unknown_service_is_enoent(accessor):
     with known_service():
         with pytest.raises(FileNotFoundError):
-            await read(accessor, spec("services/nope/operations.json"), index)
+            await read(accessor, spec("services/nope/operations.json"))
 
 
 @pytest.mark.asyncio
-async def test_read_directory_is_eisdir(accessor, index):
+async def test_read_directory_is_eisdir(accessor):
     # A matched directory kind is a real node being read as a file.
     with pytest.raises(IsADirectoryError):
-        await read(accessor, spec("services"), index)
+        await read(accessor, spec("services"))

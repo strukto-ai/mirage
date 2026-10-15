@@ -12,26 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat } from '../hierarchy/stat.ts'
-import { readdir, serviceGuard } from './readdir.ts'
+import { EXTRAS, serviceGuard } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
-function serviceExtra(match: ScopeMatch): Record<string, string> {
-  return { service: match.slots.service ?? '' }
-}
-
-function traceExtra(match: ScopeMatch): Record<string, string> {
-  return { trace_id: match.slots.trace_id ?? '' }
-}
-
-export const stat = makeStat(detectScope, readdir, {
+export const stat = makeStat(detectScope, {
   guards: {
     service: serviceGuard,
     traces: serviceGuard,
   },
-  extras: {
-    service: serviceExtra,
-    trace: traceExtra,
-  },
+  extras: EXTRAS,
 })

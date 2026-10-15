@@ -18,7 +18,6 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.discord.files import download_file, download_file_stream
 from mirage.core.discord.history import (
     get_history_jsonl,
@@ -27,9 +26,7 @@ from mirage.core.discord.history import (
     stream_messages_for_day,
 )
 from mirage.core.discord.members import list_members
-from mirage.core.discord.readdir import readdir
 from mirage.core.discord.scope import detect_scope
-from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import compact_json_bytes
@@ -41,17 +38,18 @@ from mirage.core.time_range import (
 )
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _read_chat(
     accessor: DiscordAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     await guard_day(accessor, match, path.virtual)
-    channel_id = await day_channel_id(readdir, accessor, path, index)
+    channel_id = day_channel_id(path, entry, parent)
     return await get_history_jsonl(
         accessor.config,
         channel_id,
@@ -65,9 +63,9 @@ async def _read_member(
     accessor: DiscordAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
     members = await list_members(
@@ -75,16 +73,15 @@ async def _read_member(
     )
     for m in members:
         user = m.get("user", {})
-        if user.get("id") == entry.id:
+        if user.get("id") == entry.extra.get("user_id"):
             return compact_json_bytes(m)
     raise enoent(path.virtual)
 
 
 async def _blob_url(
-    accessor: DiscordAccessor, path: PathSpec, index: IndexCacheStore
+    accessor: DiscordAccessor, path: PathSpec, entry: FileStat | None
 ) -> str:
     await guard_day(accessor, detect_scope(path), path.virtual)
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
     url = entry.extra.get("url") or entry.extra.get("proxy_url") or ""
@@ -97,10 +94,11 @@ async def _read_blob(
     accessor: DiscordAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     return await download_file(
-        await _blob_url(accessor, path, index), 0, None, session=accessor.pool
+        await _blob_url(accessor, path, entry), 0, None, session=accessor.pool
     )
 
 
@@ -108,12 +106,13 @@ async def _read_blob_range(
     accessor: DiscordAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
     offset: int,
     size: int | None,
 ) -> bytes:
     return await download_file(
-        await _blob_url(accessor, path, index),
+        await _blob_url(accessor, path, entry),
         offset,
         size,
         session=accessor.pool,
@@ -143,20 +142,22 @@ read_range = make_read_range(
 async def read_stream(
     accessor: DiscordAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Stream attachments; preserve the rendered order of JSON records.
 
     Args:
         accessor (DiscordAccessor): backend accessor.
         path (PathSpec): file to read.
-        index (IndexCacheStore): cached directory entries.
+        entry (FileStat | None): the file's row, as its listing names it.
+        parent (FileStat | None): its folder's row.
     """
     if detect_scope(path).kind == "file_blob":
-        url = await _blob_url(accessor, path, index)
+        url = await _blob_url(accessor, path, entry)
         source = download_file_stream(url, session=accessor.pool)
     else:
-        source = chunks(await read(accessor, path, index))
+        source = chunks(await read(accessor, path, entry, parent))
     async with aclosing(source):
         async for chunk in source:
             yield chunk
@@ -168,7 +169,8 @@ async def _follow_chat(
     path: PathSpec,
     n: int,
     interval: float,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> AsyncIterator[bytes]:
     """A channel day's last ``n`` messages, then each one posted to it,
     asked for every ``interval`` seconds while the day lasts
@@ -180,10 +182,11 @@ async def _follow_chat(
         path (PathSpec): the chat.jsonl.
         n (int): how many of its last lines come first, 0 for none.
         interval (float): seconds between two asks.
-        index (IndexCacheStore): cached directory entries.
+        entry (FileStat | None): the file's row, as its day lists it.
+        parent (FileStat | None): the day's row.
     """
     await guard_day(accessor, match, path.virtual)
-    channel_id = await day_channel_id(readdir, accessor, path, index)
+    channel_id = day_channel_id(path, entry, parent)
     day = match.slots["day"]
     fetch = partial(
         list_messages_for_day,

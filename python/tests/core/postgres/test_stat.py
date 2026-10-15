@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.postgres.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -36,11 +35,6 @@ def _accessor() -> PostgresAccessor:
     pool.acquire = lambda: _fake_acquire()
     a.pool = AsyncMock(return_value=pool)
     return a
-
-
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
 
 
 @pytest.fixture
@@ -70,16 +64,16 @@ def _exists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stat_root(accessor, index):
+async def test_stat_root(accessor):
     result = await stat(
-        accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
+        accessor, PathSpec(vfs_path="", virtual="/", directory="/")
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
-async def test_stat_database_json(accessor, index):
+async def test_stat_database_json(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -87,25 +81,23 @@ async def test_stat_database_json(accessor, index):
             virtual="/database.json",
             directory="/database.json",
         ),
-        index,
     )
     assert result.content == ContentType.JSON
     assert result.name == "database.json"
 
 
 @pytest.mark.asyncio
-async def test_stat_schema(accessor, index):
+async def test_stat_schema(accessor):
     result = await stat(
         accessor,
         PathSpec(vfs_path="public", virtual="/public", directory="/public"),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.extra["schema"] == "public"
 
 
 @pytest.mark.asyncio
-async def test_stat_kind_tables(accessor, index):
+async def test_stat_kind_tables(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -113,14 +105,13 @@ async def test_stat_kind_tables(accessor, index):
             virtual="/public/tables",
             directory="/public/tables",
         ),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.extra == {"schema": "public", "kind": "tables"}
 
 
 @pytest.mark.asyncio
-async def test_stat_kind_views(accessor, index):
+async def test_stat_kind_views(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -128,14 +119,13 @@ async def test_stat_kind_views(accessor, index):
             virtual="/analytics/views",
             directory="/analytics/views",
         ),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.extra == {"schema": "analytics", "kind": "views"}
 
 
 @pytest.mark.asyncio
-async def test_stat_entity_table(accessor, index):
+async def test_stat_entity_table(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -143,7 +133,6 @@ async def test_stat_entity_table(accessor, index):
             virtual="/public/tables/users",
             directory="/public/tables/users",
         ),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "users"
@@ -155,7 +144,7 @@ async def test_stat_entity_table(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_entity_schema_json(accessor, index):
+async def test_stat_entity_schema_json(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -163,7 +152,6 @@ async def test_stat_entity_schema_json(accessor, index):
             virtual="/public/tables/users/schema.json",
             directory="/public/tables/users/schema.json",
         ),
-        index,
     )
     assert result.content == ContentType.JSON
     assert result.name == "schema.json"
@@ -175,7 +163,7 @@ async def test_stat_entity_schema_json(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_entity_rows_jsonl(accessor, index, monkeypatch):
+async def test_stat_entity_rows_jsonl(accessor, monkeypatch):
     monkeypatch.setattr(
         "mirage.core.postgres.client.fetch_columns",
         AsyncMock(
@@ -200,7 +188,6 @@ async def test_stat_entity_rows_jsonl(accessor, index, monkeypatch):
             virtual="/public/tables/users/rows.jsonl",
             directory="/public/tables/users/rows.jsonl",
         ),
-        index,
     )
     assert result.content == ContentType.TEXT
     assert result.name == "rows.jsonl"
@@ -214,7 +201,7 @@ async def test_stat_entity_rows_jsonl(accessor, index, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stat_view_entity_rows(accessor, index, monkeypatch):
+async def test_stat_view_entity_rows(accessor, monkeypatch):
     monkeypatch.setattr(
         "mirage.core.postgres.client.fetch_columns",
         AsyncMock(
@@ -238,7 +225,6 @@ async def test_stat_view_entity_rows(accessor, index, monkeypatch):
             virtual="/analytics/views/daily_revenue/rows.jsonl",
             directory="/analytics/views/daily_revenue/rows.jsonl",
         ),
-        index,
     )
     assert result.content == ContentType.TEXT
     assert result.extra["kind"] == "views"
@@ -246,7 +232,7 @@ async def test_stat_view_entity_rows(accessor, index, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stat_does_not_fetch_data_or_planner_statistics(
-    accessor, index, monkeypatch
+    accessor, monkeypatch
 ):
     for name in (
         "fetch_columns",
@@ -265,14 +251,13 @@ async def test_stat_does_not_fetch_data_or_planner_statistics(
             virtual="/pg/public/tables/users/rows.jsonl",
             directory="/pg/public/tables/users",
         ),
-        index,
     )
     assert result.size is None
     assert result.fingerprint is None
 
 
 @pytest.mark.asyncio
-async def test_stat_invalid_raises(accessor, index):
+async def test_stat_invalid_raises(accessor):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
@@ -281,12 +266,11 @@ async def test_stat_invalid_raises(accessor, index):
                 virtual="/public/tables/users/extra/foo",
                 directory="/public/tables/users/extra/foo",
             ),
-            index,
         )
 
 
 @pytest.mark.asyncio
-async def test_stat_missing_schema_raises(accessor, index, monkeypatch):
+async def test_stat_missing_schema_raises(accessor, monkeypatch):
     monkeypatch.setattr(
         "mirage.core.postgres.client.list_schemas", AsyncMock(return_value=[])
     )
@@ -298,12 +282,11 @@ async def test_stat_missing_schema_raises(accessor, index, monkeypatch):
                 virtual="/pg/__nf_missing__.txt",
                 directory="/pg/__nf_missing__.txt",
             ),
-            index,
         )
 
 
 @pytest.mark.asyncio
-async def test_stat_missing_entity_raises(accessor, index, monkeypatch):
+async def test_stat_missing_entity_raises(accessor, monkeypatch):
     monkeypatch.setattr(
         "mirage.core.postgres.client.list_tables", AsyncMock(return_value=[])
     )
@@ -315,5 +298,4 @@ async def test_stat_missing_entity_raises(accessor, index, monkeypatch):
                 virtual="/public/tables/nope",
                 directory="/public/tables/nope",
             ),
-            index,
         )

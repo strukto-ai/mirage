@@ -13,24 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { type IndexEntry, ListedMiss } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { entryOrListedMiss } from '../../cache/index/warm.ts'
-import { PathSpec, type StatFn } from '../../types.ts'
-import { enoent, isEnoent } from '../../errors/fs.ts'
+import type { FileStat } from '../../types.ts'
+import { DirListing, FileType, PathSpec } from '../../types.ts'
 import { mountKey, mountPrefixOf, mountedPath } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 export type ReaddirFn<A extends Accessor> = (
   accessor: A,
   pathSpec: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<string[]>
-
-function basenameOf(entry: string): string {
-  const trimmed = rstripSlash(entry)
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1)
-}
+  entry?: FileStat | null,
+  parent?: FileStat | null,
+) => Promise<FileStat[] | DirListing>
 
 /** The PathSpec of the directory holding `path`, on the same mount. */
 export function parentSpec(path: PathSpec): PathSpec {
@@ -45,156 +38,66 @@ export function parentSpec(path: PathSpec): PathSpec {
   })
 }
 
-/**
- * Throw ENOENT unless the path appears in its parent's listing.
- *
- * Every path shape a fixed hierarchy serves is recognizable from the text
- * alone, but a recognizable shape is not evidence the entry exists. The
- * parent listing is index-cached, so validating costs one listing per
- * directory rather than one API call per stat.
- */
-export async function assertListed<A extends Accessor>(
-  readdir: ReaddirFn<A>,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<void> {
-  const entries = await readdir(accessor, parentSpec(path), index)
-  const names = new Set(entries.map(basenameOf))
-  if (!names.has(basenameOf(path.vfsPath))) throw enoent(path)
+/** The listed directory's own children, whichever shape listed them. */
+export function rowsOf(listed: readonly FileStat[] | DirListing): readonly FileStat[] {
+  return listed instanceof DirListing ? listed.entries : listed
+}
+
+/** Whether a listed row is a directory to walk into. */
+export function isDirectory(row: FileStat): boolean {
+  return row.type === FileType.DIRECTORY
 }
 
 /**
- * Throw ENOENT for `path` unless its parent directory exists.
- *
- * The parent is proven the way the backend's own stat proves it (a guard,
- * the listing chain, or construction for a fixed directory), so a container
- * its listing refuses reads as absent to everything inside it. That is where
- * a mount's id filters live: a board outside `boardIds` or a schema outside
- * `schemas` is simply not listed, and a reader that went straight to the id
- * in the path served it anyway. Mirrors `assert_parent` in
- * `mirage/core/hierarchy/probe.py`.
+ * Every row below `directory`, walked through the backend's own listings,
+ * each directory handed the row its parent's listing named. Mirrors Python's
+ * `rows_under`.
  */
-export async function assertParent<A extends Accessor>(
-  stat: StatFn<[accessor: A, path: PathSpec, index?: IndexCacheStore]>,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<void> {
-  try {
-    await stat(accessor, parentSpec(path), index)
-  } catch (err) {
-    // Named as the file the caller asked for, the way GNU reports
-    // `cat missing/f` against the operand rather than its directory.
-    if (isEnoent(err)) throw enoent(path)
-    throw err
-  }
-}
-
-/** Return the size the parent listing recorded for this path. */
-export async function listedSize(
-  index: IndexCacheStore | undefined,
-  path: PathSpec,
-): Promise<number | null> {
-  if (index === undefined) return null
-  // assertListed has just populated the parent directory, so any size the
-  // listing computed is already in the index.
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const lookup = await index.get(`${prefix}/${path.vfsPath}`)
-  return lookup.entry?.size ?? null
-}
-
-/**
- * Resolve the path's index entry, listing its parent when cold.
- *
- * Id-addressed backends can only turn a path into an id through the index,
- * so the entry is the proof of existence AND the id source; this wraps
- * `entryOrWarm` with the parent-readdir warm every such backend used to
- * spell by hand.
- */
-export async function resolveEntry<A extends Accessor>(
-  readdir: ReaddirFn<A>,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<IndexEntry | null> {
-  const found = await resolveListedEntry(readdir, accessor, path, index)
-  return found === ListedMiss.UNTRUSTED ? null : found
-}
-
-/**
- * `resolveEntry` for a backend that can ask by path: a name missing from a
- * cached listing the running command did not fetch answers
- * `ListedMiss.UNTRUSTED` (`entryOrListedMiss`). Mirrors Python's
- * `resolve_listed_entry`.
- */
-export async function resolveListedEntry<A extends Accessor>(
-  readdir: ReaddirFn<A>,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<IndexEntry | ListedMiss | null> {
-  if (index === undefined) return null
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const key = stripSlash(path.vfsPath)
-  const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
-  const parentVirtual = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
-  const warm =
-    parentVirtual !== virtualKey
-      ? () =>
-          readdir(
-            accessor,
-            new PathSpec({
-              virtual: parentVirtual,
-              directory: parentVirtual,
-              resolved: false,
-              vfsPath: mountKey(parentVirtual, prefix),
-            }),
-            index,
-          )
-      : null
-  return entryOrListedMiss(index, virtualKey, warm)
-}
-
-/** Resolve the index entry `up` levels above the path. Mirrors Python's `ancestor_entry`. */
-export async function ancestorEntry<A extends Accessor>(
-  readdir: ReaddirFn<A>,
-  accessor: A,
-  path: PathSpec,
-  index: IndexCacheStore | undefined,
-  up: number,
-): Promise<IndexEntry | null> {
-  let virtual = rstripSlash(path.virtual)
-  for (let i = 0; i < up; i++) virtual = virtual.split('/').slice(0, -1).join('/')
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  const spec = new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
-  return resolveEntry(readdir, accessor, spec, index)
-}
-
-/**
- * Every entry below `directory` with its index entry. The walk lists through
- * the index, so a search that answers by id pays for the listings grep's own
- * walk reads next. Null when a listed name has no entry. Mirrors Python's
- * `entries_under`.
- */
-export async function entriesUnder<A extends Accessor>(
+export async function rowsUnder<A extends Accessor>(
   readdir: ReaddirFn<A>,
   accessor: A,
   directory: PathSpec,
-  index: IndexCacheStore | undefined,
-  isDir: (entry: IndexEntry) => boolean,
-): Promise<[PathSpec, IndexEntry][] | null> {
-  const found: [PathSpec, IndexEntry][] = []
-  const pending = [directory]
-  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+  entry: FileStat | null,
+  parent: FileStat | null = null,
+  isDir: (row: FileStat) => boolean = isDirectory,
+): Promise<[PathSpec, FileStat][]> {
+  const found: [PathSpec, FileStat][] = []
+  const pending: [PathSpec, FileStat | null, FileStat | null][] = [[directory, entry, parent]]
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [current, row, above] = next
     const base = rstripSlash(current.mountPath)
-    for (const listed of await readdir(accessor, current, index)) {
-      const child = mountedPath(current, `${base}/${basenameOf(listed)}`)
-      const entry = await resolveEntry(readdir, accessor, child, index)
-      if (entry === null) return null
-      found.push([child, entry])
-      if (isDir(entry)) pending.push(child)
+    for (const child of rowsOf(await readdir(accessor, current, row, above))) {
+      const path = mountedPath(current, `${base}/${child.name}`)
+      found.push([path, child])
+      if (isDir(child)) pending.push([path, child, row])
     }
   }
   return found
+}
+
+/**
+ * What is at `path` and at its parent, as each level's listing names it,
+ * listed from the mount root down: a walk that starts below the root hands
+ * its first directory these. The mount root is no listing's child, so it
+ * answers nothing; a name a level does not list answers no row at `path`.
+ * Mirrors Python's `row_at`.
+ */
+export async function rowAt<A extends Accessor>(
+  readdir: ReaddirFn<A>,
+  accessor: A,
+  path: PathSpec,
+): Promise<[FileStat | null, FileStat | null]> {
+  const key = stripSlash(path.mountPath)
+  let entry: FileStat | null = null
+  let parent: FileStat | null = null
+  let current = mountedPath(path, '/')
+  for (const name of key !== '' ? key.split('/') : []) {
+    const listed = rowsOf(await readdir(accessor, current, entry, parent))
+    const row = listed.find((one) => one.name === name) ?? null
+    if (row === null) return [null, entry]
+    parent = entry
+    entry = row
+    current = mountedPath(path, `${rstripSlash(current.mountPath)}/${name}`)
+  }
+  return [entry, parent]
 }

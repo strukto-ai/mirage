@@ -250,7 +250,13 @@ async def test_a_window_listing_evicts_nothing(store):
     await store.set_dir("/dir", [("a", entry()), ("b", entry("b"))])
     assert await store.set_dir("/dir", [("b", entry("b"))], window=True) == []
     assert (await store.get("/dir/a")).entry is not None
-    assert (await store.list_dir("/dir")).entries == ["/dir/b"]
+    listing = await store.list_dir("/dir")
+    assert listing.entries == ["/dir/b"]
+    # It is kept a window, so nothing reads it as proof of absence; a
+    # complete listing after it is no window.
+    assert listing.window
+    await store.set_dir("/dir", [("b", entry("b"))])
+    assert not (await store.list_dir("/dir")).window
 
 
 @pytest.mark.asyncio

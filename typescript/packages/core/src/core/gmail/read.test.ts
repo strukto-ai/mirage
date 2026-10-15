@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as MessagesModule from './messages.ts'
 import type * as LabelsModule from './labels.ts'
@@ -32,24 +31,26 @@ vi.mock('./labels.ts', async () => {
   return { ...actual, listLabels: vi.fn() }
 })
 
-import { GmailAccessor } from '../../accessor/gmail.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
-import type { TokenManager } from '../google/client.ts'
+import { MountMode } from '../../types.ts'
+import { GmailVFS } from '../../vfs/gmail/gmail.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import * as labelsMod from './labels.ts'
 import * as messagesMod from './messages.ts'
-import { read } from './read.ts'
 
-const STUB_TOKEN_MANAGER = {
-  config: { clientId: 'cid', refreshToken: 'rt' },
-} as TokenManager
-
-function makeAccessor(): GmailAccessor {
-  return new GmailAccessor({ tokenManager: STUB_TOKEN_MANAGER, config: {} })
+async function readAt(path: string): Promise<Uint8Array> {
+  const ws = new Workspace(
+    { '/gmail/': new GmailVFS({ accessToken: 't' }) },
+    { mode: MountMode.READ },
+  )
+  try {
+    return (await ws.dispatch('read', path)) as Uint8Array
+  } finally {
+    await ws.close()
+  }
 }
 
-describe('gmail read auto-bootstrap', () => {
-  it('refetches parent listing when message entry is evicted from index', async () => {
+describe('gmail read through a mount', () => {
+  it('lists its way to a message on a cold read', async () => {
     vi.mocked(labelsMod.listLabels).mockResolvedValue([
       { id: 'INBOX', name: 'INBOX', type: 'system' },
     ])
@@ -77,19 +78,12 @@ describe('gmail read auto-bootstrap', () => {
       attachments: [],
     })
 
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const path = new PathSpec({
-      virtual: '/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json',
-      directory: '/gmail/INBOX/2026-04-27',
-      vfsPath: mountKey('/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json', '/gmail'),
-    })
-    const out = await read(accessor, path, index)
+    const out = await readAt('/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json')
     const parsed = JSON.parse(new TextDecoder().decode(out)) as { subject: string }
     expect(parsed.subject).toBe('Hello World')
   })
 
-  it('throws ENOENT when parent refresh does not contain the message', async () => {
+  it('throws ENOENT when the day does not list the message', async () => {
     vi.mocked(labelsMod.listLabels).mockResolvedValue([
       { id: 'INBOX', name: 'INBOX', type: 'system' },
     ])
@@ -97,13 +91,8 @@ describe('gmail read auto-bootstrap', () => {
     vi.mocked(messagesMod.getMessageRaw).mockRejectedValue(new Error('should not be called'))
     vi.mocked(messagesMod.getMessageProcessed).mockRejectedValue(new Error('should not be called'))
 
-    const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
-    const path = new PathSpec({
-      virtual: '/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json',
-      directory: '/gmail/INBOX/2026-04-27',
-      vfsPath: mountKey('/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json', '/gmail'),
-    })
-    await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readAt('/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json')).rejects.toMatchObject(
+      { code: 'ENOENT' },
+    )
   })
 })

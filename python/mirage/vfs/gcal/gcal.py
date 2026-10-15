@@ -16,7 +16,6 @@ from datetime import date
 from typing import Any
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gcal.day import bucket_name, bucket_start
 from mirage.core.gcal.read import read as _read
 from mirage.core.gcal.read import read_many as _read_many
@@ -26,7 +25,7 @@ from mirage.core.gcal.stat import stat as _stat
 from mirage.core.gcal.unlink import unlink as _unlink
 from mirage.core.gcal.watch import build_delta_hook
 from mirage.core.google.client import TokenManager
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gcal.config import GCalConfig
@@ -79,19 +78,13 @@ class GCalVFS(BaseVFS):
             tree_prompt(config.bucket_days) + self.accessor.time_range.prompt()
         )
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
 
     async def read_many(
@@ -106,9 +99,9 @@ class GCalVFS(BaseVFS):
         return build_delta_hook(self.accessor)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
     async def files_containing(
         self,
@@ -117,16 +110,15 @@ class GCalVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         if not whole_word or not self.config.content_search:
             return None
-        return await _files_containing(self.accessor, text, [path], index)
+        return await _files_containing(self.accessor, text, [path])
 
     async def unlink(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> None:
-        await _unlink(self.accessor, path, index)
+        await _unlink(self.accessor, path, entry)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

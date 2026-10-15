@@ -18,7 +18,7 @@ it('ranks a batch once and preserves options', async () => {
   const out = await searchResources({ search, searchMany }, accessor, [path, path], query)
   expect(new TextDecoder().decode(out)).toBe('highest\nsecond\n')
   expect(searchMany).toHaveBeenCalledOnce()
-  expect(searchMany).toHaveBeenCalledWith(accessor, [path, path], query, undefined)
+  expect(searchMany).toHaveBeenCalledWith(accessor, [path, path], query)
   expect(search).not.toHaveBeenCalled()
 })
 

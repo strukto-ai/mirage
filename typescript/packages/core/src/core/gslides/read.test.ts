@@ -28,15 +28,14 @@ vi.mock('../google/client.ts', async () => {
 })
 
 import { GSlidesAccessor } from '../../accessor/gslides.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { runWithRecording } from '../../observe/context.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type FileStat } from '../../types.ts'
+import { GSlidesVFS } from '../../vfs/gslides/gslides.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TokenManager } from '../google/client.ts'
 import * as drive from '../google/drive.ts'
 import * as client from '../google/client.ts'
 import { read } from './read.ts'
-import { stat } from './stat.ts'
 
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
@@ -47,7 +46,7 @@ function makeAccessor(): GSlidesAccessor {
 }
 
 describe('gslides read auto-bootstrap', () => {
-  it('fetches metadata by ID when entry is evicted from index', async () => {
+  it('resolves a read no listing named by its id', async () => {
     vi.mocked(drive.getFile).mockResolvedValue({
       mimeType: 'application/vnd.google-apps.presentation',
       id: 'slide1',
@@ -58,13 +57,12 @@ describe('gslides read auto-bootstrap', () => {
     vi.mocked(client.googleGet).mockResolvedValue({ presentationId: 'slide1' })
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
     const path = new PathSpec({
       virtual: '/gslides/owned/2026-04-01_Deck__slide1.gslide.json',
       directory: '/gslides/owned/2026-04-01_Deck__slide1.gslide.json',
       vfsPath: mountKey('/gslides/owned/2026-04-01_Deck__slide1.gslide.json', '/gslides'),
     })
-    const out = await read(accessor, path, index)
+    const out = await read(accessor, path)
     expect(new TextDecoder().decode(out)).toContain('slide1')
   })
 
@@ -75,49 +73,48 @@ describe('gslides read auto-bootstrap', () => {
     vi.mocked(client.googleGet).mockRejectedValue(new Error('should not call googleGet'))
 
     const accessor = makeAccessor()
-    const index = new RAMIndexCacheStore()
     const path = new PathSpec({
       virtual: '/gslides/owned/Missing__xyz.gslide.json',
       directory: '/gslides/owned/Missing__xyz.gslide.json',
       vfsPath: mountKey('/gslides/owned/Missing__xyz.gslide.json', '/gslides'),
     })
-    await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(read(accessor, path)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
 describe('gslides read token', () => {
   // read: fresh compares this record with stat's fingerprint, so both take
-  // the entry's modified stamp, and an entry without one stamps nothing.
+  // the file's modified stamp, and a file without one stamps nothing.
   const cases: [string, string | null][] = [
     ['2026-04-01T00:00:00.000Z', '2026-04-01T00:00:00.000Z'],
     ['', null],
   ]
   for (const [stamp, token] of cases) {
     it(`records the token stat reports (stamp ${JSON.stringify(stamp)})`, async () => {
-      const name = '2026-04-01_My_Deck__d1.gslide.json'
-      const target = `/gslides/owned/${name}`
-      const index = new RAMIndexCacheStore()
-      await index.setDir('/gslides/owned', [
-        [
-          name,
-          new IndexEntry({
-            id: 'd1',
-            name: 'My Deck',
-            resourceType: 'gslides/file',
-            remoteTime: stamp,
-            vfsName: name,
-          }),
-        ],
-      ])
+      const item = {
+        mimeType: 'application/vnd.google-apps.presentation',
+        id: 'd1',
+        name: 'My Deck',
+        modifiedTime: stamp,
+        owners: [{ me: true }],
+      }
+      vi.mocked(drive.listAllFiles).mockResolvedValue({ files: [item], complete: true })
+      vi.mocked(drive.getFile).mockResolvedValue(item)
       vi.mocked(client.googleGet).mockResolvedValue({ presentationId: 'd1' })
+      const accessor = makeAccessor()
+      const vfs = Object.assign(
+        new GSlidesVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),
+        { accessor },
+      )
+      const ws = new Workspace({ '/gslides/': vfs })
+      const [target = ''] = (await ws.dispatch('readdir', '/gslides/owned')) as string[]
       const path = new PathSpec({
         virtual: target,
         directory: target,
         vfsPath: mountKey(target, '/gslides'),
       })
-      const accessor = makeAccessor()
-      const [data, records] = await runWithRecording(() => read(accessor, path, index))
-      const info = await stat(accessor, path, index)
+      const [data, records] = await runWithRecording(() => read(accessor, path))
+      const info = (await ws.dispatch('stat', target)) as FileStat
       expect(records.map((r) => [r.op, r.path, r.source, r.bytes, r.fingerprint])).toEqual([
         ['read', target, 'gslides', data.byteLength, token],
       ])

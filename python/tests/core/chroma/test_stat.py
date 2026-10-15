@@ -14,13 +14,15 @@
 
 import pytest
 
-from mirage.core.chroma.stat import stat
 from mirage.types import ContentType
+from mirage.vfs.chroma import ChromaVFS
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.mark.asyncio
-async def test_stat_file(chroma_accessor, chroma_index, quickstart_path):
-    result = await stat(chroma_accessor, quickstart_path, chroma_index)
+async def test_stat_file(chroma_accessor, quickstart_path):
+    mount = Mounted(ChromaVFS, chroma_accessor, "/knowledge")
+    result = await mount.stat(quickstart_path)
     assert result.content == ContentType.TEXT
     assert result.name == "quickstart"
     assert result.size == 12

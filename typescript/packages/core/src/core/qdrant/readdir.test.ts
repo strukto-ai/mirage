@@ -16,10 +16,10 @@ import type { QdrantClient } from '@qdrant/js-client-rest'
 import { describe, expect, it, vi } from 'vitest'
 
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
-import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
-import { PathSpec } from '../../types.ts'
+import type { DirListing } from '../../types.ts'
+import { PathSpec, type FileStat } from '../../types.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { blobBytes } from '../vector/read.ts'
 import { fieldValue } from './payload.ts'
 import { pointToRow } from './query.ts'
@@ -27,6 +27,10 @@ import { renderJson, renderText } from './render.ts'
 import { filesContaining } from './search.ts'
 import { readdir } from './tree.ts'
 import type { QdrantPoint } from './types.ts'
+
+function names(listed: readonly FileStat[] | DirListing): string[] {
+  return rowsOf(listed).map((row) => row.name)
+}
 
 interface Condition {
   key?: string
@@ -83,20 +87,6 @@ const CAT: QdrantPoint = {
   payload: { label: 'cat', kind: 'big', name: 'a big orange cat', image_bytes: 'UE5HLTE=' },
 }
 
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
-  }
-}
-
 function spec(virtual: string, pattern?: string): PathSpec {
   return new PathSpec({
     virtual,
@@ -106,31 +96,29 @@ function spec(virtual: string, pattern?: string): PathSpec {
   })
 }
 
-function ids(paths: string[]): string[] {
-  return [...new Set(paths.map((p) => (p.split('/').pop() ?? '').split('.')[0] ?? ''))]
+function ids(listed: readonly FileStat[] | DirListing): string[] {
+  return [...new Set(rowsOf(listed).map((row) => row.name.split('.')[0] ?? ''))]
 }
 
 describe('qdrant readdir sizes', () => {
-  it('lists the row files of a leaf group, with or without an index', async () => {
-    const files = ['/animals/cat/big/1.json', '/animals/cat/big/1.txt', '/animals/cat/big/1.png']
+  it('lists the row files of a leaf group', async () => {
     const acc = accessorOf(ANIMALS, [CAT])
-    await expect(readdir(acc, spec('/animals/cat/big'), new RAMIndexCacheStore())).resolves.toEqual(
-      files,
-    )
-    await expect(readdir(acc, spec('/animals/cat/big'))).resolves.toEqual(files)
+    expect(names(await readdir(acc, spec('/animals/cat/big')))).toEqual([
+      '1.json',
+      '1.txt',
+      '1.png',
+    ])
   })
 
   it('seeds the exact rendered size of every row file', async () => {
     const acc = accessorOf(ANIMALS, [CAT])
     const row = pointToRow(CAT, 'id')
-    const idx = new RAMIndexCacheStore()
-    await readdir(acc, spec('/animals/cat/big'), idx)
-    const json = await idx.get('/animals/cat/big/1.json')
-    expect(json.entry?.size).toBe(renderJson(row, acc.config).byteLength)
-    const txt = await idx.get('/animals/cat/big/1.txt')
-    expect(txt.entry?.size).toBe(renderText(row, acc.config).byteLength)
-    const blob = await idx.get('/animals/cat/big/1.png')
-    expect(blob.entry?.size).toBe(blobBytes(row.image_bytes).byteLength)
+    const listed = new Map(
+      rowsOf(await readdir(acc, spec('/animals/cat/big'))).map((r) => [r.name, r]),
+    )
+    expect(listed.get('1.json')?.size).toBe(renderJson(row, acc.config).byteLength)
+    expect(listed.get('1.txt')?.size).toBe(renderText(row, acc.config).byteLength)
+    expect(listed.get('1.png')?.size).toBe(blobBytes(row.image_bytes).byteLength)
   })
 
   it('keeps listing when a blob value cannot be sized, and says why', async () => {
@@ -138,11 +126,9 @@ describe('qdrant readdir sizes', () => {
     // whole directory listing; the failure is logged rather than swallowed.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const broken = { id: 1, payload: { ...CAT.payload, image_bytes: 42 } }
-    const idx = new RAMIndexCacheStore()
-    const out = await readdir(accessorOf(ANIMALS, [broken]), spec('/animals/cat/big'), idx)
+    const out = rowsOf(await readdir(accessorOf(ANIMALS, [broken]), spec('/animals/cat/big')))
     expect(out).toHaveLength(3)
-    const blob = await idx.get('/animals/cat/big/1.png')
-    expect(blob.entry?.size).toBeNull()
+    expect(out.find((r) => r.name === '1.png')?.size).toBeNull()
     expect(warn).toHaveBeenCalledOnce()
     warn.mockRestore()
   })
@@ -171,10 +157,10 @@ describe('qdrant document lineage', () => {
       ],
       'docs',
     )
-    await expect(readdir(acc, spec('/'))).resolves.toEqual(['/refund-2026.pdf'])
-    await expect(readdir(acc, spec('/refund-2026.pdf'))).resolves.toEqual([
-      '/refund-2026.pdf/004__17.json',
-      '/refund-2026.pdf/004__17.txt',
+    expect(names(await readdir(acc, spec('/')))).toEqual(['refund-2026.pdf'])
+    expect(names(await readdir(acc, spec('/refund-2026.pdf')))).toEqual([
+      '004__17.json',
+      '004__17.txt',
     ])
   })
 
@@ -213,7 +199,7 @@ describe('qdrant readdir narrows a capped listing', () => {
     ['doc-039.js*', ['doc-039']],
     ['*9.json', ['doc-000', 'doc-001', 'doc-002', 'doc-003', 'doc-004']],
   ])('scrolls %s to the rows its literal head names', async (pattern, expected) => {
-    const out = await readdir(cappedAccessor(), spec('/all', pattern), new RAMIndexCacheStore())
+    const out = await readdir(cappedAccessor(), spec('/all', pattern))
     expect(ids(out)).toEqual(expected)
   })
 
@@ -228,16 +214,15 @@ describe('qdrant readdir narrows a capped listing', () => {
       points,
       'wide',
     )
-    await expect(readdir(acc, spec('/', 'target*'))).resolves.toEqual(['/target-late.pdf'])
+    expect(names(await readdir(acc, spec('/', 'target*')))).toEqual(['target-late.pdf'])
   })
 
   it('does not cache a narrowed listing as the directory', async () => {
     const acc = cappedAccessor()
-    const idx = new RAMIndexCacheStore()
-    await readdir(acc, spec('/all', 'doc-03*'), idx)
-    const listed = await idx.listDir('/all/')
-    expect(listed.entries === undefined || listed.entries === null).toBe(true)
-    const plain = await readdir(acc, spec('/all'), idx)
+    const narrowed = await readdir(acc, spec('/all', 'doc-03*'))
+    expect((narrowed as DirListing).partial).toBe(true)
+    const plain = await readdir(acc, spec('/all'))
+    expect((plain as DirListing).partial).toBe(false)
     expect(ids(plain)).toEqual(['doc-000', 'doc-001', 'doc-002', 'doc-003', 'doc-004'])
   })
 })
@@ -251,7 +236,7 @@ describe('qdrant blank and dot-led group values', () => {
       { id: 1, payload: { label: '', name: 'blank' } },
       { id: 2, payload: { label: '.env', name: 'dotted' } },
     ])
-    await expect(readdir(acc, spec('/'))).resolves.toEqual(['/⁄', '/⁄.env'])
+    expect(names(await readdir(acc, spec('/')))).toEqual(['⁄', '⁄.env'])
     expect(ids(await readdir(acc, spec('/⁄')))).toEqual(['1'])
     expect(ids(await readdir(acc, spec('/⁄.env')))).toEqual(['2'])
   })
@@ -261,12 +246,9 @@ describe('qdrant capped listings', () => {
   it('writes groups and rows as windows', async () => {
     // Groups and rows are read up to maxRows, so a row outside the head of
     // the table is not gone because a listing no longer names it.
-    const index = new WindowSpy()
     const acc = accessorOf(ANIMALS, [CAT])
-    await readdir(acc, spec('/animals'), index)
-    await readdir(acc, spec('/animals/cat/big'), index)
-    expect(index.windows.get('/animals')).toBe(true)
-    expect(index.windows.get('/animals/cat/big')).toBe(true)
+    expect(((await readdir(acc, spec('/animals'))) as DirListing).window).toBe(true)
+    expect(((await readdir(acc, spec('/animals/cat/big'))) as DirListing).window).toBe(true)
   })
 })
 
@@ -292,23 +274,15 @@ const SMALL_CAT = [
   '/animals/cat/small/2.txt',
 ]
 
-// Lists the small cats into an index, applies `change`, then asks with that
-// index as the walk's.
+// Lists the small cats, applies `change`, then asks.
 async function listedThen(
   change: (points: QdrantPoint[], accessor: QdrantAccessor) => void,
 ): Promise<string[] | null> {
   const points = structuredClone(ANIMAL_POINTS)
   const accessor = accessorOf(ANIMALS, points)
-  const index = new RAMIndexCacheStore()
-  await readdir(accessor, spec('/animals/cat/small'), index)
+  await readdir(accessor, spec('/animals/cat/small'))
   change(points, accessor)
-  const found = await filesContaining(
-    readdir,
-    accessor,
-    'striped',
-    [spec('/animals/cat/small')],
-    index,
-  )
+  const found = await filesContaining(readdir, accessor, 'striped', [spec('/animals/cat/small')])
   return found === null ? null : found.map((p) => p.virtual).sort()
 }
 
@@ -317,13 +291,7 @@ async function containing(
   text: string,
   path = '/animals',
 ): Promise<string[] | null> {
-  const found = await filesContaining(
-    readdir,
-    accessorOf(ANIMALS, points),
-    text,
-    [spec(path)],
-    new RAMIndexCacheStore(),
-  )
+  const found = await filesContaining(readdir, accessorOf(ANIMALS, points), text, [spec(path)])
   return found === null ? null : found.map((p) => p.virtual).sort()
 }
 
@@ -363,7 +331,7 @@ describe('qdrant filesContaining', () => {
   })
 
   // A read fetches the point as it is now, so the text is checked against a
-  // listing made for the search, not the one the walk cached.
+  // listing made for the search, not the one the command walked.
   it('finds a text changed since the listing', async () => {
     const found = await listedThen((points) => {
       const point = points[1]
@@ -372,8 +340,8 @@ describe('qdrant filesContaining', () => {
     expect(found).toEqual(SMALL_CAT)
   })
 
-  it('reads a point gone since the listing', async () => {
-    expect(await listedThen((points) => points.splice(1, 1))).toEqual(SMALL_CAT)
+  it('does not read a point gone since the listing', async () => {
+    expect(await listedThen((points) => points.splice(1, 1))).toEqual([])
   })
 
   // A listing that fails leaves every file to a read.

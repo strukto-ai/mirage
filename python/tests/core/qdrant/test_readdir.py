@@ -1,22 +1,24 @@
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.qdrant.naming import group_name
 from mirage.core.qdrant.readdir import _blob_size
 from mirage.core.qdrant.render import render_json, render_text
 from mirage.core.qdrant.tree import readdir
 from mirage.core.vector.read import blob_bytes
-from mirage.types import PathSpec
+from mirage.types import DirListing, FileStat, PathSpec
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
-from tests.fixtures.index_spy import WindowSpy
 
 
 def _ps(path: str) -> PathSpec:
     return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
-def _names(paths: list[str]) -> set[str]:
-    return {p.rsplit("/", 1)[-1] for p in paths}
+def _rows(listed: list[FileStat] | DirListing) -> list[FileStat]:
+    return listed.entries if isinstance(listed, DirListing) else listed
+
+
+def _names(listed: list[FileStat] | DirListing) -> set[str]:
+    return {row.name for row in _rows(listed)}
 
 
 @pytest.mark.asyncio
@@ -45,8 +47,10 @@ async def test_leaf_lists_row_files(accessor):
 
 @pytest.mark.asyncio
 async def test_leaf_seeds_exact_rendered_sizes(accessor):
-    index = RAMIndexCacheStore()
-    await readdir(accessor, _ps("/animals/cat/big"), index)
+    listed = {
+        row.name: row
+        for row in _rows(await readdir(accessor, _ps("/animals/cat/big")))
+    }
     config = accessor.config
     row = {
         "label": "cat",
@@ -55,15 +59,9 @@ async def test_leaf_seeds_exact_rendered_sizes(accessor):
         "image_bytes": "UE5HLTE=",
         "id": 1,
     }
-    json_lookup = await index.get("/animals/cat/big/1.json")
-    assert json_lookup.entry is not None
-    assert json_lookup.entry.size == len(render_json(row, config))
-    txt_lookup = await index.get("/animals/cat/big/1.txt")
-    assert txt_lookup.entry is not None
-    assert txt_lookup.entry.size == len(render_text(row, config))
-    blob_lookup = await index.get("/animals/cat/big/1.png")
-    assert blob_lookup.entry is not None
-    assert blob_lookup.entry.size == len(blob_bytes("UE5HLTE="))
+    assert listed["1.json"].size == len(render_json(row, config))
+    assert listed["1.txt"].size == len(render_text(row, config))
+    assert listed["1.png"].size == len(blob_bytes("UE5HLTE="))
 
 
 def test_blob_size_leaves_undecodable_values_unknown():
@@ -79,8 +77,8 @@ def _globbed(path: str, pattern: str) -> PathSpec:
     )
 
 
-def _ids(paths: list[str]) -> set[str]:
-    return {p.rsplit("/", 1)[-1].split(".")[0] for p in paths}
+def _ids(listed: list[FileStat] | DirListing) -> set[str]:
+    return {row.name.split(".")[0] for row in _rows(listed)}
 
 
 @pytest.mark.asyncio
@@ -114,11 +112,10 @@ async def test_a_basename_glob_reaches_a_source_past_the_cap(basename_capped):
 
 @pytest.mark.asyncio
 async def test_a_narrowed_listing_is_not_cached_as_the_directory(capped):
-    index = RAMIndexCacheStore()
-    await readdir(capped, _globbed("/all", "45*"), index)
-    listing = await index.list_dir("/all/")
-    assert listing.entries is None
-    plain = await readdir(capped, _ps("/all"), index)
+    narrowed = await readdir(capped, _globbed("/all", "45*"))
+    assert narrowed.partial is True
+    plain = await readdir(capped, _ps("/all"))
+    assert plain.partial is False
     assert _ids(plain) == {"1", "2", "3", "4", "5"}
 
 
@@ -204,8 +201,5 @@ async def test_a_basename_past_name_max_lists_within_it_and_opens(
 async def test_a_capped_listing_is_written_as_a_window(accessor):
     # Groups and rows are read up to max_rows, so a row outside the head of
     # the table is not gone because a listing no longer names it.
-    index = WindowSpy()
-    await readdir(accessor, _ps("/animals"), index)
-    await readdir(accessor, _ps("/animals/cat/big"), index)
-    assert index.windows["/animals"] is True
-    assert index.windows["/animals/cat/big"] is True
+    assert (await readdir(accessor, _ps("/animals"))).window is True
+    assert (await readdir(accessor, _ps("/animals/cat/big"))).window is True

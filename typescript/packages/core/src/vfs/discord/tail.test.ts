@@ -12,50 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { materialize } from '../../io/types.ts'
-import { PathSpec } from '../../types.ts'
-import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
-import { generic } from '../../commands/builtin/generic_bind/factory.ts'
+import { FakeDiscordTransport, runDiscord } from './_test_util.ts'
 
-const DISCORD_TAIL = [generic('tail')]
-
-const DEC = new TextDecoder()
-
-async function runTail(
-  paths: PathSpec[],
-  flags: Record<string, string | boolean | number | string[]>,
-  options: { index?: RAMIndexCacheStore; transport?: FakeDiscordTransport } = {},
-): Promise<string> {
-  const cmd = DISCORD_TAIL[0]
-  if (cmd === undefined) throw new Error('tail not registered')
-  const transport = options.transport ?? new FakeDiscordTransport()
-  const vfs = makeFakeVfs(transport)
-  const result = await cmd.fn(vfs.accessor, paths, [], {
-    stdin: null,
-    flags,
-    io: commandIo(vfs),
-    cwd: '/',
-    ...(options.index !== undefined ? { index: options.index } : {}),
-  })
-  if (result === null) return ''
-  const [out] = result
-  if (out === null) return ''
-  const buf = out instanceof Uint8Array ? out : await materialize(out as AsyncIterable<Uint8Array>)
-  return DEC.decode(buf)
-}
+const CHAT = '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl'
 
 describe('discord tail', () => {
   it('returns last N lines with -n', async () => {
-    const idx = new RAMIndexCacheStore()
-    await seedGuild(idx, '/mnt/discord', 'My Server__G1', 'G1')
-    await seedChannel(idx, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', {
-      dates: ['2016-04-30'],
-    })
-    const transport = new FakeDiscordTransport((_method, endpoint) => {
+    const transport = new FakeDiscordTransport((_m, endpoint) => {
       if (endpoint === '/channels/C1/messages') {
         return [
           { id: '175928847299117056', content: 'a' },
@@ -66,22 +30,8 @@ describe('discord tail', () => {
       }
       return null
     })
-    const out = await runTail(
-      [
-        new PathSpec({
-          virtual: '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-          directory: '/mnt/discord/My Server__G1/channels/general__C1/',
-          resolved: false,
-          vfsPath: mountKey(
-            '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
-            '/mnt/discord',
-          ),
-        }),
-      ],
-      { n: '2' },
-      { index: idx, transport },
-    )
-    const lines = out.trimEnd().split('\n')
+    const out = await runDiscord(transport, `tail -n 2 "${CHAT}"`, ['2016-04-30'])
+    const lines = out.stdout.trimEnd().split('\n')
     expect(lines).toHaveLength(2)
     const last = JSON.parse(lines[1] ?? '{}') as { content?: string }
     expect(last.content).toBe('d')

@@ -17,10 +17,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.gslides.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
@@ -29,12 +29,18 @@ def accessor():
 
 
 @pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+def mounted(accessor):
+    return Mounted(GSlidesVFS, accessor, "/gslides")
+
+
+async def readdir(
+    accessor: GSlidesAccessor, path: PathSpec, mounted: Mounted
+) -> list[str]:
+    return await mounted.readdir(path)
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
+async def test_readdir_root(accessor, mounted):
     result = await readdir(
         accessor,
         PathSpec(
@@ -42,13 +48,13 @@ async def test_readdir_root(accessor, index):
             virtual="/gslides",
             directory="/gslides",
         ),
-        index,
+        mounted,
     )
     assert result == ["/gslides/owned", "/gslides/shared"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned(accessor, index):
+async def test_readdir_owned(accessor, mounted):
     files = [
         {
             "id": "slide1",
@@ -69,14 +75,14 @@ async def test_readdir_owned(accessor, index):
                 virtual="/gslides/owned",
                 directory="/gslides/owned",
             ),
-            index,
+            mounted,
         )
         assert len(result) == 1
         assert "slide1" in result[0]
 
 
 @pytest.mark.asyncio
-async def test_readdir_file_path_raises(accessor, index):
+async def test_readdir_file_path_raises(accessor, mounted):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
@@ -87,12 +93,12 @@ async def test_readdir_file_path_raises(accessor, index):
                 virtual="/gslides/owned/file.gslide.json",
                 directory="/gslides/owned/file.gslide.json",
             ),
-            index,
+            mounted,
         )
 
 
 @pytest.mark.asyncio
-async def test_readdir_invalid_path_raises(accessor, index):
+async def test_readdir_invalid_path_raises(accessor, mounted):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
@@ -101,12 +107,12 @@ async def test_readdir_invalid_path_raises(accessor, index):
                 virtual="/gslides/bogus",
                 directory="/gslides/bogus",
             ),
-            index,
+            mounted,
         )
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_pushes_modified_range(accessor, index):
+async def test_readdir_owned_pushes_modified_range(accessor, mounted):
     captured = {}
 
     async def fake_list(token_manager, mime_type=None, **kwargs):
@@ -123,7 +129,7 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
                 directory="/gslides/owned",
                 pattern="2026-05-*",
             ),
-            index,
+            mounted,
         )
 
     assert captured["modified_after"] == "2026-05-01T00:00:00Z"
@@ -131,7 +137,7 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_filtered_does_not_cache(accessor, index):
+async def test_readdir_owned_filtered_does_not_cache(accessor, mounted):
     files = [
         {
             "id": "may",
@@ -172,7 +178,7 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
                 directory="/gslides/owned",
                 pattern="2026-05-*",
             ),
-            index,
+            mounted,
         )
         result = await readdir(
             accessor,
@@ -181,7 +187,7 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
                 virtual="/gslides/owned",
                 directory="/gslides/owned",
             ),
-            index,
+            mounted,
         )
 
     assert call_count["n"] == 2
@@ -189,7 +195,7 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
+async def test_readdir_owned_glob_matches_a_whole_listing(accessor, mounted):
     full_files = [
         {
             "id": "may",
@@ -228,9 +234,9 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
                 virtual="/gslides/owned",
                 directory="/gslides/owned",
             ),
-            index,
+            mounted,
         )
-        await readdir(
+        matched = await readdir(
             accessor,
             PathSpec(
                 vfs_path=mount_key("/gslides/owned/2026-05-*", "/gslides"),
@@ -238,14 +244,17 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
                 directory="/gslides/owned",
                 pattern="2026-05-*",
             ),
-            index,
+            mounted,
         )
 
-    assert call_count["n"] == 2
+    # The whole corpus is already listed, so the glob is matched against
+    # it rather than asked of Drive again.
+    assert call_count["n"] == 1
+    assert len(matched) == 1 and "may" in matched[0]
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_no_pattern_omits_range(accessor, index):
+async def test_readdir_owned_no_pattern_omits_range(accessor, mounted):
     captured = {}
 
     async def fake_list(token_manager, mime_type=None, **kwargs):
@@ -260,7 +269,7 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
                 virtual="/gslides/owned",
                 directory="/gslides/owned",
             ),
-            index,
+            mounted,
         )
 
     assert captured.get("modified_after") is None
@@ -268,7 +277,7 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
+async def test_readdir_owned_non_date_pattern_omits_range(accessor, mounted):
     captured = {}
 
     async def fake_list(token_manager, mime_type=None, **kwargs):
@@ -284,7 +293,7 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
                 directory="/gslides/owned",
                 pattern="*foo*",
             ),
-            index,
+            mounted,
         )
 
     assert captured.get("modified_after") is None
@@ -292,7 +301,7 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
+async def test_readdir_entry_size_none_source_size_in_extra(accessor, mounted):
     files = [
         {
             "id": "x1",
@@ -314,25 +323,27 @@ async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
                 virtual="/gslides/owned",
                 directory="/gslides/owned",
             ),
-            index,
+            mounted,
         )
 
-    # Drive's source size never becomes the entry size: the rendered
+    # Drive's source size never becomes the row's size: the rendered
     # JSON length is unknown until read.
-    entry = (await index.get(result[0])).entry
-    assert entry.size is None
-    assert entry.extra["source_size"] == 1234
+    row = await mounted.stat(
+        PathSpec.from_str_path(result[0], mount_key(result[0], "/gslides"))
+    )
+    assert row.size is None
+    assert row.extra["source_size"] == 1234
 
 
 @pytest.mark.asyncio
 async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
-    accessor, index
+    accessor, mounted
 ):
     """Drive reporting a corpus it skipped means the listing is short.
 
-    Caching it would pin the short listing until it expires, so a Shared
-    Drive document stays invisible long after the cause clears. The entries
-    are real, so they stay cached; only the directory is withheld.
+    Keeping it would pin the short listing until it expires, so a Shared
+    Drive document stays invisible long after the cause clears: the next
+    listing asks Drive again until one finishes.
     """
     files = [
         {
@@ -352,12 +363,14 @@ async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
         virtual="/gslides/owned",
         directory="/gslides/owned",
     )
-    with patch("mirage.core.google.readdir.list_all_files", new=fake_list):
-        listed = await readdir(accessor, owned, index)
+    listings = AsyncMock(side_effect=fake_list)
+    with patch("mirage.core.google.readdir.list_all_files", new=listings):
+        listed = await readdir(accessor, owned, mounted)
         assert len(listed) == 1
-        assert (await index.list_dir("/gslides/owned")).entries is None
-        assert (await index.get(listed[0])).entry.id == "d1"
+        await readdir(accessor, owned, mounted)
+        assert listings.await_count == 2
 
         complete["v"] = True
-        await readdir(accessor, owned, index)
-        assert (await index.list_dir("/gslides/owned")).entries is not None
+        await readdir(accessor, owned, mounted)
+        await readdir(accessor, owned, mounted)
+        assert listings.await_count == 3

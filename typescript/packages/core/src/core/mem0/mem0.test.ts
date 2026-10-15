@@ -1,17 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Mem0Accessor } from '../../accessor/mem0.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
-import { read } from './read.ts'
+import { PathSpec, type FileStat } from '../../types.ts'
+import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 import { searchMemoriesRendered } from './search.ts'
-import { stat } from './stat.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
+
+function mounted(config: ConstructorParameters<typeof Mem0VFS>[0]): Workspace {
+  return new Workspace({ '/memories/': new Mem0VFS(config) })
+}
 
 describe('Mem0 filesystem', () => {
   it('requires exactly one configured scope', () => {
@@ -22,29 +25,20 @@ describe('Mem0 filesystem', () => {
   })
 
   it('paginates the configured scope and renders memories as JSON files', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            results: [{ id: 'm1', memory: 'first', updated_at: '2026-01-01' }],
-            next: 'page-2',
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ results: [{ id: 'm2', memory: 'second' }], next: null }), {
-          status: 200,
-        }),
-      )
+    const pages = [
+      { results: [{ id: 'm1', memory: 'first', updated_at: '2026-01-01' }], next: 'page-2' },
+      { results: [{ id: 'm2', memory: 'second' }], next: null },
+    ]
+    const fetchMock = vi.fn()
+    fetchMock.mockImplementation(() => {
+      const page = pages[(fetchMock.mock.calls.length - 1) % pages.length]
+      return Promise.resolve(new Response(JSON.stringify(page), { status: 200 }))
+    })
     vi.stubGlobal('fetch', fetchMock)
     const accessor = new Mem0Accessor({ apiKey: 'key', userId: 'alex', defaultPageSize: 1 })
-    const index = new RAMIndexCacheStore()
     const root = PathSpec.fromStrPath('/memories', '')
-    const memory = PathSpec.fromStrPath('/memories/m1.json', 'm1.json')
-
-    expect(await readdir(accessor, root, index)).toEqual(['/memories/m1.json', '/memories/m2.json'])
+    const rows = await readdir(accessor, root)
+    expect(Array.isArray(rows) ? rows.map((row) => row.name) : []).toEqual(['m1.json', 'm2.json'])
     const firstInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
     expect(firstInit?.body).toBe(JSON.stringify({ filters: { user_id: 'alex' } }))
     expect(firstInit?.headers).toMatchObject({
@@ -52,11 +46,12 @@ describe('Mem0 filesystem', () => {
       'Mem0-User-ID': '3c6e0b8a9c15224a8228b9a98ca1531d',
     })
     // The listing carries every payload, so read and stat answer from it.
-    expect(new TextDecoder().decode(await read(accessor, memory, index))).toContain(
-      '"memory": "first"',
-    )
-    expect((await stat(accessor, memory, index)).content).toBe('json')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const ws = mounted({ apiKey: 'key', userId: 'alex', defaultPageSize: 1 })
+    await ws.dispatch('readdir', '/memories')
+    const data = (await ws.dispatch('read', '/memories/m1.json')) as Uint8Array
+    expect(new TextDecoder().decode(data)).toContain('"memory": "first"')
+    expect(((await ws.dispatch('stat', '/memories/m1.json')) as FileStat).content).toBe('json')
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
   // Which memories exist is the configured entity's listing; the read used to
@@ -71,11 +66,14 @@ describe('Mem0 filesystem', () => {
       ),
     )
     vi.stubGlobal('fetch', fetchMock)
-    const accessor = new Mem0Accessor({ apiKey: 'key', userId: 'alex' })
-    const other = PathSpec.fromStrPath('/memories/theirs.json', 'theirs.json')
+    const ws = mounted({ apiKey: 'key', userId: 'alex' })
 
-    await expect(read(accessor, other)).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(stat(accessor, other)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(ws.dispatch('read', '/memories/theirs.json')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(ws.dispatch('stat', '/memories/theirs.json')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
     // Only the scoped listing was asked, never a fetch by the file's id.
     for (const [url] of fetchMock.mock.calls as [URL][]) {
       expect(url.pathname).toBe('/v3/memories/')
@@ -84,10 +82,9 @@ describe('Mem0 filesystem', () => {
 
   it('propagates a non-404 provider failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 500 })))
-    const accessor = new Mem0Accessor({ apiKey: 'key', userId: 'alex' })
-    const path = PathSpec.fromStrPath('/memories/m1.json', 'm1.json')
+    const ws = mounted({ apiKey: 'key', userId: 'alex' })
 
-    await expect(read(accessor, path)).rejects.toThrow(/status 500/)
+    await expect(ws.dispatch('read', '/memories/m1.json')).rejects.toThrow(/status 500/)
   })
 
   it('renders filtered semantic results with scores', async () => {

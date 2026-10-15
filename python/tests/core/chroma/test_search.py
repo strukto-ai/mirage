@@ -7,7 +7,7 @@ from mirage.utils.key_prefix import mount_key
 
 @pytest.mark.asyncio
 async def test_search_segments_scopes_folder_to_candidate_slugs(
-    chroma_accessor, chroma_index
+    chroma_accessor,
 ):
     result = await search.search_segments(
         chroma_accessor,
@@ -19,7 +19,6 @@ async def test_search_segments_scopes_folder_to_candidate_slugs(
                 directory="/knowledge/guides",
             )
         ],
-        chroma_index,
         top_k=3,
     )
 
@@ -38,10 +37,10 @@ async def test_search_segments_scopes_folder_to_candidate_slugs(
 
 @pytest.mark.asyncio
 async def test_search_segments_empty_paths_searches_collection(
-    chroma_accessor, chroma_index
+    chroma_accessor,
 ):
     result = await search.search_segments(
-        chroma_accessor, "setup", [], chroma_index, mount_prefix="/knowledge/"
+        chroma_accessor, "setup", [], mount_prefix="/knowledge/"
     )
 
     assert result == [
@@ -84,7 +83,7 @@ async def test_files_containing_names_the_pages_a_chunk_holds_text_in(
 
 @pytest.mark.asyncio
 async def test_files_containing_asks_only_the_walked_pages_below_the_root(
-    chroma_accessor, chroma_index
+    chroma_accessor,
 ):
     under = [
         PathSpec.from_str_path(
@@ -92,9 +91,7 @@ async def test_files_containing_asks_only_the_walked_pages_below_the_root(
         )
     ]
     assert (
-        await search.files_containing(
-            chroma_accessor, "first", under, False, chroma_index
-        )
+        await search.files_containing(chroma_accessor, "first", under, False)
         == []
     )
     assert chroma_accessor.collection.get_calls[-1]["where"] == {

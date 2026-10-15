@@ -14,8 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { JaegerAccessor, type JaegerAccessorConfig } from '../../accessor/jaeger.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { JaegerTransport } from './client.ts'
 
@@ -49,58 +48,55 @@ function spec(virtual: string): PathSpec {
 }
 
 import { ContentType, FileType } from '../../types.ts'
+import { JaegerVFSBase } from '../../vfs/jaeger/jaeger.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { stat } from './stat.ts'
 
 const SERVICES = { '/api/services': { data: ['checkout'] } }
 const LISTED = { ...SERVICES, '/api/traces': { data: [{ traceID: TRACE_A }] } }
 
+async function mountedStat(transport: JaegerTransport, path: string): Promise<FileStat> {
+  const ws = new Workspace({ '/j/': new JaegerVFSBase({ accessor: accessor(transport) }) })
+  return (await ws.dispatch('stat', path)) as FileStat
+}
+
 describe('jaeger stat', () => {
   it('stats the mount root', async () => {
-    const s = await stat(accessor(new RecordingTransport({})), spec('/'), new RAMIndexCacheStore())
+    const s = await stat(accessor(new RecordingTransport({})), spec('/'))
     expect(s.type).toBe(FileType.DIRECTORY)
   })
 
   it('stats the services directory without an api call', async () => {
     const transport = new RecordingTransport({})
-    const s = await stat(accessor(transport), spec('/services'), new RAMIndexCacheStore())
+    const s = await stat(accessor(transport), spec('/services'))
     expect(s.type).toBe(FileType.DIRECTORY)
     expect(transport.calls).toHaveLength(0)
   })
 
   it('stats a known service', async () => {
-    const s = await stat(
-      accessor(new RecordingTransport(SERVICES)),
-      spec('/services/checkout'),
-      new RAMIndexCacheStore(),
-    )
+    const s = await stat(accessor(new RecordingTransport(SERVICES)), spec('/services/checkout'))
     expect(s.type).toBe(FileType.DIRECTORY)
     expect(s.extra.service).toBe('checkout')
   })
 
   it('raises ENOENT for an unknown service', async () => {
     await expect(
-      stat(
-        accessor(new RecordingTransport(SERVICES)),
-        spec('/services/nope'),
-        new RAMIndexCacheStore(),
-      ),
+      stat(accessor(new RecordingTransport(SERVICES)), spec('/services/nope')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('stats the operations file', async () => {
-    const s = await stat(
-      accessor(new RecordingTransport(SERVICES)),
-      spec('/services/checkout/operations.json'),
-      new RAMIndexCacheStore(),
+    const s = await mountedStat(
+      new RecordingTransport(SERVICES),
+      '/j/services/checkout/operations.json',
     )
     expect(s.content).toBe(ContentType.JSON)
   })
 
   it('stats a listed trace', async () => {
-    const s = await stat(
-      accessor(new RecordingTransport(LISTED)),
-      spec(`/services/checkout/traces/${TRACE_A}.json`),
-      new RAMIndexCacheStore(),
+    const s = await mountedStat(
+      new RecordingTransport(LISTED),
+      `/j/services/checkout/traces/${TRACE_A}.json`,
     )
     expect(s.content).toBe(ContentType.JSON)
     expect(s.extra.trace_id).toBe(TRACE_A)
@@ -109,21 +105,17 @@ describe('jaeger stat', () => {
   it('raises ENOENT for a well-formed id that is not listed', async () => {
     // A well-formed id is not evidence the trace exists.
     await expect(
-      stat(
-        accessor(new RecordingTransport(LISTED)),
-        spec(`/services/checkout/traces/${TRACE_B}.json`),
-        new RAMIndexCacheStore(),
-      ),
+      mountedStat(new RecordingTransport(LISTED), `/j/services/checkout/traces/${TRACE_B}.json`),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('raises ENOENT for a malformed id and a dotfile', async () => {
     const t = new RecordingTransport(LISTED)
     await expect(
-      stat(accessor(t), spec('/services/checkout/traces/zzz.json'), new RAMIndexCacheStore()),
+      stat(accessor(t), spec('/services/checkout/traces/zzz.json')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(
-      stat(accessor(t), spec('/services/.hidden'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(stat(accessor(t), spec('/services/.hidden'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

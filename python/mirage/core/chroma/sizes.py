@@ -1,13 +1,14 @@
 from mirage.accessor.chroma import ChromaAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.cache.index import IndexCacheStore
 from mirage.core.chroma.client import pages_chunks
 from mirage.core.chroma.render import render_page
+from mirage.types import FileStat, FileType
 
 
 async def ensure_dir_sizes(
     accessor: ChromaAccessor,
     directory: str,
-    index: IndexCacheStore = NULL_INDEX,
+    index: IndexCacheStore,
 ) -> None:
     """Fill in the exact size of every unsized file in one directory.
 
@@ -19,19 +20,19 @@ async def ensure_dir_sizes(
 
     Args:
         accessor: chroma accessor.
-        directory (str): virtual key of the directory to size.
-        index (IndexCacheStore): index cache.
+        directory (str): index key of the directory to size.
+        index (IndexCacheStore): the store the stat runs under, whose
+            rows of the directory are sized in place.
     """
     listing = await index.list_dir(directory)
     if listing.entries is None:
         return
-    pending: dict[str, IndexEntry] = {}
+    pending: dict[str, FileStat] = {}
     for child in listing.entries:
-        lookup = await index.get(child)
-        entry = lookup.entry
+        entry = (await index.get(child)).entry
         if (
-            entry is not None
-            and entry.resource_type == "file"
+            isinstance(entry, FileStat)
+            and entry.type is FileType.FILE
             and entry.size is None
         ):
             pending[child] = entry
@@ -41,5 +42,5 @@ async def ensure_dir_sizes(
         accessor, [entry.extra["slug"] for entry in pending.values()]
     )
     for child, entry in pending.items():
-        entry.size = len(render_page(grouped.get(entry.extra["slug"]) or []))
-        await index.put(child, entry)
+        size = len(render_page(grouped.get(entry.extra["slug"]) or []))
+        await index.put(child, entry.model_copy(update={"size": size}))

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
@@ -30,7 +29,7 @@ export function blobBytes(value: unknown): Uint8Array {
 /** Build a store's read over its per-kind readers. */
 export function makeRead<A extends Accessor>(
   tree: VectorTree<A>,
-): (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<Uint8Array> {
+): (accessor: A, path: PathSpec) => Promise<Uint8Array> {
   const readFor = perAccessor((accessor: A) => hierarchyRead(tree.detect(accessor), tree.readers))
-  return (accessor, path, index) => readFor(accessor)(accessor, path, index)
+  return (accessor, path) => readFor(accessor)(accessor, path)
 }

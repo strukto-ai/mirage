@@ -14,11 +14,11 @@
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.api.client import SessionArg
-from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
+from mirage.core.hierarchy.readdir import Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.channels import list_channels, list_dms
@@ -34,6 +34,9 @@ from mirage.core.slack.paginate import cursor_pages
 from mirage.core.slack.scope import detect_scope
 from mirage.core.slack.users import list_users, user_json_bytes
 from mirage.core.time_range import guard_day
+from mirage.types import ContentType, DirListing, FileStat, FileType
+from mirage.utils.dates import epoch_to_iso
+from mirage.utils.filetype import content_type_for_mime
 from mirage.utils.glob_walk import glob_span, has_glob_span
 
 logger = logging.getLogger(__name__)
@@ -141,80 +144,82 @@ async def _earliest_message_ts(
     return first
 
 
+def _slack_modified(remote_time: str | int | float | None) -> str | None:
+    if not remote_time:
+        return None
+    try:
+        ts = float(remote_time)
+    except (TypeError, ValueError):
+        return None
+    if ts <= 0:
+        return None
+    return epoch_to_iso(ts)
+
+
+def _conversation(
+    dirname: str, conversation: dict[str, Any], name: str
+) -> FileStat:
+    created = int(conversation.get("created", 0) or 0)
+    return FileStat(
+        name=dirname,
+        type=FileType.DIRECTORY,
+        modified=_slack_modified(created),
+        extra={
+            "channel_id": conversation["id"],
+            "name": name,
+            "created": created,
+        },
+    )
+
+
 async def _list_channels_root(
     accessor: SlackAccessor, match: ScopeMatch
 ) -> Listed:
     channels = await list_channels(accessor.config, session=accessor.pool)
-    entries: list[tuple[str, IndexEntry]] = []
-    for ch in channels:
-        dirname = channel_dirname(ch)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=ch["id"],
-                    name=ch.get("name", ""),
-                    resource_type="slack/channel",
-                    vfs_name=dirname,
-                    remote_time=str(ch.get("created", 0)),
-                ),
-            )
-        )
-    return entries
+    return [
+        _conversation(channel_dirname(ch), ch, ch.get("name", ""))
+        for ch in channels
+    ]
 
 
 async def _list_dms_root(accessor: SlackAccessor, match: ScopeMatch) -> Listed:
     dms = await list_dms(accessor.config, session=accessor.pool)
     users = await list_users(accessor.config, session=accessor.pool)
     user_map = {u["id"]: u.get("name", u["id"]) for u in users}
-    entries: list[tuple[str, IndexEntry]] = []
-    for dm in dms:
-        dirname = dm_dirname(dm, user_map)
-        uid = dm.get("user", "")
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=dm["id"],
-                    name=user_map.get(uid, uid),
-                    resource_type="slack/dm",
-                    vfs_name=dirname,
-                    remote_time=str(dm.get("created", 0)),
-                ),
-            )
+    return [
+        _conversation(
+            dm_dirname(dm, user_map),
+            dm,
+            user_map.get(dm.get("user", ""), dm.get("user", "")),
         )
-    return entries
+        for dm in dms
+    ]
 
 
 async def _list_users_root(
     accessor: SlackAccessor, match: ScopeMatch
 ) -> Listed:
     users = await list_users(accessor.config, session=accessor.pool)
-    entries: list[tuple[str, IndexEntry]] = []
-    for u in users:
-        filename = user_filename(u)
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=u["id"],
-                    name=u.get("name", ""),
-                    resource_type="slack/user",
-                    vfs_name=filename,
-                    size=len(user_json_bytes(u)),
-                ),
-            )
+    return [
+        FileStat(
+            name=user_filename(u),
+            type=FileType.FILE,
+            content=ContentType.JSON,
+            size=len(user_json_bytes(u)),
+            extra={"user_id": u["id"]},
         )
-    return entries
+        for u in users
+    ]
 
 
 async def _list_channel_days(
-    accessor: SlackAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: SlackAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    created = int(own.remote_time or 0)
+    channel_id = str(own.extra["channel_id"])
+    created = int(own.extra.get("created") or 0)
     span = glob_span(match.pattern)
     latest_ts = await _latest_message_ts(
-        accessor.config, own.id, session=accessor.pool
+        accessor.config, channel_id, session=accessor.pool
     )
     if latest_ts and accessor.time_range.bounded:
         start = created or accessor.time_range.start
@@ -224,7 +229,7 @@ async def _list_channel_days(
             first = span[0]
         else:
             first = datetime.fromtimestamp(
-                await _earliest_message_ts(accessor, own.id, latest_ts),
+                await _earliest_message_ts(accessor, channel_id, latest_ts),
                 timezone.utc,
             ).date()
         dates = list(
@@ -242,20 +247,13 @@ async def _list_channel_days(
         dates = _date_range(latest_ts, int(latest_ts), span=span)
     else:
         dates = []
-    entries = [
-        (
-            d,
-            IndexEntry(
-                id=f"{own.id}:{d}",
-                name=d,
-                resource_type="slack/date_dir",
-                vfs_name=d,
-                extra={"channel_id": own.id},
-            ),
+    rows = [
+        FileStat(
+            name=d, type=FileType.DIRECTORY, extra={"channel_id": channel_id}
         )
         for d in dates
     ]
-    return DirListing(entries=entries, partial=span is not None, window=True)
+    return DirListing(entries=rows, partial=span is not None, window=True)
 
 
 async def _day_listing(
@@ -292,21 +290,7 @@ async def _day_listing(
             # are gone, so the empty day must not evict what it held.
             return DirListing(entries=[], window=True)
         raise
-    chat_entry = IndexEntry(
-        id=f"{channel_id}:{date_str}:chat",
-        name="chat.jsonl",
-        resource_type="slack/chat_jsonl",
-        vfs_name="chat.jsonl",
-        size=len(jsonl_bytes(messages)),
-    )
-    files_entry = IndexEntry(
-        id=f"{channel_id}:{date_str}:files",
-        name="files",
-        resource_type="slack/files_dir",
-        vfs_name="files",
-        extra={"channel_id": channel_id, "date": date_str},
-    )
-    file_entries: list[tuple[str, IndexEntry]] = []
+    blobs: list[FileStat] = []
     for msg in messages:
         for fmeta in msg.get("files", []) or []:
             # Tombstoned (deleted) and access-restricted file payloads carry
@@ -319,52 +303,65 @@ async def _day_listing(
                 or fmeta.get("size") is None
             ):
                 continue
-            blob_name = file_blob_name(fmeta)
-            file_entries.append(
-                (
-                    blob_name,
-                    IndexEntry(
-                        id=fmeta["id"],
-                        name=fmeta.get("title") or fmeta.get("name") or "",
-                        resource_type="slack/file",
-                        vfs_name=blob_name,
-                        size=fmeta["size"],
-                        remote_time=str(fmeta.get("timestamp", "")),
-                        extra={
-                            "mimetype": fmeta.get("mimetype", ""),
-                            "url_private_download": fmeta.get(
-                                "url_private_download", ""
-                            ),
-                            "filetype": fmeta.get("filetype", ""),
-                            "ts": msg.get("ts", ""),
-                            "channel_id": channel_id,
-                            "date": date_str,
-                        },
-                    ),
+            mimetype = fmeta.get("mimetype", "")
+            blobs.append(
+                FileStat(
+                    name=file_blob_name(fmeta),
+                    type=FileType.FILE,
+                    content=content_type_for_mime(mimetype),
+                    size=fmeta["size"],
+                    modified=_slack_modified(fmeta.get("timestamp")),
+                    extra={
+                        "file_id": fmeta["id"],
+                        "mimetype": mimetype,
+                        "url_private_download": fmeta.get(
+                            "url_private_download", ""
+                        ),
+                        "filetype": fmeta.get("filetype", ""),
+                        "ts": msg.get("ts", ""),
+                        "channel_id": channel_id,
+                        "date": date_str,
+                    },
                 )
             )
     return DirListing(
-        entries=[("chat.jsonl", chat_entry), ("files", files_entry)],
-        seeds={"files": file_entries},
+        entries=[
+            FileStat(
+                name="chat.jsonl",
+                type=FileType.FILE,
+                content=ContentType.TEXT,
+                size=len(jsonl_bytes(messages)),
+                extra={"channel_id": channel_id},
+            ),
+            FileStat(
+                name="files",
+                type=FileType.DIRECTORY,
+                extra={"channel_id": channel_id, "date": date_str},
+            ),
+        ],
+        seeds={"files": blobs},
     )
 
 
 async def _list_day(
-    accessor: SlackAccessor, match: ScopeMatch, channel: IndexEntry
+    accessor: SlackAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    # The proof is the channel entry, not the day's own: any well-formed
-    # date under a real channel fetches, including dates outside the
-    # bounded window the channel listing mints.
-    return await _day_listing(accessor, channel.id, match.slots["day"])
+    # The day's row carries its channel: one the bounded window lists, or
+    # one stat makes for any well-formed date under a real channel, so a
+    # date outside the window fetches too.
+    return await _day_listing(
+        accessor, str(own.extra["channel_id"]), match.slots["day"]
+    )
 
 
 async def _list_files(
-    accessor: SlackAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: SlackAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
     # Normally served from the day lister's seed; reached only when the
-    # index evicted the files listing while the day's entries survived.
-    channel_id = own.extra.get("channel_id") or own.id.split(":", 1)[0]
-    listing = await _day_listing(accessor, channel_id, match.slots["day"])
+    # index evicted the files listing while the day's rows survived.
+    listing = await _day_listing(
+        accessor, str(own.extra["channel_id"]), match.slots["day"]
+    )
     # A soft-error day proves nothing about its attachments either.
     return DirListing(
         entries=list(listing.seeds.get("files", [])), window=listing.window
@@ -380,9 +377,9 @@ readdir = make_readdir(
     },
     entry_listers={
         "channel": _list_channel_days,
+        "day": _list_day,
         "files": _list_files,
     },
-    parent_entry_listers={"day": _list_day},
     static_root=VIRTUAL_ROOTS,
     guards={"day": guard_day, "files": guard_day},
     pattern_kinds={"channel": has_glob_span},

@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 
 import { TokenManager } from '../../core/google/client.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
-import { VFSName } from '../../types.ts'
+import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactGDocsConfig, type GDocsConfig, type GDocsConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { DOCS_WORDS } from '../../utils/generated/google_vocabulary.ts'
 import { filesContaining as googleFilesContaining } from '../../core/google/search.ts'
@@ -59,39 +59,43 @@ export class GDocsVFS extends BaseVFS {
     this.accessor = new GDocsAccessor({ tokenManager: tm })
   }
 
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    unlink: ['entry'],
+  } as const
+
   override readonly renderers: Readonly<Record<string, string>> = { '.gdoc.json': 'readDoc' }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
-    return googleFilesContaining(this.accessor, gdocsReaddir, MIME, DOCS_WORDS, text, [path], index)
+    return googleFilesContaining(this.accessor, gdocsReaddir, MIME, DOCS_WORDS, text, [path])
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return gdocsReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
+    return gdocsReaddir(this.accessor, path)
   }
 
   /** Render the file as the JSON its `.gdoc.json` name holds. */
   async readDoc(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await gdocsRead(this.accessor, path, index)
+    const data = await gdocsRead(this.accessor, path)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return gdocsStat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return gdocsStat(this.accessor, path)
   }
 
-  override unlink(path: PathSpec, index?: IndexCacheStore): Promise<void> {
-    return gdocsUnlink(this.accessor, path, index)
+  override unlink(path: PathSpec, handed?: Handed): Promise<void> {
+    return gdocsUnlink(this.accessor, path, handed?.entry)
   }
 
   override rename(src: PathSpec, dst: PathSpec, index?: IndexCacheStore): Promise<void> {

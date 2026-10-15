@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.slack.constants import DU_MAX_ENTRIES
 from mirage.core.slack.read import follow as _follow
 from mirage.core.slack.read import read as _read
@@ -28,7 +27,7 @@ from mirage.core.slack.search import files_containing as _files_containing
 from mirage.core.slack.search import search_available
 from mirage.core.slack.stat import stat as _stat
 from mirage.core.time_range import TimeRange
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.slack.config import SlackConfig
 from mirage.vfs.slack.prompt import PROMPT, WRITE_PROMPT
@@ -62,20 +61,23 @@ class SlackVFS(BaseVFS):
         self.prompt = PROMPT + self.accessor.time_range.prompt()
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> bytes:
         if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read_range(self.accessor, path, index, offset, size)
+            return await _read(self.accessor, path, entry, parent)
+        return await _read_range(
+            self.accessor, path, offset, size, entry, parent
+        )
 
     async def read_many(
         self,
@@ -86,23 +88,32 @@ class SlackVFS(BaseVFS):
         return await _read_many(self.accessor, paths, limit, index)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+        return _read_stream(self.accessor, path, entry, parent)
 
     async def follow(
         self,
         path: PathSpec,
         n: int,
         interval: float,
-        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> AsyncIterator[bytes] | None:
-        return await _follow(self.accessor, path, n, interval, index)
+        return await _follow(
+            self.accessor, path, n, interval, entry=entry, parent=parent
+        )
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry, parent)
 
     async def files_containing(
         self,
@@ -111,7 +122,6 @@ class SlackVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         if (
             not whole_word
@@ -119,7 +129,7 @@ class SlackVFS(BaseVFS):
             or not search_available(self.config)
         ):
             return None
-        return await _files_containing(self.accessor, text, [path], index)
+        return await _files_containing(self.accessor, text, [path])
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

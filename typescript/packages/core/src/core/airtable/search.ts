@@ -13,16 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isEnoent } from '../../errors/fs.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { recordQueries } from '../../utils/record_search.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
 import { listRecords } from './client.ts'
 import { AirtableApiError } from './errors.ts'
 import { recordsJsonl } from './normalize.ts'
-import { readdir, schemaTable } from './readdir.ts'
+import { schemaTable } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
 // A line's keys besides its field names, and the JSON literals.
@@ -94,14 +91,12 @@ export async function linesContaining(
   accessor: AirtableAccessor,
   path: PathSpec,
   text: string,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
 ): Promise<Uint8Array | null> {
   const match = detectScope(path)
-  if (match.kind !== 'records' && match.kind !== 'view') return null
-  const store = index ?? new RAMIndexCacheStore()
+  if ((match.kind !== 'records' && match.kind !== 'view') || entry === null) return null
   let table: Record<string, unknown>
   try {
-    if ((await resolveEntry(readdir, accessor, path, store)) === null) return null
     table = await schemaTable(accessor, match)
   } catch (err) {
     if (isEnoent(err)) return null

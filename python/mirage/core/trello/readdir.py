@@ -15,9 +15,9 @@
 from typing import Any
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.hierarchy.stat import entry_stat
 from mirage.core.trello.client import (
     get_board,
     list_board_labels,
@@ -46,6 +46,7 @@ from mirage.core.trello.pathing import (
     workspace_dirname,
 )
 from mirage.core.trello.scope import detect_scope
+from mirage.types import ContentType, FileStat, FileType
 
 
 async def filtered_workspaces(
@@ -121,254 +122,161 @@ async def board_in_scope(accessor: TrelloAccessor, board_id: str) -> bool:
     return board.get("idOrganization") == config.workspace_id
 
 
+WORKSPACE = entry_stat("workspace_id", FileType.DIRECTORY)
+WORKSPACE_JSON = entry_stat("workspace_id", ContentType.JSON)
+BOARD = entry_stat("board_id", FileType.DIRECTORY)
+BOARD_JSON = entry_stat("board_id", ContentType.JSON)
+MEMBER = entry_stat("member_id", ContentType.JSON)
+LABEL = entry_stat("label_id", ContentType.JSON)
+LIST = entry_stat("list_id", FileType.DIRECTORY)
+LIST_JSON = entry_stat("list_id", ContentType.JSON)
+CARD = entry_stat("card_id", FileType.DIRECTORY)
+CARD_JSON = entry_stat("card_id", ContentType.JSON)
+COMMENTS = entry_stat("card_id", ContentType.TEXT)
+
+
+def _dir(name: str) -> FileStat:
+    return FileStat(name=name, type=FileType.DIRECTORY)
+
+
 async def _list_workspaces_dir(
     accessor: TrelloAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
-    entries = []
-    for workspace in await filtered_workspaces(accessor):
-        dirname = workspace_dirname(workspace)
-        # workspace.json renders the workspace object this listing already
-        # fetched, so its exact size rides the directory entry for the
-        # child listing to read back without another call.
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=workspace["id"],
-                    name=workspace.get("displayName")
-                    or workspace.get("name")
-                    or workspace["id"],
-                    resource_type="trello/workspace",
-                    remote_time="",
-                    vfs_name=dirname,
-                    extra={
-                        "json_size": len(
-                            to_json_bytes(normalize_workspace(workspace))
-                        ),
-                    },
+) -> list[FileStat]:
+    # workspace.json renders the workspace object this listing already
+    # fetched, so its exact size rides the directory's row for the child
+    # listing to read back without another call.
+    return [
+        WORKSPACE(
+            workspace_dirname(workspace),
+            workspace["id"],
+            extra={
+                "json_size": len(
+                    to_json_bytes(normalize_workspace(workspace))
                 ),
-            )
+            },
         )
-    return entries
+        for workspace in await filtered_workspaces(accessor)
+    ]
 
 
 async def _list_workspace(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     return [
-        (
+        WORKSPACE_JSON(
             "workspace.json",
-            IndexEntry(
-                id=entry.id,
-                name="workspace.json",
-                resource_type="trello/workspace_json",
-                vfs_name="workspace.json",
-                size=entry.extra.get("json_size"),
-            ),
+            match.slots["workspace_id"],
+            size=entry.extra.get("json_size"),
         ),
-        (
-            "boards",
-            IndexEntry(
-                id=entry.id,
-                name="boards",
-                resource_type="trello/boards_dir",
-                vfs_name="boards",
-            ),
-        ),
+        _dir("boards"),
     ]
 
 
 async def _list_boards(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
-    entries = []
-    for board in await filtered_boards(accessor, match.slots["workspace_id"]):
-        dirname = board_dirname(board)
-        # board.json's normalizer only uses fields the board listing
-        # already carries, so its exact size is free here.
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=board["id"],
-                    name=board.get("name") or board["id"],
-                    resource_type="trello/board",
-                    remote_time=board.get("dateLastActivity") or "",
-                    vfs_name=dirname,
-                    extra={
-                        "json_size": len(
-                            to_json_bytes(normalize_board(board))
-                        ),
-                    },
-                ),
-            )
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
+    # board.json's normalizer only uses fields the board listing already
+    # carries, so its exact size is free here.
+    return [
+        BOARD(
+            board_dirname(board),
+            board["id"],
+            modified=board.get("dateLastActivity"),
+            extra={"json_size": len(to_json_bytes(normalize_board(board)))},
         )
-    return entries
+        for board in await filtered_boards(
+            accessor, match.slots["workspace_id"]
+        )
+    ]
 
 
 async def _list_board(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     return [
-        (
+        BOARD_JSON(
             "board.json",
-            IndexEntry(
-                id=entry.id,
-                name="board.json",
-                resource_type="trello/board_json",
-                vfs_name="board.json",
-                size=entry.extra.get("json_size"),
-                remote_time=entry.remote_time,
-            ),
+            match.slots["board_id"],
+            size=entry.extra.get("json_size"),
+            modified=entry.modified,
         ),
-        (
-            "members",
-            IndexEntry(
-                id=entry.id,
-                name="members",
-                resource_type="trello/members_dir",
-                vfs_name="members",
-            ),
-        ),
-        (
-            "labels",
-            IndexEntry(
-                id=entry.id,
-                name="labels",
-                resource_type="trello/labels_dir",
-                vfs_name="labels",
-            ),
-        ),
-        (
-            "lists",
-            IndexEntry(
-                id=entry.id,
-                name="lists",
-                resource_type="trello/lists_dir",
-                vfs_name="lists",
-            ),
-        ),
+        _dir("members"),
+        _dir("labels"),
+        _dir("lists"),
     ]
 
 
 async def _list_members(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     members = await list_board_members(
         accessor.config, match.slots["board_id"], session=accessor.pool
     )
-    entries = []
-    for member in members:
-        filename = member_filename(member)
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=member["id"],
-                    name=member.get("fullName")
-                    or member.get("username")
-                    or member["id"],
-                    resource_type="trello/member",
-                    remote_time="",
-                    vfs_name=filename,
-                    size=len(to_json_bytes(normalize_member(member))),
-                ),
-            )
+    return [
+        MEMBER(
+            member_filename(member),
+            member["id"],
+            size=len(to_json_bytes(normalize_member(member))),
         )
-    return entries
+        for member in members
+    ]
 
 
 async def _list_labels(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     labels = await list_board_labels(
         accessor.config, match.slots["board_id"], session=accessor.pool
     )
-    entries = []
-    for label in labels:
-        filename = label_filename(label)
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=label["id"],
-                    name=label.get("name")
-                    or label.get("color")
-                    or label["id"],
-                    resource_type="trello/label",
-                    remote_time="",
-                    vfs_name=filename,
-                    size=len(to_json_bytes(normalize_label(label))),
-                ),
-            )
+    return [
+        LABEL(
+            label_filename(label),
+            label["id"],
+            size=len(to_json_bytes(normalize_label(label))),
         )
-    return entries
+        for label in labels
+    ]
 
 
 async def _list_lists(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     lists = await list_board_lists(
         accessor.config, match.slots["board_id"], session=accessor.pool
     )
-    entries = []
-    for lst in lists:
-        dirname = list_dirname(lst)
-        # list.json's normalizer only uses fields the list listing already
-        # carries, so its exact size is free here.
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=lst["id"],
-                    name=lst.get("name") or lst["id"],
-                    resource_type="trello/list",
-                    remote_time="",
-                    vfs_name=dirname,
-                    extra={
-                        "json_size": len(to_json_bytes(normalize_list(lst))),
-                    },
-                ),
-            )
+    # list.json's normalizer only uses fields the list listing already
+    # carries, so its exact size is free here.
+    return [
+        LIST(
+            list_dirname(lst),
+            lst["id"],
+            extra={"json_size": len(to_json_bytes(normalize_list(lst)))},
         )
-    return entries
+        for lst in lists
+    ]
 
 
 async def _list_list(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     return [
-        (
+        LIST_JSON(
             "list.json",
-            IndexEntry(
-                id=entry.id,
-                name="list.json",
-                resource_type="trello/list_json",
-                vfs_name="list.json",
-                size=entry.extra.get("json_size"),
-            ),
+            match.slots["list_id"],
+            size=entry.extra.get("json_size"),
         ),
-        (
-            "cards",
-            IndexEntry(
-                id=entry.id,
-                name="cards",
-                resource_type="trello/cards_dir",
-                vfs_name="cards",
-            ),
-        ),
+        _dir("cards"),
     ]
 
 
 async def _list_cards(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     cards = await list_list_cards(
         accessor.config, match.slots["list_id"], session=accessor.pool
     )
-    entries = []
+    rows = []
     for card in cards:
-        dirname = card_dirname(card)
         # card.json's normalizer only uses fields the card listing already
         # carries, so its exact size is free here.
         extra: dict[str, Any] = {
@@ -376,48 +284,30 @@ async def _list_cards(
         }
         if accessor.config.content_search:
             extra["unsearched"] = unsearched_text(card)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=card["id"],
-                    name=card.get("name") or card["id"],
-                    resource_type="trello/card",
-                    remote_time=card.get("dateLastActivity") or "",
-                    vfs_name=dirname,
-                    extra=extra,
-                ),
+        rows.append(
+            CARD(
+                card_dirname(card),
+                card["id"],
+                modified=card.get("dateLastActivity"),
+                extra=extra,
             )
         )
-    return entries
+    return rows
 
 
 async def _list_card(
-    accessor: TrelloAccessor, match: ScopeMatch, entry: IndexEntry
-) -> list[tuple[str, IndexEntry]]:
+    accessor: TrelloAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     # comments.jsonl needs a per-card actions call and stays size-unknown.
+    card_id = match.slots["card_id"]
     return [
-        (
+        CARD_JSON(
             "card.json",
-            IndexEntry(
-                id=entry.id,
-                name="card.json",
-                resource_type="trello/card_json",
-                vfs_name="card.json",
-                size=entry.extra.get("json_size"),
-                remote_time=entry.remote_time,
-            ),
+            card_id,
+            size=entry.extra.get("json_size"),
+            modified=entry.modified,
         ),
-        (
-            "comments.jsonl",
-            IndexEntry(
-                id=entry.id,
-                name="comments.jsonl",
-                resource_type="trello/comments_jsonl",
-                vfs_name="comments.jsonl",
-                remote_time=entry.remote_time,
-            ),
-        ),
+        COMMENTS("comments.jsonl", card_id, modified=entry.modified),
     ]
 
 

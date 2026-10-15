@@ -20,7 +20,6 @@ from bson import Timestamp
 from bson.json_util import RELAXED_JSON_OPTIONS, dumps
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.read import per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mongodb.client import (
@@ -72,7 +71,6 @@ async def _last_documents(
     scope: ScopeMatch,
     path: PathSpec,
     n: int,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     """The last ``n`` documents of a collection or view, as its
     documents.jsonl renders them.
@@ -87,7 +85,6 @@ async def _last_documents(
         scope (ScopeMatch): the documents file's match.
         path (PathSpec): the file.
         n (int): Number of trailing documents, at least 1.
-        index (IndexCacheStore): Unused; kept for reader-signature parity.
     """
     database, name = scope.slots["database"], scope.slots["name"]
     docs = await find_documents(
@@ -156,7 +153,6 @@ async def _document_count(
     accessor: MongoDBAccessor,
     scope: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> int:
     """How many documents a collection or view holds, one line each in
     its documents.jsonl, by ``count_documents``.
@@ -165,7 +161,6 @@ async def _document_count(
         accessor (MongoDBAccessor): Backend accessor.
         scope (ScopeMatch): the documents file's match.
         path (PathSpec): the file.
-        index (IndexCacheStore): Unused; kept for reader-signature parity.
     """
     return await count_documents(
         accessor.client, scope.slots["database"], scope.slots["name"]
@@ -175,7 +170,6 @@ async def _document_count(
 async def read_stream(
     accessor: MongoDBAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     batch_size: int = 100,
 ) -> AsyncGenerator[bytes, None]:
     scope = detect_scope(path)
@@ -209,7 +203,6 @@ async def _follow_documents(
     scope: ScopeMatch,
     path: PathSpec,
     n: int,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes] | None:
     """The last ``n`` documents of a collection, then each one inserted
     after them, one documents.jsonl line each. None for a view, which has
@@ -225,7 +218,6 @@ async def _follow_documents(
         scope (ScopeMatch): the documents file's match.
         path (PathSpec): the file.
         n (int): Number of trailing documents first, 0 for none.
-        index (IndexCacheStore): Unused; kept for reader-signature parity.
     """
     if entity_kind(scope) is not EntityKind.COLLECTION:
         return None

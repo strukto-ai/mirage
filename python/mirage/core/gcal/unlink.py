@@ -13,28 +13,28 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.gcal.client import delete_event
-from mirage.core.gcal.readdir import calendar_index, readdir
+from mirage.core.gcal.readdir import calendar_index
 from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.unlink import make_unlink
 from mirage.errors.fs import eacces, enoent
+from mirage.types import FileStat
 
 
 async def _delete(
-    accessor: GCalAccessor, match: ScopeMatch, entry: IndexEntry
+    accessor: GCalAccessor, match: ScopeMatch, entry: FileStat
 ) -> None:
-    """Delete the event the entry names, on the slotted calendar.
+    """Delete the event the row names, on the slotted calendar.
 
-    The entry already carries the event id (rm resolves through the name
+    The row already carries the event id (rm resolves through the name
     the listing produced), so only the calendar's id and write role are
     looked up here.
 
     Args:
         accessor (GCalAccessor): the mount's accessor.
         match (ScopeMatch): a match holding ``calendar``.
-        entry (IndexEntry): the resolved event entry.
+        entry (FileStat): the event's row.
     """
     calendars = await calendar_index(accessor)
     calendar = calendars.get(match.slots["calendar"])
@@ -45,7 +45,9 @@ async def _delete(
     cal_id = calendar.get("id")
     if not isinstance(cal_id, str):
         raise enoent(match.vfs_path)
-    await delete_event(accessor.token_manager, cal_id, entry.id)
+    await delete_event(
+        accessor.token_manager, cal_id, str(entry.extra["event_id"])
+    )
 
 
-unlink = make_unlink(detect_scope, readdir, deleters={"event": _delete})
+unlink = make_unlink(detect_scope, deleters={"event": _delete})

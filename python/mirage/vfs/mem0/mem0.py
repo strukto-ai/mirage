@@ -16,13 +16,12 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.mem0.read import read as _read
 from mirage.core.mem0.read import read_stream as _read_stream
 from mirage.core.mem0.readdir import readdir as _readdir
 from mirage.core.mem0.search import search_many, search_resource
 from mirage.core.mem0.stat import stat as _stat
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mem0.config import Mem0Config
@@ -45,46 +44,38 @@ class Mem0VFS(BaseVFS):
         self.config = config
         self.accessor = Mem0Accessor(self.config)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path, entry)
         return slice_window(data, offset, size)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+        return _read_stream(self.accessor, path, entry)
 
     async def search(
-        self,
-        path: PathSpec,
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
+        self, path: PathSpec, query: SearchQuery
     ) -> list[tuple[str, str]] | None:
-        return await search_resource(self.accessor, path, query, index)
+        return await search_resource(self.accessor, path, query)
 
     async def search_many(
-        self,
-        paths: list[PathSpec],
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
+        self, paths: list[PathSpec], query: SearchQuery
     ) -> list[tuple[str, str]] | None:
-        return await search_many(self.accessor, paths, query, index)
+        return await search_many(self.accessor, paths, query)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

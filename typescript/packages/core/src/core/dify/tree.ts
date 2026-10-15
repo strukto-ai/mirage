@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { epochToIso } from '../../utils/dates.ts'
 import { gnuBasename } from '../../utils/path.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -24,13 +24,12 @@ import { listAllDocuments } from './client.ts'
 
 export const SLUG_NOUN = 'Dify document slug'
 
-async function loadTree(accessor: DifyAccessor, prefix: string): Promise<DirRows> {
-  return buildDirEntries(await listAllDocuments(accessor), prefix, accessor.config.slugMetadataName)
+async function loadTree(accessor: DifyAccessor): Promise<DirRows> {
+  return buildDirEntries(await listAllDocuments(accessor), accessor.config.slugMetadataName)
 }
 
 export function buildDirEntries(
   documents: Record<string, unknown>[],
-  prefix: string,
   slugMetadataName = 'slug',
 ): DirRows {
   const files = new Map<string, Record<string, unknown>>()
@@ -69,29 +68,29 @@ export function buildDirEntries(
         `requires it as a directory prefix.`,
     )
   })
-  return dirRows(
-    kept,
-    prefix,
-    // No size: the API's is the uploaded source file (a PDF, say), not the
-    // segment text this mount serves, so it rides in extra.
-    (path, document) =>
-      new IndexEntry({
-        id: scalarString(document.id) ?? '',
-        name: gnuBasename(path),
-        resourceType: 'file',
-        remoteTime: epochText(document.created_at) ?? '',
-        extra: {
-          slug: stripSlash(path),
-          source_size: extractDocumentSize(document),
-          slug_metadata_name: slugMetadataName,
-          raw_slug: rawSlugs.get(path) ?? '',
-          has_slug: hasSlugs.get(path) ?? false,
-          tokens: document.tokens ?? null,
-          indexing_status: document.indexing_status ?? null,
-          data_source_type: document.data_source_type ?? null,
-        },
-      }),
-  )
+  // No size: the API's is the uploaded source file (a PDF, say), not the
+  // segment text this mount serves, so it rides in extra.
+  return dirRows(kept, (path, document) => {
+    const created = epochText(document.created_at)
+    return new FileStat({
+      name: gnuBasename(path),
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+      modified: created,
+      birthtime: created,
+      extra: {
+        slug: stripSlash(path),
+        source_size: extractDocumentSize(document),
+        slug_metadata_name: slugMetadataName,
+        raw_slug: rawSlugs.get(path) ?? '',
+        has_slug: hasSlugs.get(path) ?? false,
+        tokens: document.tokens ?? null,
+        indexing_status: document.indexing_status ?? null,
+        data_source_type: document.data_source_type ?? null,
+        document_id: scalarString(document.id) ?? '',
+      },
+    })
+  })
 }
 
 export function extractSlug(

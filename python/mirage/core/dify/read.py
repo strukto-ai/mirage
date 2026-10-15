@@ -2,20 +2,18 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.dify import DifyAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dify.client import get_document_segments, iter_segment_pages
-from mirage.core.dify.tree import DIFY_TREE
 from mirage.core.slug_tree.read import file_entry, join_lines
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.ranges import slice_window
 
 
 async def read(
     accessor: DifyAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
+    entry: FileStat | None = None,
 ) -> bytes:
     """Read a document, optionally only a byte range of it.
 
@@ -27,21 +25,24 @@ async def read(
     Args:
         accessor (DifyAccessor): Dify accessor.
         path (PathSpec): the path to read.
-        index (IndexCacheStore): listing cache, consulted for the entry.
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
+        entry (FileStat | None): what is at the path.
     """
-    entry = await file_entry(DIFY_TREE, accessor, path, index)
-    segments = await get_document_segments(accessor, entry.id)
+    found = file_entry(path, entry)
+    segments = await get_document_segments(
+        accessor, str(found.extra["document_id"])
+    )
     rendered = "\n".join(segment_text(segment) for segment in segments)
     return slice_window(rendered.encode(), offset, size)
 
 
 async def read_stream(
-    accessor: DifyAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    accessor: DifyAccessor, path: PathSpec, entry: FileStat | None = None
 ) -> AsyncIterator[bytes]:
-    entry = await file_entry(DIFY_TREE, accessor, path, index)
-    async for chunk in join_lines(segment_texts(accessor, entry.id)):
+    found = file_entry(path, entry)
+    document_id = str(found.extra["document_id"])
+    async for chunk in join_lines(segment_texts(accessor, document_id)):
         yield chunk
 
 

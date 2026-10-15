@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -152,11 +151,6 @@ def chroma_collection() -> FakeCollection:
 @pytest.fixture
 def chroma_accessor(chroma_collection) -> SimpleNamespace:
     return accessor_for(chroma_collection)
-
-
-@pytest.fixture
-def chroma_index() -> RAMIndexCacheStore:
-    return RAMIndexCacheStore()
 
 
 @pytest.fixture

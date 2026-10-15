@@ -8,6 +8,7 @@ from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
+from mirage.workspace import Workspace
 from tests.fixtures.driver_ops import ops
 
 
@@ -54,18 +55,11 @@ async def _bytes(source):
 
 @pytest.mark.asyncio
 async def test_grep_recursive_matches_content():
-    res = _res()
-    p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
-    source, _io = await _command(res, "grep")(
-        res.accessor,
-        [p],
-        ["bananas"],
-        CommandOpts(
-            index=ops(res).index, io=command_io(res), flags={"recursive": True}
-        ),
-    )
-    out = await _bytes(source)
-    assert b"bananas" in out
+    # A memory reads from the row the scoped listing names, which the
+    # mount hands it.
+    ws = Workspace({"/mem/": _res()})
+    result = await ws.shell("grep -r bananas /mem")
+    assert "bananas" in await result.stdout_str()
 
 
 @pytest.mark.asyncio

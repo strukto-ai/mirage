@@ -12,16 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { NotionTransport } from './client.ts'
 import { normalizeDatabase, toJsonBytes } from './normalize.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import { readdir as rawOperation } from './readdir.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
+import { NotionVFSBase } from '../../vfs/notion/notion.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { formatSegment } from './pathing.ts'
 import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
 
@@ -77,7 +77,7 @@ function topPage(id: string, title: string): Record<string, unknown> {
 describe('notion readdir root', () => {
   it('lists the pages and databases virtual roots without any API call', async () => {
     const transport = new FakeTransport()
-    const out = await readdir(makeAccessor(transport), spec('/'), undefined)
+    const out = await readdir(makeAccessor(transport), spec('/'))
     expect(out).toEqual(['/pages', '/databases'])
     expect(transport.invocations).toHaveLength(0)
   })
@@ -91,7 +91,6 @@ describe('notion readdir root', () => {
         directory: '/notion',
         vfsPath: mountKey('/notion', '/notion'),
       }),
-      undefined,
     )
     expect(out).toEqual(['/notion/pages', '/notion/databases'])
   })
@@ -100,9 +99,9 @@ describe('notion readdir root', () => {
     // Returning [] made `ls` and `tree` report a bogus path as
     // real-but-empty, and left `rg` without a message.
     const transport = new FakeTransport()
-    await expect(
-      readdir(makeAccessor(transport), spec('/no-id-here/'), undefined),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readdir(makeAccessor(transport), spec('/no-id-here/'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
     expect(transport.invocations).toHaveLength(0)
   })
 })
@@ -124,7 +123,7 @@ describe('notion readdir pages', () => {
       has_more: false,
       next_cursor: null,
     })
-    const out = await readdir(makeAccessor(transport), spec('/pages'), undefined)
+    const out = await readdir(makeAccessor(transport), spec('/pages'))
     expect(out).toEqual([`/pages/Top1__${TOP1_ID}`, `/pages/Top2__${TOP2_ID}`])
   })
 
@@ -142,40 +141,8 @@ describe('notion readdir pages', () => {
         directory: '/notion/pages',
         vfsPath: mountKey('/notion/pages', '/notion'),
       }),
-      undefined,
     )
     expect(out).toEqual([`/notion/pages/Top1__${TOP1_ID}`, `/notion/pages/Top2__${TOP2_ID}`])
-  })
-
-  it('returns prefixed entries from the index cache when present', async () => {
-    const transport = new FakeTransport()
-    transport.enqueue('API-post-search', {
-      results: [topPage(TOP1_ID, 'Top1')],
-      has_more: false,
-      next_cursor: null,
-    })
-    const idx = new RAMIndexCacheStore()
-    await readdir(makeAccessor(transport), spec('/pages'), idx)
-    expect(transport.invocations).toHaveLength(1)
-    const out = await readdir(makeAccessor(transport), spec('/pages'), idx)
-    expect([...out].sort()).toEqual([`/pages/Top1__${TOP1_ID}`])
-    expect(transport.invocations).toHaveLength(1)
-  })
-
-  it('keeps the mount prefix on warm index-cache hits', async () => {
-    const transport = new FakeTransport()
-    transport.enqueue('API-post-search', {
-      results: [topPage(TOP1_ID, 'Top1')],
-      has_more: false,
-      next_cursor: null,
-    })
-    const idx = new RAMIndexCacheStore()
-    const p = spec('/notion/pages', '/notion')
-    const cold = await readdir(makeAccessor(transport), p, idx)
-    const warm = await readdir(makeAccessor(transport), p, idx)
-    expect(warm).toEqual(cold)
-    expect(warm).toEqual([`/notion/pages/Top1__${TOP1_ID}`])
-    expect(transport.invocations).toHaveLength(1)
   })
 })
 
@@ -222,7 +189,7 @@ describe('notion readdir databases', () => {
       next_cursor: null,
     })
     transport.enqueue('API-retrieve-a-database', database())
-    const out = await readdir(makeAccessor(transport), spec('/databases'), undefined)
+    const out = await readdir(makeAccessor(transport), spec('/databases'))
     expect(out).toEqual([`/databases/Tasks__${DB_ID}`])
     expect(transport.invocations[0]?.args).toEqual({
       filter: { value: 'data_source', property: 'object' },
@@ -238,7 +205,7 @@ describe('notion readdir databases', () => {
     const transport = new FakeTransport()
     transport.enqueue('API-retrieve-a-database', database())
     const dirPath = `/databases/Tasks__${DB_ID}`
-    const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
+    const out = await readdir(makeAccessor(transport), spec(dirPath))
     expect(out).toEqual([`${dirPath}/database.json`, `${dirPath}/Tasks__${DS_ID}`])
   })
 
@@ -246,7 +213,7 @@ describe('notion readdir databases', () => {
     const transport = new FakeTransport()
     transport.enqueue('API-retrieve-a-data-source', dataSource())
     const dirPath = `/databases/Tasks__${DB_ID}/Tasks__${DS_ID}`
-    const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
+    const out = await readdir(makeAccessor(transport), spec(dirPath))
     expect(out).toEqual([`${dirPath}/data_source.json`, `${dirPath}/rows.jsonl`])
     expect(transport.invocations.map((call) => call.name)).toEqual(['API-retrieve-a-data-source'])
   })
@@ -270,7 +237,7 @@ describe('notion readdir databases', () => {
       next_cursor: null,
     })
     const dirPath = `/databases/Tasks__${DB_ID}/Tasks__${DS_ID}/Row_A__${TOP1_ID}`
-    const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
+    const out = await readdir(makeAccessor(transport), spec(dirPath))
     expect(out).toEqual([`${dirPath}/page.json`, `${dirPath}/Notes__${CHILD1_ID}`])
     expect(transport.invocations[1]?.args).toEqual({ block_id: TOP1_ID, page_size: 100 })
   })
@@ -290,12 +257,12 @@ describe('notion readdir databases', () => {
     })
     transport.enqueue('API-retrieve-a-database', database())
     transport.enqueue('API-retrieve-a-database', database())
-    const idx = new RAMIndexCacheStore()
-    await readdir(makeAccessor(transport), spec('/databases'), idx)
+    const vfs = new NotionVFSBase({ accessor: makeAccessor(transport) })
+    const ws = new Workspace({ '/': vfs })
     const dirPath = `/databases/Tasks__${DB_ID}`
-    await readdir(makeAccessor(transport), spec(dirPath), idx)
-    const lookup = await idx.get(`${dirPath}/database.json`)
-    expect(lookup.entry?.size).toBe(toJsonBytes(normalizeDatabase(database())).byteLength)
+    await ws.dispatch('readdir', dirPath)
+    const row = (await ws.dispatch('stat', `${dirPath}/database.json`)) as FileStat
+    expect(row.size).toBe(toJsonBytes(normalizeDatabase(database())).byteLength)
   })
 })
 
@@ -320,7 +287,7 @@ describe('notion readdir subtree', () => {
       next_cursor: null,
     })
     const dirPath = `/pages/Top1__${TOP1_ID}`
-    const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
+    const out = await readdir(makeAccessor(transport), spec(dirPath))
     expect(out).toEqual([
       `${dirPath}/page.json`,
       `${dirPath}/ChildA__${CHILD1_ID}`,
@@ -333,28 +300,11 @@ describe('notion readdir subtree', () => {
     })
   })
 
-  it('uses the index cache on the second call without invoking the transport', async () => {
-    const transport = new FakeTransport()
-    transport.enqueue('API-retrieve-block-children', {
-      results: [{ id: CHILD1_ID, type: 'child_page', child_page: { title: 'ChildA' } }],
-      has_more: false,
-      next_cursor: null,
-    })
-    const idx = new RAMIndexCacheStore()
-    const dirPath = `/pages/Top1__${TOP1_ID}`
-    const first = await readdir(makeAccessor(transport), spec(dirPath), idx)
-    expect(first).toEqual([`${dirPath}/page.json`, `${dirPath}/ChildA__${CHILD1_ID}`])
-    expect(transport.invocations).toHaveLength(1)
-    const second = await readdir(makeAccessor(transport), spec(dirPath), idx)
-    expect(transport.invocations).toHaveLength(1)
-    expect([...second].sort()).toEqual([...first].sort())
-  })
-
   it('throws ENOENT when the last segment is not a valid notion segment', async () => {
     const transport = new FakeTransport()
     let captured: unknown = null
     try {
-      await readdir(makeAccessor(transport), spec('/pages/no-id-here/'), undefined)
+      await readdir(makeAccessor(transport), spec('/pages/no-id-here/'))
     } catch (err) {
       captured = err
     }
@@ -379,7 +329,6 @@ describe('notion readdir subtree', () => {
         directory: dirPath,
         vfsPath: mountKey(dirPath, '/notion'),
       }),
-      undefined,
     )
     expect(out).toEqual([`${dirPath}/page.json`, `${dirPath}/ChildA__${CHILD1_ID}`])
   })
@@ -395,7 +344,7 @@ describe('notion readdir long child titles', () => {
       next_cursor: null,
     })
     const dirPath = `/pages/Top1__${TOP1_ID}`
-    const out = await readdir(makeAccessor(transport), spec(dirPath), undefined)
+    const out = await readdir(makeAccessor(transport), spec(dirPath))
     const child = out.find((p) => !p.endsWith('page.json'))?.slice(dirPath.length + 1)
 
     expect(child).toBe(formatSegment({ id: CHILD1_ID, title }))
@@ -403,25 +352,19 @@ describe('notion readdir long child titles', () => {
   })
 })
 
-async function readdir(accessor: NotionAccessor, path: PathSpec, index?: IndexCacheStore) {
-  const cache = index ?? new RAMIndexCacheStore()
-  const pieces = path.virtual.replace(/\/$/, '').split('/')
-  const count = pieces.length
-  for (let i = 1; i < count; i++) {
-    const key = pieces.slice(0, i + 1).join('/')
-    const name = pieces[i] ?? ''
-    if (name.includes('__') && (await cache.get(key)).entry == null)
-      await cache.setPartialDir(key.slice(0, key.lastIndexOf('/')) || '/', [
-        [
-          name,
-          new IndexEntry({
-            id: name.split('__').at(-1) ?? '',
-            name,
-            vfsName: name,
-            resourceType: 'notion/container',
-          }),
-        ],
-      ])
-  }
-  return rawOperation(accessor, path, cache)
+// A directory's children, as a command walks them, handed the rows the mount
+// would hand: the directory's and its folder's, as the listings above them
+// name them, for a directory an id names.
+async function readdir(accessor: NotionAccessor, path: PathSpec): Promise<string[]> {
+  const base = path.virtual.replace(/\/$/, '')
+  const pieces = base.split('/')
+  const row = (name: string) =>
+    name.includes('__') ? new FileStat({ name, type: FileType.DIRECTORY }) : null
+  const listed = await rawOperation(
+    accessor,
+    path,
+    row(pieces.at(-1) ?? ''),
+    row(pieces.at(-2) ?? ''),
+  )
+  return rowsOf(listed).map((child) => `${base}/${child.name}`)
 }

@@ -22,23 +22,24 @@ from mirage.core.email.client import (
 from mirage.core.email.readdir import readdir
 from mirage.core.email.render import message_json_bytes
 from mirage.core.email.scope import detect_scope
-from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _read_message(
     accessor: EmailAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
-    msg = await fetch_message(accessor, match.slots["folder"], entry.id)
+    msg = await fetch_message(
+        accessor, match.slots["folder"], str(entry.extra["uid"])
+    )
     return message_json_bytes(msg)
 
 
@@ -46,13 +47,13 @@ async def _read_attachment(
     accessor: EmailAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is None:
         raise enoent(path.virtual)
     data = await fetch_attachment(
-        accessor, match.slots["folder"], match.slots["uid"], entry.vfs_name
+        accessor, match.slots["folder"], match.slots["uid"], entry.name
     )
     if data is None:
         raise enoent(path.virtual)

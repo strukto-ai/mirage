@@ -13,33 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Literal, TypeAlias, TypeVar
+from typing import TypeAlias, TypeVar
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexEntry
+from mirage.types import FileStat
 
 A = TypeVar("A", bound=Accessor)
 
-DirRows: TypeAlias = dict[str, list[tuple[str, IndexEntry]]]
+DirRows: TypeAlias = dict[str, list[FileStat]]
 
-LoadRows: TypeAlias = Callable[[A, str], Awaitable[DirRows]]
-
-
-@dataclass(frozen=True)
-class ResolvedDirectory:
-    virtual_key: str
-    mount_prefix: str
-    is_dir: Literal[True] = True
-    children: list[str] | None = None
-
-
-@dataclass(frozen=True)
-class ResolvedFile:
-    virtual_key: str
-    mount_prefix: str
-    entry: IndexEntry
-    is_dir: Literal[False] = False
-
-
-ResolvedPath: TypeAlias = ResolvedDirectory | ResolvedFile
+LoadRows: TypeAlias = Callable[[A], Awaitable[DirRows]]

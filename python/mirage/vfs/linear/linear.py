@@ -15,13 +15,12 @@
 from typing import Any
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.read import read as _read
 from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.search import files_containing as _files_containing
 from mirage.core.linear.stat import stat as _stat
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.linear.prompt import PROMPT, WRITE_PROMPT
@@ -59,35 +58,33 @@ class LinearVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         return await _files_containing(
             self.accessor,
             text,
             [path],
-            index,
             ask_linear=whole_word and self.config.content_search,
         )
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        parent: FileStat | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path, None, parent)
         return slice_window(data, offset, size)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SlackAccessor, type SlackResourceLike } from '../../accessor/slack.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { SlackResponse, SlackTransport } from '../../core/slack/client.ts'
+import { FileStat, FileType } from '../../types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SlackVFSBase } from './slack.ts'
 
 export interface FakeCall {
@@ -46,66 +48,66 @@ class FakeSlackVFS extends SlackVFSBase implements SlackResourceLike {
   }
 }
 
-export function makeFakeVfs(transport: SlackTransport): SlackResourceLike {
+export function makeFakeVfs(transport: SlackTransport): SlackVFSBase {
   return new FakeSlackVFS(new SlackAccessor(transport))
 }
 
 export async function seedChannel(
-  index: RAMIndexCacheStore,
+  index: IndexCacheStore,
   prefix: string,
   channelDirname: string,
   channelId: string,
-  options: { dates?: string[]; remoteTime?: string } = {},
+  options: { dates?: string[] } = {},
 ): Promise<void> {
+  const extra = { channel_id: channelId }
   const channelsKey = `${prefix}/channels`
   await index.setDir(channelsKey, [
     [
       channelDirname,
-      new IndexEntry({
-        id: channelId,
-        name: channelDirname.split('__')[0] ?? channelDirname,
-        resourceType: 'slack/channel',
-        vfsName: channelDirname,
-        remoteTime: options.remoteTime ?? '0',
+      new FileStat({
+        name: channelDirname,
+        type: FileType.DIRECTORY,
+        extra: { ...extra, name: channelDirname.split('__')[0] ?? channelDirname, created: 0 },
       }),
     ],
   ])
-  const dates = options.dates
-  if (dates !== undefined) {
-    const childKey = `${prefix}/channels/${channelDirname}`
-    const dateEntries: [string, IndexEntry][] = dates.map((d) => [
-      d,
-      new IndexEntry({
-        id: `${channelId}:${d}`,
-        name: d,
-        resourceType: 'slack/date_dir',
-        vfsName: d,
-      }),
+  const dates = options.dates ?? []
+  const childKey = `${channelsKey}/${channelDirname}`
+  await index.setDir(
+    childKey,
+    dates.map((d) => [d, new FileStat({ name: d, type: FileType.DIRECTORY, extra })]),
+  )
+  for (const d of dates) {
+    const dateKey = `${childKey}/${d}`
+    await index.setDir(dateKey, [
+      ['chat.jsonl', new FileStat({ name: 'chat.jsonl', type: FileType.FILE, extra })],
+      [
+        'files',
+        new FileStat({ name: 'files', type: FileType.DIRECTORY, extra: { ...extra, date: d } }),
+      ],
     ])
-    await index.setDir(childKey, dateEntries)
-    for (const d of dates) {
-      const dateKey = `${childKey}/${d}`
-      await index.setDir(dateKey, [
-        [
-          'chat.jsonl',
-          new IndexEntry({
-            id: `${channelId}:${d}:chat`,
-            name: 'chat.jsonl',
-            resourceType: 'slack/chat_jsonl',
-            vfsName: 'chat.jsonl',
-          }),
-        ],
-        [
-          'files',
-          new IndexEntry({
-            id: `${channelId}:${d}:files`,
-            name: 'files',
-            resourceType: 'slack/files_dir',
-            vfsName: 'files',
-          }),
-        ],
-      ])
-      await index.setDir(`${dateKey}/files`, [])
-    }
+    await index.setDir(`${dateKey}/files`, [])
+  }
+}
+
+/**
+ * Run `line` in a workspace with the fake mounted at /mnt/slack and channel
+ * general__C1 listed with `dates`.
+ */
+export async function runSlack(
+  transport: FakeSlackTransport,
+  line: string,
+  dates: string[],
+): Promise<{ stdout: string; exitCode: number }> {
+  const ws = new Workspace(
+    { '/mnt/slack/': makeFakeVfs(transport) },
+    { shellParser: await getTestParser() },
+  )
+  try {
+    await seedChannel(ws.mount('/mnt/slack').index, '/mnt/slack', 'general__C1', 'C1', { dates })
+    const io = await ws.shell(line)
+    return { stdout: new TextDecoder().decode(io.stdout), exitCode: io.exitCode }
+  } finally {
+    await ws.close()
   }
 }

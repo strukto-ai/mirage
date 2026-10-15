@@ -1,6 +1,8 @@
 import pytest
 
 from mirage.core.dify import read, tree
+from mirage.vfs.dify import DifyVFS
+from tests.fixtures.mounted import Mounted
 
 from .conftest import list_basic_documents
 
@@ -16,28 +18,28 @@ async def iter_pages(config, document_id):
 
 @pytest.mark.asyncio
 async def test_read_bytes_uses_document_segments(
-    monkeypatch, dify_accessor, dify_index, guide_path
+    monkeypatch, dify_accessor, guide_path
 ):
     monkeypatch.setattr(tree, "list_all_documents", list_basic_documents)
     monkeypatch.setattr(read, "get_document_segments", get_segments)
 
-    data = await read.read(dify_accessor, guide_path, dify_index)
+    data = await Mounted(DifyVFS, dify_accessor, "/knowledge").read(guide_path)
 
     assert data == b"first\nsecond"
 
 
 @pytest.mark.asyncio
 async def test_read_stream_separates_pages_with_single_newline(
-    monkeypatch, dify_accessor, dify_index, guide_path
+    monkeypatch, dify_accessor, guide_path
 ):
     monkeypatch.setattr(tree, "list_all_documents", list_basic_documents)
     monkeypatch.setattr(read, "iter_segment_pages", iter_pages)
+    rows = await tree.load_tree(dify_accessor)
+    (row,) = rows["/guides"]
 
     chunks = [
         chunk
-        async for chunk in read.read_stream(
-            dify_accessor, guide_path, dify_index
-        )
+        async for chunk in read.read_stream(dify_accessor, guide_path, row)
     ]
 
     assert chunks == [b"first", b"\n", b"second"]

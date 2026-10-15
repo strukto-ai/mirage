@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.discord.read import follow as _follow
 from mirage.core.discord.read import read as _read
 from mirage.core.discord.read import read_many as _read_many
@@ -25,7 +24,7 @@ from mirage.core.discord.read import read_stream as _read_stream
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.stat import stat as _stat
 from mirage.core.time_range import TimeRange
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.discord.config import DiscordConfig
 from mirage.vfs.discord.prompt import PROMPT, WRITE_PROMPT
@@ -54,20 +53,23 @@ class DiscordVFS(BaseVFS):
         self.prompt = PROMPT + self.accessor.time_range.prompt()
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> bytes:
         if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read_range(self.accessor, path, index, offset, size)
+            return await _read(self.accessor, path, entry, parent)
+        return await _read_range(
+            self.accessor, path, offset, size, entry, parent
+        )
 
     async def read_many(
         self,
@@ -78,23 +80,32 @@ class DiscordVFS(BaseVFS):
         return await _read_many(self.accessor, paths, limit, index)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+        return _read_stream(self.accessor, path, entry, parent)
 
     async def follow(
         self,
         path: PathSpec,
         n: int,
         interval: float,
-        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> AsyncIterator[bytes] | None:
-        return await _follow(self.accessor, path, n, interval, index)
+        return await _follow(
+            self.accessor, path, n, interval, entry=entry, parent=parent
+        )
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry, parent)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

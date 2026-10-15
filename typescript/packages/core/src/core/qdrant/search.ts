@@ -13,20 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { type DirListing, type FileStat, FileType, type PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
-import { type ReaddirFn, resolveEntry } from '../hierarchy/probe.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import type { Row } from '../vector/types.ts'
 import { groupName, rowStem } from './naming.ts'
 import { fieldValue } from './payload.ts'
 import { renderJson, renderText } from './render.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
-// The files a listing renders from a point's payload, whose entries keep their
-// text; a blob is read as usual.
-export const ROW_FILES: ReadonlySet<string> = new Set(['qdrant/row_json', 'qdrant/row_text'])
+type Readdir = (accessor: QdrantAccessor, path: PathSpec) => Promise<FileStat[] | DirListing>
 
 /**
  * A ranked point's path below its collection, and its body: the source text
@@ -52,25 +48,23 @@ export function hit(accessor: QdrantAccessor, row: Row): [string[], Uint8Array] 
 /**
  * The files under `under` that may hold `text` in any case.
  *
- * The listing's scroll carries every payload, so each `.json` and `.txt` entry
+ * The listing's scroll carries every payload, so each `.json` and `.txt` row
  * keeps its rendered text, lowercased, and a file is read only when that text
- * holds `text`; a blob, or a file too large to keep, is always read. A read
- * fetches the point as it is now, so the text is checked against a listing
- * made for this search rather than the walk's, which may be older; a file that
- * listing no longer holds is read. null for a text that is not ASCII, whose
- * case a lowercased copy may not keep, or a listing that fails. Mirrors
- * Python's `files_containing`.
+ * holds `text`; a blob, or a file too large to keep, is always read. The walk
+ * lists each directory from the store, so the text is checked against the
+ * points as they are now. null for a text that is not ASCII, whose case a
+ * lowercased copy may not keep, or a listing that fails. Mirrors Python's
+ * `files_containing`.
  */
 export async function filesContaining(
-  readdir: ReaddirFn<QdrantAccessor>,
+  readdir: Readdir,
   accessor: QdrantAccessor,
   text: string,
   under: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   if (/[\u0080-\uffff]/.test(text)) return null
   try {
-    return await found(readdir, accessor, text.toLowerCase(), under, index)
+    return await found(readdir, accessor, text.toLowerCase(), under)
   } catch (err) {
     // the client rejects with a QdrantClient error, or the fetcher's error
     // with a status, when Qdrant refuses or times out, and fetch with a
@@ -87,29 +81,23 @@ export async function filesContaining(
 }
 
 async function found(
-  readdir: ReaddirFn<QdrantAccessor>,
+  readdir: Readdir,
   accessor: QdrantAccessor,
   needle: string,
   under: readonly PathSpec[],
-  index: IndexCacheStore | undefined,
-): Promise<PathSpec[] | null> {
-  const fresh = new RAMIndexCacheStore()
+): Promise<PathSpec[]> {
   const out: PathSpec[] = []
   const pending = [...under]
   for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
     const parent = rstripSlash(current.mountPath)
-    for (const listed of await readdir(accessor, current, index)) {
-      const child = mountedPath(current, `${parent}/${listed.slice(listed.lastIndexOf('/') + 1)}`)
-      const entry = await resolveEntry(readdir, accessor, child, index)
-      if (entry === null) return null
-      if (entry.resourceType.endsWith('/group')) {
+    for (const row of rowsOf(await readdir(accessor, current))) {
+      const child = mountedPath(current, `${parent}/${row.name}`)
+      if (row.type === FileType.DIRECTORY) {
         pending.push(child)
         continue
       }
-      if (ROW_FILES.has(entry.resourceType)) {
-        const kept = (await resolveEntry(readdir, accessor, child, fresh))?.extra.text
-        if (typeof kept === 'string' && !kept.includes(needle)) continue
-      }
+      const kept = row.extra.text
+      if (typeof kept === 'string' && !kept.includes(needle)) continue
       out.push(child)
     }
   }

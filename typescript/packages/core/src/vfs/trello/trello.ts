@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import { TrelloAccessor } from '../../accessor/trello.ts'
 
 import { HttpTrelloTransport } from '../../core/trello/client.ts'
 
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
-import { VFSName } from '../../types.ts'
+import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactTrelloConfig, type TrelloConfig, type TrelloConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
 import { read as trelloRead } from '../../core/trello/read.ts'
@@ -35,6 +35,13 @@ export interface TrelloVFSState {
 }
 
 export class TrelloVFS extends BaseVFS {
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['parent'],
+    stat: ['entry'],
+  } as const
+
   override readonly name: string = VFSName.TRELLO
   override readonly cachesReads: boolean = true
   override readonly prompt: string = PROMPT
@@ -70,28 +77,27 @@ export class TrelloVFS extends BaseVFS {
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
-    return trelloFilesContaining(this.accessor, text, [path], index)
+    return trelloFilesContaining(this.accessor, text, [path])
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return trelloReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return trelloReaddir(this.accessor, path, handed?.entry)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await trelloRead(this.accessor, path, index)
+    const data = await trelloRead(this.accessor, path, null, handed?.parent)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return trelloStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return trelloStat(this.accessor, path, handed?.entry)
   }
 
   override getState(): Promise<TrelloVFSState> {

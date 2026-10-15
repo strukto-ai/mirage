@@ -1,18 +1,18 @@
-from mirage.core.slug_tree.stat import directory_stat
-from mirage.core.slug_tree.types import ResolvedDirectory
-from mirage.types import FileType
+import pytest
+
+from mirage.core.slug_tree.stat import tree_stat
+from mirage.types import FileStat, FileType
+
+from .conftest import spec
 
 
-def test_directory_stat_names_the_mount_root_slash():
-    root = directory_stat(
-        ResolvedDirectory(virtual_key="/knowledge", mount_prefix="/knowledge/")
-    )
-    nested = directory_stat(
-        ResolvedDirectory(
-            virtual_key="/knowledge/guides", mount_prefix="/knowledge/"
-        )
-    )
+def test_tree_stat_names_the_root_slash_and_answers_rows():
+    root = tree_stat(spec("/knowledge"), None)
+    row = FileStat(name="guides", type=FileType.DIRECTORY)
 
-    assert (root.name, nested.name) == ("/", "guides")
-    assert nested.type == FileType.DIRECTORY
-    assert nested.extra == {"children_count": 0}
+    assert root.name == "/"
+    assert root.type == FileType.DIRECTORY
+    assert root.extra == {"children_count": 0}
+    assert tree_stat(spec("/knowledge/guides"), row) is row
+    with pytest.raises(FileNotFoundError):
+        tree_stat(spec("/knowledge/missing"), None)

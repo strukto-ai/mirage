@@ -12,34 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
-from mirage.core.postgres.readdir import entity_guard, readdir, schema_guard
+from mirage.core.postgres.readdir import EXTRAS, entity_guard, schema_guard
 from mirage.core.postgres.scope import detect_scope
-
-
-def _schema_extra(match: ScopeMatch) -> dict[str, str]:
-    return {"schema": match.slots["schema"]}
-
-
-def _kind_extra(match: ScopeMatch) -> dict[str, str]:
-    return {
-        "schema": match.slots["schema"],
-        "kind": match.slots["kind"],
-    }
-
-
-def _entity_extra(match: ScopeMatch) -> dict[str, str]:
-    return {
-        "schema": match.slots["schema"],
-        "kind": match.slots["kind"],
-        "name": match.slots["entity"],
-    }
-
 
 stat = make_stat(
     detect_scope,
-    readdir,
     guards={
         "schema": schema_guard,
         "kind": schema_guard,
@@ -48,12 +26,5 @@ stat = make_stat(
         "entity_semantic": entity_guard,
         "entity_rows": entity_guard,
     },
-    extras={
-        "schema": _schema_extra,
-        "kind": _kind_extra,
-        "entity": _entity_extra,
-        "entity_schema": _entity_extra,
-        "entity_semantic": _entity_extra,
-        "entity_rows": _entity_extra,
-    },
+    extras=EXTRAS,
 )

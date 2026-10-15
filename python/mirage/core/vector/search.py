@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.probe import A
 from mirage.core.vector.types import VectorTree
 from mirage.types import PathSpec
@@ -92,10 +91,7 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
     """
 
     async def search_many(
-        accessor: A,
-        paths: list[PathSpec],
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
+        accessor: A, paths: list[PathSpec], query: SearchQuery
     ) -> list[tuple[str, str]]:
         validate_options(query, {"top_k", "method", "threshold"})
         top_k = int_option(query, "top_k", tree.search_limit(accessor))
@@ -116,11 +112,8 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
         )
 
     async def search(
-        accessor: A,
-        path: PathSpec,
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
+        accessor: A, path: PathSpec, query: SearchQuery
     ) -> list[tuple[str, str]]:
-        return await search_many(accessor, [path], query, index)
+        return await search_many(accessor, [path], query)
 
     return SearchOps(search=search, search_many=search_many)

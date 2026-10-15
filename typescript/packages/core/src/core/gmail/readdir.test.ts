@@ -27,33 +27,21 @@ vi.mock('./labels.ts', async () => {
 })
 
 import { GmailAccessor } from '../../accessor/gmail.ts'
-import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { TokenManager } from '../google/client.ts'
 import * as labelsMod from './labels.ts'
 import * as messagesMod from './messages.ts'
 import { readdir } from './readdir.ts'
 
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
-  }
-}
-
 const ACCESSOR = new GmailAccessor({ tokenManager: {} as TokenManager, config: {} })
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/gmail') })
+}
+
+function row(name: string): FileStat {
+  return new FileStat({ name, type: FileType.DIRECTORY, extra: { label_id: 'INBOX' } })
 }
 
 describe('gmail readdir windows', () => {
@@ -67,23 +55,21 @@ describe('gmail readdir windows', () => {
     })
   })
 
-  it('writes a label and the day it seeds as windows', async () => {
+  it('lists a label as a window that seeds its days', async () => {
     // Both fetches stop at MAX_MESSAGES, so what they name is a window: a
     // message outside it has not gone anywhere.
-    const index = new WindowSpy()
-    for (const path of ['/gmail/INBOX', '/gmail/INBOX/2026-04-27']) {
-      await readdir(ACCESSOR, spec(path), index)
-    }
-    expect(index.windows.get('/gmail/INBOX')).toBe(true)
-    expect(index.windows.get('/gmail/INBOX/2026-04-27')).toBe(true)
+    const listing = await readdir(ACCESSOR, spec('/gmail/INBOX'), row('INBOX'))
+    expect(listing).toBeInstanceOf(DirListing)
+    expect((listing as DirListing).window).toBe(true)
+    expect([...(listing as DirListing).seeds.keys()]).toEqual(['2026-04-27'])
   })
 
-  it('writes a day listed on its own as a window', async () => {
+  it('lists a day on its own as a window', async () => {
     // The label listing seeds its days, so a day read after it never reaches
     // the day lister; listing the day first is what exercises that lister.
-    const index = new WindowSpy()
-    await readdir(ACCESSOR, spec('/gmail/INBOX/2026-04-27'), index)
-    expect(index.windows.has('/gmail/INBOX')).toBe(false)
-    expect(index.windows.get('/gmail/INBOX/2026-04-27')).toBe(true)
+    const listing = await readdir(ACCESSOR, spec('/gmail/INBOX/2026-04-27'), row('2026-04-27'))
+    expect(listing).toBeInstanceOf(DirListing)
+    expect((listing as DirListing).window).toBe(true)
+    expect((listing as DirListing).entries.map((one) => one.name)).toEqual(['Hi_27__x1.gmail.json'])
   })
 })

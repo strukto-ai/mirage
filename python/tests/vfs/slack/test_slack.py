@@ -17,8 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mirage.cache.index import IndexEntry
-from mirage.types import VFSName
+from mirage.types import FileStat, FileType, VFSName
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.slack.config import SlackConfig
 from mirage.vfs.slack.slack import SlackVFS
@@ -83,17 +82,33 @@ async def test_cancel_cat_releases_stalled_attachment(
     )
     ws = Workspace({"/chat": SlackVFS(config)})
     path = "/chat/channels/general__C1/2026-04-24/files/report__F1.txt"
-    await ws.mount("/chat").index.set_dir(
-        path.rsplit("/", 1)[0],
+    files = path.rsplit("/", 1)[0]
+    index = ws.mount("/chat").index
+    await index.set_dir(
+        files.rsplit("/", 1)[0],
+        [
+            (
+                "files",
+                FileStat(
+                    name="files",
+                    type=FileType.DIRECTORY,
+                    extra={"channel_id": "C1"},
+                ),
+            )
+        ],
+    )
+    await index.set_dir(
+        files,
         [
             (
                 "report__F1.txt",
-                IndexEntry(
-                    id="F1",
-                    name="report.txt",
-                    vfs_name="report__F1.txt",
-                    resource_type="slack/file",
-                    extra={"url_private_download": "https://cdn.test/report"},
+                FileStat(
+                    name="report__F1.txt",
+                    type=FileType.FILE,
+                    extra={
+                        "file_id": "F1",
+                        "url_private_download": "https://cdn.test/report",
+                    },
                 ),
             )
         ],

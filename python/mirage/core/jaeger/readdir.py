@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.jaeger import JaegerAccessor
-from mirage.cache.index import IndexEntry
-from mirage.core.hierarchy.readdir import DirListing, make_readdir
+from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.jaeger.client import (
     fetch_operations,
@@ -29,6 +28,7 @@ from mirage.core.jaeger.scope import (
 )
 from mirage.core.render.json import json_bytes
 from mirage.errors.fs import enoent
+from mirage.types import DirListing, FileStat, FileType
 
 
 async def assert_service(
@@ -59,52 +59,45 @@ async def service_guard(
     await assert_service(accessor, match.slots["service"], virtual)
 
 
+def _service_extra(match: ScopeMatch) -> dict[str, str]:
+    return {"service": match.slots["service"]}
+
+
+def _trace_extra(match: ScopeMatch) -> dict[str, str]:
+    return {"trace_id": match.slots["trace_id"]}
+
+
+# What each kind's stat carries in ``extra``, listed or not.
+EXTRAS = {
+    "service": _service_extra,
+    "trace": _trace_extra,
+}
+
+
 async def _list_services(
     accessor: JaegerAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     services = await fetch_services(accessor)
     return [
-        (
-            service,
-            IndexEntry(
-                id=service,
-                name=service,
-                resource_type="jaeger/service",
-                vfs_name=service,
-            ),
-        )
-        for service in services
+        FileStat(name=service, type=FileType.DIRECTORY) for service in services
     ]
 
 
 async def _list_service(
     accessor: JaegerAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     service = match.slots["service"]
     # One operations call per service directory actually entered: nothing
     # in the services listing carries operation names, so operations.json
     # can only be sized here, and only for services the caller opens.
     operations = await fetch_operations(accessor, service)
     return [
-        (
-            OPERATIONS_FILE,
-            IndexEntry(
-                id=f"{service}/operations",
-                name=OPERATIONS_FILE,
-                resource_type="jaeger/operations",
-                vfs_name=OPERATIONS_FILE,
-                size=len(json_bytes(operations)),
-            ),
+        FileStat(
+            name=OPERATIONS_FILE,
+            type=FileType.FILE,
+            size=len(json_bytes(operations)),
         ),
-        (
-            "traces",
-            IndexEntry(
-                id=f"{service}/traces",
-                name="traces",
-                resource_type="jaeger/traces_dir",
-                vfs_name="traces",
-            ),
-        ),
+        FileStat(name="traces", type=FileType.DIRECTORY),
     ]
 
 
@@ -119,27 +112,25 @@ async def _list_traces(
         from_timestamp=accessor.config.default_from_timestamp,
         to_timestamp=accessor.config.default_to_timestamp,
     )
-    entries: list[tuple[str, IndexEntry]] = []
+    rows: list[FileStat] = []
     for trace in traces:
         trace_id = str(trace.get("traceID", ""))
         if not is_trace_id(trace_id):
             continue
-        filename = f"{trace_id}.json"
         # The search endpoint returns complete trace documents, so the
         # rendered size is free here. Span order may differ from the
         # by-id fetch, but reordering the same spans leaves the byte
         # length equal.
-        entry = IndexEntry(
-            id=trace_id,
-            name=trace_id,
-            resource_type="jaeger/trace",
-            vfs_name=filename,
-            size=len(json_bytes(trace)),
+        rows.append(
+            FileStat(
+                name=f"{trace_id}.json",
+                type=FileType.FILE,
+                size=len(json_bytes(trace)),
+            )
         )
-        entries.append((filename, entry))
     # The newest default_trace_limit traces: one that ages out of the page
     # is still in Jaeger, so the listing evicts nothing.
-    return DirListing(entries=entries, window=True)
+    return DirListing(entries=rows, window=True)
 
 
 readdir = make_readdir(
@@ -154,4 +145,5 @@ readdir = make_readdir(
         "service": service_guard,
         "traces": service_guard,
     },
+    extras=EXTRAS,
 )

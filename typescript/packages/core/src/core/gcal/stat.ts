@@ -13,30 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GCalAccessor } from '../../accessor/gcal.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat } from '../hierarchy/stat.ts'
-import { calendarIndex, readdir, bucketZone, scopedBucket } from './readdir.ts'
+import { calendarIndex, bucketZone, scopedBucket } from './readdir.ts'
 import { detectScope } from './scope.ts'
-
-function dirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
-}
-
-function fileStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: ContentType.JSON,
-    modified: entry.remoteTime,
-    size: entry.size,
-    extra: { event_id: entry.id, ...entry.extra },
-  })
-}
 
 /**
  * Stat a bucket directory, which resolves whether or not it is listed.
@@ -50,24 +32,13 @@ async function statBucket(
   accessor: GCalAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<FileStat> {
   const calendars = await calendarIndex(accessor)
   scopedBucket(accessor, match.slots.bucket ?? '', bucketZone(accessor, calendars), path.virtual)
-  const entry = await resolveEntry(readdir, accessor, path, index)
-  if (entry !== null) return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
-  // Ask the calendar list rather than the index: the index only knows the
-  // calendar once the ROOT has been listed, which a stat of a bucket two
-  // levels down never triggers.
+  if (entry !== null) return entry
   if (!calendars.has(match.slots.calendar ?? '')) throw enoent(path.virtual)
   return new FileStat({ name: match.slots.bucket ?? '', type: FileType.DIRECTORY })
 }
 
-export const stat = makeStat(detectScope, readdir, {
-  entryStats: {
-    calendar: dirStat,
-    calendar_json: fileStat,
-    event: fileStat,
-  },
-  overrides: { bucket: statBucket },
-})
+export const stat = makeStat(detectScope, { overrides: { bucket: statBucket } })

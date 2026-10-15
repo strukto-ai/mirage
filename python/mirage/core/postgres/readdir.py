@@ -13,12 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.postgres import client
 from mirage.core.postgres.scope import ENTITY_FILES, KIND_DIRS, detect_scope
 from mirage.errors.fs import enoent
+from mirage.types import FileStat, FileType
 
 
 async def schema_guard(
@@ -56,57 +56,63 @@ async def entity_guard(
         raise enoent(virtual)
 
 
+def _schema_extra(match: ScopeMatch) -> dict[str, str]:
+    return {"schema": match.slots["schema"]}
+
+
+def _kind_extra(match: ScopeMatch) -> dict[str, str]:
+    return {
+        "schema": match.slots["schema"],
+        "kind": match.slots["kind"],
+    }
+
+
+def _entity_extra(match: ScopeMatch) -> dict[str, str]:
+    return {
+        "schema": match.slots["schema"],
+        "kind": match.slots["kind"],
+        "name": match.slots["entity"],
+    }
+
+
+# What each kind's stat carries in ``extra``, listed or not.
+EXTRAS = {
+    "schema": _schema_extra,
+    "kind": _kind_extra,
+    "entity": _entity_extra,
+    "entity_schema": _entity_extra,
+    "entity_semantic": _entity_extra,
+    "entity_rows": _entity_extra,
+}
+
+
+def _dirs(names: list[str] | tuple[str, ...]) -> list[FileStat]:
+    return [FileStat(name=name, type=FileType.DIRECTORY) for name in names]
+
+
 async def _list_root(
     accessor: PostgresAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     pool = await accessor.pool()
     async with pool.acquire() as conn:
         schemas = await client.list_schemas(conn, accessor.config.schemas)
-    entries: list[tuple[str, IndexEntry]] = [
-        (
-            "database.json",
-            IndexEntry(
-                id="database.json",
-                name="database.json",
-                resource_type="postgres/database_json",
-                vfs_name="database.json",
-            ),
-        )
+    return [
+        FileStat(name="database.json", type=FileType.FILE),
+        *_dirs(schemas),
     ]
-    for s in schemas:
-        entries.append(
-            (
-                s,
-                IndexEntry(
-                    id=s, name=s, resource_type="postgres/schema", vfs_name=s
-                ),
-            )
-        )
-    return entries
 
 
 async def _list_schema(
     accessor: PostgresAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     # tables/ and views/ exist by construction under every schema, the
     # same way the entity files below do under every entity.
-    return [
-        (
-            name,
-            IndexEntry(
-                id=name,
-                name=name,
-                resource_type="postgres/kind",
-                vfs_name=name,
-            ),
-        )
-        for name in KIND_DIRS
-    ]
+    return _dirs(KIND_DIRS)
 
 
 async def _list_entities(
     accessor: PostgresAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     schema = match.slots["schema"]
     kind = match.slots["kind"]
     pool = await accessor.pool()
@@ -117,32 +123,13 @@ async def _list_entities(
             views = await client.list_views(conn, schema)
             mviews = await client.list_matviews(conn, schema)
             names = sorted(set(views) | set(mviews))
-    return [
-        (
-            n,
-            IndexEntry(
-                id=n, name=n, resource_type=f"postgres/{kind[:-1]}", vfs_name=n
-            ),
-        )
-        for n in names
-    ]
+    return _dirs(names)
 
 
 async def _list_entity_files(
     accessor: PostgresAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
-    return [
-        (
-            name,
-            IndexEntry(
-                id=name,
-                name=name,
-                resource_type="postgres/entity_file",
-                vfs_name=name,
-            ),
-        )
-        for name in ENTITY_FILES
-    ]
+) -> list[FileStat]:
+    return [FileStat(name=name, type=FileType.FILE) for name in ENTITY_FILES]
 
 
 readdir = make_readdir(
@@ -163,4 +150,5 @@ readdir = make_readdir(
         "kind": schema_guard,
         "entity": entity_guard,
     },
+    extras=EXTRAS,
 )

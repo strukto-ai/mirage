@@ -13,13 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { fileEntry, joinLines } from '../slug_tree/read.ts'
 import { scalarString } from '../slug_tree/rows.ts'
 import { getDocumentSegments, iterSegmentPages } from './client.ts'
-import { DIFY_TREE } from './tree.ts'
 
 const ENC = new TextEncoder()
 
@@ -37,17 +35,17 @@ export function segmentText(segment: Record<string, unknown>): string {
  * Args:
  *   accessor: Dify accessor.
  *   path: the path to read.
- *   index: listing cache, consulted for the entry.
+ *   entry: what is at the path.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
 export async function read(
   accessor: DifyAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
-  const entry = await fileEntry(DIFY_TREE, accessor, path, index)
-  const segments = await getDocumentSegments(accessor, entry.id)
+  const found = fileEntry(path, entry)
+  const segments = await getDocumentSegments(accessor, String(found.extra.document_id))
   const rendered = ENC.encode(segments.map((segment) => segmentText(segment)).join('\n'))
   return sliceWindow(rendered, options?.offset ?? 0, options?.size ?? null)
 }
@@ -55,10 +53,10 @@ export async function read(
 export async function* readStream(
   accessor: DifyAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
 ): AsyncIterable<Uint8Array> {
-  const entry = await fileEntry(DIFY_TREE, accessor, path, index)
-  yield* joinLines(segmentTexts(accessor, entry.id))
+  const found = fileEntry(path, entry)
+  yield* joinLines(segmentTexts(accessor, String(found.extra.document_id)))
 }
 
 async function* segmentTexts(accessor: DifyAccessor, documentId: string): AsyncIterable<string> {

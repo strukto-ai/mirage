@@ -42,7 +42,6 @@ import {
 } from './normalize.ts'
 import { filteredTeams } from './readdir.ts'
 import { detectScope } from './scope.ts'
-import { stat } from './stat.ts'
 
 function pickString(record: Record<string, unknown>, key: string): string {
   const value = record[key]
@@ -161,5 +160,5 @@ export const read = makeRead<LinearAccessor>(
     cycle: readCycle,
     document: readDocument,
   },
-  { stat },
+  { parented: true },
 )

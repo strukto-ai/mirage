@@ -13,45 +13,39 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Mem0Accessor } from '../../accessor/mem0.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonBytes } from '../render/json.ts'
 import { getAllMemories } from './client.ts'
 import { detectScope } from './scope.ts'
 
-async function listMemories(
-  accessor: Mem0Accessor,
-  _match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
-  const entries: [string, IndexEntry][] = []
-  for (const memory of await getAllMemories(accessor)) {
-    const memoryId = String(memory.id)
-    const filename = `${memoryId}.json`
-    entries.push([
-      filename,
-      new IndexEntry({
-        id: memoryId,
-        name: filename,
-        resourceType: 'mem0/memory',
-        vfsName: filename,
-        size: jsonBytes(memory).length,
-        remoteTime:
-          typeof memory.updated_at === 'string'
-            ? memory.updated_at
-            : typeof memory.created_at === 'string'
-              ? memory.created_at
-              : '',
-        extra: { memory },
-      }),
-    ])
-  }
-  return entries
+/**
+ * A memory's file as its listing names it, carrying the memory.
+ *
+ * The listing carries every payload, so the row holds the memory a read
+ * renders and the read costs no call of its own. Mirrors `memory_row` in
+ * `mirage/core/mem0/readdir.py`.
+ */
+export function memoryRow(memory: Record<string, unknown>): FileStat {
+  return new FileStat({
+    name: `${String(memory.id)}.json`,
+    type: FileType.FILE,
+    content: ContentType.JSON,
+    size: jsonBytes(memory).length,
+    modified:
+      typeof memory.updated_at === 'string' && memory.updated_at !== ''
+        ? memory.updated_at
+        : typeof memory.created_at === 'string' && memory.created_at !== ''
+          ? memory.created_at
+          : null,
+    extra: { created_at: memory.created_at, updated_at: memory.updated_at, memory },
+  })
+}
+
+async function listMemories(accessor: Mem0Accessor, _match: ScopeMatch): Promise<FileStat[]> {
+  return (await getAllMemories(accessor)).map(memoryRow)
 }
 
 export const readdir = makeReaddir<Mem0Accessor>(detectScope, {
@@ -65,20 +59,12 @@ export const readdir = makeReaddir<Mem0Accessor>(detectScope, {
  * Which memories exist is a function of the configured entity filter, and the
  * listing is the one place that filter is applied: fetching by the id in the
  * file name served a memory of any user, agent or run the API key reaches,
- * while `ls` hid it. The listing carries every payload, so a warm index
- * answers with no call and a cold one costs the listing it would have cost
- * `ls`. Mirrors `listed_memory` in `mirage/core/mem0/readdir.py`.
+ * while `ls` hid it. The mount hands the row the listing holds, which carries
+ * the memory. Mirrors `listed_memory` in `mirage/core/mem0/readdir.py`.
  */
-export async function listedMemory(
-  accessor: Mem0Accessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<Record<string, unknown>> {
-  if (detectScope(path).kind !== 'memory') throw enoent(path)
-  // resolveEntry reads back what its warm just listed, so a caller with no
-  // cache still needs one for the duration of the call.
-  const entry = await resolveEntry(readdir, accessor, path, index ?? new RAMIndexCacheStore())
-  const memory = entry?.extra.memory
+export function listedMemory(path: PathSpec, entry: FileStat | null): Record<string, unknown> {
+  if (detectScope(path).kind !== 'memory' || entry === null) throw enoent(path)
+  const memory = entry.extra.memory
   if (
     memory === null ||
     memory === undefined ||

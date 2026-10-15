@@ -14,12 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { LinearAccessor } from '../../accessor/linear.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { LinearVFS } from '../../vfs/linear/linear.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { LinearTransport } from './client.ts'
-import { read } from './read.ts'
-import { readdir } from './readdir.ts'
-import { stat } from './stat.ts'
 
 const TEAMS = [
   { id: 'TEAM1', key: 'ENG', name: 'Engineering' },
@@ -41,10 +38,6 @@ class TeamsTransport implements LinearTransport {
   }
 }
 
-function spec(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, vfsPath: virtual.replace(/^\//, '') })
-}
-
 describe('linear read', () => {
   // The teams listing drops a team `teamIds` leaves out, and the issue read
   // used to fetch straight by the id in the path: `cat` served an issue of a
@@ -52,16 +45,17 @@ describe('linear read', () => {
   it('refuses a team outside teamIds on every surface', async () => {
     const transport = new TeamsTransport()
     const accessor = new LinearAccessor(transport, { teamIds: ['TEAM1'] })
-    const index = new RAMIndexCacheStore()
-    const secret = '/teams/FIN__Finance__TEAM2'
-    const issueJson = spec(`${secret}/issues/FIN-9__ISSUE9/issue.json`)
-    for (const surface of [read, stat]) {
-      await expect(surface(accessor, issueJson, index)).rejects.toMatchObject({ code: 'ENOENT' })
+    const vfs = Object.assign(new LinearVFS({ apiKey: 'lin_api_test' }), { accessor })
+    const ws = new Workspace({ '/linear/': vfs })
+    const secret = '/linear/teams/FIN__Finance__TEAM2'
+    const issueJson = `${secret}/issues/FIN-9__ISSUE9/issue.json`
+    for (const op of ['read', 'stat']) {
+      await expect(ws.dispatch(op, issueJson)).rejects.toMatchObject({ code: 'ENOENT' })
     }
-    await expect(readdir(accessor, spec(secret), index)).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(
-      read(accessor, spec(`${secret}/members/Eve__U9.json`), index),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(ws.dispatch('readdir', secret)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(ws.dispatch('read', `${secret}/members/Eve__U9.json`)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
     expect(transport.asked).toEqual([])
   })
 })

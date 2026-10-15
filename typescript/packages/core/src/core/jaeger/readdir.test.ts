@@ -14,9 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { JaegerAccessor, type JaegerAccessorConfig } from '../../accessor/jaeger.ts'
-import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { DirListing, FileType, PathSpec, type FileStat } from '../../types.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { JaegerTransport } from './client.ts'
 
@@ -45,55 +44,36 @@ function accessor(transport: JaegerTransport, config: JaegerAccessorConfig = {})
   return new JaegerAccessor(transport, config)
 }
 
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
-  }
-}
-
 function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: stripSlash(virtual) })
 }
 
 import { readdir } from './readdir.ts'
+
+function names(listed: readonly FileStat[] | DirListing): string[] {
+  return rowsOf(listed).map((row) => row.name)
+}
 import { jsonBytes } from '../render/json.ts'
 
 const SERVICES = { '/api/services': { data: ['checkout', 'search'] } }
 
 describe('jaeger readdir', () => {
   it('lists the top level', async () => {
-    const out = await readdir(
-      accessor(new RecordingTransport({})),
-      spec('/'),
-      new RAMIndexCacheStore(),
-    )
-    expect(out).toEqual(['/services'])
+    const out = await readdir(accessor(new RecordingTransport({})), spec('/'))
+    expect(names(out)).toEqual(['services'])
   })
 
   it('lists services', async () => {
-    const out = await readdir(
-      accessor(new RecordingTransport(SERVICES)),
-      spec('/services'),
-      new RAMIndexCacheStore(),
-    )
-    expect(out).toEqual(['/services/checkout', '/services/search'])
+    const out = await readdir(accessor(new RecordingTransport(SERVICES)), spec('/services'))
+    expect(names(out)).toEqual(['checkout', 'search'])
   })
 
   it("lists a service's children", async () => {
     const out = await readdir(
       accessor(new RecordingTransport(SERVICES)),
       spec('/services/checkout'),
-      new RAMIndexCacheStore(),
     )
-    expect(out).toEqual(['/services/checkout/operations.json', '/services/checkout/traces'])
+    expect(names(out)).toEqual(['operations.json', 'traces'])
   })
 
   it('stores the rendered operations size on the service listing', async () => {
@@ -105,32 +85,16 @@ describe('jaeger readdir', () => {
       ...SERVICES,
       '/api/operations': { data: operations },
     })
-    const idx = new RAMIndexCacheStore()
-    await readdir(accessor(transport), spec('/services/checkout'), idx)
-    const lookup = await idx.get('/services/checkout/operations.json')
-    expect(lookup.entry?.size).toBe(jsonBytes(operations).byteLength)
-  })
-
-  it('fetches operations once per service directory', async () => {
-    const transport = new RecordingTransport({
-      ...SERVICES,
-      '/api/operations': { data: [{ name: 'POST /checkout' }] },
-    })
-    const idx = new RAMIndexCacheStore()
-    await readdir(accessor(transport), spec('/services/checkout'), idx)
-    await readdir(accessor(transport), spec('/services/checkout'), idx)
-    expect(transport.calls.filter((c) => c.path === '/api/operations')).toHaveLength(1)
+    const out = rowsOf(await readdir(accessor(transport), spec('/services/checkout')))
+    expect(out[0]?.size).toBe(jsonBytes(operations).byteLength)
+    expect(out[1]?.type).toBe(FileType.DIRECTORY)
   })
 
   it('raises ENOENT for an unknown service', async () => {
     // The operations endpoint answers 200 with an empty list for a service
     // that was never seen, so existence must come from the service list.
     await expect(
-      readdir(
-        accessor(new RecordingTransport(SERVICES)),
-        spec('/services/nope'),
-        new RAMIndexCacheStore(),
-      ),
+      readdir(accessor(new RecordingTransport(SERVICES)), spec('/services/nope')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
@@ -139,15 +103,8 @@ describe('jaeger readdir', () => {
       ...SERVICES,
       '/api/traces': { data: [{ traceID: TRACE_A }, { traceID: TRACE_B }] },
     })
-    const out = await readdir(
-      accessor(transport),
-      spec('/services/checkout/traces'),
-      new RAMIndexCacheStore(),
-    )
-    expect(out).toEqual([
-      `/services/checkout/traces/${TRACE_A}.json`,
-      `/services/checkout/traces/${TRACE_B}.json`,
-    ])
+    const out = await readdir(accessor(transport), spec('/services/checkout/traces'))
+    expect(names(out)).toEqual([`${TRACE_A}.json`, `${TRACE_B}.json`])
   })
 
   it('stores the rendered trace size on each listing entry', async () => {
@@ -157,10 +114,9 @@ describe('jaeger readdir', () => {
       processes: { p1: { serviceName: 'checkout' } },
     }
     const transport = new RecordingTransport({ ...SERVICES, '/api/traces': { data: [trace] } })
-    const idx = new RAMIndexCacheStore()
-    await readdir(accessor(transport), spec('/services/checkout/traces'), idx)
-    const lookup = await idx.get(`/services/checkout/traces/${TRACE_A}.json`)
-    expect(lookup.entry?.size).toBe(jsonBytes(trace).byteLength)
+    const out = rowsOf(await readdir(accessor(transport), spec('/services/checkout/traces')))
+    expect(out[0]?.size).toBe(jsonBytes(trace).byteLength)
+    expect(out[0]?.extra).toEqual({ trace_id: TRACE_A })
   })
 
   it('skips malformed trace ids', async () => {
@@ -168,12 +124,8 @@ describe('jaeger readdir', () => {
       ...SERVICES,
       '/api/traces': { data: [{ traceID: TRACE_A }, { traceID: 'not-an-id' }, {}] },
     })
-    const out = await readdir(
-      accessor(transport),
-      spec('/services/checkout/traces'),
-      new RAMIndexCacheStore(),
-    )
-    expect(out).toEqual([`/services/checkout/traces/${TRACE_A}.json`])
+    const out = await readdir(accessor(transport), spec('/services/checkout/traces'))
+    expect(names(out)).toEqual([`${TRACE_A}.json`])
   })
 
   it('threads the configured window and limit', async () => {
@@ -181,7 +133,6 @@ describe('jaeger readdir', () => {
     await readdir(
       accessor(transport, { defaultTraceLimit: 5, defaultFromTimestamp: '2026-01-01T00:00:00Z' }),
       spec('/services/checkout/traces'),
-      new RAMIndexCacheStore(),
     )
     const call = transport.calls.find((c) => c.path === '/api/traces')
     expect(call?.query?.limit).toBe(5)
@@ -190,12 +141,10 @@ describe('jaeger readdir', () => {
 
   it('raises ENOENT for a dotfile and an unknown path', async () => {
     const t = new RecordingTransport(SERVICES)
-    await expect(
-      readdir(accessor(t), spec('/services/.hidden'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(
-      readdir(accessor(t), spec('/traces'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readdir(accessor(t), spec('/services/.hidden'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(readdir(accessor(t), spec('/traces'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
@@ -203,13 +152,12 @@ describe('jaeger trace window', () => {
   it('writes a trace listing as a window', async () => {
     // The listing is the newest defaultTraceLimit traces; an older trace
     // that falls off it is still in Jaeger.
-    const index = new WindowSpy()
     const transport = new RecordingTransport({
       ...SERVICES,
       '/api/traces': { data: [{ traceID: TRACE_A }] },
     })
-    const out = await readdir(accessor(transport), spec('/services/checkout/traces'), index)
-    expect(out).toEqual([`/services/checkout/traces/${TRACE_A}.json`])
-    expect(index.windows.get('/services/checkout/traces')).toBe(true)
+    const out = await readdir(accessor(transport), spec('/services/checkout/traces'))
+    expect(out).toBeInstanceOf(DirListing)
+    expect((out as DirListing).window).toBe(true)
   })
 })

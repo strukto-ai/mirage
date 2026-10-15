@@ -22,11 +22,13 @@ from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.listing import (
+    beyond_window,
     entry_at,
     index_key,
     keep_listing,
     stored_listing,
     stored_stat,
+    stored_tree,
 )
 
 
@@ -355,3 +357,89 @@ def test_an_index_key_is_the_virtual_path_and_a_glob_keys_its_directory():
         pattern="*.txt",
     )
     assert index_key("/m/", glob) == "/m/a"
+
+
+@pytest.mark.asyncio
+async def test_a_window_proves_nothing_absent_and_answers_no_glob():
+    index = RAMIndexCacheStore()
+    day = FileStat(name="d3", type=FileType.DIRECTORY)
+    await keep_listing(index, "/w", DirListing([day], window=True))
+    assert await stored_listing(index, "/w") == ["/w/d3"]
+    assert await stored_listing(index, "/w", glob=True) is None
+    assert await stored_stat(index, "/w/d1") is None
+    assert await beyond_window(index, "/w/d1")
+    assert not await beyond_window(index, "/w/d3")
+    assert await stored_tree(index, "/w") is None
+
+
+class Days(BaseVFS):
+    """A channel whose listing is a window of recent days, as Slack's is:
+    a day outside it is still there when its channel is."""
+
+    name = "days"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[str] = []
+
+    async def readdir(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        key = path.vfs_path.strip("/")
+        self.calls.append(f"list {key}")
+        if not key:
+            return [FileStat(name="chan", type=FileType.DIRECTORY)]
+        if key == "chan":
+            return DirListing(
+                [FileStat(name="d3", type=FileType.DIRECTORY)], window=True
+            )
+        raise FileNotFoundError(path.virtual)
+
+    async def stat(
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
+    ) -> FileStat:
+        key = path.vfs_path.strip("/")
+        self.calls.append(f"stat {key}")
+        if not key:
+            return FileStat(name="/", type=FileType.DIRECTORY)
+        if entry is not None:
+            return entry
+        name = key.rsplit("/", 1)[-1]
+        if parent is not None and name.startswith("d"):
+            return FileStat(name=name, type=FileType.DIRECTORY)
+        raise FileNotFoundError(path.virtual)
+
+
+@pytest.mark.asyncio
+async def test_a_name_beyond_a_window_is_the_backends_to_answer():
+    store = Days()
+    ws = Workspace({"/w/": (store, MountMode.READ)})
+    try:
+        await ws.dispatch("readdir", _at("/w/chan"))
+        store.calls.clear()
+        day, _ = await ws.dispatch("stat", _at("/w/chan/d1"))
+        assert day.type is FileType.DIRECTORY
+        # The window does not name d1, so the backend answers it, handed
+        # the channel its listing names: no listing is asked again.
+        assert store.calls and all(c == "stat chan/d1" for c in store.calls)
+        with pytest.raises(FileNotFoundError):
+            await ws.dispatch("stat", _at("/w/chan/x1"))
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_root_stat_lists_nothing_outside_the_mount():
+    store = Days()
+    ws = Workspace({"/m/w/": (store, MountMode.READ)})
+    try:
+        root, _ = await ws.dispatch("stat", _at("/m/w"))
+        assert root.type is FileType.DIRECTORY
+        # The root holds itself, so the parent a stat is handed asks no
+        # listing.
+        assert store.calls == ["stat "]
+    finally:
+        await ws.close()

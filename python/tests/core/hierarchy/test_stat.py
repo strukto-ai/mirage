@@ -16,29 +16,14 @@ import asyncio
 
 import pytest
 
-from mirage.cache.index import IndexCacheStore
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.hierarchy.stat import make_stat
+from mirage.core.hierarchy.stat import entry_stat, make_stat
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from tests.core.hierarchy.conftest import (
     FakeAccessor,
     detect_scope,
-    list_notes,
-    list_rooms,
     room_guard,
     spec,
-)
-
-READDIR = make_readdir(
-    detect_scope,
-    listers={
-        "rooms": list_rooms,
-        "room": list_notes,
-    },
-    static_root=("rooms",),
-    guards={"room": room_guard},
 )
 
 
@@ -48,7 +33,6 @@ def _room_extra(match: ScopeMatch) -> dict[str, str]:
 
 STAT = make_stat(
     detect_scope,
-    READDIR,
     guards={"room": room_guard},
     extras={"room": _room_extra},
 )
@@ -62,28 +46,22 @@ def test_root_and_static_dirs_answer_without_probing(accessor):
     assert accessor.calls == []
 
 
-def test_guarded_dir_carries_extras(accessor):
+def test_a_listed_row_answers_without_its_guard(accessor):
+    row = FileStat(name="red", type=FileType.DIRECTORY, extra={"room": "red"})
+    assert asyncio.run(STAT(accessor, spec("/rooms/red"), row)) is row
+    assert accessor.calls == []
+
+
+def test_a_guarded_dir_no_listing_names_carries_extras(accessor):
     st = asyncio.run(STAT(accessor, spec("/rooms/red")))
     assert st.type == FileType.DIRECTORY
     assert st.extra == {"room": "red"}
     assert accessor.calls == ["guard:red"]
 
 
-def test_leaf_proves_existence_through_the_parent_listing(accessor):
-    index = RAMIndexCacheStore()
-    st = asyncio.run(STAT(accessor, spec("/rooms/red/a.json"), index=index))
-    assert st.content == ContentType.JSON
-    assert st.size == 7
+def test_a_probed_leaf_no_listing_names_is_enoent(accessor):
     with pytest.raises(FileNotFoundError):
-        asyncio.run(STAT(accessor, spec("/rooms/red/nope.json"), index=index))
-
-
-def test_a_none_index_gets_a_call_local_store(accessor):
-    # Bare commands built outside a workspace bind index=None; the kit
-    # substitutes a call-local store exactly as it does for NULL_INDEX.
-    st = asyncio.run(STAT(accessor, spec("/rooms/red/a.json"), index=None))
-    assert st.content == ContentType.JSON
-    assert st.size == 7
+        asyncio.run(STAT(accessor, spec("/rooms/red/nope.json")))
 
 
 def test_invalid_shapes_are_enoent(accessor):
@@ -93,38 +71,44 @@ def test_invalid_shapes_are_enoent(accessor):
         asyncio.run(STAT(accessor, spec("/rooms/.red")))
 
 
-def test_override_replaces_the_whole_shape(accessor):
+def test_an_override_replaces_the_whole_answer(accessor):
     async def bespoke(
         accessor: FakeAccessor,
         match: ScopeMatch,
         path: PathSpec,
-        index: IndexCacheStore,
+        entry: FileStat | None,
+        parent: FileStat | None,
     ) -> FileStat:
         return FileStat(
-            name="custom", type=FileType.FILE, content=ContentType.TEXT, size=1
+            name="custom",
+            type=FileType.FILE,
+            content=ContentType.TEXT,
+            size=None if parent is None else 1,
         )
 
-    stat = make_stat(detect_scope, READDIR, overrides={"note": bespoke})
-    st = asyncio.run(stat(accessor, spec("/rooms/red/a.json")))
-    assert st.name == "custom"
+    stat = make_stat(detect_scope, overrides={"note": bespoke})
+    room = FileStat(name="red", type=FileType.DIRECTORY)
+    st = asyncio.run(stat(accessor, spec("/rooms/red/a.json"), None, room))
+    assert (st.name, st.size) == ("custom", 1)
     assert accessor.calls == []
 
 
-def test_entry_stat_builds_from_the_resolved_entry(accessor):
-    def from_entry(match, path, entry) -> FileStat:
-        return FileStat(
-            name=entry.vfs_name,
-            type=FileType.FILE,
-            content=ContentType.JSON,
-            size=entry.size,
-            extra={"doc_id": entry.id},
-        )
-
-    stat = make_stat(detect_scope, READDIR, entry_stats={"note": from_entry})
-    index = RAMIndexCacheStore()
-    st = asyncio.run(stat(accessor, spec("/rooms/red/a.json"), index=index))
-    assert st.name == "a.json"
-    assert st.size == 7
-    assert st.extra == {"doc_id": "a.json"}
-    with pytest.raises(FileNotFoundError):
-        asyncio.run(stat(accessor, spec("/rooms/red/nope.json"), index=index))
+@pytest.mark.parametrize(
+    "filetype, kind, content",
+    [
+        (FileType.DIRECTORY, FileType.DIRECTORY, None),
+        (ContentType.JSON, FileType.FILE, ContentType.JSON),
+        (None, FileType.FILE, ContentType.TEXT),
+    ],
+)
+def test_entry_stat_builds_the_row_a_listing_names(filetype, kind, content):
+    build = entry_stat("doc_id", filetype)
+    row = build("a.txt", "D1", size=7, modified="", extra={"kept": 1})
+    assert (row.name, row.type, row.content, row.size) == (
+        "a.txt",
+        kind,
+        content,
+        7,
+    )
+    assert row.modified is None
+    assert row.extra == {"kept": 1, "doc_id": "D1"}

@@ -55,18 +55,9 @@ NOT_A_REPLICA_SET = 123
 # The databases the server keeps for itself, never listed on a mount.
 SYSTEM_DATABASES = frozenset({"admin", "local", "config"})
 
-RESOURCE_TYPE_DATABASE = "mongodb/database"
-RESOURCE_TYPE_COLLECTION = "mongodb/collection"
-RESOURCE_TYPE_VIEW = "mongodb/view"
-
 KIND_TO_DIR: dict[EntityKind, str] = {
     EntityKind.COLLECTION: "collections",
     EntityKind.VIEW: "views",
-}
-
-KIND_TO_RESOURCE_TYPE: dict[EntityKind, str] = {
-    EntityKind.COLLECTION: RESOURCE_TYPE_COLLECTION,
-    EntityKind.VIEW: RESOURCE_TYPE_VIEW,
 }
 
 KIND_DIR_NAMES: dict[str, EntityKind] = {v: k for k, v in KIND_TO_DIR.items()}

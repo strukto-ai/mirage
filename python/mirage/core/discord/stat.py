@@ -13,67 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.core.discord.entry import snowflake_to_iso
-from mirage.core.discord.readdir import readdir
 from mirage.core.discord.scope import detect_scope
-from mirage.core.hierarchy.probe import ancestor_entry, resolve_entry
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.hierarchy.stat import entry_stat, make_stat
+from mirage.core.hierarchy.stat import make_stat
 from mirage.core.time_range import day_stat, guard_day
 from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.utils.filetype import content_type_for_mime
-
-
-def _dir_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(name=entry.vfs_name, type=FileType.DIRECTORY)
-
-
-def _guild_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name or entry.name,
-        type=FileType.DIRECTORY,
-        extra={"guild_id": entry.id},
-    )
-
-
-def _channel_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name or entry.name,
-        type=FileType.DIRECTORY,
-        modified=snowflake_to_iso(entry.remote_time),
-        extra={"channel_id": entry.id},
-    )
-
-
-def _file_blob_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    mimetype = entry.extra.get("content_type", "")
-    return FileStat(
-        name=entry.vfs_name or entry.name,
-        size=entry.size,
-        type=FileType.FILE,
-        content=content_type_for_mime(mimetype),
-        extra={
-            "content_type": mimetype,
-            "attachment_id": entry.id,
-        },
-    )
 
 
 async def _stat_chat(
     accessor: DiscordAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> FileStat:
     """Stat chat.jsonl, which survives a sealed day.
 
@@ -84,18 +37,13 @@ async def _stat_chat(
         accessor (DiscordAccessor): discord accessor.
         match (ScopeMatch): a match holding the day chain.
         path (PathSpec): the path to stat.
-        index (IndexCacheStore): index cache.
+        entry (FileStat | None): the file's row, when its day lists it.
+        parent (FileStat | None): the day's row.
     """
     await guard_day(accessor, match, path.virtual)
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is not None:
-        return FileStat(
-            name="chat.jsonl",
-            type=FileType.FILE,
-            content=ContentType.TEXT,
-            size=entry.size,
-        )
-    if await ancestor_entry(readdir, accessor, path, index, up=2) is None:
+        return entry
+    if parent is None:
         raise enoent(path.virtual)
     return FileStat(
         name="chat.jsonl",
@@ -105,21 +53,13 @@ async def _stat_chat(
     )
 
 
+# A files directory or a blob is what its day's listing names, which no
+# day outside the mount's scope has; a day and its chat.jsonl exist
+# beyond what is listed.
 stat = make_stat(
     detect_scope,
-    readdir,
-    guards={kind: guard_day for kind in ("messages", "files", "file_blob")},
-    entry_stats={
-        "guild": _guild_stat,
-        "channels_dir": _dir_stat,
-        "members_dir": _dir_stat,
-        "channel": _channel_stat,
-        "member": entry_stat("user_id", ContentType.JSON),
-        "files": _dir_stat,
-        "file_blob": _file_blob_stat,
-    },
     overrides={
-        "day": day_stat(readdir, guard_day),
+        "day": day_stat(guard_day),
         "messages": _stat_chat,
     },
 )

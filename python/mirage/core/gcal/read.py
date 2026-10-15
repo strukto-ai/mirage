@@ -29,7 +29,7 @@ from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import compact_json_bytes
 from mirage.errors.fs import enoent
-from mirage.types import JsonValue, PathSpec
+from mirage.types import FileStat, JsonValue, PathSpec
 from mirage.vfs.gcal.event_entry import parse_event_filename
 
 logger = logging.getLogger(__name__)
@@ -39,13 +39,14 @@ async def _read_calendar_json(
     accessor: GCalAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     calendars = await calendar_index(accessor)
-    entry = calendars.get(match.slots["calendar"])
-    if entry is None:
+    calendar = calendars.get(match.slots["calendar"])
+    if calendar is None:
         raise enoent(path.virtual)
-    return calendar_payload(entry, bucket_zone(accessor, calendars))
+    return calendar_payload(calendar, bucket_zone(accessor, calendars))
 
 
 def _event_of(
@@ -112,7 +113,8 @@ async def _read_event(
     accessor: GCalAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     """Read one event's raw API payload.
 
@@ -125,7 +127,8 @@ async def _read_event(
         match (ScopeMatch): a match holding ``calendar``, ``bucket`` and
             ``event``.
         path (PathSpec): the file to read.
-        index (IndexCacheStore): the mount's index cache.
+        entry (FileStat | None): unused; the read asks Calendar.
+        parent (FileStat | None): unused.
     """
     calendars = await calendar_index(accessor)
     cal_id, day, event_id = _event_of(accessor, calendars, match, path)

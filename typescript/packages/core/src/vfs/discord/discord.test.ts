@@ -1,10 +1,11 @@
 import { expect, it, vi } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { NodeDiscordTransport } from '../../core/discord/client.ts'
+import { FileStat, FileType } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DiscordVFSBase } from './discord.ts'
+import { seedChannel } from './_test_util.ts'
 
 it.each([false, true])(
   'aborting cat releases a stalled attachment body (prefix=%s)',
@@ -42,15 +43,15 @@ it.each([false, true])(
     })
     const ws = new Workspace({ '/chat': vfs }, { shellParser: await getTestParser() })
     const path = '/chat/team__G1/channels/general__C1/2026-04-24/files/report__A1.txt'
-    await ws.mount('/chat').index.setDir(path.slice(0, path.lastIndexOf('/')), [
+    const index = ws.mount('/chat').index
+    await seedChannel(index, '/chat', 'team__G1', 'general__C1', 'C1', { dates: ['2026-04-24'] })
+    await index.setDir(path.slice(0, path.lastIndexOf('/')), [
       [
         'report__A1.txt',
-        new IndexEntry({
-          id: 'A1',
-          name: 'report.txt',
-          vfsName: 'report__A1.txt',
-          resourceType: 'discord/attachment',
-          extra: { url: 'https://cdn.test/report' },
+        new FileStat({
+          name: 'report__A1.txt',
+          type: FileType.FILE,
+          extra: { attachment_id: 'A1', url: 'https://cdn.test/report' },
         }),
       ],
     ])

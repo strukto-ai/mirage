@@ -17,4 +17,4 @@ import { makeFilename } from '../../vfs/gslides/slide_entry.ts'
 import { MIME } from './constants.ts'
 import { detectScope } from './scope.ts'
 
-export const readdir = makeAppReaddir(MIME, detectScope, makeFilename, 'gslides/file')
+export const readdir = makeAppReaddir(MIME, detectScope, makeFilename)

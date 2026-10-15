@@ -57,26 +57,10 @@ vi.mock('./folders.ts', async () => {
   return { ...actual, listFolders: vi.fn(() => Promise.resolve(['INBOX'])) }
 })
 
-import type { Evicted, IndexEntry, SetDirOptions } from '@struktoai/mirage-core/cache/index/config'
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { DirListing, FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { dateBucket, readdir } from './readdir.ts'
 import { messageJsonBytes } from './render.ts'
-
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
-  }
-}
 
 const ACCESSOR = { config: { maxMessages: 50 } } as unknown as EmailAccessor
 
@@ -86,60 +70,63 @@ const SPEC = new PathSpec({
   vfsPath: 'INBOX',
 })
 
+// The folder's row, as the mount root's listing names it.
+const FOLDER = new FileStat({ name: 'INBOX', type: FileType.DIRECTORY })
+
+async function folderListing(): Promise<DirListing> {
+  return (await readdir(ACCESSOR, SPEC, FOLDER)) as DirListing
+}
+
 describe('email readdir', () => {
   afterEach(() => {
     headersList = HEADERS
   })
 
-  it('stores the rendered message size on each listing entry', async () => {
-    const index = new RAMIndexCacheStore()
+  it('sizes each message row as rendered', async () => {
+    const listed = await folderListing()
 
-    const dates = await readdir(ACCESSOR, SPEC, index)
-
-    expect(dates).toEqual(['/INBOX/2024-01-15'])
-    const listing = await index.listDir('/INBOX/2024-01-15')
-    const child = listing.entries?.[0] ?? ''
-    const lookup = await index.get(child)
-    expect(lookup.entry?.size).toBe(messageJsonBytes(message({})).byteLength)
+    expect(listed.entries.map((row) => row.name)).toEqual(['2024-01-15'])
+    const [child] = listed.seeds.get('2024-01-15') ?? []
+    expect(child?.size).toBe(messageJsonBytes(message({})).byteLength)
   })
 
   // Without INTERNALDATE every message a sender left undated lands in one
   // 1970 directory, which is the mount's only organizing axis.
   it('buckets a message with no Date header by its INTERNALDATE', async () => {
     headersList = NO_DATE_HEADERS
-    const index = new RAMIndexCacheStore()
 
-    const dates = await readdir(ACCESSOR, SPEC, index)
+    const listed = await folderListing()
 
-    expect(dates).toEqual(['/INBOX/2026-08-07'])
+    expect(listed.entries.map((row) => row.name)).toEqual(['2026-08-07'])
   })
 })
 
 describe('email readdir windows', () => {
-  it('writes a folder and the days it seeds as windows', async () => {
+  it('lists a folder and the days it seeds as windows', async () => {
     // The folder fetch stops at maxMessages, so its days, and the days
-    // seeded from it, name only the messages that fit.
-    const index = new WindowSpy()
-    await readdir(ACCESSOR, SPEC, index)
-    expect(index.windows.get('/INBOX')).toBe(true)
-    expect(index.windows.get('/INBOX/2024-01-15')).toBe(true)
+    // seeded from it, name only the messages that fit. A listing's seeds are
+    // kept with its own window.
+    const listed = await folderListing()
+    expect(listed.window).toBe(true)
+    expect(listed.seeds.has('2024-01-15')).toBe(true)
   })
 
-  it('writes a day re-listed on its own as a window', async () => {
-    // The folder listing seeds its days, so the day lister runs only once
-    // the day listing is gone while its entry survives.
-    const index = new WindowSpy()
-    await readdir(ACCESSOR, SPEC, index)
-    await index.invalidateDir('/INBOX/2024-01-15')
-    index.windows.clear()
+  it('lists a day re-listed on its own as a window', async () => {
+    // With the day's own listing dropped, the day lister runs itself rather
+    // than the folder's seed answering for it.
     const day = new PathSpec({
       virtual: '/INBOX/2024-01-15',
       directory: '/INBOX/2024-01-15',
       vfsPath: 'INBOX/2024-01-15',
     })
-    expect(await readdir(ACCESSOR, day, index)).toHaveLength(1)
-    expect(index.windows.has('/INBOX')).toBe(false)
-    expect(index.windows.get('/INBOX/2024-01-15')).toBe(true)
+    const listed = await readdir(
+      ACCESSOR,
+      day,
+      new FileStat({ name: '2024-01-15', type: FileType.DIRECTORY }),
+    )
+    expect(listed).toBeInstanceOf(DirListing)
+    expect((listed as DirListing).entries).toHaveLength(1)
+    expect((listed as DirListing).window).toBe(true)
   })
 })
 

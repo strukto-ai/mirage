@@ -14,9 +14,9 @@
 
 import type { SearchQuery } from '../../vfs/types.ts'
 import { validateOptions, intOption, floatOption, textOption } from '../../vfs/search.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { PathSpec } from '../../types.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { readdir } from './readdir.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
 import { detectScope } from './scope.ts'
@@ -60,11 +60,15 @@ export async function searchMemoriesRendered(
   return lines
 }
 
+async function listedPaths(accessor: Mem0Accessor, path: PathSpec): Promise<string[]> {
+  const folder = rstripSlash(path.virtual)
+  return rowsOf(await readdir(accessor, path)).map((row) => `${folder}/${row.name}`)
+}
+
 export async function searchMany(
   accessor: Mem0Accessor,
   paths: PathSpec[],
   query: SearchQuery,
-  index?: IndexCacheStore,
 ): Promise<[string, string][]> {
   validateOptions(query, ['top_k', 'threshold', 'method'])
   const topK = intOption(query, 'top_k', accessor.config.defaultSearchLimit)
@@ -75,7 +79,7 @@ export async function searchMany(
   const threshold = floatOption(query, 'threshold', 0)
   if (method !== 'semantic') throw new Error("search: only the 'semantic' method is supported")
   const all = paths.some((p) => stripSlash(p.vfsPath) === '')
-  const targets = all ? [] : await makeResolveGlob(readdir)(accessor, paths, index)
+  const targets = all ? [] : await makeResolveGlob(listedPaths)(accessor, paths)
   const ids = all ? undefined : new Set<string>()
   for (const path of targets) {
     const match = detectScope(path)
@@ -89,7 +93,6 @@ export function searchResource(
   accessor: Mem0Accessor,
   path: PathSpec,
   query: SearchQuery,
-  index?: IndexCacheStore,
 ): Promise<[string, string][]> {
-  return searchMany(accessor, [path], query, index)
+  return searchMany(accessor, [path], query)
 }

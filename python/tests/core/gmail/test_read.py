@@ -18,11 +18,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.gmail.read import read
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gmail import GmailVFS
 from mirage.vfs.gmail.config import GmailConfig
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
@@ -32,27 +33,13 @@ def accessor():
     )
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+def _row(name: str, **extra: str) -> FileStat:
+    """A file's row as its folder's listing names it."""
+    return FileStat(name=name, type=FileType.FILE, extra=extra)
 
 
 @pytest.mark.asyncio
-async def test_read_message(accessor, index):
-    await index.set_dir(
-        "/gmail/INBOX/2026-04-12",
-        [
-            (
-                "Test_Email__msg1.gmail.json",
-                IndexEntry(
-                    id="msg1",
-                    name="Test Email",
-                    resource_type="gmail/message",
-                    vfs_name="Test_Email__msg1.gmail.json",
-                ),
-            ),
-        ],
-    )
+async def test_read_message(accessor):
     raw_msg = {
         "id": "msg1",
         "threadId": "t1",
@@ -77,7 +64,7 @@ async def test_read_message(accessor, index):
                 directory="/gmail/INBOX/2026-04-12"
                 "/Test_Email__msg1.gmail.json",
             ),
-            index,
+            _row("Test_Email__msg1.gmail.json", message_id="msg1"),
         )
         parsed = json.loads(result)
         assert parsed["id"] == "msg1"
@@ -85,7 +72,7 @@ async def test_read_message(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_not_found(accessor, index):
+async def test_read_not_found(accessor):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
@@ -96,26 +83,11 @@ async def test_read_not_found(accessor, index):
                 virtual="/gmail/INBOX/nonexistent.gmail.json",
                 directory="/gmail/INBOX/nonexistent.gmail.json",
             ),
-            index,
         )
 
 
 @pytest.mark.asyncio
-async def test_read_is_directory(accessor, index):
-    await index.set_dir(
-        "/gmail",
-        [
-            (
-                "INBOX",
-                IndexEntry(
-                    id="INBOX",
-                    name="INBOX",
-                    resource_type="gmail/label",
-                    vfs_name="INBOX",
-                ),
-            ),
-        ],
-    )
+async def test_read_is_directory(accessor):
     # A directory kind has no reader, and a matched shape alone is no
     # existence proof, so the kit answers "No such file" (the same rule
     # gcal, notion and the database mounts pin).
@@ -127,12 +99,11 @@ async def test_read_is_directory(accessor, index):
                 virtual="/gmail/INBOX",
                 directory="/gmail/INBOX",
             ),
-            index,
         )
 
 
 @pytest.mark.asyncio
-async def test_read_auto_bootstraps_from_empty_index(accessor, index):
+async def test_a_cold_read_lists_its_way_to_the_message(accessor):
     raw_msg = {
         "id": "msg-1",
         "threadId": "t-1",
@@ -166,64 +137,15 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             return_value=raw_msg,
         ),
     ):
-        result = await read(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key(
-                    "/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json",
-                    "/gmail",
-                ),
-                virtual="/gmail/INBOX/2026-04-27"
-                "/Hello_World__msg-1.gmail.json",
-                directory="/gmail/INBOX/2026-04-27"
-                "/Hello_World__msg-1.gmail.json",
-            ),
-            index,
+        result = await Mounted(GmailVFS, accessor, "/gmail").read(
+            "/INBOX/2026-04-27/Hello_World__msg-1.gmail.json"
         )
         parsed = json.loads(result)
         assert parsed["subject"] == "Hello World"
 
 
 @pytest.mark.asyncio
-async def test_read_attachment(accessor, index):
-    await index.set_dir(
-        "/gmail/INBOX/2026-04-12",
-        [
-            (
-                "Meeting__msg1.gmail.json",
-                IndexEntry(
-                    id="msg1",
-                    name="Meeting",
-                    resource_type="gmail/message",
-                    vfs_name="Meeting__msg1.gmail.json",
-                ),
-            ),
-            (
-                "Meeting__msg1",
-                IndexEntry(
-                    id="msg1",
-                    name="Meeting__msg1",
-                    resource_type="gmail/attachment_dir",
-                    vfs_name="Meeting__msg1",
-                ),
-            ),
-        ],
-    )
-    await index.set_dir(
-        "/gmail/INBOX/2026-04-12/Meeting__msg1",
-        [
-            (
-                "report.pdf",
-                IndexEntry(
-                    id="att1",
-                    name="report.pdf",
-                    resource_type="gmail/attachment",
-                    vfs_name="report.pdf",
-                    size=1024,
-                ),
-            ),
-        ],
-    )
+async def test_read_attachment(accessor):
     with patch(
         "mirage.core.gmail.read.get_attachment",
         new_callable=AsyncMock,
@@ -239,6 +161,6 @@ async def test_read_attachment(accessor, index):
                 virtual="/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
                 directory="/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
             ),
-            index,
+            _row("report.pdf", attachment_id="att1"),
         )
         assert result == b"pdf-bytes"

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { JsonValue } from '../../types.ts'
 import { API, CLIENT, PRIMARY, event, makeAccessor, spec } from './_test_util.ts'
 
@@ -40,7 +39,7 @@ async function ids(
   config: Record<string, unknown> = {},
 ): Promise<string[] | null> {
   const accessor = makeAccessor({ contentSearch: true, ...config })
-  const out = await filesContaining(accessor, text, [spec(under)], new RAMIndexCacheStore())
+  const out = await filesContaining(accessor, text, [spec(under)])
   if (out === null) return null
   return out.map((p) => (p.virtual.split('/').at(-1) ?? '').split('__')[0] ?? '').sort()
 }
@@ -84,7 +83,7 @@ it.each([
 })
 
 it('reads every file when the listing kept no text', async () => {
-  const out = await filesContaining(makeAccessor(), 'lunch', [spec('/')], new RAMIndexCacheStore())
+  const out = await filesContaining(makeAccessor(), 'lunch', [spec('/')])
   expect(out).toBeNull()
 })
 
@@ -110,9 +109,8 @@ it.each([new TypeError('fetch failed'), new Error(PAGE_LIMIT)])(
 // is listed again rather than served from the walk's listing.
 it('finds a text changed since the listing', async () => {
   const accessor = makeAccessor({ contentSearch: true })
-  const index = new RAMIndexCacheStore()
   const search = async (text: string) => {
-    const out = await filesContaining(accessor, text, [spec('/')], index)
+    const out = await filesContaining(accessor, text, [spec('/')])
     return out === null
       ? null
       : out.map((p) => (p.virtual.split('/').at(-1) ?? '').split('__')[0] ?? '')

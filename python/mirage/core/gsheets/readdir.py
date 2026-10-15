@@ -12,13 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.core.google.readdir import make_app_readdir
 from mirage.core.gsheets.constants import MIME
 from mirage.core.gsheets.scope import detect_scope
-from mirage.core.hierarchy.probe import ReaddirFn
 from mirage.vfs.gsheets.sheet_entry import make_filename
 
-readdir: ReaddirFn[GSheetsAccessor] = make_app_readdir(
-    MIME, detect_scope, make_filename, "gsheets/file"
-)
+readdir = make_app_readdir(MIME, detect_scope, make_filename)

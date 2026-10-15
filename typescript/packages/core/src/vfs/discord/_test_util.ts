@@ -13,10 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DiscordAccessor, type DiscordResourceLike } from '../../accessor/discord.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from '../../core/discord/client.ts'
-import { DiscordVFSBase } from '../../vfs/discord/discord.ts'
+import { FileStat, FileType, MountMode } from '../../types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { DiscordVFSBase } from './discord.ts'
+
+const PARSER = await getTestParser()
 
 export interface FakeCall {
   method: DiscordMethod
@@ -57,90 +61,82 @@ class FakeDiscordVFS extends DiscordVFSBase implements DiscordResourceLike {
   }
 }
 
-export function makeFakeVfs(transport: DiscordTransport): DiscordResourceLike {
+export function makeFakeVfs(transport: DiscordTransport): DiscordVFSBase {
   return new FakeDiscordVFS(new DiscordAccessor(transport))
 }
 
-export async function seedGuild(
-  index: RAMIndexCacheStore,
-  prefix: string,
-  guildDirname: string,
-  guildId: string,
-): Promise<void> {
-  await index.setDir(prefix, [
-    [
-      guildDirname,
-      new IndexEntry({
-        id: guildId,
-        name: guildDirname.split('__')[0] ?? guildDirname,
-        resourceType: 'discord/guild',
-        vfsName: guildDirname,
-      }),
-    ],
-  ])
+/** The workspace a test asks the fake through, mounted at /mnt/discord. */
+export function mountDiscord(transport: DiscordTransport): Workspace {
+  return new Workspace(
+    { '/mnt/discord/': makeFakeVfs(transport) },
+    { mode: MountMode.WRITE, shellParser: PARSER },
+  )
 }
 
 export async function seedChannel(
-  index: RAMIndexCacheStore,
+  index: IndexCacheStore,
   prefix: string,
   guildDirname: string,
   channelDirname: string,
   channelId: string,
-  options: { dates?: string[]; remoteTime?: string } = {},
+  options: { dates?: string[] } = {},
 ): Promise<void> {
+  const extra = { channel_id: channelId }
+  const guildId = guildDirname.slice(guildDirname.lastIndexOf('__') + 2)
+  await index.setDir(prefix, [
+    [
+      guildDirname,
+      new FileStat({ name: guildDirname, type: FileType.DIRECTORY, extra: { guild_id: guildId } }),
+    ],
+  ])
   const channelsKey = `${prefix}/${guildDirname}/channels`
   await index.setDir(channelsKey, [
     [
       channelDirname,
-      new IndexEntry({
-        id: channelId,
-        name: channelDirname.split('__')[0] ?? channelDirname,
-        resourceType: 'discord/channel',
-        vfsName: channelDirname,
-        remoteTime: options.remoteTime ?? '',
+      new FileStat({
+        name: channelDirname,
+        type: FileType.DIRECTORY,
+        extra: { ...extra, last_message_id: '' },
       }),
     ],
   ])
-  const dates = options.dates
-  if (dates !== undefined) {
-    const childKey = `${prefix}/${guildDirname}/channels/${channelDirname}`
-    const entries: [string, IndexEntry][] = dates.map((d) => [
-      d,
-      new IndexEntry({
-        id: `${channelId}:${d}`,
-        name: d,
-        resourceType: 'discord/history',
-        vfsName: d,
-      }),
+  const dates = options.dates ?? []
+  const childKey = `${channelsKey}/${channelDirname}`
+  await index.setDir(
+    childKey,
+    dates.map((d) => [d, new FileStat({ name: d, type: FileType.DIRECTORY, extra })]),
+  )
+  for (const d of dates) {
+    const dateKey = `${childKey}/${d}`
+    await index.setDir(dateKey, [
+      ['chat.jsonl', new FileStat({ name: 'chat.jsonl', type: FileType.FILE, extra })],
+      [
+        'files',
+        new FileStat({ name: 'files', type: FileType.DIRECTORY, extra: { ...extra, date: d } }),
+      ],
     ])
-    await index.setDir(childKey, entries)
-    // Seed each date's chat.jsonl placeholder so reads via index work
-    for (const d of dates) {
-      const dateKey = `${childKey}/${d}`
-      await index.setDir(dateKey, [
-        [
-          'chat.jsonl',
-          new IndexEntry({
-            id: `${channelId}:${d}:chat`,
-            name: 'chat.jsonl',
-            resourceType: 'discord/chat_jsonl',
-            vfsName: 'chat.jsonl',
-          }),
-        ],
-        [
-          'files',
-          new IndexEntry({
-            id: `${channelId}:${d}:files`,
-            name: 'files',
-            resourceType: 'discord/files_dir',
-            vfsName: 'files',
-            extra: { channel_id: channelId, date: d },
-          }),
-        ],
-      ])
-      // The real day fetch seeds the files listing in the same write, so
-      // the fixture does too; without it a walk would refetch the day.
-      await index.setDir(`${dateKey}/files`, [])
-    }
+    // The real day fetch seeds the files listing in the same write, so the
+    // fixture does too; without it a walk would refetch the day.
+    await index.setDir(`${dateKey}/files`, [])
+  }
+}
+
+/**
+ * Run `line` in a workspace with the fake mounted at /mnt/discord and
+ * channel general__C1 of guild My Server__G1 listed with `dates`.
+ */
+export async function runDiscord(
+  transport: DiscordTransport,
+  line: string,
+  dates: string[],
+): Promise<{ stdout: string; exitCode: number }> {
+  const ws = mountDiscord(transport)
+  try {
+    const index = ws.mount('/mnt/discord').index
+    await seedChannel(index, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', { dates })
+    const io = await ws.shell(line)
+    return { stdout: new TextDecoder().decode(io.stdout), exitCode: io.exitCode }
+  } finally {
+    await ws.close()
   }
 }

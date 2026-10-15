@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mongodb.client import (
@@ -23,12 +22,9 @@ from mirage.core.mongodb.client import (
     list_databases,
 )
 from mirage.core.mongodb.scope import detect_scope, entity_kind
-from mirage.core.mongodb.types import (
-    KIND_TO_DIR,
-    KIND_TO_RESOURCE_TYPE,
-    RESOURCE_TYPE_DATABASE,
-)
+from mirage.core.mongodb.types import KIND_TO_DIR
 from mirage.errors.fs import enoent
+from mirage.types import FileStat, FileType
 
 ENTITY_FILES = ("schema.json", "documents.jsonl")
 
@@ -71,80 +67,71 @@ async def entity_guard(
         raise enoent(virtual)
 
 
+def _database_extra(match: ScopeMatch) -> dict[str, str]:
+    return {"database": match.slots["database"]}
+
+
+def _kind_dir_extra(match: ScopeMatch) -> dict[str, str]:
+    return {
+        "database": match.slots["database"],
+        "kind": entity_kind(match),
+    }
+
+
+def _entity_extra(match: ScopeMatch) -> dict[str, str]:
+    return {
+        "database": match.slots["database"],
+        "kind": entity_kind(match),
+        "name": match.slots["name"],
+    }
+
+
+# What each kind's stat carries in ``extra``, listed or not.
+EXTRAS = {
+    "database": _database_extra,
+    "kind_dir": _kind_dir_extra,
+    "database_json": _database_extra,
+    "schema_json": _entity_extra,
+    "entity": _entity_extra,
+    "documents": _entity_extra,
+}
+
+
+def _dirs(names: list[str] | tuple[str, ...]) -> list[FileStat]:
+    return [FileStat(name=name, type=FileType.DIRECTORY) for name in names]
+
+
 async def _list_root(
     accessor: MongoDBAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
-    dbs = await list_databases(accessor.client, accessor.config)
-    return [
-        (
-            db_name,
-            IndexEntry(
-                id=db_name,
-                name=db_name,
-                resource_type=RESOURCE_TYPE_DATABASE,
-                vfs_name=db_name,
-            ),
-        )
-        for db_name in dbs
-    ]
+) -> list[FileStat]:
+    return _dirs(await list_databases(accessor.client, accessor.config))
 
 
 async def _list_database(
     accessor: MongoDBAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     # database.json, collections/ and views/ exist by construction under
     # every database that exists at all (the guard has already run).
-    names = ("database.json",) + tuple(KIND_TO_DIR.values())
     return [
-        (
-            name,
-            IndexEntry(
-                id=name,
-                name=name,
-                resource_type="mongodb/database_entry",
-                vfs_name=name,
-            ),
-        )
-        for name in names
+        FileStat(name="database.json", type=FileType.FILE),
+        *_dirs(tuple(KIND_TO_DIR.values())),
     ]
 
 
 async def _list_kind_dir(
     accessor: MongoDBAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
-    kind = entity_kind(match)
-    names = await list_collections(
-        accessor.client, match.slots["database"], kind=kind
-    )
-    return [
-        (
-            name,
-            IndexEntry(
-                id=name,
-                name=name,
-                resource_type=KIND_TO_RESOURCE_TYPE[kind],
-                vfs_name=name,
-            ),
+) -> list[FileStat]:
+    return _dirs(
+        await list_collections(
+            accessor.client, match.slots["database"], kind=entity_kind(match)
         )
-        for name in names
-    ]
+    )
 
 
 async def _list_entity_files(
     accessor: MongoDBAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
-    return [
-        (
-            name,
-            IndexEntry(
-                id=name,
-                name=name,
-                resource_type="mongodb/entity_file",
-                vfs_name=name,
-            ),
-        )
-        for name in ENTITY_FILES
-    ]
+) -> list[FileStat]:
+    return [FileStat(name=name, type=FileType.FILE) for name in ENTITY_FILES]
 
 
 readdir = make_readdir(
@@ -160,4 +147,5 @@ readdir = make_readdir(
         "kind_dir": database_guard,
         "entity": entity_guard,
     },
+    extras=EXTRAS,
 )

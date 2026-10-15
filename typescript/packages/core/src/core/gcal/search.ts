@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GCalAccessor } from '../../accessor/gcal.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isFsError } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
@@ -21,7 +20,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { mayHold, recordQueries } from '../../utils/record_search.ts'
 import { CALENDAR_FILE } from '../../vfs/gcal/event_entry.ts'
 import { GoogleApiError } from '../google/client.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { parseTime } from '../time_range.ts'
 import { PAGE_LIMIT, listEvents } from './client.ts'
@@ -32,18 +31,14 @@ import { rstripSlash } from '../../utils/slash.ts'
 
 // The bucket directories under `scope`; null for a scope inside a bucket or a
 // calendar's file.
-async function buckets(
-  accessor: GCalAccessor,
-  scope: PathSpec,
-  index: IndexCacheStore | undefined,
-): Promise<PathSpec[] | null> {
+async function buckets(accessor: GCalAccessor, scope: PathSpec): Promise<PathSpec[] | null> {
   const match = detectScope(normalize(scope)[1])
   if (match.kind === 'bucket') return [scope]
   const base = rstripSlash(scope.mountPath)
   let calendars: PathSpec[]
   if (match.kind === ROOT) {
-    calendars = (await readdir(accessor, scope, index)).map((name) =>
-      mountedPath(scope, `${base}/${name.split('/').at(-1) ?? name}`),
+    calendars = rowsOf(await readdir(accessor, scope)).map((row) =>
+      mountedPath(scope, `${base}/${row.name}`),
     )
   } else if (match.kind === 'calendar') {
     calendars = [scope]
@@ -53,9 +48,8 @@ async function buckets(
   const found: PathSpec[] = []
   for (const calendar of calendars) {
     const parent = rstripSlash(calendar.mountPath)
-    for (const listed of await readdir(accessor, calendar, index)) {
-      const leaf = listed.split('/').at(-1) ?? listed
-      if (leaf !== CALENDAR_FILE) found.push(mountedPath(calendar, `${parent}/${leaf}`))
+    for (const row of rowsOf(await readdir(accessor, calendar))) {
+      if (row.name !== CALENDAR_FILE) found.push(mountedPath(calendar, `${parent}/${row.name}`))
     }
   }
   return found
@@ -79,7 +73,6 @@ export async function filesContaining(
   accessor: GCalAccessor,
   text: string,
   under: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const queries = recordQueries(text, new Set(), true)
   if (queries === null) return null
@@ -90,7 +83,7 @@ export async function filesContaining(
     const tz = bucketZone(accessor, calendars)
     const walked = new Map<string, PathSpec[]>()
     for (const scope of under) {
-      const listed = await buckets(accessor, scope, index)
+      const listed = await buckets(accessor, scope)
       if (listed === null) return null
       for (const bucket of listed) {
         const name = detectScope(normalize(bucket)[1]).slots.calendar ?? ''
@@ -125,13 +118,12 @@ export async function filesContaining(
       }
       for (const bucket of listed) {
         const parent = rstripSlash(bucket.mountPath)
-        for (const child of await readdir(accessor, bucket, index)) {
-          const path = mountedPath(bucket, `${parent}/${child.split('/').at(-1) ?? child}`)
-          const entry = await resolveEntry(readdir, accessor, path, index)
-          if (entry === null) return null
-          const kept = entry.extra.unsearched
+        for (const row of rowsOf(await readdir(accessor, bucket))) {
+          const kept = row.extra.unsearched
           if (typeof kept !== 'string') return null
-          if (mayHold(asked, named, entry.id, kept)) found.push(path)
+          if (mayHold(asked, named, String(row.extra.event_id), kept)) {
+            found.push(mountedPath(bucket, `${parent}/${row.name}`))
+          }
         }
       }
     }

@@ -13,45 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.cache.index import IndexCacheStore, IndexEntry
 from mirage.core.gcal.readdir import (
     bucket_zone,
     calendar_index,
-    readdir,
     scoped_bucket,
 )
 from mirage.core.gcal.scope import detect_scope
-from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
 from mirage.errors.fs import enoent
-from mirage.types import ContentType, FileStat, FileType, PathSpec
-
-
-def _dir_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(name=entry.vfs_name, type=FileType.DIRECTORY)
-
-
-def _file_stat(
-    match: ScopeMatch, path: PathSpec, entry: IndexEntry
-) -> FileStat:
-    return FileStat(
-        name=entry.vfs_name,
-        type=FileType.FILE,
-        content=ContentType.JSON,
-        modified=entry.remote_time,
-        size=entry.size,
-        extra={"event_id": entry.id, **entry.extra},
-    )
+from mirage.types import FileStat, FileType, PathSpec
 
 
 async def _stat_bucket(
     accessor: GCalAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> FileStat:
     """Stat a bucket directory, which resolves whether or not it is listed.
 
@@ -65,7 +44,8 @@ async def _stat_bucket(
         accessor (GCalAccessor): the mount's accessor.
         match (ScopeMatch): a match holding ``calendar`` and ``bucket``.
         path (PathSpec): the path to stat.
-        index (IndexCacheStore): the mount's index cache.
+        entry (FileStat | None): the bucket's row, when a listing names it.
+        parent (FileStat | None): unused; the calendar list answers.
     """
     calendars = await calendar_index(accessor)
     scoped_bucket(
@@ -74,24 +54,11 @@ async def _stat_bucket(
         bucket_zone(accessor, calendars),
         path.virtual,
     )
-    entry = await resolve_entry(readdir, accessor, path, index)
     if entry is not None:
-        return FileStat(name=entry.vfs_name, type=FileType.DIRECTORY)
-    # Ask the calendar list rather than the index: the index only knows
-    # the calendar once the ROOT has been listed, which a stat of a bucket
-    # two levels down never triggers.
+        return entry
     if match.slots["calendar"] not in calendars:
         raise enoent(path.virtual)
     return FileStat(name=match.slots["bucket"], type=FileType.DIRECTORY)
 
 
-stat = make_stat(
-    detect_scope,
-    readdir,
-    entry_stats={
-        "calendar": _dir_stat,
-        "calendar_json": _file_stat,
-        "event": _file_stat,
-    },
-    overrides={"bucket": _stat_bucket},
-)
+stat = make_stat(detect_scope, overrides={"bucket": _stat_bucket})

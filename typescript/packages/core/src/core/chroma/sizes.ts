@@ -14,7 +14,7 @@
 
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
+import { FileStat, FileType } from '../../types.ts'
 import { scalarString } from '../slug_tree/rows.ts'
 import { pagesChunks } from './client.ts'
 import { renderPage } from './render.ts'
@@ -31,17 +31,16 @@ import { renderPage } from './render.ts'
 export async function ensureDirSizes(
   accessor: ChromaAccessor,
   directory: string,
-  index?: IndexCacheStore,
+  index: IndexCacheStore,
 ): Promise<void> {
-  if (index === undefined) return
   const listing = await index.listDir(directory)
   if (listing.entries === undefined || listing.entries === null) return
-  const pending = new Map<string, IndexEntry>()
+  const pending = new Map<string, FileStat>()
   for (const child of listing.entries) {
-    const lookup = await index.get(child)
-    const entry = lookup.entry
-    if (entry === undefined || entry === null) continue
-    if (entry.resourceType === 'file' && entry.size === null) pending.set(child, entry)
+    const entry: unknown = (await index.get(child)).entry
+    if (entry instanceof FileStat && entry.type === FileType.FILE && entry.size === null) {
+      pending.set(child, entry)
+    }
   }
   if (pending.size === 0) return
   const slugs: string[] = []
@@ -52,6 +51,6 @@ export async function ensureDirSizes(
   const grouped = await pagesChunks(accessor, slugs)
   for (const [child, entry] of pending) {
     const chunks = grouped.get(scalarString(entry.extra.slug) ?? '') ?? []
-    await index.put(child, entry.copyWith({ size: renderPage(chunks).byteLength }))
+    await index.put(child, entry.with({ size: renderPage(chunks).byteLength }))
   }
 }

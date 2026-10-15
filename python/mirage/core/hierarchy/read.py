@@ -15,22 +15,40 @@
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, TypeVar
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.hierarchy.probe import A, assert_parent
+from mirage.core.hierarchy.probe import A
 from mirage.core.hierarchy.scope import ROOT, DetectFn, ScopeMatch
 from mirage.errors.fs import eisdir, enoent
-from mirage.types import PathSpec, StatFn
+from mirage.types import FileStat, PathSpec
 from mirage.utils.ranges import slice_window
 
-Reader = Callable[[A, ScopeMatch, PathSpec, IndexCacheStore], Awaitable[bytes]]
+Reader = Callable[
+    [A, ScopeMatch, PathSpec, FileStat | None, FileStat | None],
+    Awaitable[bytes],
+]
 
 WindowedReader = Callable[
-    [A, ScopeMatch, PathSpec, IndexCacheStore, int | None, int | None],
+    [
+        A,
+        ScopeMatch,
+        PathSpec,
+        FileStat | None,
+        FileStat | None,
+        int | None,
+        int | None,
+    ],
     Awaitable[bytes],
 ]
 
 RangedReader = Callable[
-    [A, ScopeMatch, PathSpec, IndexCacheStore, int, int | None],
+    [
+        A,
+        ScopeMatch,
+        PathSpec,
+        FileStat | None,
+        FileStat | None,
+        int,
+        int | None,
+    ],
     Awaitable[bytes],
 ]
 
@@ -46,12 +64,14 @@ def make_read(
     readers: Mapping[str, Reader[A]],
     *,
     windowed: Mapping[str, WindowedReader[A]] | None = None,
-    stat: StatFn | None = None,
+    parented: bool = False,
 ) -> Callable[..., Awaitable[bytes]]:
     """Build a hierarchy read: classify, dispatch, refuse the rest.
 
-    Readers own their fetches, guards and rendering; the kit owns the
-    classification and the ENOENT funnel for every non-file shape.
+    Readers own their fetches, guards and rendering, handed what is at
+    the path (``entry``) and at its parent (``parent``) as the listings
+    name them; the kit owns the classification and the ENOENT funnel for
+    every non-file shape.
 
     Args:
         detect (DetectFn): the backend's scope classifier.
@@ -61,15 +81,14 @@ def make_read(
             limit/offset the backend pushes into the query); they receive
             the caller's ``limit``/``offset``, which every plain reader
             ignores, matching a filesystem read that has no row notion.
-        stat (StatFn | None): the backend's stat. Given, every read
-            first proves the file's parent directory exists the way stat
-            proves it (``assert_parent``), so a container the listing
-            refuses reads as absent exactly as ``ls`` and ``stat`` report
-            it. A backend whose readers address the API by the ids in
-            the path passes it: without it, ``cat`` of a board outside
-            ``board_ids`` fetched that board by its id. The file itself
-            stays the reader's to prove, since a bounded listing need
-            not name every file that exists.
+        parented (bool): every read first proves the file's parent
+            directory exists, by the row its listing names, so a
+            container the listing refuses reads as absent exactly as
+            ``ls`` and ``stat`` report it. A backend whose readers
+            address the API by the ids in the path asks for it: without
+            it, ``cat`` of a board outside ``board_ids`` fetched that
+            board by its id. The file itself stays the reader's to prove,
+            since a bounded listing need not name every file that exists.
     """
 
     windows = windowed if windowed is not None else {}
@@ -77,7 +96,8 @@ def make_read(
     async def read(
         accessor: A,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
         *,
         limit: int | None = None,
         offset: int | None = None,
@@ -85,10 +105,19 @@ def make_read(
         match = detect(path)
         window = windows.get(match.kind)
         reader = readers.get(match.kind)
-        if stat is not None and (window is not None or reader is not None):
-            await assert_parent(stat, accessor, path, index)
+        if (
+            parented
+            and (window is not None or reader is not None)
+            and parent is None
+            and "/" in path.vfs_path.strip("/")
+        ):
+            # Named as the file the caller asked for, the way GNU reports
+            # `cat missing/f` against the operand rather than its directory.
+            raise enoent(path.virtual)
         if window is not None:
-            return await window(accessor, match, path, index, limit, offset)
+            return await window(
+                accessor, match, path, entry, parent, limit, offset
+            )
         if reader is None:
             # A directory that exists by construction (the root, or a
             # probed=False scope) read as a file is EISDIR. Everything
@@ -102,7 +131,7 @@ def make_read(
             ):
                 raise eisdir(path.virtual)
             raise enoent(path.virtual)
-        return await reader(accessor, match, path, index)
+        return await reader(accessor, match, path, entry, parent)
 
     return read
 
@@ -170,15 +199,16 @@ def make_read_range(
     async def read_range(
         accessor: A,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> bytes:
         match = detect(path)
         fn = ranged.get(match.kind)
         if fn is not None:
-            return await fn(accessor, match, path, index, offset, size)
-        data = await read(accessor, path, index)
+            return await fn(accessor, match, path, entry, parent, offset, size)
+        data = await read(accessor, path, entry, parent)
         return slice_window(data, offset, size)
 
     return read_range

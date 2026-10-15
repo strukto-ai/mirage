@@ -282,8 +282,8 @@ def _without_accessor(method: Callable[..., Any]) -> OperationFn:
 
     Commands still pass an accessor in front of every call; the VFS
     holds its own, so it is dropped here. So is the index a command
-    passes after the path, for a function that keeps no index of its
-    own: the dispatcher keeps its listings.
+    passes, after the path or after a search's query, for a function
+    that keeps no index of its own: the dispatcher keeps its listings.
 
     Args:
         method (Callable[..., Any]): a bound VFS function.
@@ -296,8 +296,9 @@ def _without_accessor(method: Callable[..., Any]) -> OperationFn:
     def call(accessor: Accessor, *args: Any, **kwargs: Any) -> Any:
         if not keeps:
             kwargs.pop("index", None)
-            if len(args) > 1 and isinstance(args[1], IndexCacheStore):
-                args = (args[0], *args[2:])
+            args = tuple(
+                arg for arg in args if not isinstance(arg, IndexCacheStore)
+            )
         return method(*args, **kwargs)
 
     return call
@@ -819,7 +820,7 @@ def dispatched_io(
             replace(
                 ops.search,
                 search=functools.partial(
-                    _slot_call, dispatch, "search", ("query", "index")
+                    _slot_call, dispatch, "search", ("query",)
                 ),
                 search_many=(
                     functools.partial(_dispatched_search_many, dispatch)

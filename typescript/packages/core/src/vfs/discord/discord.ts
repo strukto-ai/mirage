@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import {
   follow as discordFollow,
   read as discordRead,
@@ -23,8 +22,9 @@ import {
 } from '../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../core/discord/readdir.ts'
 import { stat as discordStat } from '../../core/discord/stat.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 
 /**
  * Discord's functions over its accessor, which the node and browser
@@ -32,22 +32,33 @@ import { BaseVFS } from '../base.ts'
  */
 export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
   override readonly readsRanges: boolean = true
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry', 'parent'],
+    readStream: ['entry', 'parent'],
+    follow: ['entry', 'parent'],
+    stat: ['entry', 'parent'],
+  } as const
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return discordReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return discordReaddir(this.accessor, path, handed?.entry)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return discordRead(this.accessor, path, index)
+    const entry = handed?.entry ?? null
+    const parent = handed?.parent ?? null
+    if (offset === 0 && size === null) return discordRead(this.accessor, path, entry, parent)
     return discordReadRange(
       this.accessor,
       path,
-      index,
+      entry,
+      parent,
       size === null ? { offset } : { offset, size },
     )
   }
@@ -62,22 +73,22 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
 
   override readStream(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     signal?: AbortSignal,
   ): AsyncIterable<Uint8Array> {
-    return discordReadStream(this.accessor, path, index, signal)
+    return discordReadStream(this.accessor, path, handed?.entry, handed?.parent, signal)
   }
 
   override follow(
     path: PathSpec,
     n: number,
     interval: number,
-    index?: IndexCacheStore,
+    handed?: Handed,
   ): Promise<AsyncIterable<Uint8Array> | null> {
-    return discordFollow(this.accessor, path, n, interval, index)
+    return discordFollow(this.accessor, path, n, interval, handed?.entry, handed?.parent)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return discordStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return discordStat(this.accessor, path, handed?.entry, handed?.parent)
   }
 }

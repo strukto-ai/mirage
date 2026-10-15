@@ -45,13 +45,12 @@ async def test_read_calls_core(accessor):
         return_value=b'{"spreadsheetId": "sheet1"}',
     ) as mock:
         scope = _scope("/gsheets/owned/Budget__sheet1.gsheet.json")
-        result = await fn(accessor, scope, index=None)
+        result = await fn(accessor, scope)
         mock.assert_called_once_with(
             accessor,
             _scope(
                 "/gsheets/owned/Budget__sheet1.gsheet.json", prefix="/gsheets"
             ),
-            None,
         )
         assert b"sheet1" in result
 
@@ -68,5 +67,4 @@ async def test_read_not_found(accessor):
             await fn(
                 accessor,
                 _scope("/gsheets/owned/Nonexistent__sheet9.gsheet.json"),
-                index=None,
             )

@@ -12,14 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
 
@@ -43,50 +44,46 @@ def accessor():
     return GSlidesAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_stat_root_is_directory(accessor, index):
-    result = await stat(accessor, _scope("/gslides"), index=index)
+async def test_stat_root_is_directory(accessor):
+    result = await stat(accessor, _scope("/gslides"))
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_slide(accessor, index):
-    await index.set_dir(
-        "/gslides/owned",
-        [
-            (
-                "Deck__slide1.gslide.json",
-                IndexEntry(
-                    id="slide1",
-                    name="Deck",
-                    resource_type="gslides/slide",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="Deck__slide1.gslide.json",
-                ),
-            )
-        ],
-    )
-    result = await stat(
-        accessor,
-        _scope("/gslides/owned/Deck__slide1.gslide.json"),
-        index=index,
-    )
-    assert result.name == "Deck__slide1.gslide.json"
+async def test_stat_slide(accessor):
+    mounted = Mounted(GSlidesVFS, accessor, "/gslides")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=(
+            [
+                {
+                    "mimeType": "application/vnd.google-apps.presentation",
+                    "id": "slide1",
+                    "name": "Deck",
+                    "modifiedTime": "2026-04-01T00:00:00Z",
+                    "owners": [{"me": True}],
+                }
+            ],
+            True,
+        ),
+    ):
+        (target,) = await mounted.readdir(_scope("/gslides/owned"))
+        result = await mounted.stat(_scope(target))
+    assert result.name == target.rsplit("/", 1)[-1]
     assert result.extra["doc_id"] == "slide1"
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor, index):
-    await index.set_dir("/gslides/owned", [])
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            _scope("/gslides/owned/Nonexistent__slide9.gslide.json"),
-            index=index,
-        )
+async def test_stat_not_found(accessor):
+    mounted = Mounted(GSlidesVFS, accessor, "/gslides")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=([], True),
+    ):
+        await mounted.readdir(_scope("/gslides/owned"))
+        with pytest.raises(FileNotFoundError):
+            await mounted.stat(_scope("/gslides/owned/Nonexistent__x9.json"))

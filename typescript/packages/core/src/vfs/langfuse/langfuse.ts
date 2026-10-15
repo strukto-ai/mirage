@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import { LangfuseAccessor } from '../../accessor/langfuse.ts'
 
 import { HttpLangfuseTransport } from '../../core/langfuse/client.ts'
 
 import { PROMPT } from './prompt.ts'
-import { VFSName } from '../../types.ts'
+import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { read as langfuseRead } from '../../core/langfuse/read.ts'
@@ -34,6 +34,11 @@ export interface LangfuseVFSState {
 }
 
 export class LangfuseVFS extends BaseVFS {
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    stat: ['entry'],
+  } as const
+
   override readonly name: string = VFSName.LANGFUSE
   override readonly cachesReads: boolean = true
   override readonly prompt: string = PROMPT
@@ -61,22 +66,22 @@ export class LangfuseVFS extends BaseVFS {
     this.accessor = new LangfuseAccessor(new HttpLangfuseTransport(transportOpts), accessorConfig)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return langfuseReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
+    return langfuseReaddir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await langfuseRead(this.accessor, path, index)
+    const data = await langfuseRead(this.accessor, path)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return langfuseStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return langfuseStat(this.accessor, path, handed?.entry)
   }
 
   override getState(): Promise<LangfuseVFSState> {

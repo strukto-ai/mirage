@@ -13,25 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Awaitable, Callable
 
 from qdrant_client.http.exceptions import ApiException
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.hierarchy.probe import ReaddirFn, resolve_entry
+from mirage.core.hierarchy.probe import rows_of
 from mirage.core.qdrant.naming import group_name, row_stem
 from mirage.core.qdrant.payload import field_value
 from mirage.core.qdrant.render import render_json, render_text
 from mirage.core.vector.types import Row
-from mirage.types import PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mounted_path
 
 logger = logging.getLogger(__name__)
-
-# The files a listing renders from a point's payload, whose entries keep
-# their text; a blob is read as usual.
-ROW_FILES = frozenset({"qdrant/row_json", "qdrant/row_text"})
 
 
 def hit(accessor: QdrantAccessor, row: Row) -> tuple[list[str], bytes]:
@@ -56,66 +51,58 @@ def hit(accessor: QdrantAccessor, row: Row) -> tuple[list[str], bytes]:
 
 
 async def files_containing(
-    readdir: ReaddirFn[QdrantAccessor],
+    readdir: Callable[
+        [QdrantAccessor, PathSpec], Awaitable[list[FileStat] | DirListing]
+    ],
     accessor: QdrantAccessor,
     text: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     """The files under ``under`` that may hold ``text`` in any case.
 
     The listing's scroll carries every payload, so each ``.json`` and
-    ``.txt`` entry keeps its rendered text, lowercased, and a file is read
+    ``.txt`` row keeps its rendered text, lowercased, and a file is read
     only when that text holds ``text``; a blob, or a file too large to
-    keep, is always read. A read fetches the point as it is now, so the
-    text is checked against a listing made for this search rather than
-    the walk's, which may be older; a file that listing no longer holds is
-    read. None for a text that is not ASCII, whose case a lowercased copy
-    may not keep, or a listing that fails.
+    keep, is always read. The walk lists each directory from the store,
+    so the text is checked against the points as they are now. None for
+    a text that is not ASCII, whose case a lowercased copy may not keep,
+    or a listing that fails.
 
     Args:
-        readdir (ReaddirFn[QdrantAccessor]): the mount's readdir.
+        readdir (Callable): the mount's readdir.
         accessor (QdrantAccessor): the mount's accessor.
         text (str): plain text every match holds.
         under (list[PathSpec]): the directories walked.
-        index (IndexCacheStore): the listings the walk filled.
     """
     if not text.isascii():
         return None
     try:
-        return await _found(readdir, accessor, text.lower(), under, index)
+        return await _found(readdir, accessor, text.lower(), under)
     except (ApiException, OSError) as exc:
         logger.debug("qdrant listing failed (%s); reading every file", exc)
         return None
 
 
 async def _found(
-    readdir: ReaddirFn[QdrantAccessor],
+    readdir: Callable[
+        [QdrantAccessor, PathSpec], Awaitable[list[FileStat] | DirListing]
+    ],
     accessor: QdrantAccessor,
     needle: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
-) -> list[PathSpec] | None:
-    fresh = RAMIndexCacheStore()
+) -> list[PathSpec]:
     found: list[PathSpec] = []
     pending = list(under)
     while pending:
         current = pending.pop()
         parent = current.mount_path.rstrip("/")
-        for listed in await readdir(accessor, current, index):
-            child = mounted_path(
-                current, f"{parent}/{listed.rsplit('/', 1)[-1]}"
-            )
-            entry = await resolve_entry(readdir, accessor, child, index)
-            if entry is None:
-                return None
-            if entry.resource_type.endswith("/group"):
+        for row in rows_of(await readdir(accessor, current)):
+            child = mounted_path(current, f"{parent}/{row.name}")
+            if row.type is FileType.DIRECTORY:
                 pending.append(child)
                 continue
-            if entry.resource_type in ROW_FILES:
-                now = await resolve_entry(readdir, accessor, child, fresh)
-                kept = None if now is None else now.extra.get("text")
-                if isinstance(kept, str) and needle not in kept:
-                    continue
+            kept = row.extra.get("text")
+            if isinstance(kept, str) and needle not in kept:
+                continue
             found.append(child)
     return found

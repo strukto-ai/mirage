@@ -10,12 +10,6 @@ from functools import partial
 from typing import Any, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
-from mirage.core.hierarchy.probe import (
-    ReaddirFn,
-    ancestor_entry,
-    resolve_entry,
-)
 from mirage.core.hierarchy.readdir import Guard
 from mirage.core.hierarchy.scope import DetectFn, ScopeMatch
 from mirage.core.hierarchy.stat import StatHook
@@ -149,58 +143,62 @@ RunPages = Callable[
 ]
 
 
-async def day_channel_id(
-    readdir: ReaddirFn[A], accessor: A, path: PathSpec, index: IndexCacheStore
+def day_channel_id(
+    path: PathSpec, entry: FileStat | None, parent: FileStat | None
 ) -> str:
     """The channel a day's chat.jsonl reads, proven by the listing.
 
-    The typed ``name__id`` dirname is only trusted once the listing
-    proves it, so a fabricated channel id is ENOENT rather than a raw
-    API error. A sealed day lists nothing but the file still reads
-    through the channel, reproducing the API's own answer for the fetch.
+    The typed ``name__id`` dirname is only trusted once a listing proves
+    it, so a fabricated channel id is ENOENT rather than a raw API error.
+    The file's row carries its channel, and so does its day's, which a
+    day the window does not list still has: a sealed day lists nothing
+    but the file still reads through the channel, reproducing the API's
+    own answer for the fetch.
 
     Args:
-        readdir (ReaddirFn): the backend's readdir.
-        accessor (Accessor): backend accessor.
         path (PathSpec): the chat.jsonl path.
-        index (IndexCacheStore): index cache.
+        entry (FileStat | None): the file's row, when its day lists it.
+        parent (FileStat | None): the day's row.
     """
-    entry = await resolve_entry(readdir, accessor, path, index)
-    if entry is not None:
-        return entry.id.split(":", 1)[0]
-    channel = await ancestor_entry(readdir, accessor, path, index, up=2)
-    if channel is None:
-        raise enoent(path.virtual)
-    return channel.id
+    for row in (entry, parent):
+        channel = row.extra.get("channel_id") if row is not None else None
+        if isinstance(channel, str) and channel:
+            return channel
+    raise enoent(path.virtual)
 
 
-def day_stat(
-    readdir: ReaddirFn[A], guard: Guard[A] | None = None
-) -> StatHook[A]:
+def day_stat(guard: Guard[A] | None = None) -> StatHook[A]:
     """Stat a day directory, which resolves beyond the listed window.
 
     The parent listing synthesizes a bounded window of recent days, but
     the API answers a range query for any date, so a well-formed day
-    under a parent that exists is a directory whether or not the window
-    lists it. A bogus parent chain is ENOENT.
+    under a channel or label that exists is a directory whether or not
+    the window lists it, carrying its parent's ids as a listed day does.
+    A bogus parent chain is ENOENT.
 
     Args:
-        readdir (ReaddirFn): the backend's readdir.
         guard (Guard | None): refuses a day outside the mount's scope
             before any lookup, ``guard_day`` on a scoped mount.
     """
 
     async def stat(
-        accessor: A, match: ScopeMatch, path: PathSpec, index: IndexCacheStore
+        accessor: A,
+        match: ScopeMatch,
+        path: PathSpec,
+        entry: FileStat | None,
+        parent: FileStat | None,
     ) -> FileStat:
         if guard is not None:
             await guard(accessor, match, path.virtual)
-        entry = await resolve_entry(readdir, accessor, path, index)
         if entry is not None:
-            return FileStat(name=entry.vfs_name, type=FileType.DIRECTORY)
-        if await ancestor_entry(readdir, accessor, path, index, up=1) is None:
+            return entry
+        if parent is None:
             raise enoent(path.virtual)
-        return FileStat(name=match.slots["day"], type=FileType.DIRECTORY)
+        return FileStat(
+            name=match.slots["day"],
+            type=FileType.DIRECTORY,
+            extra=dict(parent.extra),
+        )
 
     return stat
 

@@ -24,10 +24,9 @@ import {
   type ChromaConfigResolved,
 } from './config.ts'
 import { PROMPT } from './prompt.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { DirListing, PathSpec, FileStat } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
-import type { SearchQuery } from '../types.ts'
+import type { Handed, SearchQuery } from '../types.ts'
 import { CHROMA_TREE } from '../../core/chroma/tree.ts'
 import { read, readStream } from '../../core/chroma/read.ts'
 import { stat } from '../../core/chroma/stat.ts'
@@ -54,6 +53,13 @@ export class ChromaVFS extends BaseVFS {
   override readonly prompt: string = PROMPT
   readonly config: ChromaConfigResolved
   override readonly accessor: ChromaAccessor
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry'],
+    readStream: ['entry'],
+    stat: ['entry', 'index'],
+  } as const
 
   constructor(options: ChromaVFSOptions | ChromaConfig) {
     super()
@@ -75,50 +81,41 @@ export class ChromaVFS extends BaseVFS {
     }
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return CHROMA_TREE.readdir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return CHROMA_TREE.readdir(this.accessor, path, handed?.entry)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await read(this.accessor, path, index)
+    const data = await read(this.accessor, path, handed?.entry)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return stat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return stat(this.accessor, path, handed?.entry, handed?.index)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return readStream(this.accessor, path, index)
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return readStream(this.accessor, path, handed?.entry)
   }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
-    return filesContaining(this.accessor, text, [path], opts.ignoreCase, index)
+    return filesContaining(this.accessor, text, [path], opts.ignoreCase)
   }
 
-  override search(
-    path: PathSpec,
-    query: SearchQuery,
-    index?: IndexCacheStore,
-  ): Promise<[string, string][] | null> {
-    return searchResource(this.accessor, path, query, index)
+  override search(path: PathSpec, query: SearchQuery): Promise<[string, string][] | null> {
+    return searchResource(this.accessor, path, query)
   }
 
-  override searchMany(
-    paths: PathSpec[],
-    query: SearchQuery,
-    index?: IndexCacheStore,
-  ): Promise<[string, string][] | null> {
-    return searchMany(this.accessor, paths, query, index)
+  override searchMany(paths: PathSpec[], query: SearchQuery): Promise<[string, string][] | null> {
+    return searchMany(this.accessor, paths, query)
   }
 }

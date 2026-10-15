@@ -20,9 +20,9 @@ import {
 } from '../../core/airtable/config.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import { PROMPT, WRITE_PROMPT } from './prompt.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { DirListing, PathSpec, FileStat } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as airtableReaddir } from '../../core/airtable/readdir.ts'
 import {
@@ -55,6 +55,15 @@ export class AirtableVFS extends BaseVFS {
   override readonly prompt: string = PROMPT
   override readonly writePrompt: string = WRITE_PROMPT
   override readonly accessor: AirtableAccessor
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry', 'parent'],
+    readStream: ['entry', 'parent'],
+    stat: ['entry'],
+    linesContaining: ['entry'],
+    firstLines: ['entry', 'parent'],
+  } as const
 
   private readonly config: AirtableConfig
 
@@ -64,43 +73,39 @@ export class AirtableVFS extends BaseVFS {
     this.accessor = new AirtableAccessor(config, options)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return airtableReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return airtableReaddir(this.accessor, path, handed?.entry)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await airtableRead(this.accessor, path, index)
+    const data = await airtableRead(this.accessor, path, handed?.entry, handed?.parent)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return airtableStream(this.accessor, path, index)
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return airtableStream(this.accessor, path, handed?.entry, handed?.parent)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return airtableStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return airtableStat(this.accessor, path, handed?.entry)
   }
 
   override linesContaining(
     path: PathSpec,
     text: string,
     _opts: { ignoreCase: boolean },
-    index?: IndexCacheStore,
+    handed?: Handed,
   ): Promise<ByteSource | null> {
-    return airtableLinesContaining(this.accessor, path, text, index)
+    return airtableLinesContaining(this.accessor, path, text, handed?.entry)
   }
 
-  override firstLines(
-    path: PathSpec,
-    n: number,
-    index?: IndexCacheStore,
-  ): Promise<Uint8Array | null> {
-    return airtableFirstLines(this.accessor, path, n, index)
+  override firstLines(path: PathSpec, n: number, handed?: Handed): Promise<Uint8Array | null> {
+    return airtableFirstLines(this.accessor, path, n, handed?.entry, handed?.parent)
   }
 
   override getState(): AirtableVFSState {

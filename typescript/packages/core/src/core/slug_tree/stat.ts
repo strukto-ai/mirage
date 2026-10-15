@@ -12,15 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType } from '../../types.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { mountRoot } from './rows.ts'
-import type { ResolvedDirectory } from './types.ts'
+import { enoent } from '../../errors/fs.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { stripSlash } from '../../utils/slash.ts'
+import { folderRow } from './rows.ts'
 
-/** Stat a folder of the tree, which exists only as its listing. */
-export function directoryStat(resolved: ResolvedDirectory): FileStat {
-  const key = resolved.virtualKey
-  const name =
-    key === mountRoot(resolved.mountPrefix) ? '/' : (rstripSlash(key).split('/').pop() ?? '/')
-  return new FileStat({ name, type: FileType.DIRECTORY, extra: { children_count: 0 } })
+/** Stat a path of the tree: the root, or the row its folder names. */
+export function treeStat(path: PathSpec, entry: FileStat | null): FileStat {
+  if (stripSlash(path.mountPath) === '') return folderRow('/')
+  if (entry === null) throw enoent(path.virtual)
+  return entry
 }

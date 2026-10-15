@@ -14,7 +14,6 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { LinearAccessor } from '../../accessor/linear.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import type { LinearTransport } from './client.ts'
 import { unsearchedText } from './normalize.ts'
@@ -105,7 +104,6 @@ async function ask(
     new LinearAccessor(transport, { contentSearch: true }),
     text,
     [under],
-    new RAMIndexCacheStore(),
     askLinear,
   )
   return [out, transport.searched]
@@ -160,13 +158,12 @@ describe('linear filesContaining', () => {
   )
 
   // A read fetches the record as it is now, so the kept text is checked against
-  // listings made for the search, not the ones the walk cached; an issue gone
-  // since is read.
+  // listings made for the search, not the ones the command walked; an issue
+  // gone since is not read.
   it('finds a text changed since the listing', async () => {
     const transport = new FakeTransport({ numbat: ['I1'] })
     const accessor = new LinearAccessor(transport, { contentSearch: true })
-    const index = new RAMIndexCacheStore()
-    const search = () => filesContaining(accessor, 'numbat', [scope()], index, true)
+    const search = () => filesContaining(accessor, 'numbat', [scope()], true)
     await search()
     const changed = issue('I2', 'Write release notes', 'Blocked', 'See numbat.io')
     transport.issues = ISSUES.map((item) => (item.id === 'I2' ? changed : item))
@@ -179,7 +176,7 @@ describe('linear filesContaining', () => {
     transport.issues = ISSUES.slice(0, 1)
     transport.documents = DOCUMENTS
     out = await search()
-    expect(issues(out)).toEqual(ALL_ISSUES)
+    expect(issues(out)).toEqual(['ENG-1__I1'])
   })
 
   // Without an answer from Linear every issue is read.

@@ -25,7 +25,6 @@ import { detectFor } from './scope.ts'
 import { hit } from './search.ts'
 
 export const TREE: VectorTree<LanceDBAccessor> = {
-  vfs: 'lancedb',
   detect: detectFor,
   pinned: (accessor) => accessor.config.table,
   searchLimit: (accessor) => accessor.config.searchLimit,
@@ -41,5 +40,5 @@ export const TREE: VectorTree<LanceDBAccessor> = {
 
 export const readdir = makeReaddir(TREE)
 export const read = makeRead(TREE)
-export const stat = makeStat(TREE, readdir, read)
+export const stat = makeStat(TREE, read)
 export const SEARCH = makeSearch(TREE)

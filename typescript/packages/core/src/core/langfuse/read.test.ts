@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { LangfuseAccessor } from '../../accessor/langfuse.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { LangfuseApiError, type LangfuseTransport } from './client.ts'
@@ -58,11 +57,7 @@ describe('langfuse read dataset run', () => {
         data: [{ name: 'run-alpha', datasetName: 'eval-basic' }],
       },
     })
-    const bytes = await read(
-      accessor(transport),
-      spec('/datasets/eval-basic/runs/run-alpha.jsonl'),
-      new RAMIndexCacheStore(),
-    )
+    const bytes = await read(accessor(transport), spec('/datasets/eval-basic/runs/run-alpha.jsonl'))
     const text = DEC.decode(bytes)
     expect(text.trimEnd().split('\n')).toHaveLength(1)
     expect(JSON.parse(text.trimEnd())).toMatchObject({ name: 'run-alpha' })
@@ -73,11 +68,7 @@ describe('langfuse read dataset run', () => {
     const transport = new RecordingTransport({
       '/api/public/datasets/eval-basic/runs': { data: [{ name: 'run-alpha' }] },
     })
-    await read(
-      accessor(transport),
-      spec('/datasets/eval-basic/runs/run-alpha.jsonl'),
-      new RAMIndexCacheStore(),
-    )
+    await read(accessor(transport), spec('/datasets/eval-basic/runs/run-alpha.jsonl'))
     expect(transport.paths).toEqual(['/api/public/datasets/eval-basic/runs'])
   })
 
@@ -86,11 +77,7 @@ describe('langfuse read dataset run', () => {
       '/api/public/datasets/eval-basic/runs': { data: [{ name: 'other' }] },
     })
     await expect(
-      read(
-        accessor(transport),
-        spec('/datasets/eval-basic/runs/run-alpha.jsonl'),
-        new RAMIndexCacheStore(),
-      ),
+      read(accessor(transport), spec('/datasets/eval-basic/runs/run-alpha.jsonl')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
@@ -98,22 +85,14 @@ describe('langfuse read dataset run', () => {
 describe('langfuse read error mapping', () => {
   it('translates a 404 into ENOENT', async () => {
     await expect(
-      read(
-        accessor(new ThrowingTransport(404)),
-        spec('/traces/absent.json'),
-        new RAMIndexCacheStore(),
-      ),
+      read(accessor(new ThrowingTransport(404)), spec('/traces/absent.json')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('lets a 500 propagate instead of disguising it as a missing file', async () => {
     // A server fault must not read as "this trace does not exist".
     await expect(
-      read(
-        accessor(new ThrowingTransport(500)),
-        spec('/traces/whatever.json'),
-        new RAMIndexCacheStore(),
-      ),
+      read(accessor(new ThrowingTransport(500)), spec('/traces/whatever.json')),
     ).rejects.toBeInstanceOf(LangfuseApiError)
   })
 })
@@ -125,11 +104,7 @@ describe('langfuse read dataset items', () => {
         data: [{ id: 'item-one' }, { id: 'item-two' }],
       },
     })
-    const bytes = await read(
-      accessor(transport),
-      spec('/datasets/eval-basic/items.jsonl'),
-      new RAMIndexCacheStore(),
-    )
+    const bytes = await read(accessor(transport), spec('/datasets/eval-basic/items.jsonl'))
     const lines = DEC.decode(bytes).trimEnd().split('\n')
     expect(lines).toHaveLength(2)
     expect(lines.map((l) => (JSON.parse(l) as { id: string }).id)).toEqual(['item-one', 'item-two'])
@@ -137,11 +112,7 @@ describe('langfuse read dataset items', () => {
 
   it('renders an empty dataset as an empty file', async () => {
     const transport = new RecordingTransport({ '/api/public/dataset-items': { data: [] } })
-    const bytes = await read(
-      accessor(transport),
-      spec('/datasets/eval-empty/items.jsonl'),
-      new RAMIndexCacheStore(),
-    )
+    const bytes = await read(accessor(transport), spec('/datasets/eval-empty/items.jsonl'))
     expect(DEC.decode(bytes)).toBe('')
   })
 })
@@ -154,14 +125,10 @@ describe('langfuse read of a session trace', () => {
     const transport = new RecordingTransport({
       '/api/public/traces/t1': { id: 't1', sessionId: 's2' },
     })
-    await expect(
-      read(accessor(transport), spec('/sessions/s1/t1.json'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    const own = await read(
-      accessor(transport),
-      spec('/sessions/s2/t1.json'),
-      new RAMIndexCacheStore(),
-    )
+    await expect(read(accessor(transport), spec('/sessions/s1/t1.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    const own = await read(accessor(transport), spec('/sessions/s2/t1.json'))
     expect((JSON.parse(new TextDecoder().decode(own)) as { sessionId: string }).sessionId).toBe(
       's2',
     )

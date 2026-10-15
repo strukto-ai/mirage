@@ -15,7 +15,6 @@
 from typing import Any
 
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.langfuse.client import (
@@ -28,7 +27,7 @@ from mirage.core.langfuse.client import (
 from mirage.core.langfuse.scope import detect_scope
 from mirage.core.render.json import json_bytes, jsonl_bytes
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def fetch_trace_file(
@@ -60,7 +59,8 @@ async def _read_trace(
     accessor: LangfuseAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     return json_bytes(await fetch_trace_file(accessor, match, path))
 
@@ -69,7 +69,8 @@ async def _read_prompt_version(
     accessor: LangfuseAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     # The scope's codec only matches plain ASCII integers, so the int()
     # here cannot raise.
@@ -88,7 +89,8 @@ async def _read_dataset_items(
     accessor: LangfuseAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     items = await fetch_or_enoent(
         fetch_dataset_items(accessor.api, match.slots["dataset_name"]),
@@ -101,7 +103,8 @@ async def _read_dataset_run(
     accessor: LangfuseAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     runs = await fetch_or_enoent(
         fetch_dataset_runs(accessor.api, match.slots["dataset_name"]),

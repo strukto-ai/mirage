@@ -14,46 +14,36 @@
 
 from collections.abc import Awaitable, Callable, Mapping
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.hierarchy.probe import A, ReaddirFn, resolve_entry
+from mirage.core.hierarchy.probe import A
 from mirage.core.hierarchy.scope import INVALID, DetectFn, ScopeMatch
 from mirage.errors.fs import eisdir, enoent
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.types import FileStat, PathSpec
 
-DeleteFn = Callable[[A, ScopeMatch, IndexEntry], Awaitable[None]]
+DeleteFn = Callable[[A, ScopeMatch, FileStat], Awaitable[None]]
 
 
 def make_unlink(
     detect: DetectFn,
-    readdir: ReaddirFn[A],
     *,
     deleters: Mapping[str, DeleteFn[A]],
 ) -> Callable[..., Awaitable[None]]:
-    """Build a hierarchy unlink: classify, resolve, delete, invalidate.
+    """Build a hierarchy unlink: classify, refuse, delete.
 
-    A deleter owns only the backend delete call; classification, the
-    id-resolving parent listing, the directory refusal and the cache
-    invalidation happen here, identically for every backend. The match
-    rides along because a delete addressed inside a container needs the
-    container's slots (gcal deletes an event from a calendar), while a
+    A deleter owns only the backend delete call, handed the row the
+    parent's listing names; classification and the directory refusal
+    happen here, identically for every backend. The match rides along
+    because a delete addressed inside a container needs the container's
+    slots (gcal deletes an event from a calendar), while a
     globally-id-addressed backend just ignores it.
 
     Args:
         detect (DetectFn): the backend's scope classifier.
-        readdir (ReaddirFn): the backend's readdir, for entry resolution.
         deleters (Mapping[str, DeleteFn]): one deleter per leaf kind.
     """
 
     async def unlink(
-        accessor: A, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        accessor: A, path: PathSpec, entry: FileStat | None = None
     ) -> None:
-        if index is NULL_INDEX:
-            # Entry resolution reads what its parent-listing warm just
-            # wrote, so a caller with no cache still needs one for the
-            # duration of the call.
-            index = RAMIndexCacheStore()
         match = detect(path)
         deleter = deleters.get(match.kind)
         if deleter is None:
@@ -62,14 +52,8 @@ def make_unlink(
             ):
                 raise eisdir(path.virtual)
             raise enoent(path)
-        entry = await resolve_entry(readdir, accessor, path, index)
         if entry is None:
             raise enoent(path)
         await deleter(accessor, match, entry)
-        prefix = mount_prefix_of(path.virtual, path.vfs_path)
-        key = path.vfs_path.strip("/")
-        virtual_key = prefix + "/" + key if key else prefix or "/"
-        parent_dir = virtual_key.rsplit("/", 1)[0] or "/"
-        await index.invalidate_dir(parent_dir)
 
     return unlink

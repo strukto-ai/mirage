@@ -14,7 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { normalizeSlug, scalarString, virtualPath } from './rows.ts'
+import { FileStat, FileType } from '../../types.ts'
+import { dirRows, normalizeSlug, scalarString } from './rows.ts'
 
 describe('normalizeSlug', () => {
   it('normalizes slashes', () => {
@@ -40,10 +41,20 @@ describe('scalarString', () => {
   })
 })
 
-describe('virtualPath', () => {
-  it('maps tree paths under the mount root', () => {
-    expect(virtualPath('/', '/knowledge/')).toBe('/knowledge')
-    expect(virtualPath('/guides', '/knowledge/')).toBe('/knowledge/guides')
-    expect(virtualPath('/guides', '')).toBe('/guides')
+describe('dirRows', () => {
+  it('lays each folder out by tree path', () => {
+    const files = new Map([
+      ['/guides/quickstart', 5],
+      ['/api/reference', 3],
+    ])
+    const rows = dirRows(
+      files,
+      (path, size) => new FileStat({ name: path, type: FileType.FILE, size }),
+    )
+    expect([...rows.keys()].sort()).toEqual(['/', '/api', '/guides'])
+    expect(rows.get('/')?.map((row) => [row.name, row.type])).toEqual([
+      ['api', FileType.DIRECTORY],
+      ['guides', FileType.DIRECTORY],
+    ])
   })
 })

@@ -14,18 +14,20 @@
 
 import { describe, expect, it } from 'vitest'
 import { LangfuseAccessor, type LangfuseAccessorConfig } from '../../accessor/langfuse.ts'
-import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { vfsOver } from '../../test-utils.ts'
 import { LangfuseVFS } from '../../vfs/langfuse/langfuse.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { PathSpec } from '../../types.ts'
+import type { DirListing } from '../../types.ts'
+import { PathSpec, type FileStat } from '../../types.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { LangfuseTransport } from './client.ts'
 import { readdir } from './readdir.ts'
-import { stat } from './stat.ts'
 import { jsonlBytes } from '../render/json.ts'
+
+function names(listed: readonly FileStat[] | DirListing): string[] {
+  return rowsOf(listed).map((row) => row.name)
+}
 
 interface Call {
   path: string
@@ -49,18 +51,9 @@ function accessor(transport: LangfuseTransport, config: LangfuseAccessorConfig =
   return new LangfuseAccessor(transport, config)
 }
 
-class WindowSpy extends RAMIndexCacheStore {
-  readonly windows = new Map<string, boolean>()
-
-  override setDir(
-    vfsPath: string,
-    entries: readonly [string, IndexEntry][],
-    expiredAt?: Date | null,
-    options: SetDirOptions = {},
-  ): Promise<Evicted[]> {
-    this.windows.set(vfsPath, options.window === true)
-    return super.setDir(vfsPath, entries, expiredAt, options)
-  }
+// A LangfuseVFS over `over`, so a mount lists through the test's transport.
+function mountedVfs(over: LangfuseAccessor): LangfuseVFS {
+  return Object.assign(new LangfuseVFS({ publicKey: 'pk', secretKey: 'sk' }), { accessor: over })
 }
 
 function spec(virtual: string): PathSpec {
@@ -79,12 +72,8 @@ describe('langfuse readdir prompt versions', () => {
         ],
       },
     })
-    const entries = await readdir(
-      accessor(transport),
-      spec('/prompts/greeting'),
-      new RAMIndexCacheStore(),
-    )
-    expect(entries).toEqual(['/prompts/greeting/1.json', '/prompts/greeting/2.json'])
+    const entries = await readdir(accessor(transport), spec('/prompts/greeting'))
+    expect(names(entries)).toEqual(['1.json', '2.json'])
   })
 
   it('lists prompt names once regardless of version count', async () => {
@@ -96,8 +85,8 @@ describe('langfuse readdir prompt versions', () => {
         ],
       },
     })
-    const entries = await readdir(accessor(transport), spec('/prompts'), new RAMIndexCacheStore())
-    expect(entries).toEqual(['/prompts/greeting', '/prompts/qa-template'])
+    const entries = await readdir(accessor(transport), spec('/prompts'))
+    expect(names(entries)).toEqual(['greeting', 'qa-template'])
   })
 })
 
@@ -108,8 +97,8 @@ describe('langfuse readdir trace window', () => {
     const transport = new RecordingTransport({
       '/api/public/traces': { data: [{ id: 'trace-old' }] },
     })
-    const entries = await readdir(accessor(transport), spec('/traces'), new RAMIndexCacheStore())
-    expect(entries).toEqual(['/traces/trace-old.json'])
+    const entries = await readdir(accessor(transport), spec('/traces'))
+    expect(names(entries)).toEqual(['trace-old.json'])
     expect(transport.calls[0]?.query).not.toHaveProperty('fromTimestamp')
   })
 
@@ -120,7 +109,6 @@ describe('langfuse readdir trace window', () => {
     await readdir(
       accessor(transport, { defaultFromTimestamp: '2026-01-01T00:00:00Z' }),
       spec('/traces'),
-      new RAMIndexCacheStore(),
     )
     expect(transport.calls[0]?.query?.fromTimestamp).toBe('2026-01-01T00:00:00Z')
   })
@@ -129,7 +117,7 @@ describe('langfuse readdir trace window', () => {
     const transport = new RecordingTransport({
       '/api/public/traces': { data: [] },
     })
-    await readdir(accessor(transport), spec('/traces'), new RAMIndexCacheStore())
+    await readdir(accessor(transport), spec('/traces'))
     expect(transport.calls[0]?.query?.limit).toBe(100)
   })
 })
@@ -141,14 +129,9 @@ describe('langfuse readdir dataset sizes', () => {
       { id: 'i-2', input: 'b' },
     ]
     const transport = new RecordingTransport({ '/api/public/dataset-items': { data: items } })
-    const idx = new RAMIndexCacheStore()
-    const entries = await readdir(accessor(transport), spec('/datasets/qa-eval'), idx)
-    await readdir(accessor(transport), spec('/datasets/qa-eval'), idx)
-
-    expect(entries).toEqual(['/datasets/qa-eval/items.jsonl', '/datasets/qa-eval/runs'])
-    const lookup = await idx.get('/datasets/qa-eval/items.jsonl')
-    expect(lookup.entry?.size).toBe(jsonlBytes(items).byteLength)
-    expect(transport.calls.filter((c) => c.path === '/api/public/dataset-items')).toHaveLength(1)
+    const entries = rowsOf(await readdir(accessor(transport), spec('/datasets/qa-eval')))
+    expect(entries.map((row) => row.name)).toEqual(['items.jsonl', 'runs'])
+    expect(entries[0]?.size).toBe(jsonlBytes(items).byteLength)
   })
 
   it('stores the rendered run size on each run listing entry', async () => {
@@ -156,11 +139,9 @@ describe('langfuse readdir dataset sizes', () => {
     const transport = new RecordingTransport({
       '/api/public/datasets/qa-eval/runs': { data: runs },
     })
-    const idx = new RAMIndexCacheStore()
-    await readdir(accessor(transport), spec('/datasets/qa-eval/runs'), idx)
-
-    const lookup = await idx.get('/datasets/qa-eval/runs/run-a.jsonl')
-    expect(lookup.entry?.size).toBe(jsonlBytes([runs[0] as Record<string, unknown>]).byteLength)
+    const listed = rowsOf(await readdir(accessor(transport), spec('/datasets/qa-eval/runs')))
+    expect(listed[0]?.name).toBe('run-a.jsonl')
+    expect(listed[0]?.size).toBe(jsonlBytes([runs[0] as Record<string, unknown>]).byteLength)
   })
 })
 
@@ -170,9 +151,7 @@ describe('langfuse bounded trace listing', () => {
   const TRACES = { '/api/public/traces': { data: [{ id: 't1' }, { id: 't2' }] } }
   it('fetches a full page once through the workspace index view', async () => {
     const transport = new RecordingTransport(TRACES)
-    const vfs = vfsOver(LangfuseVFS, accessor(transport, { defaultTraceLimit: 2 }), {
-      name: 'langfuse',
-    })
+    const vfs = mountedVfs(accessor(transport, { defaultTraceLimit: 2 }))
     const ws = new Workspace({ '/nested/lf/': vfs }, { shellParser: await getTestParser() })
     try {
       const result = await ws.shell('ls -l /nested/lf/traces')
@@ -190,37 +169,32 @@ describe('langfuse bounded trace listing', () => {
   ]
   for (const [label, config] of cases) {
     it(`serves child stats without refetching a partial page (${label})`, async () => {
-      const index = new RAMIndexCacheStore()
       const transport = new RecordingTransport(TRACES)
-      const acc = accessor(transport, config)
-      const paths = await readdir(acc, spec('/traces'), index)
-      for (const path of paths) await stat(acc, spec(path), index)
-      expect(transport.calls).toHaveLength(1)
-      await readdir(acc, spec('/traces'), index)
-      expect(transport.calls).toHaveLength(2)
+      const ws = new Workspace({ '/lf/': mountedVfs(accessor(transport, config)) })
+      try {
+        const paths = (await ws.dispatch('readdir', '/lf/traces')) as string[]
+        for (const path of paths) await ws.dispatch('stat', path)
+        expect(transport.calls).toHaveLength(1)
+        await ws.dispatch('readdir', '/lf/traces')
+        expect(transport.calls).toHaveLength(2)
+      } finally {
+        await ws.close()
+      }
     })
 
     it(`is not cached as the directory (${label})`, async () => {
-      const index = new RAMIndexCacheStore()
-      const out = await readdir(
-        accessor(new RecordingTransport(TRACES), config),
-        spec('/traces'),
-        index,
-      )
-      expect(out).toEqual(['/traces/t1.json', '/traces/t2.json'])
-      expect((await index.listDir('/traces')).entries).toBeUndefined()
-      expect((await index.get('/traces/t1.json')).entry?.id).toBe('t1')
+      const out = await readdir(accessor(new RecordingTransport(TRACES), config), spec('/traces'))
+      expect(names(out)).toEqual(['t1.json', 't2.json'])
+      expect((out as DirListing).partial).toBe(true)
     })
   }
 
   it('short of the limit is the directory', async () => {
-    const index = new RAMIndexCacheStore()
-    await readdir(
+    const out = await readdir(
       accessor(new RecordingTransport(TRACES), { defaultTraceLimit: 3 }),
       spec('/traces'),
-      index,
     )
-    expect((await index.listDir('/traces')).entries).toHaveLength(2)
+    expect((out as DirListing).partial).toBe(false)
   })
 })
 
@@ -233,13 +207,11 @@ describe('langfuse single-page listings', () => {
   ])('writes %s as a window', async (path, endpoint, rows) => {
     // Each of these is one page of the newest entries: an older one that
     // drops off the page has not been deleted.
-    const index = new WindowSpy()
     const out = await readdir(
       accessor(new RecordingTransport({ [endpoint]: { data: rows } })),
       spec(path),
-      index,
     )
-    expect(out).toHaveLength(1)
-    expect(index.windows.get(path)).toBe(true)
+    expect(rowsOf(out)).toHaveLength(1)
+    expect((out as DirListing).window).toBe(true)
   })
 })

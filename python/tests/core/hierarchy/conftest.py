@@ -15,7 +15,6 @@
 import pytest
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.codec import DATE, INT_JSON, JSON_NAME, Codec
 from mirage.core.hierarchy.scope import (
     Scope,
@@ -23,7 +22,7 @@ from mirage.core.hierarchy.scope import (
     Slot,
     make_detect_scope,
 )
-from mirage.types import ContentType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 SCOPES = (
     Scope(kind="rooms", segments=("rooms",), probed=False),
@@ -77,34 +76,20 @@ def spec(mount_path: str) -> PathSpec:
 
 async def list_rooms(
     accessor: FakeAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     accessor.calls.append("rooms")
     return [
-        (
-            room,
-            IndexEntry(
-                id=room, name=room, resource_type="fake/room", vfs_name=room
-            ),
-        )
+        FileStat(name=room, type=FileType.DIRECTORY, extra={"room_id": room})
         for room in TREE["rooms"]
     ]
 
 
 async def list_notes(
     accessor: FakeAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     accessor.calls.append(f"notes:{match.slots['room']}")
     return [
-        (
-            note,
-            IndexEntry(
-                id=note,
-                name=note,
-                resource_type="fake/note",
-                vfs_name=note,
-                size=7,
-            ),
-        )
+        FileStat(name=note, type=FileType.FILE, size=7)
         for note in TREE[match.slots["room"]]
     ]
 

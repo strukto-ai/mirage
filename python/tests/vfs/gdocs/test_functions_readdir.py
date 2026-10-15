@@ -12,14 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
+from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
 
@@ -43,26 +44,33 @@ def accessor():
     return GDocsAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+@pytest.mark.asyncio
+async def test_readdir_root(accessor):
+    result = await readdir(accessor, _scope("/gdocs"))
+    assert [row.name for row in result] == ["owned", "shared"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
-    result = await readdir(accessor, _scope("/gdocs"), index=index)
-    assert result == ["/gdocs/owned", "/gdocs/shared"]
-
-
-@pytest.mark.asyncio
-async def test_readdir_owned_serves_cached_listing(accessor, index):
-    entry = IndexEntry(
-        id="doc1",
-        name="Report",
-        resource_type="gdocs/doc",
-        remote_time="2026-04-01T00:00:00Z",
-        vfs_name="File__doc1.gdoc.json",
-    )
-    await index.set_dir("/gdocs/owned", [("File__doc1.gdoc.json", entry)])
-    result = await readdir(accessor, _scope("/gdocs/owned"), index=index)
-    assert "/gdocs/owned/File__doc1.gdoc.json" in result
+async def test_a_listed_corpus_is_listed_once(accessor):
+    mounted = Mounted(GDocsVFS, accessor, "/gdocs")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=(
+            [
+                {
+                    "mimeType": "application/vnd.google-apps.document",
+                    "id": "doc1",
+                    "name": "Report",
+                    "modifiedTime": "2026-04-01T00:00:00Z",
+                    "owners": [{"me": True}],
+                }
+            ],
+            True,
+        ),
+    ) as listed:
+        first = await mounted.readdir(_scope("/gdocs/owned"))
+        again = await mounted.readdir(_scope("/gdocs/owned"))
+    assert first == again and len(first) == 1
+    assert "doc1" in first[0]
+    listed.assert_awaited_once()

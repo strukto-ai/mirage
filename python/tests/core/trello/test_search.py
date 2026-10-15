@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.normalize import unsearched_text
 from mirage.core.trello.search import SEARCH_LIMIT, files_containing
 from mirage.types import JsonValue, PathSpec
@@ -63,7 +62,6 @@ async def _ask(
     named: list[str] | dict[str, list[str]],
     under: list[PathSpec] | None = None,
     reply: "JsonValue | Exception" = None,
-    index: RAMIndexCacheStore | None = None,
     listed: list[dict] = CARDS,
 ):
     accessor = TrelloAccessor(
@@ -106,9 +104,7 @@ async def _ask(
         patch(f"{readdir}.list_list_cards", AsyncMock(return_value=listed)),
         patch("mirage.core.trello.client._get", found),
     ):
-        out = await files_containing(
-            accessor, text, under or [_scope()], index or RAMIndexCacheStore()
-        )
+        out = await files_containing(accessor, text, under or [_scope()])
     return out, [
         call.kwargs["params"]["query"] for call in found.await_args_list
     ]
@@ -188,23 +184,20 @@ async def test_a_garbled_reply_reads_every_file(reply):
 
 
 # A read fetches the card as it is now, so the kept text is checked against
-# listings made for the search, not the ones the walk cached; a card gone
-# since is read.
+# listings made for the search, not the ones the command walked; a card
+# gone since is not read.
 @pytest.mark.asyncio
 async def test_a_text_changed_since_the_listing_is_found():
-    index = RAMIndexCacheStore()
-    await _ask("numbat", {"numbat": ["c1"]}, index=index)
+    await _ask("numbat", {"numbat": ["c1"]})
     changed = [CARDS[0], {**CARDS[1], "desc": "See numbat.io"}, CARDS[2]]
-    out, _ = await _ask(
-        "numbat", {"numbat": ["c1"]}, index=index, listed=changed
-    )
+    out, _ = await _ask("numbat", {"numbat": ["c1"]}, listed=changed)
     assert out is not None
     assert [p.vfs_path for p in out] == [
         f"{LIST}/cards/Fix_login__c1/card.json",
         f"{LIST}/cards/Write_notes__c2/card.json",
     ]
-    out, _ = await _ask(
-        "numbat", {"numbat": ["c1"]}, index=index, listed=CARDS[:1]
-    )
+    out, _ = await _ask("numbat", {"numbat": ["c1"]}, listed=CARDS[:1])
     assert out is not None
-    assert len(out) == len(CARDS)
+    assert [p.vfs_path for p in out] == [
+        f"{LIST}/cards/Fix_login__c1/card.json"
+    ]

@@ -27,7 +27,6 @@ from mirage.core.vector.stat import make_stat
 from mirage.core.vector.types import VectorTree
 
 TREE: VectorTree[QdrantAccessor] = VectorTree(
-    vfs="qdrant",
     detect=detect_for,
     pinned=lambda accessor: accessor.config.collection,
     search_limit=lambda accessor: accessor.config.search_limit,
@@ -43,5 +42,5 @@ TREE: VectorTree[QdrantAccessor] = VectorTree(
 
 readdir = make_readdir(TREE)
 read = make_read(TREE)
-stat = make_stat(TREE, readdir, read)
+stat = make_stat(TREE, read)
 SEARCH = make_search(TREE)

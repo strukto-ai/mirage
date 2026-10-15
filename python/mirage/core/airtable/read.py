@@ -16,8 +16,6 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.accessor.airtable import AirtableAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.airtable.client import (
     list_bases,
     list_records,
@@ -31,35 +29,29 @@ from mirage.core.airtable.normalize import (
     records_jsonl,
     to_json_bytes,
 )
-from mirage.core.airtable.readdir import readdir, schema_table
+from mirage.core.airtable.readdir import schema_table
 from mirage.core.airtable.scope import detect_scope
-from mirage.core.airtable.stat import stat
-from mirage.core.hierarchy.probe import assert_parent, resolve_entry
 from mirage.core.hierarchy.read import make_read, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.errors.fs import efbig, enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
-async def ensure_listed(
-    accessor: AirtableAccessor, path: PathSpec, index: IndexCacheStore
-) -> None:
+def ensure_listed(path: PathSpec, entry: FileStat | None) -> None:
     """Refuse a file its parent listing does not hold.
 
-    ``make_read`` proves every file's parent through stat. A view file is
-    named by its view id, so under a real ``views`` directory a wrong
-    name, or another table's view id, is still the reader's to prove:
-    without this ``jq`` would read it while ``stat`` and ``cat`` call it
-    absent, and a foreign id would reach the API as a raw 422.
+    ``make_read`` proves every file's parent by the row the mount hands.
+    A view file is named by its view id, so under a real ``views``
+    directory a wrong name, or another table's view id, is still the
+    reader's to prove: without this ``jq`` would read it while ``stat``
+    and ``cat`` call it absent, and a foreign id would reach the API as
+    a raw 422.
 
     Args:
-        accessor (AirtableAccessor): the account and its scope.
         path (PathSpec): the path, for the error.
-        index (IndexCacheStore): where the parent listing lands.
+        entry (FileStat | None): the row the parent's listing holds.
     """
-    if index is NULL_INDEX or index is None:
-        index = RAMIndexCacheStore()
-    if await resolve_entry(readdir, accessor, path, index) is None:
+    if entry is None:
         raise enoent(path.virtual)
 
 
@@ -67,7 +59,8 @@ async def _read_base_json(
     accessor: AirtableAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     base_id = match.slots["base_id"]
     for base in await list_bases(accessor):
@@ -81,7 +74,8 @@ async def _read_table_json(
     accessor: AirtableAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     try:
         table = await schema_table(accessor, match)
@@ -127,7 +121,8 @@ async def _read_records(
     accessor: AirtableAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
     limit: int | None,
     offset: int | None,
 ) -> bytes:
@@ -138,11 +133,12 @@ async def _read_view(
     accessor: AirtableAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
     limit: int | None,
     offset: int | None,
 ) -> bytes:
-    await ensure_listed(accessor, path, index)
+    ensure_listed(path, entry)
     return await _render_records(
         accessor, match, path, match.slots["view_id"], limit, offset
     )
@@ -158,14 +154,15 @@ read = make_read(
         "records": _read_records,
         "view": _read_view,
     },
-    stat=stat,
+    parented=True,
 )
 
 
 async def read_stream(
     accessor: AirtableAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> AsyncIterator[bytes]:
     """Stream a records or view file a page of records at a time, the
     next page fetched only when the caller pulls it; any other file
@@ -179,16 +176,18 @@ async def read_stream(
     Args:
         accessor (AirtableAccessor): the account and its scope.
         path (PathSpec): the file.
-        index (IndexCacheStore): where the parent listing lands.
+        entry (FileStat | None): the row the parent's listing holds.
+        parent (FileStat | None): the row of the folder holding it.
     """
     match = detect_scope(path)
     if match.kind not in ("records", "view"):
-        yield await read(accessor, path, index)
+        yield await read(accessor, path, entry, parent)
         return
-    await assert_parent(stat, accessor, path, index)
+    if parent is None:
+        raise enoent(path.virtual)
     view = None
     if match.kind == "view":
-        await ensure_listed(accessor, path, index)
+        ensure_listed(path, entry)
         view = match.slots["view_id"]
     cap = accessor.config.max_read_records
     sent = 0
@@ -219,7 +218,8 @@ async def _first_records(
     match: ScopeMatch,
     path: PathSpec,
     n: int,
-    index: IndexCacheStore = NULL_INDEX,
+    entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> bytes:
     """The first ``n`` records of a records or view file, by
     ``maxRecords``, each on its own line.
@@ -232,9 +232,10 @@ async def _first_records(
         match (ScopeMatch): the file's match.
         path (PathSpec): the file.
         n (int): how many records, at least 1.
-        index (IndexCacheStore): where the parent listing lands.
+        entry (FileStat | None): the row the parent's listing holds.
+        parent (FileStat | None): the row of the folder holding it.
     """
-    return await read(accessor, path, index, limit=n)
+    return await read(accessor, path, entry, parent, limit=n)
 
 
 first_lines = per_kind(

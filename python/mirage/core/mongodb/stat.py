@@ -12,34 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
-from mirage.core.mongodb.readdir import database_guard, entity_guard, readdir
-from mirage.core.mongodb.scope import detect_scope, entity_kind
-
-
-def _database_extra(match: ScopeMatch) -> dict[str, str]:
-    return {"database": match.slots["database"]}
-
-
-def _kind_dir_extra(match: ScopeMatch) -> dict[str, str]:
-    return {
-        "database": match.slots["database"],
-        "kind": entity_kind(match),
-    }
-
-
-def _entity_extra(match: ScopeMatch) -> dict[str, str]:
-    return {
-        "database": match.slots["database"],
-        "kind": entity_kind(match),
-        "name": match.slots["name"],
-    }
-
+from mirage.core.mongodb.readdir import EXTRAS, database_guard, entity_guard
+from mirage.core.mongodb.scope import detect_scope
 
 stat = make_stat(
     detect_scope,
-    readdir,
     guards={
         "database": database_guard,
         "kind_dir": database_guard,
@@ -48,12 +26,5 @@ stat = make_stat(
         "entity": entity_guard,
         "documents": entity_guard,
     },
-    extras={
-        "database": _database_extra,
-        "kind_dir": _kind_dir_extra,
-        "database_json": _database_extra,
-        "schema_json": _entity_extra,
-        "entity": _entity_extra,
-        "documents": _entity_extra,
-    },
+    extras=EXTRAS,
 )

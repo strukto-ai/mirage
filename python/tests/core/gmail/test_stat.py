@@ -12,16 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.core.gmail.messages import message_json_bytes
 from mirage.core.gmail.stat import stat
-from mirage.types import ContentType, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gmail import GmailVFS
 from mirage.vfs.gmail.config import GmailConfig
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
@@ -31,192 +34,118 @@ def accessor():
     )
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+RAW = {
+    "id": "msg1",
+    "internalDate": "1775995200000",
+    "sizeEstimate": 4321,
+    "payload": {
+        "headers": [{"name": "Subject", "value": "Test Email"}],
+        "parts": [
+            {
+                "filename": "image.png",
+                "mimeType": "image/png",
+                "body": {"attachmentId": "att1", "size": 2048},
+            }
+        ],
+    },
+}
 
 
-async def _populate_index(idx):
-    await idx.set_dir(
-        "/gmail",
-        [
-            (
-                "INBOX",
-                IndexEntry(
-                    id="INBOX",
-                    name="INBOX",
-                    resource_type="gmail/label",
-                    vfs_name="INBOX",
-                ),
-            ),
-        ],
-    )
-    await idx.set_dir(
-        "/gmail/INBOX",
-        [
-            (
-                "2026-04-12",
-                IndexEntry(
-                    id="2026-04-12",
-                    name="2026-04-12",
-                    resource_type="gmail/date",
-                    vfs_name="2026-04-12",
-                ),
-            ),
-        ],
-    )
-    await idx.set_dir(
-        "/gmail/INBOX/2026-04-12",
-        [
-            (
-                "Test_Email__msg1.gmail.json",
-                IndexEntry(
-                    id="msg1",
-                    name="Test Email",
-                    resource_type="gmail/message",
-                    vfs_name="Test_Email__msg1.gmail.json",
-                    extra={"size_estimate": 4321},
-                ),
-            ),
-            (
-                "Test_Email__msg1",
-                IndexEntry(
-                    id="msg1",
-                    name="Test_Email__msg1",
-                    resource_type="gmail/attachment_dir",
-                    vfs_name="Test_Email__msg1",
-                ),
-            ),
-        ],
-    )
-    await idx.set_dir(
-        "/gmail/INBOX/2026-04-12/Test_Email__msg1",
-        [
-            (
-                "image.png",
-                IndexEntry(
-                    id="att1",
-                    name="image.png",
-                    resource_type="gmail/attachment",
-                    vfs_name="image.png",
-                    size=2048,
-                ),
-            ),
-        ],
-    )
+@contextmanager
+def _mailbox():
+    """One label holding one message, on 2026-04-12, with an attachment."""
+    with (
+        patch(
+            "mirage.core.gmail.readdir.list_labels",
+            new_callable=AsyncMock,
+            return_value=[{"type": "system", "id": "INBOX"}],
+        ),
+        patch(
+            "mirage.core.gmail.readdir.list_messages",
+            new_callable=AsyncMock,
+            return_value=[{"id": "msg1"}],
+        ),
+        patch(
+            "mirage.core.gmail.readdir.get_message_raw",
+            new_callable=AsyncMock,
+            return_value=RAW,
+        ),
+    ):
+        yield
+
+
+async def _stat_at(accessor: GmailAccessor, path: str) -> FileStat:
+    return await Mounted(GmailVFS, accessor, "/gmail").stat(path)
 
 
 @pytest.mark.asyncio
-async def test_stat_root(accessor, index):
+async def test_stat_root(accessor):
     result = await stat(
         accessor,
         PathSpec(
             vfs_path=mount_key("/", "/gmail"), virtual="/", directory="/"
         ),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
-async def test_stat_label(accessor, index):
-    await _populate_index(index)
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key("/gmail/INBOX", "/gmail"),
-            virtual="/gmail/INBOX",
-            directory="/gmail/INBOX",
-        ),
-        index,
-    )
+async def test_stat_label(accessor):
+    with _mailbox():
+        result = await _stat_at(accessor, "/INBOX")
     assert result.type == FileType.DIRECTORY
     assert result.name == "INBOX"
     assert result.extra["label_id"] == "INBOX"
 
 
 @pytest.mark.asyncio
-async def test_stat_date(accessor, index):
-    await _populate_index(index)
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key("/gmail/INBOX/2026-04-12", "/gmail"),
-            virtual="/gmail/INBOX/2026-04-12",
-            directory="/gmail/INBOX/2026-04-12",
-        ),
-        index,
-    )
+async def test_stat_date(accessor):
+    with _mailbox():
+        result = await _stat_at(accessor, "/INBOX/2026-04-12")
     assert result.type == FileType.DIRECTORY
     assert result.name == "2026-04-12"
 
 
 @pytest.mark.asyncio
-async def test_stat_date_outside_the_listed_window(accessor, index):
+async def test_stat_date_outside_the_listed_window(accessor):
     # The label listing is a bounded window of recent messages, so it never
     # minted this day; the date query answers for any well-formed one, so the
-    # label's existence is the proof rather than the window. No API mock is
-    # needed precisely because nothing is fetched.
-    await _populate_index(index)
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key("/gmail/INBOX/2020-01-01", "/gmail"),
-            virtual="/gmail/INBOX/2020-01-01",
-            directory="/gmail/INBOX/2020-01-01",
-        ),
-        index,
-    )
+    # label's existence is the proof rather than the window.
+    with _mailbox():
+        result = await _stat_at(accessor, "/INBOX/2020-01-01")
     assert result.type == FileType.DIRECTORY
     assert result.name == "2020-01-01"
 
 
 @pytest.mark.asyncio
-async def test_stat_message(accessor, index):
-    await _populate_index(index)
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key(
-                "/gmail/INBOX/2026-04-12/Test_Email__msg1.gmail.json", "/gmail"
-            ),
-            virtual="/gmail/INBOX/2026-04-12/Test_Email__msg1.gmail.json",
-            directory="/gmail/INBOX/2026-04-12/Test_Email__msg1.gmail.json",
-        ),
-        index,
-    )
+async def test_stat_message(accessor):
+    with _mailbox():
+        result = await _stat_at(
+            accessor, "/INBOX/2026-04-12/Test_Email__msg1.gmail.json"
+        )
     assert result.name == "Test_Email__msg1.gmail.json"
     assert result.content == ContentType.JSON
     assert result.extra["message_id"] == "msg1"
-    # rendered .gmail.json length is unknown until read; the source
-    # estimate is surfaced via extra only
-    assert result.size is None
+    # the listing fetched the message, so the size is the rendered
+    # .gmail.json length; the source estimate is surfaced via extra only
+    assert result.size == len(message_json_bytes(RAW))
     assert result.extra["size_estimate"] == 4321
 
 
 @pytest.mark.asyncio
-async def test_stat_attachment(accessor, index):
-    await _populate_index(index)
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key(
-                "/gmail/INBOX/2026-04-12/Test_Email__msg1/image.png", "/gmail"
-            ),
-            virtual="/gmail/INBOX/2026-04-12/Test_Email__msg1/image.png",
-            directory="/gmail/INBOX/2026-04-12/Test_Email__msg1/image.png",
-        ),
-        index,
-    )
+async def test_stat_attachment(accessor):
+    with _mailbox():
+        result = await _stat_at(
+            accessor, "/INBOX/2026-04-12/Test_Email__msg1/image.png"
+        )
     assert result.name == "image.png"
     assert result.size == 2048
     assert result.extra["attachment_id"] == "att1"
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor, index):
-    await _populate_index(index)
+async def test_stat_not_found(accessor):
     with patch(
         "mirage.core.gmail.readdir.list_labels",
         new_callable=AsyncMock,
@@ -228,60 +157,34 @@ async def test_stat_not_found(accessor, index):
             return_value=([], None),
         ):
             with pytest.raises(FileNotFoundError):
-                await stat(
-                    accessor,
-                    PathSpec(
-                        vfs_path=mount_key(
-                            "/gmail/INBOX/nonexistent.gmail.json", "/gmail"
-                        ),
-                        virtual="/gmail/INBOX/nonexistent.gmail.json",
-                        directory="/gmail/INBOX/nonexistent.gmail.json",
-                    ),
-                    index,
-                )
+                await _stat_at(accessor, "/INBOX/nonexistent.gmail.json")
 
 
 @pytest.mark.asyncio
-async def test_stat_unknown_top_level_raises(accessor, index):
+async def test_stat_unknown_top_level_raises(accessor):
     with patch(
         "mirage.core.gmail.readdir.list_labels",
         new_callable=AsyncMock,
         return_value=[{"type": "system", "id": "INBOX"}],
     ):
         with pytest.raises(FileNotFoundError):
-            await stat(
-                accessor,
-                PathSpec(
-                    vfs_path=mount_key("/gmail/NoSuchLabel", "/gmail"),
-                    virtual="/gmail/NoSuchLabel",
-                    directory="/gmail/NoSuchLabel",
-                ),
-                index,
-            )
+            await _stat_at(accessor, "/NoSuchLabel")
 
 
 @pytest.mark.asyncio
-async def test_stat_real_label_via_api(accessor, index):
+async def test_stat_real_label_via_api(accessor):
     with patch(
         "mirage.core.gmail.readdir.list_labels",
         new_callable=AsyncMock,
         return_value=[{"type": "system", "id": "STARRED"}],
     ):
-        result = await stat(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key("/gmail/STARRED", "/gmail"),
-                virtual="/gmail/STARRED",
-                directory="/gmail/STARRED",
-            ),
-            index,
-        )
+        result = await _stat_at(accessor, "/STARRED")
     assert result.type == FileType.DIRECTORY
     assert result.name == "STARRED"
 
 
 @pytest.mark.asyncio
-async def test_stat_propagates_parent_refresh_failure(accessor, index):
+async def test_stat_propagates_parent_refresh_failure(accessor):
     failure = RuntimeError("gmail unavailable")
     with patch(
         "mirage.core.gmail.readdir.list_labels",
@@ -289,10 +192,6 @@ async def test_stat_propagates_parent_refresh_failure(accessor, index):
         side_effect=failure,
     ):
         with pytest.raises(RuntimeError, match="gmail unavailable"):
-            await stat(
-                accessor,
-                PathSpec.from_str_path(
-                    "/INBOX/2026-04-12/missing__x1.gmail.json"
-                ),
-                index,
+            await _stat_at(
+                accessor, "/INBOX/2026-04-12/missing__x1.gmail.json"
             )

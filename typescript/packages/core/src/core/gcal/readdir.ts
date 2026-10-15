@@ -15,8 +15,6 @@
 import type { TimeRange } from '../time_range.ts'
 import { parseTime } from '../time_range.ts'
 import type { GCalAccessor } from '../../accessor/gcal.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import {
   CALENDAR_FILE,
   PRIMARY_DIR,
@@ -24,7 +22,14 @@ import {
   makeCalendarDirname,
   makeEventFilename,
 } from '../../vfs/gcal/event_entry.ts'
-import type { JsonValue, PathSpec } from '../../types.ts'
+import {
+  ContentType,
+  DirListing,
+  FileStat,
+  FileType,
+  type JsonValue,
+  type PathSpec,
+} from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { nonPlainWords } from '../../utils/record_search.ts'
@@ -48,10 +53,6 @@ import { listCalendars, listEvents } from './client.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { compactJsonBytes, compactJsonText } from '../render/json.ts'
 
-const CALENDAR_DIR = 'gcal/calendar_dir'
-export const CALENDAR_JSON = 'gcal/calendar_json'
-const BUCKET_DIR = 'gcal/bucket_dir'
-export const EVENT = 'gcal/event'
 export const FREE_BUSY_ROLE = 'freeBusyReader'
 // The text Calendar's search reads that the listing does not keep.
 const SEARCHED_FIELDS: readonly string[] = ['summary', 'description', 'location']
@@ -213,11 +214,11 @@ export function unsearchedText(event: CalendarEntryRow): string {
 }
 
 /**
- * Build the index entries for one bucket directory.
+ * Build the rows of one bucket directory.
  *
- * An event gets one entry for each of the bucket's days it covers, so a
+ * An event gets one row for each of the bucket's days it covers, so a
  * multi-day bucket lists what its day directories would, flattened, each
- * name carrying its day when `dated`. With `unsearched` each entry keeps the
+ * name carrying its day when `dated`. With `unsearched` each row keeps the
  * text Calendar's search does not read (`unsearchedText`), for grep.
  */
 function eventEntries(
@@ -227,8 +228,8 @@ function eventEntries(
   freeBusy: boolean,
   dated: boolean,
   unsearched = false,
-): [string, IndexEntry][] {
-  const rows: [string, IndexEntry][] = []
+): FileStat[] {
+  const rows: FileStat[] = []
   for (const event of events) {
     const eventId = event.id
     if (typeof eventId !== 'string' || eventId === '') continue
@@ -238,22 +239,21 @@ function eventEntries(
     const title = eventTitle(typeof summary === 'string' ? summary : null, freeBusy)
     const updated = event.updated
     const size = compactJsonBytes(event).length
-    const extra = unsearched ? { unsearched: unsearchedText(event) } : {}
+    const extra: Record<string, JsonValue> = { event_id: eventId }
+    if (unsearched) extra.unsearched = unsearchedText(event)
     for (const day of daysCovered(span, tz)) {
       if (!days.includes(day)) continue
       const name = makeEventFilename(eventId, clampedHhmm(span, day, tz), title, dated ? day : null)
-      rows.push([
-        name,
-        new IndexEntry({
-          id: eventId,
-          name: title,
-          resourceType: EVENT,
-          remoteTime: typeof updated === 'string' ? updated : '',
-          vfsName: name,
+      rows.push(
+        new FileStat({
+          name,
+          type: FileType.FILE,
+          content: ContentType.JSON,
+          modified: typeof updated === 'string' ? updated : null,
           size,
           extra,
         }),
-      ])
+      )
     }
   }
   return rows
@@ -263,11 +263,10 @@ function eventEntries(
 export async function readdir(
   accessor: GCalAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  const [prefix, key, virtualKey] = normalize(path)
+): Promise<FileStat[] | DirListing> {
+  const [, key] = normalize(path)
   // Bespoke below the classifier: the date-glob push-down filters the
-  // events query itself, and a globbed listing must not be cached as the
+  // events query itself, and a globbed listing is no listing of the
   // directory, which the kit readdir has no notion of.
   const match = detectScope(key)
   if (match.kind !== ROOT && match.kind !== 'calendar' && match.kind !== 'bucket') {
@@ -277,19 +276,9 @@ export async function readdir(
   const tz = bucketZone(accessor, calendars)
 
   if (match.kind === ROOT) {
-    const entries: [string, IndexEntry][] = [...calendars.entries()]
-      .sort((a, b) => compareCodePoints(a[0], b[0]))
-      .map(([name, entry]) => [
-        name,
-        new IndexEntry({
-          id: typeof entry.id === 'string' && entry.id !== '' ? entry.id : name,
-          name,
-          resourceType: CALENDAR_DIR,
-          vfsName: name,
-        }),
-      ])
-    if (index !== undefined) await index.setDir(virtualKey, entries)
-    return entries.map(([name]) => `${prefix}/${name}`)
+    return [...calendars.keys()]
+      .sort(compareCodePoints)
+      .map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
   }
 
   const entry = calendars.get(match.slots.calendar ?? '')
@@ -323,39 +312,22 @@ export async function readdir(
         if (day >= first && day <= last) seen.add(bucketName(bucketStart(day, size), size))
       }
     }
-    const rows: [string, IndexEntry][] = [
-      [
-        CALENDAR_FILE,
-        new IndexEntry({
-          id: `${calId}:calendar`,
-          name: CALENDAR_FILE,
-          resourceType: CALENDAR_JSON,
-          vfsName: CALENDAR_FILE,
-          size: calendarPayload(entry, tz).length,
-        }),
-      ],
+    const rows = [
+      new FileStat({
+        name: CALENDAR_FILE,
+        type: FileType.FILE,
+        content: ContentType.JSON,
+        size: calendarPayload(entry, tz).length,
+      }),
     ]
     for (const name of [...seen].sort(compareCodePoints)) {
-      rows.push([
-        name,
-        new IndexEntry({
-          id: `${calId}:${name}`,
-          name,
-          resourceType: BUCKET_DIR,
-          vfsName: name,
-        }),
-      ])
+      rows.push(new FileStat({ name, type: FileType.DIRECTORY }))
     }
-    if (index !== undefined) {
-      if (path.pattern !== null) {
-        // A globbed listing is a filtered view, not the directory: caching
-        // it as the directory would pin a short listing until it expires.
-        for (const [name, row] of rows) await index.put(`${virtualKey}/${name}`, row)
-      } else {
-        await index.setDir(virtualKey, rows)
-      }
-    }
-    return rows.map(([name]) => `${prefix}/${key}/${name}`)
+    // The buckets holding events in the listed span: a bucket outside it,
+    // or one with no event, is still a directory its path reaches, so the
+    // listing proves nothing absent. A globbed listing is a filtered view on
+    // top of that.
+    return new DirListing({ entries: rows, partial: path.pattern !== null, window: true })
   }
 
   const days = scopedBucket(accessor, match.slots.bucket ?? '', tz, path.virtual)
@@ -368,7 +340,5 @@ export async function readdir(
     tz,
     accessor.timeRange,
   )
-  const rows = eventEntries(events, days, tz, freeBusy, size > 1, accessor.config.contentSearch)
-  if (index !== undefined) await index.setDir(virtualKey, rows)
-  return rows.map(([name]) => `${prefix}/${key}/${name}`)
+  return eventEntries(events, days, tz, freeBusy, size > 1, accessor.config.contentSearch)
 }

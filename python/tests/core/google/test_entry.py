@@ -16,15 +16,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from aiohttp import ClientResponseError
-from fakeredis.aioredis import FakeRedis
 
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.accessor.gdocs import GDocsAccessor
 from mirage.core.google.entry import resolve_app_entry
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.types import PathSpec
+from mirage.vfs.gdocs import GDocsVFS
 from mirage.vfs.gdocs.doc_entry import make_filename
+from tests.fixtures.mounted import Mounted
 
 ITEM = {
     "id": "doc1",
@@ -48,7 +47,6 @@ MATCH = ScopeMatch(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend", ["ram", "redis"])
 @pytest.mark.parametrize(
     "outcome",
     [
@@ -63,22 +61,7 @@ MATCH = ScopeMatch(
         "unavailable",
     ],
 )
-async def test_direct_lookup_after_incomplete_search(backend, outcome):
-    client = FakeRedis() if backend == "redis" else None
-    index = (
-        RAMIndexCacheStore()
-        if client is None
-        else RedisIndexCacheStore(client=client)
-    )
-    retained = IndexEntry(
-        id="doc1",
-        name="Notes",
-        vfs_name=NAME,
-        resource_type="gdocs/file",
-        remote_time="old",
-    )
-    await index.put(PATH.virtual, retained)
-    await index.invalidate()
+async def test_a_direct_lookup_proves_the_file(outcome):
     item = dict(ITEM)
     error = None
     if outcome == "renamed":
@@ -99,112 +82,66 @@ async def test_direct_lookup_after_incomplete_search(backend, outcome):
                 outcome
             ],
         )
-    try:
-        with (
-            patch(
-                "mirage.core.google.entry.get_file",
-                new_callable=AsyncMock,
-                return_value=item,
-                side_effect=error,
-            ) as get,
-            patch(
-                "mirage.core.google.drive.list_all_files",
-                new_callable=AsyncMock,
-                side_effect=AssertionError("must not search"),
-            ),
-        ):
-            if outcome == "updated":
-                entry = await resolve_app_entry(
-                    None,
-                    MATCH,
-                    PATH,
-                    index,
-                    ITEM["mimeType"],
-                    "gdocs/file",
-                    make_filename,
+    with (
+        patch(
+            "mirage.core.google.entry.get_file",
+            new_callable=AsyncMock,
+            return_value=item,
+            side_effect=error,
+        ) as get,
+        patch(
+            "mirage.core.google.drive.list_all_files",
+            new_callable=AsyncMock,
+            side_effect=AssertionError("must not search"),
+        ),
+    ):
+        if outcome == "updated":
+            row = await resolve_app_entry(
+                None, MATCH, PATH, ITEM["mimeType"], make_filename
+            )
+            assert row.modified == ITEM["modifiedTime"]
+            assert row.size is None
+            assert row.extra == {
+                "doc_id": "doc1",
+                "doc_name": "Notes",
+                "source_size": 1000,
+            }
+        elif outcome in ("forbidden", "unavailable"):
+            with pytest.raises(ClientResponseError) as raised:
+                await resolve_app_entry(
+                    None, MATCH, PATH, ITEM["mimeType"], make_filename
                 )
-                assert entry.remote_time == ITEM["modifiedTime"]
-                assert entry.size is None
-                assert entry.extra == {"source_size": 1000}
-            elif outcome in ("forbidden", "unavailable"):
-                with pytest.raises(ClientResponseError) as raised:
-                    await resolve_app_entry(
-                        None,
-                        MATCH,
-                        PATH,
-                        index,
-                        ITEM["mimeType"],
-                        "gdocs/file",
-                        make_filename,
-                    )
-                assert raised.value is error
-                assert (await index.get(PATH.virtual)).entry is not None
-            else:
-                with pytest.raises(FileNotFoundError):
-                    await resolve_app_entry(
-                        None,
-                        MATCH,
-                        PATH,
-                        index,
-                        ITEM["mimeType"],
-                        "gdocs/file",
-                        make_filename,
-                    )
-                assert (await index.get(PATH.virtual)).entry is None
-            get.assert_awaited_once_with(None, "doc1")
-    finally:
-        await index.close()
-        if client is not None:
-            await client.aclose()
+            assert raised.value is error
+        else:
+            with pytest.raises(FileNotFoundError):
+                await resolve_app_entry(
+                    None, MATCH, PATH, ITEM["mimeType"], make_filename
+                )
+        get.assert_awaited_once_with(None, "doc1")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend", ["ram", "redis"])
-@pytest.mark.parametrize("listing", ["complete", "partial", "expired"])
-async def test_only_complete_live_listing_proves_absence(backend, listing):
-    client = FakeRedis() if backend == "redis" else None
-    index = (
-        RAMIndexCacheStore()
-        if client is None
-        else RedisIndexCacheStore(client=client)
-    )
-    try:
-        if listing == "partial":
-            await index.set_partial_dir("/docs/owned", [])
-        else:
-            await index.set_dir("/docs/owned", [])
-        if listing == "expired":
-            await index.invalidate()
-        with patch(
+@pytest.mark.parametrize("complete", [True, False])
+async def test_only_a_complete_listing_proves_absence(complete):
+    mounted = Mounted(GDocsVFS, GDocsAccessor(config=None, token_manager=None))
+    with (
+        patch(
+            "mirage.core.google.readdir.list_all_files",
+            new_callable=AsyncMock,
+            return_value=([], complete),
+        ),
+        patch(
             "mirage.core.google.entry.get_file",
             new_callable=AsyncMock,
             return_value=ITEM,
-        ) as get:
-            if listing == "complete":
-                with pytest.raises(FileNotFoundError):
-                    await resolve_app_entry(
-                        None,
-                        MATCH,
-                        PATH,
-                        index,
-                        ITEM["mimeType"],
-                        "gdocs/file",
-                        make_filename,
-                    )
-                get.assert_not_awaited()
-            else:
-                entry = await resolve_app_entry(
-                    None,
-                    MATCH,
-                    PATH,
-                    index,
-                    ITEM["mimeType"],
-                    "gdocs/file",
-                    make_filename,
-                )
-                assert entry.id == ITEM["id"]
-                get.assert_awaited_once_with(None, "doc1")
-    finally:
-        await index.close()
-        if client is not None:
-            await client.aclose()
+        ) as get,
+    ):
+        await mounted.readdir("/owned")
+        if complete:
+            with pytest.raises(FileNotFoundError):
+                await mounted.stat("/owned/" + NAME)
+            get.assert_not_awaited()
+        else:
+            row = await mounted.stat("/owned/" + NAME)
+            assert row.extra["doc_id"] == ITEM["id"]
+            get.assert_awaited_once_with(None, "doc1")

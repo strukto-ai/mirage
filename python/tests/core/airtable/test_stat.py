@@ -14,33 +14,32 @@
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.airtable.read import read
-from mirage.core.airtable.stat import stat
-from mirage.types import ContentType, FileType, PathSpec
-from mirage.utils.key_prefix import mount_key
+from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.vfs.airtable import AirtableVFS
+from mirage.workspace import Workspace
 from tests.fixtures.airtable_api import make_accessor
+from tests.fixtures.vfs_io import vfs_over
 
 ROOT = "/at"
 BASE = f"{ROOT}/bases/Product_Roadmap__appRoadmapBase001"
 TABLE = f"{BASE}/Features__tblFeatures000001"
 
 
-def _spec(virtual: str) -> PathSpec:
-    return PathSpec(
-        virtual=virtual,
-        directory=virtual.rsplit("/", 1)[0],
-        vfs_path=mount_key(virtual, ROOT),
-    )
+def _mounted() -> Workspace:
+    return Workspace({f"{ROOT}/": vfs_over(AirtableVFS, make_accessor())})
+
+
+async def _stat(ws: Workspace, path: str) -> FileStat:
+    row, _ = await ws.dispatch("stat", PathSpec.from_str_path(path))
+    return row
 
 
 @pytest.mark.asyncio
 async def test_json_leaves_stat_at_their_rendered_size(airtable_api):
-    accessor = make_accessor()
-    index = RAMIndexCacheStore()
+    ws = _mounted()
     for leaf in (f"{BASE}/base.json", f"{TABLE}/table.json"):
-        info = await stat(accessor, _spec(leaf), index)
-        body = await read(accessor, _spec(leaf), index)
+        info = await _stat(ws, leaf)
+        body, _ = await ws.dispatch("read", PathSpec.from_str_path(leaf))
         assert info.type == FileType.FILE
         assert info.content == ContentType.JSON
         assert info.size == len(body)
@@ -48,13 +47,10 @@ async def test_json_leaves_stat_at_their_rendered_size(airtable_api):
 
 @pytest.mark.asyncio
 async def test_record_files_are_size_unknown(airtable_api):
-    accessor = make_accessor()
-    index = RAMIndexCacheStore()
-    records = await stat(accessor, _spec(f"{TABLE}/records.jsonl"), index)
-    view = await stat(
-        accessor,
-        _spec(f"{TABLE}/views/Done_shipped__viwDone0000000001.jsonl"),
-        index,
+    ws = _mounted()
+    records = await _stat(ws, f"{TABLE}/records.jsonl")
+    view = await _stat(
+        ws, f"{TABLE}/views/Done_shipped__viwDone0000000001.jsonl"
     )
     assert records.size is None and view.size is None
     assert view.extra == {"view_id": "viwDone0000000001"}
@@ -62,19 +58,12 @@ async def test_record_files_are_size_unknown(airtable_api):
 
 @pytest.mark.asyncio
 async def test_directories_stat_as_directories(airtable_api):
-    accessor = make_accessor()
-    index = RAMIndexCacheStore()
+    ws = _mounted()
     for path in (f"{ROOT}/bases", BASE, TABLE, f"{TABLE}/views"):
-        assert (
-            await stat(accessor, _spec(path), index)
-        ).type == FileType.DIRECTORY
+        assert (await _stat(ws, path)).type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
 async def test_an_unlisted_view_is_enoent(airtable_api):
     with pytest.raises(FileNotFoundError):
-        await stat(
-            make_accessor(),
-            _spec(f"{TABLE}/views/Gone__viwGone0000000001.jsonl"),
-            RAMIndexCacheStore(),
-        )
+        await _stat(_mounted(), f"{TABLE}/views/Gone__viwGone0000000001.jsonl")

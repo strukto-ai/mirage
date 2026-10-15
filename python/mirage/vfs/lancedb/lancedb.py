@@ -15,11 +15,10 @@
 from typing import Any
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.lancedb.search import files_containing as _files_containing
 from mirage.core.lancedb.tree import SEARCH, read, readdir, stat
 from mirage.errors.fs import enotsup
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.lancedb.config import LanceDBConfig
@@ -49,25 +48,17 @@ class LanceDBVFS(BaseVFS):
         depth = len(config.group_by) + (0 if config.table else 1)
         self.searchable = ("/".join(["*"] * depth + ["*.md"]),)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
+        return await readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
-        data = await read(self.accessor, path, index)
+        data = await read(self.accessor, path)
         return slice_window(data, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await stat(self.accessor, path)
 
     async def files_containing(
         self,
@@ -76,30 +67,23 @@ class LanceDBVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         return await _files_containing(
             self.accessor, text, [path], whole_word, ignore_case
         )
 
     async def search(
-        self,
-        path: PathSpec,
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
+        self, path: PathSpec, query: SearchQuery
     ) -> list[tuple[str, str]] | None:
-        return await SEARCH.search(self.accessor, path, query, index)
+        return await SEARCH.search(self.accessor, path, query)
 
     async def search_many(
-        self,
-        paths: list[PathSpec],
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
+        self, paths: list[PathSpec], query: SearchQuery
     ) -> list[tuple[str, str]] | None:
         many = SEARCH.search_many
         if many is None:
             raise enotsup(self.name, "search", paths[0])
-        return await many(self.accessor, paths, query, index)
+        return await many(self.accessor, paths, query)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

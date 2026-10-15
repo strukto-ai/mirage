@@ -21,13 +21,26 @@ vi.mock('./client.ts', async () => {
 })
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { ContentType, FileType, PathSpec } from '../../types.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
+import { ContentType, FileType, MountMode, type FileStat } from '../../types.ts'
+import { DifyVFS } from '../../vfs/dify/dify.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import * as clientMod from './client.ts'
-import { stat } from './stat.ts'
 
 const ACCESSOR = { config: { slugMetadataName: 'slug' } } as DifyAccessor
+
+// The stat a mount at /knowledge answers, listing its way to `virtual`.
+async function statAt(virtual: string): Promise<FileStat> {
+  const vfs = Object.assign(
+    new DifyVFS({ apiKey: 'k', baseUrl: 'https://dify.test', datasetId: 'd' }),
+    { accessor: ACCESSOR },
+  )
+  const ws = new Workspace({ '/knowledge/': vfs }, { mode: MountMode.READ })
+  try {
+    return (await ws.dispatch('stat', virtual)) as FileStat
+  } finally {
+    await ws.close()
+  }
+}
 
 function document(
   documentId: string,
@@ -49,14 +62,6 @@ function document(
   }
 }
 
-function pathAt(virtual: string): PathSpec {
-  return new PathSpec({
-    vfsPath: mountKey(virtual, '/knowledge'),
-    virtual,
-    directory: virtual,
-  })
-}
-
 // Mirrors test_stat.py.
 describe('dify stat', () => {
   beforeEach(() => {
@@ -67,9 +72,7 @@ describe('dify stat', () => {
   })
 
   it('answers from the listing', async () => {
-    const index = new RAMIndexCacheStore()
-
-    const item = await stat(ACCESSOR, pathAt('/knowledge/guides/quickstart'), index)
+    const item = await statAt('/knowledge/guides/quickstart')
 
     expect(item.name).toBe('quickstart')
     expect(item.content).toBe(ContentType.TEXT)
@@ -82,9 +85,7 @@ describe('dify stat', () => {
   })
 
   it('answers a directory', async () => {
-    const index = new RAMIndexCacheStore()
-
-    const item = await stat(ACCESSOR, pathAt('/knowledge/guides'), index)
+    const item = await statAt('/knowledge/guides')
 
     expect(item.name).toBe('guides')
     expect(item.type).toBe(FileType.DIRECTORY)

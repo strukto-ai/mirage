@@ -13,42 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { efbig, enoent, isEnoent } from '../../errors/fs.ts'
-import { assertParent, resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, perKind, type ReadWindow } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listBases, listRecords, listTables, recordPages } from './client.ts'
 import { AirtableApiError } from './errors.ts'
 import { normalizeBase, normalizeTable, recordsJsonl, toJsonBytes } from './normalize.ts'
-import { readdir, schemaTable } from './readdir.ts'
+import { schemaTable } from './readdir.ts'
 import { detectScope } from './scope.ts'
-import { stat } from './stat.ts'
 
 /**
  * Refuse a file its parent listing does not hold. `makeRead` proves every
- * file's parent through stat. A view file is named by its view id, so under
- * a real `views` directory a wrong name, or another table's view id, is
- * still the reader's to prove: without this `jq` would read it while `stat`
- * and `cat` call it absent, and a foreign id would reach the API as a raw
- * 422.
+ * file's parent by the row the mount hands. A view file is named by its view
+ * id, so under a real `views` directory a wrong name, or another table's view
+ * id, is still the reader's to prove: without this `jq` would read it while
+ * `stat` and `cat` call it absent, and a foreign id would reach the API as a
+ * raw 422.
  */
-async function ensureListed(
-  accessor: AirtableAccessor,
-  path: PathSpec,
-  index: IndexCacheStore | undefined,
-): Promise<void> {
-  const store = index ?? new RAMIndexCacheStore()
-  if ((await resolveEntry(readdir, accessor, path, store)) === null) throw enoent(path)
+function ensureListed(path: PathSpec, entry: FileStat | null): void {
+  if (entry === null) throw enoent(path)
 }
 
 async function readBaseJson(
   accessor: AirtableAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const baseId = match.slots.base_id ?? ''
   for (const base of await listBases(accessor)) {
@@ -63,7 +53,6 @@ async function readTableJson(
   accessor: AirtableAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   let table: Record<string, unknown>
   try {
@@ -109,7 +98,8 @@ function readRecords(
   accessor: AirtableAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index: IndexCacheStore | undefined,
+  _entry: FileStat | null,
+  _parent: FileStat | null,
   window: ReadWindow,
 ): Promise<Uint8Array> {
   return renderRecords(accessor, match, path, undefined, window)
@@ -119,10 +109,11 @@ async function readView(
   accessor: AirtableAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index: IndexCacheStore | undefined,
+  entry: FileStat | null,
+  _parent: FileStat | null,
   window: ReadWindow,
 ): Promise<Uint8Array> {
-  await ensureListed(accessor, path, index)
+  ensureListed(path, entry)
   return renderRecords(accessor, match, path, match.slots.view_id ?? '', window)
 }
 
@@ -137,7 +128,7 @@ export const read = makeRead<AirtableAccessor>(
       records: readRecords,
       view: readView,
     },
-    stat,
+    parented: true,
   },
 )
 
@@ -153,17 +144,18 @@ export const read = makeRead<AirtableAccessor>(
 export async function* readStream(
   accessor: AirtableAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
 ): AsyncGenerator<Uint8Array, void> {
   const match = detectScope(path)
   if (match.kind !== 'records' && match.kind !== 'view') {
-    yield await read(accessor, path, index)
+    yield await read(accessor, path, entry, parent)
     return
   }
-  await assertParent(stat, accessor, path, index)
+  if (parent === null) throw enoent(path)
   let view: string | undefined
   if (match.kind === 'view') {
-    await ensureListed(accessor, path, index)
+    ensureListed(path, entry)
     view = match.slots.view_id ?? ''
   }
   const cap = accessor.maxReadRecords
@@ -197,9 +189,10 @@ function firstRecords(
   _match: ScopeMatch,
   path: PathSpec,
   n: number,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
 ): Promise<Uint8Array> {
-  return read(accessor, path, index, { limit: n })
+  return read(accessor, path, entry, parent, { limit: n })
 }
 
 export const firstLines = perKind(detectScope, { records: firstRecords, view: firstRecords })

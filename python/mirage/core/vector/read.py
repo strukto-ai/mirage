@@ -14,7 +14,6 @@
 
 import base64
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.bind import per_accessor
 from mirage.core.hierarchy.probe import A
 from mirage.core.hierarchy.read import ReadFn
@@ -48,9 +47,7 @@ def make_read(tree: VectorTree[A]) -> ReadFn:
 
     read_for = per_accessor(build)
 
-    async def read(
-        accessor: A, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> bytes:
-        return await read_for(accessor)(accessor, path, index)
+    async def read(accessor: A, path: PathSpec) -> bytes:
+        return await read_for(accessor)(accessor, path)
 
     return read

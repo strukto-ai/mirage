@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../accessor/gmail.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { NAME_MAX_BYTES, byteLength, sanitizeLabel } from '../../utils/sanitize.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { makeReaddir, type DirListing, type Listed } from '../hierarchy/readdir.ts'
+import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
+import { makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
+import { entryStat } from '../hierarchy/stat.ts'
 import { listLabels } from './labels.ts'
 import type { GmailMessageRaw } from './messages.ts'
 import {
@@ -63,36 +64,25 @@ export function dateFromInternal(internalDate: string | undefined): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
-function attachmentEntries(raw: GmailMessageRaw): [string, IndexEntry][] {
-  return extractAttachments(raw.payload).map(
-    (att) =>
-      [
-        att.filename,
-        new IndexEntry({
-          id: att.attachmentId,
-          name: att.filename,
-          resourceType: 'gmail/attachment',
-          vfsName: att.filename,
-          size: att.size,
-        }),
-      ] as [string, IndexEntry],
+const ATTACHMENT = entryStat('attachment_id')
+
+function attachmentEntries(raw: GmailMessageRaw): FileStat[] {
+  return extractAttachments(raw.payload).map((att) =>
+    ATTACHMENT(att.filename, att.attachmentId, { size: att.size }),
   )
 }
 
 /**
  * One date directory's children, plus its attachment-dir seeds. With
- * `keepText` each message's entry keeps its rendered text, lowercased, for
+ * `keepText` each message's row keeps its rendered text, lowercased, for
  * grep (`contentSearch`).
  */
 function dateChildren(
   raws: readonly GmailMessageRaw[],
   keepText: boolean,
-): {
-  children: [string, IndexEntry][]
-  seeds: Record<string, [string, IndexEntry][]>
-} {
-  const children: [string, IndexEntry][] = []
-  const seeds: Record<string, [string, IndexEntry][]> = {}
+): { children: FileStat[]; seeds: Map<string, FileStat[]> } {
+  const children: FileStat[] = []
+  const seeds = new Map<string, FileStat[]>()
   for (const raw of raws) {
     const mid = raw.id ?? ''
     const headers = raw.payload?.headers ?? []
@@ -104,15 +94,14 @@ function dateChildren(
     // the one field that changes after the listing, which a search declines
     // to rule on instead.
     const rendered = messageJsonBytes(raw)
-    children.push([
-      filename,
-      new IndexEntry({
-        id: mid,
-        name: subject,
-        resourceType: 'gmail/message',
-        vfsName: filename,
+    children.push(
+      new FileStat({
+        name: filename,
+        type: FileType.FILE,
+        content: ContentType.JSON,
         size: rendered.byteLength,
         extra: {
+          message_id: mid,
           ...(keepText
             ? {
                 text: new TextDecoder()
@@ -123,20 +112,14 @@ function dateChildren(
           ...(raw.sizeEstimate != null ? { size_estimate: raw.sizeEstimate } : {}),
         },
       }),
-    ])
+    )
     const attEntries = attachmentEntries(raw)
     if (attEntries.length > 0) {
       const attDirName = filename.replace('.gmail.json', '')
-      children.push([
-        attDirName,
-        new IndexEntry({
-          id: mid,
-          name: attDirName,
-          resourceType: 'gmail/attachment_dir',
-          vfsName: attDirName,
-        }),
-      ])
-      seeds[attDirName] = attEntries
+      children.push(
+        new FileStat({ name: attDirName, type: FileType.DIRECTORY, extra: { message_id: mid } }),
+      )
+      seeds.set(attDirName, attEntries)
     }
   }
   return { children, seeds }
@@ -162,76 +145,59 @@ async function groupByDate(
 
 async function listRoot(accessor: GmailAccessor, _match: ScopeMatch): Promise<Listed | null> {
   const labels = await listLabels(accessor.tokenManager)
-  return labels.map((lb) => {
-    const name = lb.type === 'system' ? lb.id : (lb.name ?? lb.id)
-    return [
-      name,
-      new IndexEntry({
-        id: lb.id,
-        name,
-        resourceType: 'gmail/label',
-        vfsName: name,
+  return labels.map(
+    (lb) =>
+      new FileStat({
+        name: lb.type === 'system' ? lb.id : (lb.name ?? lb.id),
+        type: FileType.DIRECTORY,
+        extra: { label_id: lb.id },
       }),
-    ] as [string, IndexEntry]
-  })
+  )
 }
 
 async function listLabel(
   accessor: GmailAccessor,
   match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
   // The bare listing is a window, the most recent MAX_MESSAGES, so the day
   // dirs it mints are whichever days those fell on. A glob pushes its own
   // span into the query instead of filtering that window, which is the only
   // way to reach a day older than it.
   const span = globSpan(match.pattern)
+  const labelId = String(own.extra.label_id)
   const msgIds = await listMessages(accessor.tokenManager, {
-    labelId: own.id,
+    labelId,
     query: span === null ? null : spanToGmailQuery(span[0], span[1]),
     maxResults: MAX_MESSAGES,
   })
   const groups = await groupByDate(accessor, msgIds)
   const sortedDates = [...groups.keys()].sort(compareCodePoints).reverse()
-  const entries: [string, IndexEntry][] = []
-  const seeds: Record<string, [string, IndexEntry][]> = {}
+  const entries: FileStat[] = []
+  const seeds = new Map<string, FileStat[]>()
   for (const dateStr of sortedDates) {
-    entries.push([
-      dateStr,
-      new IndexEntry({
-        id: dateStr,
-        name: dateStr,
-        resourceType: 'gmail/date',
-        vfsName: dateStr,
-        extra: { label_id: own.id },
-      }),
-    ])
+    entries.push(
+      new FileStat({ name: dateStr, type: FileType.DIRECTORY, extra: { label_id: labelId } }),
+    )
     const { children, seeds: attSeeds } = dateChildren(
       groups.get(dateStr) ?? [],
       accessor.config.contentSearch === true,
     )
-    seeds[dateStr] = children
-    for (const [attDir, attEntries] of Object.entries(attSeeds)) {
-      seeds[`${dateStr}/${attDir}`] = attEntries
-    }
+    seeds.set(dateStr, children)
+    for (const [attDir, attEntries] of attSeeds) seeds.set(`${dateStr}/${attDir}`, attEntries)
   }
-  return { entries, seeds, partial: span !== null, window: true }
+  return new DirListing({ entries, seeds, partial: span !== null, window: true })
 }
 
-async function listDay(
-  accessor: GmailAccessor,
-  match: ScopeMatch,
-  label: IndexEntry,
-): Promise<Listed> {
-  // The proof is the label entry, not the day's own: a date query answers for
-  // any well-formed day, including days the label's bounded recent listing
-  // never minted. A day proven by its own entry could only ever be a day
-  // inside that window, which is the case the seed already covers.
+async function listDay(accessor: GmailAccessor, match: ScopeMatch, own: FileStat): Promise<Listed> {
+  // The day's row carries its label: one the label's bounded recent listing
+  // minted, or one stat makes for any well-formed day under a real label,
+  // since a date query answers for any day.
   const day = match.slots.day ?? ''
   const dateQuery = dateDirToGmailQuery(day)
   if (dateQuery === null) return []
   const msgIds = await listMessages(accessor.tokenManager, {
-    labelId: label.id,
+    labelId: String(own.extra.label_id),
     query: dateQuery,
     maxResults: MAX_MESSAGES,
   })
@@ -240,16 +206,15 @@ async function listDay(
     groups.get(day) ?? [],
     accessor.config.contentSearch === true,
   )
-  const listing: DirListing = { entries: children, seeds, window: true }
-  return listing
+  return new DirListing({ entries: children, seeds, window: true })
 }
 
 async function listAttachmentDir(
   accessor: GmailAccessor,
   _match: ScopeMatch,
-  own: IndexEntry,
+  own: FileStat,
 ): Promise<Listed> {
-  const raw = await getMessageRaw(accessor.tokenManager, own.id)
+  const raw = await getMessageRaw(accessor.tokenManager, String(own.extra.message_id))
   return attachmentEntries(raw)
 }
 
@@ -257,8 +222,8 @@ export const readdir = makeReaddir<GmailAccessor>(detectScope, {
   listers: { root: listRoot },
   entryListers: {
     label: listLabel,
+    day: listDay,
     attachment_dir: listAttachmentDir,
   },
-  parentEntryListers: { day: listDay },
   patternKinds: { label: hasGlobSpan },
 })

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.google.client import TokenManager, google_get, slides_base
 from mirage.core.google.entry import resolve_app_entry
 from mirage.core.gslides.constants import MIME
@@ -22,7 +21,7 @@ from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import compact_json_bytes
 from mirage.observe.context import record, start_op
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.vfs.gslides.slide_entry import make_filename
 
 
@@ -38,26 +37,23 @@ async def _read_file(
     accessor: GSlidesAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    entry = await resolve_app_entry(
-        accessor.token_manager,
-        match,
-        path,
-        index,
-        MIME,
-        "gslides/file",
-        make_filename,
+    row = entry or await resolve_app_entry(
+        accessor.token_manager, match, path, MIME, make_filename
     )
     timer = start_op()
-    data = await read_presentation(accessor.token_manager, entry.id)
+    data = await read_presentation(
+        accessor.token_manager, match.slots["file_id"]
+    )
     record(
         "read",
         path.virtual,
         "gslides",
         len(data),
         timer,
-        fingerprint=entry.remote_time or None,
+        fingerprint=row.fingerprint,
     )
     return data
 

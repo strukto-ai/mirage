@@ -15,8 +15,7 @@
 from typing import Any
 
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.cache.index import IndexEntry
-from mirage.core.hierarchy.readdir import DirListing, make_readdir
+from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.langfuse.client import (
     fetch_dataset_items,
@@ -28,6 +27,7 @@ from mirage.core.langfuse.client import (
 )
 from mirage.core.langfuse.scope import TOP_LEVEL_DIRS, detect_scope
 from mirage.core.render.json import jsonl_bytes
+from mirage.types import DirListing, FileStat, FileType
 
 
 def _bounded(accessor: LangfuseAccessor, traces: list[dict[str, Any]]) -> bool:
@@ -43,19 +43,33 @@ def _bounded(accessor: LangfuseAccessor, traces: list[dict[str, Any]]) -> bool:
     )
 
 
-def _trace_entries(
-    traces: list[dict[str, Any]],
-) -> list[tuple[str, IndexEntry]]:
+def _session_extra(match: ScopeMatch) -> dict[str, str]:
+    return {"session_id": match.slots["session_id"]}
+
+
+def _prompt_extra(match: ScopeMatch) -> dict[str, str]:
+    return {"prompt_name": match.slots["prompt_name"]}
+
+
+def _dataset_extra(match: ScopeMatch) -> dict[str, str]:
+    return {"dataset_name": match.slots["dataset_name"]}
+
+
+# What each kind's stat carries in ``extra``, listed or not.
+EXTRAS = {
+    "session": _session_extra,
+    "prompt": _prompt_extra,
+    "dataset": _dataset_extra,
+}
+
+
+def _dirs(names: list[str]) -> list[FileStat]:
+    return [FileStat(name=name, type=FileType.DIRECTORY) for name in names]
+
+
+def _trace_rows(traces: list[dict[str, Any]]) -> list[FileStat]:
     return [
-        (
-            f"{t.get('id', '')}.json",
-            IndexEntry(
-                id=t.get("id", ""),
-                name=t.get("id", ""),
-                resource_type="langfuse/trace",
-                vfs_name=f"{t.get('id', '')}.json",
-            ),
-        )
+        FileStat(name=f"{t.get('id', '')}.json", type=FileType.FILE)
         for t in traces
     ]
 
@@ -74,7 +88,7 @@ async def _list_traces(
     # read hydrates them; the dataset .jsonl files below are sized
     # because their listing already carries every item.
     return DirListing(
-        entries=_trace_entries(traces), partial=_bounded(accessor, traces)
+        entries=_trace_rows(traces), partial=_bounded(accessor, traces)
     )
 
 
@@ -85,19 +99,7 @@ async def _list_sessions(
     # not been deleted, so the listing evicts nothing.
     sessions = await fetch_sessions(accessor.api)
     return DirListing(
-        entries=[
-            (
-                s.get("id", ""),
-                IndexEntry(
-                    id=s.get("id", ""),
-                    name=s.get("id", ""),
-                    resource_type="langfuse/session",
-                    vfs_name=s.get("id", ""),
-                ),
-            )
-            for s in sessions
-        ],
-        window=True,
+        entries=_dirs([s.get("id", "") for s in sessions]), window=True
     )
 
 
@@ -111,7 +113,7 @@ async def _list_session_traces(
         from_timestamp=accessor.config.default_from_timestamp,
     )
     return DirListing(
-        entries=_trace_entries(traces), partial=_bounded(accessor, traces)
+        entries=_trace_rows(traces), partial=_bounded(accessor, traces)
     )
 
 
@@ -119,53 +121,27 @@ async def _list_prompts(
     accessor: LangfuseAccessor, match: ScopeMatch
 ) -> DirListing:
     prompts = await fetch_prompts(accessor.api)
-    seen: set[str] = set()
-    entries: list[tuple[str, IndexEntry]] = []
-    for p in prompts:
-        prompt_name = p.get("name", "")
-        if prompt_name in seen:
-            continue
-        seen.add(prompt_name)
-        entries.append(
-            (
-                prompt_name,
-                IndexEntry(
-                    id=prompt_name,
-                    name=prompt_name,
-                    resource_type="langfuse/prompt",
-                    vfs_name=prompt_name,
-                ),
-            )
-        )
-    return DirListing(entries=entries, window=True)
+    names = list(dict.fromkeys(p.get("name", "") for p in prompts))
+    return DirListing(entries=_dirs(names), window=True)
 
 
 async def _list_prompt_versions(
     accessor: LangfuseAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
+) -> list[FileStat]:
     prompt_name = match.slots["prompt_name"]
     prompts = await fetch_prompts(accessor.api)
-    entries: list[tuple[str, IndexEntry]] = []
+    rows: list[FileStat] = []
     for p in prompts:
         if p.get("name") != prompt_name:
             continue
         # The list endpoint returns PromptMeta, which carries every
         # version of a prompt in a `versions` array; there is no scalar
         # `version`.
-        for version in sorted(p.get("versions", [])):
-            filename = f"{version}.json"
-            entries.append(
-                (
-                    filename,
-                    IndexEntry(
-                        id=f"{prompt_name}/{version}",
-                        name=str(version),
-                        resource_type="langfuse/prompt_version",
-                        vfs_name=filename,
-                    ),
-                )
-            )
-    return entries
+        rows.extend(
+            FileStat(name=f"{version}.json", type=FileType.FILE)
+            for version in sorted(p.get("versions", []))
+        )
+    return rows
 
 
 async def _list_datasets(
@@ -173,77 +149,44 @@ async def _list_datasets(
 ) -> DirListing:
     datasets = await fetch_datasets(accessor.api)
     return DirListing(
-        entries=[
-            (
-                d.get("name", ""),
-                IndexEntry(
-                    id=d.get("name", ""),
-                    name=d.get("name", ""),
-                    resource_type="langfuse/dataset",
-                    vfs_name=d.get("name", ""),
-                ),
-            )
-            for d in datasets
-        ],
-        window=True,
+        entries=_dirs([d.get("name", "") for d in datasets]), window=True
     )
 
 
 async def _list_dataset(
     accessor: LangfuseAccessor, match: ScopeMatch
-) -> list[tuple[str, IndexEntry]]:
-    dataset_name = match.slots["dataset_name"]
+) -> list[FileStat]:
     # One dataset_items call per dataset directory actually entered: the
     # dataset listing carries no item payloads, so items.jsonl can only
     # be sized here, and only for datasets the caller opens.
-    items = await fetch_dataset_items(accessor.api, dataset_name)
+    items = await fetch_dataset_items(
+        accessor.api, match.slots["dataset_name"]
+    )
     return [
-        (
-            "items.jsonl",
-            IndexEntry(
-                id=f"{dataset_name}/items",
-                name="items.jsonl",
-                resource_type="langfuse/dataset_items",
-                vfs_name="items.jsonl",
-                size=len(jsonl_bytes(items)),
-            ),
+        FileStat(
+            name="items.jsonl",
+            type=FileType.FILE,
+            size=len(jsonl_bytes(items)),
         ),
-        (
-            "runs",
-            IndexEntry(
-                id=f"{dataset_name}/runs",
-                name="runs",
-                resource_type="langfuse/dataset_runs_dir",
-                vfs_name="runs",
-            ),
-        ),
+        FileStat(name="runs", type=FileType.DIRECTORY),
     ]
 
 
 async def _list_dataset_runs(
     accessor: LangfuseAccessor, match: ScopeMatch
 ) -> DirListing:
-    dataset_name = match.slots["dataset_name"]
-    runs = await fetch_dataset_runs(accessor.api, dataset_name)
-    entries: list[tuple[str, IndexEntry]] = []
-    for r in runs:
-        run_name = r.get("name", "")
-        filename = f"{run_name}.jsonl"
-        # The listing already carries the run document read() renders, so
-        # each run file's exact size is free here.
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=run_name,
-                    name=run_name,
-                    resource_type="langfuse/dataset_run",
-                    vfs_name=filename,
-                    size=len(jsonl_bytes([r])),
-                ),
-            )
+    runs = await fetch_dataset_runs(accessor.api, match.slots["dataset_name"])
+    # The listing already carries the run document read() renders, so
+    # each run file's exact size is free here.
+    rows = [
+        FileStat(
+            name=f"{r.get('name', '')}.jsonl",
+            type=FileType.FILE,
+            size=len(jsonl_bytes([r])),
         )
-    return DirListing(entries=entries, window=True)
+        for r in runs
+    ]
+    return DirListing(entries=rows, window=True)
 
 
 readdir = make_readdir(
@@ -259,4 +202,5 @@ readdir = make_readdir(
         "runs": _list_dataset_runs,
     },
     static_root=tuple(TOP_LEVEL_DIRS),
+    extras=EXTRAS,
 )

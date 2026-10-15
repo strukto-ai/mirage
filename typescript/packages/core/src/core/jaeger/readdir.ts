@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { JaegerAccessor } from '../../accessor/jaeger.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { enoent } from '../../errors/fs.ts'
-import { makeReaddir, type DirListing } from '../hierarchy/readdir.ts'
+import { DirListing, FileStat, FileType } from '../../types.ts'
+import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonBytes } from '../render/json.ts'
 import { fetchOperations, fetchServices, fetchTraces, isTraceId } from './client.ts'
@@ -45,51 +45,38 @@ export async function serviceGuard(
   await assertService(accessor, match.slots.service ?? '', virtual)
 }
 
-async function listServices(
-  accessor: JaegerAccessor,
-  _match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
-  const services = await fetchServices(accessor.transport)
-  return services.map((service): [string, IndexEntry] => [
-    service,
-    new IndexEntry({
-      id: service,
-      name: service,
-      resourceType: 'jaeger/service',
-      vfsName: service,
-    }),
-  ])
+function serviceExtra(match: ScopeMatch): Record<string, string> {
+  return { service: match.slots.service ?? '' }
 }
 
-async function listService(
-  accessor: JaegerAccessor,
-  match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
+function traceExtra(match: ScopeMatch): Record<string, string> {
+  return { trace_id: match.slots.trace_id ?? '' }
+}
+
+// What each kind's stat carries in `extra`, listed or not.
+export const EXTRAS = {
+  service: serviceExtra,
+  trace: traceExtra,
+}
+
+async function listServices(accessor: JaegerAccessor, _match: ScopeMatch): Promise<FileStat[]> {
+  const services = await fetchServices(accessor.transport)
+  return services.map((service) => new FileStat({ name: service, type: FileType.DIRECTORY }))
+}
+
+async function listService(accessor: JaegerAccessor, match: ScopeMatch): Promise<FileStat[]> {
   const service = match.slots.service ?? ''
   // One operations call per service directory actually entered: nothing in
   // the services listing carries operation names, so operations.json can only
   // be sized here, and only for services the caller opens.
   const operations = await fetchOperations(accessor.transport, service)
   return [
-    [
-      OPERATIONS_FILE,
-      new IndexEntry({
-        id: `${service}/operations`,
-        name: OPERATIONS_FILE,
-        resourceType: 'jaeger/operations',
-        vfsName: OPERATIONS_FILE,
-        size: jsonBytes(operations).byteLength,
-      }),
-    ],
-    [
-      'traces',
-      new IndexEntry({
-        id: `${service}/traces`,
-        name: 'traces',
-        resourceType: 'jaeger/traces_dir',
-        vfsName: 'traces',
-      }),
-    ],
+    new FileStat({
+      name: OPERATIONS_FILE,
+      type: FileType.FILE,
+      size: jsonBytes(operations).byteLength,
+    }),
+    new FileStat({ name: 'traces', type: FileType.DIRECTORY }),
   ]
 }
 
@@ -103,28 +90,24 @@ async function listTraces(accessor: JaegerAccessor, match: ScopeMatch): Promise<
   const to = accessor.config.defaultToTimestamp
   if (to !== undefined && to !== '') opts.toTimestamp = to
   const traces = await fetchTraces(accessor.transport, service, opts)
-  const entries: [string, IndexEntry][] = []
+  const rows: FileStat[] = []
   for (const trace of traces) {
     const traceId = typeof trace.traceID === 'string' ? trace.traceID : ''
     if (!isTraceId(traceId)) continue
-    const filename = `${traceId}.json`
     // The search endpoint returns complete trace documents, so the rendered
     // size is free here. Span order may differ from the by-id fetch, but
     // reordering the same spans leaves the byte length equal.
-    entries.push([
-      filename,
-      new IndexEntry({
-        id: traceId,
-        name: traceId,
-        resourceType: 'jaeger/trace',
-        vfsName: filename,
+    rows.push(
+      new FileStat({
+        name: `${traceId}.json`,
+        type: FileType.FILE,
         size: jsonBytes(trace).byteLength,
       }),
-    ])
+    )
   }
   // The newest defaultTraceLimit traces: one that ages out of the page is
   // still in Jaeger, so the listing evicts nothing.
-  return { entries, seeds: {}, window: true }
+  return new DirListing({ entries: rows, window: true })
 }
 
 export const readdir = makeReaddir<JaegerAccessor>(detectScope, {
@@ -138,4 +121,5 @@ export const readdir = makeReaddir<JaegerAccessor>(detectScope, {
     service: serviceGuard,
     traces: serviceGuard,
   },
+  extras: EXTRAS,
 })

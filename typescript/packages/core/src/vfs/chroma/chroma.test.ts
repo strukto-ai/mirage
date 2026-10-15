@@ -21,7 +21,7 @@ vi.mock('../../core/chroma/client.ts', async () => {
 })
 
 import * as clientMod from '../../core/chroma/client.ts'
-import { DEFAULT_READ_TTL, MountMode, ReadPolicy } from '../../types.ts'
+import { DEFAULT_READ_TTL, MountMode, ReadPolicy, type FileStat } from '../../types.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { ChromaVFS } from './chroma.ts'
@@ -58,6 +58,35 @@ describe('chroma dispatcher under read: fresh', () => {
       expect(names).toHaveLength(5)
       for (const name of names) await ws.stat(name)
       expect(fetch).toHaveBeenCalledTimes(1)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('chroma stat through a mount', () => {
+  // A listing leaves pages unsized; the first stat in a folder sizes every
+  // page in it with one scan, and the rest answer from the sized rows.
+  it('sizes a folder with one scan', async () => {
+    vi.mocked(clientMod.fetchPathTree).mockResolvedValue(
+      JSON.stringify({ 'guides/a': {}, 'guides/b': {}, 'guides/c': {} }),
+    )
+    const vfs = new ChromaVFS({ collectionName: 'docs' })
+    const scans: unknown[] = []
+    const collection = {
+      get: (args: unknown) => {
+        scans.push(args)
+        return Promise.resolve({ documents: [], metadatas: [] })
+      },
+    }
+    vi.spyOn(vfs.accessor, 'getCollection').mockResolvedValue(
+      collection as unknown as Awaited<ReturnType<typeof vfs.accessor.getCollection>>,
+    )
+    const ws = new Workspace({ '/knowledge': new Mount(vfs, { mode: MountMode.READ }) })
+    try {
+      const names = await ws.readdir('/knowledge/guides')
+      for (const name of names) expect(((await ws.stat(name)) as FileStat).size).toBe(0)
+      expect(scans).toHaveLength(1)
     } finally {
       await ws.close()
     }

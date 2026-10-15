@@ -16,7 +16,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.notion import readdir as readdir_mod
 from mirage.core.notion.stat import stat
 from mirage.types import PathSpec
@@ -57,22 +56,18 @@ def _spec(original: str, prefix: str = "") -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_stat_page_returns_modified_from_index():
-    index = RAMIndexCacheStore()
-    await readdir_mod.readdir(
-        _ACCESSOR, _spec("/notion/pages", "/notion"), index
+async def test_stat_page_answers_the_listed_row():
+    (page,) = await readdir_mod.readdir(
+        _ACCESSOR, _spec("/notion/pages", "/notion")
     )
     spec = _spec(f"/notion/pages/Top1__{TOP_ID}", "/notion")
-    s = await stat(_ACCESSOR, spec, index)
+    s = await stat(_ACCESSOR, spec, page)
     assert s.modified == "2026-01-02T00:00:00.000Z"
+    assert s.extra["page_id"] == TOP_ID
 
 
 @pytest.mark.asyncio
-async def test_stat_without_an_index_still_resolves_the_page():
-    # A caller with no cache gets a call-local one, so the entry
-    # resolution can read the parent listing it just warmed instead of
-    # reporting every existing page as absent.
+async def test_stat_of_a_page_no_listing_names_is_enoent():
     spec = _spec(f"/notion/pages/Top1__{TOP_ID}", "/notion")
-    s = await stat(_ACCESSOR, spec)
-    assert s.modified == "2026-01-02T00:00:00.000Z"
-    assert s.extra["page_id"] == TOP_ID
+    with pytest.raises(FileNotFoundError):
+        await stat(_ACCESSOR, spec)

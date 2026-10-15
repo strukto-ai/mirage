@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.airtable import AirtableAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.airtable.config import AirtableConfig
 from mirage.core.airtable.read import first_lines as _first_lines
 from mirage.core.airtable.read import read as _read
@@ -27,7 +26,7 @@ from mirage.core.airtable.search import (
 )
 from mirage.core.airtable.stat import stat as _stat
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.airtable.prompt import PROMPT, WRITE_PROMPT
 from mirage.vfs.base import BaseVFS
@@ -56,29 +55,33 @@ class AirtableVFS(BaseVFS):
         self.accessor = AirtableAccessor(self.config)
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path, entry, parent)
         return slice_window(data, offset, size)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+        return _read_stream(self.accessor, path, entry, parent)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 
     async def lines_containing(
         self,
@@ -86,14 +89,18 @@ class AirtableVFS(BaseVFS):
         text: str,
         *,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
     ) -> ByteSource | None:
-        return await _lines_containing(self.accessor, path, text, index)
+        return await _lines_containing(self.accessor, path, text, entry)
 
     async def first_lines(
-        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
+        self,
+        path: PathSpec,
+        n: int,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
     ) -> bytes | None:
-        return await _first_lines(self.accessor, path, n, index)
+        return await _first_lines(self.accessor, path, n, entry, parent)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

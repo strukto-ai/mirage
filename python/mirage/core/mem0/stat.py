@@ -12,44 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
-from mirage.accessor.mem0 import Mem0Accessor
-from mirage.cache.index import IndexCacheStore
-from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
-from mirage.core.mem0.readdir import listed_memory, readdir
 from mirage.core.mem0.scope import detect_scope
-from mirage.core.render.json import json_bytes
-from mirage.types import ContentType, FileStat, FileType, PathSpec
 
-
-def _file_stat(memory: dict[str, Any]) -> FileStat:
-    body = json_bytes(memory)
-    return FileStat(
-        name=f"{memory['id']}.json",
-        type=FileType.FILE,
-        content=ContentType.JSON,
-        size=len(body),
-        modified=memory.get("updated_at") or memory.get("created_at"),
-        extra={
-            "created_at": memory.get("created_at"),
-            "updated_at": memory.get("updated_at"),
-        },
-    )
-
-
-async def _memory_stat(
-    accessor: Mem0Accessor,
-    match: ScopeMatch,
-    path: PathSpec,
-    index: IndexCacheStore,
-) -> FileStat:
-    return _file_stat(await listed_memory(accessor, path, index))
-
-
-stat = make_stat(
-    detect_scope,
-    readdir,
-    overrides={"memory": _memory_stat},
-)
+stat = make_stat(detect_scope)

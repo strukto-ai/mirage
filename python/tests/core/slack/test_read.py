@@ -18,7 +18,6 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.read import (
@@ -28,7 +27,7 @@ from mirage.core.slack.read import (
     read_range,
     read_stream,
 )
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,88 +52,41 @@ def accessor(config):
     return SlackAccessor(config=config)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
+# The rows the mount hands a read, as the listings name them.
+DAY_ROW = FileStat(
+    name="2023-11-14", type=FileType.DIRECTORY, extra={"channel_id": "C001"}
+)
+CHAT_ROW = FileStat(
+    name="chat.jsonl",
+    type=FileType.FILE,
+    size=35,
+    extra={"channel_id": "C001"},
+)
+USER_ROW = FileStat(
+    name="alice__U001.json", type=FileType.FILE, extra={"user_id": "U001"}
+)
+BLOB_ROW = FileStat(
+    name="report__F1.pdf",
+    type=FileType.FILE,
+    size=4096,
+    extra={
+        "file_id": "F1",
+        "mimetype": "application/pdf",
+        "url_private_download": "https://files.slack.com/x/report.pdf",
+        "channel_id": "C001",
+        "date": "2026-04-10",
+    },
+)
 
 
-async def _populate_index(index: RAMIndexCacheStore) -> RAMIndexCacheStore:
-    await index.set_dir(
-        "/channels",
-        [
-            (
-                "general__C001",
-                IndexEntry(
-                    id="C001",
-                    name="general",
-                    resource_type="slack/channel",
-                    vfs_name="general__C001",
-                ),
-            ),
-        ],
-    )
-    await index.set_dir(
-        f"/{CHANNEL}/2023-11-14",
-        [
-            (
-                "chat.jsonl",
-                IndexEntry(
-                    id="C001:2023-11-14:chat",
-                    name="chat.jsonl",
-                    resource_type="slack/chat_jsonl",
-                    vfs_name="chat.jsonl",
-                    size=35,
-                ),
-            ),
-        ],
-    )
-    await index.set_dir(
-        "/users",
-        [
-            (
-                "alice__U001.json",
-                IndexEntry(
-                    id="U001",
-                    name="alice",
-                    resource_type="slack/user",
-                    vfs_name="alice__U001.json",
-                ),
-            ),
-        ],
-    )
-    await index.set_dir(
-        f"/{CHANNEL}/2026-04-10/files",
-        [
-            (
-                "report__F1.pdf",
-                IndexEntry(
-                    id="F1",
-                    name="report.pdf",
-                    resource_type="slack/file",
-                    vfs_name="report__F1.pdf",
-                    size=4096,
-                    extra={
-                        "mimetype": "application/pdf",
-                        "url_private_download": "https://files.slack.com/x/report.pdf",
-                        "channel_id": "C001",
-                        "date": "2026-04-10",
-                    },
-                ),
-            ),
-        ],
-    )
-    return index
-
-
-async def test_read_jsonl(accessor, index):
-    await _populate_index(index)
+async def test_read_jsonl(accessor):
     history_bytes = b'{"text":"hello","ts":"1700000001"}\n'
     with patch(
         "mirage.core.slack.read.get_history_jsonl",
         new_callable=AsyncMock,
         return_value=history_bytes,
     ) as mock_hist:
-        result = await read(accessor, spec(CHAT), index)
+        result = await read(accessor, spec(CHAT), CHAT_ROW, DAY_ROW)
 
     assert result == history_bytes
     mock_hist.assert_called_once_with(
@@ -142,19 +94,17 @@ async def test_read_jsonl(accessor, index):
     )
 
 
-async def test_read_file_blob(accessor, index):
-    await _populate_index(index)
+async def test_read_file_blob(accessor):
     with patch(
         "mirage.core.slack.read.download_file",
         new_callable=AsyncMock,
         return_value=b"%PDF-1.4 fake bytes",
     ):
-        data = await read(accessor, spec(BLOB), index)
+        data = await read(accessor, spec(BLOB), BLOB_ROW)
     assert data == b"%PDF-1.4 fake bytes"
 
 
-async def test_read_user_json(accessor, index):
-    await _populate_index(index)
+async def test_read_user_json(accessor):
     user_data = {
         "id": "U001",
         "name": "alice",
@@ -165,26 +115,29 @@ async def test_read_user_json(accessor, index):
         new_callable=AsyncMock,
         return_value=user_data,
     ):
-        result = await read(accessor, spec("/users/alice__U001.json"), index)
+        result = await read(
+            accessor, spec("/users/alice__U001.json"), USER_ROW
+        )
 
     parsed = json.loads(result)
     assert parsed["id"] == "U001"
     assert parsed["name"] == "alice"
 
 
-async def test_read_not_found(accessor, index):
+async def test_read_not_found(accessor):
     with pytest.raises(FileNotFoundError):
-        await read(accessor, spec("/nonexistent/path"), index)
+        await read(accessor, spec("/nonexistent/path"))
 
 
-async def test_read_file_blob_pushes_the_window_down(accessor, index):
-    await _populate_index(index)
+async def test_read_file_blob_pushes_the_window_down(accessor):
     with patch(
         "mirage.core.slack.read.download_file",
         new_callable=AsyncMock,
         return_value=b"1.4 f",
     ) as mock_dl:
-        data = await read_range(accessor, spec(BLOB), index, offset=5, size=5)
+        data = await read_range(
+            accessor, spec(BLOB), offset=5, size=5, entry=BLOB_ROW
+        )
     assert data == b"1.4 f"
     mock_dl.assert_called_once_with(
         accessor.config,
@@ -195,22 +148,25 @@ async def test_read_file_blob_pushes_the_window_down(accessor, index):
     )
 
 
-async def test_read_jsonl_window_is_sliced_locally(accessor, index):
+async def test_read_jsonl_window_is_sliced_locally(accessor):
     # Rendered history has no remote range, so the window is taken after.
-    await _populate_index(index)
     with patch(
         "mirage.core.slack.read.get_history_jsonl",
         new_callable=AsyncMock,
         return_value=b'{"text":"hello"}\n',
     ):
         result = await read_range(
-            accessor, spec(CHAT), index, offset=1, size=6
+            accessor,
+            spec(CHAT),
+            offset=1,
+            size=6,
+            entry=CHAT_ROW,
+            parent=DAY_ROW,
         )
     assert result == b'"text"'
 
 
-async def test_attachment_stream_closes_before_fetching_tail(accessor, index):
-    await _populate_index(index)
+async def test_attachment_stream_closes_before_fetching_tail(accessor):
     path = spec(BLOB)
     closed = []
 
@@ -224,16 +180,15 @@ async def test_attachment_stream_closes_before_fetching_tail(accessor, index):
     with patch(
         "mirage.core.slack.read.download_file_stream", return_value=source()
     ):
-        stream = read_stream(accessor, path, index)
+        stream = read_stream(accessor, path, BLOB_ROW)
         assert await anext(stream) == b"first\n"
         await stream.aclose()
     assert closed == [True]
 
 
 async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
-    accessor, index
+    accessor,
 ):
-    await _populate_index(index)
     first = [
         {"text": "a", "ts": "1700000001.000000"},
         {"text": "b", "ts": "1700000002.000000"},
@@ -244,7 +199,14 @@ async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
         new_callable=AsyncMock,
         side_effect=[first, added, []],
     ) as fetch:
-        stream = await follow(accessor, spec(CHAT), 1, 0.001, index)
+        stream = await follow(
+            accessor,
+            spec(CHAT),
+            1,
+            0.001,
+            entry=CHAT_ROW,
+            parent=DAY_ROW,
+        )
         try:
             assert await anext(stream) == jsonl_bytes(first[1:])
             assert await anext(stream) == jsonl_bytes(added)
@@ -255,11 +217,9 @@ async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
     assert fetch.await_args_list[0].args[1:3] == ("C001", "2023-11-14")
 
 
-async def test_only_a_chat_day_is_followed(accessor, index):
-    await _populate_index(index)
+async def test_only_a_chat_day_is_followed(accessor):
     assert (
-        await follow(accessor, spec("/users/alice__U001.json"), 1, 1.0, index)
-        is None
+        await follow(accessor, spec("/users/alice__U001.json"), 1, 1.0) is None
     )
 
 

@@ -14,13 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { Accessor } from '../../accessor/base.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { ContentType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { JSON_NAME } from './codec.ts'
-import { assertListed, entriesUnder, listedSize, resolveEntry } from './probe.ts'
-import { makeReaddir, type Lister } from './readdir.ts'
+import { Codec, DATE, JSON_NAME } from './codec.ts'
+import { parentSpec, rowsUnder } from './probe.ts'
+import { makeReaddir, type EntryLister, type Lister } from './readdir.ts'
 import { Slot, Scope, makeDetectScope } from './scope.ts'
 
 const SCOPES: readonly Scope[] = [
@@ -31,6 +29,13 @@ const SCOPES: readonly Scope[] = [
     segments: ['rooms', new Slot('room'), new Slot('note', JSON_NAME)],
     leaf: true,
     filetype: ContentType.JSON,
+  }),
+  new Scope({ kind: 'room_day', segments: ['rooms', new Slot('room'), new Slot('day', DATE)] }),
+  new Scope({
+    kind: 'tagged',
+    segments: ['tags', new Slot('tag', new Codec({ validate: (text) => /^[a-z]+$/.test(text) }))],
+    leaf: true,
+    filetype: ContentType.TEXT,
   }),
 ]
 
@@ -58,10 +63,9 @@ function spec(mountPath: string): PathSpec {
 const listRooms: Lister<FakeAccessor> = (accessor, _match) => {
   accessor.calls.push('rooms')
   return Promise.resolve(
-    (TREE.rooms ?? []).map((room): [string, IndexEntry] => [
-      room,
-      new IndexEntry({ id: room, name: room, resourceType: 'fake/room', vfsName: room }),
-    ]),
+    (TREE.rooms ?? []).map(
+      (room) => new FileStat({ name: room, type: FileType.DIRECTORY, extra: { room_id: room } }),
+    ),
   )
 }
 
@@ -69,92 +73,35 @@ const listNotes: Lister<FakeAccessor> = (accessor, match) => {
   const room = match.slots.room ?? ''
   accessor.calls.push(`notes:${room}`)
   return Promise.resolve(
-    (TREE[room] ?? []).map((note): [string, IndexEntry] => [
-      note,
-      new IndexEntry({ id: note, name: note, resourceType: 'fake/note', vfsName: note, size: 7 }),
-    ]),
+    (TREE[room] ?? []).map((note) => new FileStat({ name: note, type: FileType.FILE, size: 7 })),
   )
 }
 
+const notesOf: EntryLister<FakeAccessor> = (accessor, match, _entry) =>
+  listNotes(accessor, match) as Promise<FileStat[]>
+
 const READDIR = makeReaddir<FakeAccessor>(detectScope, {
-  listers: {
-    rooms: listRooms,
-    room: listNotes,
-  },
+  listers: { rooms: listRooms },
+  entryListers: { room: notesOf },
   staticRoot: ['rooms'],
 })
 
 describe('hierarchy probe', () => {
-  it('assertListed accepts a listed child', async () => {
-    const index = new RAMIndexCacheStore()
-    await expect(
-      assertListed(READDIR, new FakeAccessor(), spec('/rooms/red/a.json'), index),
-    ).resolves.toBeUndefined()
+  it('parentSpec is the directory holding the path', () => {
+    const parent = parentSpec(spec('/rooms/red/a.json'))
+    expect([parent.virtual, parent.vfsPath]).toEqual(['/h/rooms/red', 'rooms/red'])
   })
 
-  it('assertListed refuses an absent child', async () => {
-    const index = new RAMIndexCacheStore()
-    await expect(
-      assertListed(READDIR, new FakeAccessor(), spec('/rooms/red/nope.json'), index),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('listedSize reads what the listing recorded', async () => {
-    const index = new RAMIndexCacheStore()
-    const path = spec('/rooms/red/a.json')
-    await assertListed(READDIR, new FakeAccessor(), path, index)
-    expect(await listedSize(index, path)).toBe(7)
-    expect(await listedSize(index, spec('/rooms/red/ghost.json'))).toBeNull()
-  })
-
-  it('resolveEntry warms the parent once', async () => {
-    const index = new RAMIndexCacheStore()
+  it('rowsUnder walks every level handing each its row', async () => {
     const accessor = new FakeAccessor()
-    const entry = await resolveEntry(READDIR, accessor, spec('/rooms/red/a.json'), index)
-    expect(entry?.id).toBe('a.json')
-    expect(accessor.calls).toEqual(['notes:red'])
-    // A warm cache answers from the index without another listing.
-    const again = await resolveEntry(READDIR, accessor, spec('/rooms/red/b.json'), index)
-    expect(again).not.toBeNull()
-    expect(accessor.calls).toEqual(['notes:red'])
-  })
-
-  it('resolveEntry answers null for an absent child or a missing index', async () => {
-    const index = new RAMIndexCacheStore()
-    expect(
-      await resolveEntry(READDIR, new FakeAccessor(), spec('/rooms/red/nope.json'), index),
-    ).toBeNull()
-    expect(await resolveEntry(READDIR, new FakeAccessor(), spec('/rooms/red/a.json'))).toBeNull()
-  })
-
-  it('entriesUnder walks every level through the index', async () => {
-    const accessor = new FakeAccessor()
-    const walked = await entriesUnder(
-      READDIR,
-      accessor,
-      spec('/rooms'),
-      new RAMIndexCacheStore(),
-      (entry) => entry.resourceType === 'fake/room',
-    )
-    expect(walked?.map(([p, e]) => [p.virtual, e.id]).sort()).toEqual([
-      ['/h/rooms/blue', 'blue'],
-      ['/h/rooms/red', 'red'],
-      ['/h/rooms/red/a.json', 'a.json'],
-      ['/h/rooms/red/b.json', 'b.json'],
+    const walked = await rowsUnder(READDIR, accessor, spec('/'), null)
+    expect(walked.map(([path, row]) => [path.virtual, row.type])).toEqual([
+      ['/h/rooms', FileType.DIRECTORY],
+      ['/h/rooms/red', FileType.DIRECTORY],
+      ['/h/rooms/blue', FileType.DIRECTORY],
+      ['/h/rooms/red/a.json', FileType.FILE],
+      ['/h/rooms/red/b.json', FileType.FILE],
     ])
-    expect([...accessor.calls].sort()).toEqual(['notes:blue', 'notes:red', 'rooms'])
-  })
-
-  it('entriesUnder answers null for a name with no entry', async () => {
-    const unfiled = (_accessor: FakeAccessor, path: PathSpec): Promise<string[]> =>
-      Promise.resolve([`${path.virtual.replace(/\/+$/, '')}/ghost`])
-    const walked = await entriesUnder(
-      unfiled,
-      new FakeAccessor(),
-      spec('/rooms'),
-      new RAMIndexCacheStore(),
-      () => false,
-    )
-    expect(walked).toBeNull()
+    expect(accessor.calls).toEqual(['rooms', 'notes:blue', 'notes:red'])
   })
 })

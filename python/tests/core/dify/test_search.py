@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.dify import search, tree
 from mirage.core.dify.search import (
     render_records,
@@ -66,7 +65,6 @@ async def record_empty_custom_slug_search(config, endpoint, body):
 
 @pytest.mark.asyncio
 async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
-
     bodies: list[dict] = []
 
     async def list_documents(config):
@@ -120,7 +118,6 @@ async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
                 directory="/knowledge/guides",
             )
         ],
-        RAMIndexCacheStore(),
         method="hybrid",
         top_k=2,
         threshold=0.4,
@@ -152,7 +149,6 @@ async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_segments_unions_slug_and_name_based_paths(monkeypatch):
-
     bodies: list[dict] = []
 
     async def list_documents(config):
@@ -183,7 +179,6 @@ async def test_search_segments_unions_slug_and_name_based_paths(monkeypatch):
                 directory="/knowledge/README.md",
             ),
         ],
-        RAMIndexCacheStore(),
     )
 
     assert result == []
@@ -206,7 +201,6 @@ async def test_search_segments_unions_slug_and_name_based_paths(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_segments_uses_configured_slug_metadata_name(monkeypatch):
-
     custom_slug_search_bodies.clear()
     monkeypatch.setattr(
         tree, "list_all_documents", list_path_metadata_documents
@@ -223,7 +217,6 @@ async def test_search_segments_uses_configured_slug_metadata_name(monkeypatch):
                 directory="/knowledge/guides/api",
             )
         ],
-        RAMIndexCacheStore(),
     )
 
     assert custom_slug_search_bodies[0]["retrieval_model"][
@@ -242,7 +235,6 @@ async def test_search_segments_uses_configured_slug_metadata_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_segments_empty_paths_searches_whole_dataset(monkeypatch):
-
     bodies: list[dict] = []
 
     async def dify_post(config, endpoint, body):
@@ -268,7 +260,6 @@ async def test_search_segments_empty_paths_searches_whole_dataset(monkeypatch):
         accessor(),
         "anything",
         [],
-        RAMIndexCacheStore(),
         mount_prefix="/knowledge/",
     )
 
@@ -279,7 +270,6 @@ async def test_search_segments_empty_paths_searches_whole_dataset(monkeypatch):
 
 
 def test_render_records_formats_absolute_paths_and_scores():
-
     result = render_records(
         [
             {
@@ -316,13 +306,11 @@ def test_render_records_formats_absolute_paths_and_scores():
 
 @pytest.mark.parametrize("value", [None, {}, ["invalid"]])
 def test_response_records_rejects_malformed_payload(value):
-
     with pytest.raises(ValueError, match="records must be"):
         response_records(value)
 
 
 def test_render_records_keeps_multiple_chunks_for_same_document():
-
     result = render_records(
         [
             {
@@ -367,7 +355,6 @@ def test_render_records_keeps_multiple_chunks_for_same_document():
 
 
 def test_render_records_skips_records_with_invalid_slug():
-
     result = render_records(
         [
             {
@@ -406,7 +393,6 @@ def test_render_records_skips_records_with_invalid_slug():
 
 
 def test_render_records_omits_score_for_non_numeric_values():
-
     result = render_records(
         [
             {
@@ -433,7 +419,6 @@ def test_render_records_omits_score_for_non_numeric_values():
 
 @pytest.mark.asyncio
 async def test_search_segments_caps_top_k_at_dify_limit(monkeypatch):
-
     bodies: list[dict] = []
 
     async def dify_post(config, endpoint, body):
@@ -442,27 +427,18 @@ async def test_search_segments_caps_top_k_at_dify_limit(monkeypatch):
 
     monkeypatch.setattr(search, "dify_post", dify_post)
 
-    await search.search_segments(
-        accessor(), "anything", [], RAMIndexCacheStore(), top_k=150
-    )
+    await search.search_segments(accessor(), "anything", [], top_k=150)
 
     assert bodies[0]["retrieval_model"]["top_k"] == 100
 
 
 @pytest.mark.asyncio
 async def test_search_segments_validates_arguments():
-
     with pytest.raises(ValueError, match="search: query is required"):
-        await search_segments(accessor(), "", [], RAMIndexCacheStore())
+        await search_segments(accessor(), "", [])
     with pytest.raises(ValueError, match="search: top-k must be positive"):
-        await search_segments(
-            accessor(), "x", [], RAMIndexCacheStore(), top_k=0
-        )
+        await search_segments(accessor(), "x", [], top_k=0)
     with pytest.raises(ValueError, match="search: threshold must be in"):
-        await search_segments(
-            accessor(), "x", [], RAMIndexCacheStore(), threshold=1.2
-        )
+        await search_segments(accessor(), "x", [], threshold=1.2)
     with pytest.raises(ValueError, match="search: method must be one of"):
-        await search_segments(
-            accessor(), "x", [], RAMIndexCacheStore(), method="bad"
-        )
+        await search_segments(accessor(), "x", [], method="bad")

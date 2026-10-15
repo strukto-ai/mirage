@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.trello import TrelloAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes_by_created_at
@@ -37,16 +36,16 @@ from mirage.core.trello.normalize import (
     to_json_bytes,
 )
 from mirage.core.trello.scope import detect_scope
-from mirage.core.trello.stat import stat
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _read_workspace_json(
     accessor: TrelloAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     workspace_id = match.slots["workspace_id"]
     for workspace in await list_workspaces(
@@ -61,7 +60,8 @@ async def _read_board_json(
     accessor: TrelloAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     board = await get_board(
         accessor.config, match.slots["board_id"], session=accessor.pool
@@ -73,7 +73,8 @@ async def _read_member(
     accessor: TrelloAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     member_id = match.slots["member_id"]
     members = await list_board_members(
@@ -89,7 +90,8 @@ async def _read_label(
     accessor: TrelloAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     label_id = match.slots["label_id"]
     labels = await list_board_labels(
@@ -105,7 +107,8 @@ async def _read_list_json(
     accessor: TrelloAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     list_id = match.slots["list_id"]
     lists = await list_board_lists(
@@ -121,7 +124,8 @@ async def _read_card_json(
     accessor: TrelloAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     card = await get_card(
         accessor.config, match.slots["card_id"], session=accessor.pool
@@ -133,7 +137,8 @@ async def _read_comments(
     accessor: TrelloAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     card_id = match.slots["card_id"]
     comments = await list_card_comments(
@@ -156,5 +161,5 @@ read = make_read(
         "card_json": _read_card_json,
         "comments_jsonl": _read_comments,
     },
-    stat=stat,
+    parented=True,
 )

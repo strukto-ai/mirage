@@ -24,13 +24,14 @@ vi.mock('./drive.ts', async () => {
     }),
   }
 })
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { GDocsAccessor } from '../../accessor/gdocs.ts'
+import { PathSpec, type FileStat } from '../../types.ts'
 import { makeFilename } from '../../vfs/gdocs/doc_entry.ts'
+import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { detectScope } from '../gdocs/scope.ts'
 import { GoogleApiError, type TokenManager } from './client.ts'
-import { getFile } from './drive.ts'
+import { getFile, listAllFiles } from './drive.ts'
 import { resolveAppEntry } from './entry.ts'
 
 const ITEM = {
@@ -49,7 +50,7 @@ const PATH = new PathSpec({
 })
 const TM = {} as TokenManager
 
-describe('direct lookup after incomplete search', () => {
+describe('a direct lookup proves the file', () => {
   it.each([
     'updated',
     'renamed',
@@ -62,18 +63,6 @@ describe('direct lookup after incomplete search', () => {
     'unavailable',
   ])('%s', async (outcome) => {
     vi.mocked(getFile).mockReset()
-    const index = new RAMIndexCacheStore()
-    await index.put(
-      PATH.virtual,
-      new IndexEntry({
-        id: 'doc1',
-        name: 'Notes',
-        vfsName: NAME,
-        resourceType: 'gdocs/file',
-        remoteTime: 'old',
-      }),
-    )
-    await index.invalidate()
     const item: DriveModule.DriveFile = { ...ITEM }
     if (outcome === 'renamed') item.name = 'Renamed'
     if (outcome === 'date') item.modifiedTime = '2026-04-02T12:00:00Z'
@@ -85,58 +74,38 @@ describe('direct lookup after incomplete search', () => {
     const error = status === undefined ? null : new GoogleApiError('failed', status)
     if (error) vi.mocked(getFile).mockRejectedValue(error)
     else vi.mocked(getFile).mockResolvedValue(item)
-    const result = resolveAppEntry(
-      TM,
-      detectScope(PATH),
-      PATH,
-      index,
-      ITEM.mimeType,
-      'gdocs/file',
-      makeFilename,
-    )
+    const result = resolveAppEntry(TM, detectScope(PATH), PATH, ITEM.mimeType, makeFilename)
     if (outcome === 'updated') {
-      const entry = await result
-      expect(entry.remoteTime).toBe(ITEM.modifiedTime)
-      expect(entry.size).toBeNull()
-      expect(entry.extra).toEqual({ source_size: 1000 })
+      const row = await result
+      expect(row.modified).toBe(ITEM.modifiedTime)
+      expect(row.size).toBeNull()
+      expect(row.extra).toEqual({ doc_id: 'doc1', doc_name: 'Notes', source_size: 1000 })
     } else if (outcome === 'forbidden' || outcome === 'unavailable') {
       await expect(result).rejects.toBe(error)
-      expect((await index.get(PATH.virtual)).entry).toBeDefined()
     } else {
       await expect(result).rejects.toMatchObject({ code: 'ENOENT' })
-      expect((await index.get(PATH.virtual)).entry).toBeUndefined()
     }
     expect(getFile).toHaveBeenCalledExactlyOnceWith(TM, 'doc1')
-    await index.close()
   })
 })
 
-describe('only a complete live listing proves absence', () => {
-  it.each(['complete', 'partial', 'expired'])('%s', async (listing) => {
+describe('only a complete listing proves absence', () => {
+  it.each([true, false])('complete %s', async (complete) => {
     vi.mocked(getFile).mockReset().mockResolvedValue(ITEM)
-    const index = new RAMIndexCacheStore()
-    try {
-      if (listing === 'partial') await index.setPartialDir('/docs/owned', [])
-      else await index.setDir('/docs/owned', [])
-      if (listing === 'expired') await index.invalidate()
-      const result = resolveAppEntry(
-        TM,
-        detectScope(PATH),
-        PATH,
-        index,
-        ITEM.mimeType,
-        'gdocs/file',
-        makeFilename,
-      )
-      if (listing === 'complete') {
-        await expect(result).rejects.toMatchObject({ code: 'ENOENT' })
-        expect(getFile).not.toHaveBeenCalled()
-      } else {
-        expect((await result).id).toBe(ITEM.id)
-        expect(getFile).toHaveBeenCalledExactlyOnceWith(TM, 'doc1')
-      }
-    } finally {
-      await index.close()
+    vi.mocked(listAllFiles).mockReset().mockResolvedValue({ files: [], complete })
+    const vfs = Object.assign(
+      new GDocsVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),
+      { accessor: new GDocsAccessor({ tokenManager: TM }) },
+    )
+    const ws = new Workspace({ '/docs/': vfs })
+    await ws.dispatch('readdir', '/docs/owned')
+    const stat = ws.dispatch('stat', PATH.virtual) as Promise<FileStat>
+    if (complete) {
+      await expect(stat).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(getFile).not.toHaveBeenCalled()
+    } else {
+      expect((await stat).extra.doc_id).toBe(ITEM.id)
+      expect(getFile).toHaveBeenCalledExactlyOnceWith(TM, 'doc1')
     }
   })
 })

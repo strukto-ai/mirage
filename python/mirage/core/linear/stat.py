@@ -12,23 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.hierarchy.stat import entry_stat, make_stat
-from mirage.core.linear.readdir import readdir
+from mirage.core.hierarchy.stat import make_stat
 from mirage.core.linear.scope import detect_scope
-from mirage.types import ContentType, FileType
 
-stat = make_stat(
-    detect_scope,
-    readdir,
-    entry_stats={
-        "team": entry_stat("team_id", FileType.DIRECTORY),
-        "team_json": entry_stat("team_id", ContentType.JSON),
-        "member": entry_stat("member_id", ContentType.JSON),
-        "issue": entry_stat("issue_id", FileType.DIRECTORY),
-        "issue_json": entry_stat("issue_id", ContentType.JSON),
-        "comments_jsonl": entry_stat("issue_id", ContentType.TEXT),
-        "project": entry_stat("project_id", ContentType.JSON),
-        "cycle": entry_stat("cycle_id", ContentType.JSON),
-        "document": entry_stat("document_id", ContentType.JSON),
-    },
-)
+stat = make_stat(detect_scope)

@@ -21,9 +21,8 @@ from typing import Any
 import aiohttp
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.api.client import SessionArg
-from mirage.core.hierarchy.probe import resolve_entry
+from mirage.core.hierarchy.probe import row_at, rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.channels import list_channels
@@ -34,7 +33,6 @@ from mirage.core.slack.readdir import readdir
 from mirage.core.slack.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
-from mirage.utils.naming import parse_id_name
 from mirage.utils.record_search import record_queries
 from mirage.vfs.secrets import reveal_secret
 
@@ -645,7 +643,6 @@ async def files_containing(
     accessor: SlackAccessor,
     text: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     """The channel and DM days under ``under`` Slack search names.
 
@@ -669,13 +666,12 @@ async def files_containing(
         accessor (SlackAccessor): the workspace.
         text (str): the whole word or words searched for.
         under (list[PathSpec]): the directories walked.
-        index (IndexCacheStore): the listings the walk filled.
     """
     queries = record_queries(text, RECORD_KEYS, whole_word=True)
     if queries is None:
         return None
     try:
-        return await _search(accessor, text, queries, under, index)
+        return await _search(accessor, text, queries, under)
     except (RuntimeError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
         logger.debug("slack search failed (%s); reading every file", exc)
         return None
@@ -686,7 +682,6 @@ async def _search(
     text: str,
     queries: list[str],
     under: list[PathSpec],
-    index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     scopes = [(scope, detect_scope(scope)) for scope in under]
     if any(match.kind == "day" for _, match in scopes):
@@ -705,21 +700,26 @@ async def _search(
             dirs: dict[str, str] = {}
             for container in _CONTAINERS[match.kind]:
                 listed = await readdir(
-                    accessor, mounted_path(scope, f"/{container}"), index
+                    accessor, mounted_path(scope, f"/{container}")
                 )
-                for path in listed:
-                    name = path.rsplit("/", 1)[-1]
-                    dirs[parse_id_name(name)[1]] = f"{container}/{name}"
+                for row in rows_of(listed):
+                    dirs[str(row.extra["channel_id"])] = (
+                        f"{container}/{row.name}"
+                    )
             within = ""
         elif match.kind == "channel":
             container = match.slots["container"]
             dirname = scope.mount_path.strip("/").split("/")[1]
             channel = mounted_path(scope, f"/{container}/{dirname}")
-            entry = await resolve_entry(readdir, accessor, channel, index)
+            entry, _ = await row_at(readdir, accessor, channel)
             if entry is None:
                 return None
-            dirs = {entry.id: f"{container}/{dirname}"}
-            within = f"in:#{entry.name} " if container == "channels" else ""
+            dirs = {str(entry.extra["channel_id"]): f"{container}/{dirname}"}
+            within = (
+                f"in:#{entry.extra['name']} "
+                if container == "channels"
+                else ""
+            )
         else:
             continue
         if searched is not None and not dirs.keys() <= searched:

@@ -6,8 +6,10 @@ import type { Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { IndexView } from '../../cache/index/view.ts'
 import { normalizeWandbConfig } from './config.ts'
-import { stat } from './stat.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
+import { WandbVFS } from '../../vfs/wandb/wandb.ts'
+import { keepListing } from '../../workspace/mount/listing.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 const file = (name: string) => ({ name, url: 'https://example.com', sizeBytes: 1 })
 const path = (key: string) => PathSpec.fromStrPath('/wandb/' + key, key)
 describe('W&B file tree', () => {
@@ -17,33 +19,20 @@ describe('W&B file tree', () => {
   it('refuses file/directory collisions', () => {
     expect(() => fileTree([file('a'), file('a/b')])).toThrow('collision')
   })
-  it('reuses nested catalogs and refreshes expired metadata without reviving deleted files', async () => {
+  it('answers every directory below files from one catalog', async () => {
     const accessor = new WandbAccessor(normalizeWandbConfig({ entities: ['lab'] }))
     vi.spyOn(accessor.client, 'run').mockResolvedValue({ name: 'run' })
-    const files = vi
-      .spyOn(accessor.client, 'files')
-      .mockResolvedValueOnce([
-        { name: 'nested/old.txt', sizeBytes: 3 },
-        { name: 'deep/sub/file.txt', sizeBytes: 5 },
-      ])
-      .mockResolvedValueOnce([{ name: 'nested/new.txt', sizeBytes: 9 }])
-    const index = new RAMIndexCacheStore()
-    const root = 'lab/project/run/files'
-    await readdir(accessor, path('lab/project/run'), index)
-    await readdir(accessor, path(root), index)
-    expect(await readdir(accessor, path(root + '/deep/sub'), index)).toEqual([
-      '/wandb/' + root + '/deep/sub/file.txt',
+    const files = vi.spyOn(accessor.client, 'files').mockResolvedValue([
+      { name: 'nested/old.txt', sizeBytes: 3 },
+      { name: 'deep/sub/file.txt', sizeBytes: 5 },
     ])
-    expect((await stat(accessor, path(root), index)).type).toBe(FileType.DIRECTORY)
-    expect((await stat(accessor, path(root + '/nested/old.txt'), index)).size).toBe(3)
+    const vfs = Object.assign(new WandbVFS(accessor.config), { accessor })
+    const ws = new Workspace({ '/wandb/': vfs })
+    const root = '/wandb/lab/project/run/files'
+    await ws.dispatch('readdir', root)
+    expect(await ws.dispatch('readdir', root + '/deep/sub')).toEqual([root + '/deep/sub/file.txt'])
+    expect(((await ws.dispatch('stat', root + '/nested/old.txt')) as FileStat).size).toBe(3)
     expect(files).toHaveBeenCalledTimes(1)
-    await index.setDir('/wandb/' + root + '/nested', [], new Date(Date.now() - 1000))
-    await expect(stat(accessor, path(root + '/nested/old.txt'), index)).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-    expect((await stat(accessor, path(root + '/nested/new.txt'), index)).size).toBe(9)
-    expect((await index.get('/wandb/' + root + '/deep/sub/file.txt')).entry).toBeUndefined()
-    expect(files).toHaveBeenCalledTimes(2)
   })
   it('does not publish a partial catalog after a collision', async () => {
     const accessor = new WandbAccessor(normalizeWandbConfig({ entities: ['lab'] }))
@@ -51,19 +40,13 @@ describe('W&B file tree', () => {
       { name: 'nested/child', sizeBytes: 3 },
       { name: 'nested', sizeBytes: 1 },
     ])
-    const index = new RAMIndexCacheStore()
-    await expect(readdir(accessor, path('lab/project/run/files'), index)).rejects.toThrow(
-      'collision',
-    )
-    expect((await index.listDir('/wandb/lab/project/run/files')).entries).toBeUndefined()
-    expect((await index.get('/wandb/lab/project/run/files/nested')).entry).toBeUndefined()
+    await expect(readdir(accessor, path('lab/project/run/files'))).rejects.toThrow('collision')
   })
   it('hands what a file re-list dropped to cleanup', async () => {
     // The catalog is one complete fetch, so a re-list that no longer names
     // a file or a folder is the backend saying it went away.
     const gone: Evicted[] = []
     const accessor = new WandbAccessor(normalizeWandbConfig({ entities: ['lab'] }))
-    vi.spyOn(accessor.client, 'run').mockResolvedValue({ name: 'run' })
     vi.spyOn(accessor.client, 'files')
       .mockResolvedValueOnce([
         { name: 'nested/old.txt', sizeBytes: 3 },
@@ -78,9 +61,10 @@ describe('W&B file tree', () => {
       },
     })
     const root = 'lab/project/run/files'
-    await readdir(accessor, path(root), index)
+    const key = '/wandb/' + root
+    await keepListing(index, key, await readdir(accessor, path(root)))
     await store.invalidate()
-    await readdir(accessor, path(root), index)
+    await keepListing(index, key, await readdir(accessor, path(root)))
     expect(gone.map((child) => child.path).sort()).toEqual([
       '/wandb/' + root + '/deep',
       '/wandb/' + root + '/nested/old.txt',

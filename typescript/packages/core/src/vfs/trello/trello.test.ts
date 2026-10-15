@@ -15,7 +15,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ops } from '../../test-utils.ts'
 import { PathSpec, VFSName } from '../../types.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { redactTrelloConfig } from './config.ts'
 import { TrelloVFS } from './trello.ts'
 
@@ -75,13 +74,9 @@ describe('TrelloVFS', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch
     const r = new TrelloVFS({ apiKey: 'KEY', apiToken: 'TOK' })
     const out = await ops(r).readdir(
-      new PathSpec({
-        virtual: '/mnt/trello/workspaces',
-        directory: '/mnt/trello/workspaces',
-        vfsPath: mountKey('/mnt/trello/workspaces', '/mnt/trello'),
-      }),
+      new PathSpec({ virtual: '/workspaces', directory: '/workspaces', vfsPath: 'workspaces' }),
     )
-    expect(out).toEqual(['/mnt/trello/workspaces/Acme__w1', '/mnt/trello/workspaces/Beta__w2'])
+    expect(out).toEqual(['/workspaces/Acme__w1', '/workspaces/Beta__w2'])
     expect(fetchMock).toHaveBeenCalled()
     const firstArg = (fetchMock.mock.calls[0] as unknown[])[0]
     const firstUrl =
@@ -104,11 +99,7 @@ describe('TrelloVFS', () => {
       baseUrl: 'https://my.proxy.example/trello',
     })
     await ops(r).readdir(
-      new PathSpec({
-        virtual: '/mnt/trello/workspaces',
-        directory: '/mnt/trello/workspaces',
-        vfsPath: mountKey('/mnt/trello/workspaces', '/mnt/trello'),
-      }),
+      new PathSpec({ virtual: '/workspaces', directory: '/workspaces', vfsPath: 'workspaces' }),
     )
     const firstArg = (fetchMock.mock.calls[0] as unknown[])[0]
     const firstUrl =
@@ -132,13 +123,9 @@ describe('TrelloVFS', () => {
     ) as unknown as typeof fetch
     const r = new TrelloVFS({ apiKey: 'k', apiToken: 't', workspaceId: 'w2' })
     const out = await ops(r).readdir(
-      new PathSpec({
-        virtual: '/mnt/trello/workspaces',
-        directory: '/mnt/trello/workspaces',
-        vfsPath: mountKey('/mnt/trello/workspaces', '/mnt/trello'),
-      }),
+      new PathSpec({ virtual: '/workspaces', directory: '/workspaces', vfsPath: 'workspaces' }),
     )
-    expect(out).toEqual(['/mnt/trello/workspaces/Beta__w2'])
+    expect(out).toEqual(['/workspaces/Beta__w2'])
   })
 })
 

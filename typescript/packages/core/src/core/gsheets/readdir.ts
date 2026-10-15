@@ -17,4 +17,4 @@ import { makeFilename } from '../../vfs/gsheets/sheet_entry.ts'
 import { MIME } from './constants.ts'
 import { detectScope } from './scope.ts'
 
-export const readdir = makeAppReaddir(MIME, detectScope, makeFilename, 'gsheets/file')
+export const readdir = makeAppReaddir(MIME, detectScope, makeFilename)

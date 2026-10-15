@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.linear.client import (
@@ -39,17 +38,17 @@ from mirage.core.linear.normalize import (
 )
 from mirage.core.linear.readdir import filtered_teams
 from mirage.core.linear.scope import detect_scope
-from mirage.core.linear.stat import stat
 from mirage.core.render.json import jsonl_bytes_by_created_at
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _read_team_json(
     accessor: LinearAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     team_id = match.slots["team_id"]
     for team in await filtered_teams(accessor):
@@ -62,7 +61,8 @@ async def _read_member(
     accessor: LinearAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     member_id = match.slots["member_id"]
     users = await list_team_members(
@@ -78,7 +78,8 @@ async def _read_issue_json(
     accessor: LinearAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     issue = await get_issue(
         accessor.config, match.slots["issue_id"], session=accessor.pool
@@ -90,7 +91,8 @@ async def _read_comments(
     accessor: LinearAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     issue_id = match.slots["issue_id"]
     issue = await get_issue(accessor.config, issue_id, session=accessor.pool)
@@ -111,7 +113,8 @@ async def _read_project(
     accessor: LinearAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     team_id = match.slots["team_id"]
     project_id = match.slots["project_id"]
@@ -142,7 +145,8 @@ async def _read_cycle(
     accessor: LinearAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     team_id = match.slots["team_id"]
     cycles = await list_team_cycles(
@@ -158,7 +162,8 @@ async def _read_document(
     accessor: LinearAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     documents = await list_team_documents(
         accessor.config, match.slots["team_id"], session=accessor.pool
@@ -180,5 +185,5 @@ read = make_read(
         "cycle": _read_cycle,
         "document": _read_document,
     },
-    stat=stat,
+    parented=True,
 )

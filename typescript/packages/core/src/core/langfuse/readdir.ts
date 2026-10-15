@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { type DirListing, makeReaddir } from '../hierarchy/readdir.ts'
+import { DirListing, FileStat, FileType } from '../../types.ts'
+import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonlBytes } from '../render/json.ts'
 import {
@@ -60,20 +60,33 @@ function bounded(accessor: LangfuseAccessor, traces: readonly Record<string, unk
   return traces.length >= limit || (from !== undefined && from !== '')
 }
 
-function traceEntries(traces: readonly Record<string, unknown>[]): [string, IndexEntry][] {
-  return traces.map((t): [string, IndexEntry] => {
-    const traceId = pickString(t, 'id')
-    const filename = `${traceId}.json`
-    return [
-      filename,
-      new IndexEntry({
-        id: traceId,
-        name: traceId,
-        resourceType: 'langfuse/trace',
-        vfsName: filename,
-      }),
-    ]
-  })
+function sessionExtra(match: ScopeMatch): Record<string, string> {
+  return { session_id: match.slots.session_id ?? '' }
+}
+
+function promptExtra(match: ScopeMatch): Record<string, string> {
+  return { prompt_name: match.slots.prompt_name ?? '' }
+}
+
+function datasetExtra(match: ScopeMatch): Record<string, string> {
+  return { dataset_name: match.slots.dataset_name ?? '' }
+}
+
+// What each kind's stat carries in `extra`, listed or not.
+export const EXTRAS = {
+  session: sessionExtra,
+  prompt: promptExtra,
+  dataset: datasetExtra,
+}
+
+function dirs(names: readonly string[]): FileStat[] {
+  return names.map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
+}
+
+function traceRows(traces: readonly Record<string, unknown>[]): FileStat[] {
+  return traces.map(
+    (t) => new FileStat({ name: `${pickString(t, 'id')}.json`, type: FileType.FILE }),
+  )
 }
 
 async function listTraces(accessor: LangfuseAccessor, _match: ScopeMatch): Promise<DirListing> {
@@ -90,26 +103,17 @@ async function listTraces(accessor: LangfuseAccessor, _match: ScopeMatch): Promi
   // entry. Traces and prompts stay size-unknown until a read hydrates them;
   // the dataset .jsonl files are sized because their listing already carries
   // every item.
-  return { entries: traceEntries(traces), seeds: {}, partial: bounded(accessor, traces) }
+  return new DirListing({ entries: traceRows(traces), partial: bounded(accessor, traces) })
 }
 
 async function listSessions(accessor: LangfuseAccessor, _match: ScopeMatch): Promise<DirListing> {
   // One page of the newest sessions: an older one that drops off it has not
   // been deleted, so the listing evicts nothing.
   const sessions = await fetchSessions(accessor.transport)
-  const entries = sessions.map((s): [string, IndexEntry] => {
-    const sessionId = pickString(s, 'id')
-    return [
-      sessionId,
-      new IndexEntry({
-        id: sessionId,
-        name: sessionId,
-        resourceType: 'langfuse/session',
-        vfsName: sessionId,
-      }),
-    ]
+  return new DirListing({
+    entries: dirs(sessions.map((s) => pickString(s, 'id'))),
+    window: true,
   })
-  return { entries, seeds: {}, window: true }
 }
 
 async function listSessionTraces(
@@ -124,126 +128,65 @@ async function listSessionTraces(
   const from = accessor.config.defaultFromTimestamp
   if (from !== undefined && from !== '') opts.fromTimestamp = from
   const traces = await fetchTraces(accessor.transport, opts)
-  return { entries: traceEntries(traces), seeds: {}, partial: bounded(accessor, traces) }
+  return new DirListing({ entries: traceRows(traces), partial: bounded(accessor, traces) })
 }
 
 async function listPrompts(accessor: LangfuseAccessor, _match: ScopeMatch): Promise<DirListing> {
   const prompts = await fetchPrompts(accessor.transport)
-  const seen = new Set<string>()
-  const entries: [string, IndexEntry][] = []
-  for (const p of prompts) {
-    const promptName = pickString(p, 'name')
-    if (seen.has(promptName)) continue
-    seen.add(promptName)
-    entries.push([
-      promptName,
-      new IndexEntry({
-        id: promptName,
-        name: promptName,
-        resourceType: 'langfuse/prompt',
-        vfsName: promptName,
-      }),
-    ])
-  }
-  return { entries, seeds: {}, window: true }
+  const names = [...new Set(prompts.map((p) => pickString(p, 'name')))]
+  return new DirListing({ entries: dirs(names), window: true })
 }
 
 async function listPromptVersions(
   accessor: LangfuseAccessor,
   match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
+): Promise<FileStat[]> {
   const promptName = match.slots.prompt_name ?? ''
   const prompts = await fetchPrompts(accessor.transport)
-  const entries: [string, IndexEntry][] = []
+  const rows: FileStat[] = []
   for (const p of prompts) {
     if (pickString(p, 'name') !== promptName) continue
     // The list endpoint returns PromptMeta, which carries every version of a
     // prompt in a `versions` array; there is no scalar `version`.
     for (const version of promptVersions(p)) {
-      const filename = `${version}.json`
-      entries.push([
-        filename,
-        new IndexEntry({
-          id: `${promptName}/${version}`,
-          name: version,
-          resourceType: 'langfuse/prompt_version',
-          vfsName: filename,
-        }),
-      ])
+      rows.push(new FileStat({ name: `${version}.json`, type: FileType.FILE }))
     }
   }
-  return entries
+  return rows
 }
 
 async function listDatasets(accessor: LangfuseAccessor, _match: ScopeMatch): Promise<DirListing> {
   const datasets = await fetchDatasets(accessor.transport)
-  const entries = datasets.map((d): [string, IndexEntry] => {
-    const datasetName = pickString(d, 'name')
-    return [
-      datasetName,
-      new IndexEntry({
-        id: datasetName,
-        name: datasetName,
-        resourceType: 'langfuse/dataset',
-        vfsName: datasetName,
-      }),
-    ]
+  return new DirListing({
+    entries: dirs(datasets.map((d) => pickString(d, 'name'))),
+    window: true,
   })
-  return { entries, seeds: {}, window: true }
 }
 
-async function listDataset(
-  accessor: LangfuseAccessor,
-  match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
-  const datasetName = match.slots.dataset_name ?? ''
+async function listDataset(accessor: LangfuseAccessor, match: ScopeMatch): Promise<FileStat[]> {
   // One dataset_items call per dataset directory actually entered: the
   // dataset listing carries no item payloads, so items.jsonl can only be
   // sized here, and only for datasets the caller opens.
-  const items = await fetchDatasetItems(accessor.transport, datasetName)
+  const items = await fetchDatasetItems(accessor.transport, match.slots.dataset_name ?? '')
   return [
-    [
-      'items.jsonl',
-      new IndexEntry({
-        id: `${datasetName}/items`,
-        name: 'items.jsonl',
-        resourceType: 'langfuse/dataset_items',
-        vfsName: 'items.jsonl',
-        size: jsonlBytes(items).byteLength,
-      }),
-    ],
-    [
-      'runs',
-      new IndexEntry({
-        id: `${datasetName}/runs`,
-        name: 'runs',
-        resourceType: 'langfuse/dataset_runs_dir',
-        vfsName: 'runs',
-      }),
-    ],
+    new FileStat({ name: 'items.jsonl', type: FileType.FILE, size: jsonlBytes(items).byteLength }),
+    new FileStat({ name: 'runs', type: FileType.DIRECTORY }),
   ]
 }
 
 async function listDatasetRuns(accessor: LangfuseAccessor, match: ScopeMatch): Promise<DirListing> {
-  const datasetName = match.slots.dataset_name ?? ''
-  const runs = await fetchDatasetRuns(accessor.transport, datasetName)
-  const entries = runs.map((r): [string, IndexEntry] => {
-    const runName = pickString(r, 'name')
-    const filename = `${runName}.jsonl`
-    // The listing already carries the run document read() renders, so each
-    // run file's exact size is free here.
-    return [
-      filename,
-      new IndexEntry({
-        id: runName,
-        name: runName,
-        resourceType: 'langfuse/dataset_run',
-        vfsName: filename,
+  const runs = await fetchDatasetRuns(accessor.transport, match.slots.dataset_name ?? '')
+  // The listing already carries the run document read() renders, so each run
+  // file's exact size is free here.
+  const rows = runs.map(
+    (r) =>
+      new FileStat({
+        name: `${pickString(r, 'name')}.jsonl`,
+        type: FileType.FILE,
         size: jsonlBytes([r]).byteLength,
       }),
-    ]
-  })
-  return { entries, seeds: {}, window: true }
+  )
+  return new DirListing({ entries: rows, window: true })
 }
 
 export const readdir = makeReaddir<LangfuseAccessor>(detectScope, {
@@ -258,4 +201,5 @@ export const readdir = makeReaddir<LangfuseAccessor>(detectScope, {
     runs: listDatasetRuns,
   },
   staticRoot: TOP_LEVEL_DIRS,
+  extras: EXTRAS,
 })

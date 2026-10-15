@@ -4,7 +4,6 @@ import pytest
 from qdrant_client.http.exceptions import ResponseHandlingException
 
 import mirage.utils.record_search as record_search_mod
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.qdrant.search import files_containing
 from mirage.core.qdrant.tree import TREE, readdir
 from mirage.core.vector.search import search_rows_output
@@ -60,9 +59,7 @@ async def _containing(accessor, text: str, path: str = "/db"):
     spec = PathSpec(
         vfs_path=mount_key(path, "/db"), virtual=path, directory=path
     )
-    found = await files_containing(
-        readdir, accessor, text, [spec], RAMIndexCacheStore()
-    )
+    found = await files_containing(readdir, accessor, text, [spec])
     return None if found is None else sorted(p.virtual for p in found)
 
 
@@ -106,10 +103,9 @@ async def _listed_then(accessor, change) -> list[str] | None:
     spec = PathSpec(
         vfs_path=mount_key(path, "/db"), virtual=path, directory=path
     )
-    index = RAMIndexCacheStore()
-    await readdir(accessor, spec, index)
+    await readdir(accessor, spec)
     change(await accessor.client())
-    found = await files_containing(readdir, accessor, "striped", [spec], index)
+    found = await files_containing(readdir, accessor, "striped", [spec])
     return None if found is None else sorted(p.virtual for p in found)
 
 
@@ -135,15 +131,15 @@ def _refused(client) -> None:
 
 
 # A read fetches the point as it is now, so the text is checked against a
-# listing made for the search, not the one the walk cached.
+# listing made for the search, not the one the command walked.
 @pytest.mark.asyncio
 async def test_a_text_changed_since_the_listing_is_found(accessor):
     assert await _listed_then(accessor, _striped) == SMALL_CAT
 
 
 @pytest.mark.asyncio
-async def test_a_point_gone_since_the_listing_is_read(accessor):
-    assert await _listed_then(accessor, _dropped) == SMALL_CAT
+async def test_a_point_gone_since_the_listing_is_not_read(accessor):
+    assert await _listed_then(accessor, _dropped) == []
 
 
 # A listing that fails leaves every file to a read.

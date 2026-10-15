@@ -92,16 +92,16 @@ def test_same_named_guilds_get_distinct_dirnames():
     assert guild_dirname(a) != guild_dirname(b)
 
 
-def test_guild_entry_vfs_name_matches_dirname():
+def test_guild_entry_name_matches_dirname():
     g = {"id": "G1", "name": "My Server"}
-    assert guild_entry(g).vfs_name == guild_dirname(g)
+    assert guild_entry(g).name == guild_dirname(g)
 
 
-def test_channel_entry_vfs_name_matches_dirname():
+def test_channel_entry_name_matches_dirname():
     c = {"id": "C1", "name": "general", "last_message_id": "M1"}
-    assert channel_entry(c).vfs_name == channel_dirname(c)
+    assert channel_entry(c).name == channel_dirname(c)
 
 
-def test_member_entry_vfs_name_matches_filename():
+def test_member_entry_name_matches_filename():
     m = {"user": {"id": "U1", "username": "alice"}}
-    assert member_entry(m).vfs_name == member_filename(m)
+    assert member_entry(m).name == member_filename(m)

@@ -16,7 +16,6 @@ import { stripSlash } from '../../utils/slash.ts'
 import { EJSON } from 'bson'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import {
   countDocuments,
   findDocuments,
@@ -146,7 +145,6 @@ async function lastDocuments(
   scope: ScopeMatch,
   path: PathSpec,
   n: number,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const database = scope.slots.database ?? ''
   const name = scope.slots.name ?? ''
@@ -199,7 +197,6 @@ function documentCount(
   accessor: MongoDBAccessor,
   scope: ScopeMatch,
   _path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<number> {
   return countDocuments(accessor, scope.slots.database ?? '', scope.slots.name ?? '')
 }
@@ -217,7 +214,6 @@ async function followDocuments(
   scope: ScopeMatch,
   path: PathSpec,
   n: number,
-  _index?: IndexCacheStore,
 ): Promise<AsyncIterableIterator<Uint8Array> | null> {
   if (entityKind(scope) !== EntityKind.COLLECTION) return null
   await entityGuard(accessor, scope, path.virtual)

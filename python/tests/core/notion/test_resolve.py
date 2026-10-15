@@ -3,15 +3,25 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.notion import read as notion_read
 from mirage.core.notion import readdir as notion_readdir
 from mirage.core.notion import resolve as notion_resolve
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.read import read
-from mirage.core.notion.readdir import readdir
-from mirage.core.notion.stat import stat
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
+from mirage.vfs.notion import NotionVFS
+from tests.fixtures.mounted import Mounted
+
+
+async def readdir(accessor: NotionAccessor, path: PathSpec, *_) -> list[str]:
+    return await Mounted(NotionVFS, accessor).readdir(path)
+
+
+async def stat(accessor: NotionAccessor, path: PathSpec, *_) -> FileStat:
+    return await Mounted(NotionVFS, accessor).stat(path)
+
+
+async def read(accessor: NotionAccessor, path: PathSpec, *_) -> bytes:
+    return await Mounted(NotionVFS, accessor).read(path)
 
 
 @pytest.fixture(autouse=True)
@@ -87,10 +97,8 @@ async def test_row_validation_applies_to_every_entry_point(
     path = PathSpec.from_str_path(
         f"/databases/DB__db/DS__ds/{label}__row{suffix}"
     )
-    index = RAMIndexCacheStore()
-    await index.set_dir(path.virtual, [])
     with pytest.raises(FileNotFoundError):
-        await operation(accessor, path, index)
+        await operation(accessor, path)
     assert fetch.await_count >= 1
 
 

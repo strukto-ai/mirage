@@ -45,18 +45,44 @@ def folder_of(key: str) -> str:
     return key.rsplit("/", 1)[0] or "/"
 
 
-async def stored_listing(index: IndexCacheStore, key: str) -> list[str] | None:
+async def stored_listing(
+    index: IndexCacheStore, key: str, glob: bool = False
+) -> list[str] | None:
     """A directory's listing as the index holds it, None when the index
     holds no complete, live listing for it.
 
     The mount's read policy rides the index: a listing past its bound,
-    or one a ``fresh`` mount's check refuses, answers None here.
+    or one a ``fresh`` mount's check refuses, answers None here. A
+    window (the newest messages, the last days) answers no glob: the
+    backend moves its window to the span the glob asks for.
 
     Args:
         index (IndexCacheStore): the mount's index.
         key (str): the directory's key.
+        glob (bool): the listing answers a glob word.
     """
-    return (await index.list_dir(key)).entries
+    listing = await index.list_dir(key)
+    if glob and listing.window:
+        return None
+    return listing.entries
+
+
+async def beyond_window(index: IndexCacheStore, key: str) -> bool:
+    """Whether ``key``'s folder holds a window that does not name it.
+
+    A window shows everything to show but proves nothing absent: a day
+    it does not list may still be there, and only the backend says.
+
+    Args:
+        index (IndexCacheStore): the mount's index.
+        key (str): the path's key, below the mount root.
+    """
+    listing = await index.list_dir(folder_of(key))
+    return (
+        listing.window
+        and listing.entries is not None
+        and key not in listing.entries
+    )
 
 
 async def keep_listing(
@@ -100,9 +126,9 @@ async def stored_stat(index: IndexCacheStore, key: str) -> FileStat | None:
 
     The row the parent's listing holds answers it, so a listing costs
     one request and the stat of each child after it none. A complete
-    listing that does not name the path answers ENOENT the same way. A
-    directory whose own listing is held answers with the row a subtree
-    read kept for it.
+    listing that does not name the path answers ENOENT the same way; a
+    window that does not answers nothing. A directory whose own listing
+    is held answers with the row a subtree read kept for it.
 
     Args:
         index (IndexCacheStore): the mount's index.
@@ -115,6 +141,8 @@ async def stored_stat(index: IndexCacheStore, key: str) -> FileStat | None:
     listing = await index.list_dir(folder_of(key))
     if listing.entries is not None:
         if key not in listing.entries:
+            if listing.window:
+                return None
             raise enoent(key)
     elif key not in (listing.partial_entries or []):
         if await stored_listing(index, key) is None:
@@ -151,7 +179,7 @@ async def stored_tree(
     Every entry below the directory as its parent's listing holds it,
     keyed by its path below ``key``: what a walk of ``readdir`` and
     ``stat`` over the same listings would see. None while any directory
-    under it has no complete, live listing.
+    under it has no complete, live listing; a window is not one.
 
     Args:
         index (IndexCacheStore): the mount's index.
@@ -161,7 +189,8 @@ async def stored_tree(
     base = "" if key == "/" else key
     pending = [key]
     while pending:
-        children = await stored_listing(index, pending.pop())
+        listing = await index.list_dir(pending.pop())
+        children = None if listing.window else listing.entries
         if children is None:
             return None
         for child in children:

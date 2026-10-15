@@ -13,9 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.codec import PATH_SAFE
-from mirage.core.hierarchy.readdir import DirListing, Listed
+from mirage.core.hierarchy.readdir import Listed
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.lancedb.query import (
     distinct_values,
@@ -25,47 +24,31 @@ from mirage.core.lancedb.query import (
 )
 from mirage.core.lancedb.render import cell_text, render_card
 from mirage.core.lancedb.types import LanceRow, ValueTest
-from mirage.core.vector.readdir import dir_entry
 from mirage.core.vector.scope import filters_of, table_of
+from mirage.types import DirListing, FileStat, FileType
 from mirage.utils.glob_walk import glob_prefix, glob_stem_prefix
 from mirage.vfs.lancedb.config import LanceDBConfig
 
 
-def _row_entries(
-    rows: list[LanceRow], config: LanceDBConfig
-) -> list[tuple[str, IndexEntry]]:
+def _row_files(rows: list[LanceRow], config: LanceDBConfig) -> list[FileStat]:
     # The widened select carries every rendered column, so each card's exact
     # size is free here; blob values are deliberately not fetched at listing
     # time, so blob entries stay size-unknown and stat renders them itself.
-    entries: list[tuple[str, IndexEntry]] = []
+    listed: list[FileStat] = []
     for row in rows:
         rid = cell_text(row[config.id_column])
-        entries.append(
-            (
-                f"{rid}.md",
-                IndexEntry(
-                    id=rid,
-                    name=f"{rid}.md",
-                    resource_type="lancedb/row_card",
-                    vfs_name=f"{rid}.md",
-                    size=len(render_card(row, config)),
-                ),
+        listed.append(
+            FileStat(
+                name=f"{rid}.md",
+                type=FileType.FILE,
+                size=len(render_card(row, config)),
             )
         )
         if config.blob_column:
-            blob_name = f"{rid}.{config.blob_ext}"
-            entries.append(
-                (
-                    blob_name,
-                    IndexEntry(
-                        id=rid,
-                        name=blob_name,
-                        resource_type="lancedb/row_blob",
-                        vfs_name=blob_name,
-                    ),
-                )
+            listed.append(
+                FileStat(name=f"{rid}.{config.blob_ext}", type=FileType.FILE)
             )
-    return entries
+    return listed
 
 
 def _rendered_prefix_test(prefix: str) -> ValueTest:
@@ -131,7 +114,9 @@ async def children(
         )
         names = sorted(map(PATH_SAFE.encode, values))
         return DirListing(
-            entries=[(name, dir_entry("lancedb", name)) for name in names],
+            entries=[
+                FileStat(name=name, type=FileType.DIRECTORY) for name in names
+            ],
             partial=bool(display_prefix),
             window=True,
         )
@@ -157,5 +142,5 @@ async def children(
     # Read up to max_rows, so a row outside the head of the table is not
     # gone because a listing no longer names it.
     return DirListing(
-        entries=_row_entries(rows, config), partial=bool(prefix), window=True
+        entries=_row_files(rows, config), partial=bool(prefix), window=True
     )

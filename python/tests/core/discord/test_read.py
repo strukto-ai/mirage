@@ -18,19 +18,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.history import snowflake_at
 from mirage.core.discord.read import (
     follow,
-    read,
     read_many,
     read_range,
     read_stream,
 )
+from mirage.core.discord.readdir import readdir
 from mirage.core.render.json import jsonl_bytes
 from mirage.types import PathSpec
+from mirage.vfs.discord import DiscordVFS
 from tests.core.discord.conftest import DAY, MESSAGES, SEALED_DAY
+from tests.fixtures.handed import call, entry_at, parent_of
+from tests.fixtures.mounted import mounted
 
 pytestmark = pytest.mark.asyncio
+
+
+async def read(accessor: DiscordAccessor, path: PathSpec) -> bytes:
+    return await mounted(DiscordVFS, accessor).read(path)
+
 
 GUILD_DIR = "My Server__G001"
 CHANNEL = f"{GUILD_DIR}/channels/general__C001"
@@ -43,62 +52,60 @@ def spec(virtual: str) -> PathSpec:
     )
 
 
-async def test_read_jsonl(api, accessor, index):
-    # Cold: no prior listing is needed, the read resolves the channel
-    # through the index itself.
-    result = await read(accessor, spec(CHAT), index)
+async def test_read_jsonl(api, accessor):
+    # Cold: no prior listing is needed, the mount lists the chain down
+    # to the day itself.
+    result = await read(accessor, spec(CHAT))
     assert result == jsonl_bytes(MESSAGES)
 
 
-async def test_read_jsonl_bogus_channel_is_enoent(api, accessor, index):
+async def test_read_jsonl_bogus_channel_is_enoent(api, accessor):
     # The typed `name__id` is only trusted once the listing proves it, so
     # a fabricated channel id is ENOENT rather than a raw API error.
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
             spec(f"/{GUILD_DIR}/channels/nope__C9/{DAY}/chat.jsonl"),
-            index,
         )
 
 
-async def test_read_not_found(api, accessor, index):
+async def test_read_not_found(api, accessor):
     with pytest.raises(FileNotFoundError):
-        await read(accessor, spec("/no/such/path"), index)
+        await read(accessor, spec("/no/such/path"))
 
 
-async def test_read_jsonl_window_is_sliced_locally(api, accessor, index):
+async def test_read_jsonl_window_is_sliced_locally(api, accessor):
     # A rendered branch has no remote range, so the window is taken after.
     whole = jsonl_bytes(MESSAGES)
-    result = await read_range(accessor, spec(CHAT), index, offset=1, size=4)
+    result = await call(
+        read_range, readdir, accessor, spec(CHAT), offset=1, size=4
+    )
     assert result == whole[1:5]
 
 
 async def test_read_chat_on_a_sealed_day_reproduces_the_api_answer(
-    api, accessor, index
+    api, accessor
 ):
     # The sealed day lists nothing but the file still reads through the
     # channel; the fetch then answers what the API answers.
     import aiohttp
 
     with pytest.raises(aiohttp.ClientResponseError):
-        await read(
-            accessor, spec(f"/{CHANNEL}/{SEALED_DAY}/chat.jsonl"), index
-        )
+        await read(accessor, spec(f"/{CHANNEL}/{SEALED_DAY}/chat.jsonl"))
 
 
-async def test_read_member_json(api, accessor, index):
-    data = await read(
-        accessor, spec(f"/{GUILD_DIR}/members/alice__U001.json"), index
-    )
+async def test_read_member_json(api, accessor):
+    data = await read(accessor, spec(f"/{GUILD_DIR}/members/alice__U001.json"))
     payload = json.loads(data)
     assert payload["user"]["id"] == "U001"
 
 
-async def test_read_blob_pushes_the_range_to_the_source(api, accessor, index):
-    result = await read_range(
+async def test_read_blob_pushes_the_range_to_the_source(api, accessor):
+    result = await call(
+        read_range,
+        readdir,
         accessor,
         spec(f"/{CHANNEL}/{DAY}/files/kept__A1.txt"),
-        index,
         offset=2,
         size=3,
     )
@@ -106,23 +113,21 @@ async def test_read_blob_pushes_the_range_to_the_source(api, accessor, index):
     assert api.downloads == [("https://cdn.example/kept.txt", 2, 3)]
 
 
-async def test_read_dir_is_enoent_when_unproven(api, accessor, index):
+async def test_read_dir_is_enoent_when_unproven(api, accessor):
     # A matched shape alone is no existence proof: reading a directory
     # kind answers "No such file" unless the node exists by construction.
     with pytest.raises(FileNotFoundError):
-        await read(accessor, spec("/Nope__G9"), index)
+        await read(accessor, spec("/Nope__G9"))
 
 
-async def test_read_tombstoned_attachment_is_enoent(api, accessor, index):
+async def test_read_tombstoned_attachment_is_enoent(api, accessor):
     with pytest.raises(FileNotFoundError):
         await read(
-            accessor, spec(f"/{CHANNEL}/{DAY}/files/tombstoned__A2.txt"), index
+            accessor, spec(f"/{CHANNEL}/{DAY}/files/tombstoned__A2.txt")
         )
 
 
-async def test_attachment_stream_closes_before_fetching_tail(
-    api, accessor, index
-):
+async def test_attachment_stream_closes_before_fetching_tail(api, accessor):
     path = spec(f"/{CHANNEL}/{DAY}/files/kept__A1.txt")
     closed = []
 
@@ -136,14 +141,16 @@ async def test_attachment_stream_closes_before_fetching_tail(
     with patch(
         "mirage.core.discord.read.download_file_stream", return_value=source()
     ):
-        stream = read_stream(accessor, path, index)
+        stream = read_stream(
+            accessor, path, await entry_at(readdir, accessor, path)
+        )
         assert await anext(stream) == b"first\n"
         await stream.aclose()
     assert closed == [True]
 
 
 async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
-    api, accessor, index
+    api, accessor
 ):
     added = [{"id": "1196242344345600900", "content": "later"}]
     with patch(
@@ -151,7 +158,14 @@ async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
         new_callable=AsyncMock,
         side_effect=[[dict(m) for m in MESSAGES], added, []],
     ) as fetch:
-        stream = await follow(accessor, spec(CHAT), 1, 0.001, index)
+        stream = await follow(
+            accessor,
+            spec(CHAT),
+            1,
+            0.001,
+            entry=await entry_at(readdir, accessor, spec(CHAT)),
+            parent=await entry_at(readdir, accessor, parent_of(spec(CHAT))),
+        )
         try:
             assert await anext(stream) == jsonl_bytes(MESSAGES[-1:])
             assert await anext(stream) == jsonl_bytes(added)
@@ -161,9 +175,9 @@ async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
     assert fetch.await_args_list[1].kwargs["after"] == MESSAGES[-1]["id"]
 
 
-async def test_only_a_chat_day_is_followed(api, accessor, index):
+async def test_only_a_chat_day_is_followed(api, accessor):
     member = f"/{GUILD_DIR}/members/alice__U001.json"
-    assert await follow(accessor, spec(member), 1, 1.0, index) is None
+    assert await follow(accessor, spec(member), 1, 1.0) is None
 
 
 async def _walk(*pages):

@@ -12,48 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { materialize } from '../../io/types.ts'
-import { PathSpec } from '../../types.ts'
-import { FakeSlackTransport, makeFakeVfs, seedChannel } from './_test_util.ts'
-import { generic } from '../../commands/builtin/generic_bind/factory.ts'
-
-const SLACK_CAT = [generic('cat')]
-
-const DEC = new TextDecoder()
-
-async function runCat(
-  paths: PathSpec[],
-  flags: Record<string, string | boolean | number | string[]>,
-  options: { index?: RAMIndexCacheStore; transport?: FakeSlackTransport } = {},
-): Promise<string> {
-  const cmd = SLACK_CAT[0]
-  if (cmd === undefined) throw new Error('cat not registered')
-  const transport = options.transport ?? new FakeSlackTransport()
-  const vfs = makeFakeVfs(transport)
-  const result = await cmd.fn(vfs.accessor, paths, [], {
-    stdin: null,
-    flags,
-    io: commandIo(vfs),
-    cwd: '/',
-    ...(options.index !== undefined ? { index: options.index } : {}),
-  })
-  if (result === null) return ''
-  const [out] = result
-  if (out === null) return ''
-  const buf = out instanceof Uint8Array ? out : await materialize(out as AsyncIterable<Uint8Array>)
-  return DEC.decode(buf)
-}
+import { FakeSlackTransport, runSlack } from './_test_util.ts'
 
 describe('slack cat', () => {
   it('concatenates multiple jsonl files in order (regression: previously only read the first)', async () => {
-    const idx = new RAMIndexCacheStore()
-    await seedChannel(idx, '/mnt/slack', 'general__C1', 'C1', {
-      dates: ['2024-01-01', '2024-01-02', '2024-01-03'],
-    })
     // FakeSlackTransport returns deterministic messages per call. We map each
     // day's `oldest` (00:00 UTC) to a distinct message so we can assert order.
     const day1Oldest = (Date.UTC(2024, 0, 1) / 1000).toFixed(6)
@@ -72,19 +35,10 @@ describe('slack cat', () => {
       }
       return { ok: true }
     })
-    const mkPath = (date: string): PathSpec =>
-      new PathSpec({
-        virtual: `/mnt/slack/channels/general__C1/${date}/chat.jsonl`,
-        directory: `/mnt/slack/channels/general__C1/`,
-        resolved: false,
-        vfsPath: mountKey(`/mnt/slack/channels/general__C1/${date}/chat.jsonl`, '/mnt/slack'),
-      })
-    const out = await runCat(
-      [mkPath('2024-01-01'), mkPath('2024-01-02'), mkPath('2024-01-03')],
-      {},
-      { index: idx, transport },
-    )
-    const lines = out.trimEnd().split('\n')
+    const dates = ['2024-01-01', '2024-01-02', '2024-01-03']
+    const paths = dates.map((date) => `/mnt/slack/channels/general__C1/${date}/chat.jsonl`)
+    const out = await runSlack(transport, `cat ${paths.join(' ')}`, dates)
+    const lines = out.stdout.trimEnd().split('\n')
     expect(lines).toHaveLength(3)
     expect(JSON.parse(lines[0] ?? '')).toMatchObject({ ts: '1704067201.000000', text: 'day1' })
     expect(JSON.parse(lines[1] ?? '')).toMatchObject({ ts: '1704153602.000000', text: 'day2' })

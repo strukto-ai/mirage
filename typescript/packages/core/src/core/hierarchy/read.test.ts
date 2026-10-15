@@ -14,10 +14,10 @@
 
 import { describe, expect, it } from 'vitest'
 import { Accessor } from '../../accessor/base.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { ContentType, PathSpec } from '../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
+import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { JSON_NAME } from './codec.ts'
+import { Codec, DATE, JSON_NAME } from './codec.ts'
 import {
   makeRead,
   makeReadRange,
@@ -27,9 +27,7 @@ import {
   type Reader,
   type WindowedReader,
 } from './read.ts'
-import { makeReaddir, type Lister } from './readdir.ts'
 import { Slot, Scope, makeDetectScope, type ScopeMatch } from './scope.ts'
-import { makeStat } from './stat.ts'
 
 const SCOPES: readonly Scope[] = [
   new Scope({ kind: 'rooms', segments: ['rooms'], probed: false }),
@@ -39,6 +37,13 @@ const SCOPES: readonly Scope[] = [
     segments: ['rooms', new Slot('room'), new Slot('note', JSON_NAME)],
     leaf: true,
     filetype: ContentType.JSON,
+  }),
+  new Scope({ kind: 'room_day', segments: ['rooms', new Slot('room'), new Slot('day', DATE)] }),
+  new Scope({
+    kind: 'tagged',
+    segments: ['tags', new Slot('tag', new Codec({ validate: (text) => /^[a-z]+$/.test(text) }))],
+    leaf: true,
+    filetype: ContentType.TEXT,
   }),
 ]
 
@@ -57,148 +62,124 @@ function spec(mountPath: string): PathSpec {
   })
 }
 
-const readNote: Reader<FakeAccessor> = (_accessor, match, _path, _index) =>
-  Promise.resolve(new TextEncoder().encode(`${match.slots.room ?? ''}:${match.slots.note ?? ''}`))
+const ENCODER = new TextEncoder()
+const DECODER = new TextDecoder()
+
+const readNote: Reader<FakeAccessor> = (_accessor, match) =>
+  Promise.resolve(ENCODER.encode(`${match.slots.room ?? ''}:${match.slots.note ?? ''}`))
+
+const readNoteWindow: WindowedReader<FakeAccessor> = (
+  _accessor,
+  match,
+  _path,
+  _entry,
+  _parent,
+  window,
+) =>
+  Promise.resolve(
+    ENCODER.encode(
+      `${match.slots.note ?? ''}:${String(window.limit ?? null)}:${String(window.offset ?? null)}`,
+    ),
+  )
 
 const READ = makeRead<FakeAccessor>(detectScope, { note: readNote })
 
 describe('hierarchy makeRead', () => {
   it('hands the reader the slots', async () => {
     const out = await READ(new FakeAccessor(), spec('/rooms/red/a.json'))
-    expect(new TextDecoder().decode(out)).toBe('red:a')
+    expect(DECODER.decode(out)).toBe('red:a')
   })
 
   it('answers directories that exist by construction with EISDIR', async () => {
-    // The root and a probed=false scope provably exist, so reading one
-    // as a file is EISDIR rather than absent.
+    // The root and a probed=false scope provably exist, so reading one as a
+    // file is EISDIR rather than absent.
     for (const path of ['/', '/rooms']) {
-      await expect(READ(new FakeAccessor(), spec(path))).rejects.toMatchObject({
-        code: 'EISDIR',
-      })
+      await expect(READ(new FakeAccessor(), spec(path))).rejects.toMatchObject({ code: 'EISDIR' })
     }
   })
 
   it('answers everything else with ENOENT', async () => {
-    // A probed directory shape is no proof the node exists, so a read
-    // there reports absence, matching GNU's wording for a missing name.
+    // A probed directory shape is no proof the node exists, so a read there
+    // reports absence, matching GNU's wording for a missing name.
     for (const path of ['/rooms/red', '/rooms/.red/a.json', '/halls']) {
-      await expect(READ(new FakeAccessor(), spec(path))).rejects.toMatchObject({
-        code: 'ENOENT',
-      })
+      await expect(READ(new FakeAccessor(), spec(path))).rejects.toMatchObject({ code: 'ENOENT' })
     }
   })
 
   it('hands a windowed reader the window', async () => {
-    const readWindowed: WindowedReader<FakeAccessor> = (_accessor, match, _path, _index, window) =>
-      Promise.resolve(
-        new TextEncoder().encode(
-          `${match.slots.note ?? ''}:${String(window.limit ?? null)}:${String(window.offset ?? null)}`,
-        ),
-      )
-    const read = makeRead<FakeAccessor>(detectScope, {}, { windowed: { note: readWindowed } })
-    let out = await read(new FakeAccessor(), spec('/rooms/red/a.json'), undefined, {
-      limit: 5,
-      offset: 2,
-    })
-    expect(new TextDecoder().decode(out)).toBe('a:5:2')
-    out = await read(new FakeAccessor(), spec('/rooms/red/a.json'))
-    expect(new TextDecoder().decode(out)).toBe('a:null:null')
+    const read = makeRead<FakeAccessor>(detectScope, {}, { windowed: { note: readNoteWindow } })
+    const path = spec('/rooms/red/a.json')
+    const out = await read(new FakeAccessor(), path, null, null, { limit: 5, offset: 2 })
+    expect(DECODER.decode(out)).toBe('a:5:2')
+    expect(DECODER.decode(await read(new FakeAccessor(), path))).toBe('a:null:null')
   })
 
   it('lets a plain reader ignore the window', async () => {
-    const out = await READ(new FakeAccessor(), spec('/rooms/red/a.json'), undefined, { limit: 3 })
-    expect(new TextDecoder().decode(out)).toBe('red:a')
+    const out = await READ(new FakeAccessor(), spec('/rooms/red/a.json'), null, null, { limit: 3 })
+    expect(DECODER.decode(out)).toBe('red:a')
   })
 })
 
-const listRooms: Lister<FakeAccessor> = (accessor) => {
-  accessor.calls.push('rooms')
-  return Promise.resolve(
-    ['red', 'blue'].map((room): [string, IndexEntry] => [
-      room,
-      new IndexEntry({ id: room, name: room, resourceType: 'fake/room', vfsName: room }),
-    ]),
-  )
-}
+const PROVEN_READ = makeRead<FakeAccessor>(detectScope, { note: readNote }, { parented: true })
 
-const PROVEN_READ = makeRead<FakeAccessor>(
-  detectScope,
-  { note: readNote },
-  {
-    stat: makeStat<FakeAccessor>(
-      detectScope,
-      makeReaddir<FakeAccessor>(detectScope, { listers: { rooms: listRooms } }),
-    ),
-  },
-)
-
-describe('hierarchy makeRead with a stat', () => {
-  it('proves the parent directory before the reader runs', async () => {
-    // "green" is not a room the listing names: the read is ENOENT for the file
-    // itself, and its reader never runs.
-    const accessor = new FakeAccessor()
-    await expect(PROVEN_READ(accessor, spec('/rooms/green/a.json'))).rejects.toMatchObject({
-      code: 'ENOENT',
-      virtualPath: '/h/rooms/green/a.json',
-    })
-    expect(accessor.calls).toEqual(['rooms'])
+describe('hierarchy makeRead parented', () => {
+  it('proves its parent by its row', async () => {
+    // No listing names "green": the read is ENOENT for the file itself, and
+    // its reader never runs.
+    await expect(
+      PROVEN_READ(new FakeAccessor(), spec('/rooms/green/a.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT', virtualPath: '/h/rooms/green/a.json' })
+    const room = new FileStat({ name: 'red', type: FileType.DIRECTORY })
+    const out = await PROVEN_READ(new FakeAccessor(), spec('/rooms/red/z.json'), null, room)
     // The parent is proven; the file stays the reader's to prove.
-    const out = await PROVEN_READ(accessor, spec('/rooms/red/z.json'))
-    expect(new TextDecoder().decode(out)).toBe('red:z')
+    expect(DECODER.decode(out)).toBe('red:z')
   })
 
-  it('trusts the path when no stat is given', async () => {
+  it('trusts the path when it proves no parent', async () => {
     const accessor = new FakeAccessor()
-    const out = await READ(accessor, spec('/rooms/green/a.json'))
-    expect(new TextDecoder().decode(out)).toBe('green:a')
+    expect(DECODER.decode(await READ(accessor, spec('/rooms/green/a.json')))).toBe('green:a')
     expect(accessor.calls).toEqual([])
   })
 })
 
-const readNoteRange: RangedReader<FakeAccessor> = (_accessor, match, _path, _index, offset, size) =>
+const readNoteRange: RangedReader<FakeAccessor> = (
+  _accessor,
+  match,
+  _path,
+  _entry,
+  _parent,
+  offset,
+  size,
+) =>
   Promise.resolve(
-    new TextEncoder().encode(`ranged:${match.slots.note ?? ''}:${String(offset)}:${String(size)}`),
+    ENCODER.encode(`ranged:${match.slots.note ?? ''}:${String(offset)}:${String(size)}`),
   )
+
+const READ_RANGE = makeReadRange<FakeAccessor>(detectScope, READ, { tagged: readNoteRange })
 
 describe('hierarchy makeReadRange', () => {
   it('pushes the window to a ranged reader', async () => {
-    const readRange = makeReadRange<FakeAccessor>(detectScope, READ, { note: readNoteRange })
-    const out = await readRange(new FakeAccessor(), spec('/rooms/red/a.json'), undefined, {
-      offset: 2,
-      size: 5,
-    })
-    expect(new TextDecoder().decode(out)).toBe('ranged:a:2:5')
+    const ranged = makeReadRange<FakeAccessor>(detectScope, READ, { note: readNoteRange })
+    const path = spec('/rooms/red/a.json')
+    const out = await ranged(new FakeAccessor(), path, null, null, { offset: 2, size: 5 })
+    expect(DECODER.decode(out)).toBe('ranged:a:2:5')
   })
 
   it('slices the full read for an unranged kind', async () => {
-    const readRange = makeReadRange<FakeAccessor>(detectScope, READ, {})
-    const out = await readRange(new FakeAccessor(), spec('/rooms/red/a.json'), undefined, {
-      offset: 1,
-      size: 3,
-    })
+    const path = spec('/rooms/red/a.json')
+    const out = await READ_RANGE(new FakeAccessor(), path, null, null, { offset: 1, size: 3 })
     // The full read rendered "red:a"; the window is taken after the fact.
-    expect(new TextDecoder().decode(out)).toBe('ed:')
+    expect(DECODER.decode(out)).toBe('ed:')
   })
 
   it('defaults to the whole file', async () => {
-    const readRange = makeReadRange<FakeAccessor>(detectScope, READ, {})
-    const out = await readRange(new FakeAccessor(), spec('/rooms/red/a.json'))
-    expect(new TextDecoder().decode(out)).toBe('red:a')
+    const out = await READ_RANGE(new FakeAccessor(), spec('/rooms/red/a.json'))
+    expect(DECODER.decode(out)).toBe('red:a')
   })
 })
 
-const noteLines = (
-  _accessor: FakeAccessor,
-  match: ScopeMatch,
-  _path: PathSpec,
-  n: number,
-): Promise<string> => Promise.resolve(`${match.slots.note ?? ''}:${String(n)}`)
-
-const unexpectedGuard: Guard<FakeAccessor> = () =>
-  Promise.reject(new Error('no guard for a kind with no answer'))
-
-const missingGuard: Guard<FakeAccessor> = (_accessor, _match, virtual) =>
-  Promise.reject(new Error(`missing ${virtual}`))
+const noteLines = (_accessor: FakeAccessor, match: ScopeMatch, _path: PathSpec, n: number) =>
+  Promise.resolve(ENCODER.encode(`${match.slots.note ?? ''}:${String(n)}`))
 
 describe('hierarchy perKind', () => {
   it('answers its kinds after the guard', async () => {
@@ -208,19 +189,24 @@ describe('hierarchy perKind', () => {
       return Promise.resolve()
     }
     const first = perKind(detectScope, { note: noteLines }, { guard })
-    expect(await first(new FakeAccessor(), spec('/rooms/red/a.json'), 3)).toBe('a:3')
+    const out = await first(new FakeAccessor(), spec('/rooms/red/a.json'), 3)
+    expect(DECODER.decode(out ?? new Uint8Array())).toBe('a:3')
     expect(guarded).toEqual(['/h/rooms/red/a.json'])
   })
 
   it('is null for any other kind without the guard', async () => {
-    const first = perKind(detectScope, { note: noteLines }, { guard: unexpectedGuard })
+    const guard: Guard<FakeAccessor> = () =>
+      Promise.reject(new Error('no guard for a kind with no answer'))
+    const first = perKind(detectScope, { note: noteLines }, { guard })
     expect(await first(new FakeAccessor(), spec('/rooms/red'), 3)).toBeNull()
   })
 
   it('raises what the guard raises', async () => {
-    const first = perKind(detectScope, { note: noteLines }, { guard: missingGuard })
-    await expect(first(new FakeAccessor(), spec('/rooms/red/a.json'), 3)).rejects.toThrow(
-      'missing /h/rooms/red/a.json',
-    )
+    const guard: Guard<FakeAccessor> = (_accessor, _match, virtual) =>
+      Promise.reject(enoent(virtual))
+    const first = perKind(detectScope, { note: noteLines }, { guard })
+    await expect(first(new FakeAccessor(), spec('/rooms/red/a.json'), 3)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

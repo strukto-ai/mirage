@@ -13,34 +13,41 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NotionAccessor } from '../../accessor/notion.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { read as notionRead } from '../../core/notion/read.ts'
 import { readdir as notionReaddir } from '../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../core/notion/stat.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 
 /**
  * Notion's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
 export class NotionVFSBase extends BaseVFS<NotionAccessor> {
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return notionReaddir(this.accessor, path, index)
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry', 'parent'],
+    read: ['parent'],
+    stat: ['entry', 'parent'],
+  } as const
+
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return notionReaddir(this.accessor, path, handed?.entry, handed?.parent)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await notionRead(this.accessor, path, index)
+    const data = await notionRead(this.accessor, path, null, handed?.parent)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return notionStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return notionStat(this.accessor, path, handed?.entry, handed?.parent)
   }
 }

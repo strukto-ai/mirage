@@ -19,7 +19,6 @@ import pytest
 from langfuse.api.core.api_error import ApiError
 
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.langfuse.read import read
 from mirage.types import PathSpec
 from mirage.vfs.langfuse.config import LangfuseConfig
@@ -35,13 +34,8 @@ def accessor():
         return LangfuseAccessor(config=config)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_read_trace(accessor, index):
+async def test_read_trace(accessor):
     trace_data = {"id": "abc123", "name": "chat", "input": "hello"}
     with patch(
         "mirage.core.langfuse.read.fetch_trace",
@@ -55,7 +49,6 @@ async def test_read_trace(accessor, index):
                 virtual="/traces/abc123.json",
                 directory="/traces/abc123.json",
             ),
-            index,
         )
 
     parsed = json.loads(result)
@@ -64,7 +57,7 @@ async def test_read_trace(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_prompt_version(accessor, index):
+async def test_read_prompt_version(accessor):
     prompt_data = {"name": "summarize", "version": 1, "prompt": "Summarize:"}
     with patch(
         "mirage.core.langfuse.read.fetch_prompt",
@@ -78,7 +71,6 @@ async def test_read_prompt_version(accessor, index):
                 virtual="/prompts/summarize/1.json",
                 directory="/prompts/summarize/1.json",
             ),
-            index,
         )
 
     parsed = json.loads(result)
@@ -87,7 +79,7 @@ async def test_read_prompt_version(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_dataset_items(accessor, index):
+async def test_read_dataset_items(accessor):
     items = [
         {"id": "item1", "input": "q1", "output": "a1"},
         {"id": "item2", "input": "q2", "output": "a2"},
@@ -104,7 +96,6 @@ async def test_read_dataset_items(accessor, index):
                 virtual="/datasets/qa-eval/items.jsonl",
                 directory="/datasets/qa-eval/items.jsonl",
             ),
-            index,
         )
 
     lines = result.decode().strip().split("\n")
@@ -114,7 +105,7 @@ async def test_read_dataset_items(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_invalid_path_raises(accessor, index):
+async def test_read_invalid_path_raises(accessor):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
@@ -123,12 +114,11 @@ async def test_read_invalid_path_raises(accessor, index):
                 virtual="/not_a_valid_path",
                 directory="/not_a_valid_path",
             ),
-            index,
         )
 
 
 @pytest.mark.asyncio
-async def test_read_session_trace(accessor, index):
+async def test_read_session_trace(accessor):
     trace_data = {"id": "tid1", "sessionId": "sid1"}
     with patch(
         "mirage.core.langfuse.read.fetch_trace",
@@ -142,7 +132,6 @@ async def test_read_session_trace(accessor, index):
                 virtual="/sessions/sid1/tid1.json",
                 directory="/sessions/sid1/tid1.json",
             ),
-            index,
         )
 
     parsed = json.loads(result)
@@ -150,7 +139,7 @@ async def test_read_session_trace(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_dataset_run_renders_jsonl(accessor, index):
+async def test_read_dataset_run_renders_jsonl(accessor):
     # The path ends in .jsonl, so it must be one compact JSON object per line
     # with a trailing newline, not an indented document.
     runs = [{"name": "run-a", "metadata": {}}, {"name": "run-b"}]
@@ -166,7 +155,6 @@ async def test_read_dataset_run_renders_jsonl(accessor, index):
                 virtual="/datasets/qa-eval/runs/run-a.jsonl",
                 directory="/datasets/qa-eval/runs/run-a.jsonl",
             ),
-            index,
         )
 
     text = result.decode()
@@ -176,7 +164,7 @@ async def test_read_dataset_run_renders_jsonl(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_read_trace_not_found_is_enoent(accessor, index):
+async def test_read_trace_not_found_is_enoent(accessor):
     # A 404 from the API is a missing file, not a leaked SDK error string.
     with patch(
         "mirage.core.langfuse.read.fetch_trace",
@@ -191,12 +179,11 @@ async def test_read_trace_not_found_is_enoent(accessor, index):
                     virtual="/traces/gone.json",
                     directory="/traces/gone.json",
                 ),
-                index,
             )
 
 
 @pytest.mark.asyncio
-async def test_read_trace_server_error_propagates(accessor, index):
+async def test_read_trace_server_error_propagates(accessor):
     # Only 404 maps to ENOENT; a 500 must not be disguised as a missing file.
     with patch(
         "mirage.core.langfuse.read.fetch_trace",
@@ -211,12 +198,11 @@ async def test_read_trace_server_error_propagates(accessor, index):
                     virtual="/traces/tid1.json",
                     directory="/traces/tid1.json",
                 ),
-                index,
             )
 
 
 @pytest.mark.asyncio
-async def test_read_refuses_another_sessions_trace(accessor, index):
+async def test_read_refuses_another_sessions_trace(accessor):
     """sessions/<id>/<trace>.json names a trace of that session; the
     trace id alone would fetch any session's trace."""
     with patch(
@@ -232,7 +218,6 @@ async def test_read_refuses_another_sessions_trace(accessor, index):
                     virtual="/sessions/s1/t1.json",
                     directory="/sessions/s1/t1.json",
                 ),
-                index,
             )
         own = await read(
             accessor,
@@ -241,6 +226,5 @@ async def test_read_refuses_another_sessions_trace(accessor, index):
                 virtual="/sessions/s2/t1.json",
                 directory="/sessions/s2/t1.json",
             ),
-            index,
         )
     assert json.loads(own)["sessionId"] == "s2"

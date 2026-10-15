@@ -13,9 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
+import { AirtableVFS } from '../../vfs/airtable/airtable.ts'
+import type { AirtableConfig } from './config.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { FakeAirtable, makeAccessor } from './_test_util.ts'
 import { read, readStream } from './read.ts'
 
@@ -25,6 +28,21 @@ const TABLE = `${BASE}/Features__tblFeatures000001`
 const RECORDS = `${TABLE}/records.jsonl`
 const DONE = `${TABLE}/views/Done_shipped__viwDone0000000001.jsonl`
 const DEC = new TextDecoder()
+
+// The rows the mount hands a read: the file's, as its folder's listing names
+// it, and its folder's.
+const ROW = new FileStat({ name: 'file', type: FileType.FILE })
+const DIR = new FileStat({ name: 'dir', type: FileType.DIRECTORY })
+
+async function mounted(
+  fake: FakeAirtable,
+  overrides: Partial<AirtableConfig> = {},
+): Promise<Workspace> {
+  const vfs = Object.assign(new AirtableVFS({ token: 'pat' }), {
+    accessor: makeAccessor(fake, overrides),
+  })
+  return new Workspace({ [`${ROOT}/`]: vfs }, { shellParser: await getTestParser() })
+}
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({
@@ -43,11 +61,7 @@ function ids(body: Uint8Array): string[] {
 
 describe('airtable read', () => {
   it('renders every record across pages', async () => {
-    const body = await read(
-      makeAccessor(new FakeAirtable()),
-      spec(RECORDS),
-      new RAMIndexCacheStore(),
-    )
+    const body = await read(makeAccessor(new FakeAirtable()), spec(RECORDS), ROW, DIR)
     expect(ids(body)).toHaveLength(7)
     expect(JSON.parse(DEC.decode(body).split('\n')[0] ?? '')).toEqual({
       record_id: 'rec00000000000001',
@@ -58,7 +72,7 @@ describe('airtable read', () => {
 
   it('fetches only as many records as a limit asks for', async () => {
     const fake = new FakeAirtable()
-    const body = await read(makeAccessor(fake), spec(RECORDS), new RAMIndexCacheStore(), {
+    const body = await read(makeAccessor(fake), spec(RECORDS), ROW, DIR, {
       limit: 2,
     })
     expect(ids(body)).toEqual(['rec00000000000001', 'rec00000000000002'])
@@ -69,7 +83,7 @@ describe('airtable read', () => {
 
   it('applies the view of a view file', async () => {
     const fake = new FakeAirtable()
-    const body = await read(makeAccessor(fake), spec(DONE), new RAMIndexCacheStore())
+    const body = await read(makeAccessor(fake), spec(DONE), ROW, DIR)
     expect(ids(body)).toHaveLength(4)
     expect(fake.recordCalls()[0]?.view).toBe('viwDone0000000001')
   })
@@ -77,12 +91,12 @@ describe('airtable read', () => {
   it('refuses a full read past the cap', async () => {
     const fake = new FakeAirtable()
     const accessor = makeAccessor(fake, { maxReadRecords: 5 })
-    await expect(read(accessor, spec(RECORDS), new RAMIndexCacheStore())).rejects.toMatchObject({
+    await expect(read(accessor, spec(RECORDS), ROW, DIR)).rejects.toMatchObject({
       code: 'EFBIG',
     })
     // the refusal needed cap + 1 records, not the whole table
     expect(fake.recordCalls().at(-1)?.maxRecords).toBe('6')
-    const body = await read(accessor, spec(RECORDS), new RAMIndexCacheStore(), { limit: 3 })
+    const body = await read(accessor, spec(RECORDS), ROW, DIR, { limit: 3 })
     expect(ids(body)).toHaveLength(3)
   })
 
@@ -90,49 +104,44 @@ describe('airtable read', () => {
     const body = await read(
       makeAccessor(new FakeAirtable(), { maxReadRecords: 5 }),
       spec(DONE),
-      new RAMIndexCacheStore(),
+      ROW,
+      DIR,
       { limit: 50 },
     )
     expect(ids(body)).toHaveLength(4)
   })
 
   it('skips records for an offset', async () => {
-    const body = await read(
-      makeAccessor(new FakeAirtable()),
-      spec(RECORDS),
-      new RAMIndexCacheStore(),
-      { limit: 2, offset: 3 },
-    )
+    const body = await read(makeAccessor(new FakeAirtable()), spec(RECORDS), ROW, DIR, {
+      limit: 2,
+      offset: 3,
+    })
     expect(ids(body)).toEqual(['rec00000000000004', 'rec00000000000005'])
   })
 
   it('answers ENOENT for missing tables and views', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
+    const ws = await mounted(new FakeAirtable())
     for (const path of [
       `${BASE}/Gone__tblGone0000000001/records.jsonl`,
       `${TABLE}/views/Gone__viwGone0000000001.jsonl`,
       `${BASE}/Gone__tblGone0000000001/table.json`,
     ]) {
-      await expect(read(accessor, spec(path), new RAMIndexCacheStore())).rejects.toMatchObject({
-        code: 'ENOENT',
-      })
+      await expect(ws.dispatch('read', path)).rejects.toMatchObject({ code: 'ENOENT' })
     }
   })
 
   it('answers ENOENT for a base outside baseIds', async () => {
     const fake = new FakeAirtable()
-    const accessor = makeAccessor(fake, { baseIds: ['appOpsFinance0001'] })
+    const ws = await mounted(fake, { baseIds: ['appOpsFinance0001'] })
     for (const path of [RECORDS, `${BASE}/base.json`, `${TABLE}/table.json`]) {
-      await expect(read(accessor, spec(path), new RAMIndexCacheStore())).rejects.toMatchObject({
-        code: 'ENOENT',
-      })
+      await expect(ws.dispatch('read', path)).rejects.toMatchObject({ code: 'ENOENT' })
     }
     expect(fake.recordCalls()).toEqual([])
   })
 
   it('answers ENOENT for a name the listing does not hold', async () => {
     const fake = new FakeAirtable()
-    const accessor = makeAccessor(fake)
+    const ws = await mounted(fake)
     const ops = `${ROOT}/bases/Ops_Finance__appOpsFinance0001`
     for (const path of [
       `${ROOT}/bases/Wrong__appRoadmapBase001/base.json`,
@@ -141,29 +150,28 @@ describe('airtable read', () => {
       `${TABLE}/views/Wrong__viwDone0000000001.jsonl`,
       `${ops}/Q3_Budget__tblBudget00000001/views/Grid_view__viwGrid0000000001.jsonl`,
     ]) {
-      await expect(read(accessor, spec(path), new RAMIndexCacheStore())).rejects.toMatchObject({
-        code: 'ENOENT',
-      })
+      await expect(ws.dispatch('read', path)).rejects.toMatchObject({ code: 'ENOENT' })
     }
     // the ids resolve at the API; only the listing knows the names
     expect(fake.recordCalls()).toEqual([])
   })
 
-  it('still proves the path when read without an index', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
-    expect(ids(await read(accessor, spec(DONE)))).toHaveLength(4)
-    await expect(
-      read(accessor, spec(`${BASE}/Wrong__tblFeatures000001/records.jsonl`)),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+  it('proves nothing with no rows handed', async () => {
+    const fake = new FakeAirtable()
+    const accessor = makeAccessor(fake)
+    for (const path of [DONE, RECORDS]) {
+      await expect(read(accessor, spec(path))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+    expect(fake.recordCalls()).toEqual([])
   })
 
   it('answers ENOENT for a view gone since its listing', async () => {
     const fake = new FakeAirtable()
     // the schema still lists the view; Airtable answers its id missing
     Reflect.deleteProperty(fake.views, 'viwDone0000000001')
-    await expect(
-      read(makeAccessor(fake), spec(DONE), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(read(makeAccessor(fake), spec(DONE), ROW, DIR)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })
 
@@ -176,16 +184,16 @@ async function drain(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
 describe('airtable read stream', () => {
   it('renders the read a page at a time', async () => {
     const accessor = makeAccessor(new FakeAirtable())
-    const chunks = await drain(readStream(accessor, spec(RECORDS), new RAMIndexCacheStore()))
+    const chunks = await drain(readStream(accessor, spec(RECORDS), ROW, DIR))
     expect(chunks.map((c) => ids(c).length)).toEqual([3, 3, 1])
     expect(Buffer.concat(chunks)).toEqual(
-      Buffer.from(await read(accessor, spec(RECORDS), new RAMIndexCacheStore())),
+      Buffer.from(await read(accessor, spec(RECORDS), ROW, DIR)),
     )
   })
 
   it('stops paging when the reader stops', async () => {
     const fake = new FakeAirtable()
-    const stream = readStream(makeAccessor(fake), spec(RECORDS), new RAMIndexCacheStore())
+    const stream = readStream(makeAccessor(fake), spec(RECORDS), ROW, DIR)
     const first = await stream.next()
     await stream.return()
     expect(ids(first.value as Uint8Array)).toHaveLength(3)
@@ -200,7 +208,8 @@ describe('airtable read stream', () => {
         for await (const chunk of readStream(
           makeAccessor(fake, { maxReadRecords: 5 }),
           spec(RECORDS),
-          new RAMIndexCacheStore(),
+          ROW,
+          DIR,
         ))
           got.push(chunk)
       })(),
@@ -211,27 +220,22 @@ describe('airtable read stream', () => {
 
   it('applies a view and proves its paths', async () => {
     const accessor = makeAccessor(new FakeAirtable())
-    const body = Buffer.concat(
-      await drain(readStream(accessor, spec(DONE), new RAMIndexCacheStore())),
-    )
+    const body = Buffer.concat(await drain(readStream(accessor, spec(DONE), ROW, DIR)))
     expect(ids(body)).toHaveLength(4)
+    const ws = await mounted(new FakeAirtable())
     for (const path of [
       `${BASE}/Gone__tblGone0000000001/records.jsonl`,
       `${TABLE}/views/Gone__viwGone0000000001.jsonl`,
     ]) {
-      await expect(
-        drain(readStream(accessor, spec(path), new RAMIndexCacheStore())),
-      ).rejects.toMatchObject({ code: 'ENOENT' })
+      const result = await ws.shell(`cat < ${path}`)
+      expect(result.exitCode).toBe(1)
+      expect(result.stderrText).toContain('No such file or directory')
     }
   })
 
   it('reads another file whole', async () => {
     const accessor = makeAccessor(new FakeAirtable())
-    const chunks = await drain(
-      readStream(accessor, spec(`${TABLE}/table.json`), new RAMIndexCacheStore()),
-    )
-    expect(chunks).toEqual([
-      await read(accessor, spec(`${TABLE}/table.json`), new RAMIndexCacheStore()),
-    ])
+    const chunks = await drain(readStream(accessor, spec(`${TABLE}/table.json`), ROW, DIR))
+    expect(chunks).toEqual([await read(accessor, spec(`${TABLE}/table.json`), ROW, DIR)])
   })
 })

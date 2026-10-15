@@ -15,11 +15,11 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../accessor/trello.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { TrelloVFS } from '../../vfs/trello/trello.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TrelloTransport } from './client.ts'
 import { read } from './read.ts'
-import { readdir } from './readdir.ts'
-import { stat } from './stat.ts'
 
 class FakeTransport implements TrelloTransport {
   constructor(private readonly responder: (path: string) => unknown) {}
@@ -32,8 +32,18 @@ function spec(virtual: string, prefix = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
-// The listing chain a read proves its file's directory through before it
-// fetches by the ids in the path: workspace w1 > board b1 > list l1 > card c1.
+// The directory a read is under, as the mount hands its row: a read proves
+// the file's directory exists through it before fetching by the ids in the
+// path.
+const DIR = new FileStat({ name: 'dir', type: FileType.DIRECTORY })
+
+function mounted(accessor: TrelloAccessor): Workspace {
+  const vfs = Object.assign(new TrelloVFS({ apiKey: 'k', apiToken: 't' }), { accessor })
+  return new Workspace({ '/trello/': vfs })
+}
+
+// The listing chain a mount walks to hand a read its directory's row:
+// workspace w1 > board b1 > list l1 > card c1.
 const LISTINGS: Record<string, unknown> = {
   '/members/me/organizations': [{ id: 'w1', displayName: 'Acme' }],
   '/organizations/w1/boards': [{ id: 'b1', name: 'Roadmap' }],
@@ -47,7 +57,12 @@ describe('trello read', () => {
       if (path === '/members/me/organizations') return [{ id: 'w1', displayName: 'Acme' }]
       return []
     })
-    const bytes = await read(new TrelloAccessor(t), spec('/workspaces/Acme__w1/workspace.json'))
+    const bytes = await read(
+      new TrelloAccessor(t),
+      spec('/workspaces/Acme__w1/workspace.json'),
+      null,
+      DIR,
+    )
     const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
     expect(parsed).toEqual({ workspace_id: 'w1', workspace_name: 'Acme' })
   })
@@ -62,6 +77,8 @@ describe('trello read', () => {
     const bytes = await read(
       new TrelloAccessor(t),
       spec('/workspaces/Acme__w1/boards/Roadmap__b1/board.json'),
+      null,
+      DIR,
     )
     expect(JSON.parse(new TextDecoder().decode(bytes))).toMatchObject({
       board_id: 'b1',
@@ -79,6 +96,8 @@ describe('trello read', () => {
     const bytes = await read(
       new TrelloAccessor(t),
       spec('/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1/card.json'),
+      null,
+      DIR,
     )
     expect(JSON.parse(new TextDecoder().decode(bytes))).toMatchObject({
       card_id: 'c1',
@@ -111,6 +130,8 @@ describe('trello read', () => {
       spec(
         '/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1/comments.jsonl',
       ),
+      null,
+      DIR,
     )
     const lines = new TextDecoder().decode(bytes).trim().split('\n')
     expect((JSON.parse(lines[0] ?? '') as { text: string }).text).toBe('first')
@@ -149,19 +170,22 @@ describe('trello read', () => {
       if (path === '/cards/c9') return { id: 'c9', name: 'Payroll' }
       return LISTINGS[path] ?? []
     })
-    const accessor = new TrelloAccessor(t, { boardIds: ['b1'] })
-    const secret = '/workspaces/Acme__w1/boards/Secret__b2'
-    for (const surface of [read, stat]) {
-      await expect(surface(accessor, spec(`${secret}/board.json`))).rejects.toMatchObject({
+    const ws = mounted(new TrelloAccessor(t, { boardIds: ['b1'] }))
+    const secret = '/trello/workspaces/Acme__w1/boards/Secret__b2'
+    for (const op of ['read', 'stat']) {
+      await expect(ws.dispatch(op, `${secret}/board.json`)).rejects.toMatchObject({
         code: 'ENOENT',
       })
     }
-    await expect(readdir(accessor, spec(secret))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(ws.dispatch('readdir', secret)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(
-      read(accessor, spec(`${secret}/lists/Todo__l9/cards/Payroll__c9/card.json`)),
+      ws.dispatch('read', `${secret}/lists/Todo__l9/cards/Payroll__c9/card.json`),
     ).rejects.toMatchObject({ code: 'ENOENT' })
     expect(fetched).toEqual([])
-    const scoped = await read(accessor, spec('/workspaces/Acme__w1/boards/Roadmap__b1/board.json'))
+    const scoped = (await ws.dispatch(
+      'read',
+      '/trello/workspaces/Acme__w1/boards/Roadmap__b1/board.json',
+    )) as Uint8Array
     expect(JSON.parse(new TextDecoder().decode(scoped))).toMatchObject({ board_id: 'b1' })
   })
 
@@ -175,11 +199,14 @@ describe('trello read', () => {
       }
       return []
     })
-    const accessor = new TrelloAccessor(t, { workspaceId: 'w1' })
+    const ws = mounted(new TrelloAccessor(t, { workspaceId: 'w1' }))
     await expect(
-      read(accessor, spec('/workspaces/Finance__w2/workspace.json')),
+      ws.dispatch('read', '/trello/workspaces/Finance__w2/workspace.json'),
     ).rejects.toMatchObject({ code: 'ENOENT' })
-    const scoped = await read(accessor, spec('/workspaces/Acme__w1/workspace.json'))
+    const scoped = (await ws.dispatch(
+      'read',
+      '/trello/workspaces/Acme__w1/workspace.json',
+    )) as Uint8Array
     expect(JSON.parse(new TextDecoder().decode(scoped))).toEqual({
       workspace_id: 'w1',
       workspace_name: 'Acme',
@@ -195,12 +222,12 @@ describe('trello read', () => {
       if (path === '/boards/b1') return { id: 'b1', name: '.plan' }
       return LISTINGS[path] ?? []
     })
-    const accessor = new TrelloAccessor(t)
-    const listed = await readdir(accessor, spec('/workspaces/Acme__w1/boards'))
-    expect(listed).toEqual(['/workspaces/Acme__w1/boards/plan__b1'])
-    const boardJson = spec(`${listed[0] ?? ''}/board.json`)
-    expect((await stat(accessor, boardJson)).name).toBe('board.json')
-    const bytes = await read(accessor, boardJson)
+    const ws = mounted(new TrelloAccessor(t))
+    const listed = (await ws.dispatch('readdir', '/trello/workspaces/Acme__w1/boards')) as string[]
+    expect(listed).toEqual(['/trello/workspaces/Acme__w1/boards/plan__b1'])
+    const boardJson = `${listed[0] ?? ''}/board.json`
+    expect(((await ws.dispatch('stat', boardJson)) as FileStat).name).toBe('board.json')
+    const bytes = (await ws.dispatch('read', boardJson)) as Uint8Array
     expect(JSON.parse(new TextDecoder().decode(bytes))).toMatchObject({ board_name: '.plan' })
   })
 
@@ -212,6 +239,8 @@ describe('trello read', () => {
     const bytes = await read(
       new TrelloAccessor(t),
       spec('/mnt/trello/workspaces/Acme__w1/workspace.json', '/mnt/trello'),
+      null,
+      DIR,
     )
     expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({
       workspace_id: 'w1',

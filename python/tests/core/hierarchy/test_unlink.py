@@ -13,59 +13,28 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.unlink import make_unlink
-from mirage.errors.fs import enoent
-from tests.core.hierarchy.conftest import (
-    FakeAccessor,
-    detect_scope,
-    list_notes,
-    list_rooms,
-    spec,
-)
-
-READDIR = make_readdir(
-    detect_scope,
-    listers={
-        "rooms": list_rooms,
-        "room": list_notes,
-    },
-    static_root=("rooms",),
-)
+from mirage.types import FileStat, FileType
+from tests.core.hierarchy.conftest import FakeAccessor, detect_scope, spec
 
 
 async def _delete(
-    accessor: FakeAccessor, match: ScopeMatch, entry: IndexEntry
+    accessor: FakeAccessor, match: ScopeMatch, entry: FileStat
 ) -> None:
-    accessor.calls.append(f"delete:{entry.id}")
+    accessor.calls.append(f"delete:{entry.name}")
 
 
-UNLINK = make_unlink(detect_scope, READDIR, deleters={"note": _delete})
+UNLINK = make_unlink(detect_scope, deleters={"note": _delete})
+NOTE = FileStat(name="a.json", type=FileType.FILE)
 
 
-async def readdir_absent(_accessor, path, index=None):
-    """Stand in for a readdir whose directory does not exist.
-
-    Args:
-        path (PathSpec): the parent directory being listed.
-    """
-    raise enoent(path.virtual)
-
-
-def test_unlink_resolves_and_deletes_the_entry(accessor):
-    index = RAMIndexCacheStore()
-    asyncio.run(UNLINK(accessor, spec("/rooms/red/a.json"), index))
-    assert accessor.calls == ["notes:red", "delete:a.json"]
-    # The parent listing is invalidated so the gone entry cannot linger.
-    listing = asyncio.run(index.list_dir("/h/rooms/red"))
-    assert listing.entries is None or listing.entries == []
+def test_unlink_deletes_the_row_it_is_handed(accessor):
+    asyncio.run(UNLINK(accessor, spec("/rooms/red/a.json"), NOTE))
+    assert accessor.calls == ["delete:a.json"]
 
 
 def test_unlink_refuses_a_directory(accessor):
@@ -75,29 +44,11 @@ def test_unlink_refuses_a_directory(accessor):
         asyncio.run(UNLINK(accessor, spec("/")))
 
 
-def test_unlink_missing_or_invalid_is_enoent(accessor):
-    index = RAMIndexCacheStore()
-    with pytest.raises(FileNotFoundError):
-        asyncio.run(UNLINK(accessor, spec("/rooms/red/nope.json"), index))
-    with pytest.raises(FileNotFoundError):
-        asyncio.run(UNLINK(accessor, spec("/halls/x.json"), index))
-    assert "delete:nope.json" not in accessor.calls
-
-
-def test_unlink_propagates_parent_refresh_failure(accessor):
-    readdir = AsyncMock(side_effect=RuntimeError("backend unavailable"))
-    unlink = make_unlink(detect_scope, readdir, deleters={"note": _delete})
-    with pytest.raises(RuntimeError, match="backend unavailable"):
-        asyncio.run(
-            unlink(accessor, spec("/rooms/red/a.json"), RAMIndexCacheStore())
-        )
-
-
-def test_unlink_names_the_operand_when_the_parent_is_absent(accessor):
-    unlink = make_unlink(
-        detect_scope, readdir_absent, deleters={"note": _delete}
-    )
-    path = spec("/rooms/red/a.json")
+def test_unlink_of_a_path_no_listing_names_is_enoent(accessor):
+    path = spec("/rooms/red/nope.json")
     with pytest.raises(FileNotFoundError) as excinfo:
-        asyncio.run(unlink(accessor, path, RAMIndexCacheStore()))
+        asyncio.run(UNLINK(accessor, path))
     assert excinfo.value.filename == path.virtual
+    with pytest.raises(FileNotFoundError):
+        asyncio.run(UNLINK(accessor, spec("/halls/x.json"), NOTE))
+    assert accessor.calls == []

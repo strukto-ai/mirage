@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
 import { gunzip } from '../../utils/compress.ts'
 import { gnuBasename } from '../../utils/path.ts'
@@ -27,8 +27,8 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 
 export type ChromaPathTree = Record<string, Record<string, unknown>>
 
-async function loadTree(accessor: ChromaAccessor, prefix: string): Promise<DirRows> {
-  return buildDirEntries(await parsePathTree(await fetchPathTree(accessor)), prefix)
+async function loadTree(accessor: ChromaAccessor): Promise<DirRows> {
+  return buildDirEntries(await parsePathTree(await fetchPathTree(accessor)))
 }
 
 export async function parsePathTree(raw: string): Promise<ChromaPathTree> {
@@ -55,7 +55,7 @@ export async function parsePathTree(raw: string): Promise<ChromaPathTree> {
   return result
 }
 
-export function buildDirEntries(pathTree: ChromaPathTree, prefix: string): DirRows {
+export function buildDirEntries(pathTree: ChromaPathTree): DirRows {
   const files = new Map<string, Record<string, unknown>>()
   for (const [rawSlug, metadata] of Object.entries(pathTree)) {
     const path = normalizeSlug(rawSlug, 'Chroma path')
@@ -64,7 +64,7 @@ export function buildDirEntries(pathTree: ChromaPathTree, prefix: string): DirRo
     }
     files.set(path, metadata)
   }
-  return dirRows(dropCollisions(files, refuseCollision), prefix, fileEntry)
+  return dirRows(dropCollisions(files, refuseCollision), fileRow)
 }
 
 function refuseCollision(ancestor: string, path: string): void {
@@ -74,17 +74,17 @@ function refuseCollision(ancestor: string, path: string): void {
   )
 }
 
-function fileEntry(path: string, metadata: Record<string, unknown>): IndexEntry {
+function fileRow(path: string, metadata: Record<string, unknown>): FileStat {
   const slug = stripSlash(path)
   const updatedAt = scalarString(metadata.updated_at)
   // The path tree's `size` describes the producer's source document, not
   // the chunk join mirage serves, so it rides in extra and never becomes
   // the reported byte length: ensureDirSizes measures the rendered bytes.
-  return new IndexEntry({
-    id: slug,
+  return new FileStat({
     name: gnuBasename(path),
-    resourceType: 'file',
-    remoteTime: updatedAt ?? '',
+    type: FileType.FILE,
+    content: ContentType.TEXT,
+    modified: updatedAt,
     extra: {
       slug,
       source_size: metadataIntOrNull(metadata.size),

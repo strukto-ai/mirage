@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { filesContaining } from '../../core/lancedb/search.ts'
 import { SEARCH, read, readdir, stat } from '../../core/lancedb/tree.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import type { SearchQuery } from '../types.ts'
 
 /**
@@ -26,46 +26,39 @@ import type { SearchQuery } from '../types.ts'
  * over its own transport.
  */
 export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return readdir(this.accessor, path, index)
+  override readonly listsStats: boolean = true
+
+  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
+    return readdir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await read(this.accessor, path, index)
+    const data = await read(this.accessor, path)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return stat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return stat(this.accessor, path)
   }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    _index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     return filesContaining(this.accessor, text, [path], opts.wholeWord, opts.ignoreCase)
   }
 
-  override search(
-    path: PathSpec,
-    query: SearchQuery,
-    index?: IndexCacheStore,
-  ): Promise<[string, string][] | null> {
-    return SEARCH.search(this.accessor, path, query, index)
+  override search(path: PathSpec, query: SearchQuery): Promise<[string, string][] | null> {
+    return SEARCH.search(this.accessor, path, query)
   }
 
-  override searchMany(
-    paths: PathSpec[],
-    query: SearchQuery,
-    index?: IndexCacheStore,
-  ): Promise<[string, string][] | null> {
-    return SEARCH.searchMany(this.accessor, paths, query, index)
+  override searchMany(paths: PathSpec[], query: SearchQuery): Promise<[string, string][] | null> {
+    return SEARCH.searchMany(this.accessor, paths, query)
   }
 }

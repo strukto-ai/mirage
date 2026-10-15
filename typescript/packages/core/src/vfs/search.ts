@@ -1,6 +1,5 @@
 import { compareCodePoints } from '../utils/sort.ts'
 import type { Accessor } from '../accessor/base.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PathSpec } from '../types.ts'
 import type { SearchOps, SearchQuery } from './types.ts'
 
@@ -37,18 +36,17 @@ export async function searchResources<A extends Accessor>(
   accessor: A,
   paths: PathSpec[],
   query: SearchQuery,
-  index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   if (capability === undefined) throw new Error('search: backend does not support resource search')
   if (paths.length === 0) throw new Error('search: at least one scope is required')
   const records: [string, string][] = []
   if (capability.searchMany !== undefined) {
-    const answer = await capability.searchMany(accessor, paths, query, index)
+    const answer = await capability.searchMany(accessor, paths, query)
     if (answer === null) throw new Error('search: backend declined the query')
     records.push(...answer)
   } else {
     for (const path of paths) {
-      const answer = await capability.search(accessor, path, query, index)
+      const answer = await capability.search(accessor, path, query)
       if (answer === null) throw new Error('search: backend declined the query')
       records.push(...answer)
     }

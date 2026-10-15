@@ -23,12 +23,16 @@ vi.mock('./client.ts', () => ({
 }))
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import { readdir } from './readdir.ts'
+
+function names(listed: readonly FileStat[] | DirListing): string[] {
+  return rowsOf(listed).map((row) => row.name)
+}
 
 const STUB_DRIVER: PgDriver = {
   query: () => Promise.resolve({ rows: [], rowCount: 0 }),
@@ -50,7 +54,7 @@ describe('readdir', () => {
       vfsPath: mountKey('/pg/', '/pg'),
     })
     const out = await readdir(accessor, path)
-    expect(out).toEqual(['/pg/database.json', '/pg/public', '/pg/analytics'])
+    expect(names(out)).toEqual(['database.json', 'public', 'analytics'])
   })
 
   it('lists schema: tables and views directories', async () => {
@@ -63,7 +67,7 @@ describe('readdir', () => {
         vfsPath: mountKey('/pg/public', '/pg'),
       }),
     )
-    expect(out).toEqual(['/pg/public/tables', '/pg/public/views'])
+    expect(names(out)).toEqual(['tables', 'views'])
   })
 
   it('lists kind=tables', async () => {
@@ -77,7 +81,7 @@ describe('readdir', () => {
         vfsPath: mountKey('/pg/public/tables', '/pg'),
       }),
     )
-    expect(out).toEqual(['/pg/public/tables/users', '/pg/public/tables/orders'])
+    expect(names(out)).toEqual(['users', 'orders'])
   })
 
   it('lists kind=views: union of views and matviews, sorted', async () => {
@@ -92,7 +96,7 @@ describe('readdir', () => {
         vfsPath: mountKey('/pg/public/views', '/pg'),
       }),
     )
-    expect(out).toEqual(['/pg/public/views/a_mview', '/pg/public/views/z_view'])
+    expect(names(out)).toEqual(['a_mview', 'z_view'])
   })
 
   it('lists entity: schema.json + semantic.json + rows.jsonl', async () => {
@@ -106,26 +110,7 @@ describe('readdir', () => {
         vfsPath: mountKey('/pg/public/tables/users', '/pg'),
       }),
     )
-    expect(out).toEqual([
-      '/pg/public/tables/users/schema.json',
-      '/pg/public/tables/users/semantic.json',
-      '/pg/public/tables/users/rows.jsonl',
-    ])
-  })
-
-  it('caches root listing in index when provided', async () => {
-    vi.mocked(client.listSchemas).mockResolvedValue(['public'])
-    const index = new RAMIndexCacheStore()
-    const accessor = makeAccessor()
-    const path = new PathSpec({
-      virtual: '/pg/',
-      directory: '/pg/',
-      vfsPath: mountKey('/pg/', '/pg'),
-    })
-    await readdir(accessor, path, index)
-    vi.mocked(client.listSchemas).mockClear()
-    await readdir(accessor, path, index)
-    expect(client.listSchemas).not.toHaveBeenCalled()
+    expect(names(out)).toEqual(['schema.json', 'semantic.json', 'rows.jsonl'])
   })
 
   it('throws ENOENT for unsupported scopes', async () => {

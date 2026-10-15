@@ -18,7 +18,6 @@ from datetime import date, datetime, timedelta, timezone
 import aiohttp
 
 from mirage.accessor.discord import DiscordAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.discord.channels import list_channels
 from mirage.core.discord.entry import (
     channel_entry,
@@ -32,17 +31,17 @@ from mirage.core.discord.guilds import list_guilds
 from mirage.core.discord.history import list_messages_for_day
 from mirage.core.discord.members import list_members
 from mirage.core.discord.scope import detect_scope
-from mirage.core.hierarchy.readdir import DirListing, Listed, make_readdir
+from mirage.core.hierarchy.readdir import Listed, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import guard_day
+from mirage.types import ContentType, DirListing, FileStat, FileType
+from mirage.utils.filetype import content_type_for_mime
 from mirage.utils.glob_walk import glob_span, has_glob_span
 
 logger = logging.getLogger(__name__)
 
 SOFT_HTTP_STATUSES = frozenset((403, 404, 429))
-
-CONTAINER_TYPE = "discord/container"
 
 
 def _is_soft_error(exc: Exception) -> bool:
@@ -83,54 +82,50 @@ def _date_range(
     return out
 
 
-def _container_entry(name: str, guild_id: str) -> IndexEntry:
-    return IndexEntry(
-        id=guild_id,
-        name=name,
-        resource_type=CONTAINER_TYPE,
-        vfs_name=name,
+def _container_entry(name: str, guild_id: str) -> FileStat:
+    return FileStat(
+        name=name, type=FileType.DIRECTORY, extra={"guild_id": guild_id}
     )
 
 
 async def _list_root(accessor: DiscordAccessor, match: ScopeMatch) -> Listed:
     guilds = await list_guilds(accessor.config, session=accessor.pool)
-    entries = [guild_entry(g) for g in guilds]
-    return [(entry.vfs_name, entry) for entry in entries]
+    return [guild_entry(g) for g in guilds]
 
 
 async def _list_guild(
-    accessor: DiscordAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
+    guild_id = str(own.extra["guild_id"])
     return [
-        ("channels", _container_entry("channels", own.id)),
-        ("members", _container_entry("members", own.id)),
+        _container_entry("channels", guild_id),
+        _container_entry("members", guild_id),
     ]
 
 
 async def _list_channels_dir(
-    accessor: DiscordAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
     channels = await list_channels(
-        accessor.config, own.id, session=accessor.pool
+        accessor.config, str(own.extra["guild_id"]), session=accessor.pool
     )
-    entries = [channel_entry(c) for c in channels]
-    return [(entry.vfs_name, entry) for entry in entries]
+    return [channel_entry(c) for c in channels]
 
 
 async def _list_members_dir(
-    accessor: DiscordAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
     members = await list_members(
-        accessor.config, own.id, session=accessor.pool
+        accessor.config, str(own.extra["guild_id"]), session=accessor.pool
     )
-    entries = [member_entry(m) for m in members]
-    return [(entry.vfs_name, entry) for entry in entries]
+    return [member_entry(m) for m in members]
 
 
 async def _list_channel_days(
-    accessor: DiscordAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    last_msg_id = own.remote_time
+    channel_id = str(own.extra["channel_id"])
+    last_msg_id = str(own.extra.get("last_message_id") or "")
     if last_msg_id:
         end_date = snowflake_to_date(last_msg_id)
     else:
@@ -138,15 +133,18 @@ async def _list_channel_days(
     span = glob_span(match.pattern)
     dates = (
         accessor.time_range.listing_days(
-            date.fromisoformat(snowflake_to_date(own.id)),
+            date.fromisoformat(snowflake_to_date(channel_id)),
             date.fromisoformat(end_date),
             span,
         )
         if accessor.time_range.bounded
         else _date_range(end_date, span=span)
     )
-    entries = [(d, history_entry(own.id, d)) for d in dates]
-    return DirListing(entries=entries, partial=span is not None, window=True)
+    return DirListing(
+        entries=[history_entry(channel_id, d) for d in dates],
+        partial=span is not None,
+        window=True,
+    )
 
 
 async def _day_listing(
@@ -184,21 +182,7 @@ async def _day_listing(
         raise
     # The day's messages are already in hand, so chat.jsonl's exact rendered
     # size is free here; read() renders the same messages the same way.
-    chat_entry = IndexEntry(
-        id=f"{channel_id}:{date_str}:chat",
-        name="chat.jsonl",
-        resource_type="discord/chat_jsonl",
-        vfs_name="chat.jsonl",
-        size=len(jsonl_bytes(messages)),
-    )
-    files_entry = IndexEntry(
-        id=f"{channel_id}:{date_str}:files",
-        name="files",
-        resource_type="discord/files_dir",
-        vfs_name="files",
-        extra={"channel_id": channel_id, "date": date_str},
-    )
-    file_entries: list[tuple[str, IndexEntry]] = []
+    blobs: list[FileStat] = []
     for msg in messages:
         for att in msg.get("attachments") or []:
             # Tombstoned (deleted) and access-restricted attachment payloads
@@ -211,52 +195,63 @@ async def _day_listing(
                 or att.get("size") is None
             ):
                 continue
-            blob_name = file_blob_name(att)
-            file_entries.append(
-                (
-                    blob_name,
-                    IndexEntry(
-                        id=str(att["id"]),
-                        name=att.get("filename") or "",
-                        resource_type="discord/file",
-                        vfs_name=blob_name,
-                        size=att.get("size"),
-                        extra={
-                            "url": att.get("url", ""),
-                            "proxy_url": att.get("proxy_url", ""),
-                            "content_type": att.get("content_type", ""),
-                            "message_id": msg.get("id", ""),
-                            "author": msg.get("author", {}).get(
-                                "username", ""
-                            ),
-                            "channel_id": channel_id,
-                            "date": date_str,
-                        },
-                    ),
+            mimetype = att.get("content_type", "")
+            blobs.append(
+                FileStat(
+                    name=file_blob_name(att),
+                    type=FileType.FILE,
+                    content=content_type_for_mime(mimetype),
+                    size=att.get("size"),
+                    extra={
+                        "attachment_id": str(att["id"]),
+                        "content_type": mimetype,
+                        "url": att.get("url", ""),
+                        "proxy_url": att.get("proxy_url", ""),
+                        "message_id": msg.get("id", ""),
+                        "author": msg.get("author", {}).get("username", ""),
+                        "channel_id": channel_id,
+                        "date": date_str,
+                    },
                 )
             )
     return DirListing(
-        entries=[("chat.jsonl", chat_entry), ("files", files_entry)],
-        seeds={"files": file_entries},
+        entries=[
+            FileStat(
+                name="chat.jsonl",
+                type=FileType.FILE,
+                content=ContentType.TEXT,
+                size=len(jsonl_bytes(messages)),
+                extra={"channel_id": channel_id},
+            ),
+            FileStat(
+                name="files",
+                type=FileType.DIRECTORY,
+                extra={"channel_id": channel_id, "date": date_str},
+            ),
+        ],
+        seeds={"files": blobs},
     )
 
 
 async def _list_day(
-    accessor: DiscordAccessor, match: ScopeMatch, channel: IndexEntry
+    accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    # The proof is the channel entry, not the day's own: any well-formed
-    # date under a real channel fetches, including dates outside the
-    # bounded window the channel listing mints.
-    return await _day_listing(accessor, channel.id, match.slots["day"])
+    # The day's row carries its channel: one the bounded window lists, or
+    # one stat makes for any well-formed date under a real channel, so a
+    # date outside the window fetches too.
+    return await _day_listing(
+        accessor, str(own.extra["channel_id"]), match.slots["day"]
+    )
 
 
 async def _list_files(
-    accessor: DiscordAccessor, match: ScopeMatch, own: IndexEntry
+    accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
     # Normally served from the day lister's seed; reached only when the
-    # index evicted the files listing while the day's entries survived.
-    channel_id = own.extra.get("channel_id") or own.id.split(":", 1)[0]
-    listing = await _day_listing(accessor, channel_id, match.slots["day"])
+    # index evicted the files listing while the day's rows survived.
+    listing = await _day_listing(
+        accessor, str(own.extra["channel_id"]), match.slots["day"]
+    )
     # A soft-error day proves nothing about its attachments either.
     return DirListing(
         entries=list(listing.seeds.get("files", [])), window=listing.window
@@ -271,9 +266,9 @@ readdir = make_readdir(
         "channels_dir": _list_channels_dir,
         "members_dir": _list_members_dir,
         "channel": _list_channel_days,
+        "day": _list_day,
         "files": _list_files,
     },
-    parent_entry_listers={"day": _list_day},
     guards={"day": guard_day, "files": guard_day},
     pattern_kinds={"channel": has_glob_span},
     leaf_error="enotdir",

@@ -13,22 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isFsError } from '../../errors/fs.ts'
-import type { PathSpec } from '../../types.ts'
+import { DirListing, type FileStat, type PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { recordQueries } from '../../utils/record_search.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { type ReaddirFn, entriesUnder } from '../hierarchy/probe.ts'
 import { GoogleApiError } from './client.ts'
 import { RENDERED_WORDS, TOP_LEVEL_DIRS } from './constants.ts'
 import { searchFiles } from './drive.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-
-function noFolder(_entry: IndexEntry): boolean {
-  return false
-}
 
 /**
  * The whole words Drive is asked for `text` over an app mount's JSON, or null
@@ -59,12 +52,11 @@ export function driveQueries(text: string, vocabulary: ReadonlySet<string>): str
  */
 export async function filesContaining<A extends GoogleApiAccessor>(
   accessor: A,
-  readdir: ReaddirFn<A>,
+  readdir: (accessor: A, path: PathSpec) => Promise<FileStat[] | DirListing>,
   mime: string,
   vocabulary: ReadonlySet<string>,
   text: string,
   under: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const queries = driveQueries(text, vocabulary)
   if (queries === null) return null
@@ -88,12 +80,17 @@ export async function filesContaining<A extends GoogleApiAccessor>(
       for (const id of answer.ids) named.add(id)
     }
     for (const corpus of corpora) {
-      const walked = await entriesUnder(readdir, accessor, corpus, index, noFolder)
-      // An unfinished listing caches its entries but not the directory, and
-      // grep's own walk lists it again.
-      const listing = await index?.listDir(rstripSlash(corpus.virtual))
-      if (walked === null || (listing?.entries ?? null) === null) return null
-      for (const [path, entry] of walked) if (named.has(entry.id)) found.push(path)
+      const listed = await readdir(accessor, corpus)
+      // An unfinished listing is not the directory, and grep's own walk lists
+      // it again.
+      if (listed instanceof DirListing && listed.partial) return null
+      const rows = listed instanceof DirListing ? listed.entries : listed
+      const base = rstripSlash(corpus.mountPath)
+      for (const row of rows) {
+        if (named.has(String(row.extra.doc_id))) {
+          found.push(mountedPath(corpus, `${base}/${row.name}`))
+        }
+      }
     }
   } catch (err) {
     // fetch rejects with a TypeError when the connection fails and a

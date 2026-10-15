@@ -14,7 +14,6 @@
 
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.read import Reader
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.qdrant.naming import point_id_from_stem, row_stem
@@ -25,7 +24,7 @@ from mirage.core.qdrant.types import QdrantRow
 from mirage.core.vector.read import blob_bytes
 from mirage.core.vector.scope import table_of
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _row_of(
@@ -51,7 +50,8 @@ async def _read_json(
     accessor: QdrantAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     row = await _row_of(accessor, match, path.virtual)
     return render_json(row, accessor.config)
@@ -61,7 +61,8 @@ async def _read_text(
     accessor: QdrantAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     config = accessor.config
     row = await _row_of(accessor, match, path.virtual)
@@ -74,7 +75,8 @@ async def _read_blob(
     accessor: QdrantAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     config = accessor.config
     if not config.blob_field:

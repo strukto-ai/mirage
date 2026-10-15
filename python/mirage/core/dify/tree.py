@@ -2,7 +2,6 @@ import logging
 from typing import Any
 
 from mirage.accessor.dify import DifyAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.dify.client import list_all_documents
 from mirage.core.slug_tree.rows import (
     dir_rows,
@@ -11,7 +10,7 @@ from mirage.core.slug_tree.rows import (
 )
 from mirage.core.slug_tree.tree import SlugTree
 from mirage.core.slug_tree.types import DirRows
-from mirage.types import JsonValue
+from mirage.types import ContentType, FileStat, FileType, JsonValue
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.path import gnu_basename
 
@@ -20,18 +19,16 @@ logger = logging.getLogger(__name__)
 SLUG_NOUN = "Dify document slug"
 
 
-async def load_tree(accessor: DifyAccessor, prefix: str) -> DirRows:
+async def load_tree(accessor: DifyAccessor) -> DirRows:
     # list_all_documents already filters to visible documents.
     return build_dir_entries(
         await list_all_documents(accessor),
-        prefix,
         accessor.config.slug_metadata_name,
     )
 
 
 def build_dir_entries(
     documents: list[dict[str, Any]],
-    prefix: str,
     slug_metadata_name: str = "slug",
 ) -> DirRows:
     files: dict[str, dict[str, Any]] = {}
@@ -74,14 +71,16 @@ def build_dir_entries(
             files[path].get("id"),
         )
 
-    def file_entry(path: str, document: dict[str, Any]) -> IndexEntry:
+    def file_row(path: str, document: dict[str, Any]) -> FileStat:
         # No size: the API's is the uploaded source file (a PDF, say), not
         # the segment text this mount serves, so it rides in extra.
-        return IndexEntry(
-            id=str(document["id"]),
+        created = epoch_text(document.get("created_at"))
+        return FileStat(
             name=gnu_basename(path),
-            resource_type="file",
-            remote_time=epoch_text(document.get("created_at")) or "",
+            type=FileType.FILE,
+            content=ContentType.TEXT,
+            modified=created,
+            birthtime=created,
             extra={
                 "slug": path.strip("/"),
                 "source_size": extract_document_size(document),
@@ -91,10 +90,11 @@ def build_dir_entries(
                 "tokens": document.get("tokens"),
                 "indexing_status": document.get("indexing_status"),
                 "data_source_type": document.get("data_source_type"),
+                "document_id": str(document["id"]),
             },
         )
 
-    return dir_rows(drop_collisions(files, skip_collision), prefix, file_entry)
+    return dir_rows(drop_collisions(files, skip_collision), file_row)
 
 
 def extract_slug(

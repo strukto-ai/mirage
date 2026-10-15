@@ -2,20 +2,27 @@ import json
 from collections.abc import AsyncIterator
 
 from mirage.accessor.wandb import WandbAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.hierarchy.probe import parent_spec, rows_of
 from mirage.core.render.json import json_bytes, jsonl_bytes
 from mirage.core.wandb.metadata import run_metadata
 from mirage.core.wandb.pathing import LEAVES, parts, run_vars
 from mirage.core.wandb.queries import RUN, RUN_CONFIG, RUN_SUMMARY
-from mirage.core.wandb.stat import stat
+from mirage.core.wandb.readdir import readdir
 from mirage.errors.fs import eisdir, enoent
 from mirage.types import FileType, PathSpec
 
 
+async def _is_directory(
+    accessor: WandbAccessor, path: PathSpec, name: str
+) -> bool:
+    listed = rows_of(await readdir(accessor, parent_spec(path)))
+    return any(
+        row.name == name and row.type == FileType.DIRECTORY for row in listed
+    )
+
+
 async def read_stream(
-    accessor: WandbAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: WandbAccessor, path: PathSpec
 ) -> AsyncIterator[bytes]:
     ps = parts(accessor, path)
     if len(ps) > 4 and ps[3] == "files":
@@ -27,8 +34,7 @@ async def read_stream(
                 yield chunk
             return
     if len(ps) != 4 or ps[3] not in LEAVES:
-        info = await stat(accessor, path, index)
-        if info.type == FileType.DIRECTORY:
+        if not ps or await _is_directory(accessor, path, ps[-1]):
             raise eisdir(path)
         raise enoent(path)
     variables = run_vars(ps)
@@ -53,11 +59,5 @@ async def read_stream(
         yield json_bytes(json.loads(raw) if isinstance(raw, str) else raw)
 
 
-async def read(
-    accessor: WandbAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> bytes:
-    return b"".join(
-        [chunk async for chunk in read_stream(accessor, path, index)]
-    )
+async def read(accessor: WandbAccessor, path: PathSpec) -> bytes:
+    return b"".join([chunk async for chunk in read_stream(accessor, path)])

@@ -1,8 +1,10 @@
 import pytest
 
-from mirage.core.dify import stat, tree
+from mirage.core.dify import tree
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.dify import DifyVFS
+from tests.fixtures.mounted import Mounted
 
 from .conftest import document
 
@@ -17,10 +19,8 @@ def documents(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stat_answers_from_the_listing(
-    dify_accessor, dify_index, guide_path
-):
-    item = await stat.stat(dify_accessor, guide_path, dify_index)
+async def test_stat_answers_from_the_listing(dify_accessor, guide_path):
+    item = await Mounted(DifyVFS, dify_accessor, "/knowledge").stat(guide_path)
 
     assert item.name == "quickstart"
     assert item.content == ContentType.TEXT
@@ -33,12 +33,12 @@ async def test_stat_answers_from_the_listing(
 
 
 @pytest.mark.asyncio
-async def test_stat_of_a_directory(dify_accessor, dify_index):
+async def test_stat_of_a_directory(dify_accessor):
     guides = PathSpec.from_str_path(
         "/knowledge/guides", mount_key("/knowledge/guides", "/knowledge")
     )
 
-    item = await stat.stat(dify_accessor, guides, dify_index)
+    item = await Mounted(DifyVFS, dify_accessor, "/knowledge").stat(guides)
 
     assert item.name == "guides"
     assert item.type == FileType.DIRECTORY

@@ -16,13 +16,21 @@ import json
 
 import pytest
 
-from mirage.core.gcal.read import read, read_many
+from mirage.accessor.gcal import GCalAccessor
+from mirage.core.gcal.read import read_many
+from mirage.types import PathSpec
+from mirage.vfs.gcal import GCalVFS
 from tests.fixtures.gcal_api import EVENTS, HK, make_accessor, spec
+from tests.fixtures.mounted import mounted
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("gcal_api")]
 
 PHD = "aaaa1__0900-1030_PhD_Defense.gcal.json"
 DATED_PHD = "aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json"
+
+
+async def read(accessor: GCalAccessor, path: PathSpec) -> bytes:
+    return await mounted(GCalVFS, accessor).read(path)
 
 
 @pytest.mark.parametrize(
@@ -38,7 +46,7 @@ async def test_an_event_reads_the_unmodified_api_payload(
 ):
     # The names are a view; the payload, original offsets included, is what
     # an absolute-instant comparison is made against.
-    body = await read(make_accessor(bucket_days=size), spec(path), index)
+    body = await read(make_accessor(bucket_days=size), spec(path))
     assert json.loads(body) == EVENTS[0]
     # Only the day the name is on is queried, whatever the bucket's size.
     assert gcal_api.listed == [
@@ -71,20 +79,20 @@ async def test_an_event_reads_the_unmodified_api_payload(
     ],
 )
 async def test_calendar_json_carries_the_role_and_bucket_zone(
-    accessor, index, path, fields
+    accessor, path, fields
 ):
-    body = json.loads(await read(accessor, spec(path), index))
+    body = json.loads(await read(accessor, spec(path)))
     assert fields.items() <= body.items()
 
 
-async def test_reading_a_directory_reports_absence(accessor, index):
+async def test_reading_a_directory_reports_absence(accessor):
     # A probed directory shape is no proof the node exists, so the read
     # reports absence; the mount root, which exists by construction, is
     # the one EISDIR.
     with pytest.raises(FileNotFoundError):
-        await read(accessor, spec("/primary"), index)
+        await read(accessor, spec("/primary"))
     with pytest.raises(IsADirectoryError):
-        await read(accessor, spec("/"), index)
+        await read(accessor, spec("/"))
 
 
 @pytest.mark.parametrize(
@@ -105,9 +113,9 @@ async def test_reading_a_directory_reports_absence(accessor, index):
         (7, f"/primary/2026-08-11/{PHD}"),
     ],
 )
-async def test_a_name_the_tree_does_not_hold_is_enoent(size, path, index):
+async def test_a_name_the_tree_does_not_hold_is_enoent(size, path):
     with pytest.raises(FileNotFoundError):
-        await read(make_accessor(bucket_days=size), spec(path), index)
+        await read(make_accessor(bucket_days=size), spec(path))
 
 
 async def test_a_batch_lists_each_day_once(gcal_api, index):

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.api.client import SessionArg
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
@@ -34,9 +33,8 @@ from mirage.core.notion.pages import (
 )
 from mirage.core.notion.resolve import guard_row, resolve_row
 from mirage.core.notion.scope import detect_scope
-from mirage.core.notion.stat import stat
 from mirage.core.render.json import jsonl_bytes
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def read_page_json(
@@ -52,7 +50,8 @@ async def _read_page_json(
     accessor: NotionAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     if match.kind == "row_json":
         page = await resolve_row(accessor, match, path.virtual)
@@ -70,7 +69,8 @@ async def _read_database_json(
     accessor: NotionAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     database = await get_database(
         accessor.config, match.slots["database_id"], session=accessor.pool
@@ -82,7 +82,8 @@ async def _read_data_source_json(
     accessor: NotionAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     data_source = await get_data_source(
         accessor.config, match.slots["data_source_id"], session=accessor.pool
@@ -94,7 +95,8 @@ async def _read_rows_jsonl(
     accessor: NotionAccessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
     rows = await query_data_source(
         accessor.config, match.slots["data_source_id"], session=accessor.pool
@@ -106,7 +108,7 @@ async def _read_rows_jsonl(
 
 read = make_read(
     detect_scope,
-    stat=stat,
+    parented=True,
     readers={
         "page_json": _read_page_json,
         "row_json": _read_page_json,

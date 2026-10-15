@@ -39,10 +39,29 @@ export function folderOf(key: string): string {
  * A directory's listing as the index holds it, null when the index holds no
  * complete, live listing for it. The mount's read policy rides the index: a
  * listing past its bound, or one a `fresh` mount's check refuses, answers
- * null here.
+ * null here. A window (the newest messages, the last days) answers no glob:
+ * the backend moves its window to the span the glob asks for. Mirrors
+ * Python's `stored_listing`.
  */
-export async function storedListing(index: IndexCacheStore, key: string): Promise<string[] | null> {
-  return (await index.listDir(key)).entries ?? null
+export async function storedListing(
+  index: IndexCacheStore,
+  key: string,
+  glob = false,
+): Promise<string[] | null> {
+  const listing = await index.listDir(key)
+  if (glob && listing.window === true) return null
+  return listing.entries ?? null
+}
+
+/**
+ * Whether `key`'s folder holds a window that does not name it. A window shows
+ * everything to show but proves nothing absent: a day it does not list may
+ * still be there, and only the backend says. Mirrors Python's
+ * `beyond_window`.
+ */
+export async function beyondWindow(index: IndexCacheStore, key: string): Promise<boolean> {
+  const listing = await index.listDir(folderOf(key))
+  return listing.window === true && listing.entries != null && !listing.entries.includes(key)
 }
 
 /**
@@ -74,14 +93,18 @@ export async function keepListing(
  * A stat the stored listings answer, null when none does. The row the
  * parent's listing holds answers it, so a listing costs one request and the
  * stat of each child after it none. A complete listing that does not name the
- * path rejects with ENOENT the same way. A directory whose own listing is held
+ * path rejects with ENOENT the same way; a window that does not answers
+ * nothing. A directory whose own listing is held
  * answers with the row a subtree read kept for it. `key` is below the mount
  * root.
  */
 export async function storedStat(index: IndexCacheStore, key: string): Promise<FileStat | null> {
   const listing = await index.listDir(folderOf(key))
   if (listing.entries != null) {
-    if (!listing.entries.includes(key)) throw enoent(key)
+    if (!listing.entries.includes(key)) {
+      if (listing.window === true) return null
+      throw enoent(key)
+    }
   } else if (listing.partialEntries?.includes(key) !== true) {
     if ((await storedListing(index, key)) === null) return null
   }
@@ -108,7 +131,7 @@ export async function entryAt(
  * entry below the directory as its parent's listing holds it, keyed by its
  * path below `key`, which is what a walk of `readdir` and `stat` over the same
  * listings would see. Null while any directory under it has no complete, live
- * listing. Mirrors Python's `stored_tree`.
+ * listing; a window is not one. Mirrors Python's `stored_tree`.
  */
 export async function storedTree(
   index: IndexCacheStore,
@@ -118,7 +141,8 @@ export async function storedTree(
   const base = key === '/' ? '' : key
   const pending = [key]
   for (let folder = pending.pop(); folder !== undefined; folder = pending.pop()) {
-    const children = await storedListing(index, folder)
+    const listing = await index.listDir(folder)
+    const children = listing.window === true ? null : (listing.entries ?? null)
     if (children === null) return null
     for (const child of children) {
       const row: unknown = (await index.get(child)).entry

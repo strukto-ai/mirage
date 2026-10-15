@@ -105,6 +105,7 @@ from mirage.view.types import StatPath
 from mirage.workspace.mount.activity import VFSActivity
 from mirage.workspace.mount.constants import HANDED, STORED_OPS
 from mirage.workspace.mount.listing import (
+    beyond_window,
     entry_at,
     folder_of,
     index_key,
@@ -308,6 +309,7 @@ async def _read_window(
     offset: int = 0,
     size: int | None = None,
     entry: FileStat | None = None,
+    parent: FileStat | None = None,
 ) -> bytes:
     """A read, honoring a byte window when one is asked for.
 
@@ -330,11 +332,13 @@ async def _read_window(
         size (int | None): the window's length, None through the end.
         entry (FileStat | None): what is at ``path``, for a ``read`` that
             declares it; None hands nothing.
+        parent (FileStat | None): what is at the folder holding
+            ``path``, for a ``read`` that declares it; None hands nothing.
     """
     if size == 0:
         return b""
     whole = not offset and size is None
-    handed = _handed_on(read, index, entry=entry)
+    handed = _handed_on(read, index, entry=entry, parent=parent)
     if ranges and not whole:
         try:
             return await read(path, offset=offset, size=size, **handed)
@@ -1449,12 +1453,14 @@ class MountEntry:
 
     def _folder(self, scope: PathSpec) -> PathSpec:
         """The directory holding ``scope``, keyed below this mount; a glob
-        word stands for the directory it lists.
+        word stands for the directory it lists, and the root holds itself.
 
         Args:
             scope (PathSpec): a path below the mount root.
         """
         target = scope.dir if scope.pattern else scope
+        if index_key(self.prefix, target) == self._root_key:
+            return target
         return self._scope(target.virtual.rstrip("/").rsplit("/", 1)[0] or "/")
 
     @property
@@ -1498,11 +1504,34 @@ class MountEntry:
             probed = manager.probed_stat(scope)
             if probed is not None:
                 return probed
-        return await entry_at(
+        row = await entry_at(
             index,
             key,
             functools.partial(self._listed, self._folder(scope), index),
         )
+        if row is None and await beyond_window(index, key):
+            return await self._beyond(scope, index)
+        return row
+
+    async def _beyond(
+        self, scope: PathSpec, index: IndexCacheStore
+    ) -> FileStat | None:
+        """What is at a path its folder's window leaves out: the backend's
+        stat of it, handed what is at its parent; None when nothing is.
+
+        Args:
+            scope (PathSpec): a path keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+        """
+        stat: Callable[..., Awaitable[FileStat]] = self.vfs.stat
+        handed: dict[str, FileStat | None] = {}
+        if "parent" in _wants(stat):
+            handed["parent"] = await self._entry(self._folder(scope), index)
+        try:
+            return await stat(scope, **_handed_on(stat, index, **handed))
+        except FileNotFoundError as exc:
+            logger.debug("nothing beyond the window at %s: %s", scope, exc)
+            return None
 
     async def _listed(
         self, path: PathSpec, index: IndexCacheStore
@@ -1535,7 +1564,9 @@ class MountEntry:
         if not self._lists:
             return await stat(path, **_handed_on(stat, index))
         stored = (
-            None if key == self._root_key else await stored_stat(index, key)
+            None
+            if key == self._root_key
+            else self._whole(await stored_stat(index, key))
         )
         if stored is not None:
             return stored
@@ -1594,12 +1625,14 @@ class MountEntry:
         """
         key = index_key(self.prefix, scope)
         if name == "readdir":
-            return await stored_listing(index, key)
+            return await stored_listing(
+                index, key, glob=scope.pattern is not None
+            )
         if name == "read_tree":
             return None if self._names_only else await stored_tree(index, key)
         if key == self._root_key:
             return None
-        row = await stored_stat(index, key)
+        row = self._whole(await stored_stat(index, key))
         if row is None or not self._names_only:
             return row
         manager = self.cache_manager
@@ -1607,6 +1640,23 @@ class MountEntry:
             folder_of(key)
         )
         return row if trusted else None
+
+    def _whole(self, row: FileStat | None) -> FileStat | None:
+        """A stored row that answers a stat whole, None for one the
+        backend must finish: a file with no size, on a VFS whose stat
+        sizes every file (chroma sizes a folder's pages on its first stat).
+
+        Args:
+            row (FileStat | None): the row the stored listings hold.
+        """
+        if (
+            row is not None
+            and row.size is None
+            and row.type is FileType.FILE
+            and self.vfs.sizes_always_known
+        ):
+            return None
+        return row
 
     def _note_live(
         self,
@@ -1682,13 +1732,15 @@ class MountEntry:
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
         op_timeout: float | None,
+        found: dict[str, FileStat | None] | None = None,
     ) -> Any:
         """Run one function with the stats it declares.
 
         A stat a stored listing handed in may be stale: the backend
         answering ENOENT for it drops the listings it came from, which
         lists them again, and the function runs once more. A function
-        handed nothing is not run again.
+        handed nothing is not run again, nor a stat the listings found
+        nothing at: the backend agrees with them.
 
         Args:
             name (str): the op name.
@@ -1697,15 +1749,23 @@ class MountEntry:
             args (tuple[Any, ...]): its positionals after the path.
             kwargs (dict[str, Any]): its keywords, ``index`` among them.
             op_timeout (float | None): the op's timeout.
+            found (dict[str, FileStat | None] | None): the stats already
+                found for ``fn``, None to find them here.
         """
         index = kwargs["index"]
-        handed = await self._handed(fn, scope, kwargs, index)
+        handed = (
+            found
+            if found is not None
+            else await self._handed(fn, scope, kwargs, index)
+        )
         try:
             return await self._invoke(
                 name, fn, scope, args, {**kwargs, **handed}, op_timeout
             )
         except FileNotFoundError:
-            if all(stat is None for stat in handed.values()):
+            if all(stat is None for stat in handed.values()) or (
+                name == "stat" and handed.get("entry") is None
+            ):
                 raise
         await self._forget(scope, kwargs, index)
         handed = await self._handed(fn, scope, kwargs, index)
@@ -1818,14 +1878,24 @@ class MountEntry:
                 # spells the two the same, and routing the physical one
                 # hands the op back to the backend serving it.
                 with host_io():
+                    handed: dict[str, FileStat | None] | None = None
                     if name in STORED_OPS and self._lists:
                         stored = await self._stored(name, scope, index)
+                        if stored is None and name == "readdir":
+                            # Finding the rows a listing is handed lists
+                            # its parent, whose fetch may have proved this
+                            # listing too (a seed).
+                            handed = await self._handed(
+                                levels[0], scope, kwargs, index
+                            )
+                            stored = await self._stored(name, scope, index)
                         if stored is not None:
                             return stored
                     for fn in levels:
                         result = await self._run(
-                            name, fn, scope, args, kwargs, op_timeout
+                            name, fn, scope, args, kwargs, op_timeout, handed
                         )
+                        handed = None
                         if result is None:
                             continue
                         if self._lists:
@@ -2038,7 +2108,7 @@ class MountEntry:
         scope: PathSpec,
         index: IndexCacheStore,
     ) -> AsyncIterator[bytes]:
-        """A streamed read handed what is at its path, found on the
+        """A streamed read handed the stats it declares, found on the
         first pull.
 
         Args:
@@ -2047,9 +2117,9 @@ class MountEntry:
             scope (PathSpec): the file, keyed below the mount.
             index (IndexCacheStore): the mount's index.
         """
-        entry = await self._entry(scope, index)
+        handed = await self._handed(reader, scope, {}, index)
         async for chunk in reader(
-            scope, **_handed_on(reader, index, entry=entry)
+            scope, **_handed_on(reader, index, **handed)
         ):
             yield chunk
 
@@ -2076,7 +2146,7 @@ class MountEntry:
         reader = self.vfs.read_stream
         source = (
             self._read_entry_stream(reader, scope, self.index)
-            if "entry" in _wants(reader)
+            if _wants(reader)
             else reader(
                 scope, **_taken("read_stream", reader, {"index": self.index})
             )

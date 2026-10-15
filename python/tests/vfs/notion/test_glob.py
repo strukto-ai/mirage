@@ -12,73 +12,56 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock
+
 import pytest
-import pytest_asyncio
 
 from mirage.accessor.notion import NotionAccessor
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore
-from mirage.core.notion.readdir import readdir
-from mirage.types import PathSpec
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.core.notion import readdir as notion_readdir
+from mirage.core.notion.config import NotionConfig
+from mirage.vfs.notion import NotionVFS
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
-resolve_glob = make_resolve_glob(readdir)
+
+def _page(title: str, page_id: str) -> dict[str, object]:
+    return {
+        "id": page_id,
+        "parent": {"type": "workspace"},
+        "properties": {
+            "title": {"type": "title", "title": [{"plain_text": title}]}
+        },
+    }
 
 
-def page_entry(name: str) -> IndexEntry:
-    return IndexEntry(
-        id=name, name=name, resource_type="notion/page", vfs_name=name
+@pytest.fixture
+def ws(monkeypatch) -> Workspace:
+    monkeypatch.setattr(
+        notion_readdir,
+        "search_pages",
+        AsyncMock(
+            return_value=[
+                _page("Demo page", "uuid1"),
+                _page("Roadmap", "uuid2"),
+            ]
+        ),
     )
-
-
-def file_entry(name: str) -> IndexEntry:
-    return IndexEntry(id=name, name=name, resource_type="file", vfs_name=name)
-
-
-def glob_spec(virtual: str) -> PathSpec:
-    last_slash = virtual.rfind("/")
-    return PathSpec(
-        virtual=virtual,
-        directory=virtual[: last_slash + 1],
-        vfs_path=virtual[len("/notion") :].strip("/"),
-        pattern=virtual[last_slash + 1 :],
-        resolved=False,
+    monkeypatch.setattr(
+        notion_readdir, "list_block_children", AsyncMock(return_value=[])
     )
-
-
-@pytest_asyncio.fixture
-async def index():
-    # The index is keyed by the full virtual path (the kit standard, and
-    # what invalidation walks), not the mount-relative key the old
-    # bespoke readdir used.
-    store = RAMIndexCacheStore()
-    await store.set_dir(
-        "/notion/pages",
-        [
-            ("Demo_page__uuid1", page_entry("Demo_page__uuid1")),
-            ("Roadmap__uuid2", page_entry("Roadmap__uuid2")),
-        ],
-    )
-    await store.set_dir(
-        "/notion/pages/Demo_page__uuid1",
-        [
-            ("page.json", file_entry("page.json")),
-            ("page.md", file_entry("page.md")),
-        ],
-    )
-    return store
+    accessor = NotionAccessor(NotionConfig(api_key="ntn_test"))
+    return Workspace({"/notion/": vfs_over(NotionVFS, accessor)})
 
 
 @pytest.mark.asyncio
-async def test_mid_path_glob_expands_from_index(index):
-    spec = glob_spec("/notion/pages/Demo_page__*/page.md")
-    result = await resolve_glob(NotionAccessor(config=None), [spec], index)
-    assert [p.virtual for p in result] == [
-        "/notion/pages/Demo_page__uuid1/page.md"
-    ]
+async def test_mid_path_glob_expands_through_the_listings(ws):
+    result = await ws.shell("echo /notion/pages/Demo_page__*/page.json")
+    assert await result.stdout_str() == (
+        "/notion/pages/Demo_page__uuid1/page.json\n"
+    )
 
 
 @pytest.mark.asyncio
-async def test_last_component_glob(index):
-    spec = glob_spec("/notion/pages/Demo*")
-    result = await resolve_glob(NotionAccessor(config=None), [spec], index)
-    assert [p.virtual for p in result] == ["/notion/pages/Demo_page__uuid1"]
+async def test_last_component_glob(ws):
+    result = await ws.shell("echo /notion/pages/Demo*")
+    assert await result.stdout_str() == "/notion/pages/Demo_page__uuid1\n"

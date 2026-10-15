@@ -12,23 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.slug_tree.rows import mount_root
-from mirage.core.slug_tree.types import ResolvedDirectory
-from mirage.types import FileStat, FileType
+from mirage.core.slug_tree.rows import folder_row
+from mirage.errors.fs import enoent
+from mirage.types import FileStat, PathSpec
 
 
-def directory_stat(resolved: ResolvedDirectory) -> FileStat:
-    """Stat a folder of the tree, which exists only as its listing.
+def tree_stat(path: PathSpec, entry: FileStat | None) -> FileStat:
+    """Stat a path of the tree: the root, or the row its folder names.
 
     Args:
-        resolved (ResolvedDirectory): the resolved folder.
+        path (PathSpec): the path.
+        entry (FileStat | None): what is at the path.
+
+    Raises:
+        FileNotFoundError: nothing is there.
     """
-    key = resolved.virtual_key
-    name = (
-        "/"
-        if key == mount_root(resolved.mount_prefix)
-        else key.rstrip("/").rsplit("/", 1)[-1]
-    )
-    return FileStat(
-        name=name, type=FileType.DIRECTORY, extra={"children_count": 0}
-    )
+    if not path.mount_path.strip("/"):
+        return folder_row("/")
+    if entry is None:
+        raise enoent(path.virtual)
+    return entry

@@ -17,14 +17,12 @@ import operator
 import pytest
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexEntry
 from mirage.core.hierarchy.bind import per_accessor
 from mirage.core.hierarchy.codec import PATH_SAFE, Codec
 from mirage.core.hierarchy.scope import make_detect_scope
-from mirage.core.vector.readdir import dir_entry
 from mirage.core.vector.scope import blob_leaf, filters_of, row_scopes
 from mirage.core.vector.types import VectorTree
-from mirage.types import ContentType
+from mirage.types import ContentType, FileStat, FileType
 
 TABLE = "animals"
 
@@ -62,29 +60,22 @@ async def _children(accessor, match):
     label = filters_of(["label"], match).get("label")
     if label is None:
         return [
-            (row["label"], dir_entry("stub", row["label"])) for row in ROWS
+            FileStat(name=row["label"], type=FileType.DIRECTORY)
+            for row in ROWS
         ]
     return [
-        (
-            f"{row['id']}.txt",
-            IndexEntry(
-                id=row["id"],
-                name=f"{row['id']}.txt",
-                resource_type="stub/row_text",
-                vfs_name=f"{row['id']}.txt",
-            ),
-        )
+        FileStat(name=f"{row['id']}.txt", type=FileType.FILE)
         for row in ROWS
         if row["label"] == label
     ]
 
 
-async def _read_text(accessor, match, path, index):
+async def _read_text(accessor, match, path, entry, parent):
     accessor.reads += 1
     return f"row {match.slots['row_id']}\n".encode()
 
 
-async def _read_blob(accessor, match, path, index):
+async def _read_blob(accessor, match, path, entry, parent):
     return b"PNG"
 
 
@@ -106,7 +97,6 @@ def _hit(accessor, row):
 
 def stub_tree(rank_key: str = "_score", drops=operator.lt) -> VectorTree:
     return VectorTree(
-        vfs="stub",
         detect=per_accessor(_detect),
         pinned=_pinned,
         search_limit=_search_limit,

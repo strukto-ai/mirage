@@ -17,7 +17,6 @@ from types import MappingProxyType
 from typing import Any
 
 from mirage.accessor.gsheets import GSheetsAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.google.client import TokenManager
 from mirage.core.google.search import files_containing as _files_containing
 from mirage.core.google.watch import app_delta_hook
@@ -27,7 +26,7 @@ from mirage.core.gsheets.readdir import readdir as _readdir
 from mirage.core.gsheets.rename import rename as _rename
 from mirage.core.gsheets.stat import stat as _stat
 from mirage.core.gsheets.unlink import unlink as _unlink
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.generated.google_vocabulary import SHEETS_WORDS
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -61,15 +60,12 @@ class GSheetsVFS(BaseVFS):
         self._token_manager = TokenManager(config)
         self.accessor = GSheetsAccessor(self.config, self._token_manager)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path)
 
     async def read_sheet(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
@@ -77,11 +73,10 @@ class GSheetsVFS(BaseVFS):
 
         Args:
             path (PathSpec): the file.
-            index (IndexCacheStore): the mount's index.
             offset (int): the window's first byte.
             size (int | None): the window's length, None through the end.
         """
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
 
     async def files_containing(
@@ -91,23 +86,20 @@ class GSheetsVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         if not whole_word or not self.config.content_search:
             return None
         return await _files_containing(
-            self.accessor, _readdir, MIME, SHEETS_WORDS, text, [path], index
+            self.accessor, _readdir, MIME, SHEETS_WORDS, text, [path]
         )
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await _stat(self.accessor, path)
 
     async def unlink(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> None:
-        await _unlink(self.accessor, path, index)
+        await _unlink(self.accessor, path, entry)
 
     async def rename(
         self,

@@ -12,14 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index.config import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
+from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
 
@@ -43,48 +44,46 @@ def accessor():
     return GDocsAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_stat_root_is_directory(accessor, index):
-    result = await stat(accessor, _scope("/gdocs"), index=index)
+async def test_stat_root_is_directory(accessor):
+    result = await stat(accessor, _scope("/gdocs"))
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_doc(accessor, index):
-    await index.set_dir(
-        "/gdocs/owned",
-        [
-            (
-                "File__doc1.gdoc.json",
-                IndexEntry(
-                    id="doc1",
-                    name="Report",
-                    resource_type="gdocs/doc",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="File__doc1.gdoc.json",
-                ),
-            )
-        ],
-    )
-    result = await stat(
-        accessor, _scope("/gdocs/owned/File__doc1.gdoc.json"), index=index
-    )
-    assert result.name == "File__doc1.gdoc.json"
+async def test_stat_doc(accessor):
+    mounted = Mounted(GDocsVFS, accessor, "/gdocs")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=(
+            [
+                {
+                    "mimeType": "application/vnd.google-apps.document",
+                    "id": "doc1",
+                    "name": "Report",
+                    "modifiedTime": "2026-04-01T00:00:00Z",
+                    "owners": [{"me": True}],
+                }
+            ],
+            True,
+        ),
+    ):
+        (target,) = await mounted.readdir(_scope("/gdocs/owned"))
+        result = await mounted.stat(_scope(target))
+    assert result.name == target.rsplit("/", 1)[-1]
     assert result.extra["doc_id"] == "doc1"
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor, index):
-    await index.set_dir("/gdocs/owned", [])
-    with pytest.raises(FileNotFoundError):
-        await stat(
-            accessor,
-            _scope("/gdocs/owned/Nonexistent__doc9.gdoc.json"),
-            index=index,
-        )
+async def test_stat_not_found(accessor):
+    mounted = Mounted(GDocsVFS, accessor, "/gdocs")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=([], True),
+    ):
+        await mounted.readdir(_scope("/gdocs/owned"))
+        with pytest.raises(FileNotFoundError):
+            await mounted.stat(_scope("/gdocs/owned/Nonexistent__x9.json"))

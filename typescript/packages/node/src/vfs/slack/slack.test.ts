@@ -15,7 +15,6 @@
 import { normalizeSlackConfig, redactSlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
 import { buildVfs } from '../registry.ts'
@@ -92,12 +91,12 @@ describe('SlackVFS (node)', () => {
     const r = new SlackVFS({ token: 'xoxb-test' })
     const out = await ops(r).readdir(
       new PathSpec({
-        virtual: '/mnt/slack/channels',
-        directory: '/mnt/slack/channels',
-        vfsPath: mountKey('/mnt/slack/channels', '/mnt/slack'),
+        virtual: '/channels',
+        directory: '/channels',
+        vfsPath: 'channels',
       }),
     )
-    expect(out).toEqual(['/mnt/slack/channels/general__C1', '/mnt/slack/channels/eng__C2'])
+    expect(out).toEqual(['/channels/general__C1', '/channels/eng__C2'])
     expect(fetchMock).toHaveBeenCalled()
     const firstArg = (fetchMock.mock.calls[0] as unknown[])[0]
     const firstUrl =

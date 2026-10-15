@@ -17,10 +17,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.notion import readdir as readdir_mod
 from mirage.core.notion.pathing import format_segment
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 
@@ -59,38 +58,17 @@ def _spec(original: str, prefix: str = "") -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_root_lists_pages_with_prefix():
+async def test_root_lists_pages_and_databases():
     out = await readdir_mod.readdir(_ACCESSOR, _spec("/notion", "/notion"))
-    assert out == ["/notion/pages", "/notion/databases"]
+    assert [row.name for row in out] == ["pages", "databases"]
 
 
 @pytest.mark.asyncio
-async def test_pages_listing_cold():
-    out = await readdir_mod.readdir(_ACCESSOR, _spec("/pages"))
-    assert out == [f"/pages/Top1__{TOP_ID}"]
-
-
-@pytest.mark.asyncio
-async def test_pages_listing_keeps_prefix_on_warm_cache_hit():
-    index = RAMIndexCacheStore()
-    spec = _spec("/notion/pages", "/notion")
-    cold = await readdir_mod.readdir(_ACCESSOR, spec, index)
-    warm = await readdir_mod.readdir(_ACCESSOR, spec, index)
-    assert warm == cold
-    assert warm == [f"/notion/pages/Top1__{TOP_ID}"]
-
-
-@pytest.mark.asyncio
-async def test_pages_listing_stores_remote_time():
-    index = RAMIndexCacheStore()
-    spec = _spec("/notion/pages", "/notion")
-    await readdir_mod.readdir(_ACCESSOR, spec, index)
-    # The index is keyed by the full virtual path (the kit standard, and
-    # what invalidation walks), not the mount-relative key the old
-    # bespoke readdir used.
-    lookup = await index.get(f"/notion/pages/Top1__{TOP_ID}")
-    assert lookup.entry is not None
-    assert lookup.entry.remote_time == "2026-01-02T00:00:00.000Z"
+async def test_pages_listing_carries_each_page_id_and_time():
+    (page,) = await readdir_mod.readdir(_ACCESSOR, _spec("/pages"))
+    assert page.name == f"Top1__{TOP_ID}"
+    assert page.modified == "2026-01-02T00:00:00.000Z"
+    assert page.extra == {"page_id": TOP_ID}
 
 
 @pytest.mark.asyncio
@@ -112,8 +90,12 @@ async def test_a_long_child_page_title_fits_name_max(monkeypatch):
         ),
     )
 
-    out = await readdir_mod.readdir(_ACCESSOR, _spec(f"/pages/Top1__{TOP_ID}"))
-    names = [p.rsplit("/", 1)[1] for p in out if not p.endswith("page.json")]
+    out = await readdir_mod.readdir(
+        _ACCESSOR,
+        _spec(f"/pages/Top1__{TOP_ID}"),
+        FileStat(name=f"Top1__{TOP_ID}", type=FileType.DIRECTORY),
+    )
+    names = [row.name for row in out if row.name != "page.json"]
 
     assert names == [format_segment(title, child_id)]
     assert byte_length(names[0]) <= NAME_MAX_BYTES

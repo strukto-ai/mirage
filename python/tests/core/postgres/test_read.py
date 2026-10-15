@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.postgres.read import (
     first_lines,
     follow,
@@ -30,8 +29,11 @@ from mirage.core.postgres.read import (
     row_line,
 )
 from mirage.errors.types import FileTooLargeError
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.postgres.config import PostgresConfig
+
+# The entity directory a read is under, as the mount hands its row.
+ENTITY = FileStat(name="users", type=FileType.DIRECTORY)
 
 
 @asynccontextmanager
@@ -60,11 +62,6 @@ def _accessor(
     return a
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 async def _catalog_schemas(conn, allowlist):
     # `client.list_schemas`'s contract over a catalog holding two schemas.
     return [
@@ -74,8 +71,8 @@ async def _catalog_schemas(conn, allowlist):
 
 @pytest.fixture(autouse=True)
 def catalog():
-    # A read proves the entity directory first, through the guards stat
-    # runs, so the entity has to exist in a schema the mount can see.
+    # The line calls prove the entity directory first, through the
+    # guards, so the entity has to exist in a schema the mount can see.
     with (
         patch(
             "mirage.core.postgres.client.list_schemas",
@@ -140,6 +137,7 @@ async def test_read_entity_schema_json_table():
                 virtual="/public/tables/users/schema.json",
                 directory="/public/tables/users/schema.json",
             ),
+            parent=ENTITY,
         )
     parsed = json.loads(out)
     assert parsed == fake_doc
@@ -162,6 +160,7 @@ async def test_read_entity_schema_json_view_kind():
                 virtual="/public/views/v1/schema.json",
                 directory="/public/views/v1/schema.json",
             ),
+            parent=ENTITY,
         )
     mock_fn.assert_awaited_once_with(accessor, "public", "v1", "view")
 
@@ -180,6 +179,7 @@ async def test_read_rows_returns_jsonl():
                 virtual="/public/tables/users/rows.jsonl",
                 directory="/public/tables/users/rows.jsonl",
             ),
+            parent=ENTITY,
         )
     lines = out.decode().strip().split("\n")
     assert len(lines) == 2
@@ -199,6 +199,7 @@ async def test_read_rows_too_many_rows_raises():
                     virtual="/public/tables/users/rows.jsonl",
                     directory="/public/tables/users/rows.jsonl",
                 ),
+                parent=ENTITY,
             )
 
 
@@ -215,6 +216,7 @@ async def test_read_rows_too_many_bytes_raises():
                     virtual="/public/tables/users/rows.jsonl",
                     directory="/public/tables/users/rows.jsonl",
                 ),
+                parent=ENTITY,
             )
 
 
@@ -233,6 +235,7 @@ async def test_read_rows_with_explicit_limit_bypasses_guard():
             ),
             limit=5,
             offset=0,
+            parent=ENTITY,
         )
         mc.estimate_size.assert_not_called()
     lines = out.decode().strip().split("\n")
@@ -253,6 +256,7 @@ async def test_read_rows_with_only_offset_bypasses_guard():
                 directory="/public/tables/users/rows.jsonl",
             ),
             offset=10,
+            parent=ENTITY,
         )
         mc.estimate_size.assert_not_called()
 
@@ -270,6 +274,7 @@ async def test_read_rows_empty_returns_empty_bytes():
                 virtual="/public/tables/users/rows.jsonl",
                 directory="/public/tables/users/rows.jsonl",
             ),
+            parent=ENTITY,
         )
     assert out == b""
 
@@ -304,6 +309,7 @@ async def test_read_view_rows_names_the_view_in_the_refusal():
                     virtual="/public/views/v1/rows.jsonl",
                     directory="/public/views/v1/rows.jsonl",
                 ),
+                parent=ENTITY,
             )
 
 
@@ -311,7 +317,9 @@ async def test_read_view_rows_names_the_view_in_the_refusal():
 async def test_a_table_under_a_schema_outside_schemas_is_enoent_to_read():
     """``schemas`` hid the schema from ``ls`` while ``cat`` of a table
     under it fetched its rows: the read addressed the database by the
-    names in the path and never asked whether the mount could see them."""
+    names in the path and never asked whether the mount could see them.
+    A read now stands on the entity row the mount hands it, which no
+    listing of a hidden schema names."""
     accessor = _accessor(schemas=["public"])
     with patch("mirage.core.postgres.read.client") as mc:
         mc.estimate_size = AsyncMock(return_value=(1, 10))
@@ -334,6 +342,7 @@ async def test_a_table_under_a_schema_outside_schemas_is_enoent_to_read():
                 virtual="/public/tables/users/rows.jsonl",
                 directory="/public/tables/users",
             ),
+            parent=ENTITY,
         )
     assert json.loads(out) == {"id": 1}
 
@@ -364,6 +373,7 @@ async def test_a_whole_read_is_not_truncated_by_a_stale_estimate():
                 virtual="/public/tables/users/rows.jsonl",
                 directory="/public/tables/users",
             ),
+            parent=ENTITY,
         )
     assert len(out.decode().splitlines()) == 40
 
@@ -382,6 +392,7 @@ async def test_a_table_the_estimate_undercounted_is_refused_on_its_rows():
                     virtual="/public/tables/users/rows.jsonl",
                     directory="/public/tables/users",
                 ),
+                parent=ENTITY,
             )
     assert mc.fetch_bounded_rows.await_args.kwargs["limit"] == 11
 
@@ -399,6 +410,7 @@ async def test_whole_read_refuses_bytes_before_serializing():
             await read(
                 accessor,
                 PathSpec.from_str_path("/public/tables/users/rows.jsonl"),
+                parent=ENTITY,
             )
         render.assert_not_called()
         mc.fetch_rows.assert_not_called()
@@ -414,9 +426,11 @@ async def test_whole_read_checks_rendered_utf8_bytes(budget, refuses):
         path = PathSpec.from_str_path("/public/tables/users/rows.jsonl")
         if refuses:
             with pytest.raises(FileTooLargeError, match="rows.jsonl"):
-                await read(accessor, path)
+                await read(accessor, path, parent=ENTITY)
         else:
-            assert await read(accessor, path) == '{"x":"é"}\n'.encode()
+            assert await read(accessor, path, parent=ENTITY) == (
+                '{"x":"é"}\n'.encode()
+            )
 
 
 # A row line spells each number as TypeScript's JSON.stringify does: whole

@@ -15,10 +15,12 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../accessor/trello.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, type FileStat } from '../../types.ts'
+import { TrelloVFS } from '../../vfs/trello/trello.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TrelloTransport } from './client.ts'
 import { normalizeWorkspace, toJsonBytes } from './normalize.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import { boardInScope, filteredBoards, filteredWorkspaces, readdir } from './readdir.ts'
 
 interface Call {
@@ -40,17 +42,28 @@ function spec(virtual: string, prefix = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
+// The account behind a mount at /mnt/trello, which lists each directory's
+// parent to hand an entry lister the row it needs.
+function mounted(accessor: TrelloAccessor): Workspace {
+  const vfs = Object.assign(new TrelloVFS({ apiKey: 'k', apiToken: 't' }), { accessor })
+  return new Workspace({ '/mnt/trello/': vfs })
+}
+
+async function listedAt(accessor: TrelloAccessor, virtual: string): Promise<string[]> {
+  return (await mounted(accessor).dispatch('readdir', virtual)) as string[]
+}
+
 describe('trello readdir root', () => {
   it('returns workspaces virtual root', async () => {
     const t = new FakeTransport(() => [])
-    const out = await readdir(new TrelloAccessor(t), spec('/mnt/trello', '/mnt/trello'))
-    expect(out).toEqual(['/mnt/trello/workspaces'])
+    const out = rowsOf(await readdir(new TrelloAccessor(t), spec('/mnt/trello', '/mnt/trello')))
+    expect(out.map((row) => row.name)).toEqual(['workspaces'])
     expect(t.calls).toHaveLength(0)
   })
 })
 
 describe('trello readdir /workspaces', () => {
-  it('lists workspaces and populates index', async () => {
+  it('lists workspaces with their ids', async () => {
     const t = new FakeTransport((path) => {
       if (path === '/members/me/organizations') {
         return [
@@ -60,33 +73,26 @@ describe('trello readdir /workspaces', () => {
       }
       return []
     })
-    const idx = new RAMIndexCacheStore()
-    const out = await readdir(
-      new TrelloAccessor(t),
-      spec('/mnt/trello/workspaces', '/mnt/trello'),
-      idx,
+    const out = rowsOf(
+      await readdir(new TrelloAccessor(t), spec('/mnt/trello/workspaces', '/mnt/trello')),
     )
-    expect(out).toEqual(['/mnt/trello/workspaces/Acme__w1', '/mnt/trello/workspaces/beta__w2'])
-    const lookup = await idx.get('/mnt/trello/workspaces/Acme__w1')
-    expect(lookup.entry?.id).toBe('w1')
-    expect(lookup.entry?.resourceType).toBe('trello/workspace')
+    expect(out.map((row) => row.name)).toEqual(['Acme__w1', 'beta__w2'])
+    expect(out[0]?.extra.workspace_id).toBe('w1')
   })
 
   it('lists a workspace dir with a sized workspace.json', async () => {
     const ws = { id: 'w1', displayName: 'Acme' }
     const t = new FakeTransport(() => [ws])
-    const idx = new RAMIndexCacheStore()
-    const out = await readdir(
-      new TrelloAccessor(t),
-      spec('/mnt/trello/workspaces/Acme__w1', '/mnt/trello'),
-      idx,
-    )
+    const out = await listedAt(new TrelloAccessor(t), '/mnt/trello/workspaces/Acme__w1')
     expect(out).toEqual([
       '/mnt/trello/workspaces/Acme__w1/workspace.json',
       '/mnt/trello/workspaces/Acme__w1/boards',
     ])
-    const lookup = await idx.get('/mnt/trello/workspaces/Acme__w1/workspace.json')
-    expect(lookup.entry?.size).toBe(toJsonBytes(normalizeWorkspace(ws)).byteLength)
+    const row = (await mounted(new TrelloAccessor(t)).dispatch(
+      'stat',
+      '/mnt/trello/workspaces/Acme__w1/workspace.json',
+    )) as FileStat
+    expect(row.size).toBe(toJsonBytes(normalizeWorkspace(ws)).byteLength)
   })
 
   it('filters by workspaceId', async () => {
@@ -94,42 +100,18 @@ describe('trello readdir /workspaces', () => {
       { id: 'w1', displayName: 'Acme' },
       { id: 'w2', displayName: 'Beta' },
     ])
-    const idx = new RAMIndexCacheStore()
-    const out = await readdir(
+    const out = await listedAt(
       new TrelloAccessor(t, { workspaceId: 'w2' }),
-      spec('/mnt/trello/workspaces', '/mnt/trello'),
-      idx,
+      '/mnt/trello/workspaces',
     )
     expect(out).toEqual(['/mnt/trello/workspaces/Beta__w2'])
-  })
-
-  it('returns from index cache without API call', async () => {
-    const idx = new RAMIndexCacheStore()
-    const t1 = new FakeTransport(() => [{ id: 'w1', displayName: 'Acme' }])
-    await readdir(new TrelloAccessor(t1), spec('/mnt/trello/workspaces', '/mnt/trello'), idx)
-    const t2 = new FakeTransport(() => {
-      throw new Error('should not be called')
-    })
-    const out = await readdir(
-      new TrelloAccessor(t2),
-      spec('/mnt/trello/workspaces', '/mnt/trello'),
-      idx,
-    )
-    expect(out).toEqual(['/mnt/trello/workspaces/Acme__w1'])
-    expect(t2.calls).toHaveLength(0)
   })
 })
 
 describe('trello readdir /workspaces/<ws>', () => {
   it('returns workspace.json + boards children', async () => {
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport(() => [{ id: 'w1', displayName: 'Acme' }])
-    await readdir(new TrelloAccessor(t), spec('/mnt/trello/workspaces', '/mnt/trello'), idx)
-    const out = await readdir(
-      new TrelloAccessor(t),
-      spec('/mnt/trello/workspaces/Acme__w1', '/mnt/trello'),
-      idx,
-    )
+    const out = await listedAt(new TrelloAccessor(t), '/mnt/trello/workspaces/Acme__w1')
     expect(out).toEqual([
       '/mnt/trello/workspaces/Acme__w1/workspace.json',
       '/mnt/trello/workspaces/Acme__w1/boards',
@@ -139,7 +121,6 @@ describe('trello readdir /workspaces/<ws>', () => {
 
 describe('trello readdir boards', () => {
   it('lists boards with auto-bootstrap of workspace parent', async () => {
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport((path) => {
       if (path === '/members/me/organizations') return [{ id: 'w1', displayName: 'Acme' }]
       if (path === '/organizations/w1/boards') {
@@ -147,19 +128,17 @@ describe('trello readdir boards', () => {
       }
       return []
     })
-    const out = await readdir(
-      new TrelloAccessor(t),
-      spec('/mnt/trello/workspaces/Acme__w1/boards', '/mnt/trello'),
-      idx,
-    )
+    const out = await listedAt(new TrelloAccessor(t), '/mnt/trello/workspaces/Acme__w1/boards')
     expect(out).toEqual(['/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1'])
-    const lookup = await idx.get('/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1')
-    expect(lookup.entry?.id).toBe('b1')
-    expect(lookup.entry?.remoteTime).toBe('2025-01-01')
+    const row = (await mounted(new TrelloAccessor(t)).dispatch(
+      'stat',
+      '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1',
+    )) as FileStat
+    expect(row.extra.board_id).toBe('b1')
+    expect(row.modified).toBe('2025-01-01')
   })
 
   it('filters by boardIds', async () => {
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport((path) => {
       if (path === '/members/me/organizations') return [{ id: 'w1', displayName: 'Acme' }]
       if (path === '/organizations/w1/boards') {
@@ -170,10 +149,9 @@ describe('trello readdir boards', () => {
       }
       return []
     })
-    const out = await readdir(
+    const out = await listedAt(
       new TrelloAccessor(t, { boardIds: ['b1'] }),
-      spec('/mnt/trello/workspaces/Acme__w1/boards', '/mnt/trello'),
-      idx,
+      '/mnt/trello/workspaces/Acme__w1/boards',
     )
     expect(out).toEqual(['/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1'])
   })
@@ -181,16 +159,14 @@ describe('trello readdir boards', () => {
 
 describe('trello readdir board children', () => {
   it('returns board.json + members + labels + lists', async () => {
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport((path) => {
       if (path === '/members/me/organizations') return [{ id: 'w1', displayName: 'Acme' }]
       if (path === '/organizations/w1/boards') return [{ id: 'b1', name: 'Roadmap' }]
       return []
     })
-    const out = await readdir(
+    const out = await listedAt(
       new TrelloAccessor(t),
-      spec('/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1', '/mnt/trello'),
-      idx,
+      '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1',
     )
     expect(out).toEqual([
       '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/board.json',
@@ -203,17 +179,15 @@ describe('trello readdir board children', () => {
 
 describe('trello readdir lists', () => {
   it('lists lists for a board', async () => {
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport((path) => {
       if (path === '/members/me/organizations') return [{ id: 'w1', displayName: 'Acme' }]
       if (path === '/organizations/w1/boards') return [{ id: 'b1', name: 'Roadmap' }]
       if (path === '/boards/b1/lists') return [{ id: 'l1', name: 'Doing' }]
       return []
     })
-    const out = await readdir(
+    const out = await listedAt(
       new TrelloAccessor(t),
-      spec('/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists', '/mnt/trello'),
-      idx,
+      '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists',
     )
     expect(out).toEqual(['/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1'])
   })
@@ -221,7 +195,6 @@ describe('trello readdir lists', () => {
 
 describe('trello readdir cards', () => {
   it('lists cards under a list', async () => {
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport((path) => {
       if (path === '/members/me/organizations') return [{ id: 'w1', displayName: 'Acme' }]
       if (path === '/organizations/w1/boards') return [{ id: 'b1', name: 'Roadmap' }]
@@ -231,13 +204,9 @@ describe('trello readdir cards', () => {
       }
       return []
     })
-    const out = await readdir(
+    const out = await listedAt(
       new TrelloAccessor(t),
-      spec(
-        '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards',
-        '/mnt/trello',
-      ),
-      idx,
+      '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards',
     )
     expect(out).toEqual([
       '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1',
@@ -247,7 +216,6 @@ describe('trello readdir cards', () => {
   it('entering a card dir reuses the traversal listings', async () => {
     // The old find chain re-fetched every ancestor listing per card dir,
     // which made a recursive walk quadratic in listing payloads.
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport((path) => {
       if (path === '/members/me/organizations') return [{ id: 'w1', displayName: 'Acme' }]
       if (path === '/organizations/w1/boards') return [{ id: 'b1', name: 'Roadmap' }]
@@ -261,19 +229,13 @@ describe('trello readdir cards', () => {
       }
       return []
     })
-    const accessor = new TrelloAccessor(t)
-    const listed = await readdir(
-      accessor,
-      spec(
-        '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards',
-        '/mnt/trello',
-      ),
-      idx,
-    )
+    const ws = mounted(new TrelloAccessor(t))
+    const listed = (await ws.dispatch(
+      'readdir',
+      '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards',
+    )) as string[]
     expect(listed).toHaveLength(3)
-    for (const cardDir of listed) {
-      await readdir(accessor, spec(cardDir, '/mnt/trello'), idx)
-    }
+    for (const cardDir of listed) await ws.dispatch('readdir', cardDir)
     expect(t.calls.filter((c) => c.path === '/lists/l1/cards')).toHaveLength(1)
     expect(t.calls.filter((c) => c.path === '/members/me/organizations')).toHaveLength(1)
     expect(t.calls.filter((c) => c.path === '/organizations/w1/boards')).toHaveLength(1)
@@ -281,7 +243,6 @@ describe('trello readdir cards', () => {
   })
 
   it('returns card.json + comments.jsonl under a card', async () => {
-    const idx = new RAMIndexCacheStore()
     const t = new FakeTransport((path) => {
       if (path === '/members/me/organizations') return [{ id: 'w1', displayName: 'Acme' }]
       if (path === '/organizations/w1/boards') return [{ id: 'b1', name: 'Roadmap' }]
@@ -289,13 +250,9 @@ describe('trello readdir cards', () => {
       if (path === '/lists/l1/cards') return [{ id: 'c1', name: 'fix bug' }]
       return []
     })
-    const out = await readdir(
+    const out = await listedAt(
       new TrelloAccessor(t),
-      spec(
-        '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1',
-        '/mnt/trello',
-      ),
-      idx,
+      '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1',
     )
     expect(out).toEqual([
       '/mnt/trello/workspaces/Acme__w1/boards/Roadmap__b1/lists/Doing__l1/cards/fix_bug__c1/card.json',
@@ -308,7 +265,7 @@ describe('trello readdir errors', () => {
   it('throws ENOENT for a workspace no listing carries', async () => {
     const t = new FakeTransport(() => [])
     await expect(
-      readdir(new TrelloAccessor(t), spec('/mnt/trello/workspaces/Acme__w1/boards', '/mnt/trello')),
+      listedAt(new TrelloAccessor(t), '/mnt/trello/workspaces/Acme__w1/boards'),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
@@ -318,15 +275,15 @@ describe('trello readdir unrecognized paths', () => {
     // Returning [] made `ls` and `tree` report a bogus path as real-but-empty,
     // and left `rg` without a message.
     const t = new FakeTransport(() => [])
-    await expect(
-      readdir(new TrelloAccessor(t), spec('/__nf_missing__'), new RAMIndexCacheStore()),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readdir(new TrelloAccessor(t), spec('/__nf_missing__'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('throws ENOENT for an unrecognized nested path', async () => {
     const t = new FakeTransport(() => [])
     await expect(
-      readdir(new TrelloAccessor(t), spec('/workspaces/w/nope/deeper'), new RAMIndexCacheStore()),
+      readdir(new TrelloAccessor(t), spec('/workspaces/w/nope/deeper')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

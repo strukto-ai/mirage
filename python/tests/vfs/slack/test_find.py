@@ -17,26 +17,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.config import CommandOpts
 from mirage.core.slack.config import SlackConfig
-from mirage.io.types import materialize
-from mirage.types import PathSpec
 from mirage.vfs.slack import SlackVFS
-from tests.fixtures.vfs_io import io_for
+from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import vfs_over
 
-GENERAL = "/channels/general__C1"
-
-
-def _find_command():
-    return generic("find").fn
-
-
-def _spec(virtual: str) -> PathSpec:
-    return PathSpec(
-        virtual=virtual, directory=virtual, vfs_path=virtual.strip("/")
-    )
+GENERAL = "/slack/channels/general__C1"
 
 
 FILE_CHANNELS = [{"id": "C1", "name": "general", "created": 1700000000}]
@@ -61,9 +47,9 @@ FILE_MESSAGES = [
 DAY = "2023-11-14"
 
 
-async def _run_with_files(paths, *texts: str, **flags) -> list[str]:
+async def _run_with_files(line: str) -> list[str]:
     accessor = SlackAccessor(SlackConfig(token="xoxb-test"))
-    find = _find_command()
+    ws = Workspace({"/slack/": vfs_over(SlackVFS, accessor)})
     with (
         patch(
             "mirage.core.slack.readdir.list_channels",
@@ -81,23 +67,15 @@ async def _run_with_files(paths, *texts: str, **flags) -> list[str]:
             return_value=FILE_MESSAGES,
         ),
     ):
-        stdout, _io = await find(
-            accessor,
-            paths,
-            list(texts),
-            CommandOpts(
-                io=io_for(SlackVFS, accessor),
-                index=RAMIndexCacheStore(),
-                flags={**flags},
-            ),
-        )
-        data = await materialize(stdout)
-    return data.decode().splitlines()
+        result = await ws.shell(line)
+        data = await result.stdout_str()
+    await ws.close()
+    return data.splitlines()
 
 
 @pytest.mark.asyncio
 async def test_type_f_lists_uploaded_files():
-    lines = await _run_with_files([_spec("/channels")], type="f")
+    lines = await _run_with_files("find /slack/channels -type f")
     assert f"{GENERAL}/{DAY}/chat.jsonl" in lines
     assert f"{GENERAL}/{DAY}/files/report__F1.pdf" in lines
     assert f"{GENERAL}/{DAY}/files" not in lines
@@ -105,6 +83,6 @@ async def test_type_f_lists_uploaded_files():
 
 @pytest.mark.asyncio
 async def test_type_d_lists_files_dir_not_blobs():
-    lines = await _run_with_files([_spec("/channels")], type="d")
+    lines = await _run_with_files("find /slack/channels -type d")
     assert f"{GENERAL}/{DAY}/files" in lines
     assert f"{GENERAL}/{DAY}/files/report__F1.pdf" not in lines

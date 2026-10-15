@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { enoent } from '../../errors/fs.ts'
+import { FileStat, FileType } from '../../types.ts'
 import { listMatviews, listSchemas, listTables, listViews } from './client.ts'
 import { detectScope, ENTITY_FILES, KIND_DIRS } from './scope.ts'
 
@@ -55,49 +55,48 @@ export async function entityGuard(
   if (!names.includes(match.slots.entity ?? '')) throw enoent(virtual)
 }
 
-async function listRoot(
-  accessor: PostgresAccessor,
-  _match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
-  const schemas = await listSchemas(accessor, accessor.config.schemas)
-  const entries: [string, IndexEntry][] = [
-    [
-      'database.json',
-      new IndexEntry({
-        id: 'database.json',
-        name: 'database.json',
-        resourceType: 'postgres/database_json',
-        vfsName: 'database.json',
-      }),
-    ],
-  ]
-  for (const s of schemas) {
-    entries.push([
-      s,
-      new IndexEntry({ id: s, name: s, resourceType: 'postgres/schema', vfsName: s }),
-    ])
-  }
-  return entries
+function schemaExtra(match: ScopeMatch): Record<string, string> {
+  return { schema: match.slots.schema ?? '' }
 }
 
-function listSchema(
-  _accessor: PostgresAccessor,
-  _match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
+function kindExtra(match: ScopeMatch): Record<string, string> {
+  return { schema: match.slots.schema ?? '', kind: match.slots.kind ?? '' }
+}
+
+function entityExtra(match: ScopeMatch): Record<string, string> {
+  return {
+    schema: match.slots.schema ?? '',
+    kind: match.slots.kind ?? '',
+    name: match.slots.entity ?? '',
+  }
+}
+
+// What each kind's stat carries in `extra`, listed or not.
+export const EXTRAS = {
+  schema: schemaExtra,
+  kind: kindExtra,
+  entity: entityExtra,
+  entity_schema: entityExtra,
+  entity_semantic: entityExtra,
+  entity_rows: entityExtra,
+}
+
+function dirs(names: readonly string[]): FileStat[] {
+  return names.map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
+}
+
+async function listRoot(accessor: PostgresAccessor, _match: ScopeMatch): Promise<FileStat[]> {
+  const schemas = await listSchemas(accessor, accessor.config.schemas)
+  return [new FileStat({ name: 'database.json', type: FileType.FILE }), ...dirs(schemas)]
+}
+
+function listSchema(_accessor: PostgresAccessor, _match: ScopeMatch): Promise<FileStat[]> {
   // tables/ and views/ exist by construction under every schema, the same
   // way the entity files below do under every entity.
-  return Promise.resolve(
-    KIND_DIRS.map((name) => [
-      name,
-      new IndexEntry({ id: name, name, resourceType: 'postgres/kind', vfsName: name }),
-    ]),
-  )
+  return Promise.resolve(dirs(KIND_DIRS))
 }
 
-async function listEntities(
-  accessor: PostgresAccessor,
-  match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
+async function listEntities(accessor: PostgresAccessor, match: ScopeMatch): Promise<FileStat[]> {
   const schema = match.slots.schema ?? ''
   const kind = match.slots.kind ?? ''
   let names: string[]
@@ -108,27 +107,11 @@ async function listEntities(
     const mviews = await listMatviews(accessor, schema)
     names = [...new Set([...views, ...mviews])].sort(compareCodePoints)
   }
-  return names.map((n) => [
-    n,
-    new IndexEntry({
-      id: n,
-      name: n,
-      resourceType: `postgres/${kind.replace(/s$/, '')}`,
-      vfsName: n,
-    }),
-  ])
+  return dirs(names)
 }
 
-function listEntityFiles(
-  _accessor: PostgresAccessor,
-  _match: ScopeMatch,
-): Promise<[string, IndexEntry][]> {
-  return Promise.resolve(
-    ENTITY_FILES.map((name) => [
-      name,
-      new IndexEntry({ id: name, name, resourceType: 'postgres/entity_file', vfsName: name }),
-    ]),
-  )
+function listEntityFiles(_accessor: PostgresAccessor, _match: ScopeMatch): Promise<FileStat[]> {
+  return Promise.resolve(ENTITY_FILES.map((name) => new FileStat({ name, type: FileType.FILE })))
 }
 
 export const readdir = makeReaddir<PostgresAccessor>(detectScope, {
@@ -148,4 +131,5 @@ export const readdir = makeReaddir<PostgresAccessor>(detectScope, {
     kind: schemaGuard,
     entity: entityGuard,
   },
+  extras: EXTRAS,
 })

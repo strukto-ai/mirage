@@ -13,14 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LinearAccessor } from '../../accessor/linear.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { isFsError } from '../../errors/fs.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { mayHold, recordQueries } from '../../utils/record_search.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
+import { rowAt, rowsOf } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { LinearApiError, searchIssues } from './client.ts'
 import { readdir } from './readdir.ts'
@@ -43,41 +41,52 @@ export const RECORD_KEYS: ReadonlySet<string> = new Set([
   'null',
 ])
 
-// A team's directories whose files' listing entries keep their text
-// (`keptText`).
+// A team's directories whose files' rows keep their text (`keptText`).
 export const KEPT_DIRS: readonly string[] = ['members', 'projects', 'cycles', 'documents']
 
 function child(directory: PathSpec, name: string): PathSpec {
   return mountedPath(directory, `${rstripSlash(directory.mountPath)}/${name}`)
 }
 
-// The `issues` directories and the kept-text directories under `scope`; null
-// for a scope inside an issue.
-async function walked(
+// A path, its row and its directory's row.
+type Walked = [PathSpec, FileStat, FileStat | null][]
+
+// A directory's children, each with its row and the directory's.
+async function listed(
   accessor: LinearAccessor,
-  scope: PathSpec,
-  index: IndexCacheStore | undefined,
-): Promise<[PathSpec[], PathSpec[]] | null> {
+  directory: PathSpec,
+  entry: FileStat | null,
+  parent: FileStat | null,
+): Promise<Walked> {
+  const rows = rowsOf(await readdir(accessor, directory, entry, parent))
+  return rows.map((row) => [child(directory, row.name), row, entry])
+}
+
+// The `issues` directories and the kept-text directories under `scope`, each
+// with its row and its team's; null for a scope inside an issue.
+async function walked(accessor: LinearAccessor, scope: PathSpec): Promise<[Walked, Walked] | null> {
   const match = detectScope(scope)
-  let teams: PathSpec[]
+  let teams: Walked
   if (match.kind === ROOT || match.kind === 'teams') {
-    const root = mountedPath(scope, '/teams')
-    teams = (await readdir(accessor, root, index)).map((name) =>
-      child(root, name.split('/').at(-1) ?? name),
-    )
-  } else if (match.kind === 'team') {
-    teams = [scope]
-  } else if (match.kind === 'issues') {
-    return [[scope], []]
-  } else if (KEPT_DIRS.includes(match.kind)) {
-    return [[], [scope]]
+    teams = await listed(accessor, mountedPath(scope, '/teams'), null, null)
+  } else if (match.kind === 'team' || match.kind === 'issues' || KEPT_DIRS.includes(match.kind)) {
+    const [entry, parent] = await rowAt(readdir, accessor, scope)
+    if (entry === null) return null
+    if (match.kind === 'issues') return [[[scope, entry, parent]], []]
+    if (match.kind !== 'team') return [[], [[scope, entry, parent]]]
+    teams = [[scope, entry, parent]]
   } else {
     return null
   }
-  return [
-    teams.map((team) => child(team, 'issues')),
-    teams.flatMap((team) => KEPT_DIRS.map((kind) => child(team, kind))),
-  ]
+  const issueDirs: Walked = []
+  const keptDirs: Walked = []
+  for (const [team, row] of teams) {
+    for (const found of await listed(accessor, team, row, null)) {
+      if (found[1].name === 'issues') issueDirs.push(found)
+      else if (KEPT_DIRS.includes(found[1].name)) keptDirs.push(found)
+    }
+  }
+  return [issueDirs, keptDirs]
 }
 
 // Each searched text's words, and the issues Linear names for each word; null
@@ -117,40 +126,36 @@ async function found(
   accessor: LinearAccessor,
   needle: string,
   under: readonly PathSpec[],
-  index: IndexCacheStore | undefined,
   askLinear: boolean,
 ): Promise<PathSpec[] | null> {
-  const issueDirs: PathSpec[] = []
-  const keptDirs: PathSpec[] = []
+  const issueDirs: Walked = []
+  const keptDirs: Walked = []
   for (const scope of under) {
-    const dirs = await walked(accessor, scope, index)
+    const dirs = await walked(accessor, scope)
     if (dirs === null) return null
     issueDirs.push(...dirs[0])
     keptDirs.push(...dirs[1])
   }
-  const issues: PathSpec[] = []
-  for (const directory of issueDirs) {
-    for (const listed of await readdir(accessor, directory, index)) {
-      issues.push(child(directory, listed.split('/').at(-1) ?? listed))
-    }
+  const issues: Walked = []
+  for (const [directory, row, above] of issueDirs) {
+    issues.push(...(await listed(accessor, directory, row, above)))
   }
-  const fresh = new RAMIndexCacheStore()
   const answer = askLinear && issues.length > 0 ? await named(accessor, needle) : null
   const held: PathSpec[] = []
   if (answer !== null) {
-    for (const path of issues) {
-      const entry = await resolveEntry(readdir, accessor, path, fresh)
-      const kept = entry?.extra.unsearched
-      if (entry === null || typeof kept !== 'string' || mayHold(...answer, entry.id, kept)) {
+    for (const [path, row] of issues) {
+      const kept = row.extra.unsearched
+      if (typeof kept !== 'string' || mayHold(...answer, String(row.extra.issue_id), kept)) {
         held.push(path)
       }
     }
   }
-  const out = (held.length > 0 ? held : issues).map((path) => child(path, 'issue.json'))
-  for (const directory of keptDirs) {
-    for (const listed of await readdir(accessor, directory, index)) {
-      const path = child(directory, listed.split('/').at(-1) ?? listed)
-      const kept = (await resolveEntry(readdir, accessor, path, fresh))?.extra.text
+  const out = (held.length > 0 ? held : issues.map(([path]) => path)).map((path) =>
+    child(path, 'issue.json'),
+  )
+  for (const [directory, row, above] of keptDirs) {
+    for (const [path, file] of await listed(accessor, directory, row, above)) {
+      const kept = file.extra.text
       if (typeof kept !== 'string' || kept.includes(needle)) out.push(path)
     }
   }
@@ -171,23 +176,21 @@ async function found(
  * escapes. Every issue is read without `askLinear`, when the text cannot be
  * searched, a search fails or answers a full page, or nothing is found, since
  * Linear indexes a write some time after it lands. A member, project, cycle or
- * document file is read when the text its listing entry kept (`keptText`)
- * holds `text` in any case, or when it was too large to keep. A read fetches
- * the record as it is now, so the kept text is checked against listings made
- * for this search rather than the walk's, which may be older; a file those
- * listings no longer hold is read. null for a text that is not ASCII or a
- * scope inside an issue. Mirrors Python's `files_containing`.
+ * document file is read when the text its row kept (`keptText`) holds `text`
+ * in any case, or when it was too large to keep. The walk lists each directory
+ * from Linear, so the kept text is checked against the records as they are
+ * now. null for a text that is not ASCII or a scope inside an issue. Mirrors
+ * Python's `files_containing`.
  */
 export async function filesContaining(
   accessor: LinearAccessor,
   text: string,
   under: readonly PathSpec[],
-  index: IndexCacheStore | undefined,
   askLinear: boolean,
 ): Promise<PathSpec[] | null> {
   if (/[\u0080-\uffff]/.test(text)) return null
   try {
-    return await found(accessor, text.toLowerCase(), under, index, askLinear)
+    return await found(accessor, text.toLowerCase(), under, askLinear)
   } catch (err) {
     // fetch rejects with a TypeError when the connection fails and a
     // DOMException when its timeout aborts it; a body that is not JSON

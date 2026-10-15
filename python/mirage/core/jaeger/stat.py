@@ -12,29 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
-from mirage.core.jaeger.readdir import readdir, service_guard
+from mirage.core.jaeger.readdir import EXTRAS, service_guard
 from mirage.core.jaeger.scope import detect_scope
-
-
-def _service_extra(match: ScopeMatch) -> dict[str, str]:
-    return {"service": match.slots["service"]}
-
-
-def _trace_extra(match: ScopeMatch) -> dict[str, str]:
-    return {"trace_id": match.slots["trace_id"]}
-
 
 stat = make_stat(
     detect_scope,
-    readdir,
     guards={
         "service": service_guard,
         "traces": service_guard,
     },
-    extras={
-        "service": _service_extra,
-        "trace": _trace_extra,
-    },
+    extras=EXTRAS,
 )

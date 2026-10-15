@@ -15,8 +15,8 @@
 from collections.abc import Callable
 from typing import TypeVar
 
-from mirage.cache.index import IndexEntry
 from mirage.core.slug_tree.types import DirRows
+from mirage.types import FileStat, FileType
 from mirage.utils.path import gnu_basename, parent
 
 V = TypeVar("V")
@@ -64,48 +64,36 @@ def drop_collisions(
 
 def dir_rows(
     files: dict[str, V],
-    prefix: str,
-    file_entry: Callable[[str, V], IndexEntry],
+    file_row: Callable[[str, V], FileStat],
 ) -> DirRows:
-    """Lay files out as each folder's rows under a mount prefix.
+    """Lay files out as each folder's rows, keyed by the folder's tree path.
 
     Args:
         files (dict[str, V]): tree path to the backend's document.
-        prefix (str): the mount prefix the keys are built against.
-        file_entry (Callable[[str, V], IndexEntry]): the backend's entry
-            for one file.
+        file_row (Callable[[str, V], FileStat]): the backend's row for one
+            file.
     """
     directories = {"/"}
     for path in files:
         parts = path.strip("/").split("/")
         for depth in range(1, len(parts)):
             directories.add("/" + "/".join(parts[:depth]))
-    rows: DirRows = {
-        virtual_path(directory, prefix): [] for directory in directories
-    }
+    rows: DirRows = {directory: [] for directory in directories}
     for directory in sorted(directories - {"/"}):
-        entry = IndexEntry(
-            id=directory.strip("/"),
-            name=gnu_basename(directory),
-            resource_type="folder",
-        )
-        rows[virtual_path(parent(directory), prefix)].append(
-            (entry.name, entry)
-        )
+        rows[parent(directory)].append(folder_row(gnu_basename(directory)))
     for path in sorted(files):
-        entry = file_entry(path, files[path])
-        rows[virtual_path(parent(path), prefix)].append((entry.name, entry))
+        rows[parent(path)].append(file_row(path, files[path]))
+    for children in rows.values():
+        children.sort(key=lambda row: row.name)
     return rows
 
 
-def mount_root(prefix: str) -> str:
-    return prefix.rstrip("/") or "/"
+def folder_row(name: str) -> FileStat:
+    """A folder of the tree, which exists only as its listing.
 
-
-def virtual_path(path: str, prefix: str) -> str:
-    root = mount_root(prefix)
-    if path == "/":
-        return root
-    if root == "/":
-        return path
-    return root + path
+    Args:
+        name (str): the folder's name.
+    """
+    return FileStat(
+        name=name, type=FileType.DIRECTORY, extra={"children_count": 0}
+    )

@@ -14,27 +14,10 @@
 
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { makeStat } from '../hierarchy/stat.ts'
-import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { entityGuard, readdir, schemaGuard } from './readdir.ts'
+import { EXTRAS, entityGuard, schemaGuard } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
-function schemaExtra(match: ScopeMatch): Record<string, string> {
-  return { schema: match.slots.schema ?? '' }
-}
-
-function kindExtra(match: ScopeMatch): Record<string, string> {
-  return { schema: match.slots.schema ?? '', kind: match.slots.kind ?? '' }
-}
-
-function entityExtra(match: ScopeMatch): Record<string, string> {
-  return {
-    schema: match.slots.schema ?? '',
-    kind: match.slots.kind ?? '',
-    name: match.slots.entity ?? '',
-  }
-}
-
-export const stat = makeStat<PostgresAccessor>(detectScope, readdir, {
+export const stat = makeStat<PostgresAccessor>(detectScope, {
   guards: {
     schema: schemaGuard,
     kind: schemaGuard,
@@ -43,12 +26,5 @@ export const stat = makeStat<PostgresAccessor>(detectScope, readdir, {
     entity_semantic: entityGuard,
     entity_rows: entityGuard,
   },
-  extras: {
-    schema: schemaExtra,
-    kind: kindExtra,
-    entity: entityExtra,
-    entity_schema: entityExtra,
-    entity_semantic: entityExtra,
-    entity_rows: entityExtra,
-  },
+  extras: EXTRAS,
 })

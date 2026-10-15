@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DifyAccessor } from '../../accessor/dify.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { formatScore } from '../../utils/score.ts'
@@ -45,7 +44,6 @@ export async function searchSegments(
   accessor: DifyAccessor,
   query: string,
   paths: readonly PathSpec[],
-  index?: IndexCacheStore,
   options: SearchOptions = {},
 ): Promise<[string, string][]> {
   const method = options.method ?? 'semantic'
@@ -64,7 +62,7 @@ export async function searchSegments(
     reranking_enable: false,
   }
   if (paths.length > 0) {
-    const conditions = await metadataConditions(accessor, paths, index)
+    const conditions = await metadataConditions(accessor, paths)
     if (conditions.length === 0) return []
     retrievalModel.metadata_filtering_conditions = { logical_operator: 'or', conditions }
   }
@@ -92,9 +90,8 @@ function validateArgs(query: string, method: string, topK: number, threshold: nu
 async function metadataConditions(
   accessor: DifyAccessor,
   paths: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<Record<string, unknown>[]> {
-  const targets = await targetEntries(DIFY_TREE, accessor, paths, index)
+  const targets = await targetEntries(DIFY_TREE, accessor, paths)
   const slugValues: string[] = []
   const nameValues: string[] = []
   for (const entry of targets.values()) {
@@ -200,14 +197,13 @@ export async function searchMany(
   accessor: DifyAccessor,
   paths: PathSpec[],
   query: SearchQuery,
-  index?: IndexCacheStore,
 ): Promise<[string, string][]> {
   validateOptions(query, ['top_k', 'threshold', 'method'])
   const topK = intOption(query, 'top_k', 10)
   const method = textOption(query, 'method', 'semantic')
   const threshold = floatOption(query, 'threshold', 0)
-  const [targets, prefix] = await searchScope(DIFY_TREE, accessor, paths, index)
-  return searchSegments(accessor, query.query, targets, index, {
+  const [targets, prefix] = await searchScope(DIFY_TREE, accessor, paths)
+  return searchSegments(accessor, query.query, targets, {
     method,
     topK,
     threshold,
@@ -219,7 +215,6 @@ export function searchResource(
   accessor: DifyAccessor,
   path: PathSpec,
   query: SearchQuery,
-  index?: IndexCacheStore,
 ): Promise<[string, string][]> {
-  return searchMany(accessor, [path], query, index)
+  return searchMany(accessor, [path], query)
 }

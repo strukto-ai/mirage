@@ -13,121 +13,49 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NotionAccessor } from '../../accessor/notion.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { assertParent } from '../hierarchy/probe.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
+import { enoent } from '../../errors/fs.ts'
 import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat } from '../hierarchy/stat.ts'
 import { pageSegmentName } from './normalize.ts'
-import { readdir } from './readdir.ts'
-import { guardRow, resolveRow } from './resolve.ts'
+import { resolveRow } from './resolve.ts'
 import { detectScope } from './scope.ts'
-
-function pageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.DIRECTORY,
-    modified: entry.remoteTime !== '' ? entry.remoteTime : null,
-    extra: { page_id: entry.id },
-  })
-}
 
 async function rowStat(
   accessor: NotionAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
+  parent: FileStat | null,
 ): Promise<FileStat> {
-  await assertParent(stat, accessor, path, index)
+  // No listing names a row: its data source lists it as a line of
+  // rows.jsonl, so a row proves itself against the data source the mount
+  // hands as its parent, once; the mount hands what it proved.
+  if (entry !== null) return entry
+  if (parent === null) throw enoent(path.virtual)
   const page = await resolveRow(accessor, match, path.virtual)
-  const name = pageSegmentName(page)
   const edited = typeof page.last_edited_time === 'string' ? page.last_edited_time : ''
   return new FileStat({
-    name,
+    name: pageSegmentName(page),
     type: FileType.DIRECTORY,
     modified: edited !== '' ? edited : null,
     extra: { page_id: typeof page.id === 'string' ? page.id : '' },
   })
 }
 
-async function rowJsonStat(
-  accessor: NotionAccessor,
-  match: ScopeMatch,
+function rowJsonStat(
+  _accessor: NotionAccessor,
+  _match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  _entry: FileStat | null,
+  parent: FileStat | null,
 ): Promise<FileStat> {
-  await assertParent(stat, accessor, path, index)
-  return new FileStat({ name: 'page.json', type: FileType.FILE, content: ContentType.JSON })
+  if (parent === null) return Promise.reject(enoent(path.virtual))
+  return Promise.resolve(
+    new FileStat({ name: 'page.json', type: FileType.FILE, content: ContentType.JSON }),
+  )
 }
 
-function pageJsonStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: ContentType.JSON,
-    size: entry.size,
-  })
-}
-
-function databaseStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.DIRECTORY,
-    modified: entry.remoteTime !== '' ? entry.remoteTime : null,
-    extra: { database_id: entry.id },
-  })
-}
-
-function databaseJsonStat(match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: ContentType.JSON,
-    size: entry.size,
-    extra: { database_id: match.slots.database_id ?? '' },
-  })
-}
-
-function dataSourceStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.DIRECTORY,
-    modified: entry.remoteTime !== '' ? entry.remoteTime : null,
-    extra: { data_source_id: entry.id },
-  })
-}
-
-function dataSourceJsonStat(match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: ContentType.JSON,
-    size: entry.size,
-    extra: { data_source_id: match.slots.data_source_id ?? '' },
-  })
-}
-
-function rowsJsonlStat(match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileStat {
-  return new FileStat({
-    name: entry.vfsName,
-    type: FileType.FILE,
-    content: ContentType.TEXT,
-    size: entry.size,
-    extra: { data_source_id: match.slots.data_source_id ?? '' },
-  })
-}
-
-export const stat = makeStat(detectScope, readdir, {
+export const stat = makeStat(detectScope, {
   overrides: { row: rowStat, row_json: rowJsonStat },
-  guards: { page: guardRow, page_json: guardRow },
-  entryStats: {
-    page: pageStat,
-    page_json: pageJsonStat,
-    database: databaseStat,
-    database_json: databaseJsonStat,
-    data_source: dataSourceStat,
-    data_source_json: dataSourceJsonStat,
-    rows_jsonl: rowsJsonlStat,
-  },
 })

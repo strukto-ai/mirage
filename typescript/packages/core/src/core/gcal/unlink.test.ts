@@ -13,18 +13,40 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import type { GCalAccessor } from '../../accessor/gcal.ts'
+import type { Workspace } from '../../workspace/workspace/workspace.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
 import { API, makeAccessor, spec } from './_test_util.ts'
 
 vi.mock('./client.ts', async () => (await import('./_test_util.ts')).CLIENT)
 
-const { unlink } = await import('./unlink.ts')
+const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
+const { Workspace: MountWorkspace } = await import('../../workspace/workspace/workspace.ts')
+const MOUNTS = new WeakMap<GCalAccessor, Workspace>()
 
-let index: RAMIndexCacheStore
+// The one mount a test asks an accessor through, at /m, so the listings one
+// call keeps answer the next, as they do for a command.
+function mounted(accessor: GCalAccessor): Workspace {
+  let ws = MOUNTS.get(accessor)
+  if (ws === undefined) {
+    const vfs = Object.assign(new GCalVFS(accessor.config), { accessor })
+    ws = new MountWorkspace({ '/m/': vfs }, { mode: MountMode.WRITE })
+    MOUNTS.set(accessor, ws)
+  }
+  return ws
+}
+
+// The mounted spelling of a path below the mount.
+function at(path: PathSpec): string {
+  return path.virtual === '/' ? '/m' : `/m${path.virtual}`
+}
+
+async function unlink(accessor: GCalAccessor, path: PathSpec): Promise<void> {
+  await mounted(accessor).dispatch('unlink', at(path))
+}
 
 beforeEach(() => {
   API.reset()
-  index = new RAMIndexCacheStore()
 })
 
 describe('gcal unlink', () => {
@@ -34,7 +56,7 @@ describe('gcal unlink', () => {
     [1, '/primary/2026-08-11/aaaa1__0900-1030_PhD_Defense.gcal.json'],
     [7, '/primary/2026-08-10--2026-08-16/aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json'],
   ])('deletes the event a %i-day name carries', async (size, path) => {
-    await unlink(makeAccessor({ bucket_days: size }), spec(path), index)
+    await unlink(makeAccessor({ bucket_days: size }), spec(path))
     expect(API.deleted).toEqual([['integ@example.com', 'aaaa1']])
     expect(API.listed.map((call) => call[0])).toEqual(['integ@example.com'])
   })
@@ -50,7 +72,7 @@ describe('gcal unlink', () => {
     ['/Exec__busy@group.calendar.google.com/2026-08-11/aaaa1__0900-1030_busy.gcal.json', 'EACCES'],
     ['/nope/2026-08-11/aaaa1__0900-1030_X.gcal.json', 'ENOENT'],
   ])('refuses %s with %s and deletes nothing', async (path, code) => {
-    await expect(unlink(makeAccessor(), spec(path), index)).rejects.toMatchObject({ code })
+    await expect(unlink(makeAccessor(), spec(path))).rejects.toMatchObject({ code })
     expect(API.deleted).toEqual([])
   })
 })

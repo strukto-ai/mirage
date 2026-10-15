@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { DU_MAX_ENTRIES } from '../../core/slack/constants.ts'
 import {
   follow as slackFollow,
@@ -25,8 +24,9 @@ import {
 import { readdir as slackReaddir } from '../../core/slack/readdir.ts'
 import { filesContaining as slackFilesContaining } from '../../core/slack/search.ts'
 import { stat as slackStat } from '../../core/slack/stat.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 
 /**
  * Slack's functions over its accessor, which the node and browser
@@ -35,6 +35,14 @@ import { BaseVFS } from '../base.ts'
 export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   override readonly maxDuEntries: number | null = DU_MAX_ENTRIES
   override readonly readsRanges: boolean = true
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    readdir: ['entry'],
+    read: ['entry', 'parent'],
+    readStream: ['entry', 'parent'],
+    follow: ['entry', 'parent'],
+    stat: ['entry', 'parent'],
+  } as const
   // Slack search names channel and DM days; users and file blobs are read as
   // usual.
   override readonly searchable: readonly string[] = [
@@ -42,18 +50,26 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
     'dms/*/*/chat.jsonl',
   ]
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return slackReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return slackReaddir(this.accessor, path, handed?.entry)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return slackRead(this.accessor, path, index)
-    return slackReadRange(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    const entry = handed?.entry ?? null
+    const parent = handed?.parent ?? null
+    if (offset === 0 && size === null) return slackRead(this.accessor, path, entry, parent)
+    return slackReadRange(
+      this.accessor,
+      path,
+      entry,
+      parent,
+      size === null ? { offset } : { offset, size },
+    )
   }
 
   override readMany(
@@ -66,30 +82,29 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
 
   override readStream(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     signal?: AbortSignal,
   ): AsyncIterable<Uint8Array> {
-    return slackReadStream(this.accessor, path, index, signal)
+    return slackReadStream(this.accessor, path, handed?.entry, handed?.parent, signal)
   }
 
   override follow(
     path: PathSpec,
     n: number,
     interval: number,
-    index?: IndexCacheStore,
+    handed?: Handed,
   ): Promise<AsyncIterable<Uint8Array> | null> {
-    return slackFollow(this.accessor, path, n, interval, index)
+    return slackFollow(this.accessor, path, n, interval, handed?.entry, handed?.parent)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return slackStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return slackStat(this.accessor, path, handed?.entry, handed?.parent)
   }
 
   override filesContaining(
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     if (
       !opts.wholeWord ||
@@ -97,6 +112,6 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
       !(this.accessor.transport.searchAvailable?.() ?? true)
     )
       return Promise.resolve(null)
-    return slackFilesContaining(this.accessor, text, [path], index)
+    return slackFilesContaining(this.accessor, text, [path])
   }
 }

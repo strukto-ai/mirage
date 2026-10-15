@@ -18,9 +18,8 @@ import aiohttp
 import pytest
 
 import mirage.core.google.search as search_mod
-from mirage.cache.index import IndexCacheStore, IndexEntry, RAMIndexCacheStore
 from mirage.core.google.search import drive_queries, files_containing
-from mirage.types import PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.generated.google_vocabulary import DOCS_WORDS
 
 MIME = "application/vnd.google-apps.document"
@@ -30,22 +29,19 @@ CORPORA = {
 }
 
 
-async def _readdir(accessor, path: PathSpec, index: IndexCacheStore):
-    key = path.vfs_path.strip("/")
-    entries = [
-        (
-            f"{name}.gdoc.json",
-            IndexEntry(
-                id=file_id,
-                name=name,
-                resource_type="gdocs/file",
-                vfs_name=f"{name}.gdoc.json",
-            ),
+def _rows(key: str) -> list[FileStat]:
+    return [
+        FileStat(
+            name=f"{name}.gdoc.json",
+            type=FileType.FILE,
+            extra={"doc_id": file_id, "doc_name": name},
         )
         for name, file_id in CORPORA[key]
     ]
-    await index.set_dir(f"/docs/{key}", entries)
-    return [f"/docs/{key}/{name}" for name, _ in entries]
+
+
+async def _readdir(accessor, path: PathSpec) -> DirListing:
+    return DirListing(entries=_rows(path.vfs_path.strip("/")))
 
 
 def _scope(vfs_path: str = "") -> PathSpec:
@@ -69,7 +65,7 @@ def _answer(monkeypatch, ids, complete=True, fail=None) -> list[tuple]:
 async def _ask(text: str, under: list[PathSpec]) -> list[PathSpec] | None:
     accessor = SimpleNamespace(token_manager=None)
     return await files_containing(
-        accessor, _readdir, MIME, DOCS_WORDS, text, under, RAMIndexCacheStore()
+        accessor, _readdir, MIME, DOCS_WORDS, text, under
     )
 
 
@@ -145,18 +141,12 @@ async def test_each_query_is_asked_and_their_answers_joined(monkeypatch):
     assert [query for query, _, _ in asked] == ["notes", "otes"]
 
 
-async def _unfinished(accessor, path: PathSpec, index: IndexCacheStore):
-    listed = await _readdir(accessor, path, RAMIndexCacheStore())
-    for name in listed:
-        leaf = name.rsplit("/", 1)[-1]
-        await index.put(
-            name, IndexEntry(id=leaf, name=leaf, resource_type="gdocs/file")
-        )
-    return listed
+async def _unfinished(accessor, path: PathSpec) -> DirListing:
+    return DirListing(entries=_rows(path.vfs_path.strip("/")), partial=True)
 
 
-# Drive could not finish the listing, so its entries are cached but not the
-# directory, and grep's own walk lists it again and may find more.
+# Drive could not finish the listing, so it is not the directory, and
+# grep's own walk lists it again and may find more.
 @pytest.mark.asyncio
 async def test_an_unfinished_listing_reads_every_file(monkeypatch):
     _answer(monkeypatch, ["a.gdoc.json"])
@@ -168,6 +158,5 @@ async def test_an_unfinished_listing_reads_every_file(monkeypatch):
         DOCS_WORDS,
         "wombat",
         [_scope("owned")],
-        RAMIndexCacheStore(),
     )
     assert out is None

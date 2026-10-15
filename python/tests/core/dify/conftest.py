@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -51,11 +50,6 @@ def dify_accessor() -> SimpleNamespace:
             dataset_id="dataset-1", slug_metadata_name="slug"
         )
     )
-
-
-@pytest.fixture
-def dify_index() -> RAMIndexCacheStore:
-    return RAMIndexCacheStore()
 
 
 @pytest.fixture

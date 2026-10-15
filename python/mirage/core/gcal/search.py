@@ -17,7 +17,6 @@ import logging
 import aiohttp
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.gcal.client import list_events
 from mirage.core.gcal.day import day_bounds
 from mirage.core.gcal.readdir import (
@@ -28,7 +27,7 @@ from mirage.core.gcal.readdir import (
     scoped_bucket,
 )
 from mirage.core.gcal.scope import detect_scope
-from mirage.core.hierarchy.probe import resolve_entry
+from mirage.core.hierarchy.probe import rows_of
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.time_range import parse_time
 from mirage.types import PathSpec
@@ -40,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _buckets(
-    accessor: GCalAccessor, scope: PathSpec, index: IndexCacheStore
+    accessor: GCalAccessor, scope: PathSpec
 ) -> list[PathSpec] | None:
     """The bucket directories under ``scope``; None for a scope inside a
     bucket or a calendar's file.
@@ -48,7 +47,6 @@ async def _buckets(
     Args:
         accessor (GCalAccessor): the mount's accessor.
         scope (PathSpec): a directory grep walks.
-        index (IndexCacheStore): the mount's index.
     """
     match = detect_scope(normalize(scope)[1])
     if match.kind == "bucket":
@@ -56,8 +54,8 @@ async def _buckets(
     base = scope.mount_path.rstrip("/")
     if match.kind == ROOT:
         calendars = [
-            mounted_path(scope, f"{base}/{name.rsplit('/', 1)[-1]}")
-            for name in await readdir(accessor, scope, index)
+            mounted_path(scope, f"{base}/{row.name}")
+            for row in rows_of(await readdir(accessor, scope))
         ]
     elif match.kind == "calendar":
         calendars = [scope]
@@ -66,10 +64,9 @@ async def _buckets(
     buckets: list[PathSpec] = []
     for calendar in calendars:
         parent = calendar.mount_path.rstrip("/")
-        for listed in await readdir(accessor, calendar, index):
-            leaf = listed.rsplit("/", 1)[-1]
-            if leaf != CALENDAR_FILE:
-                buckets.append(mounted_path(calendar, f"{parent}/{leaf}"))
+        for row in rows_of(await readdir(accessor, calendar)):
+            if row.name != CALENDAR_FILE:
+                buckets.append(mounted_path(calendar, f"{parent}/{row.name}"))
     return buckets
 
 
@@ -77,7 +74,6 @@ async def files_containing(
     accessor: GCalAccessor,
     text: str,
     under: list[PathSpec],
-    index: IndexCacheStore,
 ) -> list[PathSpec] | None:
     """The event files under ``under`` whose event holds every word of
     ``text`` where Calendar's search finds it or where the listing kept it.
@@ -96,7 +92,6 @@ async def files_containing(
         accessor (GCalAccessor): the mount's accessor.
         text (str): the whole word or words searched for.
         under (list[PathSpec]): the directories walked.
-        index (IndexCacheStore): the mount's index.
     """
     queries = record_queries(text, frozenset(), whole_word=True)
     if queries is None:
@@ -108,7 +103,7 @@ async def files_containing(
         tz = bucket_zone(accessor, calendars)
         walked: dict[str, list[PathSpec]] = {}
         for scope in under:
-            buckets = await _buckets(accessor, scope, index)
+            buckets = await _buckets(accessor, scope)
             if buckets is None:
                 return None
             for bucket in buckets:
@@ -150,20 +145,16 @@ async def files_containing(
                 }
             for bucket in buckets:
                 parent = bucket.mount_path.rstrip("/")
-                for listed in await readdir(accessor, bucket, index):
-                    child = mounted_path(
-                        bucket, f"{parent}/{listed.rsplit('/', 1)[-1]}"
-                    )
-                    entry = await resolve_entry(
-                        readdir, accessor, child, index
-                    )
-                    if entry is None:
-                        return None
-                    kept = entry.extra.get("unsearched")
+                for row in rows_of(await readdir(accessor, bucket)):
+                    kept = row.extra.get("unsearched")
                     if not isinstance(kept, str):
                         return None
-                    if may_hold(asked, named, entry.id, kept):
-                        found.append(child)
+                    if may_hold(
+                        asked, named, str(row.extra.get("event_id")), kept
+                    ):
+                        found.append(
+                            mounted_path(bucket, f"{parent}/{row.name}")
+                        )
     except (OSError, aiohttp.ClientError, ValueError, RuntimeError) as exc:
         logger.debug("calendar search failed (%s); reading every file", exc)
         return None

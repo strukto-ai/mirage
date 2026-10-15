@@ -17,11 +17,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gsheets import GSheetsAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gsheets.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gsheets import GSheetsVFS
+from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
@@ -29,13 +29,8 @@ def accessor():
     return GSheetsAccessor(config=None, token_manager=None)
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
-
-
 @pytest.mark.asyncio
-async def test_stat_root(accessor, index):
+async def test_stat_root(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -43,14 +38,13 @@ async def test_stat_root(accessor, index):
             virtual="/gsheets",
             directory="/gsheets",
         ),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
-async def test_stat_owned_dir(accessor, index):
+async def test_stat_owned_dir(accessor):
     result = await stat(
         accessor,
         PathSpec(
@@ -58,47 +52,37 @@ async def test_stat_owned_dir(accessor, index):
             virtual="/gsheets/owned",
             directory="/gsheets/owned",
         ),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "owned"
 
 
 @pytest.mark.asyncio
-async def test_stat_sheet_from_cache(accessor, index):
-    await index.set_dir(
-        "/gsheets/owned",
-        [
-            (
-                "2026-04-01_My_Sheet__s1.gsheet.json",
-                IndexEntry(
-                    id="s1",
-                    name="My Sheet",
-                    resource_type="gsheets/file",
-                    remote_time="2026-04-01T00:00:00.000Z",
-                    vfs_name="2026-04-01_My_Sheet__s1.gsheet.json",
-                    size=512,
-                ),
-            ),
-        ],
-    )
-    target = "/gsheets/owned/2026-04-01_My_Sheet__s1.gsheet.json"
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key(target, "/gsheets"),
-            virtual=target,
-            directory=target,
-        ),
-        index,
-    )
+async def test_stat_sheet_from_the_listing(accessor):
+    stamp = "2026-04-01T00:00:00.000Z"
+    item = {
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+        "id": "s1",
+        "name": "My Sheet",
+        "modifiedTime": stamp,
+        "owners": [{"me": True}],
+    }
+    mounted = Mounted(GSheetsVFS, accessor, "/gsheets")
+    with patch(
+        "mirage.core.google.readdir.list_all_files",
+        new_callable=AsyncMock,
+        return_value=([item], True),
+    ):
+        (target,) = await mounted.readdir("/owned")
+        result = await mounted.stat(target.removeprefix("/gsheets"))
+    assert target == "/gsheets/owned/2026-04-01_My_Sheet__s1.gsheet.json"
     assert result.content == ContentType.JSON
     assert result.extra["doc_id"] == "s1"
-    assert result.fingerprint == "2026-04-01T00:00:00.000Z"
+    assert result.fingerprint == stamp
 
 
 @pytest.mark.asyncio
-async def test_stat_cache_miss_fetches_metadata_by_id(accessor, index):
+async def test_stat_cache_miss_fetches_metadata_by_id(accessor):
     files = [
         {
             "mimeType": "application/vnd.google-apps.spreadsheet",
@@ -122,7 +106,6 @@ async def test_stat_cache_miss_fetches_metadata_by_id(accessor, index):
                 virtual=target,
                 directory=target,
             ),
-            index,
         )
     assert result.content == ContentType.JSON
     assert result.extra["doc_id"] == "s1"
@@ -130,7 +113,7 @@ async def test_stat_cache_miss_fetches_metadata_by_id(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found_after_fallback(accessor, index):
+async def test_stat_not_found_after_fallback(accessor):
     files = [
         {
             "mimeType": "application/vnd.google-apps.spreadsheet",
@@ -155,5 +138,4 @@ async def test_stat_not_found_after_fallback(accessor, index):
                     virtual="/gsheets/owned/nope.gsheet.json",
                     directory="/gsheets/owned/nope.gsheet.json",
                 ),
-                index,
             )

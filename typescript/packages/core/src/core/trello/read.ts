@@ -38,7 +38,6 @@ import {
   toJsonBytes,
 } from './normalize.ts'
 import { detectScope } from './scope.ts'
-import { stat } from './stat.ts'
 
 async function readWorkspaceJson(
   accessor: TrelloAccessor,
@@ -119,5 +118,5 @@ export const read = makeRead<TrelloAccessor>(
     card_json: readCardJson,
     comments_jsonl: readComments,
   },
-  { stat },
+  { parented: true },
 )

@@ -14,14 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { Accessor } from '../../accessor/base.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { ContentType, PathSpec } from '../../types.ts'
-import { enoent } from '../../errors/fs.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { JSON_NAME } from './codec.ts'
-import type { ReaddirFn } from './probe.ts'
-import { makeReaddir, type Lister } from './readdir.ts'
+import { Codec, DATE, JSON_NAME } from './codec.ts'
 import { Slot, Scope, makeDetectScope } from './scope.ts'
 import { makeUnlink, type DeleteFn } from './unlink.ts'
 
@@ -34,15 +29,16 @@ const SCOPES: readonly Scope[] = [
     leaf: true,
     filetype: ContentType.JSON,
   }),
+  new Scope({ kind: 'room_day', segments: ['rooms', new Slot('room'), new Slot('day', DATE)] }),
+  new Scope({
+    kind: 'tagged',
+    segments: ['tags', new Slot('tag', new Codec({ validate: (text) => /^[a-z]+$/.test(text) }))],
+    leaf: true,
+    filetype: ContentType.TEXT,
+  }),
 ]
 
 const detectScope = makeDetectScope(SCOPES)
-
-const TREE: Record<string, string[]> = {
-  rooms: ['red', 'blue'],
-  red: ['a.json', 'b.json'],
-  blue: [],
-}
 
 class FakeAccessor extends Accessor {
   readonly calls: string[] = []
@@ -57,92 +53,37 @@ function spec(mountPath: string): PathSpec {
   })
 }
 
-const listRooms: Lister<FakeAccessor> = (accessor, _match) => {
-  accessor.calls.push('rooms')
-  return Promise.resolve(
-    (TREE.rooms ?? []).map((room): [string, IndexEntry] => [
-      room,
-      new IndexEntry({ id: room, name: room, resourceType: 'fake/room', vfsName: room }),
-    ]),
-  )
-}
-
-const listNotes: Lister<FakeAccessor> = (accessor, match) => {
-  const room = match.slots.room ?? ''
-  accessor.calls.push(`notes:${room}`)
-  return Promise.resolve(
-    (TREE[room] ?? []).map((note): [string, IndexEntry] => [
-      note,
-      new IndexEntry({ id: note, name: note, resourceType: 'fake/note', vfsName: note }),
-    ]),
-  )
-}
-
-const READDIR = makeReaddir<FakeAccessor>(detectScope, {
-  listers: {
-    rooms: listRooms,
-    room: listNotes,
-  },
-  staticRoot: ['rooms'],
-})
-
-const del: DeleteFn<FakeAccessor> = (accessor, _match, entry) => {
-  accessor.calls.push(`delete:${entry.id}`)
+const remove: DeleteFn<FakeAccessor> = (accessor, _match, entry) => {
+  accessor.calls.push(`delete:${entry.name}`)
   return Promise.resolve()
 }
 
-const UNLINK = makeUnlink<FakeAccessor>(detectScope, READDIR, { deleters: { note: del } })
-
-const readdirAbsent: ReaddirFn<FakeAccessor> = (_accessor, path, _index) =>
-  Promise.reject(enoent(path.virtual))
+const UNLINK = makeUnlink<FakeAccessor>(detectScope, { deleters: { note: remove } })
+const NOTE = new FileStat({ name: 'a.json', type: FileType.FILE })
 
 describe('hierarchy makeUnlink', () => {
-  it('resolves and deletes the entry, then invalidates the parent', async () => {
-    const index = new RAMIndexCacheStore()
+  it('deletes the row it is handed', async () => {
     const accessor = new FakeAccessor()
-    await UNLINK(accessor, spec('/rooms/red/a.json'), index)
-    expect(accessor.calls).toEqual(['notes:red', 'delete:a.json'])
-    const listing = await index.listDir('/h/rooms/red')
-    expect(listing.entries ?? null).toBeNull()
+    await UNLINK(accessor, spec('/rooms/red/a.json'), NOTE)
+    expect(accessor.calls).toEqual(['delete:a.json'])
   })
 
   it('refuses a directory', async () => {
-    await expect(UNLINK(new FakeAccessor(), spec('/rooms/red'))).rejects.toMatchObject({
-      code: 'EISDIR',
-    })
-    await expect(UNLINK(new FakeAccessor(), spec('/'))).rejects.toMatchObject({
-      code: 'EISDIR',
-    })
+    const accessor = new FakeAccessor()
+    await expect(UNLINK(accessor, spec('/rooms/red'))).rejects.toMatchObject({ code: 'EISDIR' })
+    await expect(UNLINK(accessor, spec('/'))).rejects.toMatchObject({ code: 'EISDIR' })
   })
 
-  it('answers missing or invalid paths with ENOENT', async () => {
-    const index = new RAMIndexCacheStore()
-    await expect(
-      UNLINK(new FakeAccessor(), spec('/rooms/red/nope.json'), index),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(UNLINK(new FakeAccessor(), spec('/halls/x.json'), index)).rejects.toMatchObject({
+  it('is ENOENT for a path no listing names', async () => {
+    const accessor = new FakeAccessor()
+    const path = spec('/rooms/red/nope.json')
+    await expect(UNLINK(accessor, path)).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: path.virtual,
+    })
+    await expect(UNLINK(accessor, spec('/halls/x.json'), NOTE)).rejects.toMatchObject({
       code: 'ENOENT',
     })
-  })
-
-  it('propagates a parent refresh failure', async () => {
-    const broken: ReaddirFn<FakeAccessor> = () => Promise.reject(new Error('backend unavailable'))
-    const unlink = makeUnlink<FakeAccessor>(detectScope, broken, { deleters: { note: del } })
-    await expect(
-      unlink(new FakeAccessor(), spec('/rooms/red/a.json'), new RAMIndexCacheStore()),
-    ).rejects.toThrow('backend unavailable')
-  })
-
-  it('names the operand when the parent is absent', async () => {
-    const unlink = makeUnlink<FakeAccessor>(detectScope, readdirAbsent, {
-      deleters: { note: del },
-    })
-    const path = spec('/rooms/red/a.json')
-    await expect(unlink(new FakeAccessor(), path, new RAMIndexCacheStore())).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-    await expect(unlink(new FakeAccessor(), path, new RAMIndexCacheStore())).rejects.toThrow(
-      path.virtual,
-    )
+    expect(accessor.calls).toEqual([])
   })
 })

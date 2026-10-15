@@ -15,10 +15,8 @@
 import { chunks } from '../../io/cooperative.ts'
 import { dayChannelId, followedDay, guardDay, readDays } from '../time_range.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import {
@@ -35,10 +33,11 @@ async function readChat(
   accessor: SlackAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
+  parent: FileStat | null,
 ): Promise<Uint8Array> {
   await guardDay(accessor, match, path.virtual)
-  const channelId = await dayChannelId(readdir, accessor, path, index)
+  const channelId = dayChannelId(path, entry, parent)
   return getHistoryJsonl(accessor, channelId, match.slots.day ?? '')
 }
 
@@ -46,21 +45,19 @@ async function readUser(
   accessor: SlackAccessor,
   _match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const entry = await resolveEntry(readdir, accessor, path, index)
   if (entry === null) throw enoent(path)
-  const user = await getUserProfile(accessor, entry.id)
+  const user = await getUserProfile(accessor, String(entry.extra.user_id))
   return userJsonBytes(user)
 }
 
 async function blobUrl(
   accessor: SlackAccessor,
   path: PathSpec,
-  index: IndexCacheStore | undefined,
+  entry: FileStat | null,
 ): Promise<string> {
   await guardDay(accessor, detectScope(path), path.virtual)
-  const entry = await resolveEntry(readdir, accessor, path, index)
   if (entry === null) throw enoent(path)
   const url =
     typeof entry.extra.url_private_download === 'string' ? entry.extra.url_private_download : ''
@@ -84,20 +81,21 @@ async function readBlob(
   accessor: SlackAccessor,
   _match: ScopeMatch,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null,
 ): Promise<Uint8Array> {
-  return downloadBlob(accessor, await blobUrl(accessor, path, index), 0, null)
+  return downloadBlob(accessor, await blobUrl(accessor, path, entry), 0, null)
 }
 
 async function readBlobRange(
   accessor: SlackAccessor,
   _match: ScopeMatch,
   path: PathSpec,
-  index: IndexCacheStore | undefined,
+  entry: FileStat | null,
+  _parent: FileStat | null,
   offset: number,
   size: number | null,
 ): Promise<Uint8Array> {
-  return downloadBlob(accessor, await blobUrl(accessor, path, index), offset, size)
+  return downloadBlob(accessor, await blobUrl(accessor, path, entry), offset, size)
 }
 
 export const read = makeRead<SlackAccessor>(detectScope, {
@@ -117,18 +115,19 @@ export const readRange = makeReadRange<SlackAccessor>(detectScope, read, {
 export async function* readStream(
   accessor: SlackAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
   signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array, void> {
   if (detectScope(path).kind === 'file_blob') {
-    const url = await blobUrl(accessor, path, index)
+    const url = await blobUrl(accessor, path, entry)
     const source =
       accessor.transport.downloadFileStream === undefined
         ? await downloadBlob(accessor, url, 0, null)
         : accessor.transport.downloadFileStream(url, signal)
     yield* chunks(source, signal)
   } else {
-    yield* chunks(await read(accessor, path, index), signal)
+    yield* chunks(await read(accessor, path, entry, parent), signal)
   }
 }
 
@@ -143,10 +142,11 @@ async function followChat(
   path: PathSpec,
   n: number,
   interval: number,
-  index?: IndexCacheStore,
+  entry: FileStat | null = null,
+  parent: FileStat | null = null,
 ): Promise<AsyncIterable<Uint8Array>> {
   await guardDay(accessor, match, path.virtual)
-  const channelId = await dayChannelId(readdir, accessor, path, index)
+  const channelId = dayChannelId(path, entry, parent)
   const day = match.slots.day ?? ''
   const [, end] = accessor.timeRange.dayBounds(day)
   return followedDay<SlackMessage>(

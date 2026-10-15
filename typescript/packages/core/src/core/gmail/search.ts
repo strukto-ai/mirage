@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../accessor/gmail.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { GoogleApiError } from '../google/client.ts'
-import { resolveEntry } from '../hierarchy/probe.ts'
+import { rowAt, rowsOf } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -51,26 +50,10 @@ function childOf(directory: PathSpec, name: string): PathSpec {
   return mountedPath(directory, `${rstripSlash(directory.mountPath)}/${name}`)
 }
 
-// The account's label ids, lowercased, from the mount root's listing; null
-// when the listing does not hold one.
-async function labelIds(
-  accessor: GmailAccessor,
-  scope: PathSpec,
-  index?: IndexCacheStore,
-): Promise<Set<string> | null> {
-  const root = mountedPath(scope, '/')
-  const ids = new Set<string>()
-  for (const listed of await readdir(accessor, root, index)) {
-    const entry = await resolveEntry(
-      readdir,
-      accessor,
-      childOf(root, listed.slice(listed.lastIndexOf('/') + 1)),
-      index,
-    )
-    if (entry === null) return null
-    ids.add(entry.id.toLowerCase())
-  }
-  return ids
+// The account's label ids, lowercased, from the mount root's listing.
+async function labelIds(accessor: GmailAccessor, scope: PathSpec): Promise<Set<string>> {
+  const listed = await readdir(accessor, mountedPath(scope, '/'))
+  return new Set(rowsOf(listed).map((row) => String(row.extra.label_id).toLowerCase()))
 }
 
 // Whether `needle` may lie in a message's labels field: across its quotes and
@@ -100,24 +83,28 @@ export async function filesContaining(
   accessor: GmailAccessor,
   text: string,
   under: readonly PathSpec[],
-  index?: IndexCacheStore,
 ): Promise<PathSpec[] | null> {
   const first = under[0]
   if (/[\u0080-\uffff]/.test(text) || first === undefined) return null
   const needle = text.toLowerCase()
   const found: PathSpec[] = []
-  const pending = under.filter((scope) => WALKED.has(detectScope(scope).kind))
   try {
-    const labels = await labelIds(accessor, first, index)
-    if (labels === null || inLabels(needle, labels)) return null
-    for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
-      for (const listed of await readdir(accessor, current, index)) {
-        const child = childOf(current, listed.slice(listed.lastIndexOf('/') + 1))
+    const labels = await labelIds(accessor, first)
+    if (inLabels(needle, labels)) return null
+    const pending: [PathSpec, FileStat | null][] = []
+    for (const scope of under) {
+      if (WALKED.has(detectScope(scope).kind)) {
+        pending.push([scope, (await rowAt(readdir, accessor, scope))[0]])
+      }
+    }
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      const [current, row] = next
+      for (const childRow of rowsOf(await readdir(accessor, current, row))) {
+        const child = childOf(current, childRow.name)
         const kind = detectScope(child).kind
-        if (WALKED.has(kind)) pending.push(child)
+        if (WALKED.has(kind)) pending.push([child, childRow])
         else if (kind === 'message') {
-          const entry = await resolveEntry(readdir, accessor, child, index)
-          const kept = entry?.extra.text
+          const kept = childRow.extra.text
           if (typeof kept !== 'string') return null
           if (kept.includes(needle)) found.push(child)
         }

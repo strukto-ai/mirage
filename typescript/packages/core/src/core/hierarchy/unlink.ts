@@ -13,63 +13,43 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-
-import type { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { stripSlash } from '../../utils/slash.ts'
-import { resolveEntry, type ReaddirFn } from './probe.ts'
 import { INVALID, type DetectFn, type ScopeMatch } from './scope.ts'
 
 export type DeleteFn<A extends Accessor> = (
   accessor: A,
   match: ScopeMatch,
-  entry: IndexEntry,
+  entry: FileStat,
 ) => Promise<void>
 
 /**
- * Build a hierarchy unlink: classify, resolve, delete, invalidate.
+ * Build a hierarchy unlink: classify, refuse, delete.
  *
- * A deleter owns only the backend delete call; classification, the
- * id-resolving parent listing, the directory refusal and the cache
- * invalidation happen here, identically for every backend. `deleters` holds
- * one deleter per leaf kind. The match rides along because a delete
+ * A deleter owns only the backend delete call, handed the row the parent's
+ * listing names; classification and the directory refusal happen here,
+ * identically for every backend. The match rides along because a delete
  * addressed inside a container needs the container's slots (gcal deletes an
- * event from a calendar), while a globally-id-addressed backend just
- * ignores it.
+ * event from a calendar), while a globally-id-addressed backend just ignores
+ * it. Mirrors `make_unlink` in `mirage/core/hierarchy/unlink.py`.
  */
 export function makeUnlink<A extends Accessor>(
   detect: DetectFn,
-  readdir: ReaddirFn<A>,
   options: { deleters: Readonly<Record<string, DeleteFn<A>>> },
-): (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<void> {
+): (accessor: A, path: PathSpec, entry?: FileStat | null) => Promise<void> {
   const { deleters } = options
   return async function unlink(
     accessor: A,
     path: PathSpec,
-    index?: IndexCacheStore,
+    entry: FileStat | null = null,
   ): Promise<void> {
-    // Entry resolution reads what its parent-listing warm just wrote, so
-    // a caller with no cache still needs one for the duration of the call.
-    const store = index ?? new RAMIndexCacheStore()
     const match = detect(path)
     const deleter = deleters[match.kind]
     if (deleter === undefined) {
-      if (match.kind !== INVALID && !match.scope?.leaf) {
-        throw eisdir(path.virtual)
-      }
-      throw enoent(path.virtual)
+      if (match.kind !== INVALID && !match.scope?.leaf) throw eisdir(path.virtual)
+      throw enoent(path)
     }
-    const entry = await resolveEntry(readdir, accessor, path, store)
-    if (entry === null) throw enoent(path.virtual)
+    if (entry === null) throw enoent(path)
     await deleter(accessor, match, entry)
-    const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-    const key = stripSlash(path.vfsPath)
-    const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
-    const parentDir = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
-    await store.invalidateDir(parentDir)
   }
 }

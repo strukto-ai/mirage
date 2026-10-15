@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { JaegerAccessor } from '../../accessor/jaeger.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { makeRead } from '../hierarchy/read.ts'
@@ -44,7 +43,6 @@ async function readOperations(
   accessor: JaegerAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const service = match.slots.service ?? ''
   await assertService(accessor, service, path.virtual)
@@ -56,7 +54,6 @@ async function readTrace(
   accessor: JaegerAccessor,
   match: ScopeMatch,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
   const service = match.slots.service ?? ''
   await assertService(accessor, service, path.virtual)

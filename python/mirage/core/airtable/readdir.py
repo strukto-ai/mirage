@@ -15,7 +15,6 @@
 from typing import Any
 
 from mirage.accessor.airtable import AirtableAccessor
-from mirage.cache.index import IndexEntry
 from mirage.core.airtable.client import list_bases, list_tables
 from mirage.core.airtable.normalize import (
     as_rows,
@@ -29,24 +28,32 @@ from mirage.core.airtable.pathing import (
     view_filename,
 )
 from mirage.core.airtable.scope import detect_scope
-from mirage.core.hierarchy.readdir import DirListing, make_readdir
+from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.hierarchy.stat import entry_stat
 from mirage.errors.fs import enoent
+from mirage.types import ContentType, DirListing, FileStat, FileType
 
-Listing = list[tuple[str, IndexEntry]]
+BASE = entry_stat("base_id", FileType.DIRECTORY)
+BASE_JSON = entry_stat("base_id", ContentType.JSON)
+TABLE = entry_stat("table_id", FileType.DIRECTORY)
+TABLE_JSON = entry_stat("table_id", ContentType.JSON)
+RECORDS = entry_stat("table_id", ContentType.TEXT)
+VIEWS = entry_stat("table_id", FileType.DIRECTORY)
+VIEW = entry_stat("view_id", ContentType.TEXT)
 
 
-def _base_row(entry: IndexEntry) -> dict[str, Any]:
-    # The base listing row base.json renders, rebuilt from the directory
-    # entry that listing wrote, so its size needs no second call.
+def _base_row(entry: FileStat) -> dict[str, Any]:
+    # The base listing row base.json renders, rebuilt from the directory's
+    # row that listing wrote, so its size needs no second call.
     return {
-        "id": entry.id,
-        "name": entry.name,
+        "id": entry.extra.get("base_id"),
+        "name": entry.extra.get("base_name"),
         "permissionLevel": entry.extra.get("permission_level"),
     }
 
 
-def table_children(table: dict[str, Any], base_id: str) -> Listing:
+def table_children(table: dict[str, Any], base_id: str) -> list[FileStat]:
     """A table directory's contents, all known from the base schema.
 
     records.jsonl stays size-unknown: its bytes are the table's records,
@@ -58,120 +65,60 @@ def table_children(table: dict[str, Any], base_id: str) -> Listing:
     """
     table_id = table["id"]
     return [
-        (
+        TABLE_JSON(
             "table.json",
-            IndexEntry(
-                id=table_id,
-                name="table.json",
-                resource_type="airtable/table_json",
-                vfs_name="table.json",
-                size=len(to_json_bytes(normalize_table(table, base_id))),
-            ),
+            table_id,
+            size=len(to_json_bytes(normalize_table(table, base_id))),
         ),
-        (
-            "records.jsonl",
-            IndexEntry(
-                id=table_id,
-                name="records.jsonl",
-                resource_type="airtable/records",
-                vfs_name="records.jsonl",
-            ),
-        ),
-        (
-            "views",
-            IndexEntry(
-                id=table_id,
-                name="views",
-                resource_type="airtable/views_dir",
-                vfs_name="views",
-            ),
-        ),
+        RECORDS("records.jsonl", table_id),
+        VIEWS("views", table_id),
     ]
 
 
-def view_children(table: dict[str, Any]) -> Listing:
+def view_children(table: dict[str, Any]) -> list[FileStat]:
     """A table's saved views, one size-unknown .jsonl file each.
 
     Args:
         table (dict[str, Any]): a schema table.
     """
-    entries: Listing = []
-    for view in as_rows(table.get("views")):
-        filename = view_filename(view)
-        entries.append(
-            (
-                filename,
-                IndexEntry(
-                    id=view["id"],
-                    name=view.get("name") or view["id"],
-                    resource_type="airtable/view",
-                    vfs_name=filename,
-                ),
-            )
-        )
-    return entries
+    return [
+        VIEW(view_filename(view), view["id"])
+        for view in as_rows(table.get("views"))
+    ]
 
 
 async def _list_bases_dir(
     accessor: AirtableAccessor, match: ScopeMatch
-) -> Listing:
-    entries: Listing = []
-    for base in await list_bases(accessor):
-        dirname = base_dirname(base)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=base["id"],
-                    name=base.get("name") or base["id"],
-                    resource_type="airtable/base",
-                    vfs_name=dirname,
-                    extra={
-                        "permission_level": base.get("permissionLevel"),
-                    },
-                ),
-            )
+) -> list[FileStat]:
+    return [
+        BASE(
+            base_dirname(base),
+            base["id"],
+            extra={
+                "base_name": base.get("name") or base["id"],
+                "permission_level": base.get("permissionLevel"),
+            },
         )
-    return entries
+        for base in await list_bases(accessor)
+    ]
 
 
 async def _list_base(
-    accessor: AirtableAccessor, match: ScopeMatch, entry: IndexEntry
+    accessor: AirtableAccessor, match: ScopeMatch, entry: FileStat
 ) -> DirListing:
     # One schema call answers the base AND every table directory and
     # views directory under it, so they are seeded rather than refetched.
     base_id = match.slots["base_id"]
     tables = await list_tables(accessor, base_id)
     base_json = to_json_bytes(normalize_base(_base_row(entry), tables))
-    entries: Listing = [
-        (
-            "base.json",
-            IndexEntry(
-                id=base_id,
-                name="base.json",
-                resource_type="airtable/base_json",
-                vfs_name="base.json",
-                size=len(base_json),
-            ),
-        )
-    ]
-    seeds: dict[str, Listing] = {}
+    rows = [BASE_JSON("base.json", base_id, size=len(base_json))]
+    seeds: dict[str, list[FileStat]] = {}
     for table in tables:
         dirname = table_dirname(table)
-        entries.append(
-            (
-                dirname,
-                IndexEntry(
-                    id=table["id"],
-                    name=table.get("name") or table["id"],
-                    resource_type="airtable/table",
-                    vfs_name=dirname,
-                ),
-            )
-        )
+        rows.append(TABLE(dirname, table["id"]))
         seeds[dirname] = table_children(table, base_id)
         seeds[f"{dirname}/views"] = view_children(table)
-    return DirListing(entries=entries, seeds=seeds)
+    return DirListing(entries=rows, seeds=seeds)
 
 
 async def schema_table(
@@ -194,15 +141,15 @@ async def schema_table(
 
 
 async def _list_table(
-    accessor: AirtableAccessor, match: ScopeMatch, entry: IndexEntry
-) -> Listing:
+    accessor: AirtableAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     table = await schema_table(accessor, match)
     return table_children(table, match.slots["base_id"])
 
 
 async def _list_views(
-    accessor: AirtableAccessor, match: ScopeMatch, entry: IndexEntry
-) -> Listing:
+    accessor: AirtableAccessor, match: ScopeMatch, entry: FileStat
+) -> list[FileStat]:
     return view_children(await schema_table(accessor, match))
 
 

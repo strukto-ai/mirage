@@ -12,24 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
-import { eisdir } from '../../errors/fs.ts'
-import type { SlugTree } from './tree.ts'
+import { FileType, type FileStat, type PathSpec } from '../../types.ts'
+import { eisdir, enoent } from '../../errors/fs.ts'
+import { stripSlash } from '../../utils/slash.ts'
 
 const ENC = new TextEncoder()
 
-/** The index entry of a file path; a folder is EISDIR. */
-export async function fileEntry<A>(
-  tree: SlugTree<A>,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<IndexEntry> {
-  const resolved = await tree.resolve(accessor, path, index)
-  if (resolved.isDir) throw eisdir(path.virtual)
-  return resolved.entry
+/** What is at the file `path`, as its folder's listing named it. */
+export function fileEntry(path: PathSpec, entry: FileStat | null): FileStat {
+  if (stripSlash(path.mountPath) === '') throw eisdir(path.virtual)
+  if (entry === null) throw enoent(path.virtual)
+  if (entry.type === FileType.DIRECTORY) throw eisdir(path.virtual)
+  return entry
 }
 
 /** Stream a document's parts joined by newlines, the way it renders. */

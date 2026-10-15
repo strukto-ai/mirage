@@ -13,50 +13,37 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
+import { DirListing, FileStat, FileType } from '../../types.ts'
 import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 import { globPrefix, globStemPrefix } from '../../utils/glob_walk.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { PATH_SAFE } from '../hierarchy/codec.ts'
-import type { DirListing, Listed } from '../hierarchy/readdir.ts'
+import type { Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { dirEntry } from '../vector/readdir.ts'
 import { filtersOf, tableOf } from '../vector/scope.ts'
 import { tableExists } from './query.ts'
 import type { LanceRow, ValueTest } from './types.ts'
 import { cellText, renderCard } from './render.ts'
 
-function rowEntries(rows: LanceRow[], config: LanceDBConfigResolved): [string, IndexEntry][] {
+function rowFiles(rows: LanceRow[], config: LanceDBConfigResolved): FileStat[] {
   // The widened select carries every rendered column, so each card's exact
   // size is free here; blob values are deliberately not fetched at listing
   // time, so blob entries stay size-unknown and stat renders them itself.
-  const entries: [string, IndexEntry][] = []
+  const listed: FileStat[] = []
   for (const row of rows) {
     const id = cellText(row[config.idColumn])
-    entries.push([
-      `${id}.md`,
-      new IndexEntry({
-        id,
+    listed.push(
+      new FileStat({
         name: `${id}.md`,
-        resourceType: 'lancedb/row_card',
-        vfsName: `${id}.md`,
+        type: FileType.FILE,
         size: renderCard(row, config).byteLength,
       }),
-    ])
+    )
     if (config.blobColumn !== null) {
-      const blobName = `${id}.${config.blobExt}`
-      entries.push([
-        blobName,
-        new IndexEntry({
-          id,
-          name: blobName,
-          resourceType: 'lancedb/row_blob',
-          vfsName: blobName,
-        }),
-      ])
+      listed.push(new FileStat({ name: `${id}.${config.blobExt}`, type: FileType.FILE }))
     }
   }
-  return entries
+  return listed
 }
 
 /** Keep values whose rendered name starts with a glob's literal head. */
@@ -103,13 +90,11 @@ export async function children(
       displayPrefix === '' ? undefined : renderedPrefixTest(displayPrefix),
     )
     const names = values.map((value) => PATH_SAFE.encode(value)).sort(compareCodePoints)
-    const listing: DirListing = {
-      entries: names.map((name): [string, IndexEntry] => [name, dirEntry('lancedb', name)]),
-      seeds: {},
+    return new DirListing({
+      entries: names.map((name) => new FileStat({ name, type: FileType.DIRECTORY })),
       partial: displayPrefix !== '',
       window: true,
-    }
-    return listing
+    })
   }
   // Select every column except the vector and blob ones (schema order, so
   // the projected rows render byte-identically to the full rows read()
@@ -127,11 +112,5 @@ export async function children(
     config.idColumn,
     prefix,
   )
-  const listing: DirListing = {
-    entries: rowEntries(rows, config),
-    seeds: {},
-    partial: prefix !== '',
-    window: true,
-  }
-  return listing
+  return new DirListing({ entries: rowFiles(rows, config), partial: prefix !== '', window: true })
 }

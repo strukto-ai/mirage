@@ -1,7 +1,6 @@
 from typing import Any
 
 from mirage.accessor.chroma import ChromaAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.chroma.client import PAGE_CHUNK_BATCH_SIZE
 from mirage.core.chroma.tree import CHROMA_TREE
 from mirage.core.slug_tree.search import (
@@ -20,7 +19,6 @@ async def search_segments(
     accessor: ChromaAccessor,
     query: str,
     paths: list[PathSpec],
-    index: IndexCacheStore = NULL_INDEX,
     top_k: int = 10,
     mount_prefix: str = "",
 ) -> list[tuple[str, str]]:
@@ -35,7 +33,7 @@ async def search_segments(
     scoped_slugs: set[str] | None = None
     if paths:
         scoped_slugs = set(
-            (await target_entries(CHROMA_TREE, accessor, paths, index)).keys()
+            (await target_entries(CHROMA_TREE, accessor, paths)).keys()
         )
         if not scoped_slugs:
             return []
@@ -93,16 +91,14 @@ async def search_many(
     accessor: ChromaAccessor,
     paths: list[PathSpec],
     query: SearchQuery,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> list[tuple[str, str]]:
     validate_options(query, {"top_k"})
     top_k = int_option(query, "top_k", 10)
-    targets, prefix = await search_scope(CHROMA_TREE, accessor, paths, index)
+    targets, prefix = await search_scope(CHROMA_TREE, accessor, paths)
     return await search_segments(
         accessor,
         query.query,
         targets,
-        index,
         top_k=top_k,
         mount_prefix=prefix,
     )
@@ -112,9 +108,8 @@ async def search_resource(
     accessor: ChromaAccessor,
     path: PathSpec,
     query: SearchQuery,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> list[tuple[str, str]]:
-    return await search_many(accessor, [path], query, index)
+    return await search_many(accessor, [path], query)
 
 
 async def files_containing(
@@ -122,7 +117,6 @@ async def files_containing(
     text: str,
     under: list[PathSpec],
     ignore_case: bool,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> list[PathSpec] | None:
     """The pages with a chunk holding ``text``.
 
@@ -136,14 +130,13 @@ async def files_containing(
         text (str): the text searched for.
         under (list[PathSpec]): the directories walked.
         ignore_case (bool): whether case is folded.
-        index (IndexCacheStore): the mount's index.
     """
     if ignore_case:
         return None
     field = accessor.config.slug_field
     where: dict[str, Any] | None = None
     if all(scope.mount_path.strip("/") for scope in under):
-        walked = await target_entries(CHROMA_TREE, accessor, under, index)
+        walked = await target_entries(CHROMA_TREE, accessor, under)
         if not walked:
             return []
         where = {field: {"$in": sorted(walked)}}

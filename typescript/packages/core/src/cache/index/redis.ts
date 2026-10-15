@@ -601,6 +601,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
               generation: `${generation}:${directories.get(path) ?? ''}`,
               partial: false,
               version: seed.version,
+              window: false,
             }
             pipe.set(this.childrenKey(path), JSON.stringify(listing))
           }
@@ -654,6 +655,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       expires_at: (now.getTime() + this.ttl * 1000) / 1000,
       partial: true,
       version: null,
+      window: false,
     }
     const pipe = c.multi()
     this.trackPaths(pipe, [folder, vfsPath])
@@ -704,7 +706,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     )
       return { status: LookupStatus.EXPIRED }
     if (listing.partial) return { partialEntries: listing.entries, version: listing.version }
-    return { entries: listing.entries, version: listing.version }
+    return { entries: listing.entries, version: listing.version, window: listing.window }
   }
 
   async setDir(
@@ -758,6 +760,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       expires_at: (expiredAt?.getTime() ?? now.getTime() + this.ttl * 1000) / 1000,
       partial,
       version: partial ? null : version,
+      window: !partial && !evict,
     }
     if (!evict) {
       const pipe = c.multi()

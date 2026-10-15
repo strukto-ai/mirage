@@ -14,10 +14,17 @@
 
 import pytest
 
-from mirage.core.gcal.unlink import unlink
+from mirage.accessor.gcal import GCalAccessor
+from mirage.types import PathSpec
+from mirage.vfs.gcal import GCalVFS
 from tests.fixtures.gcal_api import make_accessor, spec
+from tests.fixtures.mounted import mounted
 
 pytestmark = pytest.mark.asyncio
+
+
+async def unlink(accessor: GCalAccessor, path: PathSpec) -> None:
+    await mounted(GCalVFS, accessor).unlink(path)
 
 
 @pytest.mark.parametrize(
@@ -34,7 +41,7 @@ pytestmark = pytest.mark.asyncio
 async def test_unlink_deletes_the_event_the_name_carries(
     gcal_api, size, path, index
 ):
-    await unlink(make_accessor(bucket_days=size), spec(path), index)
+    await unlink(make_accessor(bucket_days=size), spec(path))
     assert gcal_api.deleted == [("integ@example.com", "aaaa1")]
     # The entry resolves through the parent bucket's one listing first, so
     # an unlisted name is refused without a destructive call.
@@ -64,5 +71,5 @@ async def test_unlink_refuses_without_deleting(
     gcal_api, accessor, index, path, error
 ):
     with pytest.raises(error):
-        await unlink(accessor, spec(path), index)
+        await unlink(accessor, spec(path))
     assert gcal_api.deleted == []

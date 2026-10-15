@@ -30,6 +30,7 @@ import { GSlidesAccessor } from '../../accessor/gslides.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
 import type { FindOptions } from '../../vfs/types.ts'
 import { walkFind } from '../generic/find.ts'
 import * as readdirMod from './readdir.ts'
@@ -44,8 +45,11 @@ async function find(
   return walkFind(
     path,
     {
-      readdir: (spec, idx) => readdirMod.readdir(accessor, spec, idx),
-      stat: (spec, idx) => statMod.stat(accessor, spec, idx),
+      readdir: async (spec) => {
+        const base = spec.virtual.replace(/\/$/, '')
+        return rowsOf(await readdirMod.readdir(accessor, spec)).map((row) => `${base}/${row.name}`)
+      },
+      stat: (spec) => statMod.stat(accessor, spec),
     },
     options,
     index,
@@ -68,7 +72,11 @@ function mockTree(tree: Record<string, string[]>): void {
   vi.mocked(readdirMod.readdir).mockImplementation((_accessor, spec) => {
     const children = tree[spec.virtual]
     if (children === undefined) return Promise.reject(enoent(spec.virtual))
-    return Promise.resolve(children)
+    return Promise.resolve(
+      children.map(
+        (child) => new FileStat({ name: child.split('/').pop() ?? '', type: FileType.FILE }),
+      ),
+    )
   })
 }
 

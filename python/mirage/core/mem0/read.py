@@ -15,37 +15,35 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mem0.readdir import listed_memory
 from mirage.core.mem0.scope import detect_scope
 from mirage.core.render.json import json_bytes
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def _read_memory(
     accessor: Mem0Accessor,
     match: ScopeMatch,
     path: PathSpec,
-    index: IndexCacheStore,
+    entry: FileStat | None,
+    parent: FileStat | None,
 ) -> bytes:
-    return json_bytes(await listed_memory(accessor, path, index))
+    return json_bytes(listed_memory(path, entry))
 
 
 read = make_read(detect_scope, {"memory": _read_memory})
 
 
 async def read_stream(
-    accessor: Mem0Accessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: Mem0Accessor, path: PathSpec, entry: FileStat | None = None
 ) -> AsyncIterator[bytes]:
     """Stream a memory as full JSON bytes (used by jq).
 
     Args:
         accessor (Mem0Accessor): mem0 accessor.
         path (PathSpec): the memory file path.
-        index (IndexCacheStore): index cache.
+        entry (FileStat | None): the row the listing holds there.
     """
-    yield json_bytes(await listed_memory(accessor, path, index))
+    yield json_bytes(listed_memory(path, entry))

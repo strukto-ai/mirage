@@ -1,97 +1,83 @@
 import type { WandbAccessor } from '../../accessor/wandb.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { ContentType, DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent, enotdir } from '../../errors/fs.ts'
 import { WandbAPIError } from './errors.ts'
 import { LEAVES, parts, runVars, safeName } from './pathing.ts'
 import { RUN_EXISTS } from './queries.ts'
 import type { Named, FileMetadata } from './types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
-function entry(name: string, directory: boolean, size: number | null = null): IndexEntry {
-  return new IndexEntry({
-    id: name,
-    name,
-    vfsName: name,
-    resourceType: directory ? 'wandb/directory' : 'wandb/file',
-    size: directory ? 0 : size,
-  })
+export function row(
+  name: string,
+  directory: boolean,
+  size: number | null = null,
+  content: ContentType | null = null,
+): FileStat {
+  if (directory) return new FileStat({ name, type: FileType.DIRECTORY, size: 0 })
+  return new FileStat({ name, type: FileType.FILE, size, content })
 }
-export function fileTree(files: FileMetadata[]): Map<string, [string, IndexEntry][]> {
-  const directories = new Map<string, Map<string, IndexEntry>>([['', new Map()]])
+function leaf(name: string): FileStat {
+  return row(name, false, null, name.endsWith('.json') ? ContentType.JSON : ContentType.TEXT)
+}
+export function fileTree(files: FileMetadata[]): Map<string, FileStat[]> {
+  const directories = new Map<string, Map<string, FileStat>>([['', new Map()]])
   for (const file of files) {
     const segments = file.name.split('/')
     if (!segments.every(safeName)) throw new WandbAPIError('W&B unsafe run file name')
     let parent = ''
     for (const [depth, child] of segments.entries()) {
-      const node = entry(child, depth < segments.length - 1, file.sizeBytes)
-      const children = directories.get(parent) ?? new Map<string, IndexEntry>()
+      const node = row(child, depth < segments.length - 1, file.sizeBytes, ContentType.BINARY)
+      const children = directories.get(parent) ?? new Map<string, FileStat>()
       const previous = children.get(child)
-      if (previous && previous.resourceType !== node.resourceType)
+      if (previous && previous.type !== node.type)
         throw new WandbAPIError('W&B file and directory name collision')
       children.set(child, node)
       directories.set(parent, children)
       parent = parent ? parent + '/' + child : child
     }
   }
-  return new Map([...directories].map(([parent, children]) => [parent, [...children]]))
+  return new Map([...directories].map(([parent, children]) => [parent, [...children.values()]]))
 }
-export async function listing(
+/**
+ * A run's `files/` directory, or one below it, from the one call that lists
+ * every file of the run: each directory below the listed one is proven by the
+ * same call, so it rides along as a seed. Mirrors `_run_files` in
+ * `mirage/core/wandb/readdir.py`.
+ */
+function runFiles(path: PathSpec, prefix: string, files: FileMetadata[]): DirListing {
+  if (prefix && files.some((f) => f.name === prefix)) throw enotdir(path)
+  const tree = fileTree(files)
+  const entries = tree.get(prefix)
+  if (!entries) throw enoent(path)
+  const stem = prefix ? prefix + '/' : ''
+  const seeds = new Map<string, FileStat[]>()
+  for (const [directory, rows] of tree) {
+    if (directory.startsWith(stem) && directory !== prefix) {
+      seeds.set(directory.slice(stem.length), rows)
+    }
+  }
+  return new DirListing({ entries, seeds })
+}
+/** A directory's rows. Mirrors `readdir` in `mirage/core/wandb/readdir.py`. */
+export async function readdir(
   accessor: WandbAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<[string, IndexEntry][]> {
+  pathSpec: PathSpec,
+): Promise<FileStat[] | DirListing> {
+  const path = pathSpec.pattern ? pathSpec.dir : pathSpec
   const ps = parts(accessor, path)
-  if (ps.length === 0) return [...new Set(accessor.config.entities)].map((e) => [e, entry(e, true)])
+  if (ps.length === 0) return [...new Set(accessor.config.entities)].map((e) => row(e, true))
   let nodes: Named[]
   if (ps.length === 1) nodes = await accessor.client.projects(ps[0] ?? '')
   else if (ps.length === 2) nodes = await accessor.client.runs(ps[0] ?? '', ps[1] ?? '')
   else if (ps.length === 3) {
-    const key = rstripSlash(path.virtual)
-    const parent = key.slice(0, key.lastIndexOf('/')) || '/'
-    const cached = await index?.listDir(parent)
-    if (!cached?.entries?.includes(key)) await accessor.client.run(runVars(ps), RUN_EXISTS)
-    return [
-      ...LEAVES.map((n): [string, IndexEntry] => [n, entry(n, false)]),
-      ['files', entry('files', true)],
-    ]
+    await accessor.client.run(runVars(ps), RUN_EXISTS)
+    return [...LEAVES.map(leaf), row('files', true)]
   } else if (ps[3] === 'files') {
     const files = await accessor.client.files(runVars(ps))
-    const prefix = ps.slice(4).join('/')
-    if (prefix && files.some((f) => f.name === prefix)) throw enotdir(path)
-    const tree = fileTree(files)
-    const result = tree.get(prefix)
-    if (!result) throw enoent(path)
-    if (index) {
-      const root = mountPrefixOf(path.virtual, path.vfsPath) + '/' + ps.slice(0, 4).join('/')
-      // No wipe first: each complete setDir drops what it no longer names, a
-      // dropped folder takes its subtree, and the old lists are what tells
-      // cleanup which files went away.
-      await index.put(root, entry('files', true))
-      for (const [directory, entries] of tree)
-        await index.setDir(directory ? root + '/' + directory : root, entries)
-    }
-    return result
+    return runFiles(path, ps.slice(4).join('/'), files)
   } else if (LEAVES.includes(ps[3] ?? '')) throw enotdir(path)
   else throw enoent(path)
   return nodes.map((node) => {
     if (!safeName(node.name)) throw new WandbAPIError('W&B unsafe object name')
-    return [node.name, entry(node.name, true)]
+    return row(node.name, true)
   })
-}
-export async function readdir(
-  accessor: WandbAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  path = path.pattern ? path.dir : path
-  parts(accessor, path)
-  const key = rstripSlash(path.virtual) || '/'
-  const cached = await index?.listDir(key)
-  if (cached?.entries) return cached.entries
-  const entries = await listing(accessor, path, index)
-  await index?.setDir(key, entries)
-  return entries.map(([name]) => key.replace(/\/$/, '') + '/' + name)
 }

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import {
   firstLines as postgresFirstLines,
   follow as postgresFollow,
@@ -26,64 +25,62 @@ import { readdir as postgresReaddir } from '../../core/postgres/readdir.ts'
 import { linesContaining as postgresLinesContaining } from '../../core/postgres/search.ts'
 import { stat as postgresStat } from '../../core/postgres/stat.ts'
 import type { ByteSource } from '../../io/types.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 
 /**
  * Postgres's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
 export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return postgresReaddir(this.accessor, path, index)
+  override readonly listsStats: boolean = true
+  override readonly handed = {
+    read: ['parent'],
+    stat: ['entry'],
+  } as const
+
+  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
+    return postgresReaddir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await postgresRead(this.accessor, path, index)
+    const data = await postgresRead(this.accessor, path, null, handed?.parent)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return postgresReadStream(this.accessor, path, index)
+  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
+    return postgresReadStream(this.accessor, path, handed?.entry ?? null, handed?.parent ?? null)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return postgresStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return postgresStat(this.accessor, path, handed?.entry)
   }
 
   override linesContaining(
     path: PathSpec,
     text: string,
     opts: { ignoreCase: boolean },
-    _index?: IndexCacheStore,
   ): Promise<ByteSource | null> {
     return postgresLinesContaining(this.accessor, path, text, opts.ignoreCase)
   }
 
-  override firstLines(
-    path: PathSpec,
-    n: number,
-    index?: IndexCacheStore,
-  ): Promise<Uint8Array | null> {
-    return postgresFirstLines(this.accessor, path, n, index)
+  override firstLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
+    return postgresFirstLines(this.accessor, path, n)
   }
 
-  override lastLines(
-    path: PathSpec,
-    n: number,
-    index?: IndexCacheStore,
-  ): Promise<Uint8Array | null> {
-    return postgresLastLines(this.accessor, path, n, index)
+  override lastLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
+    return postgresLastLines(this.accessor, path, n)
   }
 
-  override lineCount(path: PathSpec, index?: IndexCacheStore): Promise<number | null> {
-    return postgresLineCount(this.accessor, path, index)
+  override lineCount(path: PathSpec): Promise<number | null> {
+    return postgresLineCount(this.accessor, path)
   }
 
   override follow(

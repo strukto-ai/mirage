@@ -45,11 +45,10 @@ async def test_read_calls_core(accessor):
         return_value=b"doc content",
     ) as mock:
         scope = _scope("/gdocs/owned/File__doc1.gdoc.json")
-        result = await fn(accessor, scope, index=None)
+        result = await fn(accessor, scope)
         mock.assert_called_once_with(
             accessor,
             _scope("/gdocs/owned/File__doc1.gdoc.json", prefix="/gdocs"),
-            None,
         )
         assert result == b"doc content"
 
@@ -66,5 +65,4 @@ async def test_read_not_found(accessor):
             await fn(
                 accessor,
                 _scope("/gdocs/owned/Nonexistent__doc9.gdoc.json"),
-                index=None,
             )

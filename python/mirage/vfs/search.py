@@ -1,7 +1,6 @@
 import math
 from typing import Any
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import PathSpec
 from mirage.vfs.types import SearchOps, SearchQuery
 
@@ -44,7 +43,6 @@ async def search_resources(
     accessor: Any,
     paths: list[PathSpec],
     query: SearchQuery,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     """Batch when supported; otherwise concatenate single-scope records.
 
@@ -53,7 +51,6 @@ async def search_resources(
         accessor (Any): backend client.
         paths (list[PathSpec]): explicit resource scopes.
         query (SearchQuery): backend query and options.
-        index (IndexCacheStore): active mount index.
     """
     if capability is None:
         raise NotImplementedError(
@@ -63,13 +60,13 @@ async def search_resources(
         raise ValueError("search: at least one scope is required")
     records: list[tuple[str, str]] = []
     if capability.search_many is not None:
-        answer = await capability.search_many(accessor, paths, query, index)
+        answer = await capability.search_many(accessor, paths, query)
         if answer is None:
             raise NotImplementedError("search: backend declined the query")
         records = answer
     else:
         for path in paths:
-            answer = await capability.search(accessor, path, query, index)
+            answer = await capability.search(accessor, path, query)
             if answer is None:
                 raise NotImplementedError("search: backend declined the query")
             records.extend(answer)
