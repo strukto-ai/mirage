@@ -14,15 +14,13 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { MongoFindOptions, MongoIterOptions } from './_driver.ts'
-import { EntityKind } from './types.ts'
+import { EntityKind, SYSTEM_DATABASES } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-
-const SYSTEM_DBS: ReadonlySet<string> = new Set(['admin', 'local', 'config'])
 
 export async function listDatabases(accessor: MongoDBAccessor): Promise<string[]> {
   return accessor.cachedList('listDatabases', async () => {
     const all = await accessor.driver.listDatabases()
-    let dbs = all.filter((d) => !SYSTEM_DBS.has(d))
+    let dbs = all.filter((d) => !SYSTEM_DATABASES.has(d))
     const allow = accessor.config.databases
     if (allow !== null && allow.length > 0) {
       const allowSet = new Set(allow)
@@ -95,6 +93,16 @@ export function findSnapshot<T = Record<string, unknown>>(
   options: MongoFindOptions,
 ): Promise<[T[], unknown] | null> {
   return accessor.driver.findSnapshot<T>(database, collection, options)
+}
+
+/** The change events since `token`, and the position after them. Mirrors Python's `drain_changes`. */
+export function drainChanges(
+  accessor: MongoDBAccessor,
+  database: string | null,
+  token: unknown,
+  limit = 1000,
+): Promise<[Record<string, unknown>[], unknown]> {
+  return accessor.driver.drainChanges(database, token, limit)
 }
 
 export function iterInserts<T = Record<string, unknown>>(

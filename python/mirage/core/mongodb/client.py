@@ -13,14 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 from bson import Timestamp
 from pymongo import AsyncMongoClient
 from pymongo.errors import OperationFailure, PyMongoError
 
-from mirage.core.mongodb.types import NOT_A_REPLICA_SET, EntityKind
+from mirage.core.mongodb.types import (
+    NOT_A_REPLICA_SET,
+    SYSTEM_DATABASES,
+    EntityKind,
+)
 from mirage.vfs.mongodb.config import MongoDBConfig
 
 if TYPE_CHECKING:
@@ -33,8 +37,7 @@ async def list_databases(
     client: AsyncMongoClient[Any], config: MongoDBConfig
 ) -> list[str]:
     all_dbs = await client.list_database_names()
-    system_dbs = {"admin", "local", "config"}
-    dbs = [d for d in all_dbs if d not in system_dbs]
+    dbs = [d for d in all_dbs if d not in SYSTEM_DATABASES]
     if config.databases:
         dbs = [d for d in dbs if d in config.databases]
     return sorted(dbs)
@@ -226,6 +229,45 @@ async def iter_inserts(
             doc = change.get("fullDocument")
             if doc is not None:
                 yield doc
+
+
+async def drain_changes(
+    client: AsyncMongoClient[Any],
+    database: str | None,
+    token: Mapping[str, Any] | None,
+    limit: int = 1000,
+) -> tuple[list[dict[str, Any]], Mapping[str, Any] | None]:
+    """The change events since ``token``, and the stream position after
+    the last one taken.
+
+    A stream opened with no token takes no events: it only marks the
+    position a later drain starts after. One with a token is read until
+    the server has no event ready, or ``limit`` of them, and resumes
+    with ``start_after``, so a position past an invalidate (a watched
+    database dropped) still opens a stream.
+
+    Args:
+        client (AsyncMongoClient[Any]): the client.
+        database (str | None): the one database watched, None for the
+            whole cluster.
+        token (Mapping[str, Any] | None): the position the events come
+            after, None for now.
+        limit (int): the most events one drain takes.
+    """
+    target: Any = client if database is None else client[database]
+    options: dict[str, Any] = {"show_expanded_events": True}
+    if token is not None:
+        options["start_after"] = token
+    events: list[dict[str, Any]] = []
+    async with await target.watch(**options) as stream:
+        if token is None:
+            await stream.try_next()
+        while token is not None and len(events) < limit:
+            event = await stream.try_next()
+            if event is None:
+                break
+            events.append(event)
+        return events, stream.resume_token
 
 
 async def is_view(

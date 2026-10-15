@@ -52,6 +52,16 @@ PRIMARY_KEY = "_id"
 # The server error a snapshot read meets on a server outside a replica set.
 NOT_A_REPLICA_SET = 123
 
+# The server error a change stream meets on a server outside a replica set.
+CHANGE_STREAM_UNSUPPORTED = 40573
+
+# The server error a change stream meets resuming past what its history
+# still holds.
+HISTORY_LOST = 286
+
+# The databases the server keeps for itself, never listed on a mount.
+SYSTEM_DATABASES = frozenset({"admin", "local", "config"})
+
 RESOURCE_TYPE_DATABASE = "mongodb/database"
 RESOURCE_TYPE_COLLECTION = "mongodb/collection"
 RESOURCE_TYPE_VIEW = "mongodb/view"

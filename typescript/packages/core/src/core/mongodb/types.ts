@@ -52,6 +52,16 @@ export const PRIMARY_KEY = '_id'
 // The server error a snapshot read meets on a server outside a replica set.
 export const NOT_A_REPLICA_SET = 123
 
+// The server error a change stream meets on a server outside a replica set.
+export const CHANGE_STREAM_UNSUPPORTED = 40573
+
+// The server error a change stream meets resuming past what its history still
+// holds.
+export const HISTORY_LOST = 286
+
+// The databases the server keeps for itself, never listed on a mount.
+export const SYSTEM_DATABASES: ReadonlySet<string> = new Set(['admin', 'local', 'config'])
+
 export const RESOURCE_TYPE_DATABASE = 'mongodb/database'
 const RESOURCE_TYPE_COLLECTION = 'mongodb/collection'
 const RESOURCE_TYPE_VIEW = 'mongodb/view'

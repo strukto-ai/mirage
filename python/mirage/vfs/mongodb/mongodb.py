@@ -27,12 +27,14 @@ from mirage.core.mongodb.stat import stat as _stat
 from mirage.core.mongodb.stream import follow as _follow
 from mirage.core.mongodb.stream import last_lines as _last_lines
 from mirage.core.mongodb.stream import line_count as _line_count
+from mirage.core.mongodb.watch import build_delta_hook
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
 from mirage.vfs.mongodb.prompt import PROMPT
+from mirage.watch.base import DeltaHook
 
 
 class MongoDBVFS(BaseVFS):
@@ -102,6 +104,9 @@ class MongoDBVFS(BaseVFS):
         index: IndexCacheStore = NULL_INDEX,
     ) -> AsyncIterator[bytes] | None:
         return await _follow(self.accessor, path, n, index)
+
+    def delta_hook(self) -> DeltaHook:
+        return build_delta_hook(self.accessor)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

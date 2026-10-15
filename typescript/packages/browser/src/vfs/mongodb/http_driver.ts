@@ -18,7 +18,10 @@ import type {
   MongoFindOptions,
   MongoIterOptions,
 } from '@struktoai/mirage-core/core/mongodb/_driver'
-import type { EntityKind } from '@struktoai/mirage-core/core/mongodb/types'
+import {
+  CHANGE_STREAM_UNSUPPORTED,
+  type EntityKind,
+} from '@struktoai/mirage-core/core/mongodb/types'
 
 export interface HttpMongoDriverOptions {
   endpoint: string
@@ -136,6 +139,19 @@ export class HttpMongoDriver implements MongoDriver {
         return this
       },
     }
+  }
+
+  /** Rejects as a server with no change stream does, so a watch is refused. */
+  drainChanges(
+    _database: string | null,
+    _token: unknown,
+    _limit: number,
+  ): Promise<[Record<string, unknown>[], unknown]> {
+    return Promise.reject(
+      Object.assign(new Error('drainChanges (watch) is not supported by HttpMongoDriver'), {
+        code: CHANGE_STREAM_UNSUPPORTED,
+      }),
+    )
   }
 
   countDocuments(
