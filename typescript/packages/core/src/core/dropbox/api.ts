@@ -169,12 +169,21 @@ export async function deletePath(
   )
 }
 
-/** An entry's metadata, null when Dropbox has nothing at the path. Mirrors Python's `lookup`. */
+/**
+ * An entry's metadata, null when Dropbox has nothing at the path. Only a
+ * not_found or not_folder 409 is a miss; any other refusal (restricted_content,
+ * a relay's 5xx naming not_found) names a path that may exist, and throws.
+ * Mirrors Python's `lookup`.
+ */
 export async function lookup(tm: DropboxTokenManager, path: string): Promise<DropboxEntry | null> {
   try {
     return await getMetadata(tm, path)
   } catch (err) {
-    if (err instanceof DropboxApiError && MISS_SUMMARIES.some((s) => err.summary.startsWith(s))) {
+    if (
+      err instanceof DropboxApiError &&
+      err.status === 409 &&
+      MISS_SUMMARIES.some((s) => err.summary.startsWith(s))
+    ) {
       return null
     }
     throw err

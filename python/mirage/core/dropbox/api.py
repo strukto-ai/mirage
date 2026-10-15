@@ -43,6 +43,10 @@ async def get_metadata(tm: DropboxTokenManager, path: str) -> dict[str, Any]:
 async def lookup(tm: DropboxTokenManager, path: str) -> dict[str, Any] | None:
     """An entry's metadata, None when Dropbox has nothing at the path.
 
+    Only a not_found or not_folder 409 is a miss; any other refusal
+    (restricted_content, a relay's 5xx naming not_found) names a path that
+    may exist, and raises.
+
     Args:
         tm (DropboxTokenManager): the account's token manager.
         path (str): the Dropbox path.
@@ -50,7 +54,7 @@ async def lookup(tm: DropboxTokenManager, path: str) -> dict[str, Any] | None:
     try:
         return await get_metadata(tm, path)
     except DropboxApiError as exc:
-        if exc.summary.startswith(MISS_SUMMARIES):
+        if exc.status == 409 and exc.summary.startswith(MISS_SUMMARIES):
             return None
         raise
 
