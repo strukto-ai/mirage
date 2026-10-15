@@ -366,11 +366,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * file read the usual way; rejects with the file's read error otherwise
    * (`EFBIG` when the answer passes a ceiling on one read, such as
    * `max_read_rows`).
-   * Return bytes or async byte chunks. The consumer closes the iterator;
-   * this partial-file answer is never installed as a full cached file.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  firstLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<ByteSource | null> {
+  firstLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<Uint8Array | null> {
     return Promise.reject(enotsup(this.name, 'firstLines', path))
   }
 
@@ -383,11 +381,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * file the read cache holds is read instead. Resolves null to have the file
    * read the usual way; rejects with the file's read error otherwise (`EFBIG`
    * when the answer passes a ceiling on one read).
-   * Return bytes or async byte chunks. The consumer closes the iterator;
-   * this partial-file answer is never installed as a full cached file.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  lastLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<ByteSource | null> {
+  lastLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<Uint8Array | null> {
     return Promise.reject(enotsup(this.name, 'lastLines', path))
   }
 

@@ -191,7 +191,7 @@ export type FirstLinesOp<A extends Accessor = Accessor> = (
   path: PathSpec,
   n: number,
   index?: IndexCacheStore,
-) => Promise<ByteSource | null>
+) => Promise<Uint8Array | null>
 
 /** The last `n` lines of `path`; null when the file is to be read. */
 export type LastLinesOp<A extends Accessor = Accessor> = (
@@ -199,7 +199,7 @@ export type LastLinesOp<A extends Accessor = Accessor> = (
   path: PathSpec,
   n: number,
   index?: IndexCacheStore,
-) => Promise<ByteSource | null>
+) => Promise<Uint8Array | null>
 
 /** How many lines `path` holds; null when the file is to be read. */
 export type LineCountOp<A extends Accessor = Accessor> = (

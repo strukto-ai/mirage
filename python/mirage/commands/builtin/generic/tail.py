@@ -420,7 +420,7 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
 
 def _read_last(
     read: Callable[..., Any],
-    last_lines: Callable[[PathSpec, int], Awaitable[ByteSource | None]],
+    last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]],
     n: int,
 ) -> Callable[[PathSpec], Awaitable[Any]]:
     """``read``, answered by the mount's ``last_lines(path, n)`` where it
@@ -429,7 +429,7 @@ def _read_last(
     Args:
         read (Callable[..., Any]): bound whole-file reader, for a file
             the mount does not answer and for standard input.
-        last_lines (Callable[[PathSpec, int], Awaitable[ByteSource | None]]):
+        last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]):
             the mount's ``last_lines``.
         n (int): the line count, at least 1.
     """
@@ -831,7 +831,7 @@ async def tail_generic(
     stat: StatFn,
     stream: PolymorphicReadFn,
     read_range: ReadRangeFn | None = None,
-    last_lines: Callable[[PathSpec, int], Awaitable[ByteSource | None]]
+    last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
     | None = None,
     follow: Callable[
         [PathSpec, int, float], Awaitable[AsyncIterator[bytes] | None]
@@ -858,7 +858,7 @@ async def tail_generic(
         read_range (ReadRangeFn | None): Bound byte-window reader
             called as ``read_range(path, offset, size)``, for a follow
             that only wants what the file gained; None reads whole.
-        last_lines (Callable[[PathSpec, int], Awaitable[ByteSource | None]]
+        last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]
             | None): the mount's ``last_lines`` called as
             ``last_lines(path, n)``; None, or an answer of None, reads
             the file.

@@ -342,7 +342,7 @@ class BaseVFS:
     @vfs_call(effect=Effect.READ, target=Target.FILE)
     async def first_lines(
         self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
-    ) -> ByteSource | None:
+    ) -> bytes | None:
         """The first ``n`` lines of a file, without reading the rest.
 
         ``head -n N`` asks this before it reads, so a backend that can
@@ -354,9 +354,6 @@ class BaseVFS:
         raise the file's read error otherwise (``EFBIG`` when the answer
         passes a ceiling on one read, such as ``max_read_rows``).
 
-        Return bytes or async byte chunks. The consumer closes the iterator;
-        this partial-file answer is never installed as a full cached file.
-
         Args:
             path (PathSpec): the file.
             n (int): how many lines, at least 1.
@@ -367,7 +364,7 @@ class BaseVFS:
     @vfs_call(effect=Effect.READ, target=Target.FILE)
     async def last_lines(
         self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
-    ) -> ByteSource | None:
+    ) -> bytes | None:
         """The last ``n`` lines of a file, without reading the rest.
 
         ``tail -n N`` asks this before it reads, and ``tail -f`` for its
@@ -377,9 +374,6 @@ class BaseVFS:
         instead. Return None to have the file read the usual way; raise
         the file's read error otherwise (``EFBIG`` when the answer passes
         a ceiling on one read).
-
-        Return bytes or async byte chunks. The consumer closes the iterator;
-        this partial-file answer is never installed as a full cached file.
 
         Args:
             path (PathSpec): the file.

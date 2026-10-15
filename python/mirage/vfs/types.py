@@ -299,7 +299,7 @@ class FirstLinesOp(Protocol):
         n: int,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[ByteSource | None]: ...
+    ) -> Awaitable[bytes | None]: ...
 
 
 class LastLinesOp(Protocol):
@@ -313,7 +313,7 @@ class LastLinesOp(Protocol):
         n: int,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[ByteSource | None]: ...
+    ) -> Awaitable[bytes | None]: ...
 
 
 class LineCountOp(Protocol):

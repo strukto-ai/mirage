@@ -14,7 +14,7 @@
 
 import { isStdin, operandLabel } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
@@ -207,7 +207,7 @@ export async function headGeneric(
   opts: CommandOpts,
   stat: Stat,
   stream: Stream,
-  firstLines?: (p: PathSpec, n: number) => Promise<ByteSource | null>,
+  firstLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   stream = stdinStream(stream, opts.stdin)
@@ -234,7 +234,7 @@ export async function headGeneric(
         if (pushed && firstLines !== undefined && !isStdin(p)) {
           const lines = await firstLines(p, parsed.lines)
           if (lines !== null) {
-            yield* chunks(lines, opts.signal, false, deadlineCheck(opts))
+            yield lines
             return
           }
         }

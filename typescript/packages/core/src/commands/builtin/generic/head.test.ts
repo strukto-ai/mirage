@@ -215,35 +215,3 @@ describe('head asks the mount for the first lines', () => {
     )
   })
 })
-
-it('accepts streamed firstLines and closes an abandoned shortcut', async () => {
-  let closed = false
-  let read = false
-  async function* source(): AsyncGenerator<Uint8Array> {
-    await Promise.resolve()
-    try {
-      yield ENC.encode('a\n')
-      yield ENC.encode('b\n')
-      throw new Error('unused shortcut tail was read')
-    } finally {
-      closed = true
-    }
-  }
-  const result = await headGeneric(
-    [PathSpec.fromStrPath('/t')],
-    [],
-    { stdin: null, flags: { lines: '2' }, cwd: '/', vfs: {} } as CommandOpts,
-    (p) => Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE })),
-    async function* fallback() {
-      read = true
-      yield await Promise.resolve(ENC.encode('unused'))
-    },
-    () => Promise.resolve(source()),
-  )
-  const [out] = result ?? [null]
-  const iterator = (out as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
-  expect((await iterator.next()).value).toEqual(ENC.encode('a\n'))
-  await iterator.return?.()
-  expect(closed).toBe(true)
-  expect(read).toBe(false)
-})

@@ -199,7 +199,7 @@ async function polledWindow(
 // `n` lines without the rest of the file. Mirrors Python's `_read_last`.
 function readLast(
   stream: Stream,
-  lastLines: (p: PathSpec, n: number) => Promise<ByteSource | null>,
+  lastLines: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
   n: number,
 ): Stream {
   return (p) => {
@@ -649,7 +649,7 @@ export async function tailGeneric(
   stream: Stream,
   stat: Stat,
   readRange: ReadRangeFn | null = null,
-  lastLines?: (p: PathSpec, n: number) => Promise<ByteSource | null>,
+  lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
   followOp?: (
     p: PathSpec,
     n: number,
