@@ -9,7 +9,8 @@ import { VFSName } from '../../types.ts'
 import { PROMPT } from './prompt.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { buildDeltaHook } from '../../core/onedrive/watch.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
+import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
+import { capacity as onedriveCapacity } from '../../core/onedrive/capacity.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { readdir } from '../../core/onedrive/readdir.ts'
 import { read } from '../../core/onedrive/read.ts'
@@ -133,6 +134,10 @@ export class OneDriveVFS extends BaseVFS {
     const config = this.accessor.config
     const scopes = [path].map((d) => [d, driveLoc(config, d.vfsPath)] as const)
     return filesContaining(config, readdir, this.accessor, scopes, text, index)
+  }
+
+  override capacity(): Promise<CapacityResult> {
+    return onedriveCapacity(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

@@ -2672,7 +2672,8 @@ class Dispatcher:
         A mount with a native setattr op applies what it can and returns
         the residual; residual fields go to the overlay and natively
         applied ones are dropped from it, so a stale overlay never
-        shadows a fresh backend value. A mount without the op, and a
+        shadows a fresh backend value, and the cached stat and listing
+        that still carry the old value go too. A mount without the op, and a
         link path (which has no backend inode), overlay everything. The
         overlay half is the dispatcher's own write, so it runs inside the same
         gates as the native half.
@@ -2699,6 +2700,7 @@ class Dispatcher:
         ]
         if applied:
             await self._namespace.drop_attrs(path.virtual, applied)
+            await self.invalidate_after_write(mount, path, times=False)
         if residual:
             await self._write_overlay(path.virtual, residual)
         return dict(residual)

@@ -39,3 +39,6 @@ export const ROOT_ID = '0'
 export const ID_BASE = 1000000000
 
 export const DEFAULT_LIMIT = 100
+
+// A Personal account's storage, which users/me reports as space_amount.
+export const SPACE_BYTES = 10 * 1024 * 1024 * 1024

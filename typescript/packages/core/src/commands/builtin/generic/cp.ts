@@ -1593,7 +1593,7 @@ export async function cpGeneric(
         try {
           await strategy.dirCopy(src, target)
         } catch (err) {
-          if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
+          if (classify(err) !== 'ENOTSUP') throw err
           copied = false
         }
         if (copied) {
@@ -1613,9 +1613,9 @@ export async function cpGeneric(
         }
       }
       // Per-entry policy forfeits dirCopy, as does a tree copy the
-      // dispatcher declines, so the tree's directories are recreated here: a
-      // files-only pass would drop every directory that holds no files (GNU
-      // keeps them).
+      // dispatcher declines or the backend cannot make in one call, so the
+      // tree's directories are recreated here: a files-only pass would drop
+      // every directory that holds no files (GNU keeps them).
       if (wholeTree) await beforeFullScan(dispatch, src, 'cp')
       const mirrored = await mirrorDirs(
         strategy,

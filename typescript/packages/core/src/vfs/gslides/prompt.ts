@@ -73,4 +73,10 @@ export const WRITE_PROMPT = `  Writes go through the gws CLI if installed:
     rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive
     rm -f <path>                             # ignore if missing
     Only operates on .gslide.json files; owned/ and shared/ themselves
-    cannot be removed.`
+    cannot be removed.
+
+  Rename (a new title):
+    mv {prefix}/owned/<date>_<old>__<id>.gslide.json \\
+       {prefix}/owned/<date>_<new>__<id>.gslide.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused.`

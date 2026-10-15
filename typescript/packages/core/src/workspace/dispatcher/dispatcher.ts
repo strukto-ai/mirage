@@ -2640,7 +2640,10 @@ export class Dispatcher {
     const applied = SETATTR_KEYS.filter(
       (key) => kwargs[key] !== undefined && kwargs[key] !== null && !(key in residual),
     )
-    if (applied.length > 0) await this.namespace.dropAttrs(p.virtual, applied)
+    if (applied.length > 0) {
+      await this.namespace.dropAttrs(p.virtual, applied)
+      await this.invalidateAfterWriteByPath(p.virtual, null, false)
+    }
     if (Object.keys(residual).length > 0) await this.writeOverlay(p.virtual, residual)
     return residual
   }

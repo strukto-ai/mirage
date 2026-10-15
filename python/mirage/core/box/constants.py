@@ -53,3 +53,7 @@ SHA1 = "sha1"
 ACTIVE = "active"
 ALL_FILES_FOLDER_ID = "0"
 TRASH_FOLDER_ID = "1"
+
+# The space_amount Box reports for an account with unlimited storage, a
+# placeholder rather than a size.
+UNLIMITED_SPACE = 999_999_999_999_999

@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
-from mirage.core.dropbox.copy import copy
+from mirage.core.dropbox.copy import copy, dir_copy
 from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
 
@@ -69,3 +69,17 @@ async def test_copy_replaces_existing_destination_file():
                 )
     assert deleted.await_args.args[1] == "/b.txt"
     assert copied.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_dir_copy_copies_the_tree_in_one_request():
+    with patch(
+        "mirage.core.dropbox.copy.copy_path", new_callable=AsyncMock
+    ) as copied:
+        await dir_copy(
+            make_accessor("/Team"),
+            PathSpec.from_str_path("/src"),
+            PathSpec.from_str_path("/dst"),
+        )
+    assert copied.await_count == 1
+    assert copied.await_args.args[1:] == ("/Team/src", "/Team/dst")

@@ -14,7 +14,7 @@
 
 import { rangeReply, route } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
-import { DEFAULT_DRIVE, SITE_ID, SITE_NAME, type C } from './config.ts'
+import { DEFAULT_DRIVE, DRIVE_BYTES, SITE_ID, SITE_NAME, type C } from './config.ts'
 import {
   baseName,
   dirName,
@@ -38,6 +38,7 @@ import {
   dirAt,
   drives,
   fileAt,
+  folderSize,
   hasDrive,
   moveDir,
   moveFile,
@@ -99,6 +100,26 @@ async function declareDrive(ctx: Ctx<C>): Promise<Reply> {
   if (key === '') return notFound()
   await addDrive(base(ctx), key)
   return { status: 200, body: { id: key, name: key } }
+}
+
+// A drive's own resource: its quota facet counts the bytes every stored file
+// holds against a Basic account's storage.
+async function driveInfo(ctx: Ctx<C>, drive: string): Promise<Reply> {
+  const used = await folderSize(ctx.db, ctx.tenant, drive, '')
+  return {
+    status: 200,
+    body: {
+      id: drive,
+      driveType: 'personal',
+      quota: {
+        total: DRIVE_BYTES,
+        used,
+        remaining: DRIVE_BYTES - used,
+        deleted: 0,
+        state: 'normal',
+      },
+    },
+  }
 }
 
 async function download(ctx: Ctx<C>): Promise<Reply> {
@@ -402,6 +423,9 @@ export function onedriveRoutes(): KitRoute<C>[] {
     route('GET', '/sites', sites),
     route('GET', '/sites/:site/drives', siteDrives),
     route('PUT', '/drives/:drive', declareDrive, { write: true }),
+    route('GET', '/me/drive', (ctx) => driveInfo(ctx, DEFAULT_DRIVE)),
+    route('GET', '/sites/:site/drive', (ctx) => driveInfo(ctx, DEFAULT_DRIVE)),
+    route('GET', '/drives/:drive', (ctx) => driveInfo(ctx, ctx.params.drive ?? DEFAULT_DRIVE)),
     ...driveShape('/me/drive/*rest', () => DEFAULT_DRIVE),
     ...driveShape('/sites/:site/drive/*rest', () => DEFAULT_DRIVE),
     ...driveShape('/drives/:drive/*rest', (ctx) => ctx.params.drive ?? DEFAULT_DRIVE),

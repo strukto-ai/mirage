@@ -9,7 +9,12 @@ import {
   type NextcloudConfigRedacted,
 } from './config.ts'
 import { PROMPT } from './prompt.ts'
-import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type {
+  CapacityResult,
+  PathSpec,
+  FileStat,
+  SetAttrFields,
+} from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir } from '../../core/nextcloud/readdir.ts'
@@ -24,8 +29,10 @@ import { unlink } from '../../core/nextcloud/unlink.ts'
 import { rmdir } from '../../core/nextcloud/rmdir.ts'
 import { rmR } from '../../core/nextcloud/rm.ts'
 import { rename } from '../../core/nextcloud/rename.ts'
-import { copy } from '../../core/nextcloud/copy.ts'
+import { copy, dirCopy } from '../../core/nextcloud/copy.ts'
 import { truncate } from '../../core/nextcloud/truncate.ts'
+import { capacity } from '../../core/nextcloud/capacity.ts'
+import { setAttrs } from '../../core/nextcloud/set_attrs.ts'
 import { SCOPE_ERROR } from '../../core/nextcloud/constants.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
@@ -128,8 +135,23 @@ export class NextcloudVFS extends BaseVFS {
     return copy(this.accessor, src, dst)
   }
 
+  override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return dirCopy(this.accessor, src, dst)
+  }
+
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     return truncate(this.accessor, path, length, noCreate)
+  }
+
+  override setattr(
+    path: PathSpec,
+    fields: SetAttrFields,
+  ): Promise<Record<string, number | string>> {
+    return setAttrs(this.accessor, path, fields)
+  }
+
+  override capacity(): Promise<CapacityResult> {
+    return capacity(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

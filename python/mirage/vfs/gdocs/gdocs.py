@@ -21,16 +21,19 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gdocs.constants import MIME
 from mirage.core.gdocs.read import read as _read
 from mirage.core.gdocs.readdir import readdir as _readdir
+from mirage.core.gdocs.rename import rename as _rename
 from mirage.core.gdocs.stat import stat as _stat
 from mirage.core.gdocs.unlink import unlink as _unlink
 from mirage.core.google.client import TokenManager
 from mirage.core.google.search import files_containing as _files_containing
+from mirage.core.google.watch import app_delta_hook
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.utils.generated.google_vocabulary import DOCS_WORDS
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.gdocs.prompt import PROMPT, WRITE_PROMPT
+from mirage.watch.base import DeltaHook
 
 
 class GDocsVFS(BaseVFS):
@@ -102,6 +105,17 @@ class GDocsVFS(BaseVFS):
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> None:
         await _unlink(self.accessor, path, index)
+
+    async def rename(
+        self,
+        src: PathSpec,
+        dst: PathSpec,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> None:
+        await _rename(self.accessor, src, dst, index)
+
+    def delta_hook(self) -> DeltaHook:
+        return app_delta_hook(self.accessor, _readdir, _stat)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

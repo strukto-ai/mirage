@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { SFTPWrapper } from 'ssh2'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { copy } from './copy.ts'
+import { copy, dirCopy } from './copy.ts'
 import { exists } from './exists.ts'
-import { makeFakeAccessor } from './_test_utils.ts'
+import { makeFakeAccessor, RunAccessor, type RunAnswer } from './_test_utils.ts'
 import { read } from './read.ts'
 
 function spec(p: string): PathSpec {
@@ -49,5 +50,52 @@ describe('core/ssh/copy', () => {
     await expect(copy(accessor, spec('/data/missing'), spec('/data/x'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+})
+
+const ENC = new TextEncoder()
+
+function remote(answer: RunAnswer, landed = false): RunAccessor {
+  const accessor = new RunAccessor('/srv', answer)
+  const sftp = {
+    exists: (_path: string, cb: (yes: boolean) => void) => {
+      cb(landed)
+    },
+  } as unknown as SFTPWrapper
+  accessor.sftp = () => Promise.resolve(sftp)
+  return accessor
+}
+
+function copyTree(accessor: RunAccessor): Promise<void> {
+  return dirCopy(accessor, spec('/a b'), spec('/c'))
+}
+
+describe('core/ssh/copy dirCopy', () => {
+  it('copies the tree with one cp on the server', async () => {
+    const accessor = remote([0, ENC.encode('copied\n'), new Uint8Array()])
+    await copyTree(accessor)
+    expect(accessor.sent).toEqual(["env LC_ALL=C cp -RL -- '/srv/a b' '/srv/c' && echo copied"])
+  })
+
+  it.each<[string, RunAnswer]>([
+    [
+      'a server that runs nothing',
+      [1, ENC.encode('This service allows sftp connections only.\n'), new Uint8Array()],
+    ],
+    ['a refused exec', new Error('refused')],
+  ])('leaves the walk on %s', async (_name, answer) => {
+    await expect(copyTree(remote(answer))).rejects.toMatchObject({ code: 'ENOTSUP' })
+  })
+
+  it('says why a cp that failed partway failed', async () => {
+    const accessor = remote(
+      [
+        1,
+        new Uint8Array(),
+        ENC.encode("cp: cannot open '/srv/a b/x' for reading: Permission denied\n"),
+      ],
+      true,
+    )
+    await expect(copyTree(accessor)).rejects.toMatchObject({ code: 'EACCES' })
   })
 })

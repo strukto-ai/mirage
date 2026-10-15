@@ -20,7 +20,8 @@ import { VFSName } from '../../types.ts'
 import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/dropbox/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
+import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
+import { capacity as dropboxCapacity } from '../../core/dropbox/capacity.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { MkdirOp } from '../types.ts'
 import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
@@ -35,7 +36,7 @@ import { unlink as dropboxUnlink } from '../../core/dropbox/unlink.ts'
 import { rmdir as dropboxRmdir } from '../../core/dropbox/rmdir.ts'
 import { rmR as dropboxRmR } from '../../core/dropbox/rm.ts'
 import { rename as dropboxRename } from '../../core/dropbox/rename.ts'
-import { copy as dropboxCopy } from '../../core/dropbox/copy.ts'
+import { copy as dropboxCopy, dirCopy as dropboxDirCopy } from '../../core/dropbox/copy.ts'
 import { filesContaining as dropboxFilesContaining } from '../../core/dropbox/search.ts'
 
 const mkdirOp: MkdirOp<DropboxAccessor> = (accessor, path, parents) =>
@@ -149,6 +150,10 @@ export class DropboxVFS extends BaseVFS {
     return dropboxCopy(this.accessor, src, dst)
   }
 
+  override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return dropboxDirCopy(this.accessor, src, dst)
+  }
+
   override filesContaining(
     path: PathSpec,
     text: string,
@@ -156,6 +161,10 @@ export class DropboxVFS extends BaseVFS {
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || !this.accessor.contentSearch) return Promise.resolve(null)
     return dropboxFilesContaining(this.accessor, text, [path])
+  }
+
+  override capacity(): Promise<CapacityResult> {
+    return dropboxCapacity(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

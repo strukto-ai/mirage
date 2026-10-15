@@ -7,9 +7,12 @@
         "ram",
         "disk",
         "redis",
-        "opfs"
+        "opfs",
+        "ssh",
+        "nextcloud",
+        "gdrive"
       ],
-      "command": "mkdir -p /data/ptch1 && printf 'x' > /data/ptch1/a.txt && touch -d '2021-06-15T12:00:00' /data/ptch1/a.txt",
+      "command": "mkdir -p /data/ptch1 && printf 'x' > /data/ptch1/a.txt && ls /data/ptch1 > /dev/null && touch -d '2021-06-15T12:00:00' /data/ptch1/a.txt",
       "check": {
         "stat": "/data/ptch1/a.txt",
         "fields": [

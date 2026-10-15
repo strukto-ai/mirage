@@ -107,4 +107,10 @@ export const WRITE_PROMPT = `  Writes go through the gws CLI if installed:
     rm {prefix}/owned/<file>.gdoc.json      # permanent delete from Drive
     rm -f <path>                            # ignore if missing
     Only operates on .gdoc.json files; owned/ and shared/ themselves
-    cannot be removed.`
+    cannot be removed.
+
+  Rename (a new title):
+    mv {prefix}/owned/<date>_<old>__<id>.gdoc.json \\
+       {prefix}/owned/<date>_<new>__<id>.gdoc.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused.`

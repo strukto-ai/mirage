@@ -37,3 +37,7 @@ export const LIST_LIMIT = 2000
 
 // search_v2's default max_results.
 export const SEARCH_LIMIT = 100
+
+// A Basic account's allocation, which get_space_usage reports as the
+// individual allocation.
+export const ALLOCATED_BYTES = 2 * 1024 * 1024 * 1024

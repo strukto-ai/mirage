@@ -1,6 +1,9 @@
+from unittest.mock import AsyncMock, patch
+
+import httpx
 import pytest
 
-from mirage.core.nextcloud.copy import copy
+from mirage.core.nextcloud.copy import copy, dir_copy
 from mirage.core.nextcloud.create import create
 from mirage.core.nextcloud.mkdir import mkdir
 from mirage.core.nextcloud.rename import rename
@@ -49,6 +52,36 @@ async def test_copy_duplicates_file(make_acc):
     )
     assert acc._fake.files["dst.txt"] == b"payload"
     assert acc._fake.files["src.txt"] == b"payload"
+
+
+@pytest.mark.parametrize(
+    ("status", "error"), [(201, None), (404, FileNotFoundError)]
+)
+@pytest.mark.asyncio
+async def test_dir_copy_is_one_copy_of_the_whole_tree(make_acc, status, error):
+    root = "https://cloud.example.com/remote.php/dav/files/user"
+    answer = httpx.Response(status, request=httpx.Request("COPY", root))
+    with patch(
+        "mirage.core.nextcloud.copy.dav_request",
+        new_callable=AsyncMock,
+        return_value=answer,
+    ) as request:
+        copying = dir_copy(
+            make_acc(),
+            PathSpec.from_str_path("/src"),
+            PathSpec.from_str_path("/dst"),
+        )
+        if error is None:
+            await copying
+        else:
+            with pytest.raises(error):
+                await copying
+    assert request.await_args.args[1:] == ("COPY", f"{root}/src/")
+    assert request.await_args.kwargs["headers"] == {
+        "Destination": f"{root}/dst/",
+        "Depth": "infinity",
+        "Overwrite": "F",
+    }
 
 
 @pytest.mark.asyncio

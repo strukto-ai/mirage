@@ -16,6 +16,7 @@ import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import {
   invalidateAfterWrite,
   invalidateAncestors,
+  invalidateSubtree,
   nativeCondition,
   stale,
   writeCondition,
@@ -128,5 +129,32 @@ export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSp
   record('copy', dst.virtual, 'dropbox', 0, timer)
   liftLost(dst, upto)
   await invalidateAfterWrite(dst)
+  await invalidateAncestors(dst)
+}
+
+/**
+ * Copy a folder tree onto a fresh name in one copy_v2. `cp -r` asks this
+ * only when nothing holds `dst`, so a taken name is Dropbox's conflict,
+ * never a merge.
+ */
+export async function dirCopy(
+  accessor: DropboxAccessor,
+  src: PathSpec,
+  dst: PathSpec,
+): Promise<void> {
+  const tm = accessor.tokenManager
+  const upto = lostCount()
+  const timer = startOp()
+  try {
+    await copyPath(tm, dropboxPathOf(accessor, src), dropboxPathOf(accessor, dst))
+  } catch (err) {
+    if (err instanceof DropboxApiError && err.summary.startsWith(MISSING_SOURCE)) {
+      throw enoent(src.virtual)
+    }
+    throw err
+  }
+  record('copy_prefix', dst.virtual, 'dropbox', 0, timer)
+  liftLost(dst, upto, true)
+  await invalidateSubtree(dst)
   await invalidateAncestors(dst)
 }

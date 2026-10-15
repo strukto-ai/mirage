@@ -464,16 +464,19 @@ async def test_no_op_policy_modes_keep_the_native_dir_copy():
         assert used["dir_copy"], flags
 
 
+@pytest.mark.parametrize("refuse", [walk_declined, enotsup])
 @pytest.mark.asyncio
-async def test_a_declined_dir_copy_copies_entry_by_entry():
+async def test_a_declined_dir_copy_copies_entry_by_entry(refuse):
     # The dispatcher may turn a one-call tree copy down (a link below the
-    # destination); the copy then goes per entry, directories included.
+    # destination), and a backend may be unable to make it in one call (an
+    # SSH server that runs no commands); the copy then goes per entry,
+    # directories included.
     files = {"/t/f.txt": b"F"}
     dirs = {"/t", "/t/empt"}
     stat, copy, find, mkdir = _typed_backend(files, dirs)
 
     async def dir_copy(src, dst) -> None:
-        raise walk_declined("ram", "dir_copy", dst)
+        raise refuse("ram", "dir_copy", dst)
 
     _, io = await cp_generic(
         [_spec(p) for p in ["/t", "/c"]],

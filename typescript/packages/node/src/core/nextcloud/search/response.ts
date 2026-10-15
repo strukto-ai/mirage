@@ -4,7 +4,7 @@ import { CONTENT_LENGTH, LAST_MODIFIED, RESOURCE_TYPE } from './constants.ts'
 import { relativePath } from './target.ts'
 import type { Property, SearchEntry, SearchTarget, XmlRecord } from './types.ts'
 
-const parser = new XMLParser({
+export const parser = new XMLParser({
   ignoreAttributes: false,
   removeNSPrefix: true,
   parseTagValue: false,
@@ -15,7 +15,7 @@ function isRecord(value: unknown): value is XmlRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function records(value: unknown): XmlRecord[] {
+export function records(value: unknown): XmlRecord[] {
   if (Array.isArray(value)) return value.filter(isRecord)
   return isRecord(value) ? [value] : []
 }

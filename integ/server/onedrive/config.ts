@@ -40,3 +40,6 @@ export const DEFAULT_DRIVE = 'default'
 // shared-case expectations stay deterministic.
 export const OFFICE_EXTENSIONS = ['.pptx', '.docx', '.xlsx']
 export const ENRICH_MARKER = '<odsp-metadata/>'
+
+// A Basic account's storage, which a drive's quota facet reports as total.
+export const DRIVE_BYTES = 5 * 1024 * 1024 * 1024

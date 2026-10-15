@@ -577,24 +577,29 @@ describe('per-entry policy still materializes directories', () => {
     }
   })
 
-  it('copies entry by entry when the dirCopy is declined', async () => {
-    // The dispatcher may turn a one-call tree copy down (a link below the
-    // destination); the copy then goes per entry, directories included.
-    const files = new Map([['/t/f.txt', new Uint8Array([70])]])
-    const dirs = new Set(['/t', '/t/empt'])
-    const { stat, copy, find, mkdir } = typedBackend(files, dirs)
-    const dirCopy = (_src: PathSpec, dst: PathSpec): Promise<void> =>
-      Promise.reject(walkDeclined('ram', 'dir_copy', dst))
-    const [, io] = await cpGeneric(
-      ['/t', '/c'].map(spec),
-      stat,
-      { copy, find, dirCopy, mkdir },
-      cpFlags({ recursive: true, verbose: true }),
-    )
-    expect(io.exitCode).toBe(0)
-    expect(files.get('/c/f.txt')).toEqual(new Uint8Array([70]))
-    expect(dirs.has('/c/empt')).toBe(true)
-  })
+  it.each([walkDeclined, enotsup])(
+    'copies entry by entry when the dirCopy is declined (%o)',
+    async (refuse) => {
+      // The dispatcher may turn a one-call tree copy down (a link below the
+      // destination), and a backend may be unable to make it in one call (an
+      // SSH server that runs no commands); the copy then goes per entry,
+      // directories included.
+      const files = new Map([['/t/f.txt', new Uint8Array([70])]])
+      const dirs = new Set(['/t', '/t/empt'])
+      const { stat, copy, find, mkdir } = typedBackend(files, dirs)
+      const dirCopy = (_src: PathSpec, dst: PathSpec): Promise<void> =>
+        Promise.reject(refuse('ram', 'dir_copy', dst))
+      const [, io] = await cpGeneric(
+        ['/t', '/c'].map(spec),
+        stat,
+        { copy, find, dirCopy, mkdir },
+        cpFlags({ recursive: true, verbose: true }),
+      )
+      expect(io.exitCode).toBe(0)
+      expect(files.get('/c/f.txt')).toEqual(new Uint8Array([70]))
+      expect(dirs.has('/c/empt')).toBe(true)
+    },
+  )
 
   it('names a refused entry copy and goes on', async () => {
     const files = new Map([

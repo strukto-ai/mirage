@@ -77,4 +77,10 @@ WRITE_PROMPT = """\
     rm {prefix}/owned/<file>.gsheet.json     # permanent delete from Drive
     rm -f <path>                             # ignore if missing
     Only operates on .gsheet.json files; owned/ and shared/ themselves
-    cannot be removed."""
+    cannot be removed.
+
+  Rename (a new title):
+    mv {prefix}/owned/<date>_<old>__<id>.gsheet.json \\
+       {prefix}/owned/<date>_<new>__<id>.gsheet.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused."""

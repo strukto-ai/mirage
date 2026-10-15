@@ -122,7 +122,7 @@ def _rpc_error(
 async def dropbox_rpc(
     tm: DropboxTokenManager,
     endpoint: str,
-    body: dict[str, Any],
+    body: dict[str, Any] | None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = await api_request(
         "POST",

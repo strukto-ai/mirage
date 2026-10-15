@@ -18,6 +18,7 @@ from typing import Any
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.msgraph.search import files_containing as _files_containing
+from mirage.core.onedrive.capacity import capacity as _capacity
 from mirage.core.onedrive.client import drive_loc
 from mirage.core.onedrive.copy import copy as _copy
 from mirage.core.onedrive.create import create as _create
@@ -34,7 +35,7 @@ from mirage.core.onedrive.truncate import truncate as _truncate
 from mirage.core.onedrive.unlink import unlink as _unlink
 from mirage.core.onedrive.watch import build_delta_hook
 from mirage.core.onedrive.write import write as _write
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.onedrive.prompt import PROMPT
 from mirage.watch.base import DeltaHook
@@ -150,6 +151,9 @@ class OneDriveVFS(BaseVFS):
             index,
             session=self.accessor.pool,
         )
+
+    async def capacity(self) -> CapacityResult:
+        return await _capacity(self.accessor)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

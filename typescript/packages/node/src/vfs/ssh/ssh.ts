@@ -19,7 +19,12 @@ import { type SSHConfig, type SSHConfigRedacted, redactSshConfig } from './confi
 import { PROMPT } from './prompt.ts'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { buildDeltaHook } from '../../core/ssh/watch.ts'
-import type { PathSpec, FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
+import type {
+  CapacityResult,
+  PathSpec,
+  FileStat,
+  SetAttrFields,
+} from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import type { MkdirOp } from '@struktoai/mirage-core/vfs/types'
 import { readdir as sshReaddir } from '../../core/ssh/readdir.ts'
@@ -37,7 +42,8 @@ import { unlink as sshUnlink } from '../../core/ssh/unlink.ts'
 import { rmdir as sshRmdir } from '../../core/ssh/rmdir.ts'
 import { rmR as sshRmR } from '../../core/ssh/rm.ts'
 import { rename as sshRename } from '../../core/ssh/rename.ts'
-import { copy as sshCopy } from '../../core/ssh/copy.ts'
+import { copy as sshCopy, dirCopy as sshDirCopy } from '../../core/ssh/copy.ts'
+import { capacity as sshCapacity } from '../../core/ssh/capacity.ts'
 import { truncate as sshTruncate } from '../../core/ssh/truncate.ts'
 import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
 import { SCOPE_ERROR } from '../../core/ssh/constants.ts'
@@ -174,6 +180,10 @@ export class SSHVFS extends BaseVFS {
     return sshCopy(this.accessor, src, dst)
   }
 
+  override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
+    return sshDirCopy(this.accessor, src, dst)
+  }
+
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     return sshTruncate(this.accessor, path, length, noCreate)
   }
@@ -183,6 +193,10 @@ export class SSHVFS extends BaseVFS {
     fields: SetAttrFields,
   ): Promise<Record<string, number | string>> {
     return sshSetAttrs(this.accessor, path, fields)
+  }
+
+  override capacity(): Promise<CapacityResult> {
+    return sshCapacity(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

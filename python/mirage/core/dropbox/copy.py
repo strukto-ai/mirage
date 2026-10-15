@@ -19,6 +19,7 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import (
     invalidate_after_write,
     invalidate_ancestors,
+    invalidate_subtree,
     native_condition,
     stale,
     write_condition,
@@ -153,4 +154,34 @@ async def copy(
     record("copy", dst.virtual, "dropbox", 0, timer)
     lift_lost(dst, upto)
     await invalidate_after_write(dst)
+    await invalidate_ancestors(dst)
+
+
+async def dir_copy(
+    accessor: DropboxAccessor, src: PathSpec, dst: PathSpec
+) -> None:
+    """Copy a folder tree onto a fresh name in one copy_v2.
+
+    ``cp -r`` asks this only when nothing holds ``dst``, so a taken name
+    is Dropbox's conflict, never a merge.
+
+    Args:
+        accessor (DropboxAccessor): Dropbox accessor.
+        src (PathSpec): the folder.
+        dst (PathSpec): the copy.
+    """
+    tm = accessor.token_manager
+    upto = lost_count()
+    timer = start_op()
+    try:
+        await copy_path(
+            tm, dropbox_path_of(accessor, src), dropbox_path_of(accessor, dst)
+        )
+    except DropboxApiError as exc:
+        if exc.summary.startswith(MISSING_SOURCE):
+            raise enoent(src.virtual) from exc
+        raise
+    record("copy_prefix", dst.virtual, "dropbox", 0, timer)
+    lift_lost(dst, upto, subtree=True)
+    await invalidate_subtree(dst)
     await invalidate_ancestors(dst)

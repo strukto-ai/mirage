@@ -351,6 +351,19 @@
         "stdout": "[[\"properties\",\"sheets\",\"spreadsheetId\",\"spreadsheetUrl\"],[\"data\",\"properties\"],[\"rowData\"],[\"effectiveValue\",\"formattedValue\",\"userEnteredValue\"]]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gapp_mv_retitles_a_file",
+      "seq": 520026,
+      "targets": [
+        "gapps"
+      ],
+      "command": "mv /sheets/owned/2026-01-01_Metrics__sheet0001.gsheet.json /sheets/owned/2026-01-01_Revenue__sheet0001.gsheet.json && ls /sheets/owned | grep sheet0001 && cat /sheets/owned/*__sheet0001.gsheet.json | jq -r .properties.title; mv /sheets/owned/*__sheet0001.gsheet.json /sheets/owned/Revenue.gsheet.json; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-01_Revenue__sheet0001.gsheet.json\nRevenue\nrc=1\n",
+        "stderr": "mv: cannot move '/sheets/owned/2026-01-01_Revenue__sheet0001.gsheet.json' to '/sheets/owned/Revenue.gsheet.json': Operation not permitted\n"
+      }
     }
   ]
 }

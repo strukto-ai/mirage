@@ -5,8 +5,10 @@ from typing import Any
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.generic.rewrite import append_by_rewrite
+from mirage.core.nextcloud.capacity import capacity as _capacity
 from mirage.core.nextcloud.constants import SCOPE_ERROR
 from mirage.core.nextcloud.copy import copy as _copy
+from mirage.core.nextcloud.copy import dir_copy as _dir_copy
 from mirage.core.nextcloud.create import create as _create
 from mirage.core.nextcloud.exists import exists as _exists
 from mirage.core.nextcloud.mkdir import mkdir as _mkdir
@@ -15,6 +17,7 @@ from mirage.core.nextcloud.readdir import readdir as _readdir
 from mirage.core.nextcloud.rename import rename as _rename
 from mirage.core.nextcloud.rm import rm_r as _rm_r
 from mirage.core.nextcloud.rmdir import rmdir as _rmdir
+from mirage.core.nextcloud.set_attrs import set_attrs as _set_attrs
 from mirage.core.nextcloud.stat import stat as _stat
 from mirage.core.nextcloud.stat import tree as _tree
 from mirage.core.nextcloud.stream import read_stream as _read_stream
@@ -22,7 +25,7 @@ from mirage.core.nextcloud.truncate import truncate as _truncate
 from mirage.core.nextcloud.unlink import unlink as _unlink
 from mirage.core.nextcloud.watch import build_delta_hook
 from mirage.core.nextcloud.write import write as _write
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.nextcloud.config import NextcloudConfig
 from mirage.vfs.nextcloud.prompt import PROMPT
@@ -121,10 +124,36 @@ class NextcloudVFS(BaseVFS):
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
         await _copy(self.accessor, src, dst)
 
+    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
+        await _dir_copy(self.accessor, src, dst)
+
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
         await _truncate(self.accessor, path, length, no_create)
+
+    async def setattr(
+        self,
+        path: PathSpec,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+    ) -> dict[str, int | str]:
+        return await _set_attrs(
+            self.accessor,
+            path,
+            mode=mode,
+            uid=uid,
+            gid=gid,
+            atime=atime,
+            mtime=mtime,
+        )
+
+    async def capacity(self) -> CapacityResult:
+        return await _capacity(self.accessor)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

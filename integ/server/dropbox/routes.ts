@@ -14,7 +14,7 @@
 
 import { rangeReply, route } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
-import { LIST_LIMIT, SEARCH_LIMIT, type C } from './config.ts'
+import { ALLOCATED_BYTES, LIST_LIMIT, SEARCH_LIMIT, type C } from './config.ts'
 import {
   addFolder,
   changesSince,
@@ -332,6 +332,17 @@ async function searchContinue(ctx: Ctx<C>): Promise<Reply> {
   return searchPage(ctx, JSON.parse(payload) as SearchState)
 }
 
+// The account's space, the bytes every stored file holds against a Basic
+// account's allocation.
+async function spaceUsage(ctx: Ctx<C>): Promise<Reply> {
+  const items = (await scopedItems(ctx.db, ctx.tenant, '')) ?? []
+  const used = items.reduce((n, item) => n + (item.content?.length ?? 0), 0)
+  return {
+    status: 200,
+    body: { used, allocation: { '.tag': 'individual', allocated: ALLOCATED_BYTES } },
+  }
+}
+
 export function dropboxRoutes(): KitRoute<C>[] {
   return [
     route('POST', '/oauth2/token', token),
@@ -346,5 +357,6 @@ export function dropboxRoutes(): KitRoute<C>[] {
     route('POST', '/2/files/copy_v2', relocate(false), { write: true }),
     route('POST', '/2/files/search_v2', search, { write: true }),
     route('POST', '/2/files/search/continue_v2', searchContinue, { write: true }),
+    route('POST', '/2/users/get_space_usage', spaceUsage),
   ]
 }

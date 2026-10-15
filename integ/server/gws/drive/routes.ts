@@ -174,6 +174,10 @@ function patchFile(ctx: GwsCtx): Reply {
   const item = fileOr404(ctx)
   if (isReply(item)) return item
   const body = asObj(ctx.json())
+  const stamp = asStr(body.modifiedTime)
+  if (stamp !== undefined && Number.isNaN(Date.parse(stamp))) {
+    return driveError(400, 'Invalid value for: modifiedTime', 'invalid')
+  }
   if ('parents' in body) {
     return driveError(
       403,
@@ -206,7 +210,9 @@ function patchFile(ctx: GwsCtx): Reply {
   }
   const trashed = asBool(body.trashed)
   if (trashed !== undefined) item.trashed = trashed
-  item.modifiedTime = ctx.db.now()
+  // modifiedTime is writable: a caller may set it, which Drive keeps to the
+  // millisecond; any other update stamps the time of the change.
+  item.modifiedTime = stamp === undefined ? ctx.db.now() : new Date(stamp).toISOString()
   return ok(fmtFile(item))
 }
 

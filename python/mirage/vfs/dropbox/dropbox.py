@@ -17,8 +17,10 @@ from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.dropbox.capacity import capacity as _capacity
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.copy import copy as _copy
+from mirage.core.dropbox.copy import dir_copy as _dir_copy
 from mirage.core.dropbox.create import create as _create
 from mirage.core.dropbox.exists import exists as _exists
 from mirage.core.dropbox.mkdir import mkdir as _mkdir
@@ -35,7 +37,7 @@ from mirage.core.dropbox.unlink import unlink as _unlink
 from mirage.core.dropbox.watch import build_delta_hook
 from mirage.core.dropbox.write import write as _write
 from mirage.core.generic.rewrite import truncate_by_rewrite
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dropbox.config import DropboxConfig
 from mirage.vfs.dropbox.prompt import PROMPT
@@ -134,6 +136,9 @@ class DropboxVFS(BaseVFS):
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
         await _copy(self.accessor, src, dst)
 
+    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
+        await _dir_copy(self.accessor, src, dst)
+
     async def files_containing(
         self,
         path: PathSpec,
@@ -151,6 +156,9 @@ class DropboxVFS(BaseVFS):
         """Drain the token manager's connection pool with the VFS."""
         await self._token_manager.close()
         await super().close()
+
+    async def capacity(self) -> CapacityResult:
+        return await _capacity(self.accessor)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

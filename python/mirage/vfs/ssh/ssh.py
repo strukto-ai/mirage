@@ -18,8 +18,10 @@ from typing import Any
 from mirage.accessor.ssh import SSHAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ssh.append import append_bytes as _append
+from mirage.core.ssh.capacity import capacity as _capacity
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy as _copy
+from mirage.core.ssh.copy import dir_copy as _dir_copy
 from mirage.core.ssh.create import create as _create
 from mirage.core.ssh.exists import exists as _exists
 from mirage.core.ssh.mkdir import mkdir as _mkdir
@@ -39,7 +41,7 @@ from mirage.core.ssh.truncate import truncate as _truncate
 from mirage.core.ssh.unlink import unlink as _unlink
 from mirage.core.ssh.watch import build_delta_hook
 from mirage.core.ssh.write import write as _write
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ssh.config import SSHConfig
 from mirage.vfs.ssh.prompt import PROMPT
@@ -162,6 +164,9 @@ class SSHVFS(BaseVFS):
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
         await _copy(self.accessor, src, dst)
 
+    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
+        await _dir_copy(self.accessor, src, dst)
+
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
@@ -186,6 +191,9 @@ class SSHVFS(BaseVFS):
             atime=atime,
             mtime=mtime,
         )
+
+    async def capacity(self) -> CapacityResult:
+        return await _capacity(self.accessor)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

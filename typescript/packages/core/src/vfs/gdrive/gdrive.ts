@@ -20,11 +20,13 @@ import { VFSName } from '../../types.ts'
 import { redactGDriveConfig, type GDriveConfig, type GDriveConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/gdrive/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
+import type { CapacityResult, PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { readdir as gdriveReaddir } from '../../core/gdrive/readdir.ts'
 import { read as gdriveRead, readStream as gdriveStream } from '../../core/gdrive/read.ts'
+import { capacity as gdriveCapacity } from '../../core/gdrive/capacity.ts'
 import { checksum as gdriveChecksum } from '../../core/gdrive/checksum.ts'
+import { setAttrs as gdriveSetAttrs } from '../../core/gdrive/set_attrs.ts'
 import { stat as gdriveStat } from '../../core/gdrive/stat.ts'
 import { exists as gdriveExists } from '../../core/gdrive/exists.ts'
 import { write as gdriveWrite } from '../../core/gdrive/write.ts'
@@ -144,6 +146,17 @@ export class GDriveVFS extends BaseVFS {
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
     return gdriveFilesContaining(this.accessor, text, [path], index)
+  }
+
+  override setattr(
+    path: PathSpec,
+    fields: SetAttrFields,
+  ): Promise<Record<string, number | string>> {
+    return gdriveSetAttrs(this.accessor, path, fields)
+  }
+
+  override capacity(): Promise<CapacityResult> {
+    return gdriveCapacity(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

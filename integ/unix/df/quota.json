@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "id": "df_quota_reports_the_backend_space",
+      "seq": 612011,
+      "targets": [
+        "ssh",
+        "gdrive",
+        "onedrive",
+        "box",
+        "dropbox"
+      ],
+      "command": "df -P /data | awk 'NR == 2 { print ($2 > 0 && $4 > 0), $6 }'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 /data\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

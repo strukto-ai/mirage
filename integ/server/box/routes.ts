@@ -14,7 +14,7 @@
 
 import { rangeReply, route } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
-import { DEFAULT_LIMIT, ROOT_ID, type C } from './config.ts'
+import { DEFAULT_LIMIT, ROOT_ID, SPACE_BYTES, type C } from './config.ts'
 import { readMultipart } from './multipart.ts'
 import {
   addFile,
@@ -131,6 +131,18 @@ async function folderInfo(ctx: Ctx<C>): Promise<Reply> {
     ctx.clock.nowIso(false),
   )
   return item === null ? notFound('folder') : { status: 200, body: render(item) }
+}
+
+// The user's storage: the bytes every stored file holds against a Personal
+// account's amount.
+async function me(ctx: Ctx<C>): Promise<Reply> {
+  if (!authed(ctx)) return unauthorized()
+  const items = await allItems(ctx.db, ctx.tenant)
+  const used = items.reduce((n, item) => n + (item.content?.length ?? 0), 0)
+  return {
+    status: 200,
+    body: { type: 'user', id: '1', space_amount: SPACE_BYTES, space_used: used },
+  }
 }
 
 async function fileInfo(ctx: Ctx<C>): Promise<Reply> {
@@ -458,6 +470,7 @@ export function boxRoutes(): KitRoute<C>[] {
     route('DELETE', '/2.0/files/:file_id', deleteOf('file', 'file_id'), { write: true }),
     route('DELETE', '/2.0/folders/:folder_id', deleteOf('folder', 'folder_id'), { write: true }),
     route('GET', '/2.0/search', search),
+    route('GET', '/2.0/users/me', me),
     route('GET', '/2.0/events', events),
     route('GET', '/dl/:file_id', dl),
     route('GET', '/rep/:file_id/extracted_text', repText),

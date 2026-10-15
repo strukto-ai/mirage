@@ -50,6 +50,7 @@ from mirage.errors.types import (
     DotWalkLoop,
     DotWalkMissing,
     FsCondition,
+    OperationNotSupportedError,
     WalkDeclinedError,
 )
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -2065,7 +2066,7 @@ async def cp_generic(
                 copied = True
                 try:
                     await strategy.dir_copy(src, target)
-                except WalkDeclinedError:
+                except OperationNotSupportedError:
                     copied = False
                 if copied:
                     lines.extend(tree)
@@ -2081,9 +2082,10 @@ async def cp_generic(
                         )
                     continue
             # Per-entry policy forfeits dir_copy, as does a tree copy the
-            # dispatcher declines, so the tree's directories are recreated
-            # here: a files-only pass would drop every directory that
-            # holds no files (GNU keeps them).
+            # dispatcher declines or the backend cannot make in one call,
+            # so the tree's directories are recreated here: a files-only
+            # pass would drop every directory that holds no files (GNU
+            # keeps them).
             if whole_tree:
                 await before_full_scan(dispatch, src, "cp")
             blocked, made = await _mirror_dirs(

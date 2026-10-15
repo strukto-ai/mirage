@@ -19,7 +19,7 @@ import { Slot, Scope } from '../hierarchy/scope.ts'
 import { CORPUS } from './constants.ts'
 
 const TITLE_MAX_CHARS = 100
-const DATE_LEN = 10
+export const DATE_LEN = 10
 
 const sanitizeTitle = (title: string, maxBytes: number): string =>
   sanitizeLabel(title, { fallback: 'Untitled', maxLen: TITLE_MAX_CHARS, maxBytes })

@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.gdrive.capacity import capacity as _capacity
 from mirage.core.gdrive.checksum import checksum as _checksum
 from mirage.core.gdrive.copy import copy as _copy
 from mirage.core.gdrive.create import create as _create
@@ -29,13 +30,14 @@ from mirage.core.gdrive.rename import rename as _rename
 from mirage.core.gdrive.rm import rm_r as _rm_r
 from mirage.core.gdrive.rmdir import rmdir as _rmdir
 from mirage.core.gdrive.search import files_containing as _files_containing
+from mirage.core.gdrive.set_attrs import set_attrs as _set_attrs
 from mirage.core.gdrive.stat import stat as _stat
 from mirage.core.gdrive.truncate import truncate as _truncate
 from mirage.core.gdrive.unlink import unlink as _unlink
 from mirage.core.gdrive.watch import build_delta_hook
 from mirage.core.gdrive.write import write as _write
 from mirage.core.google.client import TokenManager
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.prompt import PROMPT
@@ -150,6 +152,29 @@ class GoogleDriveVFS(BaseVFS):
         """Drain the token manager's connection pool with the VFS."""
         await self._token_manager.close()
         await super().close()
+
+    async def setattr(
+        self,
+        path: PathSpec,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+    ) -> dict[str, int | str]:
+        return await _set_attrs(
+            self.accessor,
+            path,
+            mode=mode,
+            uid=uid,
+            gid=gid,
+            atime=atime,
+            mtime=mtime,
+        )
+
+    async def capacity(self) -> CapacityResult:
+        return await _capacity(self.accessor)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

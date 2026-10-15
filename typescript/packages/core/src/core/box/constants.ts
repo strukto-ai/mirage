@@ -48,3 +48,7 @@ export const SHA1 = 'sha1'
 export const ACTIVE = 'active'
 export const ALL_FILES_FOLDER_ID = '0'
 export const TRASH_FOLDER_ID = '1'
+
+// The space_amount Box reports for an account with unlimited storage, a
+// placeholder rather than a size.
+export const UNLIMITED_SPACE = 999_999_999_999_999

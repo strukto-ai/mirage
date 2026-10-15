@@ -30,7 +30,10 @@ import { MIME } from '../../core/gdocs/constants.ts'
 import { readdir as gdocsReaddir } from '../../core/gdocs/readdir.ts'
 import { read as gdocsRead } from '../../core/gdocs/read.ts'
 import { stat as gdocsStat } from '../../core/gdocs/stat.ts'
+import { appDeltaHook } from '../../core/google/watch.ts'
+import type { DeltaHook } from '../../watch/base.ts'
 import { unlink as gdocsUnlink } from '../../core/gdocs/unlink.ts'
+import { rename as gdocsRename } from '../../core/gdocs/rename.ts'
 
 export interface GDocsVFSState {
   type: string
@@ -88,6 +91,14 @@ export class GDocsVFS extends BaseVFS {
 
   override unlink(path: PathSpec, index?: IndexCacheStore): Promise<void> {
     return gdocsUnlink(this.accessor, path, index)
+  }
+
+  override rename(src: PathSpec, dst: PathSpec, index?: IndexCacheStore): Promise<void> {
+    return gdocsRename(this.accessor, src, dst, index)
+  }
+
+  override deltaHook(): DeltaHook {
+    return appDeltaHook(this.accessor, gdocsReaddir, gdocsStat)
   }
 
   override getState(): Promise<GDocsVFSState> {

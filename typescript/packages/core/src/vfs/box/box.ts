@@ -20,7 +20,8 @@ import { VFSName } from '../../types.ts'
 import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/box/watch.ts'
 import { type DeltaHook } from '../../watch/index.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
+import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
+import { capacity as boxCapacity } from '../../core/box/capacity.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { readdir as boxReaddir } from '../../core/box/readdir.ts'
 import { read as boxRead, readStream as boxStream } from '../../core/box/read.ts'
@@ -155,6 +156,10 @@ export class BoxVFS extends BaseVFS {
   ): Promise<PathSpec[] | null> {
     if (!opts.wholeWord || !this.accessor.contentSearch) return Promise.resolve(null)
     return boxFilesContaining(this.accessor, text, [path])
+  }
+
+  override capacity(): Promise<CapacityResult> {
+    return boxCapacity(this.accessor)
   }
 
   override deltaHook(): DeltaHook {

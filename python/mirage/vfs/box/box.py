@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.box.capacity import capacity as _capacity
 from mirage.core.box.checksum import checksum as _checksum
 from mirage.core.box.client import BoxTokenManager
 from mirage.core.box.copy import copy as _copy
@@ -35,7 +36,7 @@ from mirage.core.box.truncate import truncate as _truncate
 from mirage.core.box.unlink import unlink as _unlink
 from mirage.core.box.watch import build_delta_hook
 from mirage.core.box.write import write as _write
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.box.config import BoxConfig
 from mirage.vfs.box.prompt import PROMPT
@@ -152,6 +153,9 @@ class BoxVFS(BaseVFS):
         """Drain the token manager's connection pool with the VFS."""
         await self._token_manager.close()
         await super().close()
+
+    async def capacity(self) -> CapacityResult:
+        return await _capacity(self.accessor)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

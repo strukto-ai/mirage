@@ -19,6 +19,7 @@ import logging
 import os
 import posixpath
 import shlex
+import shutil
 import stat
 import tempfile
 from collections.abc import AsyncIterator, Iterator
@@ -48,6 +49,8 @@ UNLISTABLE = b"unlistable"
 FIND = ["env", "LC_ALL=C", "find", "-L"]
 TREE_FORMAT = "%y %m %s %T@ %A@ %U %G %P\\0"
 WC = ["env", "LC_ALL=C", "wc", "-l", "<"]
+CP = ["env", "LC_ALL=C", "cp", "-RL", "--"]
+COPIED = ["&&", "echo", "copied"]
 FIND_KINDS = (
     (stat.S_ISDIR, "d"),
     (stat.S_ISREG, "f"),
@@ -260,6 +263,84 @@ def line_total(root: str, target: str) -> tuple[int, bytes, bytes]:
     return 0, b"%d\n" % data.count(b"\n"), b""
 
 
+def tree_copy(root: str, source: str, target: str) -> tuple[int, bytes, bytes]:
+    """What ``cp -RL SOURCE TARGET && echo copied`` answers under the
+    chroot: the tree copied with links followed, then the echo. A missing
+    source, a directory the SFTP server will not list or a file it cannot
+    read fails with cp's message, as cp does, and the rest still copies.
+    Nothing outside ``root`` is read or written, through a link or not.
+
+    Args:
+        root (str): Local directory served as the SFTP root.
+        source (str): The directory, as the client named it.
+        target (str): The copy, as the client named it.
+    """
+    root = os.path.realpath(root)
+    base = os.path.join(root, source.lstrip("/"))
+    if not _inside(root, base) or not os.path.exists(base):
+        return (
+            1,
+            b"",
+            f"cp: cannot stat '{source}': No such file or directory\n".encode(),
+        )
+    land = os.path.join(root, target.lstrip("/"))
+    if not _inside(root, os.path.dirname(land.rstrip("/"))):
+        return (
+            1,
+            b"",
+            f"cp: cannot create directory '{target}': "
+            "No such file or directory\n".encode(),
+        )
+    errors: list[str] = []
+
+    def visit(
+        path: str, dest: str, named: str, shown: str, above: frozenset[str]
+    ) -> None:
+        if not _inside(root, path):
+            errors.append(f"cp: cannot stat '{named}': Permission denied\n")
+            return
+        if not os.path.isdir(path):
+            try:
+                shutil.copyfile(path, dest)
+            except OSError as exc:
+                errors.append(
+                    f"cp: cannot open '{named}' for reading: {exc.strerror}\n"
+                )
+            return
+        real = os.path.realpath(path)
+        if real in above:
+            errors.append(
+                f"cp: cannot stat '{named}': "
+                "Too many levels of symbolic links\n"
+            )
+            return
+        try:
+            os.mkdir(dest)
+        except OSError as exc:
+            errors.append(
+                f"cp: cannot create directory '{shown}': {exc.strerror}\n"
+            )
+            return
+        if os.path.basename(path).encode() == UNLISTABLE:
+            errors.append(
+                f"cp: cannot open directory '{named}': Permission denied\n"
+            )
+            return
+        for name in sorted(os.listdir(path)):
+            visit(
+                os.path.join(path, name),
+                os.path.join(dest, name),
+                f"{named}/{name}",
+                f"{shown}/{name}",
+                above | {real},
+            )
+
+    visit(base, land, source.rstrip("/"), target.rstrip("/"), frozenset())
+    if errors:
+        return 1, b"", "".join(errors).encode()
+    return 0, b"copied\n", b""
+
+
 def _answer(root: str, argv: list[str]) -> tuple[int, bytes, bytes] | None:
     """The answer to the commands the mount sends, or None for any other.
 
@@ -282,12 +363,18 @@ def _answer(root: str, argv: list[str]) -> tuple[int, bytes, bytes] | None:
         return tree_records(root, argv[len(FIND)])
     if argv[: len(WC)] == WC and len(argv) == len(WC) + 1:
         return line_total(root, argv[-1])
+    if (
+        argv[: len(CP)] == CP
+        and argv[len(CP) + 2 :] == COPIED
+        and len(argv) == len(CP) + 2 + len(COPIED)
+    ):
+        return tree_copy(root, argv[len(CP)], argv[len(CP) + 1])
     return None
 
 
 async def run_command(root: str, process: asyncssh.SSHServerProcess) -> None:
-    """Answer the ssh search's grep, the tree's find and the line
-    count's wc, and refuse any other command.
+    """Answer the ssh search's grep, the tree's find, the line count's
+    wc and the tree copy's cp, and refuse any other command.
 
     Args:
         root (str): Local directory served as the SFTP root.
@@ -308,7 +395,7 @@ async def run_command(root: str, process: asyncssh.SSHServerProcess) -> None:
 
 async def start_server(root: str, port: int = 0) -> asyncssh.SSHAcceptor:
     """Start a no-auth SFTP server chrooted to root, which runs no command
-    but the mount's grep, find and wc.
+    but the mount's grep, find, wc and cp.
 
     Args:
         root (str): Local directory served as the SFTP root.

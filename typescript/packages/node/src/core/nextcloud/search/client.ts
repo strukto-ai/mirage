@@ -11,7 +11,7 @@ import { parsePage } from './response.ts'
 import { searchTarget } from './target.ts'
 import type { SearchEntry } from './types.ts'
 
-function authorization(accessor: NextcloudAccessor): string | null {
+export function auth(accessor: NextcloudAccessor): string | null {
   const username = accessor.config.username
   if (username === undefined || username === '') return null
   return `Basic ${Buffer.from(`${username}:${accessor.config.password ?? ''}`).toString('base64')}`
@@ -30,8 +30,8 @@ export async function searchFiles(
   const target = searchTarget(accessor.config.url)
   if (target === null) return null
   const headers: Record<string, string> = { ...SEARCH_HEADERS }
-  const auth = authorization(accessor)
-  if (auth !== null) headers.Authorization = auth
+  const basic = auth(accessor)
+  if (basic !== null) headers.Authorization = basic
   const entries = new Map<string, SearchEntry>()
   let offset = 0
   for (;;) {
