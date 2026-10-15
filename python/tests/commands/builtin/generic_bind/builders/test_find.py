@@ -64,7 +64,6 @@ def _ops(stat_calls: list[str], read_tree=None) -> CommandIO:
         read_stream=read_stream,
         stat=stat,
         is_mounted=lambda _a: True,
-        local=False,
         read_tree=read_tree,
     )
 

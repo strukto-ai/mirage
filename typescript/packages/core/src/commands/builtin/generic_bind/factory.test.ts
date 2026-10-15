@@ -45,7 +45,6 @@ function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
     stat: () =>
       Promise.resolve(new FileStat({ name: 'x', type: FileType.FILE, content: ContentType.TEXT })),
     isMounted: () => true,
-    local: true,
     ...overrides,
   }
 }
@@ -62,7 +61,6 @@ describe('GENERIC_COMMANDS', () => {
       const copied: string[] = []
       const index = new RAMIndexCacheStore()
       const io = makeOps({
-        local: false,
         readTree: (_accessor, path, idx) => tree(accessor, path, idx),
         stat: (_accessor, path, idx) => stat(accessor, path, idx),
         mkdir: () => Promise.resolve(),
@@ -218,7 +216,6 @@ describe('a command stat after the freshness probe', () => {
     counter.ops = withStatCache(
       withProbeAnswers(
         makeOps({
-          local: false,
           stat: () => {
             counter.calls += 1
             return Promise.resolve(answer)
@@ -284,7 +281,6 @@ describe('a command with its own stat', () => {
     const file = (size: number): FileStat =>
       new FileStat({ name: 'a.txt', size, type: FileType.FILE, content: ContentType.TEXT })
     const base = makeOps({
-      local: false,
       stat: () => {
         calls.table += 1
         return Promise.resolve(file(7))

@@ -387,7 +387,6 @@ def command_io(vfs: BaseVFS) -> CommandIO:
         truncate=slot("truncate"),
         set_attrs=slot("setattr"),
         is_mounted=_without_accessor(vfs.is_mounted),
-        local=vfs.local,
         max_glob_matches=vfs.max_glob_matches,
         max_du_entries=vfs.max_du_entries,
         search=(

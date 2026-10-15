@@ -72,7 +72,6 @@ def _ops() -> CommandIO:
         read_stream=partial(stream_from_bytes, _read),
         stat=_stat,
         is_mounted=lambda a: True,
-        local=False,
     )
 
 

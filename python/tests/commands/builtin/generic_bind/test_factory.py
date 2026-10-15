@@ -67,7 +67,6 @@ def _ops(backend: _CountingBackend) -> CommandIO:
         read_stream=backend.read_stream,
         stat=_noop_stat,
         is_mounted=lambda a: True,
-        local=False,
     )
 
 

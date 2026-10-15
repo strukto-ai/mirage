@@ -214,7 +214,6 @@ export function commandIo(vfs: BaseVFS): CommandIO {
         }
       : {}),
     isMounted: () => vfs.isMounted(),
-    local: vfs.local,
     maxGlobMatches: vfs.maxGlobMatches,
     maxDuEntries: vfs.maxDuEntries,
     ...(has('search')

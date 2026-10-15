@@ -133,7 +133,6 @@ export interface CommandIO<A extends Accessor = Accessor> {
   truncate?: (accessor: A, path: PathSpec, length: number, noCreate?: boolean) => Promise<void>
   setAttrs?: SetAttrsOp<A>
   isMounted: (accessor: A) => boolean
-  local?: boolean
   maxGlobMatches?: number
   maxDuEntries?: number | null
   search?: SearchOps<A>

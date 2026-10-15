@@ -958,7 +958,6 @@ class TestJqS3Backend:
             read_stream=partial(_const_stream, data),
             stat=None,
             is_mounted=lambda a: True,
-            local=False,
         )
         path = PathSpec(
             vfs_path="s3/data.json",
