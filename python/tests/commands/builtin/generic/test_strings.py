@@ -1,12 +1,10 @@
 import pytest
 
 from mirage.commands.builtin.generic.strings import strings
-from mirage.io.stream import close_quietly
 from mirage.io.types import materialize
-from mirage.types import PathSpec
 
 
-async def _unused_read_bytes(path):
+async def _unused_read_stream(path):
     raise AssertionError(f"strings read {path} although stdin was given")
 
 
@@ -14,34 +12,8 @@ async def _unused_read_bytes(path):
 async def test_strings_min_len_filter():
     binary = b"hi\x00longer_string\x00"
     output, _ = await strings(
-        [], read_stream=_unused_read_bytes, stdin=binary, min_len=5
+        [], read_stream=_unused_read_stream, stdin=binary, min_len=5
     )
     decoded = (await materialize(output)).decode()
     assert "longer_string" in decoded
     assert "hi" not in decoded
-
-
-@pytest.mark.asyncio
-async def test_first_output_closes_inputs_without_reading_the_tail():
-    opened = []
-    closed = []
-
-    async def source(path):
-        opened.append(path.virtual)
-        try:
-            yield b"first\x00"
-            raise AssertionError(
-                "stream fetched the tail before its first output"
-            )
-        finally:
-            closed.append(path.virtual)
-
-    paths = [PathSpec.from_str_path(f"/input{i}") for i in range(1)]
-    output, io = await strings(paths, read_stream=source)
-    try:
-        assert await anext(output) == b"first\n"
-    finally:
-        await close_quietly(output)
-    assert len(opened) == 1
-    assert sorted(closed) == sorted(opened)
-    assert io.exit_code == 0

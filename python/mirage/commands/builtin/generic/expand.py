@@ -5,7 +5,6 @@ from functools import partial
 from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
-    normalized_read,
     reported_stream,
     split_readable,
 )
@@ -424,7 +423,6 @@ async def expand_generic(
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    stream = stdin_stream(stream, opts.stdin)
     try:
         parsed = parse_flags(opts.flags)
     except ValueError as exc:
@@ -435,7 +433,7 @@ async def expand_generic(
     return await merge_split_errors(
         await expand(
             readable,
-            read_stream=normalized_read(stream),
+            read_stream=stream,
             stdin=opts.stdin,
             tabs=parsed.tabs,
             initial_only=parsed.initial_only,

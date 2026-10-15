@@ -14,6 +14,8 @@
 
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../../io/types.ts'
+import { concat } from '../../../utils/bytes.ts'
+
 // Split text into lines (or `sep`-terminated records), dropping the
 // terminator's trailing empty entry. Mirrors Python's
 // mirage.commands.builtin.utils.lines.split_lines.
@@ -78,13 +80,7 @@ export async function* mapStream(
       const [line, ended] = await reader.readUntil(10)
       if (line.length === 0 && !ended) return
       const data = transform(line)
-      if (!ended) yield data
-      else {
-        const output = new Uint8Array(data.length + 1)
-        output.set(data)
-        output[data.length] = 10
-        yield output
-      }
+      yield ended ? concat([data, Uint8Array.of(10)]) : data
     }
   } finally {
     await reader.discard()

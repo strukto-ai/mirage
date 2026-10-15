@@ -61,14 +61,6 @@ def join_file_lines(chunks: Sequence[AnyStr], sep: AnyStr) -> AnyStr:
     return sep[:0].join(parts)
 
 
-__all__ = [
-    "join_file_lines",
-    "map_lines",
-    "split_lines",
-    "split_lines_keepends",
-]
-
-
 async def map_stream(
     source: ByteSource, transform: Callable[[bytes], bytes]
 ) -> AsyncIterator[bytes]:
@@ -87,3 +79,12 @@ async def map_stream(
             yield transform(line) + (b"\n" if ended else b"")
     finally:
         await reader.discard()
+
+
+__all__ = [
+    "join_file_lines",
+    "map_lines",
+    "map_stream",
+    "split_lines",
+    "split_lines_keepends",
+]

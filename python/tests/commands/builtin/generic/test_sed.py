@@ -1,7 +1,6 @@
 import pytest
 
 from mirage.commands.builtin.generic.sed import sed
-from mirage.io.stream import close_quietly
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 
@@ -156,32 +155,4 @@ async def test_repeated_stdin_operands_share_one_byte_cursor():
         stdin=b"x\n",
     )
     assert await materialize(output) == b"x\n"
-    assert io.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_first_output_closes_inputs_without_reading_the_tail():
-    opened = []
-    closed = []
-
-    async def source(path):
-        opened.append(path.virtual)
-        try:
-            yield b"first\n"
-            raise AssertionError(
-                "stream fetched the tail before its first output"
-            )
-        finally:
-            closed.append(path.virtual)
-
-    paths = [PathSpec.from_str_path(f"/input{i}") for i in range(1)]
-    output, io = await sed(
-        paths, "s/first/yes/", read_stream=source, write_bytes=None
-    )
-    try:
-        assert await anext(output) == b"yes\n"
-    finally:
-        await close_quietly(output)
-    assert len(opened) == 1
-    assert sorted(closed) == sorted(opened)
     assert io.exit_code == 0

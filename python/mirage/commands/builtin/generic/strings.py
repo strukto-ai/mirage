@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
-    normalized_read,
     reported_stream,
     split_readable,
 )
@@ -102,7 +101,6 @@ async def strings_generic(
     """
     # binutils strings never reads `-` as stdin; only /dev/stdin is.
     stat = stdin_stat(stat, dash=False)
-    stream = stdin_stream(stream, opts.stdin, dash=False)
     parsed = parse_flags(opts.flags)
     readable, err = await split_readable(paths, stat, "strings")
     if err and not readable:
@@ -110,7 +108,7 @@ async def strings_generic(
     return await merge_split_errors(
         await strings(
             readable,
-            read_stream=normalized_read(stream),
+            read_stream=stream,
             stdin=opts.stdin,
             min_len=parsed.min_len,
         ),

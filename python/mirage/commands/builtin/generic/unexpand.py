@@ -5,7 +5,6 @@ from functools import partial
 from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
-    normalized_read,
     reported_stream,
     split_readable,
 )
@@ -115,7 +114,6 @@ async def unexpand_generic(
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    stream = stdin_stream(stream, opts.stdin)
     parsed = parse_flags(opts.flags)
     readable, err = await split_readable(paths, stat, "unexpand")
     if err and not readable:
@@ -123,7 +121,7 @@ async def unexpand_generic(
     return await merge_split_errors(
         await unexpand(
             readable,
-            read_stream=normalized_read(stream),
+            read_stream=stream,
             stdin=opts.stdin,
             tabsize=parsed.tabsize,
             all_spaces=parsed.all_spaces,

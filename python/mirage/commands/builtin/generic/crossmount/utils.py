@@ -54,17 +54,24 @@ from mirage.types import FileType, PathSpec, PrimitiveCopy, Visibility
 from mirage.view.types import LinkView
 
 
-async def read_file(dispatch: DispatchFn, path: PathSpec) -> bytes:
-    """Read a relayed file.
+def file_stream_op(
+    dispatch: DispatchFn,
+) -> Callable[[PathSpec], AsyncIterator[bytes]]:
+    """A directory-aware whole-file reader over the dispatcher.
+
+    Mirrors ``fileStreamOp``.
 
     Args:
         dispatch (DispatchFn): Workspace operation dispatcher.
-        path (PathSpec): Full virtual input path.
     """
-    info = await dispatched_call(dispatch, "stat", path)
-    if info.type is FileType.DIRECTORY:
-        raise eisdir(path.virtual)
-    return cast(bytes, await dispatched_call(dispatch, "read", path))
+
+    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
+        info = await dispatched_call(dispatch, "stat", path)
+        if info.type is FileType.DIRECTORY:
+            raise eisdir(path.virtual)
+        yield cast(bytes, await dispatched_call(dispatch, "read", path))
+
+    return stream
 
 
 async def _relay_write(

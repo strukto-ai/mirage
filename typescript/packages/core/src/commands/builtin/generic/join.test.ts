@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { MountMode, PathSpec } from '../../../types.ts'
+import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { CheckOrder, joinGeneric, parseFlags, type JoinFlags } from './join.ts'
+import { CheckOrder, parseFlags, type JoinFlags } from './join.ts'
 
 type Row = [string, string, string, string, string, number, string, string]
 
@@ -132,37 +132,4 @@ describe('join across mounts', () => {
     )
     expect(r).toEqual([0, 'B 2 y\nC - z\nx 1 -\n', ''])
   })
-})
-
-it('emits before fetching the tail and closes every input', async () => {
-  const opened: string[] = [],
-    closed: string[] = []
-  async function* source(path: PathSpec): AsyncIterable<Uint8Array> {
-    opened.push(path.virtual)
-    try {
-      yield await Promise.resolve(new Uint8Array([97, 32, 49, 10, 98, 32, 50, 10]))
-      throw new Error('stream fetched the tail before its first output')
-    } finally {
-      closed.push(path.virtual)
-    }
-  }
-  const paths = Array.from({ length: 2 }, (_, i) => PathSpec.fromStrPath(`/input${String(i)}`))
-  const result = await joinGeneric(
-    paths,
-    { stdin: null, flags: {}, cwd: '/' },
-    (targets) => Promise.resolve(targets),
-    source,
-  )
-  if (result === null) throw new Error('missing result')
-  const [output, io] = result
-  if (output === null || output instanceof Uint8Array) throw new Error('expected stream')
-  const iterator = output[Symbol.asyncIterator]()
-  try {
-    expect((await iterator.next()).value).toEqual(new Uint8Array([97, 32, 49, 32, 49, 10]))
-  } finally {
-    await iterator.return?.()
-  }
-  expect(opened).toHaveLength(2)
-  expect(closed.sort()).toEqual(opened.sort())
-  expect(io.exitCode).toBe(0)
 })

@@ -669,12 +669,10 @@ class _Merge:
                         yield self.emit(line1, line2)
             seq1 = [] if eof1 else seq1[-1:]
             seq2 = [] if eof2 else seq2[-1:]
-        async with aclosing(self.tail(0, seq1)) as tail:
-            async for chunk in tail:
-                yield chunk
-        async with aclosing(self.tail(1, seq2)) as tail:
-            async for chunk in tail:
-                yield chunk
+        for which, run in ((0, seq1), (1, seq2)):
+            async with aclosing(self.tail(which, run)) as tail:
+                async for chunk in tail:
+                    yield chunk
 
     def result(self) -> IOResult:
         stderr = b"".join(self.err)
