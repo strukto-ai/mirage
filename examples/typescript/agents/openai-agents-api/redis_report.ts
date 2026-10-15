@@ -1,5 +1,5 @@
 import { config as loadEnv } from 'dotenv'
-import { spawn, spawnSync } from 'node:child_process'
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
@@ -41,35 +41,41 @@ mirageShell('cat > /workspace/orders.csv', ORDERS)
 const relay = spawn('mirage', ['codex-exec', WORKSPACE, '--listen', LISTEN], {
   stdio: ['ignore', 'inherit', 'pipe'],
 })
-console.log(
-  await new Promise<string>((done) => createInterface({ input: relay.stderr }).once('line', done)),
-)
-
-const client = new OpenAI()
-const session = await client.beta.agents.sessions.create({
-  agent: { model: 'gpt-6-luna' },
-  environment: { type: 'self_hosted', workspace_directory: '/workspace' },
-})
-const environment = session.environment
-if (environment?.type !== 'self_hosted') throw new Error('the session has no self-hosted environment')
-const forward = spawn(
-  CODEX,
-  [
-    'exec-server',
-    'forward',
-    '--connect',
-    `ws://${LISTEN}`,
-    '--remote',
-    environment.remote_url,
-    '--environment-id',
-    environment.id,
-  ],
-  {
-    stdio: 'inherit',
-    env: { ...process.env, CODEX_API_KEY: process.env.OPENAI_EXECUTOR_API_KEY },
-  },
-)
+let forward: ChildProcess | undefined
 try {
+  console.log(
+    await new Promise<string>((done) =>
+      createInterface({ input: relay.stderr }).once('line', done),
+    ),
+  )
+
+  const client = new OpenAI()
+  const session = await client.beta.agents.sessions.create({
+    agent: { model: 'gpt-6-luna' },
+    environment: { type: 'self_hosted', workspace_directory: '/workspace' },
+  })
+  const environment = session.environment
+  if (environment?.type !== 'self_hosted') {
+    throw new Error('the session has no self-hosted environment')
+  }
+  forward = spawn(
+    CODEX,
+    [
+      'exec-server',
+      'forward',
+      '--connect',
+      `ws://${LISTEN}`,
+      '--remote',
+      environment.remote_url,
+      '--environment-id',
+      environment.id,
+    ],
+    {
+      stdio: 'inherit',
+      env: { ...process.env, CODEX_API_KEY: process.env.OPENAI_EXECUTOR_API_KEY },
+    },
+  )
+
   const stream = await client.beta.agents.sessions.events.stream(session.id)
   await client.beta.agents.sessions.events.create(session.id, {
     events: [
@@ -93,7 +99,7 @@ try {
     }
   }
 } finally {
-  forward.kill()
+  forward?.kill()
   relay.kill()
 }
 

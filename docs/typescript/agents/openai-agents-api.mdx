@@ -34,7 +34,8 @@ mounts:
 docker run -d -p 6379:6379 redis
 npm install -g redis
 mirage workspace create workspace.yaml --id demo
-mirage shell -w demo -c 'cat > /workspace/orders.csv' < orders.csv
+printf 'customer,item,amount\nacme,widget,120\nglobex,gadget,75\nacme,gizmo,30\ninitech,widget,60\nglobex,widget,45\n' \
+  | mirage shell -w demo -c 'cat > /workspace/orders.csv'
 ```
 
 ## Create a session
