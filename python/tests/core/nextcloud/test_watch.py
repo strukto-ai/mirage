@@ -84,3 +84,36 @@ async def test_node_events_map_below_the_mounted_folder(url, username):
     ]
     assert changes[3][2] is not None
     assert changes[3][2].virtual == "/nc/a.txt"
+
+
+@pytest.mark.asyncio
+async def test_a_folder_above_the_mount_root_moves_the_root():
+    # Removing or renaming away a folder above the root removes the root;
+    # one made or renamed into place leaves it unknown; its own writes say
+    # nothing about the mount.
+    hook = _hook("https://nc.test/remote.php/dav/files/ada/Projects/Work")
+    deliveries = [
+        ("NodeDeletedEvent", _node("/ada/files/Projects")),
+        (
+            "NodeRenamedEvent",
+            _renamed("/ada/files/Projects", "/ada/files/Old"),
+        ),
+        (
+            "NodeRenamedEvent",
+            _renamed("/ada/files/New", "/ada/files/Projects"),
+        ),
+        ("NodeCreatedEvent", _node("/ada/files/Projects")),
+        ("NodeWrittenEvent", _node("/ada/files/Projects")),
+        ("NodeDeletedEvent", _node("/ada/files/Projects2")),
+    ]
+    changes = [
+        (event.kind, event.path.virtual)
+        for name, payload in deliveries
+        for event in await hook.to_events(ROOT, NODE + name, payload)
+    ]
+    assert changes == [
+        (FileChangeKind.DELETE, "/nc"),
+        (FileChangeKind.DELETE, "/nc"),
+        (FileChangeKind.UNKNOWN, "/nc"),
+        (FileChangeKind.UNKNOWN, "/nc"),
+    ]

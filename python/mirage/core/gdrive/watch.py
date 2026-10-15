@@ -47,6 +47,18 @@ from mirage.watch.delta import (
 logger = logging.getLogger(__name__)
 
 
+def _is_folder(item: dict[str, Any]) -> bool:
+    """Whether a changed item is a folder the hook places by name; a
+    shared drive's root is named by the root listing instead.
+
+    Args:
+        item (dict[str, Any]): A Drive file or folder.
+    """
+    if item.get("mimeType") != FOLDER_MIME:
+        return False
+    return not (item.get("driveId") and not item.get("parents"))
+
+
 def _filename_of(item: dict[str, Any]) -> str:
     """The name the listing gives ``item``.
 
@@ -83,6 +95,15 @@ class _Places:
         self._top = top
         self._scoped = scoped
         self._drives: dict[str, str] | None = None
+        self._drive_roots: set[str] = set()
+
+    def kept(self) -> dict[str, list[str]]:
+        """The folders the checkpoint carries: every one looked up but a
+        shared drive's root, whose name the root listing assigns afresh
+        whenever My Drive's own top entries change."""
+        return {
+            k: v for k, v in self.folders.items() if k not in self._drive_roots
+        }
 
     async def under(self, parents: list[str]) -> str | None:
         """The mount path of the folder an item sits in, "" for the root,
@@ -124,6 +145,7 @@ class _Places:
             return None
         parents = item.get("parents") or []
         if item.get("driveId") and not parents:
+            self._drive_roots.add(folder_id)
             name = "" if self._scoped else await self._drive_name(folder_id)
             return [name, self._top if name else ""]
         return [item["name"], parents[0] if parents else ""]
@@ -164,7 +186,10 @@ class GDriveDeltaHook:
     otherwise; one removed before any
     read placed it names nothing, and is left to the index's expiry. On
     an unscoped mount, whose root lists the shared drives, a shared drive
-    made, renamed or left reports the root as unknown.
+    made, renamed or left reports the root as unknown. Each read first
+    applies the feed's folder renames and moves, so an item listed before
+    its folder is still placed where the folder is now, and a shared
+    drive is named afresh each read, as the root listing may rename it.
     """
 
     def __init__(self, accessor: GDriveAccessor) -> None:
@@ -205,6 +230,7 @@ class GDriveDeltaHook:
         seen: dict[str, str] = dict(state.get("seen") or {})
         changes: list[tuple[FileChangeKind, str]] = []
         unknown = False
+        entries: list[tuple[str, dict[str, Any] | None, bool]] = []
         for change in found:
             if change.get("changeType") == "drive":
                 unknown = unknown or not scoped
@@ -222,15 +248,19 @@ class GDriveDeltaHook:
                 if gone:
                     changes.append((FileChangeKind.DELETE, prefix or "/"))
                 continue
+            entries.append((item_id, item, gone))
+        for item_id, _, _ in entries:
             if item_id not in seen and item_id in places.folders:
                 placed = await places.folder(item_id)
                 if placed is not None:
                     seen[item_id] = _virtual_at(prefix, placed)
-            if item is not None and item.get("mimeType") == FOLDER_MIME:
+        for item_id, item, gone in entries:
+            if item is not None and _is_folder(item):
                 parents = item.get("parents") or [""]
                 places.folders[item_id] = [item["name"], parents[0]]
             elif gone:
                 places.folders.pop(item_id, None)
+        for item_id, item, gone in entries:
             where = None
             if item is not None:
                 base = await places.under(item.get("parents") or [])
@@ -257,7 +287,7 @@ class GDriveDeltaHook:
             )
         return Delta(
             tuple(events),
-            _encode(token, top, places.folders, seen),
+            _encode(token, top, places.kept(), seen),
         )
 
 

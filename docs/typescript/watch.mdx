@@ -170,7 +170,9 @@ Many providers push only a ping: Gmail and Calendar push notifications, Drive
 SharePoint, Dropbox webhooks and `list_folder/longpoll`, and Box's long poll
 all say that something changed, not what. A mount on one of those backends has
 a `deltaHook()`, and your receiver answers each ping with one `pull` from the
-checkpoint the last one handed back:
+checkpoint the last one handed back. Answer pings one at a time: two pulls from
+the same checkpoint would race, and the slower one would hand back the older
+cursor.
 
 ```ts
 import { PathSpec } from "@struktoai/mirage-node";
@@ -182,11 +184,16 @@ if (mount === null || mount.vfs.deltaHook === undefined) {
 const hook = mount.vfs.deltaHook();
 const root = PathSpec.fromStrPath("/drive", "");
 let checkpoint = (await hook.pull(root, null)).checkpoint;
+let queue: Promise<void> = Promise.resolve();
 
-async function onPing(): Promise<void> {
-  const delta = await hook.pull(root, checkpoint);
-  checkpoint = delta.checkpoint;
-  for (const change of delta.changes) await ws.notify(change);
+function onPing(): Promise<void> {
+  const run = queue.then(async () => {
+    const delta = await hook.pull(root, checkpoint);
+    checkpoint = delta.checkpoint;
+    for (const change of delta.changes) await ws.notify(change);
+  });
+  queue = run.catch(() => undefined);
+  return run;
 }
 ```
 

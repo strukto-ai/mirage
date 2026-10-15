@@ -32,6 +32,7 @@ export interface DeltaTarget {
 
 interface DriveState {
   virtual: string
+  folder?: string
   top: string
   link: string
   folders: Record<string, [string, string]>
@@ -63,9 +64,11 @@ interface GraphItem {
  * one deleted leaves it. An item seen for the first time is created when it is
  * as Graph made it (its created and modified times agree) and updated
  * otherwise; one deleted before any
- * read placed it names nothing, and is left to the index's expiry. A feed
- * Graph asks to resync reports its mount root as unknown and starts again
- * from the present.
+ * read placed it names nothing, and is left to the index's expiry. Each read
+ * first applies the feed's folder renames and moves, so an item listed before
+ * its folder is still placed where the folder is now. A feed Graph asks to
+ * resync reports its mount root as unknown and starts again from the present,
+ * forgetting every place it kept.
  *
  * Mirrors Python `GraphDeltaHook` (`core/msgraph/watch.py`).
  */
@@ -84,9 +87,11 @@ export class GraphDeltaHook implements DeltaHook {
     if (state === null) {
       const drives: Record<string, DriveState> = {}
       for (const target of await this.targets(root)) {
+        const top = await this.top(target.drive, target.folder)
         drives[target.drive] = {
           virtual: target.virtual,
-          top: await this.top(target),
+          folder: target.folder,
+          top: top ?? '',
           link: await this.latest(target.drive),
           folders: {},
           seen: {},
@@ -104,13 +109,21 @@ export class GraphDeltaHook implements DeltaHook {
     })
   }
 
-  /** Read one drive's feed into `changes` and move `kept` on. */
+  /**
+   * Read one drive's feed into `changes` and move `kept` on.
+   *
+   * A mount rooted below the drive root names its root by path, so each read
+   * finds that folder again: one deleted, replaced or moved away (its own move
+   * or an ancestor's) reports the root as unknown and starts placing items
+   * afresh under whatever the path is now.
+   */
   private async read(
     drive: string,
     kept: DriveState,
     changes: [FileChangeKind, string][],
   ): Promise<void> {
     const virtual = kept.virtual
+    const folder = kept.folder ?? ''
     let items: GraphItem[]
     try {
       ;[items, kept.link] = await this.feed(kept.link)
@@ -118,33 +131,46 @@ export class GraphDeltaHook implements DeltaHook {
       if (!(err instanceof GraphError) || err.status !== 410) throw err
       console.debug(`graph feed of ${drive} must resync: ${err.message}`)
       changes.push([FileChangeKind.UNKNOWN, virtual])
+      kept.top = (await this.top(drive, folder)) ?? ''
       kept.link = await this.latest(drive)
+      kept.folders = {}
+      kept.seen = {}
       return
     }
+    if (folder !== '') {
+      const top = (await this.top(drive, folder)) ?? ''
+      if (top !== kept.top) {
+        changes.push([FileChangeKind.UNKNOWN, virtual])
+        kept.top = top
+        kept.folders = {}
+        kept.seen = {}
+      }
+    }
     const { top, folders, seen } = kept
+    if (top === '') return
     const lookUp = (id: string): Promise<[string, string] | null> => this.lookUp(drive, id)
-    for (const item of items) {
-      const itemId = item.id
-      if (typeof itemId !== 'string') continue
-      const gone = item.deleted !== undefined
-      if (itemId === top) {
-        if (gone) changes.push([FileChangeKind.DELETE, virtual])
-        continue
+    const placed = items.filter(
+      (item): item is GraphItem & { id: string } =>
+        typeof item.id === 'string' && item.id !== top && item.root === undefined,
+    )
+    for (const item of placed) {
+      if (!Object.hasOwn(seen, item.id) && Object.hasOwn(folders, item.id)) {
+        const path = await folderPath(item.id, top, folders, lookUp)
+        if (path !== null) seen[item.id] = join(virtual, path)
       }
-      if (item.root !== undefined) continue
-      if (!Object.hasOwn(seen, itemId) && Object.hasOwn(folders, itemId)) {
-        const placed = await folderPath(itemId, top, folders, lookUp)
-        if (placed !== null) seen[itemId] = join(virtual, placed)
-      }
-      const parent = item.parentReference?.id ?? ''
-      if (item.folder !== undefined && !gone) {
-        folders[itemId] = [item.name ?? '', parent]
-      } else if (gone) {
+    }
+    for (const item of placed) {
+      if (item.deleted !== undefined) {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete folders[itemId]
+        delete folders[item.id]
+      } else if (item.folder !== undefined) {
+        folders[item.id] = [item.name ?? '', parentOf(item)]
       }
+    }
+    for (const item of placed) {
+      const parent = parentOf(item)
       let now: string | null = null
-      if (!gone && parent !== '') {
+      if (item.deleted === undefined && parent !== '') {
         const base = parent === top ? '' : await folderPath(parent, top, folders, lookUp)
         if (base !== null) {
           const name = item.name ?? ''
@@ -152,7 +178,7 @@ export class GraphDeltaHook implements DeltaHook {
         }
       }
       const made = justMade(item.createdDateTime, item.lastModifiedDateTime)
-      const was = settle(changes, seen, itemId, now, made)
+      const was = settle(changes, seen, item.id, now, made)
       if (was !== null && was !== now) movedBelow(seen, was, now)
     }
   }
@@ -178,12 +204,18 @@ export class GraphDeltaHook implements DeltaHook {
   }
 
   /** The id of the folder the mount root is. */
-  private async top(target: DeltaTarget): Promise<string> {
-    const folder = stripSlash(target.folder)
-    const url =
-      folder !== '' ? `${target.drive}/root:/${encodedPath(folder)}` : `${target.drive}/root`
-    const data = await graphGet(this.config, url, { $select: 'id' })
-    return String(data.id)
+  /** The id of the folder the mount root is, null when no folder is at its path. */
+  private async top(drive: string, folder: string): Promise<string | null> {
+    const path = stripSlash(folder)
+    const url = path !== '' ? `${drive}/root:/${encodedPath(path)}` : `${drive}/root`
+    try {
+      const data = await graphGet(this.config, url, { $select: 'id' })
+      return String(data.id)
+    } catch (err) {
+      if (!(err instanceof GraphError) || err.status !== 404) throw err
+      console.debug(`graph mount root ${path} is gone: ${err.message}`)
+      return null
+    }
   }
 
   /**
@@ -204,6 +236,11 @@ export class GraphDeltaHook implements DeltaHook {
     if (item.root !== undefined) return ['', '']
     return [item.name ?? '', item.parentReference?.id ?? '']
   }
+}
+
+/** The id of the folder a feed item sits in, '' when it names none. Mirrors Python's `_parent_of`. */
+function parentOf(item: GraphItem): string {
+  return item.parentReference?.id ?? ''
 }
 
 /** The virtual path of a path below a mount root. Mirrors Python's `_join`. */

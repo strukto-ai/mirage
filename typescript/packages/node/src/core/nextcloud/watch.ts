@@ -44,8 +44,9 @@ const WEBDAV = '/remote.php/webdav'
  * `/<user>/files/<path>`; the mount is rooted at the WebDAV folder its URL
  * names, so the hook reads that root from the URL and maps only the nodes
  * below it. A rename into the mount is a CREATE and one out of it a DELETE; a
- * node outside it, or an event class the watcher does not model, maps to
- * nothing.
+ * folder above the mount root deleted or renamed away removes the root, and
+ * one made or renamed into place leaves it UNKNOWN. Any other node outside it,
+ * or an event class the watcher does not model, maps to nothing.
  *
  * Mirrors Python `NextcloudEventHook` (`core/nextcloud/watch.py`).
  */
@@ -69,16 +70,33 @@ export class NextcloudEventHook {
     return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null
   }
 
+  /** Whether an instance path is a folder the mount root sits below. */
+  private above(node: string | undefined): boolean {
+    const root = this.root
+    if (node === undefined || root === null) return false
+    return root.startsWith(`${rstripSlash(node)}/`)
+  }
+
   private map(root: PathSpec, eventClass: string, payload: JsonValue): readonly FileEvent[] {
     const kind = Object.hasOwn(KIND_BY_CLASS, eventClass) ? KIND_BY_CLASS[eventClass] : undefined
     const event = field(payload, 'event') ?? null
     if (kind === undefined) return []
     if (kind !== FileChangeKind.MOVE) {
-      const place = this.relative(textField(field(event, 'node') ?? null, 'path'))
-      return place === null ? [] : [eventAt(root, place, kind)]
+      const node = textField(field(event, 'node') ?? null, 'path')
+      const place = this.relative(node)
+      if (place !== null) return [eventAt(root, place, kind)]
+      if (this.above(node) && kind !== FileChangeKind.UPDATE) {
+        const gone = kind === FileChangeKind.DELETE
+        return [eventAt(root, '', gone ? FileChangeKind.DELETE : FileChangeKind.UNKNOWN)]
+      }
+      return []
     }
-    const source = this.relative(textField(field(event, 'source') ?? null, 'path'))
-    const target = this.relative(textField(field(event, 'target') ?? null, 'path'))
+    const sourcePath = textField(field(event, 'source') ?? null, 'path')
+    const targetPath = textField(field(event, 'target') ?? null, 'path')
+    if (this.above(sourcePath)) return [eventAt(root, '', FileChangeKind.DELETE)]
+    if (this.above(targetPath)) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
+    const source = this.relative(sourcePath)
+    const target = this.relative(targetPath)
     if (source !== null && target !== null) return [eventAt(root, target, kind, source)]
     if (target !== null) return [eventAt(root, target, FileChangeKind.CREATE)]
     if (source !== null) return [eventAt(root, source, FileChangeKind.DELETE)]

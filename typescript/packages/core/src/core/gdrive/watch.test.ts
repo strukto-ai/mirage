@@ -121,4 +121,79 @@ describe('GDriveDeltaHook', () => {
       ['unknown', '/drive'],
     ])
   })
+
+  async function pulls(
+    feed: [DriveChange[], string][],
+    rootNames: string[][],
+  ): Promise<string[][][]> {
+    const hook = buildDeltaHook(
+      new GDriveAccessor({
+        tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
+      }),
+    )
+    vi.mocked(drive.startPageToken).mockResolvedValue('1')
+    vi.mocked(drive.getFile).mockImplementation((_tm, id) => {
+      const found = FOLDERS[id]
+      if (found === undefined) throw new Error(`no folder ${id}`)
+      return Promise.resolve(found)
+    })
+    const listings = [...rootNames]
+    vi.mocked(drive.listFiles).mockImplementation(() =>
+      Promise.resolve(
+        (listings.shift() ?? []).map((name) => ({ id: name, name, mimeType: FOLDER_MIME })),
+      ),
+    )
+    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'D', name: 'Team' }])
+    const changes = vi.mocked(drive.listChanges).mockReset()
+    for (const page of feed) changes.mockResolvedValueOnce(page)
+    let delta = await hook.pull(ROOT, null)
+    const out: string[][][] = []
+    while (out.length < feed.length) {
+      delta = await hook.pull(ROOT, delta.checkpoint)
+      out.push(delta.changes.map((c) => [c.kind, c.path.virtual]))
+    }
+    return out
+  }
+
+  // Twin of test_a_child_listed_before_its_renamed_folder_lands_in_it.
+  it('places a child listed before its renamed folder in that folder', async () => {
+    const edited = '2026-10-01T00:00:00.000Z'
+    const [first, second] = await pulls(
+      [
+        [[item('F', 'Docs', 'R', { mime: FOLDER_MIME })], '2'],
+        [
+          [
+            item('c', 'a.txt', 'F', { created: edited, modified: edited }),
+            item('F', 'Papers', 'R', { mime: FOLDER_MIME }),
+          ],
+          '3',
+        ],
+      ],
+      [],
+    )
+    expect(first).toEqual([['update', '/drive/Docs']])
+    expect(second).toEqual([
+      ['create', '/drive/Papers/a.txt'],
+      ['delete', '/drive/Docs'],
+      ['create', '/drive/Papers'],
+    ])
+  })
+
+  // Twin of test_a_shared_drive_is_named_as_the_root_listing_names_it_now: a My
+  // Drive folder named like the drive arrives between two reads, and the root
+  // listing renames the drive "Team [Shared Drive]".
+  it('names a shared drive as the root listing names it now', async () => {
+    const [first, second] = await pulls(
+      [
+        [[item('d', 'd.txt', 'D')], '2'],
+        [[item('d', 'd.txt', 'D')], '3'],
+      ],
+      [[], ['Team']],
+    )
+    expect(first).toEqual([['update', '/drive/Team/d.txt']])
+    expect(second).toEqual([
+      ['delete', '/drive/Team/d.txt'],
+      ['create', '/drive/Team [Shared Drive]/d.txt'],
+    ])
+  })
 })

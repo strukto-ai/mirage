@@ -71,10 +71,12 @@ class GraphDeltaHook:
     moves leaves that path, with everything below a folder, and one
     deleted leaves it. An item seen for the first time is created when it
     is as Graph made it (its created and modified times agree) and
-    updated otherwise; one deleted
-    before any read placed it names nothing, and is left to the index's
-    expiry. A feed Graph asks to resync reports its mount root as
-    unknown and starts again from the present.
+    updated otherwise; one deleted before any read placed it names
+    nothing, and is left to the index's expiry. Each read first applies
+    the feed's folder renames and moves, so an item listed before its
+    folder is still placed where the folder is now. A feed Graph asks to
+    resync reports its mount root as unknown and starts again from the
+    present, forgetting every place it kept.
     """
 
     def __init__(
@@ -106,9 +108,11 @@ class GraphDeltaHook:
         if state is None:
             drives: dict[str, dict[str, Any]] = {}
             for target in await self._targets(root):
+                top = await self._top(target.drive, target.folder)
                 drives[target.drive] = {
                     "virtual": target.virtual,
-                    "top": await self._top(target),
+                    "folder": target.folder,
+                    "top": top or "",
                     "link": await self._latest(target.drive),
                     "folders": {},
                     "seen": {},
@@ -130,12 +134,18 @@ class GraphDeltaHook:
     ) -> None:
         """Read one drive's feed into ``changes`` and move ``kept`` on.
 
+        A mount rooted below the drive root names its root by path, so
+        each read finds that folder again: one deleted, replaced or moved
+        away (its own move or an ancestor's) reports the root as unknown
+        and starts placing items afresh under whatever the path is now.
+
         Args:
             drive (str): The drive's Graph URL.
             kept (dict[str, Any]): What the checkpoint holds for it.
             changes (list[tuple[FileChangeKind, str]]): The changes so far.
         """
         virtual = str(kept["virtual"])
+        folder = str(kept.get("folder") or "")
         try:
             items, kept["link"] = await self._feed(str(kept["link"]))
         except GraphError as exc:
@@ -143,34 +153,51 @@ class GraphDeltaHook:
                 raise
             logger.debug("graph feed of %s must resync: %s", drive, exc)
             changes.append((FileChangeKind.UNKNOWN, virtual))
-            kept["link"] = await self._latest(drive)
+            top = await self._top(drive, folder)
+            kept.update(
+                link=await self._latest(drive),
+                top=top or "",
+                folders={},
+                seen={},
+            )
             return
+        if folder:
+            top = await self._top(drive, folder) or ""
+            if top != kept["top"]:
+                changes.append((FileChangeKind.UNKNOWN, virtual))
+                kept.update(top=top, folders={}, seen={})
         top = str(kept["top"])
+        if not top:
+            return
         folders: dict[str, list[str]] = kept["folders"]
         seen: dict[str, str] = kept["seen"]
         look_up = partial(self._look_up, drive)
-        for item in items:
-            item_id = item.get("id")
-            if not isinstance(item_id, str):
-                continue
-            gone = "deleted" in item
-            if item_id == top:
-                if gone:
-                    changes.append((FileChangeKind.DELETE, virtual))
-                continue
-            if "root" in item:
-                continue
+        placed_items = [
+            item
+            for item in items
+            if isinstance(item.get("id"), str)
+            and item["id"] != top
+            and "root" not in item
+        ]
+        for item in placed_items:
+            item_id = item["id"]
             if item_id not in seen and item_id in folders:
                 placed = await folder_path(item_id, top, folders, look_up)
                 if placed is not None:
                     seen[item_id] = _join(virtual, placed)
-            parent = (item.get("parentReference") or {}).get("id") or ""
-            if "folder" in item and not gone:
-                folders[item_id] = [str(item.get("name", "")), parent]
-            elif gone:
-                folders.pop(item_id, None)
+        for item in placed_items:
+            if "deleted" in item:
+                folders.pop(item["id"], None)
+            elif "folder" in item:
+                folders[item["id"]] = [
+                    str(item.get("name", "")),
+                    _parent_of(item),
+                ]
+        for item in placed_items:
+            item_id = item["id"]
+            parent = _parent_of(item)
             now = None
-            if not gone and parent:
+            if "deleted" not in item and parent:
                 base = (
                     ""
                     if parent == top
@@ -218,21 +245,32 @@ class GraphDeltaHook:
         )
         return str(data["@odata.deltaLink"])
 
-    async def _top(self, target: DeltaTarget) -> str:
-        """The id of the folder the mount root is.
+    async def _top(self, drive: str, folder: str) -> str | None:
+        """The id of the folder the mount root is, None when no folder is
+        at its path.
 
         Args:
-            target (DeltaTarget): The drive and the root's place in it.
+            drive (str): The drive's Graph URL.
+            folder (str): The mount root's path from the drive root.
         """
-        folder = target.folder.strip("/")
+        folder = folder.strip("/")
         url = (
-            f"{target.drive}/root:/{encoded_path(folder)}"
+            f"{drive}/root:/{encoded_path(folder)}"
             if folder
-            else f"{target.drive}/root"
+            else f"{drive}/root"
         )
-        data = await graph_get(
-            self._config, url, params={"$select": "id"}, session=self._session
-        )
+        try:
+            data = await graph_get(
+                self._config,
+                url,
+                params={"$select": "id"},
+                session=self._session,
+            )
+        except GraphError as exc:
+            if exc.status != HTTPStatus.NOT_FOUND:
+                raise
+            logger.debug("graph mount root %s is gone: %s", folder, exc)
+            return None
         return str(data["id"])
 
     async def _look_up(self, drive: str, folder_id: str) -> list[str] | None:
@@ -259,6 +297,15 @@ class GraphDeltaHook:
             return ["", ""]
         parent = (item.get("parentReference") or {}).get("id") or ""
         return [str(item.get("name", "")), parent]
+
+
+def _parent_of(item: dict[str, Any]) -> str:
+    """The id of the folder a feed item sits in, "" when it names none.
+
+    Args:
+        item (dict[str, Any]): One ``/delta`` item.
+    """
+    return str((item.get("parentReference") or {}).get("id") or "")
 
 
 def _join(virtual: str, relative: str) -> str:

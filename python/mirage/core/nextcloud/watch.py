@@ -43,7 +43,9 @@ class NextcloudEventHook:
     the instance, ``/<user>/files/<path>``; the mount is rooted at the
     WebDAV folder its URL names, so the hook reads that root from the
     URL and maps only the nodes below it. A rename into the mount is a
-    CREATE and one out of it a DELETE; a node outside it, or an event
+    CREATE and one out of it a DELETE; a folder above the mount root
+    deleted or renamed away removes the root, and one made or renamed
+    into place leaves it UNKNOWN. Any other node outside it, or an event
     class the watcher does not model, maps to nothing.
     """
 
@@ -69,6 +71,17 @@ class NextcloudEventHook:
             return ""
         return node[len(root) + 1 :] if node.startswith(root + "/") else None
 
+    def _above(self, node: str | None) -> bool:
+        """Whether an instance path is a folder the mount root sits below.
+
+        Args:
+            node (str | None): ``/<user>/files/<path>``.
+        """
+        root = self._root
+        if node is None or root is None:
+            return False
+        return root.startswith(node.rstrip("/") + "/")
+
     async def to_events(
         self, root: PathSpec, event_class: str, payload: JsonValue
     ) -> Sequence[FileEvent]:
@@ -84,10 +97,25 @@ class NextcloudEventHook:
         if kind is None:
             return ()
         if kind is not FileChangeKind.MOVE:
-            place = self._relative(text_field(field(event, "node"), "path"))
-            return () if place is None else (event_at(root, place, kind),)
-        source = self._relative(text_field(field(event, "source"), "path"))
-        target = self._relative(text_field(field(event, "target"), "path"))
+            node = text_field(field(event, "node"), "path")
+            place = self._relative(node)
+            if place is not None:
+                return (event_at(root, place, kind),)
+            if self._above(node) and kind is not FileChangeKind.UPDATE:
+                gone = kind is FileChangeKind.DELETE
+                kind = (
+                    FileChangeKind.DELETE if gone else FileChangeKind.UNKNOWN
+                )
+                return (event_at(root, "", kind),)
+            return ()
+        source_path = text_field(field(event, "source"), "path")
+        target_path = text_field(field(event, "target"), "path")
+        if self._above(source_path):
+            return (event_at(root, "", FileChangeKind.DELETE),)
+        if self._above(target_path):
+            return (event_at(root, "", FileChangeKind.UNKNOWN),)
+        source = self._relative(source_path)
+        target = self._relative(target_path)
         if source is not None and target is not None:
             return (event_at(root, target, kind, previous=source),)
         if target is not None:

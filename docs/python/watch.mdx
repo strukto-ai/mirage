@@ -169,20 +169,24 @@ Many providers push only a ping: Gmail and Calendar push notifications, Drive
 SharePoint, Dropbox webhooks and `list_folder/longpoll`, and Box's long poll
 all say that something changed, not what. A mount on one of those backends has
 a `delta_hook()`, and your receiver answers each ping with one `pull` from the
-checkpoint the last one handed back:
+checkpoint the last one handed back. Answer pings one at a time: two pulls
+from the same checkpoint would race, and the slower one would hand back the
+older cursor.
 
 ```python
 hook = ws.registry.mount_for("/drive").vfs.delta_hook()
 root = PathSpec.from_str_path("/drive", vfs_path="")
 checkpoint = (await hook.pull(root, None)).checkpoint
+lock = asyncio.Lock()
 
 
 async def on_ping(request):
     global checkpoint
-    delta = await hook.pull(root, checkpoint)
-    checkpoint = delta.checkpoint
-    for change in delta.changes:
-        await ws.notify(change)
+    async with lock:
+        delta = await hook.pull(root, checkpoint)
+        checkpoint = delta.checkpoint
+        for change in delta.changes:
+            await ws.notify(change)
     return web.json_response({"ok": True})
 ```
 

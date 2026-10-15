@@ -64,4 +64,36 @@ describe('NextcloudEventHook', () => {
       [FileChangeKind.DELETE, '/nc/c.txt', null],
     ])
   })
+
+  // Twin of test_a_folder_above_the_mount_root_moves_the_root: removing or
+  // renaming away a folder above the root removes the root; one made or
+  // renamed into place leaves it unknown; its own writes say nothing about
+  // the mount.
+  it('moves the root with a folder above it', async () => {
+    const hook = new NextcloudEventHook(
+      new NextcloudAccessor({
+        url: 'https://nc.test/remote.php/dav/files/ada/Projects/Work',
+      } as NextcloudConfig),
+    )
+    const deliveries: [string, JsonValue][] = [
+      ['NodeDeletedEvent', node('/ada/files/Projects')],
+      ['NodeRenamedEvent', renamed('/ada/files/Projects', '/ada/files/Old')],
+      ['NodeRenamedEvent', renamed('/ada/files/New', '/ada/files/Projects')],
+      ['NodeCreatedEvent', node('/ada/files/Projects')],
+      ['NodeWrittenEvent', node('/ada/files/Projects')],
+      ['NodeDeletedEvent', node('/ada/files/Projects2')],
+    ]
+    const changes: [string, string][] = []
+    for (const [name, payload] of deliveries) {
+      for (const event of await hook.toEvents(ROOT, NODE + name, payload)) {
+        changes.push([event.kind, event.path.virtual])
+      }
+    }
+    expect(changes).toEqual([
+      [FileChangeKind.DELETE, '/nc'],
+      [FileChangeKind.DELETE, '/nc'],
+      [FileChangeKind.UNKNOWN, '/nc'],
+      [FileChangeKind.UNKNOWN, '/nc'],
+    ])
+  })
 })

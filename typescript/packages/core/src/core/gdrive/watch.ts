@@ -33,6 +33,15 @@ import { feedCheckpoint, feedState } from '../google/watch.ts'
 import { uniqueSharedDriveName } from './readdir.ts'
 import { rootContext } from './resolve.ts'
 
+/**
+ * Whether a changed item is a folder the hook places by name; a shared drive's
+ * root is named by the root listing instead. Mirrors Python's `_is_folder`.
+ */
+function isFolder(item: DriveFile): boolean {
+  if (item.mimeType !== FOLDER_MIME) return false
+  return !(item.driveId !== undefined && item.driveId !== '' && (item.parents ?? []).length === 0)
+}
+
 /** The name the listing gives `item`. */
 function filenameOf(item: DriveFile): string {
   return item.name + (MIME_TO_EXT[item.mimeType ?? ''] ?? '')
@@ -50,6 +59,7 @@ class Places {
   private readonly top: string
   private readonly scoped: boolean
   private drives: Map<string, string> | null = null
+  private readonly driveRoots = new Set<string>()
 
   constructor(
     tm: TokenManager,
@@ -61,6 +71,17 @@ class Places {
     this.top = top
     this.scoped = scoped
     this.folders = folders
+  }
+
+  /**
+   * The folders the checkpoint carries: every one looked up but a shared
+   * drive's root, whose name the root listing assigns afresh whenever My
+   * Drive's own top entries change.
+   */
+  kept(): Record<string, [string, string]> {
+    return Object.fromEntries(
+      Object.entries(this.folders).filter(([id]) => !this.driveRoots.has(id)),
+    )
   }
 
   /** The mount path of the folder an item sits in, '' for the root, null outside. */
@@ -92,6 +113,7 @@ class Places {
     }
     const parents = item.parents ?? []
     if (item.driveId !== undefined && item.driveId !== '' && parents.length === 0) {
+      this.driveRoots.add(folderId)
       const name = this.scoped ? '' : await this.driveName(folderId)
       return [name, name !== '' ? this.top : '']
     }
@@ -135,7 +157,10 @@ function virtualAt(prefix: string, relative: string): string {
  * removed before any read
  * placed it names nothing, and is left to the index's expiry. On an unscoped
  * mount, whose root lists the shared drives, a shared drive made, renamed or
- * left reports the root as unknown.
+ * left reports the root as unknown. Each read first applies the feed's folder
+ * renames and moves, so an item listed before its folder is still placed where
+ * the folder is now, and a shared drive is named afresh each read, as the root
+ * listing may rename it.
  *
  * Mirrors Python `GDriveDeltaHook` (`core/gdrive/watch.py`).
  */
@@ -164,6 +189,7 @@ export class GDriveDeltaHook implements DeltaHook {
     const seen: Record<string, string> = { ...(state.seen ?? {}) }
     const changes: [FileChangeKind, string][] = []
     let unknown = false
+    const entries: [string, DriveFile | null, boolean][] = []
     for (const change of found) {
       if (change.changeType === 'drive') {
         unknown ||= !scoped
@@ -177,16 +203,23 @@ export class GDriveDeltaHook implements DeltaHook {
         if (gone) changes.push([FileChangeKind.DELETE, prefix === '' ? '/' : prefix])
         continue
       }
+      entries.push([itemId, item, gone])
+    }
+    for (const [itemId] of entries) {
       if (!Object.hasOwn(seen, itemId) && Object.hasOwn(places.folders, itemId)) {
         const placed = await places.folder(itemId)
         if (placed !== null) seen[itemId] = virtualAt(prefix, placed)
       }
-      if (item !== null && item.mimeType === FOLDER_MIME) {
+    }
+    for (const [itemId, item, gone] of entries) {
+      if (item !== null && isFolder(item)) {
         places.folders[itemId] = [item.name, item.parents?.[0] ?? '']
       } else if (gone) {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete places.folders[itemId]
       }
+    }
+    for (const [itemId, item, gone] of entries) {
       let where: string | null = null
       if (item !== null) {
         const base = await places.under(item.parents ?? [])
@@ -207,7 +240,7 @@ export class GDriveDeltaHook implements DeltaHook {
     }
     return new Delta({
       changes: events,
-      checkpoint: encode(token, top, places.folders, seen),
+      checkpoint: encode(token, top, places.kept(), seen),
     })
   }
 }
