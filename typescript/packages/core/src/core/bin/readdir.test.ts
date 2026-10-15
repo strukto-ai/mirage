@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { BinAccessor } from '../../accessor/bin.ts'
 import { PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
+import { stat } from './stat.ts'
 
 function accessor(names: string[]): BinAccessor {
   return new BinAccessor(
@@ -34,11 +35,11 @@ function spec(path: string): PathSpec {
 }
 
 describe('readdir', () => {
-  it('lists one path per program', async () => {
-    expect(await readdir(accessor(['cat', 'ls']), spec('/usr/bin'))).toEqual([
-      '/usr/bin/cat',
-      '/usr/bin/ls',
-    ])
+  it('lists one row per program, as its stat answers it', async () => {
+    const programs = accessor(['cat', 'ls'])
+    const rows = await readdir(programs, spec('/usr/bin'))
+    expect(rows.map((row) => row.name)).toEqual(['cat', 'ls'])
+    expect(rows[1]).toEqual(await stat(programs, spec('/usr/bin/ls')))
   })
 
   it('of a program is not a directory', async () => {

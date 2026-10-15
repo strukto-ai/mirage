@@ -104,7 +104,7 @@ describe('mkdir', () => {
   it('creates directories via PUT when parents=true', async () => {
     const { fetch, calls } = routedFetch(() => new Response(null, { status: 200 }))
     vi.stubGlobal('fetch', fetch)
-    await mkdir(makeAccessor(), spec('/volume/a/b'), undefined, true)
+    await mkdir(makeAccessor(), spec('/volume/a/b'), true)
     expect(calls).toHaveLength(1)
     expect(calls[0]?.method).toBe('PUT')
     expect(calls[0]?.url).toContain('/fs/directories/')

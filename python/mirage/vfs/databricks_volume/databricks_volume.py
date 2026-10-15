@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
 from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.copy import copy as _copy
 from mirage.core.databricks_volume.create import create as _create
 from mirage.core.databricks_volume.exists import exists as _exists
@@ -59,31 +57,22 @@ class DatabricksVolumeVFS(BaseVFS):
         self.config = config
         self.accessor = DatabricksVolumeAccessor(self.config, client)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await _readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read(self.accessor, path, index, offset, size)
+        return await _read(self.accessor, path, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await _stat(self.accessor, path)
 
-    def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
@@ -91,19 +80,8 @@ class DatabricksVolumeVFS(BaseVFS):
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)
 
-    async def append(
-        self,
-        path: PathSpec,
-        data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await append_by_rewrite(
-            functools.partial(self.read, index=index),
-            self.write,
-            functools.partial(self.stat, index=index),
-            path,
-            data,
-        )
+    async def append(self, path: PathSpec, data: bytes) -> None:
+        await append_by_rewrite(self.read, self.write, self.stat, path, data)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)
@@ -114,10 +92,8 @@ class DatabricksVolumeVFS(BaseVFS):
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         await _mkdir(self.accessor, path, parents=parents)
 
-    async def rmdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
-        await _rmdir(self.accessor, path, index)
+    async def rmdir(self, path: PathSpec) -> None:
+        await _rmdir(self.accessor, path)
 
     async def rm_r(self, path: PathSpec) -> Any:
         return await _rm_r(self.accessor, path)

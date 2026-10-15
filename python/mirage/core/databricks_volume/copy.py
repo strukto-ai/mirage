@@ -16,7 +16,6 @@ import asyncio
 from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
 from mirage.core.databricks_volume.stat import stat
@@ -71,10 +70,9 @@ async def copy(
     accessor: DatabricksVolumeAccessor,
     src: PathSpec,
     dst: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     recursive: bool = False,
 ) -> None:
-    src_stat = await stat(accessor, src, index)
+    src_stat = await stat(accessor, src)
     # Same-path guard runs after stat (and the non-recursive directory check)
     # so a missing source or `cp` of a directory still raises.
     same_path = backend_path(accessor.config, src) == backend_path(
@@ -102,5 +100,5 @@ async def copy(
     if same_path:
         # Copying a file onto itself would re-upload it; skip.
         return
-    data = await read(accessor, src, index)
-    await write(accessor, dst, data, index)
+    data = await read(accessor, src)
+    await write(accessor, dst, data)

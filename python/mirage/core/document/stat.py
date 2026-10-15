@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.document import DocumentAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.document.read import read
 from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
 
@@ -21,9 +20,8 @@ from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
 async def stat(
     accessor: DocumentAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
-    data = await read(accessor, path, index)
+    data = await read(accessor, path)
     return FileStat(
         name=accessor.name,
         type=FileType.FILE,

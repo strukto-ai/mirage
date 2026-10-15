@@ -16,7 +16,6 @@ import asyncio
 from io import BytesIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import (
     is_directory_metadata,
     parent_path,
@@ -69,7 +68,6 @@ async def write(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
     data: bytes,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     parent = parent_path(path)
     remote_parent = backend_path(accessor.config, parent)

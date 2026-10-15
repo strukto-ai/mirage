@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { copy as dbxCopy } from '../../core/databricks_volume/copy.ts'
 import { create as dbxCreate } from '../../core/databricks_volume/create.ts'
 import { exists as dbxExists } from '../../core/databricks_volume/exists.ts'
@@ -29,6 +28,7 @@ import { unlink as dbxUnlink } from '../../core/databricks_volume/unlink.ts'
 import { write as dbxWrite } from '../../core/databricks_volume/write.ts'
 import { appendByRewrite } from '../../core/generic/rewrite.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
+import type { Handed } from '../types.ts'
 import { BaseVFS } from '../base.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
@@ -48,25 +48,27 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     return `${this.name}:${workspace}:${volume}${rstripSlash(cfg.rootPath)}`
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return dbxReaddir(this.accessor, path, index)
+  override readonly listsStats: boolean = true
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return dbxReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return dbxRead(this.accessor, path, index)
-    return dbxRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return dbxRead(this.accessor, path)
+    return dbxRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return dbxStat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return dbxStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     return dbxStream(this.accessor, path)
   }
 
@@ -78,11 +80,11 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     return dbxWrite(this.accessor, path, data)
   }
 
-  override append(path: PathSpec, data: Uint8Array, index?: IndexCacheStore): Promise<void> {
+  override append(path: PathSpec, data: Uint8Array): Promise<void> {
     return appendByRewrite(
-      (p) => this.read(p, index),
+      (p) => this.read(p),
       (p, d) => this.write(p, d),
-      (p) => this.stat(p, index),
+      (p) => this.stat(p),
       path,
       data,
     )
@@ -93,15 +95,15 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
   }
 
   override mkdir(path: PathSpec, parents = false): Promise<void> {
-    return dbxMkdir(this.accessor, path, undefined, parents)
+    return dbxMkdir(this.accessor, path, parents)
   }
 
   override unlink(path: PathSpec): Promise<void> {
     return dbxUnlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, index?: IndexCacheStore): Promise<void> {
-    return dbxRmdir(this.accessor, path, index)
+  override rmdir(path: PathSpec): Promise<void> {
+    return dbxRmdir(this.accessor, path)
   }
 
   override async rmR(path: PathSpec): Promise<void> {

@@ -16,7 +16,6 @@ import asyncio
 from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
@@ -41,9 +40,8 @@ def _delete_directory_sync(
 async def rmdir(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
-    file_stat = await stat(accessor, path, index)
+    file_stat = await stat(accessor, path)
     if file_stat.type != FileType.DIRECTORY:
         raise enotdir(path)
     remote_path = backend_path(accessor.config, path)

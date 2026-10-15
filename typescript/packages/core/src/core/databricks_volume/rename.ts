@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { ensurePathSpec } from './_helpers.ts'
 import { copy } from './copy.ts'
@@ -26,13 +25,12 @@ export async function rename(
   accessor: DatabricksVolumeAccessor,
   src: PathSpec,
   dst: PathSpec,
-  index?: IndexCacheStore,
 ): Promise<void> {
   // Non-atomic: the Databricks Files API has no native rename, so this is
   // implemented as copy + delete and can leave partial state on failure.
   const s = ensurePathSpec(src)
   const d = ensurePathSpec(dst)
-  const srcStat = await stat(accessor, s, index)
+  const srcStat = await stat(accessor, s)
   const remoteSrc = backendPath(accessor.config, s)
   const remoteDst = backendPath(accessor.config, d)
   if (remoteSrc === remoteDst) {
@@ -48,11 +46,11 @@ export async function rename(
       // Refuse before either side effect.
       throw new Error(`cannot move '${s.virtual}' to a subdirectory of itself, '${d.virtual}'`)
     }
-    await copy(accessor, s, d, index, true)
-    await rmRecursive(accessor, s, index)
+    await copy(accessor, s, d, true)
+    await rmRecursive(accessor, s)
   } else {
-    await copy(accessor, s, d, index)
-    await unlink(accessor, s, index)
+    await copy(accessor, s, d)
+    await unlink(accessor, s)
   }
   // Only a positive file rules out a subtree at the source. The destination
   // keeps the subtree drop: the upload overwrites whatever stands there,

@@ -15,7 +15,6 @@
 import asyncio
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import stat
@@ -34,9 +33,8 @@ def _delete_file_sync(
 async def unlink(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
-    file_stat = await stat(accessor, path, index)
+    file_stat = await stat(accessor, path)
     if file_stat.type == FileType.DIRECTORY:
         raise eisdir(path.virtual)
     remote_path = backend_path(accessor.config, path)

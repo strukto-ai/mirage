@@ -13,21 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.bin import BinAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.bin.render import render_stub
 from mirage.errors.fs import eisdir, enoent
 from mirage.types import PathSpec
 
 
-async def read(
-    accessor: BinAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> bytes:
+async def read(accessor: BinAccessor, path: PathSpec) -> bytes:
     """Render one program's file.
 
     Args:
         accessor (BinAccessor): Accessor holding the lookup.
         path (PathSpec): Virtual path under the view.
-        index (IndexCacheStore): Unused; op signature parity.
 
     Returns:
         bytes: The program's stub, fresh on every call.

@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from mirage.bridge.sync import run_async_from_sync
 from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.mixin import FileCacheMixin
-from mirage.cache.index import IndexConfig
+from mirage.cache.index import NULL_INDEX, IndexConfig
 from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.concurrency.limiter import run_blocking
@@ -493,16 +493,19 @@ class Workspace:
         # clears these, not only what the state store would hand out.
         self._planes = (stores.namespace, stores.observe, stores.sessions)
         # Explicit at the construction site: the history view does not
-        # cache reads, so its policy can only ever be bounded.
+        # cache reads, so its policy can only ever be bounded, and keeps
+        # no listing, since it renders on every read.
         self._registry.mount(
             HISTORY_PREFIX,
             HistoryViewVFS(self.observer),
             MountMode.READ,
             ReadSpec(),
             write=WritePolicy.UNCONDITIONAL,
+            store=NULL_INDEX,
         )
         # One file per program, where PATH finds it: the same lookup
-        # which, type and command -v answer from.
+        # which, type and command -v answer from. Each session lists its
+        # own programs, so no listing is kept.
         self._registry.mount(
             BIN_PREFIX,
             BinViewVFS(
@@ -514,6 +517,7 @@ class Workspace:
             MountMode.READ,
             ReadSpec(),
             write=WritePolicy.UNCONDITIONAL,
+            store=NULL_INDEX,
         )
         # The facade delegates every op to the dispatcher, so FUSE and
         # programmatic ws.vfs walk the same pipeline as a shell command

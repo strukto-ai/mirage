@@ -23,13 +23,13 @@ describe('opfs/readdir', () => {
     const accessor = makeMockAccessor()
     await write(accessor, spec('/b'), new Uint8Array())
     await write(accessor, spec('/a'), new Uint8Array())
-    expect(await readdir(accessor, spec('/'))).toEqual(['/a', '/b'])
+    expect((await readdir(accessor, spec('/'))).map((row) => row.name)).toEqual(['a', 'b'])
   })
   it('lists nested directory', async () => {
     const accessor = makeMockAccessor()
     await mkdir(accessor, spec('/sub'))
     await write(accessor, spec('/sub/x'), new Uint8Array())
-    expect(await readdir(accessor, spec('/sub'))).toEqual(['/sub/x'])
+    expect((await readdir(accessor, spec('/sub'))).map((row) => row.name)).toEqual(['x'])
   })
   it('throws ENOENT for a missing path, at any depth', async () => {
     const accessor = makeMockAccessor()

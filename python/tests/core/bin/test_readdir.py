@@ -16,6 +16,7 @@ import pytest
 
 from mirage.accessor.bin import BinAccessor
 from mirage.core.bin.readdir import readdir
+from mirage.core.bin.stat import stat
 from mirage.types import PathSpec
 
 
@@ -33,11 +34,11 @@ def _spec(path: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_readdir_lists_one_path_per_program():
-    assert await readdir(_accessor(), _spec("/usr/bin")) == [
-        "/usr/bin/cat",
-        "/usr/bin/ls",
-    ]
+async def test_readdir_lists_one_row_per_program_as_its_stat():
+    accessor = _accessor()
+    rows = await readdir(accessor, _spec("/usr/bin"))
+    assert [row.name for row in rows] == ["cat", "ls"]
+    assert rows[1] == await stat(accessor, _spec("/usr/bin/ls"))
 
 
 @pytest.mark.asyncio

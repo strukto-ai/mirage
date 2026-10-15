@@ -12,21 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
-import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { isNotFound, isTypeMismatch, iterEntries, norm, resolveDirHandle } from './utils.ts'
+import { stat } from './stat.ts'
+import { isNotFound, isTypeMismatch, iterEntries, resolveDirHandle } from './utils.ts'
 
-export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<string[]> {
+export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<FileStat[]> {
   const root = await accessor.root()
   // A pattern spec addresses the directory whose entries the glob filters,
   // and the rest of this function works in mount-relative space, so the
   // directory has to be read off `dir` rather than off the virtual
   // `directory` string (python strips the prefix by hand for the same
   // reason).
-  const virtual = (path.pattern !== null ? path.dir : path).mountPath
+  const target = path.pattern !== null ? path.dir : path
+  const virtual = target.mountPath
   let dir: FileSystemDirectoryHandle
   try {
     dir = await resolveDirHandle(root, virtual, { create: false })
@@ -43,8 +45,22 @@ export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<s
   for await (const [name] of iterEntries(dir)) {
     names.push(name)
   }
-  const base = norm(virtual)
-  const dirPrefix = base === '/' ? '/' : `${base}/`
-  const mountPrefix = mountPrefixOf(path.virtual, path.vfsPath)
-  return names.map((n) => `${mountPrefix}${dirPrefix}${n}`).sort(compareCodePoints)
+  const base = rstripSlash(target.virtual)
+  const key = stripSlash(target.vfsPath)
+  // Each child answered as its stat answers it, so a row the mount keeps is
+  // the stat it would ask for.
+  const rows: FileStat[] = []
+  for (const name of names.sort(compareCodePoints)) {
+    rows.push(
+      await stat(
+        accessor,
+        new PathSpec({
+          virtual: `${base}/${name}`,
+          directory: base || '/',
+          vfsPath: key === '' ? name : `${key}/${name}`,
+        }),
+      ),
+    )
+  }
+  return rows
 }

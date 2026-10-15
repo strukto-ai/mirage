@@ -396,7 +396,7 @@ async def test_read_stat_readdir_range_stream_and_exists():
             "/volume/reports", mount_key("/volume/reports", "/volume")
         )
     )
-    assert entries == ["/volume/reports/latest.md"]
+    assert [row.name for row in entries] == ["latest.md"]
 
 
 @pytest.mark.asyncio

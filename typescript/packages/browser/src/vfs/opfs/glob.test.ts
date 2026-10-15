@@ -18,9 +18,16 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
 import { readdir } from '../../core/opfs/readdir.ts'
 import { write } from '../../core/opfs/write.ts'
+import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
 
-const resolveGlob = makeResolveGlob(readdir, SCOPE_ERROR)
+// The glob walk takes child paths; this backend lists rows.
+async function listedPaths(accessor: OPFSAccessor, path: PathSpec): Promise<string[]> {
+  const base = path.virtual.replace(/\/$/, '')
+  return (await readdir(accessor, path)).map((row) => `${base}/${row.name}`)
+}
+
+const resolveGlob = makeResolveGlob(listedPaths, SCOPE_ERROR)
 
 describe('vfs/opfs resolveGlob binding', () => {
   it('expands a glob into matching paths', async () => {

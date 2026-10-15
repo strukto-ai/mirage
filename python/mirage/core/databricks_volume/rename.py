@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.copy import copy
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.rm import rm_recursive
@@ -26,11 +25,10 @@ async def rename(
     accessor: DatabricksVolumeAccessor,
     src: PathSpec,
     dst: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     # Non-atomic: the Databricks Files API has no native rename, so this is
     # implemented as copy + delete and can leave partial state on failure.
-    src_stat = await stat(accessor, src, index)
+    src_stat = await stat(accessor, src)
     remote_src = backend_path(accessor.config, src)
     remote_dst = backend_path(accessor.config, dst)
     if remote_src == remote_dst:
@@ -47,8 +45,8 @@ async def rename(
                 f"cannot move '{src.virtual}' to a subdirectory of "
                 f"itself, '{dst.virtual}'"
             )
-        await copy(accessor, src, dst, index, recursive=True)
-        await rm_recursive(accessor, src, index)
+        await copy(accessor, src, dst, recursive=True)
+        await rm_recursive(accessor, src)
     else:
-        await copy(accessor, src, dst, index)
-        await unlink(accessor, src, index)
+        await copy(accessor, src, dst)
+        await unlink(accessor, src)

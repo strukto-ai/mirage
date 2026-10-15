@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.context.session_context import get_current_session
 from mirage.core.history.render import render_bash_history
 from mirage.errors.fs import enoent
@@ -26,7 +25,6 @@ VIEW_KEYS = ("", VIEW_NAME)
 async def read(
     accessor: HistoryAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     """Render the GNU histfile from the recorder's command events.
 
@@ -38,7 +36,6 @@ async def read(
     Args:
         accessor (HistoryAccessor): Accessor holding the recorder.
         path (PathSpec): Virtual path; only the view file resolves.
-        index (IndexCacheStore): Unused; op signature parity.
 
     Returns:
         bytes: Rendered histfile content, fresh on every call.

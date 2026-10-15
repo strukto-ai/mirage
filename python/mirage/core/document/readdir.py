@@ -13,14 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.document import DocumentAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.errors.fs import enotdir
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def readdir(
     accessor: DocumentAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[FileStat]:
     raise enotdir(path)

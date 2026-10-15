@@ -31,42 +31,40 @@ def _seed_directory(files, path: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_mkdir_creates_directory(accessor, files, remote_root, index):
+async def test_mkdir_creates_directory(accessor, files, remote_root):
     _seed_directory(files, remote_root)
 
-    await mkdir(accessor, _path("/dbx/newdir"), index=index)
+    await mkdir(accessor, _path("/dbx/newdir"))
 
     assert f"{remote_root}/newdir" in files.create_directory_calls
     assert f"{remote_root}/newdir" in files.directory_metadata
 
 
 @pytest.mark.asyncio
-async def test_mkdir_parent_missing_fails(accessor, files, remote_root, index):
+async def test_mkdir_parent_missing_fails(accessor, files, remote_root):
     _seed_directory(files, remote_root)
 
     with pytest.raises(FileNotFoundError) as raised:
-        await mkdir(accessor, _path("/dbx/a/b"), index=index)
+        await mkdir(accessor, _path("/dbx/a/b"))
     assert raised.value.filename == "/dbx/a/b"
     assert files.create_directory_calls == []
 
 
 @pytest.mark.asyncio
-async def test_mkdir_parents_creates_chain(
-    accessor, files, remote_root, index
-):
+async def test_mkdir_parents_creates_chain(accessor, files, remote_root):
     _seed_directory(files, remote_root)
 
-    await mkdir(accessor, _path("/dbx/a/b/c"), parents=True, index=index)
+    await mkdir(accessor, _path("/dbx/a/b/c"), parents=True)
 
     assert f"{remote_root}/a/b/c" in files.directory_metadata
 
 
 @pytest.mark.asyncio
-async def test_mkdir_parent_is_file_fails(accessor, files, remote_root, index):
+async def test_mkdir_parent_is_file_fails(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     files.metadata[f"{remote_root}/file.txt"] = SimpleNamespace(
         is_directory=False, file_size=3
     )
 
     with pytest.raises(NotADirectoryError):
-        await mkdir(accessor, _path("/dbx/file.txt/sub"), index=index)
+        await mkdir(accessor, _path("/dbx/file.txt/sub"))

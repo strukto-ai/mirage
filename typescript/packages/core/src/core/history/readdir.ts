@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HistoryAccessor } from '../../accessor/history.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 
 /**
  * List nothing: the mount root is a file, not a directory. Keeps
  * recursive traversal (find, grep -r, tree) from blowing up when it
  * descends into the view mount.
  */
-export function readdir(_accessor: HistoryAccessor, _path: PathSpec): Promise<string[]> {
+export function readdir(_accessor: HistoryAccessor, _path: PathSpec): Promise<FileStat[]> {
   return Promise.resolve([])
 }

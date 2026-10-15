@@ -15,7 +15,6 @@
 import asyncio
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import parent_path
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
@@ -35,14 +34,13 @@ async def mkdir(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
     parents: bool = False,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     remote_path = backend_path(accessor.config, path)
     if parents:
         await asyncio.to_thread(_create_directory_sync, accessor, remote_path)
         return
     try:
-        parent_stat = await stat(accessor, parent_path(path), index)
+        parent_stat = await stat(accessor, parent_path(path))
     except FileNotFoundError as exc:
         raise enoent(path) from exc
     if parent_stat.type != FileType.DIRECTORY:

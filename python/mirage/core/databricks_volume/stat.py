@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume._helpers import is_directory_metadata
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
@@ -25,7 +24,6 @@ from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import to_iso_z
 from mirage.utils.filetype import content_type_for_path
-from mirage.utils.key_prefix import mount_prefix_of
 
 
 def modified_to_iso(value) -> str | None:
@@ -69,34 +67,10 @@ async def _directory_stat_or_raise(
     )
 
 
-async def stat(
-    accessor: DatabricksVolumeAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
+async def stat(accessor: DatabricksVolumeAccessor, path: PathSpec) -> FileStat:
     stripped = path.mount_path.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
-    prefix = mount_prefix_of(path.virtual, path.vfs_path)
-    virtual_key = (
-        prefix.rstrip("/") + "/" + stripped if prefix else "/" + stripped
-    )
-    lookup = await index.get(virtual_key)
-    if lookup.entry is not None:
-        entry = lookup.entry
-        if entry.resource_type == "folder":
-            return FileStat(name=entry.name, type=FileType.DIRECTORY)
-        return FileStat(
-            name=entry.name,
-            size=entry.size,
-            modified=entry.remote_time or None,
-            type=FileType.FILE,
-            content=content_type_for_path(entry.name),
-        )
-    parent = virtual_key.rsplit("/", 1)[0] or "/"
-    parent_listing = await index.list_dir(parent)
-    if parent_listing.entries is not None:
-        raise enoent(path)
     remote_path = backend_path(accessor.config, path)
     try:
         metadata = await asyncio.to_thread(

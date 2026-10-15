@@ -16,7 +16,7 @@ import { BinAccessor } from '../../accessor/bin.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS, type VFSStateBase } from '../base.ts'
 import type { FileStat, PathSpec, SetAttrFields } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as binReaddir } from '../../core/bin/readdir.ts'
 import { read as binRead } from '../../core/bin/read.ts'
@@ -33,6 +33,7 @@ export class BinViewVFS extends BaseVFS {
   override readonly cachesReads = false
   // A stub's size is its rendering: cheap, no network, never null.
   override readonly sizesAlwaysKnown = true
+  override readonly listsStats: boolean = true
   override readonly accessor: BinAccessor
 
   constructor(programs: () => string[], note: (name: string) => string | null) {
@@ -40,13 +41,13 @@ export class BinViewVFS extends BaseVFS {
     this.accessor = new BinAccessor(programs, note)
   }
 
-  override readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     return binReaddir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
@@ -54,7 +55,7 @@ export class BinViewVFS extends BaseVFS {
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return binStat(this.accessor, path)
   }
 

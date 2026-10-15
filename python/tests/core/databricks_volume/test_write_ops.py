@@ -56,23 +56,21 @@ def _seed_file(files, path: str, data: bytes) -> None:
 
 
 @pytest.mark.asyncio
-async def test_write_new_file(accessor, files, remote_root, index):
+async def test_write_new_file(accessor, files, remote_root):
     _seed_directory(files, remote_root)
 
-    await write(accessor, _path("/dbx/new.txt"), b"hello", index)
+    await write(accessor, _path("/dbx/new.txt"), b"hello")
 
     assert files.downloads[f"{remote_root}/new.txt"] == b"hello"
     assert files.upload_calls == [(f"{remote_root}/new.txt", b"hello", True)]
 
 
 @pytest.mark.asyncio
-async def test_write_overwrites_existing_file(
-    accessor, files, remote_root, index
-):
+async def test_write_overwrites_existing_file(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     _seed_file(files, f"{remote_root}/new.txt", b"old")
 
-    await write(accessor, _path("/dbx/new.txt"), b"new", index)
+    await write(accessor, _path("/dbx/new.txt"), b"new")
 
     assert files.downloads[f"{remote_root}/new.txt"] == b"new"
     assert files.metadata[f"{remote_root}/new.txt"].content_length == 3
@@ -80,50 +78,48 @@ async def test_write_overwrites_existing_file(
 
 @pytest.mark.asyncio
 async def test_write_fails_when_parent_is_missing(
-    accessor, files, remote_root, index
+    accessor, files, remote_root
 ):
     _seed_directory(files, remote_root)
 
     with pytest.raises(FileNotFoundError):
-        await write(accessor, _path("/dbx/missing/new.txt"), b"x", index)
+        await write(accessor, _path("/dbx/missing/new.txt"), b"x")
 
 
 @pytest.mark.asyncio
-async def test_write_fails_when_parent_is_file(
-    accessor, files, remote_root, index
-):
+async def test_write_fails_when_parent_is_file(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     _seed_file(files, f"{remote_root}/parent.txt", b"file")
 
     with pytest.raises(NotADirectoryError):
-        await write(accessor, _path("/dbx/parent.txt/new.txt"), b"x", index)
+        await write(accessor, _path("/dbx/parent.txt/new.txt"), b"x")
 
 
 @pytest.mark.asyncio
-async def test_create_empty_file(accessor, files, remote_root, index):
+async def test_create_empty_file(accessor, files, remote_root):
     _seed_directory(files, remote_root)
 
-    await create(accessor, _path("/dbx/empty.txt"), index)
+    await create(accessor, _path("/dbx/empty.txt"))
 
     assert files.downloads[f"{remote_root}/empty.txt"] == b""
 
 
 @pytest.mark.asyncio
 async def test_create_fails_when_parent_is_missing(
-    accessor, files, remote_root, index
+    accessor, files, remote_root
 ):
     _seed_directory(files, remote_root)
 
     with pytest.raises(FileNotFoundError):
-        await create(accessor, _path("/dbx/missing/empty.txt"), index)
+        await create(accessor, _path("/dbx/missing/empty.txt"))
 
 
 @pytest.mark.asyncio
-async def test_unlink_file(accessor, files, remote_root, index):
+async def test_unlink_file(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     _seed_file(files, f"{remote_root}/delete.txt", b"bye")
 
-    await unlink(accessor, _path("/dbx/delete.txt"), index)
+    await unlink(accessor, _path("/dbx/delete.txt"))
 
     assert f"{remote_root}/delete.txt" not in files.downloads
     assert files.delete_calls == [f"{remote_root}/delete.txt"]
@@ -131,35 +127,35 @@ async def test_unlink_file(accessor, files, remote_root, index):
 
 @pytest.mark.asyncio
 async def test_unlink_missing_file_raises_file_not_found(
-    accessor, files, remote_root, index
+    accessor, files, remote_root
 ):
     _seed_directory(files, remote_root)
 
     with pytest.raises(FileNotFoundError):
-        await unlink(accessor, _path("/dbx/missing.txt"), index)
+        await unlink(accessor, _path("/dbx/missing.txt"))
 
 
 @pytest.mark.asyncio
 async def test_unlink_directory_raises_is_a_directory(
-    accessor, files, remote_root, index
+    accessor, files, remote_root
 ):
     _seed_directory(files, remote_root)
     _seed_directory(files, f"{remote_root}/dir")
 
     with pytest.raises(IsADirectoryError):
-        await unlink(accessor, _path("/dbx/dir"), index)
+        await unlink(accessor, _path("/dbx/dir"))
 
 
 @pytest.mark.asyncio
 async def test_file_mutation_paths_cannot_escape_root(
-    accessor, files, remote_root, index
+    accessor, files, remote_root
 ):
     _seed_directory(files, remote_root)
     escaping = _path("/dbx/../escape.txt")
 
     with pytest.raises(ValueError):
-        await write(accessor, escaping, b"x", index)
+        await write(accessor, escaping, b"x")
     with pytest.raises(ValueError):
-        await create(accessor, escaping, index)
+        await create(accessor, escaping)
     with pytest.raises(ValueError):
-        await unlink(accessor, escaping, index)
+        await unlink(accessor, escaping)

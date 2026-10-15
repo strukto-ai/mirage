@@ -16,7 +16,6 @@ import asyncio
 from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import stat
@@ -73,11 +72,10 @@ def _remove_tree_sync(
 async def rm_recursive(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    file_stat = await stat(accessor, path, index)
+    file_stat = await stat(accessor, path)
     if file_stat.type != FileType.DIRECTORY:
-        await unlink(accessor, path, index)
+        await unlink(accessor, path)
         return [path.mount_path]
     remote_root = backend_path(accessor.config, path)
     try:

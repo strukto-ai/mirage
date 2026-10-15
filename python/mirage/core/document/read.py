@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.document import DocumentAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
 
@@ -21,7 +20,6 @@ from mirage.types import PathSpec
 async def read(
     accessor: DocumentAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     if path.mount_path.strip("/"):
         raise enoent(path)

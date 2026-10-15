@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { copy } from './copy.ts'
@@ -30,7 +31,13 @@ import {
   type FetchCall,
 } from './_test_util.ts'
 
-const resolveGlob = makeResolveGlob(dbxReaddir, undefined, undefined, dbxStat)
+// The glob walk takes child paths; this backend lists rows.
+async function listedPaths(accessor: DatabricksVolumeAccessor, path: PathSpec): Promise<string[]> {
+  const base = path.virtual.replace(/\/$/, '')
+  return (await dbxReaddir(accessor, path)).map((row) => `${base}/${row.name}`)
+}
+
+const resolveGlob = makeResolveGlob(listedPaths, undefined, undefined, dbxStat)
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -96,7 +103,7 @@ describe('copy', () => {
       return new Response(null, { status: 200 })
     })
     vi.stubGlobal('fetch', fetch)
-    await copy(makeAccessor(), spec('/volume/dir'), spec('/volume/dir2'), undefined, true)
+    await copy(makeAccessor(), spec('/volume/dir'), spec('/volume/dir2'), true)
     const puts = calls.filter((c) => c.method === 'PUT')
     expect(puts.some((c) => c.url.includes('/fs/directories/') && c.url.includes('dir2'))).toBe(
       true,
@@ -114,7 +121,6 @@ describe('copy', () => {
       makeAccessor(),
       spec('/volume/dir'),
       spec('/volume/dir/sub'),
-      undefined,
       true,
     ).catch((e: unknown) => e)) as Error
     expect(err.message).toContain('into itself')

@@ -17,7 +17,6 @@ from collections.abc import AsyncIterator
 from typing import BinaryIO
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
 from mirage.errors.fs import enoent
@@ -45,7 +44,6 @@ def _open_download_sync(
 async def read_stream(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     if chunk_size <= 0:

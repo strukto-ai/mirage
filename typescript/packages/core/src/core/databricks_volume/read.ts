@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
@@ -30,7 +29,6 @@ export interface DbxReadOptions {
 export async function read(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options: DbxReadOptions = {},
 ): Promise<Uint8Array> {
   const virtual = path.virtual

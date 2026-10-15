@@ -47,25 +47,25 @@ def _seed_file(files, path: str, data: bytes = b"x") -> None:
 
 
 @pytest.mark.asyncio
-async def test_rm_recursive_file(accessor, files, remote_root, index):
+async def test_rm_recursive_file(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     _seed_file(files, f"{remote_root}/a.txt")
 
-    removed = await rm_recursive(accessor, _path("/dbx/a.txt"), index)
+    removed = await rm_recursive(accessor, _path("/dbx/a.txt"))
 
     assert removed == ["/a.txt"]
     assert f"{remote_root}/a.txt" not in files.downloads
 
 
 @pytest.mark.asyncio
-async def test_rm_recursive_nested_tree(accessor, files, remote_root, index):
+async def test_rm_recursive_nested_tree(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     _seed_directory(files, f"{remote_root}/d")
     _seed_file(files, f"{remote_root}/d/a.txt")
     _seed_directory(files, f"{remote_root}/d/sub")
     _seed_file(files, f"{remote_root}/d/sub/b.txt")
 
-    removed = await rm_recursive(accessor, _path("/dbx/d"), index)
+    removed = await rm_recursive(accessor, _path("/dbx/d"))
 
     assert f"{remote_root}/d/a.txt" in files.delete_calls
     assert f"{remote_root}/d/sub/b.txt" in files.delete_calls
@@ -76,10 +76,8 @@ async def test_rm_recursive_nested_tree(accessor, files, remote_root, index):
 
 
 @pytest.mark.asyncio
-async def test_rm_recursive_missing_raises(
-    accessor, files, remote_root, index
-):
+async def test_rm_recursive_missing_raises(accessor, files, remote_root):
     _seed_directory(files, remote_root)
 
     with pytest.raises(FileNotFoundError):
-        await rm_recursive(accessor, _path("/dbx/missing"), index)
+        await rm_recursive(accessor, _path("/dbx/missing"))

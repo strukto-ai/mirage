@@ -14,7 +14,6 @@
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { dbxFetch } from './client.ts'
@@ -57,12 +56,11 @@ export async function copy(
   accessor: DatabricksVolumeAccessor,
   src: PathSpec,
   dst: PathSpec,
-  index?: IndexCacheStore,
   recursive = false,
 ): Promise<void> {
   const s = ensurePathSpec(src)
   const d = ensurePathSpec(dst)
-  const srcStat = await stat(accessor, s, index)
+  const srcStat = await stat(accessor, s)
   // Same-path guard runs after stat (and the non-recursive directory check)
   // so a missing source or `cp` of a directory still raises.
   const samePath = backendPath(accessor.config, s) === backendPath(accessor.config, d)
@@ -84,6 +82,6 @@ export async function copy(
     // Copying a file onto itself would re-upload it; skip.
     return
   }
-  const data = await read(accessor, s, index)
-  await write(accessor, d, data, index)
+  const data = await read(accessor, s)
+  await write(accessor, d, data)
 }

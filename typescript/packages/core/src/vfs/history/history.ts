@@ -17,7 +17,7 @@ import { HistoryAccessor } from '../../accessor/history.ts'
 import type { Observer } from '../../observe/observer.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as historyReaddir } from '../../core/history/readdir.ts'
 import { read as historyRead } from '../../core/history/read.ts'
@@ -37,6 +37,7 @@ export class HistoryViewVFS extends BaseVFS {
   // The view renders from in-memory events, so stat() sizes it by
   // rendering: cheap, no network, and never null.
   override readonly sizesAlwaysKnown = true
+  override readonly listsStats: boolean = true
   override readonly accessor: HistoryAccessor
 
   constructor(observer: Observer, session: string | null = null) {
@@ -49,13 +50,13 @@ export class HistoryViewVFS extends BaseVFS {
     return new HistoryViewVFS(this.accessor.observer, session)
   }
 
-  override readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     return historyReaddir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
@@ -63,7 +64,7 @@ export class HistoryViewVFS extends BaseVFS {
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return historyStat(this.accessor, path)
   }
 

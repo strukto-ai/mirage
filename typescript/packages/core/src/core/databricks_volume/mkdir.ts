@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
@@ -38,7 +37,6 @@ async function createDirectory(
 export async function mkdir(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
   parents = false,
 ): Promise<void> {
   const p = ensurePathSpec(path)
@@ -49,7 +47,7 @@ export async function mkdir(
   }
   let parentStat
   try {
-    parentStat = await stat(accessor, parentPath(p), index)
+    parentStat = await stat(accessor, parentPath(p))
   } catch (exc) {
     if ((exc as { code?: string }).code === 'ENOENT') throw enoent(p.virtual)
     throw exc

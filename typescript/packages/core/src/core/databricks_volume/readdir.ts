@@ -13,15 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { toIsoZ } from '../../utils/dates.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { PathSpec } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { dbxFetch, type DbxEndpoint } from './client.ts'
 import { isNotFound } from './errors.ts'
-import { backendPath, virtualPath } from './path.ts'
+import { backendPath } from './path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { listingError } from '../../errors/fs.ts'
 
@@ -68,17 +66,18 @@ async function head(
   return true
 }
 
+/**
+ * A folder's rows, as the Files API lists them. Mirrors Python's `readdir`.
+ *
+ * Throws:
+ *   FileNotFoundError: nothing is at the path.
+ *   NotADirectoryError: the path, or a folder above it, is a file.
+ */
 export async function readdir(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
+): Promise<FileStat[]> {
   const listPath = path.pattern !== null ? path.dir : path
-  const virtualKey = rstripSlash(listPath.virtual) || '/'
-  if (index !== undefined) {
-    const listing = await index.listDir(virtualKey)
-    if (listing.entries !== undefined && listing.entries !== null) return listing.entries
-  }
   const remotePath = backendPath(accessor.config, listPath)
   let entries: DbxDirectoryEntry[]
   try {
@@ -97,45 +96,32 @@ export async function readdir(
     }
     throw exc
   }
-  const pairs = entries
-    .map(
-      (entry) =>
-        [
-          virtualPath(accessor.config, entry.path, mountPrefixOf(path.virtual, path.vfsPath)),
-          entry,
-        ] as [string, DbxDirectoryEntry],
-    )
-    .sort((a, b) => compareCodePoints(a[0], b[0]))
-  const names: string[] = []
-  const indexEntries: [string, IndexEntry][] = []
-  for (const [fullPath, entry] of pairs) {
-    const isDir = entry.is_directory === true
-    names.push(fullPath)
-    const name = rstripSlash(fullPath).split('/').pop() ?? fullPath
-    const remoteTime =
-      typeof entry.last_modified === 'number' ? toIsoZ(new Date(entry.last_modified)) : ''
-    let size = !isDir && typeof entry.file_size === 'number' ? entry.file_size : null
-    if (!isDir && size === null) {
-      // DirectoryEntry normally carries file_size; when the lister omits
-      // it, one HEAD per affected file fills the gap so the index never
-      // caches an unknown size.
+  const rows: FileStat[] = []
+  for (const entry of [...entries].sort((a, b) => compareCodePoints(a.path, b.path))) {
+    const name = rstripSlash(entry.path).split('/').pop() ?? entry.path
+    if (entry.is_directory === true) {
+      rows.push(new FileStat({ name, type: FileType.DIRECTORY }))
+      continue
+    }
+    let size = typeof entry.file_size === 'number' ? entry.file_size : null
+    if (size === null) {
+      // DirectoryEntry normally carries file_size; when the lister omits it,
+      // one HEAD per affected file fills the gap so no row carries an
+      // unknown size.
       const r = await dbxFetch(accessor, 'HEAD', 'files', entry.path)
       const lengthHeader = r.headers.get('content-length')
       size = lengthHeader !== null && lengthHeader !== '' ? Number(lengthHeader) : null
     }
-    indexEntries.push([
-      name,
-      new IndexEntry({
-        id: fullPath,
+    rows.push(
+      new FileStat({
         name,
-        resourceType: isDir ? 'folder' : 'file',
         size,
-        remoteTime,
+        modified:
+          typeof entry.last_modified === 'number' ? toIsoZ(new Date(entry.last_modified)) : null,
+        type: FileType.FILE,
+        content: contentTypeForPath(name),
       }),
-    ])
+    )
   }
-  if (index !== undefined) {
-    await index.setDir(virtualKey, indexEntries)
-  }
-  return names
+  return rows
 }

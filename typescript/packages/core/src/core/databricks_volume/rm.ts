@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 
 import { dbxFetch } from './client.ts'
@@ -45,12 +44,11 @@ async function removeTreeRecurse(
 export async function rmRecursive(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
 ): Promise<string[]> {
   const p = ensurePathSpec(path)
-  const fileStat = await stat(accessor, p, index)
+  const fileStat = await stat(accessor, p)
   if (fileStat.type !== FileType.DIRECTORY) {
-    await unlink(accessor, p, index)
+    await unlink(accessor, p)
     return [p.mountPath]
   }
   const remoteRoot = backendPath(accessor.config, p)

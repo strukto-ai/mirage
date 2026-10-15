@@ -13,14 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { PathSpec } from '../../types.ts'
 import { write } from './write.ts'
 
-export async function create(
-  accessor: DatabricksVolumeAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<void> {
-  await write(accessor, path, new Uint8Array(0), index)
+export async function create(accessor: DatabricksVolumeAccessor, path: PathSpec): Promise<void> {
+  await write(accessor, path, new Uint8Array(0))
 }

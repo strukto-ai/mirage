@@ -19,13 +19,12 @@ from functools import partial
 from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.databricks_volume.errors import is_not_found
-from mirage.core.databricks_volume.path import backend_path, virtual_path
+from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import modified_to_iso
 from mirage.errors.fs import listing_error
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.filetype import content_type_for_path
 from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
 
 logger = logging.getLogger(__name__)
@@ -62,15 +61,19 @@ async def _is_dir(accessor: DatabricksVolumeAccessor, key: str) -> bool:
 
 
 async def readdir(
-    accessor: DatabricksVolumeAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+    accessor: DatabricksVolumeAccessor, path: PathSpec
+) -> list[FileStat]:
+    """A folder's rows, as the Files API lists them.
+
+    Args:
+        accessor (DatabricksVolumeAccessor): Databricks accessor.
+        path (PathSpec): the folder, or a glob word in it.
+
+    Raises:
+        FileNotFoundError: nothing is at the path.
+        NotADirectoryError: the path, or a folder above it, is a file.
+    """
     list_path = path.dir if path.pattern else path
-    virtual_key = list_path.virtual.rstrip("/") or "/"
-    listing = await index.list_dir(virtual_key)
-    if listing.entries is not None:
-        return listing.entries
     remote_path = backend_path(accessor.config, list_path)
     try:
         entries = await asyncio.to_thread(
@@ -90,51 +93,37 @@ async def readdir(
                 partial(_is_dir, accessor),
             ) from exc
         raise
-    pairs = sorted(
-        (
-            virtual_path(
-                accessor.config,
-                entry.path,
-                mount_prefix_of(path.virtual, path.vfs_path),
-            ),
-            entry,
-        )
-        for entry in entries
-    )
-    names = [name for name, _ in pairs]
-    if len(names) > SCOPE_ERROR:
+    if len(entries) > SCOPE_ERROR:
         logger.warning(
             "databricks_volume readdir: %s returned %d entries (limit %d)",
-            virtual_key,
-            len(names),
+            list_path.virtual,
+            len(entries),
             SCOPE_ERROR,
         )
-    index_entries = []
-    for full_path, entry in pairs:
-        name = full_path.rstrip("/").rsplit("/", 1)[-1]
-        is_dir = bool(getattr(entry, "is_directory", False))
-        resource_type = "folder" if is_dir else "file"
-        remote_time = modified_to_iso(getattr(entry, "last_modified", None))
+    rows: list[FileStat] = []
+    for entry in sorted(entries, key=lambda item: item.path):
+        name = entry.path.rstrip("/").rsplit("/", 1)[-1]
+        if getattr(entry, "is_directory", False):
+            rows.append(FileStat(name=name, type=FileType.DIRECTORY))
+            continue
         size = getattr(entry, "file_size", None)
-        if not is_dir and size is None:
+        if size is None:
             # DirectoryEntry normally carries file_size; when the lister
-            # omits it, one HEAD per affected file fills the gap so the
-            # index never caches an unknown size.
+            # omits it, one HEAD per affected file fills the gap so no row
+            # carries an unknown size.
             metadata = await asyncio.to_thread(
                 accessor.files.get_metadata, entry.path
             )
             size = getattr(metadata, "content_length", None)
-        index_entries.append(
-            (
-                name,
-                IndexEntry(
-                    id=full_path,
-                    name=name,
-                    resource_type=resource_type,
-                    size=size,
-                    remote_time=remote_time or "",
+        rows.append(
+            FileStat(
+                name=name,
+                size=size,
+                modified=modified_to_iso(
+                    getattr(entry, "last_modified", None)
                 ),
+                type=FileType.FILE,
+                content=content_type_for_path(name),
             )
         )
-    await index.set_dir(virtual_key, index_entries)
-    return names
+    return rows

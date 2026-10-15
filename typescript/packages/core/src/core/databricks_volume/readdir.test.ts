@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { FileType } from '../../types.ts'
 import { readdir } from './readdir.ts'
 import {
   jsonResponse,
@@ -29,7 +29,7 @@ afterEach(() => {
 })
 
 describe('readdir', () => {
-  it('lists sorted virtual paths without trailing slashes', async () => {
+  it('lists sorted rows named without trailing slashes', async () => {
     const { fetch } = routedFetch(() =>
       jsonResponse({
         contents: [
@@ -39,8 +39,11 @@ describe('readdir', () => {
       }),
     )
     vi.stubGlobal('fetch', fetch)
-    const names = await readdir(makeAccessor(), spec('/volume/'))
-    expect(names).toEqual(['/volume/a', '/volume/b.txt'])
+    const rows = await readdir(makeAccessor(), spec('/volume/'))
+    expect(rows.map((row) => [row.name, row.type])).toEqual([
+      ['a', FileType.DIRECTORY],
+      ['b.txt', FileType.FILE],
+    ])
   })
 
   it('follows next_page_token pagination', async () => {
@@ -54,8 +57,8 @@ describe('readdir', () => {
       })
     })
     vi.stubGlobal('fetch', fetch)
-    const names = await readdir(makeAccessor(), spec('/volume/'))
-    expect(names).toEqual(['/volume/a.txt', '/volume/b.txt'])
+    const rows = await readdir(makeAccessor(), spec('/volume/'))
+    expect(rows.map((row) => row.name)).toEqual(['a.txt', 'b.txt'])
     expect(calls).toHaveLength(2)
   })
 
@@ -100,7 +103,7 @@ describe('readdir', () => {
     expect(calls.filter((c) => c.method === 'HEAD')).toHaveLength(1)
   })
 
-  it('stores size, type, and modified time in the index cache', async () => {
+  it('answers each child with its size, type and modified time', async () => {
     const { fetch } = routedFetch(() =>
       jsonResponse({
         contents: [
@@ -110,14 +113,13 @@ describe('readdir', () => {
       }),
     )
     vi.stubGlobal('fetch', fetch)
-    const index = new RAMIndexCacheStore()
-    await readdir(makeAccessor(), spec('/volume/'), index)
-    const file = await index.get('/volume/a.txt')
-    expect(file.entry?.resourceType).toBe('file')
-    expect(file.entry?.size).toBe(6)
-    expect(file.entry?.remoteTime).toBe('2023-11-14T22:13:20Z')
-    const dir = await index.get('/volume/d')
-    expect(dir.entry?.resourceType).toBe('folder')
+    const [file, dir] = await readdir(makeAccessor(), spec('/volume/'))
+    expect([file?.type, file?.size, file?.modified]).toEqual([
+      FileType.FILE,
+      6,
+      '2023-11-14T22:13:20Z',
+    ])
+    expect(dir?.type).toBe(FileType.DIRECTORY)
   })
 
   it('backfills a lister-omitted size with one HEAD', async () => {
@@ -130,25 +132,11 @@ describe('readdir', () => {
       })
     })
     vi.stubGlobal('fetch', fetch)
-    const index = new RAMIndexCacheStore()
-    await readdir(makeAccessor(), spec('/volume/'), index)
-    const backfilled = await index.get('/volume/a.txt')
-    expect(backfilled.entry?.size).toBe(7)
-    const listed = await index.get('/volume/b.txt')
-    expect(listed.entry?.size).toBe(3)
+    const rows = await readdir(makeAccessor(), spec('/volume/'))
+    expect(rows.map((row) => [row.name, row.size])).toEqual([
+      ['a.txt', 7],
+      ['b.txt', 3],
+    ])
     expect(calls.filter((c) => c.method === 'HEAD')).toHaveLength(1)
-  })
-
-  it('serves and fills the index cache', async () => {
-    const { fetch, calls } = routedFetch(() =>
-      jsonResponse({ contents: [{ path: `${TEST_ROOT}/a.txt`, file_size: 1 }] }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const index = new RAMIndexCacheStore()
-    const first = await readdir(makeAccessor(), spec('/volume/'), index)
-    const second = await readdir(makeAccessor(), spec('/volume/'), index)
-    expect(first).toEqual(['/volume/a.txt'])
-    expect(second).toEqual(first)
-    expect(calls).toHaveLength(1)
   })
 })

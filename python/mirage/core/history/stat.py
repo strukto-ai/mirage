@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.history.read import read
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
@@ -22,19 +21,17 @@ from mirage.utils.filetype import content_type_for_path
 async def stat(
     accessor: HistoryAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     """Stat the rendered histfile.
 
     Args:
         accessor (HistoryAccessor): Accessor holding the recorder.
         path (PathSpec): Virtual path; only the view file resolves.
-        index (IndexCacheStore): Unused; op signature parity.
 
     Returns:
         FileStat: File entry sized to the current rendering.
     """
-    data = await read(accessor, path, index)
+    data = await read(accessor, path)
     return FileStat(
         name=".bash_history",
         size=len(data),

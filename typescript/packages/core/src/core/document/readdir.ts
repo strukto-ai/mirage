@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DocumentAccessor } from '../../accessor/document.ts'
-import type { PathSpec } from '../../types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { enotdir } from '../../errors/fs.ts'
 
-export function readdir(_accessor: DocumentAccessor, path: PathSpec): Promise<string[]> {
+export function readdir(_accessor: DocumentAccessor, path: PathSpec): Promise<FileStat[]> {
   return Promise.reject(enotdir(path))
 }

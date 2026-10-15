@@ -43,39 +43,39 @@ def _seed_file(files, path: str, data: bytes = b"x") -> None:
 
 
 @pytest.mark.asyncio
-async def test_rmdir_empty_succeeds(accessor, files, remote_root, index):
+async def test_rmdir_empty_succeeds(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     _seed_directory(files, f"{remote_root}/empty")
 
-    await rmdir(accessor, _path("/dbx/empty"), index)
+    await rmdir(accessor, _path("/dbx/empty"))
 
     assert files.delete_directory_calls == [f"{remote_root}/empty"]
     assert f"{remote_root}/empty" not in files.directory_metadata
 
 
 @pytest.mark.asyncio
-async def test_rmdir_non_empty_fails(accessor, files, remote_root, index):
+async def test_rmdir_non_empty_fails(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     _seed_directory(files, f"{remote_root}/full")
     _seed_file(files, f"{remote_root}/full/a.txt")
 
     with pytest.raises(OSError):
-        await rmdir(accessor, _path("/dbx/full"), index)
+        await rmdir(accessor, _path("/dbx/full"))
     assert files.delete_directory_calls == []
 
 
 @pytest.mark.asyncio
-async def test_rmdir_file_target_fails(accessor, files, remote_root, index):
+async def test_rmdir_file_target_fails(accessor, files, remote_root):
     _seed_directory(files, remote_root)
     _seed_file(files, f"{remote_root}/a.txt")
 
     with pytest.raises(NotADirectoryError):
-        await rmdir(accessor, _path("/dbx/a.txt"), index)
+        await rmdir(accessor, _path("/dbx/a.txt"))
 
 
 @pytest.mark.asyncio
-async def test_rmdir_missing_fails(accessor, files, remote_root, index):
+async def test_rmdir_missing_fails(accessor, files, remote_root):
     _seed_directory(files, remote_root)
 
     with pytest.raises(FileNotFoundError):
-        await rmdir(accessor, _path("/dbx/missing"), index)
+        await rmdir(accessor, _path("/dbx/missing"))

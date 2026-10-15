@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
@@ -59,7 +58,6 @@ export async function write(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
   data: Uint8Array,
-  _index?: IndexCacheStore,
 ): Promise<void> {
   const p = ensurePathSpec(path)
   const remoteParent = backendPath(accessor.config, parentPath(p))

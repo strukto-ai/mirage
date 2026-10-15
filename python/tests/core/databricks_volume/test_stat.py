@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.core.databricks_volume.stat import (
     _name_from_backend_path,
@@ -86,92 +85,21 @@ async def test_stat_file(accessor, files, remote_root):
     assert result.type != FileType.DIRECTORY
 
 
-@pytest.mark.asyncio
-async def test_stat_file_from_index_skips_sdk(
-    accessor, files, index, remote_root
-):
-    files.directories[f"{remote_root}/reports"] = [
-        file_entry(
-            f"{remote_root}/reports/latest.md",
-            size=6,
-            modified=1_700_000_000_000,
-        ),
-    ]
-    await readdir(
+async def _listed(accessor, name: str):
+    rows = await readdir(
         accessor,
         PathSpec.from_str_path(
             "/volume/reports", mount_key("/volume/reports", "/volume")
         ),
-        index,
     )
-    path = PathSpec.from_str_path(
-        "/volume/reports/latest.md",
-        mount_key("/volume/reports/latest.md", "/volume"),
-    )
-    result = await stat(accessor, path, index)
-    assert result.name == "latest.md"
-    assert result.size == 6
-    assert result.modified == "2023-11-14T22:13:20Z"
-    assert result.type != FileType.DIRECTORY
-    assert files.get_metadata_calls == []
-    assert files.get_directory_metadata_calls == []
+    return next(row for row in rows if row.name == name)
 
 
+# The mount answers a stat from the row the listing names, so a row and
+# the backend's own stat of the path must agree.
 @pytest.mark.asyncio
-async def test_stat_directory_from_index_skips_sdk(
-    accessor, files, index, remote_root
-):
-    files.directories[f"{remote_root}/reports"] = [
-        directory_entry(f"{remote_root}/reports/archive"),
-    ]
-    await readdir(
-        accessor,
-        PathSpec.from_str_path(
-            "/volume/reports", mount_key("/volume/reports", "/volume")
-        ),
-        index,
-    )
-    path = PathSpec.from_str_path(
-        "/volume/reports/archive",
-        mount_key("/volume/reports/archive", "/volume"),
-    )
-    result = await stat(accessor, path, index)
-    assert result.name == "archive"
-    assert result.type == FileType.DIRECTORY
-    assert files.get_metadata_calls == []
-    assert files.get_directory_metadata_calls == []
-
-
-@pytest.mark.asyncio
-async def test_stat_index_negative_cache_raises_without_sdk(
-    accessor,
-    files,
-    index,
-    remote_root,
-):
-    files.directories[f"{remote_root}/reports"] = [
-        file_entry(f"{remote_root}/reports/latest.md", size=6),
-    ]
-    await readdir(
-        accessor,
-        PathSpec.from_str_path(
-            "/volume/reports", mount_key("/volume/reports", "/volume")
-        ),
-        index,
-    )
-    path = PathSpec.from_str_path(
-        "/volume/reports/missing.md",
-        mount_key("/volume/reports/missing.md", "/volume"),
-    )
-    with pytest.raises(FileNotFoundError):
-        await stat(accessor, path, index)
-    assert files.get_metadata_calls == []
-    assert files.get_directory_metadata_calls == []
-
-
-@pytest.mark.asyncio
-async def test_stat_index_fast_path_matches_sdk(
-    accessor, files, index, remote_root
+async def test_a_listed_file_row_matches_its_stat(
+    accessor, files, remote_root
 ):
     files.directories[f"{remote_root}/reports"] = [
         file_entry(
@@ -184,51 +112,26 @@ async def test_stat_index_fast_path_matches_sdk(
         size=6,
         modified="Tue, 14 Nov 2023 22:13:20 GMT",
     )
-    await readdir(
-        accessor,
-        PathSpec.from_str_path(
-            "/volume/reports", mount_key("/volume/reports", "/volume")
-        ),
-        index,
-    )
     path = PathSpec.from_str_path(
         "/volume/reports/latest.md",
         mount_key("/volume/reports/latest.md", "/volume"),
     )
-    fast = await stat(accessor, path, index)
-    slow = await stat(accessor, path, RAMIndexCacheStore(ttl=600))
-    assert fast == slow
-    assert files.get_metadata_calls == [f"{remote_root}/reports/latest.md"]
+    assert await _listed(accessor, "latest.md") == await stat(accessor, path)
 
 
 @pytest.mark.asyncio
-async def test_stat_directory_index_fast_path_matches_sdk(
-    accessor,
-    files,
-    index,
-    remote_root,
+async def test_a_listed_folder_row_matches_its_stat(
+    accessor, files, remote_root
 ):
     files.directories[f"{remote_root}/reports"] = [
         directory_entry(f"{remote_root}/reports/archive"),
     ]
     files.directory_metadata.add(f"{remote_root}/reports/archive")
-    await readdir(
-        accessor,
-        PathSpec.from_str_path(
-            "/volume/reports", mount_key("/volume/reports", "/volume")
-        ),
-        index,
-    )
     path = PathSpec.from_str_path(
         "/volume/reports/archive",
         mount_key("/volume/reports/archive", "/volume"),
     )
-    fast = await stat(accessor, path, index)
-    slow = await stat(accessor, path, RAMIndexCacheStore(ttl=600))
-    assert fast == slow
-    assert files.get_directory_metadata_calls == [
-        f"{remote_root}/reports/archive"
-    ]
+    assert await _listed(accessor, "archive") == await stat(accessor, path)
 
 
 @pytest.mark.asyncio

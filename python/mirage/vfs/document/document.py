@@ -15,7 +15,6 @@
 from collections.abc import Callable
 
 from mirage.accessor.document import DocumentAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.document.read import read as document_read
 from mirage.core.document.readdir import readdir as document_readdir
 from mirage.core.document.stat import stat as document_stat
@@ -41,22 +40,17 @@ class DocumentVFS(BaseVFS):
         self.global_view = False
         self.sessions: dict[str, float] = {}
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await document_readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await document_readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        data = await document_read(self.accessor, path, index)
+        data = await document_read(self.accessor, path)
         return slice_window(data, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await document_stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await document_stat(self.accessor, path)

@@ -16,7 +16,6 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.accessor.bin import BinAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.bin.read import read as _read
 from mirage.core.bin.readdir import readdir as _readdir
 from mirage.core.bin.refuse import refuse
@@ -53,25 +52,20 @@ class BinViewVFS(BaseVFS):
         super().__init__()
         self.accessor = BinAccessor(programs, note)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await _readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        data = await _read(self.accessor, path, index)
+        data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await _stat(self.accessor, path)
 
     # What the view holds is the lookup's to say, so every write answers
     # as a read-only file system does, rather than as a missing function,
@@ -80,21 +74,10 @@ class BinViewVFS(BaseVFS):
     async def write(self, path: PathSpec, data: bytes) -> None:
         await refuse(self.accessor, path)
 
-    async def append(
-        self,
-        path: PathSpec,
-        data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
+    async def append(self, path: PathSpec, data: bytes) -> None:
         await refuse(self.accessor, path)
 
-    async def pwrite(
-        self,
-        path: PathSpec,
-        data: bytes,
-        offset: int,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
+    async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         await refuse(self.accessor, path)
 
     async def create(self, path: PathSpec) -> None:
@@ -106,9 +89,7 @@ class BinViewVFS(BaseVFS):
     async def unlink(self, path: PathSpec) -> None:
         await refuse(self.accessor, path)
 
-    async def rmdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
+    async def rmdir(self, path: PathSpec) -> None:
         await refuse(self.accessor, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:

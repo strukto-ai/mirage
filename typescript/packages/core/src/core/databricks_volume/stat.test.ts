@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { FileType } from '../../types.ts'
 import { exists } from './exists.ts'
 import { readdir } from './readdir.ts'
@@ -31,56 +30,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('stat index fast path', () => {
-  it('serves a file from the index without a network call', async () => {
-    const { fetch, calls } = routedFetch(() =>
-      jsonResponse({
-        contents: [
-          { path: `${TEST_ROOT}/reports/a.txt`, file_size: 6, last_modified: 1_700_000_000_000 },
-        ],
-      }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const index = new RAMIndexCacheStore()
-    await readdir(makeAccessor(), spec('/volume/reports'), index)
-    const afterReaddir = calls.length
-    const st = await stat(makeAccessor(), spec('/volume/reports/a.txt'), index)
-    expect(st.name).toBe('a.txt')
-    expect(st.size).toBe(6)
-    expect(st.modified).toBe('2023-11-14T22:13:20Z')
-    expect(st.type).not.toBe(FileType.DIRECTORY)
-    expect(calls.length).toBe(afterReaddir)
-  })
-
-  it('serves a directory from the index without a network call', async () => {
-    const { fetch, calls } = routedFetch(() =>
-      jsonResponse({ contents: [{ path: `${TEST_ROOT}/reports/sub`, is_directory: true }] }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const index = new RAMIndexCacheStore()
-    await readdir(makeAccessor(), spec('/volume/reports'), index)
-    const afterReaddir = calls.length
-    const st = await stat(makeAccessor(), spec('/volume/reports/sub'), index)
-    expect(st.type).toBe(FileType.DIRECTORY)
-    expect(calls.length).toBe(afterReaddir)
-  })
-
-  it('raises ENOENT from the negative cache without a network call', async () => {
-    const { fetch, calls } = routedFetch(() =>
-      jsonResponse({ contents: [{ path: `${TEST_ROOT}/reports/a.txt`, file_size: 6 }] }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const index = new RAMIndexCacheStore()
-    await readdir(makeAccessor(), spec('/volume/reports'), index)
-    const afterReaddir = calls.length
-    const err = (await stat(makeAccessor(), spec('/volume/reports/missing.txt'), index).catch(
-      (e: unknown) => e,
-    )) as Error & { code?: string }
-    expect(err.code).toBe('ENOENT')
-    expect(calls.length).toBe(afterReaddir)
-  })
-
-  it('returns the same FileStat from the index as from the SDK', async () => {
+// The mount answers a stat from the row the listing names, so a row and the
+// backend's own stat of the path must agree. Mirrors Python's
+// test_a_listed_*_row_matches_its_stat.
+describe('a listed row', () => {
+  it('matches the stat of a file', async () => {
     const { fetch } = routedFetch((call) => {
       if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
         return jsonResponse({
@@ -95,14 +49,11 @@ describe('stat index fast path', () => {
       })
     })
     vi.stubGlobal('fetch', fetch)
-    const index = new RAMIndexCacheStore()
-    await readdir(makeAccessor(), spec('/volume/reports'), index)
-    const fast = await stat(makeAccessor(), spec('/volume/reports/a.txt'), index)
-    const slow = await stat(makeAccessor(), spec('/volume/reports/a.txt'))
-    expect(fast).toEqual(slow)
+    const [row] = await readdir(makeAccessor(), spec('/volume/reports'))
+    expect(row).toEqual(await stat(makeAccessor(), spec('/volume/reports/a.txt')))
   })
 
-  it('returns the same directory FileStat from the index as from the SDK', async () => {
+  it('matches the stat of a directory', async () => {
     const { fetch } = routedFetch((call) => {
       if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
         return jsonResponse({
@@ -115,12 +66,9 @@ describe('stat index fast path', () => {
       return new Response(null, { status: 200 })
     })
     vi.stubGlobal('fetch', fetch)
-    const index = new RAMIndexCacheStore()
-    await readdir(makeAccessor(), spec('/volume/reports'), index)
-    const fast = await stat(makeAccessor(), spec('/volume/reports/sub'), index)
-    const slow = await stat(makeAccessor(), spec('/volume/reports/sub'))
-    expect(fast.type).toBe(FileType.DIRECTORY)
-    expect(fast).toEqual(slow)
+    const [row] = await readdir(makeAccessor(), spec('/volume/reports'))
+    expect(row?.type).toBe(FileType.DIRECTORY)
+    expect(row).toEqual(await stat(makeAccessor(), spec('/volume/reports/sub')))
   })
 })
 

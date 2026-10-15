@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { toIsoZ } from '../../utils/dates.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { dbxFetch } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
@@ -50,41 +48,10 @@ async function directoryStatOrRaise(
   return new FileStat({ name: nameFromBackendPath(remotePath), type: FileType.DIRECTORY })
 }
 
-export async function stat(
-  accessor: DatabricksVolumeAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
+export async function stat(accessor: DatabricksVolumeAccessor, path: PathSpec): Promise<FileStat> {
   const stripped = stripSlash(path.mountPath)
   if (stripped === '') {
     return new FileStat({ name: '/', type: FileType.DIRECTORY })
-  }
-  // Fast path: the index cache populated by readdir() carries size, mtime, and
-  // type for every listed entry, so stat returns without a network round-trip.
-  // Mirrors Python's mirage/core/databricks_volume/stat.py.
-  if (index !== undefined) {
-    const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-    const virtualKey = prefix !== '' ? `${rstripSlash(prefix)}/${stripped}` : `/${stripped}`
-    const lookup = await index.get(virtualKey)
-    if (lookup.entry !== undefined && lookup.entry !== null) {
-      const entry = lookup.entry
-      if (entry.resourceType === 'folder') {
-        return new FileStat({ name: entry.name, type: FileType.DIRECTORY })
-      }
-      return new FileStat({
-        name: entry.name,
-        size: entry.size ?? null,
-        modified: entry.remoteTime !== '' ? entry.remoteTime : null,
-        type: FileType.FILE,
-        content: contentTypeForPath(entry.name),
-      })
-    }
-    // Parent was already listed and didn't include this path — it doesn't exist.
-    const parent = virtualKey.replace(/\/[^/]*$/, '') || '/'
-    const parentListing = await index.listDir(parent)
-    if (parentListing.entries !== undefined && parentListing.entries !== null) {
-      throw enoent(path.virtual)
-    }
   }
   const remotePath = backendPath(accessor.config, path)
   let r: Response

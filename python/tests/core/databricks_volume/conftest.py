@@ -6,7 +6,6 @@ from urllib.parse import unquote
 import pytest
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.databricks_volume.path import backend_path
 from mirage.types import PathSpec
 from mirage.vfs.databricks_volume import DatabricksVolumeConfig
@@ -241,11 +240,6 @@ def accessor(
     files: FakeFiles,
 ) -> DatabricksVolumeAccessor:
     return DatabricksVolumeAccessor(databricks_config, FakeClient(files))
-
-
-@pytest.fixture
-def index() -> RAMIndexCacheStore:
-    return RAMIndexCacheStore(ttl=600)
 
 
 def file_metadata(size: int = 0, modified: str | None = None) -> object:

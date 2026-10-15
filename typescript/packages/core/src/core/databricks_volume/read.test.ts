@@ -32,7 +32,7 @@ describe('readBytes', () => {
   it('sends Range for offset/size reads', async () => {
     const { fetch, calls } = routedFetch(() => new Response('ell', { status: 206 }))
     vi.stubGlobal('fetch', fetch)
-    const data = await read(makeAccessor(), spec('/volume/a.txt'), undefined, {
+    const data = await read(makeAccessor(), spec('/volume/a.txt'), {
       offset: 1,
       size: 3,
     })
@@ -46,7 +46,7 @@ describe('readBytes', () => {
   it('slices locally when the server ignores the range', async () => {
     const { fetch } = routedFetch(() => new Response('hello', { status: 200 }))
     vi.stubGlobal('fetch', fetch)
-    const data = await read(makeAccessor(), spec('/volume/a.txt'), undefined, {
+    const data = await read(makeAccessor(), spec('/volume/a.txt'), {
       offset: 1,
       size: 3,
     })
@@ -56,7 +56,7 @@ describe('readBytes', () => {
   it('short-circuits size=0 reads without a request', async () => {
     const { fetch, calls } = routedFetch(() => new Response('x', { status: 200 }))
     vi.stubGlobal('fetch', fetch)
-    const data = await read(makeAccessor(), spec('/volume/a.txt'), undefined, { size: 0 })
+    const data = await read(makeAccessor(), spec('/volume/a.txt'), { size: 0 })
     expect(data.byteLength).toBe(0)
     expect(calls).toHaveLength(0)
   })

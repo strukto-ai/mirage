@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 
 import { dbxFetch } from './client.ts'
@@ -24,13 +23,9 @@ import { listDirectoryContents } from './readdir.ts'
 import { stat } from './stat.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 
-export async function rmdir(
-  accessor: DatabricksVolumeAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<void> {
+export async function rmdir(accessor: DatabricksVolumeAccessor, path: PathSpec): Promise<void> {
   const p = ensurePathSpec(path)
-  const fileStat = await stat(accessor, p, index)
+  const fileStat = await stat(accessor, p)
   if (fileStat.type !== FileType.DIRECTORY) {
     throw enotdir(p.virtual)
   }

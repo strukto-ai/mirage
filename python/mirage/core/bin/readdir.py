@@ -13,23 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.bin import BinAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.bin.stat import stat
 from mirage.errors.fs import enoent, enotdir
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
-async def readdir(
-    accessor: BinAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> list[str]:
-    """List one file per program.
+async def readdir(accessor: BinAccessor, path: PathSpec) -> list[FileStat]:
+    """List one file per program, each as its stat answers it.
 
     Args:
         accessor (BinAccessor): Accessor holding the lookup.
         path (PathSpec): Virtual path; only the view root lists.
-        index (IndexCacheStore): Unused; op signature parity.
 
     Returns:
-        list[str]: The programs' virtual paths, sorted.
+        list[FileStat]: The programs' rows, sorted.
     """
     key = path.mount_path.strip("/")
     if key != "":
@@ -37,4 +34,12 @@ async def readdir(
             raise enotdir(path)
         raise enoent(path)
     base = path.virtual.rstrip("/")
-    return [f"{base}/{name}" for name in accessor.programs()]
+    return [
+        await stat(
+            accessor,
+            PathSpec(
+                virtual=f"{base}/{name}", directory=base or "/", vfs_path=name
+            ),
+        )
+        for name in accessor.programs()
+    ]

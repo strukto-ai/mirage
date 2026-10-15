@@ -20,7 +20,7 @@ import { OPFSAccessor } from '../../accessor/opfs.ts'
 import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as opfsReaddir } from '../../core/opfs/readdir.ts'
 import { read as opfsRead } from '../../core/opfs/read.ts'
 import { stat as opfsStat } from '../../core/opfs/stat.ts'
@@ -140,25 +140,27 @@ export class OPFSVFS extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readdir(path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
+  override readonly listsStats: boolean = true
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     return opfsReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return opfsRead(this.accessor, path, index)
-    return opfsRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return opfsRead(this.accessor, path)
+    return opfsRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
-  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return opfsStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     return opfsStream(this.accessor, path)
   }
 
@@ -186,7 +188,7 @@ export class OPFSVFS extends BaseVFS {
     return opfsUnlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return opfsRmdir(this.accessor, path)
   }
 

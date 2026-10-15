@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.bin import BinAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.bin.read import read
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -22,15 +21,12 @@ from mirage.types import FileStat, FileType, PathSpec
 PROGRAM_MODE = 0o755
 
 
-async def stat(
-    accessor: BinAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> FileStat:
+async def stat(accessor: BinAccessor, path: PathSpec) -> FileStat:
     """Stat the view root or one program's file.
 
     Args:
         accessor (BinAccessor): Accessor holding the lookup.
         path (PathSpec): Virtual path under the view.
-        index (IndexCacheStore): Unused; op signature parity.
 
     Returns:
         FileStat: The directory, or an executable file sized to its stub.
@@ -38,7 +34,7 @@ async def stat(
     key = path.mount_path.strip("/")
     if key == "":
         return FileStat(name="bin", type=FileType.DIRECTORY, mode=PROGRAM_MODE)
-    data = await read(accessor, path, index)
+    data = await read(accessor, path)
     return FileStat(
         name=key, size=len(data), type=FileType.FILE, mode=PROGRAM_MODE
     )

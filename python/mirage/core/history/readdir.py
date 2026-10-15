@@ -13,15 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.history import HistoryAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def readdir(
     accessor: HistoryAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+) -> list[FileStat]:
     """List nothing: the mount root is a file, not a directory.
 
     Keeps recursive traversal (find, grep -r, tree) from blowing up
@@ -30,9 +28,8 @@ async def readdir(
     Args:
         accessor (HistoryAccessor): Accessor holding the recorder.
         path (PathSpec): Virtual path.
-        index (IndexCacheStore): Unused; op signature parity.
 
     Returns:
-        list[str]: Always empty.
+        list[FileStat]: Always empty.
     """
     return []

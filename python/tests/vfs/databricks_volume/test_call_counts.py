@@ -1,20 +1,14 @@
 import time
-from functools import partial
 
 import pytest
 
-from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.cache.index import RAMIndexCacheStore
-from mirage.commands.builtin.generic.find import parse_find_args
-from mirage.commands.builtin.generic.ls import ls as generic_ls
-from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.core.databricks_volume.path import backend_path
-from mirage.core.databricks_volume.readdir import readdir
-from mirage.core.databricks_volume.stat import stat
-from mirage.core.generic.find import walk_find
-from mirage.types import LsSortBy, PathSpec
-from mirage.utils.key_prefix import mount_key
-from mirage.vfs.databricks_volume import DatabricksVolumeConfig
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.databricks_volume import (
+    DatabricksVolumeConfig,
+    DatabricksVolumeVFS,
+)
+from mirage.workspace import Workspace
 from tests.core.databricks_volume.conftest import (
     FakeClient,
     FakeFiles,
@@ -29,9 +23,7 @@ DAY_S = 86_400
 AGES_DAYS = (1, 2, 3, 10, 20)
 
 
-def _rig() -> tuple[
-    DatabricksVolumeAccessor, FakeFiles, RAMIndexCacheStore, str
-]:
+def _rig() -> tuple[Workspace, FakeFiles, str]:
     config = DatabricksVolumeConfig(
         catalog="main",
         schema="default",
@@ -40,14 +32,11 @@ def _rig() -> tuple[
         token="secret",
     )
     files = FakeFiles()
-    accessor = DatabricksVolumeAccessor(config, FakeClient(files))
-    index = RAMIndexCacheStore(ttl=600)
-    return (
-        accessor,
-        files,
-        index,
-        backend_path(config, PathSpec.from_str_path("/")),
-    )
+    vfs = DatabricksVolumeVFS(config, FakeClient(files))
+    root = backend_path(config, PathSpec.from_str_path("/"))
+    files.directories[root] = [directory_entry(f"{root}/sub")]
+    files.directory_metadata.add(f"{root}/sub")
+    return Workspace({"/volume": vfs}, mode=MountMode.READ), files, root
 
 
 def _seed_flat(files: FakeFiles, root: str, count: int = 5) -> None:
@@ -59,143 +48,102 @@ def _seed_flat(files: FakeFiles, root: str, count: int = 5) -> None:
     ]
 
 
-def _ls_readdir(accessor: DatabricksVolumeAccessor):
-    return partial(readdir, accessor)
+def _seed_nested(files: FakeFiles, root: str) -> None:
+    files.directories[f"{root}/sub"] = [
+        file_entry(f"{root}/sub/a.txt", size=1, modified=MODIFIED_MS),
+        directory_entry(f"{root}/sub/inner"),
+    ]
+    files.directories[f"{root}/sub/inner"] = [
+        file_entry(f"{root}/sub/inner/b.txt", size=2, modified=MODIFIED_MS),
+    ]
 
 
-def _ls_stat(accessor: DatabricksVolumeAccessor):
-    return partial(stat, accessor)
+async def _run(ws: Workspace, line: str) -> list[str]:
+    try:
+        result = await ws.shell(line)
+        out = await result.materialize_stdout()
+        assert (result.exit_code, await result.stderr_str()) == (0, ""), line
+        return out.decode().splitlines()
+    finally:
+        await ws.close()
+
+
+def _child_metadata(files: FakeFiles) -> list[str]:
+    return [
+        call
+        for call in files.get_metadata_calls
+        + files.get_directory_metadata_calls
+        if "/sub/" in call
+    ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "sort_by,long",
-    [
-        (LsSortBy.NAME, False),
-        (LsSortBy.NAME, True),
-        (LsSortBy.TIME, False),
-        (LsSortBy.SIZE, False),
-    ],
-)
-async def test_ls_lists_once_without_per_entry_metadata(sort_by, long):
-    accessor, files, index, root = _rig()
+@pytest.mark.parametrize("flags", ["", "-l", "-t", "-S"])
+async def test_ls_lists_once_without_per_entry_metadata(flags):
+    ws, files, root = _rig()
     _seed_flat(files, root, count=5)
-    path = PathSpec.from_str_path(
-        "/volume/sub", mount_key("/volume/sub", "/volume")
-    )
-    await generic_ls(
-        [path],
-        readdir=_ls_readdir(accessor),
-        stat=_ls_stat(accessor),
-        long=long,
-        sort_by=sort_by,
-        index=index,
-    )
-    assert files.list_directory_calls == [f"{root}/sub"]
-    assert files.get_metadata_calls == []
-    assert files.get_directory_metadata_calls == []
+    await _run(ws, f"ls {flags} /volume/sub")
+    assert files.list_directory_calls.count(f"{root}/sub") == 1
+    assert _child_metadata(files) == []
 
 
 @pytest.mark.asyncio
 async def test_ls_recursive_one_list_per_directory():
-    accessor, files, index, root = _rig()
-    files.directories[f"{root}/sub"] = [
-        file_entry(f"{root}/sub/a.txt", size=1, modified=MODIFIED_MS),
-        directory_entry(f"{root}/sub/inner"),
-    ]
-    files.directories[f"{root}/sub/inner"] = [
-        file_entry(f"{root}/sub/inner/b.txt", size=2, modified=MODIFIED_MS),
-    ]
-    path = PathSpec.from_str_path(
-        "/volume/sub", mount_key("/volume/sub", "/volume")
-    )
-    await generic_ls(
-        [path],
-        readdir=_ls_readdir(accessor),
-        stat=_ls_stat(accessor),
-        recursive=True,
-        index=index,
-    )
-    assert sorted(files.list_directory_calls) == [
+    ws, files, root = _rig()
+    _seed_nested(files, root)
+    await _run(ws, "ls -R /volume/sub")
+    assert sorted(set(files.list_directory_calls) - {root}) == [
         f"{root}/sub",
         f"{root}/sub/inner",
     ]
-    assert files.get_metadata_calls == []
-    assert files.get_directory_metadata_calls == []
+    assert len(files.list_directory_calls) == len(
+        set(files.list_directory_calls)
+    )
+    assert _child_metadata(files) == []
 
 
 @pytest.mark.asyncio
 async def test_tree_one_list_per_directory_without_metadata():
-    accessor, files, index, root = _rig()
-    files.directories[f"{root}/sub"] = [
-        file_entry(f"{root}/sub/a.txt", size=1, modified=MODIFIED_MS),
-        directory_entry(f"{root}/sub/inner"),
-    ]
-    files.directories[f"{root}/sub/inner"] = [
-        file_entry(f"{root}/sub/inner/b.txt", size=2, modified=MODIFIED_MS),
-    ]
-    path = PathSpec.from_str_path(
-        "/volume/sub", mount_key("/volume/sub", "/volume")
-    )
-    await generic_tree(
-        [path],
-        readdir=_ls_readdir(accessor),
-        stat=_ls_stat(accessor),
-        index=index,
-    )
-    assert sorted(files.list_directory_calls) == [
+    ws, files, root = _rig()
+    _seed_nested(files, root)
+    await _run(ws, "tree /volume/sub")
+    assert sorted(set(files.list_directory_calls) - {root}) == [
         f"{root}/sub",
         f"{root}/sub/inner",
     ]
-    assert files.get_metadata_calls == []
-    assert files.get_directory_metadata_calls == []
-
-
-async def _run_find(accessor, index, *, type=None, size=None, mtime=None):
-    args = parse_find_args((), type=type, size=size, mtime=mtime)
-    path = PathSpec.from_str_path(
-        "/volume/sub", mount_key("/volume/sub", "/volume")
+    assert len(files.list_directory_calls) == len(
+        set(files.list_directory_calls)
     )
-    return await walk_find(
-        path,
-        readdir=_ls_readdir(accessor),
-        stat=_ls_stat(accessor),
-        index=index,
-        args=args,
-    )
+    assert _child_metadata(files) == []
 
 
 @pytest.mark.asyncio
 async def test_find_type_does_not_stat_children():
-    accessor, files, index, root = _rig()
+    ws, files, root = _rig()
     _seed_flat(files, root, count=5)
-    files.directory_metadata.add(f"{root}/sub")
-    results = await _run_find(accessor, index, type="f")
+    results = await _run(ws, "find /volume/sub -type f")
     assert len(results) == 5
-    assert files.list_directory_calls == [f"{root}/sub"]
-    child_metadata = [c for c in files.get_metadata_calls if "/sub/" in c]
-    assert child_metadata == []
+    assert files.list_directory_calls.count(f"{root}/sub") == 1
+    assert _child_metadata(files) == []
 
 
 @pytest.mark.asyncio
-async def test_find_size_reads_size_from_index():
-    accessor, files, index, root = _rig()
+async def test_find_size_reads_size_from_the_listing():
+    ws, files, root = _rig()
     _seed_flat(files, root, count=5)
-    files.directory_metadata.add(f"{root}/sub")
-    results = await _run_find(accessor, index, type="f", size="+3c")
+    results = await _run(ws, "find /volume/sub -type f -size +3c")
     assert sorted(r.rsplit("/", 1)[-1] for r in results) == [
         "f3.txt",
         "f4.txt",
     ]
-    assert files.list_directory_calls == [f"{root}/sub"]
-    child_metadata = [c for c in files.get_metadata_calls if "/sub/" in c]
-    assert child_metadata == []
+    assert files.list_directory_calls.count(f"{root}/sub") == 1
+    assert _child_metadata(files) == []
 
 
 @pytest.mark.asyncio
-async def test_find_mtime_reads_modified_from_index(monkeypatch):
+async def test_find_mtime_reads_modified_from_the_listing(monkeypatch):
     monkeypatch.setattr(time, "time", lambda: float(FROZEN_NOW_S))
-    accessor, files, index, root = _rig()
+    ws, files, root = _rig()
     files.directories[f"{root}/sub"] = [
         file_entry(
             f"{root}/sub/f{i}.txt",
@@ -204,13 +152,11 @@ async def test_find_mtime_reads_modified_from_index(monkeypatch):
         )
         for i, age in enumerate(AGES_DAYS)
     ]
-    files.directory_metadata.add(f"{root}/sub")
-    results = await _run_find(accessor, index, mtime="-5")
-    assert sorted(r.rsplit("/", 1)[-1] for r in results) == [
+    results = await _run(ws, "find /volume/sub -mtime -5")
+    assert sorted(r.rsplit("/", 1)[-1] for r in results if "/f" in r) == [
         "f0.txt",
         "f1.txt",
         "f2.txt",
     ]
-    assert files.list_directory_calls == [f"{root}/sub"]
-    child_metadata = [c for c in files.get_metadata_calls if "/sub/" in c]
-    assert child_metadata == []
+    assert files.list_directory_calls.count(f"{root}/sub") == 1
+    assert _child_metadata(files) == []

@@ -13,17 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BinAccessor } from '../../accessor/bin.ts'
-import type { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
+import { stat } from './stat.ts'
 import { enoent, enotdir } from '../../errors/fs.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
-/** List one file per program, as sorted virtual paths. */
-export function readdir(accessor: BinAccessor, path: PathSpec): Promise<string[]> {
+/** List one file per program, each as its stat answers it. Mirrors Python's `readdir`. */
+export async function readdir(accessor: BinAccessor, path: PathSpec): Promise<FileStat[]> {
   const key = stripSlash(path.mountPath)
   if (key !== '') {
-    if (!key.includes('/') && accessor.note(key) !== null) return Promise.reject(enotdir(path))
-    return Promise.reject(enoent(path))
+    if (!key.includes('/') && accessor.note(key) !== null) throw enotdir(path)
+    throw enoent(path)
   }
   const base = rstripSlash(path.virtual)
-  return Promise.resolve(accessor.programs().map((name) => `${base}/${name}`))
+  const rows: FileStat[] = []
+  for (const name of accessor.programs()) {
+    rows.push(
+      await stat(
+        accessor,
+        new PathSpec({ virtual: `${base}/${name}`, directory: base || '/', vfsPath: name }),
+      ),
+    )
+  }
+  return rows
 }

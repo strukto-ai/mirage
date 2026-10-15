@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import {
   jsonResponse,
   makeAccessor,
@@ -23,28 +21,15 @@ import {
   TEST_ROOT,
   type FetchCall,
 } from '../../core/databricks_volume/_test_util.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { materialize } from '../../io/types.ts'
-import type { Command } from '../../commands/config.ts'
-import { PathSpec } from '../../types.ts'
-import { generic } from '../../commands/builtin/generic_bind/factory.ts'
-import { ioFor } from '../../test-utils.ts'
+import { MountMode } from '../../types.ts'
+import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DatabricksVolumeVFSBase } from './databricks_volume.ts'
 
 const MS = 1_700_000_000_000
 const FROZEN_NOW_S = 1_700_000_000
 const DAY_S = 86_400
 const AGES_DAYS = [1, 2, 3, 10, 20]
-const DEC = new TextDecoder()
-
-function cmdOf(name: string): Command {
-  return generic(name)
-}
-
-function pathOf(virtual: string): PathSpec {
-  return PathSpec.fromStrPath(virtual, mountKey(virtual, '/volume'))
-}
-
 function flatContents(count: number): { contents: unknown[] } {
   return {
     contents: Array.from({ length: count }, (_, i) => ({
@@ -103,51 +88,27 @@ function agedRoute(call: FetchCall): Response {
   return notFoundResponse()
 }
 
-async function findText(
-  paths: PathSpec[],
-  texts: string[],
-  index: IndexCacheStore,
-): Promise<string> {
-  const cmd = cmdOf('find')
-  const accessor = makeAccessor()
-  const result = await cmd.fn(accessor, paths, texts, {
-    stdin: null,
-    flags: {},
-    io: ioFor(DatabricksVolumeVFSBase, accessor),
-    cwd: '/',
-    index,
-  })
-  if (result === null) return ''
-  const [out] = result
-  if (out === null) return ''
-  const buf = out instanceof Uint8Array ? out : await materialize(out as AsyncIterable<Uint8Array>)
-  return DEC.decode(buf)
-}
-
-async function runCmd(
-  name: string,
-  paths: PathSpec[],
-  texts: string[],
-  flags: Record<string, string | boolean | number | string[]>,
-  index: IndexCacheStore,
-): Promise<void> {
-  const cmd = cmdOf(name)
-  const accessor = makeAccessor()
-  const result = await cmd.fn(accessor, paths, texts, {
-    stdin: null,
-    flags,
-    io: ioFor(DatabricksVolumeVFSBase, accessor),
-    cwd: '/',
-    index,
-  })
-  if (result !== null) await materialize(result[0])
+// Runs one line over a fresh mount, the way the agent's shell does.
+async function run(line: string): Promise<string[]> {
+  const ws = new Workspace(
+    { '/volume': new DatabricksVolumeVFSBase({ accessor: makeAccessor() }) },
+    { mode: MountMode.READ, shellParser: await getTestParser() },
+  )
+  try {
+    const result = await ws.shell(line)
+    expect([result.exitCode, result.stderrText], line).toEqual([0, ''])
+    return result.stdoutText.split('\n').filter((l) => l !== '')
+  } finally {
+    await ws.close()
+  }
 }
 
 const listDirCalls = (calls: FetchCall[]): FetchCall[] =>
   calls.filter((c) => c.method === 'GET' && c.url.includes('/fs/directories/'))
 
-const headFileCalls = (calls: FetchCall[]): FetchCall[] =>
-  calls.filter((c) => c.method === 'HEAD' && c.url.includes('/fs/files/'))
+// The operand's own stat may ask; a child's never does.
+const childStats = (calls: FetchCall[]): FetchCall[] =>
+  calls.filter((c) => c.method === 'HEAD' && c.url.includes('/sub/'))
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -155,57 +116,44 @@ afterEach(() => {
 })
 
 describe('databricks_volume listing API-call counts', () => {
-  it.each([
-    ['ls', {}],
-    ['ls -l', { args_l: true }],
-    ['ls -t', { t: true }],
-    ['ls -S', { S: true }],
-  ])('%s lists once and never stats entries', async (_label, flags) => {
+  it.each(['', '-l', '-t', '-S'])('ls %s lists once and never stats entries', async (flags) => {
     const { fetch, calls } = routedFetch(flatRoute(5))
     vi.stubGlobal('fetch', fetch)
-    await runCmd('ls', [pathOf('/volume/sub')], [], flags, new RAMIndexCacheStore())
+    await run(`ls ${flags} /volume/sub`)
     expect(listDirCalls(calls)).toHaveLength(1)
-    expect(headFileCalls(calls)).toHaveLength(0)
+    expect(childStats(calls)).toHaveLength(0)
   })
 
   it('tree lists one directory per level and never stats entries', async () => {
     const { fetch, calls } = routedFetch(nestedRoute)
     vi.stubGlobal('fetch', fetch)
-    await runCmd('tree', [pathOf('/volume/sub')], [], {}, new RAMIndexCacheStore())
+    await run('tree /volume/sub')
     expect(listDirCalls(calls)).toHaveLength(2)
-    expect(headFileCalls(calls)).toHaveLength(0)
+    expect(childStats(calls)).toHaveLength(0)
   })
 
-  it.each([
-    ['find -type f', ['-type', 'f']],
-    ['find -size +3c', ['-size', '+3c']],
-    ['find -mtime -100000', ['-mtime', '-100000']],
-  ])('%s lists once and never stats children', async (_label, texts) => {
-    const { fetch, calls } = routedFetch(flatRoute(5))
-    vi.stubGlobal('fetch', fetch)
-    await runCmd('find', [pathOf('/volume/sub')], texts, {}, new RAMIndexCacheStore())
-    expect(listDirCalls(calls)).toHaveLength(1)
-    const childStats = headFileCalls(calls).filter((c) => c.url.includes('/sub/f'))
-    expect(childStats).toHaveLength(0)
-  })
+  it.each(['-type f', '-size +3c', '-mtime -100000'])(
+    'find %s lists once and never stats children',
+    async (texts) => {
+      const { fetch, calls } = routedFetch(flatRoute(5))
+      vi.stubGlobal('fetch', fetch)
+      await run(`find /volume/sub ${texts}`)
+      expect(listDirCalls(calls)).toHaveLength(1)
+      expect(childStats(calls)).toHaveLength(0)
+    },
+  )
 
-  it('find -mtime filters on the modified time served from the index', async () => {
-    vi.useFakeTimers()
+  it('find -mtime filters on the modified time the listing names', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(FROZEN_NOW_S * 1000)
     const { fetch, calls } = routedFetch(agedRoute)
     vi.stubGlobal('fetch', fetch)
-    const stdout = await findText(
-      [pathOf('/volume/sub')],
-      ['-mtime', '-5'],
-      new RAMIndexCacheStore(),
-    )
-    const names = stdout
-      .split('\n')
+    const names = (await run('find /volume/sub -mtime -5'))
       .filter((line) => line.endsWith('.txt'))
       .map((line) => line.split('/').pop())
       .sort()
     expect(names).toEqual(['f0.txt', 'f1.txt', 'f2.txt'])
     expect(listDirCalls(calls)).toHaveLength(1)
-    expect(headFileCalls(calls).filter((c) => c.url.includes('/sub/f'))).toHaveLength(0)
+    expect(childStats(calls)).toHaveLength(0)
   })
 })

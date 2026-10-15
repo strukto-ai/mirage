@@ -27,7 +27,9 @@ import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
+import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { DocumentVFS } from '../../vfs/document/document.ts'
+import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
 import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
 import {
@@ -336,7 +338,16 @@ export class MountRegistry {
   ): IndexCacheStore {
     const alias = siblings.find((existing) => existing.vfs === vfs)
     if (alias !== undefined) return alias.indexStore
-    if (vfs instanceof DevVFS || vfs instanceof DocumentVFS) return new DevIndex()
+    // A view renders on every read, and bin lists each session's own
+    // programs, so none of them keeps a listing.
+    if (
+      vfs instanceof DevVFS ||
+      vfs instanceof DocumentVFS ||
+      vfs instanceof BinViewVFS ||
+      vfs instanceof HistoryViewVFS
+    ) {
+      return new DevIndex()
+    }
     return buildIndex(config ?? this.indexConfig, vfs.indexTtl)
   }
 
