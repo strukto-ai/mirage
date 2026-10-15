@@ -554,16 +554,6 @@ async def _listed_without_a(accessor, index) -> FakeDropboxRpc:
     return FakeDropboxRpc(entries=[FOLDER_ENTRY, FILE_ENTRY])
 
 
-class _CountingIndex(RAMIndexCacheStore):
-    def __init__(self) -> None:
-        super().__init__()
-        self.listings = 0
-
-    async def list_dir(self, vfs_path: str):
-        self.listings += 1
-        return await super().list_dir(vfs_path)
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "metadata, expected",
@@ -573,11 +563,8 @@ class _CountingIndex(RAMIndexCacheStore):
 async def test_a_name_past_an_earlier_listing_asks_once(
     dropbox_accessor, metadata, expected
 ):
-    # One get_metadata and one read of the cached listing (one MGET of the
-    # whole folder on a Redis index).
-    index = _CountingIndex()
+    index = RAMIndexCacheStore()
     rpc = await _listed_without_a(dropbox_accessor, index)
-    index.listings = 0
     rpc.metadata = metadata
     with patch(RPC, new=rpc):
         if isinstance(expected, tuple):
@@ -587,4 +574,3 @@ async def test_a_name_past_an_earlier_listing_asks_once(
             with pytest.raises(expected):
                 await stat(dropbox_accessor, A_TXT, index)
     assert (rpc.metadata_paths, rpc.list_requests) == (["/a.txt"], 0)
-    assert index.listings == 1

@@ -410,34 +410,3 @@ async def test_a_live_read_refuses_another_case(index, door):
                 await read(make_accessor(), n, index)
             else:
                 await read(make_accessor(), n)
-
-
-class _CountingIndex(RAMIndexCacheStore):
-    def __init__(self) -> None:
-        super().__init__()
-        self.listings = 0
-
-    async def list_dir(self, vfs_path: str):
-        self.listings += 1
-        return await super().list_dir(vfs_path)
-
-
-@pytest.mark.asyncio
-async def test_a_read_of_a_listed_file_lists_its_folder_once():
-    # The listing-miss check rides the lookup the read already makes, so a
-    # file the listing names costs no extra listing read (one MGET of the
-    # whole folder on a Redis index).
-    with serve(FakeDropbox(files={"/a.txt": DATA})) as fake:
-        accessor = served_accessor(fake.url)
-        index = _CountingIndex()
-        try:
-            await readdir(
-                accessor,
-                PathSpec(virtual="/", directory="/", vfs_path=""),
-                index,
-            )
-            index.listings = 0
-            assert await read(accessor, A, index) == DATA
-        finally:
-            await accessor.close()
-    assert index.listings == 1

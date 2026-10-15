@@ -378,6 +378,7 @@ function past(): Date {
 
 class AskedIndex extends RAMIndexCacheStore {
   readonly asked: string[] = []
+  listings = 0
 
   constructor(private readonly listed: boolean) {
     super()
@@ -387,12 +388,19 @@ class AskedIndex extends RAMIndexCacheStore {
     this.asked.push(folder)
     return this.listed
   }
+
+  override listDir(vfsPath: string): ReturnType<RAMIndexCacheStore['listDir']> {
+    this.listings += 1
+    return super.listDir(vfsPath)
+  }
 }
 
 describe('cache/index/warm: entryOrListedMiss', () => {
   // Only a complete, unexpired listing the running command did not fetch
   // answers UNTRUSTED; with no warm, every other state answers null, as
-  // entryOrWarm does. The trust question names the key's folder.
+  // entryOrWarm does. The trust question names the key's folder, and the
+  // answer rides the one listing read the lookup makes (one MGET of the whole
+  // folder on a Redis index).
   it.each([
     ['earlier-listing-lacks-it', false, 'absent', ListedMiss.UNTRUSTED],
     ['this-command-listed-it', true, 'absent', null],
@@ -408,5 +416,6 @@ describe('cache/index/warm: entryOrListedMiss', () => {
     if (state === 'partial') await index.setPartialDir('/owned', [['old.json', entryFor('old')]])
     expect(await entryOrListedMiss(index, KEY, null)).toBe(found)
     expect(index.asked.every((folder) => folder === '/owned')).toBe(true)
+    expect(index.listings).toBe(1)
   })
 })

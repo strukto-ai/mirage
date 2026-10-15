@@ -423,41 +423,40 @@ class _AskedIndex(RAMIndexCacheStore):
         super().__init__()
         self.listed = listed
         self.asked: list[str] = []
+        self.listings = 0
 
     def listed_this_command(self, folder: str) -> bool:
         self.asked.append(folder)
         return self.listed
 
-
-async def _absent_listing(index: RAMIndexCacheStore) -> None:
-    await index.set_dir("/owned", [("old.json", entry_for("old"))])
-
-
-async def _expired_listing(index: RAMIndexCacheStore) -> None:
-    await index.set_dir(
-        "/owned",
-        [("old.json", entry_for("old"))],
-        expired_at=datetime.now(timezone.utc) - timedelta(seconds=1),
-    )
+    async def list_dir(self, vfs_path: str):
+        self.listings += 1
+        return await super().list_dir(vfs_path)
 
 
-async def _partial_listing(index: RAMIndexCacheStore) -> None:
-    await index.set_partial_dir("/owned", [("old.json", entry_for("old"))])
-
-
-async def _no_listing(index: RAMIndexCacheStore) -> None:
-    return None
+async def _seed(index: RAMIndexCacheStore, state: str) -> None:
+    rows = [("old.json", entry_for("old"))]
+    if state == "complete":
+        await index.set_dir("/owned", rows)
+    elif state == "expired":
+        await index.set_dir(
+            "/owned",
+            rows,
+            expired_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+    elif state == "partial":
+        await index.set_partial_dir("/owned", rows)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "listed, setup, found",
+    "listed, state, found",
     [
-        (False, _absent_listing, ListedMiss.UNTRUSTED),
-        (True, _absent_listing, None),
-        (False, _expired_listing, None),
-        (False, _partial_listing, None),
-        (False, _no_listing, None),
+        (False, "complete", ListedMiss.UNTRUSTED),
+        (True, "complete", None),
+        (False, "expired", None),
+        (False, "partial", None),
+        (False, "none", None),
     ],
     ids=[
         "earlier-listing-lacks-it",
@@ -468,12 +467,15 @@ async def _no_listing(index: RAMIndexCacheStore) -> None:
     ],
 )
 async def test_entry_or_listed_miss_flags_only_an_untrusted_complete_miss(
-    listed, setup, found
+    listed, state, found
 ):
     # Only a complete, unexpired listing the running command did not fetch
     # answers UNTRUSTED; with no warm, every other state answers None, as
-    # entry_or_warm does. The trust question names the key's folder.
+    # entry_or_warm does. The trust question names the key's folder, and
+    # the answer rides the one listing read the lookup makes (one MGET of
+    # the whole folder on a Redis index).
     index = _AskedIndex(listed)
-    await setup(index)
+    await _seed(index, state)
     assert await entry_or_listed_miss(index, KEY, None) is found
     assert set(index.asked) <= {"/owned"}
+    assert index.listings == 1

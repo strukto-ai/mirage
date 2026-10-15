@@ -60,15 +60,6 @@ const FOLDER_ENTRY: DropboxEntry = {
   path_display: '/docs',
 }
 
-class CountingIndex extends RAMIndexCacheStore {
-  listings = 0
-
-  override listDir(vfsPath: string): ReturnType<RAMIndexCacheStore['listDir']> {
-    this.listings += 1
-    return super.listDir(vfsPath)
-  }
-}
-
 async function listedWithoutA(index: RAMIndexCacheStore): Promise<FakeDropboxRpc> {
   vi.mocked(client.dropboxRpc).mockImplementation(
     new FakeDropboxRpc({ entries: [FOLDER_ENTRY] }).handle,
@@ -467,11 +458,8 @@ describe('dropbox stat', () => {
   ] as const)(
     'asks once for a name past an earlier listing (%s)',
     async (_id, metadata, expected) => {
-      // One get_metadata and one read of the cached listing (one MGET of the
-      // whole folder on a Redis index).
-      const index = new CountingIndex()
+      const index = new RAMIndexCacheStore()
       const fake = await listedWithoutA(index)
-      index.listings = 0
       fake.metadata = metadata
       if (typeof expected === 'string') {
         await expect(stat(makeAccessor(), A_TXT, index)).rejects.toMatchObject({ code: expected })
@@ -480,7 +468,6 @@ describe('dropbox stat', () => {
         expect([out.type, out.fingerprint]).toEqual(expected)
       }
       expect([fake.metadataPaths, fake.listRequests]).toEqual([['/a.txt'], 0])
-      expect(index.listings).toBe(1)
     },
   )
 })

@@ -30,7 +30,6 @@ vi.mock('./api.ts', async () => {
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { captureRead, runWithWriteContext } from '../../cache/context.ts'
 import type { WriteContext } from '../../cache/types.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
@@ -293,35 +292,5 @@ describe('dropbox read past an earlier listing', () => {
     await expect(read(makeAccessor(), n, await listed())).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(drain(makeAccessor(), await listed())).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(read(makeAccessor(), n)).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-})
-
-describe('dropbox read of a listed file', () => {
-  // The listing-miss check rides the lookup the read already makes, so a
-  // file the listing names costs no extra listing read (one MGET of the
-  // whole folder on a Redis index).
-  it('lists its folder once', async () => {
-    class Counting extends RAMIndexCacheStore {
-      listings = 0
-      override listDir(vfsPath: string): ReturnType<RAMIndexCacheStore['listDir']> {
-        this.listings += 1
-        return super.listDir(vfsPath)
-      }
-    }
-    const index = new Counting()
-    await index.setDir('/', [
-      ['note.txt', new IndexEntry({ id: 'id:1', name: 'note.txt', resourceType: 'dropbox/file' })],
-    ])
-    vi.mocked(client.dropboxDownload).mockResolvedValue([
-      new Uint8Array([1]),
-      JSON.stringify({ name: 'note.txt', content_hash: 'h' }),
-    ])
-    index.listings = 0
-    await read(
-      makeAccessor(),
-      new PathSpec({ virtual: '/note.txt', directory: '/', vfsPath: 'note.txt' }),
-      index,
-    )
-    expect(index.listings).toBe(1)
   })
 })

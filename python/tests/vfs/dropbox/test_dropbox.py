@@ -81,14 +81,14 @@ def _workspace(dbx: FakeDropbox) -> Workspace:
 @pytest.mark.parametrize(
     "line, after",
     [
-        ("cat /dbx/f >> /dbx/n", b"v1\none\n"),
         ("touch /dbx/n", b"v1\n"),
-        ("sed -i s/v1/v2/ /dbx/n", b"v2\n"),
         ("{ echo x; } >> /dbx/n", b"v1\nx\n"),
     ],
-    ids=["append", "touch", "sed-i", "group-append"],
+    ids=["touch", "group-append"],
 )
 async def test_a_file_created_after_the_listing_is_found(line, after):
+    # >>, sed -i and truncate on a simple command are integ's
+    # write_conditional_own_read_ops_need_no_prior_read.
     with serve(FakeDropbox(files={"f": b"one\n"})) as dbx:
         ws = _workspace(dbx)
         try:

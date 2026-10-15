@@ -47,10 +47,10 @@ afterEach(async () => {
 })
 
 describe('dropbox listing miss', () => {
+  // >>, sed -i and truncate on a simple command are integ's
+  // write_conditional_own_read_ops_need_no_prior_read.
   it.each([
-    ['append', 'cat /dbx/f >> /dbx/n', 'v1\none\n'],
     ['touch', 'touch /dbx/n', 'v1\n'],
-    ['sed-i', 'sed -i s/v1/v2/ /dbx/n', 'v2\n'],
     ['group-append', '{ echo x; } >> /dbx/n', 'v1\nx\n'],
   ])('finds a file created after the listing (%s)', async (_id, line, after) => {
     await ws.shell('ls /dbx')
