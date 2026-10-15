@@ -1,19 +1,3 @@
-// Total a CSV with Claude Managed Agents, working in a Mirage workspace.
-//
-// A self-hosted environment's worker answers the agent's bash, read,
-// write, edit, glob and grep calls in a RAM and Redis workspace. The
-// agent totals /workspace/orders.csv per customer and saves the table
-// to /redis/report.md, which stays in Redis after the run.
-//
-// Usage:
-//   docker run -d -p 6379:6379 redis
-//   pnpm --filter @struktoai/mirage-examples exec \
-//     tsx agents/claude-managed-agents/redis_report.ts
-//
-// .env.development holds ANTHROPIC_API_KEY, ANTHROPIC_ENVIRONMENT_ID (a
-// self-hosted environment) and ANTHROPIC_ENVIRONMENT_KEY (its key from
-// the Claude Console).
-
 import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'

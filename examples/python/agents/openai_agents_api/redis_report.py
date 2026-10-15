@@ -1,23 +1,3 @@
-"""Total a CSV with OpenAI's Agents API, working in a Mirage workspace.
-
-The agent runs on OpenAI's servers in a self-hosted environment: its
-shell commands, file reads and patches reach workspace `demo` through
-`codex exec-server forward` and `mirage codex-exec`, both started
-here. The agent totals /workspace/orders.csv per customer and saves
-the table to /redis/report.md, which stays in Redis after the run.
-
-Usage:
-    docker run -d -p 6379:6379 redis
-    uv tool install 'mirage-ai[ssh,redis]'
-    npm install -g @openai/codex@alpha
-    mirage workspace create workspace.yaml --id demo
-    python examples/python/agents/openai_agents_api/redis_report.py
-
-workspace.yaml mounts RAM at /workspace and Redis at /redis, as the
-OpenAI Agents API page shows. .env.development holds OPENAI_API_KEY
-and OPENAI_EXECUTOR_API_KEY (an environment key from the Agents tab).
-"""
-
 import os
 import subprocess
 import uuid
