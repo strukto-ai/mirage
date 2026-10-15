@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
-import { isFolderKind } from '../../cache/index/config.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
@@ -219,7 +218,7 @@ async function fitsReadAhead(
   batched: boolean,
 ): Promise<boolean> {
   const entry = (await mount.index.get(path.virtual)).entry ?? null
-  if (entry !== null && isFolderKind(entry.resourceType)) return false
+  if (entry !== null && entry.type === FileType.DIRECTORY) return false
   const size = entry?.size ?? null
   return size === null ? batched : size <= READ_AHEAD_BYTES
 }

@@ -14,7 +14,6 @@
 
 import { makeAppRename } from '../google/rename.ts'
 import { FILE_NAME } from './constants.ts'
-import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
-export const rename = makeAppRename(detectScope, readdir, FILE_NAME.suffix)
+export const rename = makeAppRename(detectScope, FILE_NAME.suffix)

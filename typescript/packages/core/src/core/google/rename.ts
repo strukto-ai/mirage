@@ -13,14 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
-import { invalidateAfterMove } from '../../cache/context.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { eisdir, enoent, fsError } from '../../errors/fs.ts'
-import type { PathSpec } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { stripSlash } from '../../utils/slash.ts'
-import { resolveEntry, type ReaddirFn } from '../hierarchy/probe.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
 import { INVALID, type DetectFn } from '../hierarchy/scope.ts'
 import { getFile, patchFile } from './drive.ts'
 import { DATE_LEN, appFilename } from './scope.ts'
@@ -48,41 +42,38 @@ export function appTitle(
  * modified time goes back unchanged, as rename(2) leaves it, and any other
  * name is EPERM. Mirrors Python's `make_app_rename`.
  */
-export function makeAppRename<A extends GoogleApiAccessor>(
+export function makeAppRename(
   detect: DetectFn,
-  readdir: ReaddirFn<A>,
   suffix: string,
-): (accessor: A, src: PathSpec, dst: PathSpec, index?: IndexCacheStore) => Promise<void> {
+): (
+  accessor: GoogleApiAccessor,
+  src: PathSpec,
+  dst: PathSpec,
+  entry?: FileStat | null,
+) => Promise<void> {
   return async function rename(
-    accessor: A,
+    accessor: GoogleApiAccessor,
     src: PathSpec,
     dst: PathSpec,
-    index?: IndexCacheStore,
+    entry: FileStat | null = null,
   ): Promise<void> {
-    const store = index ?? new RAMIndexCacheStore()
     const match = detect(src)
     if (match.kind !== 'file') {
       if (match.kind !== INVALID && !match.scope?.leaf) throw eisdir(src.virtual)
       throw enoent(src.virtual)
     }
-    const entry = await resolveEntry(readdir, accessor, src, store)
     if (entry === null) throw enoent(src.virtual)
+    const docId = String(entry.extra.doc_id)
     const tm = accessor.tokenManager
-    const modified = (await getFile(tm, entry.id)).modifiedTime ?? ''
+    const modified = (await getFile(tm, docId)).modifiedTime ?? ''
     const cut = dst.virtual.lastIndexOf('/')
-    const title = appTitle(dst.virtual.slice(cut + 1), entry.id, modified, suffix)
+    const title = appTitle(dst.virtual.slice(cut + 1), docId, modified, suffix)
     if (
       title === null ||
       dst.virtual.slice(0, cut) !== src.virtual.slice(0, src.virtual.lastIndexOf('/'))
     ) {
       throw fsError(dst, 'EPERM')
     }
-    await patchFile(tm, entry.id, { body: { name: title, modifiedTime: modified } })
-    const prefix = mountPrefixOf(src.virtual, src.vfsPath)
-    const key = stripSlash(src.vfsPath)
-    const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
-    await store.invalidateDir(virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/')
-    await invalidateAfterMove(dst, false)
-    await invalidateAfterMove(src, false)
+    await patchFile(tm, docId, { body: { name: title, modifiedTime: modified } })
   }
 }

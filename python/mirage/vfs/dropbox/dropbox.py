@@ -25,6 +25,7 @@ from mirage.core.dropbox.create import create as _create
 from mirage.core.dropbox.exists import exists as _exists
 from mirage.core.dropbox.mkdir import mkdir as _mkdir
 from mirage.core.dropbox.read import read as _read
+from mirage.core.dropbox.read import read_by_path as _read_by_path
 from mirage.core.dropbox.read import read_stream as _stream
 from mirage.core.dropbox.readdir import readdir as _readdir
 from mirage.core.dropbox.rename import rename as _rename
@@ -107,7 +108,11 @@ class DropboxVFS(BaseVFS):
         entry: FileStat | None = None,
     ) -> None:
         await truncate_by_rewrite(
-            functools.partial(self.read, entry=entry),
+            (
+                functools.partial(_read_by_path, self.accessor)
+                if entry is None
+                else functools.partial(self.read, entry=entry)
+            ),
             self.write,
             path,
             length,

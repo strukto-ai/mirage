@@ -52,6 +52,7 @@ export class EmailVFS extends BaseVFS {
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],
+    readMany: ['entry'],
     stat: ['entry'],
   } as const
   readonly config: EmailConfig
@@ -85,9 +86,9 @@ export class EmailVFS extends BaseVFS {
   override readMany(
     paths: PathSpec[],
     limit: number,
-    index?: IndexCacheStore,
+    handed?: readonly Handed[],
   ): Promise<Map<string, Uint8Array>> {
-    return emailReadMany(this.accessor, paths, limit, index)
+    return emailReadMany(this.accessor, paths, limit, handed)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

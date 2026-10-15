@@ -3,6 +3,7 @@ import { FileStat, FileType, type PathSpec } from '../types.ts'
 import type { Guard } from './hierarchy/readdir.ts'
 import type { ScopeMatch } from './hierarchy/scope.ts'
 import type { StatHook } from './hierarchy/stat.ts'
+import type { Handed } from '../vfs/types.ts'
 import { enoent } from '../errors/fs.ts'
 import { abortable, sleep } from '../utils/abort.ts'
 import { jsonlBytes } from './render/json.ts'
@@ -214,12 +215,10 @@ export type RunPages<M> = (channelId: string, first: string, last: string) => As
  * day's lines are the run's messages posted within it, oldest first, as its own
  * read lists them. Mirrors Python's `read_days`.
  */
-export async function readDays<A extends Accessor, M>(
-  readdir: ReaddirFn<A>,
-  accessor: A,
+export async function readDays<M>(
   scope: TimeRange,
   paths: readonly PathSpec[],
-  index: IndexCacheStore | undefined,
+  handed: readonly Handed[],
   detect: (path: PathSpec) => ScopeMatch,
   pages: RunPages<M>,
   order: (message: M) => number | bigint,
@@ -227,14 +226,14 @@ export async function readDays<A extends Accessor, M>(
   limit: number,
 ): Promise<Map<string, Uint8Array>> {
   const days = new Map<string, Map<string, string>>()
-  for (const path of paths) {
+  for (const [i, path] of paths.entries()) {
     const match = detect(path)
     if (match.kind !== 'messages') continue
     const day = match.slots.day ?? ''
     let channelId: string
     try {
       scope.requireDay(day, path.virtual)
-      channelId = await dayChannelId(readdir, accessor, path, index)
+      channelId = dayChannelId(path, handed[i]?.entry ?? null, handed[i]?.parent ?? null)
     } catch (err) {
       if ((err as { code?: string }).code !== 'ENOENT') throw err
       console.debug(`readDays leaves out ${path.virtual}: ${String(err)}`)

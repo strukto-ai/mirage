@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runInCommandScope } from '../../cache/index/scope.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as DriveModule from './drive.ts'
 vi.mock('./drive.ts', async () => {
@@ -98,14 +99,17 @@ describe('only a complete listing proves absence', () => {
       { accessor: new GDocsAccessor({ tokenManager: TM }) },
     )
     const ws = new Workspace({ '/docs/': vfs })
-    await ws.dispatch('readdir', '/docs/owned')
-    const stat = ws.dispatch('stat', PATH.virtual) as Promise<FileStat>
-    if (complete) {
-      await expect(stat).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(getFile).not.toHaveBeenCalled()
-    } else {
-      expect((await stat).extra.doc_id).toBe(ITEM.id)
-      expect(getFile).toHaveBeenCalledExactlyOnceWith(TM, 'doc1')
-    }
+    // One command lists and stats, so its own complete listing is proof.
+    await runInCommandScope(async () => {
+      await ws.dispatch('readdir', '/docs/owned')
+      const stat = ws.dispatch('stat', PATH.virtual) as Promise<FileStat>
+      if (complete) {
+        await expect(stat).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(getFile).not.toHaveBeenCalled()
+      } else {
+        expect((await stat).extra.doc_id).toBe(ITEM.id)
+        expect(getFile).toHaveBeenCalledExactlyOnceWith(TM, 'doc1')
+      }
+    })
   })
 })

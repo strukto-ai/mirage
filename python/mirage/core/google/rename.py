@@ -16,17 +16,12 @@ from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from mirage.accessor.google_api import GoogleApiAccessor
-from mirage.cache.context import invalidate_after_move
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.google.drive import get_file, patch_file
 from mirage.core.google.scope import DATE_LEN, app_filename
-from mirage.core.hierarchy.probe import ReaddirFn, resolve_entry
 from mirage.core.hierarchy.scope import INVALID, DetectFn
 from mirage.errors.fs import eisdir, enoent, fs_error
 from mirage.errors.types import FsCondition
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.types import FileStat, PathSpec
 
 G = TypeVar("G", bound=GoogleApiAccessor)
 
@@ -55,7 +50,6 @@ def app_title(
 
 def make_app_rename(
     detect: DetectFn,
-    readdir: ReaddirFn[G],
     suffix: str,
 ) -> Callable[..., Awaitable[None]]:
     """The rename of a Google app mount: a new title for a file.
@@ -66,7 +60,6 @@ def make_app_rename(
 
     Args:
         detect (DetectFn): the app's path classifier.
-        readdir (ReaddirFn): the app's readdir, for entry resolution.
         suffix (str): the app's file suffix.
     """
 
@@ -74,10 +67,8 @@ def make_app_rename(
         accessor: G,
         src: PathSpec,
         dst: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
     ) -> None:
-        if index is NULL_INDEX:
-            index = RAMIndexCacheStore()
         match = detect(src)
         if match.kind != "file":
             if match.kind != INVALID and (
@@ -85,23 +76,15 @@ def make_app_rename(
             ):
                 raise eisdir(src.virtual)
             raise enoent(src)
-        entry = await resolve_entry(readdir, accessor, src, index)
         if entry is None:
             raise enoent(src)
+        doc_id = str(entry.extra["doc_id"])
         tm = accessor.token_manager
-        modified = str((await get_file(tm, entry.id)).get("modifiedTime", ""))
+        modified = str((await get_file(tm, doc_id)).get("modifiedTime", ""))
         folder, _, name = dst.virtual.rpartition("/")
-        title = app_title(name, entry.id, modified, suffix)
+        title = app_title(name, doc_id, modified, suffix)
         if title is None or folder != src.virtual.rpartition("/")[0]:
             raise fs_error(dst, FsCondition.EPERM)
-        await patch_file(
-            tm, entry.id, {"name": title, "modifiedTime": modified}
-        )
-        prefix = mount_prefix_of(src.virtual, src.vfs_path)
-        key = src.vfs_path.strip("/")
-        virtual_key = prefix + "/" + key if key else prefix or "/"
-        await index.invalidate_dir(virtual_key.rsplit("/", 1)[0] or "/")
-        await invalidate_after_move(dst, False)
-        await invalidate_after_move(src, False)
+        await patch_file(tm, doc_id, {"name": title, "modifiedTime": modified})
 
     return rename

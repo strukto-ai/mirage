@@ -28,7 +28,7 @@ from mirage.core.discord.read import (
 )
 from mirage.core.discord.readdir import readdir
 from mirage.core.render.json import jsonl_bytes
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.discord import DiscordVFS
 from tests.core.discord.conftest import DAY, MESSAGES, SEALED_DAY
 from tests.fixtures.handed import call, entry_at, parent_of
@@ -185,7 +185,7 @@ async def _walk(*pages):
         yield page
 
 
-async def test_a_batch_walks_a_run_of_days_once(api, accessor, index):
+async def test_a_batch_walks_a_run_of_days_once(api, accessor):
     nxt = "2024-01-16"
     on_day, later = (
         {
@@ -202,8 +202,11 @@ async def test_a_batch_walks_a_run_of_days_once(api, accessor, index):
         new_callable=MagicMock,
         return_value=_walk([later], [on_day]),
     ) as walk:
+        chat = FileStat(
+            name="chat.jsonl", type=FileType.FILE, extra={"channel_id": "C001"}
+        )
         answers = await read_many(
-            accessor, [spec(c) for c in chats], 1 << 20, index
+            accessor, [spec(c) for c in chats], 1 << 20, [chat] * 2, [None] * 2
         )
     assert answers == {
         chats[0]: jsonl_bytes([on_day]),

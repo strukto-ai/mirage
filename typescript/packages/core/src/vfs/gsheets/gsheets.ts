@@ -61,6 +61,7 @@ export class GSheetsVFS extends BaseVFS {
 
   override readonly handed = {
     unlink: ['entry'],
+    rename: ['entry'],
   } as const
 
   override readonly renderers: Readonly<Record<string, string>> = { '.gsheet.json': 'readSheet' }
@@ -97,8 +98,8 @@ export class GSheetsVFS extends BaseVFS {
     return gsheetsUnlink(this.accessor, path, handed?.entry)
   }
 
-  override rename(src: PathSpec, dst: PathSpec, index?: IndexCacheStore): Promise<void> {
-    return gsheetsRename(this.accessor, src, dst, index)
+  override rename(src: PathSpec, dst: PathSpec, handed?: Handed): Promise<void> {
+    return gsheetsRename(this.accessor, src, dst, handed?.entry ?? null)
   }
 
   override deltaHook(): DeltaHook {

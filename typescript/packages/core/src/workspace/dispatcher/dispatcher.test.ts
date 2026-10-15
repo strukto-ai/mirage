@@ -2424,10 +2424,7 @@ describe('a hide filters a one-call read', () => {
             ['a', 2],
             ['big', READ_AHEAD_BYTES + 1],
           ] as const
-        ).map(([name, size]) => [
-          name,
-          new IndexEntry({ id: name, name, resourceType: 'file', size }),
-        ]),
+        ).map(([name, size]) => [name, new FileStat({ name, type: FileType.FILE, size })]),
       )
       await ws.dispatch('read_many', '/r/a', [], {
         paths: [PathSpec.fromStrPath('/r/big'), PathSpec.fromStrPath('/r/b')],

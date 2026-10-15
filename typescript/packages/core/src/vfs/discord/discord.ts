@@ -37,6 +37,7 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
     read: ['entry', 'parent'],
     readStream: ['entry', 'parent'],
     follow: ['entry', 'parent'],
+    readMany: ['entry', 'parent'],
     stat: ['entry', 'parent'],
   } as const
 
@@ -65,9 +66,9 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
   override readMany(
     paths: PathSpec[],
     limit: number,
-    index?: IndexCacheStore,
+    handed?: readonly Handed[],
   ): Promise<Map<string, Uint8Array>> {
-    return discordReadMany(this.accessor, paths, limit, index)
+    return discordReadMany(this.accessor, paths, limit, handed)
   }
 
   override readStream(

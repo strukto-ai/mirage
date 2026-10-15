@@ -120,6 +120,7 @@ from mirage.workspace.mount.listing import (
     stored_listing,
     stored_stat,
     stored_tree,
+    unproven_miss,
 )
 from mirage.workspace.mount.read_policy import coerce_read_policy
 from mirage.workspace.mount.write_policy import (
@@ -1474,6 +1475,44 @@ class MountEntry:
         stats."""
         return self.vfs.supports("readdir")
 
+    async def _stored_row(
+        self, index: IndexCacheStore, key: str
+    ) -> FileStat | None:
+        """The row the stored listings answer a stat of ``key`` with, None
+        for one the backend must answer, a miss they do not prove
+        (``_unproven``) included.
+
+        Args:
+            index (IndexCacheStore): the mount's index.
+            key (str): the path's key, below the mount root.
+        """
+        try:
+            return self._whole(await stored_stat(index, key))
+        except FileNotFoundError:
+            if await self._unproven(index, key):
+                return None
+            raise
+
+    @property
+    def _asks_by_path(self) -> bool:
+        """Whether the VFS's stat asks by path, handed no stored row."""
+        return self._lists and not _wants(self.vfs.stat)
+
+    async def _unproven(self, index: IndexCacheStore, key: str) -> bool:
+        """Whether the stored listings leave ``key`` out without proving
+        it absent (``unproven_miss``), on a VFS that checks such a name
+        again: one whose stat asks by path (one stat) or one that writes
+        (its folder is listed again), where a stale miss would let a
+        write land over a file another client made.
+
+        Args:
+            index (IndexCacheStore): the mount's index.
+            key (str): the path's key, below the mount root.
+        """
+        return (
+            self._asks_by_path or self.vfs.supports("write")
+        ) and await unproven_miss(index, key)
+
     def _backend_fn(self, fn: Callable[..., Any]) -> Callable[..., Any]:
         """The VFS function a mount wrapper calls, whose parameters say
         which stats it is handed.
@@ -1509,20 +1548,26 @@ class MountEntry:
             probed = manager.probed_stat(scope)
             if probed is not None:
                 return probed
-        row = await entry_at(
-            index,
-            key,
-            functools.partial(self._listed, self._folder(scope), index),
-        )
-        if row is None and await beyond_window(index, key):
+        warm = functools.partial(self._listed, self._folder(scope), index)
+        row = await entry_at(index, key, warm)
+        if row is not None:
+            return row
+        if await beyond_window(index, key):
             return await self._beyond(scope, index)
-        return row
+        if not await self._unproven(index, key):
+            return None
+        if self._asks_by_path:
+            return await self._beyond(scope, index)
+        await index.invalidate_dir(folder_of(key))
+        return await entry_at(index, key, warm)
 
     async def _beyond(
         self, scope: PathSpec, index: IndexCacheStore
     ) -> FileStat | None:
-        """What is at a path its folder's window leaves out: the backend's
-        stat of it, handed what is at its parent; None when nothing is.
+        """What is at a path its folder's stored listing leaves out
+        without proving it absent (a window, or a listing another
+        command fetched): the backend's stat of it, handed what is at
+        its parent; None when nothing is.
 
         Args:
             scope (PathSpec): a path keyed below the mount.
@@ -1535,7 +1580,7 @@ class MountEntry:
         try:
             return await stat(scope, **_handed_on(stat, index, **handed))
         except FileNotFoundError as exc:
-            logger.debug("nothing beyond the window at %s: %s", scope, exc)
+            logger.debug("nothing unlisted at %s: %s", scope, exc)
             return None
 
     async def _listed(
@@ -1576,7 +1621,7 @@ class MountEntry:
         stored = (
             None
             if key == self._root_key
-            else self._whole(await stored_stat(index, key))
+            else await self._stored_row(index, key)
         )
         if stored is not None:
             return stored
@@ -1642,7 +1687,7 @@ class MountEntry:
             return None if self._names_only else await stored_tree(index, key)
         if key == self._root_key:
             return None
-        row = self._whole(await stored_stat(index, key))
+        row = await self._stored_row(index, key)
         if row is None or not self._names_only:
             return row
         manager = self.cache_manager
@@ -2068,7 +2113,7 @@ class MountEntry:
                 with host_io():
                     return await run_with_timeout(
                         self.vfs.search_many(
-                            [self._scope(p) for p in paths], query, self.index
+                            [self._scope(p) for p in paths], query
                         ),
                         self._op_timeout("search"),
                         "search",
@@ -2100,14 +2145,37 @@ class MountEntry:
             try:
                 with host_io():
                     return await run_with_timeout(
-                        self.vfs.read_many(
-                            [self._scope(p) for p in paths], limit, self.index
+                        self._read_many(
+                            [self._scope(p) for p in paths], limit
                         ),
                         self._op_timeout("read"),
                         "read",
                     )
             finally:
                 reset_caller(token)
+
+    async def _read_many(
+        self, scopes: list[PathSpec], limit: int
+    ) -> dict[str, bytes]:
+        """The VFS's batch read, handed what is at each path and at its
+        folder as the stored listings name them, where it takes them.
+
+        Args:
+            scopes (list[PathSpec]): the files, keyed below the mount.
+            limit (int): the most bytes worth fetching for one file.
+        """
+        fn = self.vfs.read_many
+        names = _parameters(getattr(fn, "__func__", fn))
+        kwargs: dict[str, list[FileStat | None]] = {}
+        if names is None or "entries" in names:
+            kwargs["entries"] = [
+                await self._entry(s, self.index) for s in scopes
+            ]
+        if names is None or "parents" in names:
+            kwargs["parents"] = [
+                await self._entry(self._folder(s), self.index) for s in scopes
+            ]
+        return await fn(scopes, limit, **kwargs)
 
     def live_pipe(self, path: str) -> DevicePipe | None:
         """The live pipe a read of ``path`` takes bytes from, which another

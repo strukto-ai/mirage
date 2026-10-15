@@ -296,7 +296,7 @@ async def _row_count(
 async def read_stream(
     accessor: PostgresAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    parent: FileStat | None = None,
 ) -> AsyncIterator[bytes]:
     """Stream a keyed table's rows.jsonl a page of rows at a time, in key
     order, the next page fetched only when the caller pulls it; any other
@@ -316,7 +316,8 @@ async def read_stream(
     Args:
         accessor (PostgresAccessor): backend handle.
         path (PathSpec): the file.
-        index (IndexCacheStore): unused; the rows are queried by name.
+        parent (FileStat | None): its folder's row, which a whole read
+            proves the file's folder by.
     """
     match = detect_scope(path)
     pk: list[str] = []
@@ -328,7 +329,7 @@ async def read_stream(
             pk = await client.fetch_row_key(conn, schema, entity)
             columns = await _column_names(conn, schema, entity)
     if not pk:
-        yield await read(accessor, path, index)
+        yield await read(accessor, path, None, parent)
         return
     cfg = accessor.config
     rows_out = bytes_out = 0
@@ -390,7 +391,6 @@ async def _follow_rows(
     path: PathSpec,
     n: int,
     interval: float,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes] | None:
     """A keyed table's last ``n`` rows, then each row whose key sorts
     past them, asked for every ``interval`` seconds. None for a relation
@@ -407,7 +407,6 @@ async def _follow_rows(
         path (PathSpec): the file.
         n (int): how many of its last rows come first, 0 for none.
         interval (float): seconds between two asks.
-        index (IndexCacheStore): unused; the rows are queried by name.
     """
     schema, entity = match.slots["schema"], match.slots["entity"]
     cap = accessor.config.max_read_rows

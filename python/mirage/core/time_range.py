@@ -245,11 +245,10 @@ async def followed_day(
 
 
 async def read_days(
-    readdir: ReaddirFn[A],
-    accessor: A,
     scope: TimeRange,
     paths: list[PathSpec],
-    index: IndexCacheStore,
+    entries: list[FileStat | None],
+    parents: list[FileStat | None],
     detect: DetectFn,
     pages: RunPages,
     order: Callable[[dict[str, Any]], float],
@@ -266,11 +265,11 @@ async def read_days(
     oldest first, as its own read lists them.
 
     Args:
-        readdir (ReaddirFn): the backend's readdir.
-        accessor (Accessor): backend accessor.
         scope (TimeRange): the mount's time scope, bounding each day.
         paths (list[PathSpec]): the files.
-        index (IndexCacheStore): index cache.
+        entries (list[FileStat | None]): what is at each path, as its
+            day's listing names it.
+        parents (list[FileStat | None]): each path's day.
         detect (DetectFn): the backend's scope classifier.
         pages (RunPages): a channel's messages from a run's first day
             through its last, a page at a time, as
@@ -281,13 +280,13 @@ async def read_days(
         limit (int): the most bytes worth reading for one day.
     """
     days: dict[str, dict[str, str]] = {}
-    for path in paths:
+    for path, entry, parent in zip(paths, entries, parents, strict=True):
         match = detect(path)
         if match.kind != "messages":
             continue
         try:
             scope.require_day(match.slots["day"], path.virtual)
-            channel_id = await day_channel_id(readdir, accessor, path, index)
+            channel_id = day_channel_id(path, entry, parent)
         except FileNotFoundError as exc:
             logger.debug("read_days leaves out %s: %s", path.virtual, exc)
             continue

@@ -40,6 +40,7 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
     read: ['entry', 'parent'],
     readStream: ['entry', 'parent'],
     follow: ['entry', 'parent'],
+    readMany: ['entry', 'parent'],
     stat: ['entry', 'parent'],
   } as const
   // Slack search names channel and DM days; users and file blobs are read as
@@ -74,9 +75,9 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   override readMany(
     paths: PathSpec[],
     limit: number,
-    index?: IndexCacheStore,
+    handed?: readonly Handed[],
   ): Promise<Map<string, Uint8Array>> {
-    return slackReadMany(this.accessor, paths, limit, index)
+    return slackReadMany(this.accessor, paths, limit, handed)
   }
 
   override readStream(

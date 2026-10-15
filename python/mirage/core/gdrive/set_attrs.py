@@ -15,10 +15,10 @@
 from datetime import datetime
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.resolve import eacces_on_denied, resolve_key
+from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.google.drive import patch_file
 from mirage.errors.fs import enoent
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import to_iso_z
 
 
@@ -26,6 +26,7 @@ from mirage.utils.dates import to_iso_z
 async def set_attrs(
     accessor: GDriveAccessor,
     path: PathSpec,
+    entry: FileStat | None = None,
     *,
     mode: int | None = None,
     uid: int | str | None = None,
@@ -41,6 +42,7 @@ async def set_attrs(
     Args:
         accessor (GDriveAccessor): backend accessor.
         path (PathSpec): the file or folder.
+        entry (FileStat | None): what is at the path.
         mode (int | None): permission bits.
         uid (int | str | None): owner.
         gid (int | str | None): group.
@@ -58,12 +60,11 @@ async def set_attrs(
     if not path.vfs_path.strip("/"):
         residual["mtime"] = mtime
         return residual
-    node = await resolve_key(accessor, path.vfs_path)
-    if node is None:
+    if entry is None:
         raise enoent(path)
     await patch_file(
         accessor.token_manager,
-        node.id,
+        entry.extra["file_id"],
         {"modifiedTime": to_iso_z(datetime.fromisoformat(mtime))},
     )
     return residual

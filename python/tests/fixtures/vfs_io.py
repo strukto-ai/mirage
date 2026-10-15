@@ -17,7 +17,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.commands.config import CommandIO
 from mirage.context import Caller
@@ -242,15 +241,15 @@ class BatchedRAM(RAMVFS):
     def supports(self, name: str) -> bool:
         return self.batched if name == "read_many" else super().supports(name)
 
-    async def read(self, path, index=NULL_INDEX, offset=0, size=None):
+    async def read(self, path, offset=0, size=None):
         self.reads.append(path.virtual)
-        return await super().read(path, index, offset, size)
+        return await super().read(path, offset, size)
 
-    def read_stream(self, path, index=NULL_INDEX):
+    def read_stream(self, path):
         self.reads.append(path.virtual)
-        return super().read_stream(path, index)
+        return super().read_stream(path)
 
-    async def read_many(self, paths, limit, index=NULL_INDEX):
+    async def read_many(self, paths, limit):
         self.batches.append([path.virtual for path in paths])
         return {
             path.virtual: self._store.files["/" + path.vfs_path.strip("/")]

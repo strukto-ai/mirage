@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runInCommandScope } from '../../cache/index/scope.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
@@ -39,9 +40,12 @@ describe('OneDrive exists', () => {
       { mode: MountMode.READ, shellParser: await getTestParser() },
     )
     try {
-      await ws.dispatch('readdir', '/od')
-      expect(((await ws.dispatch('stat', '/od/a.txt')) as FileStat).name).toBe('a.txt')
-      await expect(ws.dispatch('stat', '/od/b.txt')).rejects.toMatchObject({ code: 'ENOENT' })
+      // One command lists and stats, so its own listing proves b.txt absent.
+      await runInCommandScope(async () => {
+        await ws.dispatch('readdir', '/od')
+        expect(((await ws.dispatch('stat', '/od/a.txt')) as FileStat).name).toBe('a.txt')
+        await expect(ws.dispatch('stat', '/od/b.txt')).rejects.toMatchObject({ code: 'ENOENT' })
+      })
       expect(fetchMock).toHaveBeenCalledTimes(1)
     } finally {
       await ws.close()

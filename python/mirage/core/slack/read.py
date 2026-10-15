@@ -26,7 +26,6 @@ from mirage.core.slack.history import (
     get_history_jsonl,
     stream_messages_for_day,
 )
-from mirage.core.slack.readdir import readdir
 from mirage.core.slack.scope import detect_scope
 from mirage.core.slack.users import get_user_profile, user_json_bytes
 from mirage.core.time_range import (
@@ -228,7 +227,8 @@ async def read_many(
     accessor: SlackAccessor,
     paths: list[PathSpec],
     limit: int,
-    index: IndexCacheStore = NULL_INDEX,
+    entries: list[FileStat | None],
+    parents: list[FileStat | None],
 ) -> dict[str, bytes]:
     """Several chat.jsonl files, one history walk per run of a channel's
     consecutive days (``read_days``).
@@ -237,14 +237,15 @@ async def read_many(
         accessor (SlackAccessor): backend accessor.
         paths (list[PathSpec]): the files.
         limit (int): the most bytes worth reading for one day.
-        index (IndexCacheStore): cached directory entries.
+        entries (list[FileStat | None]): what is at each path, as its
+            day's listing names it.
+        parents (list[FileStat | None]): each path's day.
     """
     return await read_days(
-        readdir,
-        accessor,
         accessor.time_range,
         paths,
-        index,
+        entries,
+        parents,
         detect_scope,
         partial(_run_pages, accessor),
         _sort_key,

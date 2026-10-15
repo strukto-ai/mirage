@@ -13,13 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.email import EmailAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.email.client import (
     fetch_attachment,
     fetch_headers,
     fetch_message,
 )
-from mirage.core.email.readdir import readdir
 from mirage.core.email.render import message_json_bytes
 from mirage.core.email.scope import detect_scope
 from mirage.core.hierarchy.read import make_read
@@ -73,7 +71,7 @@ async def read_many(
     accessor: EmailAccessor,
     paths: list[PathSpec],
     limit: int,
-    index: IndexCacheStore = NULL_INDEX,
+    entries: list[FileStat | None],
 ) -> dict[str, bytes]:
     """Several message files, one UID FETCH per folder for all of them.
 
@@ -85,18 +83,17 @@ async def read_many(
         accessor (EmailAccessor): the account.
         paths (list[PathSpec]): the files.
         limit (int): the most bytes worth reading for one file.
-        index (IndexCacheStore): index cache.
+        entries (list[FileStat | None]): what is at each path, as its
+            folder's listing names it.
     """
     folders: dict[str, dict[str, str]] = {}
-    for path in paths:
+    for path, entry in zip(paths, entries, strict=True):
         match = detect_scope(path)
         if match.kind != "message":
             continue
-        entry = await resolve_entry(readdir, accessor, path, index)
         if entry is not None and (entry.size or 0) <= limit:
-            folders.setdefault(match.slots["folder"], {})[entry.id] = (
-                path.virtual
-            )
+            uid = str(entry.extra["uid"])
+            folders.setdefault(match.slots["folder"], {})[uid] = path.virtual
     answers: dict[str, bytes] = {}
     for folder, uids in folders.items():
         for msg in await fetch_headers(accessor, folder, list(uids)):

@@ -63,9 +63,9 @@ class PostgresVFS(BaseVFS):
         return slice_window(data, offset, size)
 
     def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, parent: FileStat | None = None
     ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+        return _read_stream(self.accessor, path, parent)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None
@@ -87,13 +87,9 @@ class PostgresVFS(BaseVFS):
         return await _line_count(self.accessor, path)
 
     async def follow(
-        self,
-        path: PathSpec,
-        n: int,
-        interval: float,
-        index: IndexCacheStore = NULL_INDEX,
+        self, path: PathSpec, n: int, interval: float
     ) -> AsyncIterator[bytes] | None:
-        return await _follow(self.accessor, path, n, interval, index)
+        return await _follow(self.accessor, path, n, interval)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

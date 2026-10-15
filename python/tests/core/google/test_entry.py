@@ -18,6 +18,7 @@ import pytest
 from aiohttp import ClientResponseError
 
 from mirage.accessor.gdocs import GDocsAccessor
+from mirage.cache.index.scope import command_scope
 from mirage.core.google.entry import resolve_app_entry
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.types import PathSpec
@@ -136,12 +137,14 @@ async def test_only_a_complete_listing_proves_absence(complete):
             return_value=ITEM,
         ) as get,
     ):
-        await mounted.readdir("/owned")
-        if complete:
-            with pytest.raises(FileNotFoundError):
-                await mounted.stat("/owned/" + NAME)
-            get.assert_not_awaited()
-        else:
-            row = await mounted.stat("/owned/" + NAME)
-            assert row.extra["doc_id"] == ITEM["id"]
-            get.assert_awaited_once_with(None, "doc1")
+        # One command lists and stats, so its own complete listing is proof.
+        async with command_scope():
+            await mounted.readdir("/owned")
+            if complete:
+                with pytest.raises(FileNotFoundError):
+                    await mounted.stat("/owned/" + NAME)
+                get.assert_not_awaited()
+            else:
+                row = await mounted.stat("/owned/" + NAME)
+                assert row.extra["doc_id"] == ITEM["id"]
+                get.assert_awaited_once_with(None, "doc1")

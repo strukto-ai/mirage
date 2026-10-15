@@ -36,6 +36,7 @@ import * as client from './client.ts'
 import type { DropboxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { read, readStream } from './read.ts'
+import { DropboxVFS } from '../../vfs/dropbox/dropbox.ts'
 import { readdir } from './readdir.ts'
 import { runWithRecording } from '../../observe/context.ts'
 
@@ -178,16 +179,37 @@ describe('dropbox read stamps content_hash', () => {
     expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([['read', 3, 'fresh']])
   })
 
-  // A 409 says the listed file is no longer there, which the mount reads as a
-  // stale row and lists again; anything else is a failure.
+  // A miss says the listed file is no longer there, which the mount reads as
+  // a stale row and lists again; anything else is a failure.
   it.each([
-    [409, { code: 'ENOENT' }],
-    [500, { status: 500 }],
-  ] as const)('maps only a listed read %s to ENOENT', async (status, raised) => {
+    [409, 'path/not_found/..', { code: 'ENOENT' }],
+    [409, 'path/not_file/..', { code: 'EISDIR' }],
+    [409, 'path/restricted_content/..', { status: 409 }],
+    [500, 'path/not_found/..', { status: 500 }],
+  ] as const)('maps only a listed read %s %s to ENOENT', async (status, summary, raised) => {
     vi.mocked(client.dropboxDownload).mockRejectedValue(
-      new client.DropboxApiError('refused', status, 'path/not_found/...'),
+      new client.DropboxApiError('refused', status, summary),
     )
     await expect(read(makeAccessor(), spec, undefined, NOTE)).rejects.toMatchObject(raised)
+  })
+
+  // Dropbox matches a path without case: with N stored and no row for n,
+  // truncate reads N's bytes and cuts them, where calling it absent would
+  // upload zeros over N.
+  it('keeps the file Dropbox resolves for a truncate with no row', async () => {
+    const result = JSON.stringify({ '.tag': 'file', name: 'N', content_hash: 'h' })
+    vi.mocked(client.dropboxDownload).mockResolvedValue([
+      new TextEncoder().encode('abcdef'),
+      result,
+    ])
+    const vfs = new DropboxVFS({ clientId: 'c', clientSecret: 's', refreshToken: 'r' })
+    const written: Uint8Array[] = []
+    vfs.write = (_path, data) => {
+      written.push(data)
+      return Promise.resolve(null)
+    }
+    await vfs.truncate(new PathSpec({ virtual: '/n', directory: '/', vfsPath: 'n' }), 4)
+    expect(written.map((data) => new TextDecoder().decode(data))).toEqual(['abcd'])
   })
 })
 

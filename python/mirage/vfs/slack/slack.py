@@ -83,9 +83,13 @@ class SlackVFS(BaseVFS):
         self,
         paths: list[PathSpec],
         limit: int,
-        index: IndexCacheStore = NULL_INDEX,
+        entries: list[FileStat | None] | None = None,
+        parents: list[FileStat | None] | None = None,
     ) -> dict[str, bytes]:
-        return await _read_many(self.accessor, paths, limit, index)
+        unknown: list[FileStat | None] = [None] * len(paths)
+        return await _read_many(
+            self.accessor, paths, limit, entries or unknown, parents or unknown
+        )
 
     def read_stream(
         self,

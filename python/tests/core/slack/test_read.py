@@ -228,25 +228,12 @@ async def _walk(*pages):
         yield page
 
 
-async def test_a_batch_walks_each_run_of_days_once(accessor, index):
-    await _populate_index(index)
+async def test_a_batch_walks_each_run_of_days_once(accessor):
     days = ["2023-11-14", "2023-11-15", "2023-11-17"]
     chats = [f"/{CHANNEL}/{day}/chat.jsonl" for day in days]
-    for day in days[1:]:
-        await index.set_dir(
-            f"/{CHANNEL}/{day}",
-            [
-                (
-                    "chat.jsonl",
-                    IndexEntry(
-                        id=f"C001:{day}:chat",
-                        name="chat.jsonl",
-                        resource_type="slack/chat_jsonl",
-                        vfs_name="chat.jsonl",
-                    ),
-                )
-            ],
-        )
+    chat = FileStat(
+        name="chat.jsonl", type=FileType.FILE, extra={"channel_id": "C001"}
+    )
     on_14 = {"text": "a", "ts": "1699999999.000100"}
     on_15 = {"text": "b", "ts": "1700050000.000000"}
     with patch(
@@ -258,7 +245,8 @@ async def test_a_batch_walks_each_run_of_days_once(accessor, index):
             accessor,
             [spec(c) for c in [*chats, "/users/alice__U001.json"]],
             1 << 20,
-            index,
+            [chat, chat, chat, None],
+            [None] * 4,
         )
     assert answers == {
         chats[0]: jsonl_bytes([on_14]),
@@ -283,7 +271,11 @@ async def test_a_batch_walks_each_run_of_days_once(accessor, index):
         ):
             assert (
                 await read_many(
-                    accessor, [spec(c) for c in chats], size, index
+                    accessor,
+                    [spec(c) for c in chats],
+                    size,
+                    [chat] * 3,
+                    [None] * 3,
                 )
                 == kept
             )

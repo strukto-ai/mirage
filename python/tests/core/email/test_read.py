@@ -17,10 +17,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.email.read import read_many
 from mirage.core.email.render import message_json_bytes
-from mirage.types import JsonValue, PathSpec
+from mirage.types import FileStat, FileType, JsonValue, PathSpec
 
 DAY = "/INBOX/2024-01-15"
 
@@ -46,22 +45,19 @@ async def test_a_batch_fetches_a_folders_messages_at_once():
     gone = f"{DAY}/gone__103.email.json"
     big = f"{DAY}/big__104.email.json"
 
-    async def entry(readdir, accessor, path, index):
-        if path.virtual == big:
-            return SimpleNamespace(id="104", size=1 << 30)
-        uid = names.get(path.virtual)
-        return None if uid is None else SimpleNamespace(id=uid, size=300)
+    def row(uid: str, size: int) -> FileStat:
+        return FileStat(
+            name=f"m__{uid}", type=FileType.FILE, size=size, extra={"uid": uid}
+        )
 
+    rows = [row(uid, 300) for uid in names.values()]
     fetch = AsyncMock(return_value=[_message("102"), _message("101")])
-    with (
-        patch("mirage.core.email.read.resolve_entry", side_effect=entry),
-        patch("mirage.core.email.read.fetch_headers", fetch),
-    ):
+    with patch("mirage.core.email.read.fetch_headers", fetch):
         answers = await read_many(
             SimpleNamespace(),
             [PathSpec.from_str_path(p) for p in [*names, gone, big]],
             1 << 20,
-            RAMIndexCacheStore(),
+            [*rows, None, row("104", 1 << 30)],
         )
     assert answers == {
         path: message_json_bytes(_message(uid)) for path, uid in names.items()

@@ -350,11 +350,8 @@ async def _linked_readdir(
         entries = []
     if not owed:
         return entries
-    present = {entry.rstrip("/") for entry in entries}
-    return [
-        *entries,
-        *(f"{base}/{n}" for n in owed if f"{base}/{n}" not in present),
-    ]
+    present = {gnu_basename(entry.rstrip("/")) for entry in entries}
+    return [*entries, *(f"{base}/{n}" for n in owed if n not in present)]
 
 
 async def _linked_tree(

@@ -344,7 +344,6 @@ async function followRows(
   path: PathSpec,
   n: number,
   interval: number,
-  _index?: IndexCacheStore,
 ): Promise<AsyncIterableIterator<Uint8Array> | null> {
   const schema = match.slots.schema ?? ''
   const entity = match.slots.entity ?? ''

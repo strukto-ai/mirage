@@ -26,7 +26,6 @@ from datetime import datetime
 from typing import Any
 
 from mirage.cache.file import io as cache_io
-from mirage.cache.index.config import is_folder_kind
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
@@ -414,7 +413,7 @@ async def _fits_read_ahead(
         batched (bool): whether the store reads a batch.
     """
     entry = (await mount.index.get(path.virtual)).entry
-    if entry is not None and is_folder_kind(entry.resource_type):
+    if entry is not None and entry.type is FileType.DIRECTORY:
         return False
     if entry is None or entry.size is None:
         return batched

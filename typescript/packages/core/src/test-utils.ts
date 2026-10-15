@@ -16,6 +16,7 @@ import type { Caller } from './context/session_context.ts'
 import type { Dispatcher } from './workspace/dispatcher/dispatcher.ts'
 import { RAMIndexCacheStore } from './cache/index/ram.ts'
 import type { IndexCacheStore } from './cache/index/store.ts'
+import type { Handed } from './vfs/types.ts'
 import type { OpKwargs } from './view/types.ts'
 import type { WriteContext } from './cache/types.ts'
 import { type FileStat, MountMode, type PathSpec } from './types.ts'
@@ -289,17 +290,17 @@ export class BatchedRAM extends RAMVFS {
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
     this.reads.push(path.virtual)
-    return super.read(path, index, offset, size)
+    return super.read(path, handed, offset, size)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     this.reads.push(path.virtual)
-    return super.readStream(path, index)
+    return super.readStream(path)
   }
 
   override readMany(paths: PathSpec[]): Promise<Map<string, Uint8Array>> {

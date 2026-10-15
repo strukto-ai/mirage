@@ -590,7 +590,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * it stored; the rest land in the namespace's attribute overlay.
    */
   @vfsCall({ effect: Effect.ATTR })
-  setattr(path: PathSpec, _fields: SetAttrFields): Promise<Record<string, number | string>> {
+  setattr(
+    path: PathSpec,
+    _fields: SetAttrFields,
+    _handed?: Handed,
+  ): Promise<Record<string, number | string>> {
     return Promise.reject(enotsup(this.name, 'setattr', path))
   }
 
@@ -626,12 +630,14 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * `limit` bytes, one the request could not read), and its own read answers
    * it later; an error of the whole request rejects. Each file read is
    * recorded as `read` records it, fingerprint included, so the read cache
-   * keeps its token. Mirrors Python's `read_many`.
+   * keeps its token. A VFS that needs what the listings hold declares
+   * `readMany` in `handed` and gets each path's `Handed`, in the order of
+   * `paths`. Mirrors Python's `read_many`.
    */
   readMany(
     paths: PathSpec[],
     _limit: number,
-    _index?: IndexCacheStore,
+    _handed?: readonly Handed[],
   ): Promise<Map<string, Uint8Array>> {
     return Promise.reject(enotsup(this.name, 'read', paths[0] ?? ''))
   }

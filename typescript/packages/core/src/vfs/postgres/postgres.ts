@@ -37,6 +37,7 @@ import type { Handed } from '../types.ts'
 export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
   override readonly handed = {
     read: ['parent'],
+    readStream: ['parent'],
     stat: ['entry'],
   } as const
 
@@ -86,8 +87,7 @@ export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
     path: PathSpec,
     n: number,
     interval: number,
-    index?: IndexCacheStore,
   ): Promise<AsyncIterable<Uint8Array> | null> {
-    return postgresFollow(this.accessor, path, n, interval, index)
+    return postgresFollow(this.accessor, path, n, interval)
   }
 }

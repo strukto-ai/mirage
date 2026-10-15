@@ -18,6 +18,7 @@ from unittest.mock import patch
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.index.scope import command_scope
 from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.workspace import Workspace
@@ -198,17 +199,18 @@ def _at(path: str) -> PathSpec:
 
 @pytest.mark.asyncio
 async def test_a_listing_answers_the_stats_after_it():
-    store = Folders()
-    store.add("a.txt", data=b"hi")
-    store.add("d")
-    ws = _workspace(store)
-    listed, _ = await ws.dispatch("readdir", _at("/f"))
-    assert sorted(listed) == ["/f/a.txt", "/f/d"]
-    row, _ = await ws.dispatch("stat", _at("/f/a.txt"))
-    assert (row.name, row.size) == ("a.txt", 2)
-    with pytest.raises(FileNotFoundError):
-        await ws.dispatch("stat", _at("/f/gone.txt"))
-    assert store.calls == [("list", "root")]
+    async with command_scope():
+        store = Folders()
+        store.add("a.txt", data=b"hi")
+        store.add("d")
+        ws = _workspace(store)
+        listed, _ = await ws.dispatch("readdir", _at("/f"))
+        assert sorted(listed) == ["/f/a.txt", "/f/d"]
+        row, _ = await ws.dispatch("stat", _at("/f/a.txt"))
+        assert (row.name, row.size) == ("a.txt", 2)
+        with pytest.raises(FileNotFoundError):
+            await ws.dispatch("stat", _at("/f/gone.txt"))
+        assert store.calls == [("list", "root")]
 
 
 @pytest.mark.asyncio
@@ -224,40 +226,43 @@ async def test_a_cold_read_lists_its_parent_and_reads_by_id():
 
 @pytest.mark.asyncio
 async def test_a_nested_create_hands_each_level_the_one_above():
-    store = Folders()
-    ws = _workspace(store)
-    await ws.dispatch("mkdir", _at("/f/a/b/c"), parents=True)
-    by_name = {
-        node["name"]: (node_id, node) for node_id, node in store.nodes.items()
-    }
-    assert by_name["a"][1]["parent"] == "root"
-    assert by_name["b"][1]["parent"] == by_name["a"][0]
-    assert by_name["c"][1]["parent"] == by_name["b"][0]
-    assert store.calls == [
-        ("list", "root"),
-        ("mkdir", "root"),
-        ("mkdir", by_name["a"][0]),
-        ("mkdir", by_name["b"][0]),
-    ]
-    await ws.dispatch("write", _at("/f/a/b/c/x.txt"), data=b"x")
-    assert store.nodes[f"n{store._ids}"]["parent"] == by_name["c"][0]
-    listed, _ = await ws.dispatch("readdir", _at("/f/a/b/c"))
-    assert listed == ["/f/a/b/c/x.txt"]
-    assert store.calls[-1] == ("write", by_name["c"][0])
+    async with command_scope():
+        store = Folders()
+        ws = _workspace(store)
+        await ws.dispatch("mkdir", _at("/f/a/b/c"), parents=True)
+        by_name = {
+            node["name"]: (node_id, node)
+            for node_id, node in store.nodes.items()
+        }
+        assert by_name["a"][1]["parent"] == "root"
+        assert by_name["b"][1]["parent"] == by_name["a"][0]
+        assert by_name["c"][1]["parent"] == by_name["b"][0]
+        assert store.calls == [
+            ("list", "root"),
+            ("mkdir", "root"),
+            ("mkdir", by_name["a"][0]),
+            ("mkdir", by_name["b"][0]),
+        ]
+        await ws.dispatch("write", _at("/f/a/b/c/x.txt"), data=b"x")
+        assert store.nodes[f"n{store._ids}"]["parent"] == by_name["c"][0]
+        listed, _ = await ws.dispatch("readdir", _at("/f/a/b/c"))
+        assert listed == ["/f/a/b/c/x.txt"]
+        assert store.calls[-1] == ("write", by_name["c"][0])
 
 
 @pytest.mark.asyncio
 async def test_a_listing_kept_through_a_create_needs_no_second_request():
-    store = Folders()
-    store.add("old.txt", data=b"o")
-    ws = _workspace(store)
-    await ws.dispatch("readdir", _at("/f"))
-    await ws.dispatch("write", _at("/f/new.txt"), data=b"n")
-    listed, _ = await ws.dispatch("readdir", _at("/f"))
-    assert sorted(listed) == ["/f/new.txt", "/f/old.txt"]
-    assert [call for call in store.calls if call[0] == "list"] == [
-        ("list", "root")
-    ]
+    async with command_scope():
+        store = Folders()
+        store.add("old.txt", data=b"o")
+        ws = _workspace(store)
+        await ws.dispatch("readdir", _at("/f"))
+        await ws.dispatch("write", _at("/f/new.txt"), data=b"n")
+        listed, _ = await ws.dispatch("readdir", _at("/f"))
+        assert sorted(listed) == ["/f/new.txt", "/f/old.txt"]
+        assert [call for call in store.calls if call[0] == "list"] == [
+            ("list", "root")
+        ]
 
 
 @pytest.mark.asyncio
@@ -443,3 +448,88 @@ async def test_a_root_stat_lists_nothing_outside_the_mount():
         assert store.calls == ["stat "]
     finally:
         await ws.close()
+
+
+class Keys(BaseVFS):
+    """A store addressed by path, as Dropbox is: its stat asks by path."""
+
+    name = "keys"
+
+    def __init__(self, files: dict[str, bytes]) -> None:
+        super().__init__()
+        self.files = files
+        self.calls: list[tuple[str, str]] = []
+
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        self.calls.append(("list", path.vfs_path.strip("/")))
+        return [
+            FileStat(name=name, type=FileType.FILE, size=len(data))
+            for name, data in sorted(self.files.items())
+        ]
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        key = path.vfs_path.strip("/")
+        if not key:
+            return FileStat(name="/", type=FileType.DIRECTORY)
+        self.calls.append(("stat", key))
+        if key not in self.files:
+            raise FileNotFoundError(path.virtual)
+        return FileStat(
+            name=key, type=FileType.FILE, size=len(self.files[key])
+        )
+
+    async def read(
+        self,
+        path: PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        entry: FileStat | None = None,
+    ) -> bytes:
+        if entry is None:
+            raise FileNotFoundError(path.virtual)
+        key = path.vfs_path.strip("/")
+        self.calls.append(("read", key))
+        return self.files[key]
+
+
+@pytest.mark.asyncio
+async def test_a_name_an_earlier_listing_leaves_out_is_asked_by_path():
+    keys = Keys({"f": b"1\n"})
+    ws = Workspace({"/k": keys})
+    try:
+        await (await ws.shell("ls /k")).stdout_str()
+        keys.files["new"] = b"2\n"
+        keys.calls.clear()
+        r = await ws.shell("cat /k/new")
+        out = await r.stdout_str()
+    finally:
+        await ws.close()
+    assert (r.exit_code, out) == (0, "2\n")
+    assert ("stat", "new") in keys.calls and ("read", "new") in keys.calls
+    assert ("list", "") not in keys.calls
+
+
+@pytest.mark.asyncio
+async def test_a_listing_the_command_fetched_proves_a_name_absent():
+    keys = Keys({"f": b"1\n"})
+    ws = Workspace({"/k": keys})
+    try:
+        r = await ws.shell("cat /k/f* /k/missing")
+        await r.stderr_str()
+    finally:
+        await ws.close()
+    assert r.exit_code == 1
+    assert ("stat", "missing") not in keys.calls
+
+
+@pytest.mark.asyncio
+async def test_a_miss_outside_a_command_asks_by_path():
+    keys = Keys({"f": b"1\n"})
+    ws = Workspace({"/k": keys})
+    try:
+        await (await ws.shell("ls /k")).stdout_str()
+        keys.files["new"] = b"2\n"
+        found = await ws.vfs.stat("/k/new")
+    finally:
+        await ws.close()
+    assert found.name == "new"

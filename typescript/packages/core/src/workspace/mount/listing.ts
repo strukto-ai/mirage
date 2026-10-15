@@ -91,6 +91,23 @@ export async function keepListing(
 }
 
 /**
+ * Whether the stored listing of the path's folder leaves it out without
+ * proving it absent: a complete listing the running command did not fetch,
+ * which another client may have added the name to since. Mirrors Python's
+ * `unproven_miss`.
+ */
+export async function unprovenMiss(index: IndexCacheStore, key: string): Promise<boolean> {
+  const folder = folderOf(key)
+  const listing = await index.listDir(folder)
+  return (
+    listing.entries != null &&
+    listing.window !== true &&
+    !listing.entries.includes(key) &&
+    !index.listedThisCommand(folder)
+  )
+}
+
+/**
  * A stat the stored listings answer, null when none does. The row the
  * parent's listing holds answers it, so a listing costs one request and the
  * stat of each child after it none. A complete listing that does not name the

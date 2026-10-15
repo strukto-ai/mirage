@@ -273,33 +273,13 @@ describe('follow', () => {
 
 // Twin of test_a_batch_walks_each_run_of_days_once.
 it('walks each run of days of a batch once', async () => {
-  const idx = new RAMIndexCacheStore()
   const channel = '/mnt/slack/channels/general__C1'
-  await idx.setDir('/mnt/slack/channels', [
-    [
-      'general__C1',
-      new IndexEntry({
-        id: 'C1',
-        name: 'general',
-        resourceType: 'slack/channel',
-        vfsName: 'general__C1',
-      }),
-    ],
-  ])
   const days = ['2026-04-24', '2026-04-25', '2026-04-27']
-  for (const day of days) {
-    await idx.setDir(`${channel}/${day}`, [
-      [
-        'chat.jsonl',
-        new IndexEntry({
-          id: `C1:${day}:chat`,
-          name: 'chat.jsonl',
-          resourceType: 'slack/chat_jsonl',
-          vfsName: 'chat.jsonl',
-        }),
-      ],
-    ])
-  }
+  const chat = new FileStat({
+    name: 'chat.jsonl',
+    type: FileType.FILE,
+    extra: { channel_id: 'C1' },
+  })
   const on24 = { ts: '1776988900.000000', text: 'a' }
   const on25 = { ts: '1777075300.000000', text: 'b' }
   const t = new FakeTransport(() => ({ ok: true, messages: [on24, on25] }))
@@ -308,7 +288,7 @@ it('walks each run of days of a batch once', async () => {
     new SlackAccessor(t),
     [...chats, '/mnt/slack/users/alice__U1.json'].map((v) => spec(v, '/mnt/slack')),
     1 << 20,
-    idx,
+    [...chats.map(() => ({ entry: chat })), {}],
   )
   const lines = (body: Uint8Array | undefined): unknown[] =>
     decoder
@@ -335,7 +315,7 @@ it('walks each run of days of a batch once', async () => {
       new SlackAccessor(sized),
       chats.map((v) => spec(v, '/mnt/slack')),
       size,
-      idx,
+      chats.map(() => ({ entry: chat })),
     )
     expect([...got.keys()]).toEqual(kept)
   }

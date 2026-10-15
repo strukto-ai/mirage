@@ -15,10 +15,10 @@
 import { makeRead } from '@struktoai/mirage-core/core/hierarchy/read'
 import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchAttachment, fetchHeaders, fetchMessage } from './client.ts'
-import { readdir } from './readdir.ts'
 import { messageJsonBytes } from './render.ts'
 import { detectScope } from './scope.ts'
 
@@ -64,17 +64,17 @@ export async function readMany(
   accessor: EmailAccessor,
   paths: readonly PathSpec[],
   limit: number,
-  index?: IndexCacheStore,
+  handed: readonly Handed[] = [],
 ): Promise<Map<string, Uint8Array>> {
   const folders = new Map<string, Map<string, string>>()
-  for (const path of paths) {
+  for (const [i, path] of paths.entries()) {
     const match = detectScope(path)
     if (match.kind !== 'message') continue
-    const entry = await resolveEntry(readdir, accessor, path, index)
+    const entry = handed[i]?.entry ?? null
     if (entry === null || (entry.size ?? 0) > limit) continue
     const folder = match.slots.folder ?? ''
     const uids = folders.get(folder) ?? new Map<string, string>()
-    uids.set(entry.id, path.virtual)
+    uids.set(String(entry.extra.uid), path.virtual)
     folders.set(folder, uids)
   }
   const answers = new Map<string, Uint8Array>()

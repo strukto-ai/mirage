@@ -118,7 +118,7 @@ async def test_a_name_the_tree_does_not_hold_is_enoent(size, path):
         await read(make_accessor(bucket_days=size), spec(path))
 
 
-async def test_a_batch_lists_each_day_once(gcal_api, index):
+async def test_a_batch_lists_each_day_once(gcal_api):
     day = "/primary/2026-08-11"
     paths = [
         f"{day}/{PHD}",
@@ -127,7 +127,7 @@ async def test_a_batch_lists_each_day_once(gcal_api, index):
         "/primary/calendar.json",
     ]
     answers = await read_many(
-        make_accessor(), [spec(path) for path in paths], 1 << 20, index
+        make_accessor(), [spec(path) for path in paths], 1 << 20
     )
     assert {path: json.loads(body) for path, body in answers.items()} == {
         paths[0]: EVENTS[0],
@@ -141,6 +141,5 @@ async def test_a_batch_lists_each_day_once(gcal_api, index):
             make_accessor(),
             [spec(path) for path in paths],
             len(answers[small]),
-            index,
         )
     ) == [small]

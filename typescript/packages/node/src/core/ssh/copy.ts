@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { invalidateSubtree } from '@struktoai/mirage-core/cache/context'
 import { enotsup, fsError } from '@struktoai/mirage-core/errors/fs'
 import { POSIX } from '@struktoai/mirage-core/errors/posix'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
@@ -70,13 +69,11 @@ export async function dirCopy(accessor: SSHAccessor, src: PathSpec, dst: PathSpe
   if (status === 0 && new TextDecoder().decode(out) === COPIED) {
     record('copy_prefix', dst.virtual, VFSName.SSH, 0, timer)
     liftLost(dst, upto, true)
-    await invalidateSubtree(dst)
     return
   }
   if (!(await exists(accessor, dst))) {
     console.debug(`ssh tree copy left to the walk: ${new TextDecoder().decode(err)}`)
     throw enotsup(VFSName.SSH, 'dirCopy', dst)
   }
-  await invalidateSubtree(dst)
   throw refusal(dst, err)
 }

@@ -14,11 +14,11 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { enoent } from '../../errors/fs.ts'
-import type { PathSpec, SetAttrFields } from '../../types.ts'
+import type { FileStat, PathSpec, SetAttrFields } from '../../types.ts'
 import { toIsoZ } from '../../utils/dates.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { patchFile } from '../google/drive.ts'
-import { eaccesOnDenied, resolveKey } from './resolve.ts'
+import { eaccesOnDenied } from './resolve.ts'
 
 /**
  * Store a modified time as the item's Drive `modifiedTime`, and return the
@@ -30,6 +30,7 @@ export const setAttrs = eaccesOnDenied(async function setAttrs(
   accessor: GDriveAccessor,
   path: PathSpec,
   fields: SetAttrFields,
+  entry: FileStat | null = null,
 ): Promise<Record<string, number | string>> {
   const residual: Record<string, number | string> = {}
   if (fields.mode !== undefined) residual.mode = fields.mode
@@ -41,9 +42,8 @@ export const setAttrs = eaccesOnDenied(async function setAttrs(
     residual.mtime = fields.mtime
     return residual
   }
-  const node = await resolveKey(accessor, path.vfsPath)
-  if (node === null) throw enoent(path)
-  await patchFile(accessor.tokenManager, node.id, {
+  if (entry === null) throw enoent(path)
+  await patchFile(accessor.tokenManager, entry.extra.file_id as string, {
     body: { modifiedTime: toIsoZ(new Date(fields.mtime)) },
   })
   return residual

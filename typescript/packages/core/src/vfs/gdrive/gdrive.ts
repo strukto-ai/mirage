@@ -68,6 +68,7 @@ export class GDriveVFS extends BaseVFS {
     copy: ['entry', 'dstParent', 'dstEntry'],
     dirCopy: ['entry', 'dstParent', 'dstEntry'],
     truncate: ['entry', 'parent'],
+    setattr: ['entry'],
     filesContaining: ['entry'],
   } as const
   override readonly prompt: string = PROMPT
@@ -188,8 +189,9 @@ export class GDriveVFS extends BaseVFS {
   override setattr(
     path: PathSpec,
     fields: SetAttrFields,
+    handed?: Handed,
   ): Promise<Record<string, number | string>> {
-    return gdriveSetAttrs(this.accessor, path, fields)
+    return gdriveSetAttrs(this.accessor, path, fields, handed?.entry ?? null)
   }
 
   override capacity(): Promise<CapacityResult> {

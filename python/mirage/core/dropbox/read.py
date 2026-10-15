@@ -21,8 +21,12 @@ from mirage.core.dropbox.client import (
     dropbox_download,
     dropbox_download_stream,
 )
-from mirage.core.dropbox.constants import RESULT_HEADER
-from mirage.core.dropbox.fingerprint import result_token
+from mirage.core.dropbox.constants import (
+    MISS_SUMMARIES,
+    NOT_FILE_SUMMARY,
+    RESULT_HEADER,
+)
+from mirage.core.dropbox.fingerprint import result_of, result_token
 from mirage.core.dropbox.paths import dropbox_path_of
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, record_stream, start_op
@@ -50,6 +54,26 @@ def file_entry(path: PathSpec, entry: FileStat | None) -> FileStat:
     return entry
 
 
+def _refusal(path: PathSpec, exc: DropboxApiError) -> OSError | None:
+    """What a download Dropbox refused means, or None.
+
+    Only a miss is ENOENT (a file the listing named that is gone) and a
+    folder's path EISDIR; any other refusal (restricted_content, a 5xx)
+    names a file that may exist, and is raised as Dropbox sent it.
+
+    Args:
+        path (PathSpec): the path read.
+        exc (DropboxApiError): the download's error.
+    """
+    if exc.status != 409:
+        return None
+    if exc.summary.startswith(MISS_SUMMARIES):
+        return enoent(path.virtual)
+    if exc.summary.startswith(NOT_FILE_SUMMARY):
+        return eisdir(path.virtual)
+    return None
+
+
 async def read(
     accessor: DropboxAccessor,
     path: PathSpec,
@@ -67,6 +91,27 @@ async def read(
         entry (FileStat | None): what is at the path.
     """
     file_entry(path, entry)
+    return await read_by_path(accessor, path, offset, size)
+
+
+async def read_by_path(
+    accessor: DropboxAccessor,
+    path: PathSpec,
+    offset: int = 0,
+    size: int | None = None,
+) -> bytes:
+    """Download whatever file Dropbox resolves ``path`` to, in any case.
+
+    A rewrite (``truncate``) reads this way where no listing names the
+    file: its upload lands on that same file, so calling a file stored
+    as ``N`` absent for ``n`` would zero it.
+
+    Args:
+        accessor (DropboxAccessor): Dropbox accessor.
+        path (PathSpec): the path to read.
+        offset (int): first byte to read.
+        size (int | None): how many bytes, or None for the rest.
+    """
     window = window_for(offset, size)
     timer = start_op()
     try:
@@ -74,11 +119,11 @@ async def read(
             accessor.token_manager, dropbox_path_of(accessor, path), window
         )
     except DropboxApiError as exc:
-        # The listing named a file Dropbox no longer has there.
-        if exc.status == 409:
-            raise enoent(path.virtual) from exc
+        refusal = _refusal(path, exc)
+        if refusal is not None:
+            raise refusal from exc
         raise
-    token = result_token(result)
+    token = result_token(result_of(result))
     record(
         "read", path.virtual, "dropbox", len(data), timer, fingerprint=token
     )
@@ -104,13 +149,21 @@ async def read_stream(
 
     def stamp(headers: Mapping[str, str]) -> None:
         if rec is not None:
-            rec.fingerprint = result_token(headers.get(RESULT_HEADER.lower()))
+            rec.fingerprint = result_token(
+                result_of(headers.get(RESULT_HEADER.lower()))
+            )
 
-    async for chunk in dropbox_download_stream(
-        accessor.token_manager,
-        dropbox_path_of(accessor, path),
-        on_response=stamp,
-    ):
-        if rec is not None:
-            rec.bytes += len(chunk)
-        yield chunk
+    try:
+        async for chunk in dropbox_download_stream(
+            accessor.token_manager,
+            dropbox_path_of(accessor, path),
+            on_response=stamp,
+        ):
+            if rec is not None:
+                rec.bytes += len(chunk)
+            yield chunk
+    except DropboxApiError as exc:
+        refusal = _refusal(path, exc)
+        if refusal is not None:
+            raise refusal from exc
+        raise

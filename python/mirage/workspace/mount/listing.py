@@ -124,6 +124,26 @@ async def keep_listing(
     return [f"{stem}/{row.name}" for row in listing.entries]
 
 
+async def unproven_miss(index: IndexCacheStore, key: str) -> bool:
+    """Whether the stored listing of the path's folder leaves it out
+    without proving it absent: a complete listing the running command
+    did not fetch, which another client may have added the name to
+    since.
+
+    Args:
+        index (IndexCacheStore): the mount's index.
+        key (str): the path's key, below the mount root.
+    """
+    folder = folder_of(key)
+    listing = await index.list_dir(folder)
+    return (
+        listing.entries is not None
+        and not listing.window
+        and key not in listing.entries
+        and not index.listed_this_command(folder)
+    )
+
+
 async def stored_stat(index: IndexCacheStore, key: str) -> FileStat | None:
     """A stat the stored listings answer, None when none does.
 

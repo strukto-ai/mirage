@@ -14,7 +14,6 @@
 
 from mirage.core.google.rename import make_app_rename
 from mirage.core.gslides.constants import FILE_NAME
-from mirage.core.gslides.readdir import readdir
 from mirage.core.gslides.scope import detect_scope
 
-rename = make_app_rename(detect_scope, readdir, FILE_NAME.suffix)
+rename = make_app_rename(detect_scope, FILE_NAME.suffix)

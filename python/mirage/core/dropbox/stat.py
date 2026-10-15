@@ -12,13 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.api import get_metadata, list_folder
+from mirage.core.dropbox.api import list_folder, lookup
 from mirage.core.dropbox.client import DropboxApiError
-from mirage.core.dropbox.constants import MISS_SUMMARIES
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import dropbox_path_of, spelled_otherwise
 from mirage.core.dropbox.readdir import dropbox_path_from_key, stat_from_entry
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
@@ -27,19 +24,12 @@ from mirage.types import FileStat, FileType, PathSpec
 async def _stat_from_api(
     accessor: DropboxAccessor, path: PathSpec
 ) -> FileStat:
-    # One get_metadata. Only a not_found or not_folder 409 is a miss; any
-    # other (restricted_content, ...) names a path that may exist, so a
-    # fresh probe must not call it gone. get_metadata matches names
-    # case-insensitively where a listing is exact.
-    try:
-        entry = await get_metadata(
-            accessor.token_manager, dropbox_path_of(accessor, path)
-        )
-    except DropboxApiError as exc:
-        if exc.status == 409 and exc.summary.startswith(MISS_SUMMARIES):
-            raise enoent(path.virtual) from exc
-        raise
-    if entry.get("name") != posixpath.basename(path.vfs_path.strip("/")):
+    # One get_metadata, which matches names case-insensitively where a
+    # listing is exact.
+    entry = await lookup(
+        accessor.token_manager, dropbox_path_of(accessor, path)
+    )
+    if entry is None or spelled_otherwise(path, entry):
         raise enoent(path.virtual)
     return stat_from_entry(entry)
 

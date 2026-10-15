@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../io/cooperative.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { dayChannelId, followedDay, guardDay, readDays } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
@@ -180,14 +181,12 @@ export function readMany(
   accessor: DiscordAccessor,
   paths: readonly PathSpec[],
   limit: number,
-  index?: IndexCacheStore,
+  handed: readonly Handed[] = [],
 ): Promise<Map<string, Uint8Array>> {
   return readDays(
-    readdir,
-    accessor,
     accessor.timeRange,
     paths,
-    index,
+    handed,
     detectScope,
     (channelId, first, last) => runPages(accessor, channelId, first, last),
     sortKey,

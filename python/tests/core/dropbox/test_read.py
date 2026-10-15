@@ -258,17 +258,24 @@ async def test_a_stream_records_the_content_hash(recorded):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "status, raised",
-    [(409, FileNotFoundError), (500, DropboxApiError)],
-    ids=["missing", "server-error"],
+    "status, summary, raised",
+    [
+        (409, "path/not_found/..", FileNotFoundError),
+        (409, "path/not_file/..", IsADirectoryError),
+        (409, "path/restricted_content/..", DropboxApiError),
+        (500, "path/not_found/..", DropboxApiError),
+    ],
+    ids=["missing", "folder", "restricted", "server-error"],
 )
-async def test_a_listed_read_maps_only_a_409_to_enoent(status, raised):
-    # A 409 says the listed file is no longer there, which the mount reads
+async def test_a_listed_read_maps_only_a_miss_to_enoent(
+    status, summary, raised
+):
+    # A miss says the listed file is no longer there, which the mount reads
     # as a stale row and lists again; anything else is a failure.
     with patch(
         "mirage.core.dropbox.read.dropbox_download",
         new_callable=AsyncMock,
-        side_effect=DropboxApiError("refused", status),
+        side_effect=DropboxApiError("refused", status, summary),
     ):
         with pytest.raises(raised):
             await read(make_accessor(), A, entry=NOTE)

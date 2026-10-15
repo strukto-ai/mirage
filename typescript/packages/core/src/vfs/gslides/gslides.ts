@@ -61,6 +61,7 @@ export class GSlidesVFS extends BaseVFS {
 
   override readonly handed = {
     unlink: ['entry'],
+    rename: ['entry'],
   } as const
 
   override readonly renderers: Readonly<Record<string, string>> = { '.gslide.json': 'readDeck' }
@@ -97,8 +98,8 @@ export class GSlidesVFS extends BaseVFS {
     return gslidesUnlink(this.accessor, path, handed?.entry)
   }
 
-  override rename(src: PathSpec, dst: PathSpec, index?: IndexCacheStore): Promise<void> {
-    return gslidesRename(this.accessor, src, dst, index)
+  override rename(src: PathSpec, dst: PathSpec, handed?: Handed): Promise<void> {
+    return gslidesRename(this.accessor, src, dst, handed?.entry ?? null)
   }
 
   override deltaHook(): DeltaHook {

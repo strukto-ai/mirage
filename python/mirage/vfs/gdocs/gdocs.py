@@ -103,9 +103,9 @@ class GDocsVFS(BaseVFS):
         self,
         src: PathSpec,
         dst: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
     ) -> None:
-        await _rename(self.accessor, src, dst, index)
+        await _rename(self.accessor, src, dst, entry)
 
     def delta_hook(self) -> DeltaHook:
         return app_delta_hook(self.accessor, MIME, make_filename)

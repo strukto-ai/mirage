@@ -14,6 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { runInCommandScope } from '../../cache/index/scope.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { enoent } from '../../errors/fs.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
@@ -212,14 +213,16 @@ describe('a mount that keeps its VFS listings', () => {
     store.add('d')
     const ws = await workspace(store)
     try {
-      expect(((await ws.dispatch('readdir', '/f')) as string[]).sort()).toEqual([
-        '/f/a.txt',
-        '/f/d',
-      ])
-      const row = (await ws.dispatch('stat', '/f/a.txt')) as FileStat
-      expect([row.name, row.size]).toEqual(['a.txt', 2])
-      await expect(ws.dispatch('stat', '/f/gone.txt')).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(store.calls).toEqual([['list', 'root']])
+      await runInCommandScope(async () => {
+        expect(((await ws.dispatch('readdir', '/f')) as string[]).sort()).toEqual([
+          '/f/a.txt',
+          '/f/d',
+        ])
+        const row = (await ws.dispatch('stat', '/f/a.txt')) as FileStat
+        expect([row.name, row.size]).toEqual(['a.txt', 2])
+        await expect(ws.dispatch('stat', '/f/gone.txt')).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(store.calls).toEqual([['list', 'root']])
+      })
     } finally {
       await ws.close()
     }
@@ -247,21 +250,23 @@ describe('a mount that keeps its VFS listings', () => {
     const store = new Folders()
     const ws = await workspace(store)
     try {
-      await ws.dispatch('mkdir', '/f/a/b/c', [], { parents: true })
-      const byName = new Map([...store.nodes].map(([id, node]) => [node.name, { id, node }]))
-      expect(byName.get('a')?.node.parent).toBe('root')
-      expect(byName.get('b')?.node.parent).toBe(byName.get('a')?.id)
-      expect(byName.get('c')?.node.parent).toBe(byName.get('b')?.id)
-      expect(store.calls).toEqual([
-        ['list', 'root'],
-        ['mkdir', 'root'],
-        ['mkdir', byName.get('a')?.id],
-        ['mkdir', byName.get('b')?.id],
-      ])
-      await ws.dispatch('write', '/f/a/b/c/x.txt', [ENC.encode('x')])
-      expect(store.nodes.get(store.lastId)?.parent).toBe(byName.get('c')?.id)
-      expect(await ws.dispatch('readdir', '/f/a/b/c')).toEqual(['/f/a/b/c/x.txt'])
-      expect(store.calls.at(-1)).toEqual(['write', byName.get('c')?.id])
+      await runInCommandScope(async () => {
+        await ws.dispatch('mkdir', '/f/a/b/c', [], { parents: true })
+        const byName = new Map([...store.nodes].map(([id, node]) => [node.name, { id, node }]))
+        expect(byName.get('a')?.node.parent).toBe('root')
+        expect(byName.get('b')?.node.parent).toBe(byName.get('a')?.id)
+        expect(byName.get('c')?.node.parent).toBe(byName.get('b')?.id)
+        expect(store.calls).toEqual([
+          ['list', 'root'],
+          ['mkdir', 'root'],
+          ['mkdir', byName.get('a')?.id],
+          ['mkdir', byName.get('b')?.id],
+        ])
+        await ws.dispatch('write', '/f/a/b/c/x.txt', [ENC.encode('x')])
+        expect(store.nodes.get(store.lastId)?.parent).toBe(byName.get('c')?.id)
+        expect(await ws.dispatch('readdir', '/f/a/b/c')).toEqual(['/f/a/b/c/x.txt'])
+        expect(store.calls.at(-1)).toEqual(['write', byName.get('c')?.id])
+      })
     } finally {
       await ws.close()
     }
@@ -272,13 +277,15 @@ describe('a mount that keeps its VFS listings', () => {
     store.add('old.txt', 'root', ENC.encode('o'))
     const ws = await workspace(store)
     try {
-      await ws.dispatch('readdir', '/f')
-      await ws.dispatch('write', '/f/new.txt', [ENC.encode('n')])
-      expect(((await ws.dispatch('readdir', '/f')) as string[]).sort()).toEqual([
-        '/f/new.txt',
-        '/f/old.txt',
-      ])
-      expect(store.calls.filter(([op]) => op === 'list')).toEqual([['list', 'root']])
+      await runInCommandScope(async () => {
+        await ws.dispatch('readdir', '/f')
+        await ws.dispatch('write', '/f/new.txt', [ENC.encode('n')])
+        expect(((await ws.dispatch('readdir', '/f')) as string[]).sort()).toEqual([
+          '/f/new.txt',
+          '/f/old.txt',
+        ])
+        expect(store.calls.filter(([op]) => op === 'list')).toEqual([['list', 'root']])
+      })
     } finally {
       await ws.close()
     }
@@ -486,6 +493,90 @@ describe('a window', () => {
       // The root holds itself, so the parent a stat is handed asks no
       // listing.
       expect(store.calls).toEqual(['stat '])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+/** A store addressed by path, as Dropbox is: its stat asks by path. */
+class Keys extends BaseVFS {
+  override readonly name: string = 'keys'
+  override readonly handed = { read: ['entry'] } as const
+  readonly calls: [string, string][] = []
+
+  constructor(readonly files: Map<string, Uint8Array>) {
+    super()
+  }
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    this.calls.push(['list', path.vfsPath.replace(/^\/+|\/+$/g, '')])
+    return Promise.resolve(
+      [...this.files.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([name, data]) => new FileStat({ name, type: FileType.FILE, size: data.byteLength })),
+    )
+  }
+
+  override stat(path: PathSpec): Promise<FileStat> {
+    const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
+    if (key === '') return Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
+    this.calls.push(['stat', key])
+    const data = this.files.get(key)
+    if (data === undefined) return Promise.reject(enoent(path))
+    return Promise.resolve(new FileStat({ name: key, type: FileType.FILE, size: data.byteLength }))
+  }
+
+  override read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {
+    const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
+    const data = this.files.get(key)
+    if (handed?.entry == null || data === undefined) return Promise.reject(enoent(path))
+    this.calls.push(['read', key])
+    return Promise.resolve(data)
+  }
+}
+
+async function keysWorkspace(keys: Keys): Promise<Workspace> {
+  return new Workspace({ '/k': keys }, { shellParser: await getTestParser() })
+}
+
+describe('a name a listing leaves out', () => {
+  it('is asked by path past an earlier listing', async () => {
+    const keys = new Keys(new Map([['f', ENC.encode('1\n')]]))
+    const ws = await keysWorkspace(keys)
+    try {
+      await ws.shell('ls /k')
+      keys.files.set('new', ENC.encode('2\n'))
+      keys.calls.length = 0
+      const io = await ws.shell('cat /k/new')
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, '2\n'])
+      expect(keys.calls).toContainEqual(['stat', 'new'])
+      expect(keys.calls).toContainEqual(['read', 'new'])
+      expect(keys.calls).not.toContainEqual(['list', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('is absent past a listing the command fetched', async () => {
+    const keys = new Keys(new Map([['f', ENC.encode('1\n')]]))
+    const ws = await keysWorkspace(keys)
+    try {
+      const io = await ws.shell('cat /k/f* /k/missing')
+      expect(io.exitCode).toBe(1)
+      expect(keys.calls).not.toContainEqual(['stat', 'missing'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('is asked by path outside a command', async () => {
+    const keys = new Keys(new Map([['f', ENC.encode('1\n')]]))
+    const ws = await keysWorkspace(keys)
+    try {
+      await ws.shell('ls /k')
+      keys.files.set('new', ENC.encode('2\n'))
+      expect((await ws.vfs.stat('/k/new')).name).toBe('new')
     } finally {
       await ws.close()
     }

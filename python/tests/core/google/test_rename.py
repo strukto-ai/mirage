@@ -18,11 +18,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdocs.rename import rename
 from mirage.core.google.rename import app_title
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 MODIFIED = "2026-10-01T09:00:00.000Z"
@@ -53,23 +51,19 @@ def patched():
         yield patched
 
 
-async def renamed(dst: str) -> RAMIndexCacheStore:
-    index = RAMIndexCacheStore()
-    entry = IndexEntry(
-        id="doc1",
-        name="Old Plan",
-        resource_type="gdocs/file",
-        remote_time=MODIFIED,
-        vfs_name=OLD,
+async def renamed(dst: str) -> None:
+    entry = FileStat(
+        name=OLD,
+        type=FileType.FILE,
+        modified=MODIFIED,
+        extra={"doc_id": "doc1", "doc_name": "Old Plan"},
     )
-    await index.set_dir("/gdocs/owned", [(OLD, entry)])
     await rename(
         GDocsAccessor(config=None, token_manager=None),
         spec(f"/gdocs/owned/{OLD}"),
         spec(dst),
-        index,
+        entry,
     )
-    return index
 
 
 @pytest.mark.parametrize(
@@ -87,12 +81,11 @@ def test_only_a_name_the_listing_renders_back_gives_a_title(name, title):
 
 @pytest.mark.asyncio
 async def test_rename_sets_the_title_and_keeps_the_modified_time(patched):
-    index = await renamed(f"/gdocs/owned/{NEW}")
+    await renamed(f"/gdocs/owned/{NEW}")
     assert patched.await_args.args[1:] == (
         "doc1",
         {"name": "New_Plan", "modifiedTime": MODIFIED},
     )
-    assert (await index.list_dir("/gdocs/owned")).entries is None
 
 
 @pytest.mark.parametrize(

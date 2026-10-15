@@ -111,6 +111,7 @@ import {
   storedListing,
   storedStat,
   storedTree,
+  unprovenMiss,
 } from './listing.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { PipeClosed } from '../../io/errors.ts'
@@ -812,7 +813,7 @@ export class MountEntry {
             vfs.truncate(scope, lengthArg(args[0]), kw.no_create === true, handed(kw)),
         ]
       case 'setattr':
-        return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields)]
+        return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields, handed(kw))]
       default: {
         const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[name]
         return method === undefined ? [] : [(scope, args) => method.call(vfs, scope, ...args)]
@@ -967,15 +968,51 @@ export class MountEntry {
       const probed = this.cacheManager.probedStat(scope)
       if (probed !== null) return probed
     }
-    const row = await entryAt(index, key, () => this.listed(this.folder(scope), index))
-    if (row === null && (await beyondWindow(index, key))) return this.beyond(scope, index)
-    return row
+    const warm = (): Promise<string[]> => this.listed(this.folder(scope), index)
+    const row = await entryAt(index, key, warm)
+    if (row !== null) return row
+    if (await beyondWindow(index, key)) return this.beyond(scope, index)
+    if (!(await this.unproven(index, key))) return null
+    if (this.asksByPath) return this.beyond(scope, index)
+    await index.invalidateDir(folderOf(key))
+    return entryAt(index, key, warm)
   }
 
   /**
-   * What is at a path its folder's window leaves out: the backend's stat of
-   * it, handed what is at its parent; null when nothing is. Mirrors Python's
-   * `_beyond`.
+   * The row the stored listings answer a stat of `key` with, null for one the
+   * backend must answer, a miss they do not prove (`unproven`) included.
+   * Mirrors Python's `_stored_row`.
+   */
+  private async storedRow(index: IndexCacheStore, key: string): Promise<FileStat | null> {
+    try {
+      return this.whole(await storedStat(index, key))
+    } catch (err) {
+      if (isEnoent(err) && (await this.unproven(index, key))) return null
+      throw err
+    }
+  }
+
+  /** Whether the VFS's stat asks by path, handed no stored row. */
+  private get asksByPath(): boolean {
+    return this.lists && this.wants('stat').length === 0
+  }
+
+  /**
+   * Whether the stored listings leave `key` out without proving it absent
+   * (`unprovenMiss`), on a VFS that checks such a name again: one whose stat
+   * asks by path (one stat) or one that writes (its folder is listed again),
+   * where a stale miss would let a write land over a file another client
+   * made. Mirrors Python's `_unproven`.
+   */
+  private async unproven(index: IndexCacheStore, key: string): Promise<boolean> {
+    return (this.asksByPath || this.vfs.supports('write')) && unprovenMiss(index, key)
+  }
+
+  /**
+   * What is at a path its folder's stored listing leaves out without proving
+   * it absent (a window, or a listing another command fetched): the backend's
+   * stat of it, handed what is at its parent; null when nothing is. Mirrors
+   * Python's `_beyond`.
    */
   private async beyond(scope: PathSpec, index: IndexCacheStore): Promise<FileStat | null> {
     const handed: { -readonly [K in keyof Handed]: Handed[K] } = {}
@@ -986,7 +1023,7 @@ export class MountEntry {
       return await this.vfs.stat(scope, handed)
     } catch (err) {
       if (!isEnoent(err)) throw err
-      console.debug(`nothing beyond the window at ${scope.virtual}: ${String(err)}`)
+      console.debug(`nothing unlisted at ${scope.virtual}: ${String(err)}`)
       return null
     }
   }
@@ -1011,7 +1048,7 @@ export class MountEntry {
   /** A stat of `path` on this mount, as `callKeyed` answers one. Mirrors Python's `_stat`. */
   private async statAt(index: IndexCacheStore, path: PathSpec): Promise<FileStat> {
     const key = indexKey(this.prefix, path)
-    const stored = key === this.rootKey ? null : this.whole(await storedStat(index, key))
+    const stored = key === this.rootKey ? null : await this.storedRow(index, key)
     if (stored !== null) return stored
     return this.vfs.stat(path, await this.handedFor('stat', path, null, index))
   }
@@ -1108,7 +1145,7 @@ export class MountEntry {
     if (name === 'readdir') return storedListing(index, key, scope.pattern !== null)
     if (name === 'read_tree') return this.namesOnly ? null : storedTree(index, key)
     if (key === this.rootKey) return null
-    const row = this.whole(await storedStat(index, key))
+    const row = await this.storedRow(index, key)
     if (row === null || !this.namesOnly) return row
     return this.cacheManager?.listingTrusted(folderOf(key)) === true ? row : null
   }
@@ -1806,10 +1843,9 @@ export class MountEntry {
         () =>
           this.runWithWriteRevisions(() =>
             runWithTimeout(
-              this.vfs.readMany(
+              this.batchRead(
                 paths.map((p) => this.scope(p)),
                 limit,
-                this.index,
               ),
               this.opTimeout('read'),
               'read',
@@ -1818,6 +1854,24 @@ export class MountEntry {
         this.mountId,
       ),
     )
+  }
+
+  /**
+   * The VFS's batch read, handed what is at each path and at its folder as
+   * the stored listings name them, where it declares them. Mirrors Python's
+   * `_read_many`.
+   */
+  private async batchRead(scopes: PathSpec[], limit: number): Promise<Map<string, Uint8Array>> {
+    const wants = this.wants('readMany')
+    const index = this.index
+    const handed: Handed[] = []
+    for (const scope of scopes) {
+      const one: { -readonly [K in keyof Handed]: Handed[K] } = {}
+      if (wants.includes('entry')) one.entry = await this.entry(scope, index)
+      if (wants.includes('parent')) one.parent = await this.entry(this.folder(scope), index)
+      handed.push(one)
+    }
+    return this.vfs.readMany(scopes, limit, handed)
   }
 
   /**
@@ -1838,7 +1892,6 @@ export class MountEntry {
               this.vfs.searchMany(
                 paths.map((p) => this.scope(p)),
                 query,
-                this.index,
               ),
               this.opTimeout('search'),
               'search',

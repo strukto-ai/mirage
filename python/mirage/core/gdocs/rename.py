@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.gdocs.constants import FILE_NAME
-from mirage.core.gdocs.readdir import readdir
 from mirage.core.gdocs.scope import detect_scope
 from mirage.core.google.rename import make_app_rename
 
-rename = make_app_rename(detect_scope, readdir, FILE_NAME.suffix)
+rename = make_app_rename(detect_scope, FILE_NAME.suffix)

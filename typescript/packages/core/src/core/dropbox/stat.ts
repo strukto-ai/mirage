@@ -16,32 +16,16 @@ import { stripSlash } from '../../utils/slash.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
-import { getMetadata, listFolder, type DropboxEntry } from './api.ts'
-import { dropboxPathOf } from './paths.ts'
-import { MISS_SUMMARIES } from './constants.ts'
+import { listFolder, lookup, type DropboxEntry } from './api.ts'
+import { dropboxPathOf, spelledOtherwise } from './paths.ts'
 import { dropboxPathFromKey, statFromEntry } from './readdir.ts'
 import { enoent } from '../../errors/fs.ts'
 
-// One get_metadata. Only a not_found or not_folder 409 is a miss; any other
-// (restricted_content, ...) names a path that may exist, so a fresh probe must
-// not call it gone. get_metadata matches names case-insensitively where a
-// listing is exact.
+// One get_metadata, which matches names case-insensitively where a listing is
+// exact.
 async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
-  let entry: DropboxEntry
-  try {
-    entry = await getMetadata(accessor.tokenManager, dropboxPathOf(accessor, path))
-  } catch (err) {
-    if (
-      err instanceof DropboxApiError &&
-      err.status === 409 &&
-      MISS_SUMMARIES.some((miss) => err.summary.startsWith(miss))
-    ) {
-      throw enoent(path.virtual)
-    }
-    throw err
-  }
-  const key = stripSlash(path.vfsPath)
-  if (entry.name !== key.slice(key.lastIndexOf('/') + 1)) throw enoent(path.virtual)
+  const entry = await lookup(accessor.tokenManager, dropboxPathOf(accessor, path))
+  if (entry === null || spelledOtherwise(path, entry)) throw enoent(path.virtual)
   return statFromEntry(entry)
 }
 

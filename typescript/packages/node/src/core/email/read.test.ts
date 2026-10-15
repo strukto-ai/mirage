@@ -11,26 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { PathSpec } from '@struktoai/mirage-core/types'
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
+import { FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
-import type * as ProbeModule from '@struktoai/mirage-core/core/hierarchy/probe'
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
   return { ...actual, fetchHeaders: vi.fn() }
 })
-vi.mock('@struktoai/mirage-core/core/hierarchy/probe', async () => {
-  const actual = await vi.importActual<typeof ProbeModule>(
-    '@struktoai/mirage-core/core/hierarchy/probe',
-  )
-  return { ...actual, resolveEntry: vi.fn() }
-})
 
 import type { EmailAccessor } from '../../accessor/email.ts'
 import * as client from './client.ts'
-import * as probe from '@struktoai/mirage-core/core/hierarchy/probe'
 import type { FetchedMessage } from './client.ts'
 import { readMany } from './read.ts'
 import { messageJsonBytes } from './render.ts'
@@ -64,18 +55,18 @@ it('fetches a folder’s messages of a batch at once', async () => {
   // A message the listing sizes past the limit is not fetched.
   const names = new Map(['101', '102'].map((uid) => [`${DAY}/note__${uid}.email.json`, uid]))
   const big = `${DAY}/big__104.email.json`
-  vi.mocked(probe.resolveEntry).mockImplementation((_readdir, _accessor, path) => {
-    const virtual = typeof path === 'string' ? path : path.virtual
-    if (virtual === big) return Promise.resolve({ id: '104', size: 1 << 30 } as never)
-    const uid = names.get(virtual)
-    return Promise.resolve(uid === undefined ? null : ({ id: uid, size: 300 } as never))
-  })
+  const row = (uid: string, size: number): FileStat =>
+    new FileStat({ name: `m__${uid}`, type: FileType.FILE, size, extra: { uid } })
   const fetch = vi.mocked(client.fetchHeaders).mockResolvedValue([message('102'), message('101')])
   const answers = await readMany(
     {} as EmailAccessor,
     [...names.keys(), `${DAY}/gone__103.email.json`, big].map((p) => PathSpec.fromStrPath(p)),
     1 << 20,
-    new RAMIndexCacheStore(),
+    [
+      ...[...names.values()].map((uid) => ({ entry: row(uid, 300) })),
+      {},
+      { entry: row('104', 1 << 30) },
+    ],
   )
   expect(answers).toEqual(
     new Map([...names].map(([path, uid]) => [path, messageJsonBytes(message(uid))])),

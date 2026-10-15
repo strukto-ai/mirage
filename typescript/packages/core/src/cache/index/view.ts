@@ -174,14 +174,15 @@ export class IndexView extends IndexCacheStore {
       if (!this.owns(path)) return { status: LookupStatus.NOT_FOUND }
       const result = await this.inner.listDir(path)
       if (!this.owns(path)) return { status: LookupStatus.NOT_FOUND }
+      // A child of a folder this mount owns is its own too, unless a nested
+      // mount sits at that very name.
+      const nested = new Set(this.excludedPrefixes())
+      const kept = (keys: readonly string[]): string[] =>
+        keys.filter((key) => !nested.has(key) || this.owns(key))
       return {
         ...result,
-        ...(result.entries == null
-          ? {}
-          : { entries: result.entries.filter((key) => this.owns(key)) }),
-        ...(result.partialEntries == null
-          ? {}
-          : { partialEntries: result.partialEntries.filter((key) => this.owns(key)) }),
+        ...(result.entries == null ? {} : { entries: kept(result.entries) }),
+        ...(result.partialEntries == null ? {} : { partialEntries: kept(result.partialEntries) }),
       }
     })
   }

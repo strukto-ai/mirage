@@ -237,33 +237,13 @@ describe('follow', () => {
 
 // Twin of test_a_batch_walks_a_run_of_days_once.
 it('walks a run of days of a batch once', async () => {
-  const idx = new RAMIndexCacheStore()
   const channels = '/mnt/discord/My Server__G1/channels'
-  await idx.setDir(channels, [
-    [
-      'general__C1',
-      new IndexEntry({
-        id: 'C1',
-        name: 'general',
-        resourceType: 'discord/channel',
-        vfsName: 'general__C1',
-      }),
-    ],
-  ])
   const days = ['2024-01-15', '2024-01-16']
-  for (const day of days) {
-    await idx.setDir(`${channels}/general__C1/${day}`, [
-      [
-        'chat.jsonl',
-        new IndexEntry({
-          id: `C1:${day}:chat`,
-          name: 'chat.jsonl',
-          resourceType: 'discord/chat_jsonl',
-          vfsName: 'chat.jsonl',
-        }),
-      ],
-    ])
-  }
+  const chat = new FileStat({
+    name: 'chat.jsonl',
+    type: FileType.FILE,
+    extra: { channel_id: 'C1' },
+  })
   const [onDay, later] = [
     [Date.UTC(2024, 0, 15, 10), 'a'],
     [Date.UTC(2024, 0, 16, 1), 'b'],
@@ -274,7 +254,7 @@ it('walks a run of days of a batch once', async () => {
     new DiscordAccessor(t),
     chats.map((v) => spec(v, '/mnt/discord')),
     1 << 20,
-    idx,
+    chats.map(() => ({ entry: chat })),
   )
   const lines = (body: Uint8Array | undefined): unknown[] =>
     decoder

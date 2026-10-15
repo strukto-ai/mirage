@@ -263,8 +263,8 @@ async function linkedReaddir<A extends Accessor>(
     entries = []
   }
   if (owed.length === 0) return entries
-  const present = new Set(entries.map((entry) => entry.replace(/\/+$/, '')))
-  return [...entries, ...owed.map((n) => `${base}/${n}`).filter((entry) => !present.has(entry))]
+  const present = new Set(entries.map((entry) => gnuBasename(entry.replace(/\/+$/, ''))))
+  return [...entries, ...owed.filter((n) => !present.has(n)).map((n) => `${base}/${n}`)]
 }
 
 async function linkedTree<A extends Accessor>(

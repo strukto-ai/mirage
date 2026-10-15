@@ -21,9 +21,7 @@ vi.mock('./drive.ts', async () => {
 })
 
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { rename } from '../gdocs/rename.ts'
 import type { TokenManager } from './client.ts'
@@ -42,24 +40,20 @@ function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/gdocs') })
 }
 
-async function renamed(dst: string): Promise<RAMIndexCacheStore> {
-  const index = new RAMIndexCacheStore()
-  const entry = new IndexEntry({
-    id: 'doc1',
-    name: 'Old Plan',
-    resourceType: 'gdocs/file',
-    remoteTime: MODIFIED,
-    vfsName: OLD,
+async function renamed(dst: string): Promise<void> {
+  const entry = new FileStat({
+    name: OLD,
+    type: FileType.FILE,
+    modified: MODIFIED,
+    extra: { doc_id: 'doc1', doc_name: 'Old Plan' },
   })
-  await index.setDir('/gdocs/owned', [[OLD, entry]])
   vi.mocked(drive.getFile).mockResolvedValueOnce({
     id: 'doc1',
     name: 'Old Plan',
     modifiedTime: MODIFIED,
   })
   vi.mocked(drive.patchFile).mockClear()
-  await rename(accessor, spec(`/gdocs/owned/${OLD}`), spec(dst), index)
-  return index
+  await rename(accessor, spec(`/gdocs/owned/${OLD}`), spec(dst), entry)
 }
 
 describe('appTitle', () => {
@@ -75,12 +69,11 @@ describe('appTitle', () => {
 
 describe('google app rename', () => {
   it('sets the title and keeps the modified time', async () => {
-    const index = await renamed(`/gdocs/owned/${NEW}`)
+    await renamed(`/gdocs/owned/${NEW}`)
     expect(vi.mocked(drive.patchFile).mock.lastCall?.slice(1)).toEqual([
       'doc1',
       { body: { name: 'New_Plan', modifiedTime: MODIFIED } },
     ])
-    expect((await index.listDir('/gdocs/owned')).entries).toBeUndefined()
   })
 
   it.each(['/gdocs/owned/New_Plan.gdoc.json', `/gdocs/shared/${NEW}`])(

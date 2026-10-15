@@ -15,7 +15,6 @@
 import logging
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gcal.client import list_events
 from mirage.core.gcal.day import day_bounds
 from mirage.core.gcal.readdir import (
@@ -143,7 +142,6 @@ async def read_many(
     accessor: GCalAccessor,
     paths: list[PathSpec],
     limit: int,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, bytes]:
     """Read several event files, listing each day they name once.
 
@@ -156,7 +154,6 @@ async def read_many(
         accessor (GCalAccessor): the mount's accessor.
         paths (list[PathSpec]): the files.
         limit (int): the most bytes worth reading for one file.
-        index (IndexCacheStore): the mount's index cache.
     """
     calendars = await calendar_index(accessor)
     tz = bucket_zone(accessor, calendars)

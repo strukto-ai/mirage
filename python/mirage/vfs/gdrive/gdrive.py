@@ -36,7 +36,13 @@ from mirage.core.gdrive.unlink import unlink as _unlink
 from mirage.core.gdrive.watch import build_delta_hook
 from mirage.core.gdrive.write import write as _write
 from mirage.core.google.client import TokenManager
-from mirage.types import CapacityResult, DirListing, FileStat, PathSpec, VFSName
+from mirage.types import (
+    CapacityResult,
+    DirListing,
+    FileStat,
+    PathSpec,
+    VFSName,
+)
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.prompt import PROMPT
@@ -203,6 +209,7 @@ class GoogleDriveVFS(BaseVFS):
     async def setattr(
         self,
         path: PathSpec,
+        entry: FileStat | None = None,
         *,
         mode: int | None = None,
         uid: int | str | None = None,
@@ -213,6 +220,7 @@ class GoogleDriveVFS(BaseVFS):
         return await _set_attrs(
             self.accessor,
             path,
+            entry,
             mode=mode,
             uid=uid,
             gid=gid,

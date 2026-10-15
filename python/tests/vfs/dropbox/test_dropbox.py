@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage import Mount, MountMode, Workspace
+from mirage import Mount, MountMode, PathSpec, Workspace
 from mirage.vfs.dropbox import DropboxConfig, DropboxVFS
 from mirage.vfs.registry import build_vfs
 from tests.fixtures.dropbox_api import FakeDropbox, serve
@@ -106,14 +107,14 @@ async def test_a_file_created_after_the_listing_is_found(line, after):
 @pytest.mark.parametrize(
     "setup, line, code, routes",
     [
-        ("", "cat /dbx/missing", 1, ["list_folder"]),
+        ("", "cat /dbx/missing", 1, ["get_metadata", "list_folder"]),
         ("", "cat /dbx/f* /dbx/missing", 1, ["list_folder", "download"]),
         ("ls /dbx", "cat /dbx/missing", 1, ["get_metadata"]),
         (
             "",
             "touch /dbx/a /dbx/b /dbx/c",
             0,
-            ["list_folder", "upload"] * 3 + ["list_folder"],
+            ["get_metadata", "upload"] * 3,
         ),
         (
             "",
@@ -133,9 +134,10 @@ async def test_a_file_created_after_the_listing_is_found(line, after):
 async def test_a_miss_asks_dropbox_only_past_an_earlier_listing(
     setup, line, code, routes
 ):
-    # A listing this command fetched, cold, for its own glob or re-listed
-    # after its own write, is live evidence of absence; one an earlier line
-    # left behind is not, and the miss asks once by path.
+    # With no listing stored a miss asks by path, and cat's directory probe
+    # lists the parent. A listing this command fetched for its own glob is
+    # live evidence of absence; one an earlier line left behind is not, and
+    # the miss asks once by path.
     with serve(FakeDropbox(files={"f": b"one\n"})) as dbx:
         ws = _workspace(dbx)
         try:
@@ -166,3 +168,26 @@ async def test_a_miss_outside_a_command_always_asks_dropbox():
         finally:
             await ws.close()
     assert [r for r, _ in dbx.log[start:] if r != "token"] == ["get_metadata"]
+
+
+@pytest.mark.asyncio
+async def test_truncate_with_no_row_keeps_the_file_dropbox_resolves():
+    # Dropbox matches a path without case: with N stored and no row for n,
+    # truncate reads N's bytes and cuts them, where calling it absent
+    # would upload zeros over N.
+    vfs = make_vfs()
+    result = json.dumps({".tag": "file", "name": "N", "content_hash": "h"})
+    write = AsyncMock()
+    with (
+        patch(
+            "mirage.core.dropbox.read.dropbox_download",
+            new_callable=AsyncMock,
+            return_value=(b"abcdef", result),
+        ),
+        patch.object(vfs, "write", write),
+    ):
+        await vfs.truncate(
+            PathSpec(virtual="/n", directory="/", vfs_path="n"), 4
+        )
+    assert write.await_args is not None
+    assert write.await_args.args[1] == b"abcd"

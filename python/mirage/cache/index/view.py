@@ -167,18 +167,21 @@ class IndexView(IndexCacheStore):
             result = await self._store.list_dir(vfs_path)
             if not self._owns(vfs_path):
                 return ListResult(status=LookupStatus.NOT_FOUND)
+            # A child of a folder this mount owns is its own too, unless a
+            # nested mount sits at that very name.
+            nested = set(self._excluded_prefixes())
+
+            def kept(paths: list[str]) -> list[str]:
+                return [p for p in paths if p not in nested or self._owns(p)]
+
             return result.model_copy(
                 update={
                     "entries": None
                     if result.entries is None
-                    else [path for path in result.entries if self._owns(path)],
+                    else kept(result.entries),
                     "partial_entries": None
                     if result.partial_entries is None
-                    else [
-                        path
-                        for path in result.partial_entries
-                        if self._owns(path)
-                    ],
+                    else kept(result.partial_entries),
                 }
             )
 

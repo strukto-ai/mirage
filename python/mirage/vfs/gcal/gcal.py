@@ -88,12 +88,9 @@ class GCalVFS(BaseVFS):
         return slice_window(data, offset, size)
 
     async def read_many(
-        self,
-        paths: list[PathSpec],
-        limit: int,
-        index: IndexCacheStore = NULL_INDEX,
+        self, paths: list[PathSpec], limit: int
     ) -> dict[str, bytes]:
-        return await _read_many(self.accessor, paths, limit, index)
+        return await _read_many(self.accessor, paths, limit)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

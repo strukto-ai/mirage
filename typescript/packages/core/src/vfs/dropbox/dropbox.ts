@@ -25,7 +25,11 @@ import { capacity as dropboxCapacity } from '../../core/dropbox/capacity.ts'
 import type { Handed } from '../types.ts'
 import type { MkdirOp } from '../types.ts'
 import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
-import { read as dropboxRead, readStream as dropboxStream } from '../../core/dropbox/read.ts'
+import {
+  read as dropboxRead,
+  readByPath as dropboxReadByPath,
+  readStream as dropboxStream,
+} from '../../core/dropbox/read.ts'
 import { stat as dropboxStat, tree as dropboxTree } from '../../core/dropbox/stat.ts'
 import { exists as dropboxExists } from '../../core/dropbox/exists.ts'
 import { truncateByRewrite } from '../../core/generic/rewrite.ts'
@@ -127,7 +131,10 @@ export class DropboxVFS extends BaseVFS {
     handed: Handed = {},
   ): Promise<void> {
     return truncateByRewrite(
-      (p) => this.read(p, handed),
+      (p) =>
+        handed.entry === undefined || handed.entry === null
+          ? dropboxReadByPath(this.accessor, p)
+          : this.read(p, handed),
       async (p, d) => {
         await this.write(p, d)
       },

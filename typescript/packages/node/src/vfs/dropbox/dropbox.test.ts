@@ -60,11 +60,12 @@ describe('dropbox listing miss', () => {
     expect(DEC.decode(dbx.read('n'))).toBe(after)
   })
 
-  // A listing this command fetched, cold, for its own glob or re-listed
-  // after its own write, is live evidence of absence; one an earlier line
-  // left behind is not, and the miss asks once by path.
+  // With no listing stored a miss asks by path, and cat's directory probe
+  // lists the parent. A listing this command fetched for its own glob is live
+  // evidence of absence; one an earlier line left behind is not, and the miss
+  // asks once by path.
   it.each([
-    ['cold', '', 'cat /dbx/missing', 1, ['list_folder']],
+    ['cold', '', 'cat /dbx/missing', 1, ['get_metadata', 'list_folder']],
     ['glob-in-this-command', '', 'cat /dbx/f* /dbx/missing', 1, ['list_folder', 'download']],
     ['earlier-line', 'ls /dbx', 'cat /dbx/missing', 1, ['get_metadata']],
     [
@@ -72,7 +73,7 @@ describe('dropbox listing miss', () => {
       '',
       'touch /dbx/a /dbx/b /dbx/c',
       0,
-      ['list_folder', 'upload', 'list_folder', 'upload', 'list_folder', 'upload', 'list_folder'],
+      ['get_metadata', 'upload', 'get_metadata', 'upload', 'get_metadata', 'upload'],
     ],
     [
       'glob-then-append',

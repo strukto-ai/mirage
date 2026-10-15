@@ -2433,7 +2433,7 @@ async def test_a_read_ahead_reads_only_the_files_listed_small():
         await ws.mount("/r/").index.set_dir(
             "/r",
             [
-                (n, IndexEntry(id=n, name=n, resource_type="file", size=s))
+                (n, FileStat(name=n, type=FileType.FILE, size=s))
                 for n, s in [("a", 2), ("big", READ_AHEAD_BYTES + 1)]
             ],
         )
