@@ -297,7 +297,7 @@ export async function failedRead(
   err: unknown,
   execNode: ExecutionNode | null,
 ): Promise<void> {
-  if (!(err instanceof Error) || (err as { code?: string }).code === undefined) throw err
+  if (!(err instanceof Error) || typeof (err as { code?: unknown }).code !== 'string') throw err
   const cmdName = execNode?.command?.split(' ')[0] ?? ''
   io.stderr = concat([
     await materialize(io.stderr),
