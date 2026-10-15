@@ -33,10 +33,13 @@ from mirage.commands.builtin.sed_script import (
     compile_script,
     looks_ahead,
 )
+from mirage.commands.builtin.utils.operands import (
+    materialized_read,
+    normalized_read,
+)
 from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
-    stdin_bytes,
 )
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
@@ -58,7 +61,7 @@ from mirage.shell.bytes import (
     from_byte_view,
     utf8_locale,
 )
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType, PathSpec, PolymorphicReadFn
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
 
@@ -228,7 +231,7 @@ async def sed(
     paths: list[PathSpec],
     script: str | Sequence[SedScriptPiece],
     *,
-    read_bytes: ReadBytes,
+    read_stream: PolymorphicReadFn,
     write_bytes: WriteBytes | None,
     stdin: ByteSource | None = None,
     in_place: bool = False,
@@ -247,7 +250,7 @@ async def sed(
         paths (list[PathSpec]): the resolved operands.
         script (str | Sequence[SedScriptPiece]): one expression, or the
             -e and -f pieces in order.
-        read_bytes (ReadBytes): bound whole-file reader.
+        read_stream (PolymorphicReadFn): bound input reader.
         write_bytes (WriteBytes | None): bound writer, None when the
             backend is read-only.
         stdin (ByteSource | None): the input when there are no operands.
@@ -264,8 +267,8 @@ async def sed(
         utf8 (bool): a UTF-8 locale: the script and the input are
             characters rather than bytes.
     """
-    if not in_place:
-        read_bytes = stdin_bytes(read_bytes, stdin)
+    read_bytes = materialized_read(read_stream)
+    read = normalized_read(read_stream)
     pieces = (
         [SedScriptPiece("expr", script)] if isinstance(script, str) else script
     )
@@ -302,20 +305,6 @@ async def sed(
     inputs: list[SedInput] = []
     if not paths:
         inputs.append(SedInput("-", source=stdin_source))
-    # sed owns its exit code rather than letting the executor's
-    # chokepoint pick it, because GNU sed splits a failed operand two
-    # ways (GNU sed 4.9). An OPEN error (a missing file) is exit 2,
-    # reported when the run reaches it, and the remaining operands still
-    # process: `sed -n p nope ok.txt ok2.txt` prints both files. A READ
-    # error (a directory, which opens fine and then fails) is exit 4 and
-    # FATAL: `sed -n p dir ok.txt` prints nothing and `sed -n p ok.txt dir
-    # ok2.txt` stops after ok.txt. A `q` before an operand means GNU never
-    # opens it, so it is not reported either. The operands after a
-    # directory are still read: the lookahead for `$` opens a directory,
-    # finds no data in it and goes on (`sed -n '$p' ok.txt dir ok2.txt`
-    # prints ok2.txt's last line, exit 0). Only `$`, `n` and `N` look
-    # ahead, and under -s never into the next file, so otherwise nothing
-    # past the directory is read.
     look_ahead = looks_ahead(program) and not separate
     for p in paths:
         if is_stdin(p):
@@ -324,19 +313,18 @@ async def sed(
         if inputs and inputs[-1].fatal and not look_ahead:
             break
         try:
-            data = await read_bytes(p)
+            source = read(p)
         except FS_ERRORS as exc:
-            fatal = isinstance(exc, IsADirectoryError)
             inputs.append(
                 SedInput(
                     p.raw_path,
                     error=fs_error_line("sed", p, exc),
                     code=read_fail_exit_code("sed", exc),
-                    fatal=fatal,
+                    fatal=isinstance(exc, IsADirectoryError),
                 )
             )
-            continue
-        inputs.append(SedInput(p.raw_path, byte_view(data, utf8)))
+        else:
+            inputs.append(SedInput(p.raw_path, source=source))
     io = IOResult()
 
     async def output() -> AsyncIterator[bytes]:
@@ -558,7 +546,7 @@ async def sed_generic(
     texts: list[str],
     opts: CommandOpts,
     resolve_glob: Callable[..., Awaitable[list[PathSpec]]],
-    read_bytes: ReadBytes,
+    read_stream: PolymorphicReadFn,
     write_bytes: WriteBytes | None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run sed over the given operands; mirrors sedGeneric.
@@ -575,10 +563,11 @@ async def sed_generic(
         opts (CommandOpts): Flags, stdin and cwd from the dispatcher.
         resolve_glob (Callable[..., Awaitable[list[PathSpec]]]):
             Expands globs against the backend.
-        read_bytes (ReadBytes): Bound whole-file reader.
+        read_stream (PolymorphicReadFn): Bound input reader.
         write_bytes (WriteBytes | None): Bound writer, None when the
             backend is read-only.
     """
+    read_bytes = materialized_read(read_stream)
     parsed = parse_flags(opts.flags)
     origins = _script_origins(opts.argv, len(parsed.scripts))
     pieces: list[SedScriptPiece] = []
@@ -624,7 +613,7 @@ async def sed_generic(
     return await sed(
         operands,
         pieces,
-        read_bytes=read_bytes,
+        read_stream=read_stream,
         write_bytes=write_bytes,
         stdin=opts.stdin,
         in_place=parsed.in_place,

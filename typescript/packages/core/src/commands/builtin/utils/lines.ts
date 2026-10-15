@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import type { ByteSource } from '../../../io/types.ts'
 // Split text into lines (or `sep`-terminated records), dropping the
 // terminator's trailing empty entry. Mirrors Python's
 // mirage.commands.builtin.utils.lines.split_lines.
@@ -64,4 +66,27 @@ export function joinFileBytes(chunks: readonly Uint8Array[], sep: number): Uint8
     offset += part.byteLength
   }
   return out
+}
+
+export async function* mapStream(
+  source: ByteSource,
+  transform: (line: Uint8Array) => Uint8Array,
+): AsyncIterable<Uint8Array> {
+  const reader = new AsyncLineIterator(source)
+  try {
+    for (;;) {
+      const [line, ended] = await reader.readUntil(10)
+      if (line.length === 0 && !ended) return
+      const data = transform(line)
+      if (!ended) yield data
+      else {
+        const output = new Uint8Array(data.length + 1)
+        output.set(data)
+        output[data.length] = 10
+        yield output
+      }
+    }
+  } finally {
+    await reader.discard()
+  }
 }

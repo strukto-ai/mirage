@@ -1,10 +1,11 @@
-from collections.abc import Awaitable, Callable
-from itertools import cycle, zip_longest
+from collections.abc import AsyncIterator
+from itertools import cycle
 
-from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.stream import is_stdin, read_stdin_async
+from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn
 
 _ESCAPES = {"n": "\n", "t": "\t", "\\": "\\", "0": ""}
 
@@ -50,60 +51,64 @@ def _join_fields(
 async def paste_generic(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     delimiters: str = "\t",
     delimiter: str | None = None,
     serial: bool = False,
     zero_terminated: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    file_lines: list[list[str]] = []
-    remaining_stdin = stdin
-    stdin_slots = [i for i, p in enumerate(paths) if is_stdin(p)]
-    for p in paths:
-        if is_stdin(p):
-            raw = await read_stdin_async(remaining_stdin)
-            data = raw.decode(errors="replace") if raw else ""
-            remaining_stdin = None
-        else:
-            data = (await read_bytes(p)).decode(errors="replace")
-        file_lines.append(
-            data.rstrip("\0").split("\0")
-            if zero_terminated
-            else split_lines(data)
-        )
-
-    if not serial and len(stdin_slots) > 1:
-        records = file_lines[stdin_slots[0]]
-        for column, slot in enumerate(stdin_slots):
-            file_lines[slot] = records[column :: len(stdin_slots)]
-
-    if not file_lines:
-        raw = await read_stdin_async(remaining_stdin)
-        data = raw.decode(errors="replace") if raw is not None else ""
-        file_lines.append(
-            data.rstrip("\0").split("\0")
-            if zero_terminated
-            else split_lines(data)
-        )
-
-    delimiter_sequence = delimiter if delimiter is not None else delimiters
-    delimiter_chars = _decode_delimiters(delimiter_sequence)
-
-    if serial:
-        out_lines = [
-            _join_fields(lines, delimiter_chars) for lines in file_lines
-        ]
-    else:
-        out_lines = [
-            _join_fields(row, delimiter_chars)
-            for row in zip_longest(*file_lines, fillvalue="")
-        ]
-    separator = "\0" if zero_terminated else "\n"
-    output = (
-        (separator.join(out_lines) + separator).encode() if out_lines else b""
+    read = normalized_read(read_stream)
+    shared = AsyncLineIterator(resolve_source(stdin))
+    readers = [
+        shared if is_stdin(p) else AsyncLineIterator(read(p)) for p in paths
+    ] or [shared]
+    chars = _decode_delimiters(
+        delimiter if delimiter is not None else delimiters
     )
-    return output, IOResult()
+    separator = b"\0" if zero_terminated else b"\n"
+    return _paste_stream(readers, chars, serial, separator), IOResult()
+
+
+async def _paste_stream(
+    readers: list[AsyncLineIterator],
+    delimiters: list[str],
+    serial: bool,
+    separator: bytes,
+) -> AsyncIterator[bytes]:
+    try:
+        if serial:
+            for reader in readers:
+                index = 0
+                while (record := await reader.readline(separator)) is not None:
+                    prefix = (
+                        ""
+                        if index == 0
+                        else delimiters[(index - 1) % len(delimiters)]
+                    )
+                    yield (prefix + record.decode(errors="replace")).encode()
+                    index += 1
+                yield separator
+        else:
+            while True:
+                row = [await reader.readline(separator) for reader in readers]
+                if all(record is None for record in row):
+                    return
+                yield (
+                    _join_fields(
+                        [
+                            record.decode(errors="replace")
+                            if record is not None
+                            else ""
+                            for record in row
+                        ],
+                        delimiters,
+                    ).encode()
+                    + separator
+                )
+    finally:
+        for reader in dict.fromkeys(readers):
+            await reader.discard()
 
 
 __all__ = ["paste_generic"]

@@ -1,13 +1,16 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import partial
 
+from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
-    materialized_read,
     merge_split_errors,
+    normalized_read,
+    reported_stream,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    read_stdin_async,
+    resolve_source,
     stdin_stat,
     stdin_stream,
 )
@@ -16,6 +19,7 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -377,26 +381,29 @@ def apply_expand(text: str, tabs: TabStops, initial_only: bool) -> str:
     return _expand_text(text, tabs)
 
 
+def _expand_record(line: bytes, tabs: TabStops, initial_only: bool) -> bytes:
+    return apply_expand(
+        line.decode(errors="replace"), tabs, initial_only
+    ).encode()
+
+
 async def expand(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     tabs: TabStops | None = None,
     initial_only: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    stops = tabs if tabs is not None else TabStops()
-    if paths:
-        # GNU reads its operands as one stream, so a line a file leaves
-        # unfinished continues into the next one, column and all.
-        texts = [(await read_bytes(p)).decode(errors="replace") for p in paths]
-        return apply_expand(
-            "".join(texts), stops, initial_only
-        ).encode(), IOResult()
-
-    raw = await read_stdin_async(stdin) or b""
-    text = raw.decode(errors="replace")
-    return apply_expand(text, stops, initial_only).encode(), IOResult()
+    io = IOResult()
+    read = stdin_stream(read_stream, stdin)
+    sources = [reported_stream(read(p), io, p, "expand") for p in paths]
+    transform = partial(
+        _expand_record, tabs=tabs or TabStops(), initial_only=initial_only
+    )
+    source = async_chain(sources) if paths else resolve_source(stdin)
+    output = map_stream(source, transform)
+    return output, io
 
 
 async def expand_generic(
@@ -428,7 +435,7 @@ async def expand_generic(
     return await merge_split_errors(
         await expand(
             readable,
-            read_bytes=materialized_read(stream),
+            read_stream=normalized_read(stream),
             stdin=opts.stdin,
             tabs=parsed.tabs,
             initial_only=parsed.initial_only,

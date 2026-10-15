@@ -47,7 +47,7 @@ async def sed(
         list(texts),
         opts,
         partial(_resolve, ops, accessor, opts.index),
-        bound_op(ops.read_bytes, accessor, opts.index),
+        bound_op(ops.read_stream, accessor, opts.index),
         (partial(ops.write, accessor) if ops.write is not None else None),
     )
 

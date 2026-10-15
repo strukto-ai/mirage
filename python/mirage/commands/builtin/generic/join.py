@@ -1,9 +1,16 @@
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from enum import Enum
 
-from mirage.commands.builtin.utils.stream import stdin_bytes
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -15,8 +22,9 @@ from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
 )
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn
 
 IDX_MAX = 2**63 - 1
 INTMAX_MIN = -(2**63)
@@ -453,13 +461,6 @@ def _keycmp(left: bytes, right: bytes) -> int:
     return (left > right) - (left < right)
 
 
-def _records(data: bytes, eol: bytes) -> list[bytes]:
-    records = data.split(eol)
-    if records[-1] == b"":
-        records.pop()
-    return records
-
-
 class _Merge:
     """join.c's ``join``: a merge of two inputs read one line at a time.
 
@@ -472,14 +473,14 @@ class _Merge:
     Args:
         flags (JoinFlags): the parsed options.
         names (tuple[bytes, bytes]): each operand as typed.
-        inputs (tuple[list[bytes], list[bytes]]): each file's records.
+        inputs (tuple[AsyncLineIterator, AsyncLineIterator]): each file's records.
     """
 
     def __init__(
         self,
         flags: JoinFlags,
         names: tuple[bytes, bytes],
-        inputs: tuple[list[bytes], list[bytes]],
+        inputs: tuple[AsyncLineIterator, AsyncLineIterator],
     ) -> None:
         self.flags = flags
         self.names = names
@@ -491,13 +492,14 @@ class _Merge:
         self.seen_unpairable = False
         self.fatal = False
         self.autocount = [0, 0]
-        self.out: list[bytes] = []
         self.err: list[bytes] = []
 
-    def get_line(self, which: int) -> _Line | None:
-        if self.fatal or self.read[which] == len(self.inputs[which]):
+    async def get_line(self, which: int) -> _Line | None:
+        if self.fatal:
             return None
-        record = self.inputs[which][self.read[which]]
+        record = await self.inputs[which].readline(self.flags.eol)
+        if record is None:
+            return None
         self.read[which] += 1
         fields = _fields(record, self.flags.tab)
         index = self.fields[which]
@@ -562,9 +564,9 @@ class _Merge:
             if i != self.fields[which]
         ]
 
-    def emit(self, line1: _Line, line2: _Line) -> None:
+    def emit(self, line1: _Line, line2: _Line) -> bytes:
         if self.fatal:
-            return
+            return b""
         lines = (line1, line2)
         if line1 is BLANK:
             key = self.prfield(self.fields[1], line2)
@@ -577,15 +579,13 @@ class _Merge:
             ]
         else:
             parts = [key, *self.prfields(line1, 0), *self.prfields(line2, 1)]
-        self.out.append(
-            self.flags.output_separator.join(parts) + self.flags.eol
-        )
+        return self.flags.output_separator.join(parts) + self.flags.eol
 
-    def first(self, which: int) -> list[_Line]:
-        line = self.get_line(which)
+    async def first(self, which: int) -> list[_Line]:
+        line = await self.get_line(which)
         return [] if line is None else [line]
 
-    def run_of(self, which: int, run: list[_Line], other: _Line) -> bool:
+    async def run_of(self, which: int, run: list[_Line], other: _Line) -> bool:
         """Read file WHICH while it matches OTHER; whether it hit EOF.
 
         Args:
@@ -594,14 +594,16 @@ class _Merge:
             other (_Line): the other file's current line.
         """
         while True:
-            line = self.get_line(which)
+            line = await self.get_line(which)
             if line is None:
                 return True
             run.append(line)
             if _keycmp(line.key, other.key) != 0:
                 return False
 
-    def tail(self, which: int, run: list[_Line]) -> None:
+    async def tail(
+        self, which: int, run: list[_Line]
+    ) -> AsyncGenerator[bytes, None]:
         """Finish the file left over once the other one ended.
 
         Its lines are unpairable, printed under -a or -v, and still read
@@ -622,57 +624,63 @@ class _Merge:
         line: _Line | None = run[0]
         while line is not None:
             if unpairables:
-                self.emit(*((line, BLANK) if which == 0 else (BLANK, line)))
+                yield self.emit(
+                    *((line, BLANK) if which == 0 else (BLANK, line))
+                )
             line = (
                 None
                 if self.warned[which] and not unpairables
-                else self.get_line(which)
+                else await self.get_line(which)
             )
 
-    def run(self) -> None:
-        seq1 = self.first(0)
-        seq2 = self.first(1)
+    async def run(self) -> AsyncGenerator[bytes, None]:
+        seq1 = await self.first(0)
+        seq2 = await self.first(1)
         if self.flags.autoformat:
             self.autocount = [
                 len(seq[0].fields) if seq else 0 for seq in (seq1, seq2)
             ]
         if self.flags.header and (seq1 or seq2):
-            self.emit(seq1[0] if seq1 else BLANK, seq2[0] if seq2 else BLANK)
+            yield self.emit(
+                seq1[0] if seq1 else BLANK, seq2[0] if seq2 else BLANK
+            )
             self.previous = [None, None]
-            seq1 = self.first(0) if seq1 else seq1
-            seq2 = self.first(1) if seq2 else seq2
+            seq1 = await self.first(0) if seq1 else seq1
+            seq2 = await self.first(1) if seq2 else seq2
         while seq1 and seq2:
             diff = _keycmp(seq1[0].key, seq2[0].key)
             if diff < 0:
                 if self.flags.unpairables1:
-                    self.emit(seq1[0], BLANK)
-                seq1 = self.first(0)
+                    yield self.emit(seq1[0], BLANK)
+                seq1 = await self.first(0)
                 self.seen_unpairable = True
                 continue
             if diff > 0:
                 if self.flags.unpairables2:
-                    self.emit(BLANK, seq2[0])
-                seq2 = self.first(1)
+                    yield self.emit(BLANK, seq2[0])
+                seq2 = await self.first(1)
                 self.seen_unpairable = True
                 continue
-            eof1 = self.run_of(0, seq1, seq2[0])
-            eof2 = self.run_of(1, seq2, seq1[0])
+            eof1 = await self.run_of(0, seq1, seq2[0])
+            eof2 = await self.run_of(1, seq2, seq1[0])
             if self.flags.pairables:
                 for line1 in seq1 if eof1 else seq1[:-1]:
                     for line2 in seq2 if eof2 else seq2[:-1]:
-                        self.emit(line1, line2)
+                        yield self.emit(line1, line2)
             seq1 = [] if eof1 else seq1[-1:]
             seq2 = [] if eof2 else seq2[-1:]
-        self.tail(0, seq1)
-        self.tail(1, seq2)
+        async with aclosing(self.tail(0, seq1)) as tail:
+            async for chunk in tail:
+                yield chunk
+        async with aclosing(self.tail(1, seq2)) as tail:
+            async for chunk in tail:
+                yield chunk
 
-    def result(self) -> tuple[bytes, IOResult]:
+    def result(self) -> IOResult:
         stderr = b"".join(self.err)
         if not self.fatal and any(self.warned):
             stderr += b"join: input is not in sorted order\n"
-        return b"".join(self.out), IOResult(
-            stderr=stderr or None, exit_code=1 if stderr else 0
-        )
+        return IOResult(stderr=stderr or None, exit_code=1 if stderr else 0)
 
 
 def _operand_word(path: PathSpec) -> str:
@@ -682,7 +690,7 @@ def _operand_word(path: PathSpec) -> str:
 async def join(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     flags: JoinFlags = JoinFlags(),
 ) -> tuple[ByteSource | None, IOResult]:
@@ -691,7 +699,7 @@ async def join(
     Args:
         paths (list[PathSpec]): the operands, of which ``flags.files``
             names the two files; ``-`` reads stdin.
-        read_bytes (Callable): reads one operand's bytes.
+        read_stream (PolymorphicReadFn): reads one operand's bytes.
         stdin (ByteSource | None): the line's input.
         flags (JoinFlags): the options, from ``parse_flags``.
     """
@@ -704,16 +712,29 @@ async def join(
         return None, IOResult(
             exit_code=1, stderr=b"join: both files cannot be standard input\n"
         )
-    read = stdin_bytes(read_bytes, stdin)
-    data1 = await read(file1)
-    data2 = await read(file2)
+    read = stdin_stream(read_stream, stdin)
+    readers = (AsyncLineIterator(read(file1)), AsyncLineIterator(read(file2)))
     merge = _Merge(
         flags,
         (_raw(_operand_word(file1)), _raw(_operand_word(file2))),
-        (_records(data1, flags.eol), _records(data2, flags.eol)),
+        readers,
     )
-    merge.run()
-    return merge.result()
+    io = IOResult()
+    return _join_stream(merge, io), io
+
+
+async def _join_stream(
+    merge: _Merge, io: IOResult
+) -> AsyncGenerator[bytes, None]:
+    try:
+        async with aclosing(merge.run()) as source:
+            async for chunk in source:
+                yield chunk
+    finally:
+        result = merge.result()
+        io.exit_code, io.stderr = result.exit_code, result.stderr
+        for reader in merge.inputs:
+            await reader.discard()
 
 
 async def join_generic(
@@ -721,7 +742,7 @@ async def join_generic(
     texts: list[str],
     opts: CommandOpts,
     resolve_glob: Callable[[list[PathSpec]], Awaitable[list[PathSpec]]],
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
     """The builder's entry point: parse the line's flags, then ``join``.
 
@@ -733,7 +754,7 @@ async def join_generic(
         texts (list[str]): unused; join takes no text operands.
         opts (CommandOpts): the line's flags, stdin and words.
         resolve_glob (Callable): expands globs against the backend.
-        read_bytes (Callable): reads one operand's bytes.
+        read_stream (PolymorphicReadFn): reads one operand's bytes.
     """
     groups = [await resolve_glob([path]) for path in paths]
     resolved = [path for group in groups for path in group]
@@ -743,7 +764,7 @@ async def join_generic(
     )
     return await join(
         resolved,
-        read_bytes=read_bytes,
+        read_stream=read_stream,
         stdin=opts.stdin,
         flags=parse_flags(
             flags, [_operand_word(path) for path in resolved], opts.argv

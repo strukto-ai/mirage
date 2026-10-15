@@ -302,19 +302,6 @@ export async function sedGeneric(
   if (paths.length === 0) {
     inputs.push({ name: '-', source: stdinSource })
   }
-  // sed owns its exit code rather than letting the executor's chokepoint
-  // pick it, because GNU sed splits a failed operand two ways (GNU sed
-  // 4.9). An OPEN error (a missing file) is exit 2, reported when the run
-  // reaches it, and the remaining operands still process: `sed -n p nope
-  // ok.txt ok2.txt` prints both files. A READ error (a directory, which
-  // opens fine and then fails) is exit 4 and FATAL: `sed -n p dir ok.txt`
-  // prints nothing and `sed -n p ok.txt dir ok2.txt` stops after ok.txt.
-  // A `q` before an operand means GNU never opens it, so it is not
-  // reported either. The operands after a directory are still read: the
-  // lookahead for `$` opens a directory, finds no data in it and goes on
-  // (`sed -n '$p' ok.txt dir ok2.txt` prints ok2.txt's last line, exit 0).
-  // Only `$`, `n` and `N` look ahead, and under -s never into the next
-  // file, so otherwise nothing past the directory is read.
   const lookAhead = looksAhead(program) && !parsed.separate
   for (const p of paths) {
     if (isStdin(p)) {
@@ -324,15 +311,14 @@ export async function sedGeneric(
     const last = inputs.at(-1)
     if (last !== undefined && 'fatal' in last && last.fatal && !lookAhead) break
     try {
-      inputs.push({ name: p.rawPath, text: byteView(await materialize(stream(p)), utf8) })
-    } catch (e) {
-      if (!isFsError(e)) throw e
-      const fatal = (e as { code?: string }).code === 'EISDIR'
+      inputs.push({ name: p.rawPath, source: stream(p) })
+    } catch (error) {
+      if (!isFsError(error)) throw error
       inputs.push({
         name: p.rawPath,
-        error: fsErrorLine('sed', p, e),
-        code: readFailExitCode('sed', e),
-        fatal,
+        error: fsErrorLine('sed', p, error),
+        code: readFailExitCode('sed', error),
+        fatal: (error as { code?: string }).code === 'EISDIR',
       })
     }
   }

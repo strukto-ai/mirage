@@ -8,6 +8,7 @@ from mirage.commands.builtin.generic.join import (
 )
 from mirage.commands.errors import UsageError
 from mirage.core.ram.write import write
+from mirage.io.stream import close_quietly
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -114,4 +115,30 @@ async def test_cross_mount_relay_reads_every_flag():
 @pytest.mark.asyncio
 async def test_join_refuses_a_missing_file():
     with pytest.raises(UsageError, match="missing operand after '/a'"):
-        await join([PathSpec.from_str_path("/a")], read_bytes=_drain)
+        await join([PathSpec.from_str_path("/a")], read_stream=_drain)
+
+
+@pytest.mark.asyncio
+async def test_first_output_closes_inputs_without_reading_the_tail():
+    opened = []
+    closed = []
+
+    async def source(path):
+        opened.append(path.virtual)
+        try:
+            yield b"a 1\nb 2\n"
+            raise AssertionError(
+                "stream fetched the tail before its first output"
+            )
+        finally:
+            closed.append(path.virtual)
+
+    paths = [PathSpec.from_str_path(f"/input{i}") for i in range(2)]
+    output, io = await join(paths, read_stream=source)
+    try:
+        assert await anext(output) == b"a 1 1\n"
+    finally:
+        await close_quietly(output)
+    assert len(opened) == 2
+    assert sorted(closed) == sorted(opened)
+    assert io.exit_code == 0

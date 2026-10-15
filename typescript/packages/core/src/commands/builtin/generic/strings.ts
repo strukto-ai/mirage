@@ -18,29 +18,36 @@ import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync, stdinStream } from '../utils/stream.ts'
-import { operandsIo, readOperands } from '../utils/operands.ts'
+import { stdinStream } from '../utils/stream.ts'
+import { reportedStream } from '../utils/operands.ts'
+import { asyncChain } from '../../../io/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
 
-const ENC = new TextEncoder()
-
-function extractStrings(data: Uint8Array, minLen: number): string[] {
-  const out: string[] = []
-  let current: number[] = []
-  for (let i = 0; i < data.byteLength; i++) {
-    const b = data[i] ?? 0
-    if (b >= 0x20 && b <= 0x7e) {
-      current.push(b)
-    } else {
-      if (current.length >= minLen) {
-        out.push(String.fromCharCode(...current))
+async function* stringsStream(source: ByteSource, minLen: number): AsyncIterable<Uint8Array> {
+  let prefix: number[] = []
+  let printing = false
+  for await (const data of chunks(source)) {
+    const output: number[] = []
+    for (const byte of data) {
+      if (byte >= 32 && byte <= 126) {
+        if (printing) output.push(byte)
+        else {
+          prefix.push(byte)
+          if (prefix.length >= minLen) {
+            for (const byte of prefix) output.push(byte)
+            prefix = []
+            printing = true
+          }
+        }
+      } else {
+        if (printing) output.push(10)
+        prefix = []
+        printing = false
       }
-      current = []
     }
+    if (output.length > 0) yield new Uint8Array(output)
   }
-  if (current.length >= minLen) {
-    out.push(String.fromCharCode(...current))
-  }
-  return out
+  if (printing) yield new Uint8Array([10])
 }
 
 interface StringsFlags {
@@ -52,33 +59,20 @@ function parseFlags(bag: Record<string, FlagValue>): StringsFlags {
   return { minLen: fl.asInt('n') ?? 4 }
 }
 
-export async function stringsGeneric(
+export function stringsGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   // binutils strings never reads `-` as stdin; only /dev/stdin is.
   stream = stdinStream(stream, opts.stdin, false, false)
   const { minLen } = parseFlags(opts.flags)
-  // Each operand is scanned independently and the matches concatenate in
-  // operand order, like GNU strings.
-  if (paths.length > 0) {
-    // A missing operand is reported and skipped; the remaining operands
-    // still scan (GNU strings).
-    const [ok, err] = await readOperands(paths, stream, 'strings')
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    let output = ''
-    for (const o of ok) {
-      const matches = extractStrings(o.data, minLen)
-      if (matches.length > 0) output += matches.join('\n') + '\n'
-    }
-    const result: ByteSource = ENC.encode(output)
-    return [result, io]
-  }
-  const stdinData = await readStdinAsync(opts.stdin)
-  const matches = extractStrings(stdinData ?? new Uint8Array(0), minLen)
-  const output = matches.length > 0 ? matches.join('\n') + '\n' : ''
-  const result: ByteSource = ENC.encode(output)
-  return [result, new IOResult()]
+  const io = new IOResult()
+  const sources = paths.map((p) =>
+    reportedStream(stringsStream(stream(p), minLen), io, p, 'strings'),
+  )
+  return [
+    paths.length > 0 ? asyncChain(sources) : stringsStream(opts.stdin ?? new Uint8Array(), minLen),
+    io,
+  ]
 }

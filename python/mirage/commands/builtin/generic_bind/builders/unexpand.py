@@ -38,7 +38,7 @@ async def unexpand(
         list(texts),
         opts,
         dir_aware_stat(ops, accessor, opts),
-        bound_op(ops.read_bytes, accessor, opts.index),
+        bound_op(ops.read_stream, accessor, opts.index),
     )
 
 

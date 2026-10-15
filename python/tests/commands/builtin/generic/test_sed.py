@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.sed import sed
+from mirage.io.stream import close_quietly
 from mirage.io.types import materialize
 from mirage.types import PathSpec
 
@@ -54,7 +55,7 @@ async def test_sed_scripts_over_stdin(script, stdin, out):
     # address keeps its escapes, delimiters included.
     rb, wb, _ = _make_backend({})
     output, _ = await sed(
-        [], script, read_bytes=rb, write_bytes=wb, stdin=stdin
+        [], script, read_stream=rb, write_bytes=wb, stdin=stdin
     )
     assert await materialize(output) == out
 
@@ -77,7 +78,7 @@ async def test_sed_scripts_over_stdin(script, stdin, out):
 async def test_sed_refuses_a_script(script, message):
     rb, wb, _ = _make_backend({})
     output, io = await sed(
-        [], script, read_bytes=rb, write_bytes=wb, stdin=b"a\n"
+        [], script, read_stream=rb, write_bytes=wb, stdin=b"a\n"
     )
     assert output is None
     assert io.exit_code == 1
@@ -90,7 +91,7 @@ async def test_sed_inplace_transliterate_writes_file():
     output, _ = await sed(
         [_spec("/a.txt")],
         "y/o/0/",
-        read_bytes=rb,
+        read_stream=rb,
         write_bytes=wb,
         in_place=True,
     )
@@ -119,7 +120,7 @@ async def test_sed_reads_nothing_after_a_directory(script, separate, out):
     output, io = await sed(
         [_spec("/f"), _spec("/d"), _spec("/g")],
         script,
-        read_bytes=read,
+        read_stream=read,
         write_bytes=wb,
         suppress=True,
         separate=separate,
@@ -136,7 +137,7 @@ async def test_reached_writes_and_status_survive_early_output_close(
 ):
     rb, wb, store = _make_backend({})
     output, io = await sed(
-        [], script, read_bytes=rb, write_bytes=wb, stdin=b"x\n"
+        [], script, read_stream=rb, write_bytes=wb, stdin=b"x\n"
     )
     assert await anext(output) == b"x\n"
     await output.aclose()
@@ -150,9 +151,37 @@ async def test_repeated_stdin_operands_share_one_byte_cursor():
     output, io = await sed(
         [_spec("-"), _spec("-")],
         "",
-        read_bytes=rb,
+        read_stream=rb,
         write_bytes=wb,
         stdin=b"x\n",
     )
     assert await materialize(output) == b"x\n"
+    assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_first_output_closes_inputs_without_reading_the_tail():
+    opened = []
+    closed = []
+
+    async def source(path):
+        opened.append(path.virtual)
+        try:
+            yield b"first\n"
+            raise AssertionError(
+                "stream fetched the tail before its first output"
+            )
+        finally:
+            closed.append(path.virtual)
+
+    paths = [PathSpec.from_str_path(f"/input{i}") for i in range(1)]
+    output, io = await sed(
+        paths, "s/first/yes/", read_stream=source, write_bytes=None
+    )
+    try:
+        assert await anext(output) == b"yes\n"
+    finally:
+        await close_quietly(output)
+    assert len(opened) == 1
+    assert sorted(closed) == sorted(opened)
     assert io.exit_code == 0

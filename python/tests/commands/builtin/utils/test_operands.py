@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from mirage.commands.builtin.utils.operands import (
@@ -22,6 +24,7 @@ from mirage.commands.builtin.utils.operands import (
     read_operands,
     split_readable,
 )
+from mirage.io.stream import close_quietly
 from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -50,6 +53,36 @@ def _read_over(files: dict[str, bytes]):
         yield files[path.virtual]
 
     return read
+
+
+@pytest.mark.asyncio
+async def test_normalized_read_defers_coroutines_for_unused_operands():
+    read = AsyncMock(return_value=b"first\n")
+    stream = normalized_read(read)
+    path = PathSpec.from_str_path("/input")
+    unused = stream(path)
+    await close_quietly(unused)
+    read.assert_not_called()
+    assert [part async for part in stream(path)] == [b"first\n"]
+    read.assert_awaited_once_with(path)
+
+
+@pytest.mark.asyncio
+async def test_normalized_read_closes_an_awaited_producer():
+    closed = []
+
+    async def producer():
+        try:
+            yield b"first\n"
+            raise AssertionError("consumer fetched the tail")
+        finally:
+            closed.append(True)
+
+    read = AsyncMock(return_value=producer())
+    output = normalized_read(read)(PathSpec.from_str_path("/input"))
+    assert await anext(output) == b"first\n"
+    await close_quietly(output)
+    assert closed == [True]
 
 
 @pytest.mark.asyncio

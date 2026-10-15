@@ -25,10 +25,14 @@ from mirage.commands.builtin.sed_script import (
     SedRegex,
     sed_regex_flags,
 )
+from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
 from mirage.shell.bytes import byte_view, from_byte_view, text_view
+from mirage.types import PathSpec
 from mirage.utils.posix import compile_posix_regex
 
 SED_LINE_LENGTH = 70
@@ -429,12 +433,28 @@ class SedMachine:
             return True
         return False
 
-    async def _more(self) -> bool:
+    async def _more(self, ignore_fatal: bool = False) -> bool:
         if self._next_line is not None:
             return True
         if self._reader is None:
             return False
-        raw, chomped = await self._reader.read_until(b"\n")
+        try:
+            raw, chomped = await self._reader.read_until(b"\n")
+        except FS_ERRORS as exc:
+            await self._reader.discard()
+            self._reader = None
+            message = fs_error_line(
+                "sed", PathSpec.from_str_path(self._file_name), exc
+            )
+            if isinstance(exc, IsADirectoryError):
+                if not ignore_fatal:
+                    raise SedPanic(message) from exc
+            else:
+                self.stderr_lines.append(message)
+                self.bad_code = max(
+                    self.bad_code, read_fail_exit_code("sed", exc)
+                )
+            return False
         if raw or chomped:
             self._next_line = _InputLine(
                 byte_view(raw, self.opts.utf8), chomped
@@ -475,7 +495,7 @@ class SedMachine:
         if self.opts.separate:
             return True
         while self._open_next_file(ignore_fatal=True):
-            if await self._more():
+            if await self._more(ignore_fatal=True):
                 return False
         return True
 

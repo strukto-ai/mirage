@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND, SPELLED } from '../../spec/constants.ts'
 import { FlagView, spreadOperands } from '../../spec/flag_view.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
@@ -373,12 +374,6 @@ function keycmp(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
 
-function splitRecords(data: string, eol: string): string[] {
-  const records = data.split(eol)
-  if (records[records.length - 1] === '') records.pop()
-  return records
-}
-
 /**
  * join.c's `join`: a merge of two inputs read one line at a time.
  *
@@ -396,21 +391,21 @@ class Merge {
   private seenUnpairable = false
   private fatal = false
   private autocount: [number, number] = [0, 0]
-  private readonly out: string[] = []
   private readonly err: string[] = []
 
   constructor(
     private readonly flags: JoinFlags,
     private readonly names: readonly [string, string],
-    private readonly inputs: readonly [string[], string[]],
+    readonly inputs: readonly [AsyncLineIterator, AsyncLineIterator],
   ) {
     this.fields = [flags.field1, flags.field2]
   }
 
-  private getLine(which: 0 | 1): Line | null {
-    const records = this.inputs[which]
-    if (this.fatal || this.read[which] === records.length) return null
-    const record = records[this.read[which]] ?? ''
+  private async getLine(which: 0 | 1): Promise<Line | null> {
+    if (this.fatal) return null
+    const raw = await this.inputs[which].readline(undefined, this.flags.eol.charCodeAt(0))
+    if (raw === null) return null
+    const record = byteView(raw)
     this.read[which] += 1
     const fields = splitFields(record, this.flags.tab)
     const key = fields[this.fields[which]] ?? ''
@@ -454,8 +449,8 @@ class Merge {
     return parts
   }
 
-  private emit(line1: Line, line2: Line): void {
-    if (this.fatal) return
+  private emit(line1: Line, line2: Line): Uint8Array {
+    if (this.fatal) return new Uint8Array()
     const key =
       line1 === BLANK ? this.prfield(this.fields[1], line2) : this.prfield(this.fields[0], line1)
     const parts =
@@ -464,18 +459,18 @@ class Merge {
             file === 0 ? key : this.prfield(index, file === 1 ? line1 : line2),
           )
         : [key, ...this.prfields(line1, 0), ...this.prfields(line2, 1)]
-    this.out.push(parts.join(this.flags.outputSeparator) + this.flags.eol)
+    return fromByteView(parts.join(this.flags.outputSeparator) + this.flags.eol)
   }
 
-  private first(which: 0 | 1): Line[] {
-    const line = this.getLine(which)
+  private async first(which: 0 | 1): Promise<Line[]> {
+    const line = await this.getLine(which)
     return line === null ? [] : [line]
   }
 
   // Read file WHICH while it matches OTHER; whether it hit EOF.
-  private runOf(which: 0 | 1, run: Line[], other: Line): boolean {
+  private async runOf(which: 0 | 1, run: Line[], other: Line): Promise<boolean> {
     for (;;) {
-      const line = this.getLine(which)
+      const line = await this.getLine(which)
       if (line === null) return true
       run.push(line)
       if (keycmp(line.key, other.key) !== 0) return false
@@ -486,7 +481,7 @@ class Merge {
   // unpairable, printed under -a or -v, and still read for the order check
   // unless --nocheck-order, though they never count as unpairable for the
   // default check themselves.
-  private tail(which: 0 | 1, run: readonly Line[]): void {
+  private async *tail(which: 0 | 1, run: readonly Line[]): AsyncIterable<Uint8Array> {
     const unpairables = which === 0 ? this.flags.unpairables1 : this.flags.unpairables2
     const checktail =
       this.flags.checkOrder !== CheckOrder.DISABLED && !(this.warned[0] && this.warned[1])
@@ -494,24 +489,24 @@ class Merge {
     if (line === null || !(unpairables || checktail)) return
     while (line !== null) {
       if (unpairables) {
-        if (which === 0) this.emit(line, BLANK)
-        else this.emit(BLANK, line)
+        if (which === 0) yield this.emit(line, BLANK)
+        else yield this.emit(BLANK, line)
       }
-      line = this.warned[which] && !unpairables ? null : this.getLine(which)
+      line = this.warned[which] && !unpairables ? null : await this.getLine(which)
     }
   }
 
-  run(): void {
-    let seq1 = this.first(0)
-    let seq2 = this.first(1)
+  async *run(): AsyncIterable<Uint8Array> {
+    let seq1 = await this.first(0)
+    let seq2 = await this.first(1)
     if (this.flags.autoformat) {
       this.autocount = [seq1[0]?.fields.length ?? 0, seq2[0]?.fields.length ?? 0]
     }
     if (this.flags.header && (seq1.length > 0 || seq2.length > 0)) {
-      this.emit(seq1[0] ?? BLANK, seq2[0] ?? BLANK)
+      yield this.emit(seq1[0] ?? BLANK, seq2[0] ?? BLANK)
       this.previous = [null, null]
-      if (seq1.length > 0) seq1 = this.first(0)
-      if (seq2.length > 0) seq2 = this.first(1)
+      if (seq1.length > 0) seq1 = await this.first(0)
+      if (seq2.length > 0) seq2 = await this.first(1)
     }
     for (;;) {
       const head1 = seq1[0]
@@ -519,43 +514,40 @@ class Merge {
       if (head1 === undefined || head2 === undefined) break
       const diff = keycmp(head1.key, head2.key)
       if (diff < 0) {
-        if (this.flags.unpairables1) this.emit(head1, BLANK)
-        seq1 = this.first(0)
+        if (this.flags.unpairables1) yield this.emit(head1, BLANK)
+        seq1 = await this.first(0)
         this.seenUnpairable = true
         continue
       }
       if (diff > 0) {
-        if (this.flags.unpairables2) this.emit(BLANK, head2)
-        seq2 = this.first(1)
+        if (this.flags.unpairables2) yield this.emit(BLANK, head2)
+        seq2 = await this.first(1)
         this.seenUnpairable = true
         continue
       }
-      const eof1 = this.runOf(0, seq1, head2)
-      const eof2 = this.runOf(1, seq2, head1)
+      const eof1 = await this.runOf(0, seq1, head2)
+      const eof2 = await this.runOf(1, seq2, head1)
       if (this.flags.pairables) {
         for (const line1 of eof1 ? seq1 : seq1.slice(0, -1)) {
-          for (const line2 of eof2 ? seq2 : seq2.slice(0, -1)) this.emit(line1, line2)
+          for (const line2 of eof2 ? seq2 : seq2.slice(0, -1)) yield this.emit(line1, line2)
         }
       }
       seq1 = eof1 ? [] : seq1.slice(-1)
       seq2 = eof2 ? [] : seq2.slice(-1)
     }
-    this.tail(0, seq1)
-    this.tail(1, seq2)
+    yield* this.tail(0, seq1)
+    yield* this.tail(1, seq2)
   }
 
-  result(): [ByteSource, IOResult] {
+  result(): IOResult {
     let stderr = this.err.join('')
     if (!this.fatal && (this.warned[0] || this.warned[1])) {
       stderr += 'join: input is not in sorted order\n'
     }
-    return [
-      fromByteView(this.out.join('')),
-      new IOResult({
-        stderr: stderr === '' ? null : fromByteView(stderr),
-        exitCode: stderr === '' ? 0 : 1,
-      }),
-    ]
+    return new IOResult({
+      stderr: stderr === '' ? null : fromByteView(stderr),
+      exitCode: stderr === '' ? 0 : 1,
+    })
   }
 }
 
@@ -570,7 +562,7 @@ export interface JoinIO {
  * operands, of which `flags.files` names the two files. Mirrors join in
  * join.py.
  */
-export async function join(paths: PathSpec[], io: JoinIO): Promise<[ByteSource | null, IOResult]> {
+export function join(paths: PathSpec[], io: JoinIO): [ByteSource | null, IOResult] {
   const p1 = paths[io.flags.files[0]]
   const p2 = paths[io.flags.files[1]]
   if (p1 === undefined || p2 === undefined) {
@@ -586,15 +578,21 @@ export async function join(paths: PathSpec[], io: JoinIO): Promise<[ByteSource |
     ]
   }
   const stream = stdinStream(io.read, io.stdin)
-  const data1 = byteView(await materialize(stream(p1)))
-  const data2 = byteView(await materialize(stream(p2)))
-  const merge = new Merge(
-    io.flags,
-    [byteView(p1.rawPath), byteView(p2.rawPath)],
-    [splitRecords(data1, io.flags.eol), splitRecords(data2, io.flags.eol)],
-  )
-  merge.run()
-  return merge.result()
+  const readers = [new AsyncLineIterator(stream(p1)), new AsyncLineIterator(stream(p2))] as const
+  const merge = new Merge(io.flags, [byteView(p1.rawPath), byteView(p2.rawPath)], readers)
+  const result = new IOResult()
+  return [joinStream(merge, result), result]
+}
+
+async function* joinStream(merge: Merge, io: IOResult): AsyncIterable<Uint8Array> {
+  try {
+    yield* merge.run()
+  } finally {
+    const result = merge.result()
+    io.exitCode = result.exitCode
+    io.stderr = result.stderr
+    for (const reader of merge.inputs) await reader.discard()
+  }
 }
 
 /**

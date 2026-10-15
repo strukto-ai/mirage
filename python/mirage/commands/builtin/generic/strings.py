@@ -1,14 +1,15 @@
-import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import (
-    materialized_read,
     merge_split_errors,
+    normalized_read,
+    reported_stream,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    read_stdin_async,
+    resolve_source,
     stdin_stat,
     stdin_stream,
 )
@@ -16,6 +17,8 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.cooperative import chunks
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -31,29 +34,53 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> StringsFlags:
     return StringsFlags(min_len=int(n_raw) if n_raw else 4)
 
 
+async def _strings_stream(
+    source: ByteSource, min_len: int
+) -> AsyncIterator[bytes]:
+    prefix = bytearray()
+    printing = False
+    async with aclosing(chunks(source)) as source_chunks:
+        async for data in source_chunks:
+            output = bytearray()
+            for byte in data:
+                if 32 <= byte <= 126:
+                    if printing:
+                        output.append(byte)
+                    else:
+                        prefix.append(byte)
+                        if len(prefix) >= min_len:
+                            output.extend(prefix)
+                            prefix.clear()
+                            printing = True
+                else:
+                    if printing:
+                        output.append(10)
+                    prefix.clear()
+                    printing = False
+            if output:
+                yield bytes(output)
+    if printing:
+        yield b"\n"
+
+
 async def strings(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     min_len: int = 4,
 ) -> tuple[ByteSource | None, IOResult]:
-    pattern = rb"[\x20-\x7e]{" + str(min_len).encode() + rb",}"
-    # Each operand is scanned independently and the matches concatenate in
-    # operand order, like GNU strings.
-    if paths:
-        parts: list[bytes] = []
-        for p in paths:
-            matches = re.findall(pattern, await read_bytes(p))
-            if matches:
-                parts.append(b"\n".join(matches) + b"\n")
-        return b"".join(parts), IOResult()
-    raw = await read_stdin_async(stdin)
-    if raw is None:
-        raw = b""
-    matches = re.findall(pattern, raw)
-    output = b"\n".join(matches) + b"\n" if matches else b""
-    return output, IOResult()
+    io = IOResult()
+    read = stdin_stream(read_stream, stdin, dash=False)
+    sources = [
+        reported_stream(_strings_stream(read(p), min_len), io, p, "strings")
+        for p in paths
+    ]
+    return (
+        async_chain(sources)
+        if paths
+        else _strings_stream(resolve_source(stdin), min_len)
+    ), io
 
 
 async def strings_generic(
@@ -83,7 +110,7 @@ async def strings_generic(
     return await merge_split_errors(
         await strings(
             readable,
-            read_bytes=materialized_read(stream),
+            read_stream=normalized_read(stream),
             stdin=opts.stdin,
             min_len=parsed.min_len,
         ),

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -45,7 +46,7 @@ async function run(
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and expand never answers that way, so say so rather than
   // destructure a union.
-  const result = await expandGeneric([], opts, stubStream)
+  const result = expandGeneric([], opts, stubStream)
   if (result === null) throw new Error('expand declined to handle its own operands')
   const [out, io] = result
   return {
@@ -491,4 +492,34 @@ describe('a misplaced specifier does not end the scan', () => {
   ])('-t %j ends it', (list, message) => {
     expect(parseTabStops([list])).toBe(message)
   })
+})
+
+it('emits before fetching the tail and closes every input', async () => {
+  const opened: string[] = [],
+    closed: string[] = []
+  async function* source(path: PathSpec): AsyncIterable<Uint8Array> {
+    opened.push(path.virtual)
+    try {
+      yield await Promise.resolve(new Uint8Array([97, 9, 98, 10]))
+      throw new Error('stream fetched the tail before its first output')
+    } finally {
+      closed.push(path.virtual)
+    }
+  }
+  const paths = Array.from({ length: 1 }, (_, i) => PathSpec.fromStrPath(`/input${String(i)}`))
+  const result = expandGeneric(paths, { stdin: null, flags: {}, cwd: '/' }, source)
+  if (result === null) throw new Error('missing result')
+  const [output, io] = result
+  if (output === null || output instanceof Uint8Array) throw new Error('expected stream')
+  const iterator = output[Symbol.asyncIterator]()
+  try {
+    expect((await iterator.next()).value).toEqual(
+      new Uint8Array([97, 32, 32, 32, 32, 32, 32, 32, 98, 10]),
+    )
+  } finally {
+    await iterator.return?.()
+  }
+  expect(opened).toHaveLength(1)
+  expect(closed.sort()).toEqual(opened.sort())
+  expect(io.exitCode).toBe(0)
 })

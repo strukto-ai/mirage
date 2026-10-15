@@ -15,24 +15,13 @@
 import { isStdin } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-function splitLinesNoEnds(text: string): string[] {
-  const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
-  return stripped === '' ? [] : stripped.split('\n')
-}
-
-function splitRecords(text: string, zeroTerminated: boolean): string[] {
-  if (!zeroTerminated) return splitLinesNoEnds(text)
-  const stripped = text.replace(/\0$/, '')
-  return stripped === '' ? [] : stripped.split('\0')
-}
 
 const ESCAPES: Record<string, string> = { n: '\n', t: '\t', '\\': '\\', '0': '' }
 
@@ -65,57 +54,57 @@ function joinFields(fields: readonly string[], delimiters: readonly string[]): s
   return output
 }
 
-export async function pasteGeneric(
+export function pasteGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   const fl = new FlagView(opts.flags, specOf('paste'))
   const delimiterValue = fl.asStr('delimiters')
   const delimiters = decodeDelimiters(typeof delimiterValue === 'string' ? delimiterValue : '\t')
   const serial = fl.asBool('serial')
   const zeroTerminated = fl.asBool('zero_terminated')
-  const fileLines: string[][] = []
-  let stdinConsumed = false
-  const stdinSlots = paths.flatMap((p, i) => (isStdin(p) ? [i] : []))
-  for (const p of paths) {
-    if (isStdin(p)) {
-      const raw = stdinConsumed ? null : await readStdinAsync(opts.stdin)
-      stdinConsumed = true
-      fileLines.push(splitRecords(raw !== null ? DEC.decode(raw) : '', zeroTerminated))
+  const shared = new AsyncLineIterator(opts.stdin ?? new Uint8Array())
+  const readers =
+    paths.length === 0
+      ? [shared]
+      : paths.map((p) => (isStdin(p) ? shared : new AsyncLineIterator(stream(p))))
+  return [pasteStream(readers, delimiters, serial, zeroTerminated ? 0 : 10), new IOResult()]
+}
+
+async function* pasteStream(
+  readers: AsyncLineIterator[],
+  delimiters: string[],
+  serial: boolean,
+  separator: number,
+): AsyncIterable<Uint8Array> {
+  try {
+    if (serial) {
+      for (const reader of readers) {
+        let index = 0
+        for (;;) {
+          const record = await reader.readline(undefined, separator)
+          if (record === null) break
+          const prefix = index === 0 ? '' : (delimiters[(index - 1) % delimiters.length] ?? '')
+          yield ENC.encode(prefix + DEC.decode(record))
+          index += 1
+        }
+        yield new Uint8Array([separator])
+      }
     } else {
-      const data = await materialize(stream(p))
-      fileLines.push(splitRecords(DEC.decode(data), zeroTerminated))
+      for (;;) {
+        const row: (Uint8Array | null)[] = []
+        for (const reader of readers) row.push(await reader.readline(undefined, separator))
+        if (row.every((record) => record === null)) return
+        yield ENC.encode(
+          joinFields(
+            row.map((record) => (record === null ? '' : DEC.decode(record))),
+            delimiters,
+          ) + String.fromCharCode(separator),
+        )
+      }
     }
+  } finally {
+    for (const reader of new Set(readers)) await reader.discard()
   }
-  if (!serial && stdinSlots.length > 1) {
-    const records = fileLines[stdinSlots[0] ?? 0] ?? []
-    for (const [column, slot] of stdinSlots.entries()) {
-      fileLines[slot] = records.filter((_, i) => i % stdinSlots.length === column)
-    }
-  }
-  if (fileLines.length === 0 && !stdinConsumed) {
-    const raw = await readStdinAsync(opts.stdin)
-    fileLines.push(splitRecords(raw !== null ? DEC.decode(raw) : '', zeroTerminated))
-  }
-  let outLines: string[]
-  if (serial) {
-    outLines = fileLines.map((lines) => joinFields(lines, delimiters))
-  } else {
-    const maxLen = Math.max(...fileLines.map((l) => l.length))
-    outLines = []
-    for (let i = 0; i < maxLen; i++) {
-      outLines.push(
-        joinFields(
-          fileLines.map((lines) => lines[i] ?? ''),
-          delimiters,
-        ),
-      )
-    }
-  }
-  const out: ByteSource =
-    outLines.length === 0
-      ? new Uint8Array(0)
-      : ENC.encode(outLines.join(zeroTerminated ? '\0' : '\n') + (zeroTerminated ? '\0' : '\n'))
-  return [out, new IOResult()]
 }

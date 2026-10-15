@@ -39,7 +39,7 @@ async def join(
         list(texts),
         opts,
         partial(ops.resolve_glob, accessor, index=opts.index),
-        bound_op(ops.read_bytes, accessor, opts.index),
+        bound_op(ops.read_stream, accessor, opts.index),
     )
 
 

@@ -11,14 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { sedGeneric } from './sed.ts'
+import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 
 import { yieldBytes } from '../../../io/stream.ts'
 import { materialize } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { CommandOpts } from '../../config.ts'
-import { sedGeneric } from './sed.ts'
 
 const DEC = new TextDecoder()
 
@@ -147,4 +148,38 @@ it('shares bytes-valued stdin across repeated operands', async () => {
   if (result === null) throw new Error('no result')
   expect(DEC.decode(await materialize(result[0]))).toBe('x\n')
   expect(result[1].exitCode).toBe(0)
+})
+
+it('emits before fetching the tail and closes every input', async () => {
+  const opened: string[] = [],
+    closed: string[] = []
+  async function* source(path: PathSpec): AsyncIterable<Uint8Array> {
+    opened.push(path.virtual)
+    try {
+      yield await Promise.resolve(new Uint8Array([102, 105, 114, 115, 116, 10]))
+      throw new Error('stream fetched the tail before its first output')
+    } finally {
+      closed.push(path.virtual)
+    }
+  }
+  const paths = Array.from({ length: 1 }, (_, i) => PathSpec.fromStrPath(`/input${String(i)}`))
+  const result = await sedGeneric(
+    paths,
+    ['s/first/yes/'],
+    { stdin: null, flags: {}, cwd: '/' },
+    source,
+    () => Promise.reject(new Error('unexpected write')),
+  )
+  if (result === null) throw new Error('missing result')
+  const [output, io] = result
+  if (output === null || output instanceof Uint8Array) throw new Error('expected stream')
+  const iterator = output[Symbol.asyncIterator]()
+  try {
+    expect((await iterator.next()).value).toEqual(new Uint8Array([121, 101, 115, 10]))
+  } finally {
+    await iterator.return?.()
+  }
+  expect(opened).toHaveLength(1)
+  expect(closed.sort()).toEqual(opened.sort())
+  expect(io.exitCode).toBe(0)
 })

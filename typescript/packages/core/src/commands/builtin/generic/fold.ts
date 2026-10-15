@@ -15,13 +15,13 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync, stdinStream } from '../utils/stream.ts'
-import { operandsIo, readOperands } from '../utils/operands.ts'
-import { mapLines } from '../utils/lines.ts'
-import { concat } from '../../../utils/bytes.ts'
+import { stdinStream } from '../utils/stream.ts'
+import { reportedStream } from '../utils/operands.ts'
+import { asyncChain } from '../../../io/stream.ts'
+import { mapStream } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -84,32 +84,31 @@ function parseFlags(bag: Record<string, FlagValue>): FoldFlags {
   }
 }
 
-export async function foldGeneric(
+function foldRecord(
+  line: Uint8Array,
+  width: number,
+  breakSpaces: boolean,
+  countBytes: boolean,
+): Uint8Array {
+  return countBytes
+    ? foldBytes(line, width)
+    : ENC.encode(foldLine(DEC.decode(line), width, breakSpaces))
+}
+
+export function foldGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   stream = stdinStream(stream, opts.stdin)
   const { width, breakSpaces, countBytes } = parseFlags(opts.flags)
-  if (paths.length > 0) {
-    // A missing operand is reported and skipped; the remaining operands
-    // still fold (GNU fold).
-    const [ok, err] = await readOperands(paths, stream, 'fold')
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    if (countBytes) return [concat(ok.map((operand) => foldBytes(operand.data, width))), io]
-    // GNU folds each file on its own, a column fresh at its start, and writes
-    // a newline only where the file had one: `ab` then `cd` fold to `abcd`,
-    // not to two lines. Mirrors Python's fold.
-    const result: ByteSource = ENC.encode(
-      ok
-        .map((o) => mapLines(DEC.decode(o.data), (line) => foldLine(line, width, breakSpaces)))
-        .join(''),
-    )
-    return [result, io]
-  }
-  const stdinData = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
-  if (countBytes) return [foldBytes(stdinData, width), new IOResult()]
-  const text = mapLines(DEC.decode(stdinData), (line) => foldLine(line, width, breakSpaces))
-  return [ENC.encode(text), new IOResult()]
+  const io = new IOResult()
+  const sources = paths.map((p) => reportedStream(stream(p), io, p, 'fold'))
+  const transform = (line: Uint8Array): Uint8Array =>
+    foldRecord(line, width, breakSpaces, countBytes)
+  const output =
+    paths.length > 0
+      ? asyncChain(sources.map((source) => mapStream(source, transform)))
+      : mapStream(opts.stdin ?? new Uint8Array(), transform)
+  return [output, io]
 }

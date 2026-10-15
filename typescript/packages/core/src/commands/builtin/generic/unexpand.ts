@@ -15,12 +15,13 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync, stdinStream } from '../utils/stream.ts'
-import { operandsIo, readOperands } from '../utils/operands.ts'
-import { splitLinesKeepends } from '../utils/lines.ts'
+import { stdinStream } from '../utils/stream.ts'
+import { reportedStream } from '../utils/operands.ts'
+import { asyncChain } from '../../../io/stream.ts'
+import { mapStream } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -73,33 +74,25 @@ function parseFlags(bag: Record<string, FlagValue>): UnexpandFlags {
   }
 }
 
-export async function unexpandGeneric(
+function unexpandRecord(line: Uint8Array, tabsize: number, allSpaces: boolean): Uint8Array {
+  return ENC.encode(unexpandLine(DEC.decode(line), tabsize, allSpaces))
+}
+
+export function unexpandGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   const tabsize = parsed.tabsize
   const allSpaces = parsed.allSpaces && !parsed.firstOnly
-  if (paths.length > 0) {
-    // A missing operand is reported and skipped; the remaining operands
-    // still unexpand (GNU unexpand).
-    const [ok, err] = await readOperands(paths, stream, 'unexpand')
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    // GNU reads its operands as one stream, so a line a file leaves
-    // unfinished continues into the next one, column and all.
-    const text = ok.map((o) => DEC.decode(o.data)).join('')
-    const parts = splitLinesKeepends(text).map((ln) => unexpandLine(ln, tabsize, allSpaces))
-    const result: ByteSource = ENC.encode(parts.join(''))
-    return [result, io]
-  }
-  const stdinData = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
-  const text = DEC.decode(stdinData)
-  const lines = splitLinesKeepends(text)
-  const result: ByteSource = ENC.encode(
-    lines.map((ln) => unexpandLine(ln, tabsize, allSpaces)).join(''),
+  const io = new IOResult()
+  const sources = paths.map((p) => reportedStream(stream(p), io, p, 'unexpand'))
+  const transform = (line: Uint8Array): Uint8Array => unexpandRecord(line, tabsize, allSpaces)
+  const output = mapStream(
+    paths.length > 0 ? asyncChain(sources) : (opts.stdin ?? new Uint8Array()),
+    transform,
   )
-  return [result, new IOResult()]
+  return [output, io]
 }

@@ -12,89 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareCodePoints } from '../../../utils/sort.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
-import { splitLines } from '../utils/lines.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-type MergeEntry = [number, string]
-
-function commMerge(lines1: readonly string[], lines2: readonly string[]): MergeEntry[] {
-  const result: MergeEntry[] = []
-  let i = 0
-  let j = 0
-  while (i < lines1.length && j < lines2.length) {
-    const a = lines1[i] ?? ''
-    const b = lines2[j] ?? ''
-    if (a < b) {
-      result.push([1, a])
-      i += 1
-    } else if (a > b) {
-      result.push([2, b])
-      j += 1
-    } else {
-      result.push([3, a])
-      i += 1
-      j += 1
-    }
-  }
-  while (i < lines1.length) {
-    result.push([1, lines1[i] ?? ''])
-    i += 1
-  }
-  while (j < lines2.length) {
-    result.push([2, lines2[j] ?? ''])
-    j += 1
-  }
-  return result
-}
-
-function formatComm(
-  merged: readonly MergeEntry[],
-  suppress1: boolean,
-  suppress2: boolean,
-  suppress3: boolean,
-  delimiter: string,
-  recordSeparator: string,
-  total: boolean,
-): string {
-  const out: string[] = []
-  const counts = [0, 0, 0]
-  for (const [col, text] of merged) {
-    counts[col - 1] = (counts[col - 1] ?? 0) + 1
-    if (col === 1 && !suppress1) {
-      out.push(text)
-    } else if (col === 2 && !suppress2) {
-      const prefix = suppress1 ? '' : delimiter
-      out.push(prefix + text)
-    } else if (col === 3 && !suppress3) {
-      let prefix = ''
-      if (!suppress1) prefix += delimiter
-      if (!suppress2) prefix += delimiter
-      out.push(prefix + text)
-    }
-  }
-  if (total) {
-    const visible = counts.filter((_count, index) => ![suppress1, suppress2, suppress3][index])
-    out.push([...visible.map(String), 'total'].join(delimiter))
-  }
-  return out.length > 0 ? out.join(recordSeparator) + recordSeparator : ''
-}
-
-function isSorted(lines: readonly string[]): boolean {
-  for (let i = 1; i < lines.length; i++) {
-    if ((lines[i - 1] ?? '') > (lines[i] ?? '')) return false
-  }
-  return true
-}
 
 interface CommFlags {
   readonly suppress1: boolean
@@ -119,11 +49,11 @@ function parseFlags(bag: Record<string, FlagValue>): CommFlags {
   }
 }
 
-export async function commGeneric(
+export function commGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   const parsed = parseFlags(opts.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.COMM, paths[2]?.rawPath ?? '')
   if (paths.length < 2) throw missingOperandError(CommandName.COMM, paths[0]?.rawPath ?? null)
@@ -131,32 +61,69 @@ export async function commGeneric(
   const p2 = paths[1]
   if (p1 === undefined || p2 === undefined) return [null, new IOResult()]
   const stream = stdinStream(read, opts.stdin)
-  const data1 = DEC.decode(await materialize(stream(p1)))
-  const data2 = DEC.decode(await materialize(stream(p2)))
-  const zeroTerminated = parsed.zeroTerminated
-  const lines1 = zeroTerminated ? data1.replace(/\0$/, '').split('\0') : splitLines(data1)
-  const lines2 = zeroTerminated ? data2.replace(/\0$/, '').split('\0') : splitLines(data2)
-  let stderr = ''
-  if (parsed.checkOrder) {
-    if (!isSorted(lines1)) stderr = 'comm: file 1 is not in sorted order\n'
-    else if (!isSorted(lines2)) stderr = 'comm: file 2 is not in sorted order\n'
+  const readers = [new AsyncLineIterator(stream(p1)), new AsyncLineIterator(stream(p2))] as const
+  const io = new IOResult()
+  return [commStream(readers, io, parsed), io]
+}
+
+async function* commStream(
+  readers: readonly [AsyncLineIterator, AsyncLineIterator],
+  io: IOResult,
+  flags: CommFlags,
+): AsyncIterable<Uint8Array> {
+  const separator = flags.zeroTerminated ? 0 : 10
+  const previous: (string | null)[] = [null, null]
+  const warned = [false, false]
+  const counts = [0, 0, 0]
+  const suppressed = [flags.suppress1, flags.suppress2, flags.suppress3]
+  async function read(which: 0 | 1): Promise<string | null> {
+    const raw = await readers[which].readline(undefined, separator)
+    const line = raw === null ? null : DEC.decode(raw)
+    const before = previous[which]
+    if (
+      flags.checkOrder &&
+      line !== null &&
+      before !== null &&
+      before !== undefined &&
+      compareCodePoints(line, before) < 0
+    ) {
+      warned[which] = true
+      io.stderr = ENC.encode(`comm: file ${warned[0] ? '1' : '2'} is not in sorted order\n`)
+      io.exitCode = 1
+    }
+    previous[which] = line
+    return line
   }
-  const merged = commMerge(lines1, lines2)
-  const output = formatComm(
-    merged,
-    parsed.suppress1,
-    parsed.suppress2,
-    parsed.suppress3,
-    parsed.outputDelimiter,
-    zeroTerminated ? '\0' : '\n',
-    parsed.total,
-  )
-  const result: ByteSource = ENC.encode(output)
-  return [
-    result,
-    new IOResult({
-      stderr: stderr !== '' ? ENC.encode(stderr) : null,
-      exitCode: stderr !== '' ? 1 : 0,
-    }),
-  ]
+  try {
+    let left = await read(0),
+      right = await read(1)
+    while (left !== null || right !== null) {
+      const column =
+        right === null || (left !== null && compareCodePoints(left, right) < 0)
+          ? 1
+          : left === null || compareCodePoints(right, left) < 0
+            ? 2
+            : 3
+      const text = column === 2 ? right : left
+      counts[column - 1] = (counts[column - 1] ?? 0) + 1
+      if (!suppressed[column - 1])
+        yield ENC.encode(
+          flags.outputDelimiter.repeat(
+            suppressed.slice(0, column - 1).filter((hidden) => !hidden).length,
+          ) +
+            (text ?? '') +
+            String.fromCharCode(separator),
+        )
+      if (column !== 2) left = await read(0)
+      if (column !== 1) right = await read(1)
+    }
+    if (flags.total)
+      yield ENC.encode(
+        [...counts.filter((_, i) => !suppressed[i]).map(String), 'total'].join(
+          flags.outputDelimiter,
+        ) + String.fromCharCode(separator),
+      )
+  } finally {
+    for (const reader of readers) await reader.discard()
+  }
 }

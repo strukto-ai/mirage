@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isFsError, isEisdir } from '../../errors/fs.ts'
+import { fsErrorLine } from '../../errors/render.ts'
+import { readFailExitCode } from '../spec/usage.ts'
+import { PathSpec } from '../../types.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -314,10 +318,25 @@ export class SedMachine {
     }
   }
 
-  private async more(): Promise<boolean> {
+  private async more(ignoreFatal = false): Promise<boolean> {
     if (this.nextLine !== undefined) return true
     if (this.reader === undefined) return false
-    const [raw, chomped] = await this.reader.readUntil(10, this.signal)
+    let raw: Uint8Array, chomped: boolean
+    try {
+      ;[raw, chomped] = await this.reader.readUntil(10, this.signal)
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      await this.reader.discard()
+      this.reader = undefined
+      const message = fsErrorLine('sed', PathSpec.fromStrPath(this.fileName), error)
+      if (isEisdir(error)) {
+        if (!ignoreFatal) throw new SedPanic(message)
+      } else {
+        this.stderrLines.push(message)
+        this.badCode = Math.max(this.badCode, readFailExitCode('sed', error))
+      }
+      return false
+    }
     if (raw.length > 0 || chomped)
       this.nextLine = { text: byteView(raw, this.opts.utf8 ?? false), chomped }
     return this.nextLine !== undefined
@@ -352,7 +371,7 @@ export class SedMachine {
     if (await this.more()) return false
     if (this.opts.separate) return true
     while (this.openNextFile(true)) {
-      if (await this.more()) return false
+      if (await this.more(true)) return false
     }
     return true
   }

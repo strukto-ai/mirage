@@ -1,16 +1,18 @@
-from functools import partial
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
-    read_file,
 )
 from mirage.commands.builtin.generic.sed import sed_generic
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec.types import FlagValue
+from mirage.errors.fs import eisdir
+from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
 
 
 async def _resolved(paths: list[PathSpec]) -> list[PathSpec]:
@@ -49,6 +51,15 @@ async def run_sed(
     async def write(path: PathSpec, data: bytes) -> None:
         await dispatch("write", path, data=data)
 
+    async def read_stream(path: PathSpec) -> AsyncIterator[bytes]:
+        info, _ = await dispatch("stat", path)
+        if info.type is FileType.DIRECTORY:
+            raise eisdir(path)
+        data, _ = await dispatch("read", path)
+        async with aclosing(chunks(data)) as source:
+            async for chunk in source:
+                yield chunk
+
     return await sed_generic(
         flat_scopes(scopes),
         texts,
@@ -61,6 +72,6 @@ async def run_sed(
             argv=argv,
         ),
         _resolved,
-        partial(read_file, dispatch),
+        read_stream,
         write,
     )

@@ -1,8 +1,7 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.stream import stdin_bytes
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -11,74 +10,15 @@ from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
 )
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
-
-
-def _comm_merge(lines1: list[str], lines2: list[str]) -> list[tuple[int, str]]:
-    result: list[tuple[int, str]] = []
-    i, j = 0, 0
-    while i < len(lines1) and j < len(lines2):
-        if lines1[i] < lines2[j]:
-            result.append((1, lines1[i]))
-            i += 1
-        elif lines1[i] > lines2[j]:
-            result.append((2, lines2[j]))
-            j += 1
-        else:
-            result.append((3, lines1[i]))
-            i += 1
-            j += 1
-    while i < len(lines1):
-        result.append((1, lines1[i]))
-        i += 1
-    while j < len(lines2):
-        result.append((2, lines2[j]))
-        j += 1
-    return result
-
-
-def _format_comm(
-    merged: list[tuple[int, str]],
-    suppress1: bool,
-    suppress2: bool,
-    suppress3: bool,
-    delimiter: str,
-    record_separator: str,
-    include_total: bool,
-) -> str:
-    out: list[str] = []
-    counts = [0, 0, 0]
-    for col, text in merged:
-        counts[col - 1] += 1
-        if col == 1 and not suppress1:
-            out.append(text)
-        elif col == 2 and not suppress2:
-            prefix = "" if suppress1 else delimiter
-            out.append(prefix + text)
-        elif col == 3 and not suppress3:
-            prefix = ""
-            if not suppress1:
-                prefix += delimiter
-            if not suppress2:
-                prefix += delimiter
-            out.append(prefix + text)
-    if include_total:
-        visible = [
-            str(count)
-            for count, suppressed in zip(
-                counts, (suppress1, suppress2, suppress3)
-            )
-            if not suppressed
-        ]
-        out.append(delimiter.join(visible + ["total"]))
-    return record_separator.join(out) + record_separator if out else ""
+from mirage.types import PathSpec, PolymorphicReadFn
 
 
 async def comm(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     suppress1: bool = False,
     suppress2: bool = False,
@@ -97,39 +37,89 @@ async def comm(
             CommandName.COMM,
             paths[-1].raw_path or paths[-1].virtual if paths else None,
         )
-    read = stdin_bytes(read_bytes, stdin)
-    data1 = (await read(paths[0])).decode(errors="replace")
-    data2 = (await read(paths[1])).decode(errors="replace")
-    lines1 = (
-        data1.rstrip("\0").split("\0")
-        if zero_terminated
-        else split_lines(data1)
-    )
-    lines2 = (
-        data2.rstrip("\0").split("\0")
-        if zero_terminated
-        else split_lines(data2)
-    )
-    stderr = ""
-    if check_order:
-        if lines1 != sorted(lines1):
-            stderr = "comm: file 1 is not in sorted order\n"
-        elif lines2 != sorted(lines2):
-            stderr = "comm: file 2 is not in sorted order\n"
-    merged = _comm_merge(lines1, lines2)
-    output = _format_comm(
-        merged,
-        suppress1,
-        suppress2,
-        suppress3,
+    read = stdin_stream(read_stream, stdin)
+    readers = [AsyncLineIterator(read(p)) for p in paths]
+    io = IOResult()
+    return _comm_stream(
+        readers,
+        io,
+        (suppress1, suppress2, suppress3),
+        check_order,
         output_delimiter,
-        "\0" if zero_terminated else "\n",
         total,
-    )
-    return output.encode(), IOResult(
-        stderr=stderr.encode() if stderr else None,
-        exit_code=1 if stderr else 0,
-    )
+        b"\0" if zero_terminated else b"\n",
+    ), io
+
+
+async def _comm_stream(
+    readers: list[AsyncLineIterator],
+    io: IOResult,
+    suppressed: tuple[bool, bool, bool],
+    check_order: bool,
+    delimiter: str,
+    total: bool,
+    separator: bytes,
+) -> AsyncIterator[bytes]:
+    previous: list[str | None] = [None, None]
+    warned = [False, False]
+    counts = [0, 0, 0]
+
+    async def read(which: int) -> str | None:
+        raw = await readers[which].readline(separator)
+        line = None if raw is None else raw.decode(errors="replace")
+        before = previous[which]
+        if (
+            check_order
+            and line is not None
+            and before is not None
+            and line < before
+        ):
+            warned[which] = True
+            which_file = 1 if warned[0] else 2
+            io.stderr = (
+                f"comm: file {which_file} is not in sorted order\n".encode()
+            )
+            io.exit_code = 1
+        previous[which] = line
+        return line
+
+    try:
+        left, right = await read(0), await read(1)
+        while left is not None or right is not None:
+            column = (
+                1
+                if right is None or (left is not None and left < right)
+                else 2
+                if left is None or right < left
+                else 3
+            )
+            text = left if column != 2 else right
+            counts[column - 1] += 1
+            if not suppressed[column - 1]:
+                yield (
+                    delimiter
+                    * sum(not value for value in suppressed[: column - 1])
+                    + (text or "")
+                ).encode() + separator
+            if column != 2:
+                left = await read(0)
+            if column != 1:
+                right = await read(1)
+        if total:
+            yield (
+                delimiter.join(
+                    [
+                        str(count)
+                        for count, hidden in zip(counts, suppressed)
+                        if not hidden
+                    ]
+                    + ["total"]
+                ).encode()
+                + separator
+            )
+    finally:
+        for reader in readers:
+            await reader.discard()
 
 
 __all__ = ["comm"]
@@ -163,12 +153,12 @@ async def comm_generic(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(opts.flags)
     return await comm(
         paths,
-        read_bytes=read_bytes,
+        read_stream=read_stream,
         stdin=opts.stdin,
         suppress1=parsed.suppress1,
         suppress2=parsed.suppress2,

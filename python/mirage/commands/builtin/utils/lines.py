@@ -1,5 +1,8 @@
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from typing import AnyStr
+
+from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.types import ByteSource
 
 
 def split_lines(text: str, sep: str = "\n") -> list[str]:
@@ -64,3 +67,23 @@ __all__ = [
     "split_lines",
     "split_lines_keepends",
 ]
+
+
+async def map_stream(
+    source: ByteSource, transform: Callable[[bytes], bytes]
+) -> AsyncIterator[bytes]:
+    """Transform records while retaining their original newline endings.
+
+    Args:
+        source (ByteSource): the input, consumed one record at a time.
+        transform (Callable): transforms one unterminated record.
+    """
+    reader = AsyncLineIterator(source)
+    try:
+        while True:
+            line, ended = await reader.read_until(b"\n")
+            if not line and not ended:
+                return
+            yield transform(line) + (b"\n" if ended else b"")
+    finally:
+        await reader.discard()

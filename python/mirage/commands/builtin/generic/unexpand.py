@@ -1,14 +1,16 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 
-from mirage.commands.builtin.utils.lines import split_lines_keepends
+from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
-    materialized_read,
     merge_split_errors,
+    normalized_read,
+    reported_stream,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    read_stdin_async,
+    resolve_source,
     stdin_stat,
     stdin_stream,
 )
@@ -16,6 +18,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -66,30 +69,32 @@ def _unexpand_line(line: str, tabsize: int, all_spaces: bool) -> str:
     return line
 
 
+def _unexpand_record(line: bytes, tabsize: int, all_spaces: bool) -> bytes:
+    return _unexpand_line(
+        line.decode(errors="replace"), tabsize, all_spaces
+    ).encode()
+
+
 async def unexpand(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     tabsize: int = 8,
     all_spaces: bool = False,
     first_only: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    if first_only:
-        all_spaces = False
-    if paths:
-        # GNU reads its operands as one stream, so a line a file leaves
-        # unfinished continues into the next one, column and all.
-        texts = [(await read_bytes(p)).decode(errors="replace") for p in paths]
-        return "".join(
-            _unexpand_line(ln, tabsize, all_spaces)
-            for ln in split_lines_keepends("".join(texts))
-        ).encode(), IOResult()
-
-    raw = await read_stdin_async(stdin) or b""
-    lines = split_lines_keepends(raw.decode(errors="replace"))
-    result = [_unexpand_line(ln, tabsize, all_spaces) for ln in lines]
-    return "".join(result).encode(), IOResult()
+    io = IOResult()
+    read = stdin_stream(read_stream, stdin)
+    sources = [reported_stream(read(p), io, p, "unexpand") for p in paths]
+    transform = partial(
+        _unexpand_record,
+        tabsize=tabsize,
+        all_spaces=all_spaces and not first_only,
+    )
+    source = async_chain(sources) if paths else resolve_source(stdin)
+    output = map_stream(source, transform)
+    return output, io
 
 
 async def unexpand_generic(
@@ -118,7 +123,7 @@ async def unexpand_generic(
     return await merge_split_errors(
         await unexpand(
             readable,
-            read_bytes=materialized_read(stream),
+            read_stream=normalized_read(stream),
             stdin=opts.stdin,
             tabsize=parsed.tabsize,
             all_spaces=parsed.all_spaces,

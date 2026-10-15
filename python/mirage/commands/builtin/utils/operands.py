@@ -388,8 +388,12 @@ async def reported_stream(
 async def _awaited_stream(
     source: "Awaitable[bytes | AsyncIterator[bytes]]",
 ) -> AsyncIterator[bytes]:
-    async for chunk in ensure_stream(await source):
-        yield chunk
+    stream = ensure_stream(await source)
+    try:
+        async for chunk in stream:
+            yield chunk
+    finally:
+        await close_quietly(stream)
 
 
 def _call_normalized(
@@ -418,6 +422,20 @@ def normalized_read(
     Args:
         read (PolymorphicReadFn): Bound reader called as ``read(path)``.
     """
+    if inspect.iscoroutinefunction(read):
+        # Binding a coroutine does not capture a cache scope. Delay its
+        # creation too, so an unused operand leaves nothing unawaited.
+        async_read = read
+
+        async def stream(path: PathSpec) -> AsyncIterator[bytes]:
+            source = _awaited_stream(async_read(path))
+            try:
+                async for chunk in source:
+                    yield chunk
+            finally:
+                await close_quietly(source)
+
+        return stream
     return partial(_call_normalized, read)
 
 
