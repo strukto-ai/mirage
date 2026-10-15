@@ -2,9 +2,11 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from functools import partial
 from typing import Any, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
@@ -140,6 +142,12 @@ async def guard_day(
 
 A = TypeVar("A", bound=Accessor)
 
+# A channel's messages from a run's first day through its last, a page at
+# a time, as ``pages(channel_id, first, last)``.
+RunPages = Callable[
+    [str, str, str], AsyncGenerator[list[dict[str, Any]], None]
+]
+
 
 async def day_channel_id(
     readdir: ReaddirFn[A], accessor: A, path: PathSpec, index: IndexCacheStore
@@ -245,16 +253,19 @@ async def read_days(
     paths: list[PathSpec],
     index: IndexCacheStore,
     detect: DetectFn,
-    fetch: Callable[[str, str, str], Awaitable[list[dict[str, Any]]]],
+    pages: RunPages,
+    order: Callable[[dict[str, Any]], float],
     within: Callable[[dict[str, Any], float, float], bool],
+    limit: int,
 ) -> dict[str, bytes]:
-    """Several chat days' chat.jsonl files, one fetch per run of a
+    """Several chat days' chat.jsonl files, one walk per run of a
     channel's consecutive days.
 
     Each file is proven as its own read proves it (a day in scope, a
     channel the listing holds); one that is not, or is no chat file, is
-    left out for its own read to answer. Each day's lines are the run's
-    messages posted within it, oldest first, as its own read lists them.
+    left out for its own read to answer, as is a day past ``limit``
+    bytes. Each day's lines are the run's messages posted within it,
+    oldest first, as its own read lists them.
 
     Args:
         readdir (ReaddirFn): the backend's readdir.
@@ -263,11 +274,13 @@ async def read_days(
         paths (list[PathSpec]): the files.
         index (IndexCacheStore): index cache.
         detect (DetectFn): the backend's scope classifier.
-        fetch (Callable): a channel's messages from a run's first day
-            through its last, oldest first, as
-            ``fetch(channel_id, first, last)``.
+        pages (RunPages): a channel's messages from a run's first day
+            through its last, a page at a time, as
+            ``pages(channel_id, first, last)``.
+        order (Callable): a message's place among its day's lines.
         within (Callable): whether a message was posted in a day's
             bounds, as ``within(message, start, end)``.
+        limit (int): the most bytes worth reading for one day.
     """
     days: dict[str, dict[str, str]] = {}
     for path in paths:
@@ -281,6 +294,14 @@ async def read_days(
             logger.debug("read_days leaves out %s: %s", path.virtual, exc)
             continue
         days.setdefault(channel_id, {})[match.slots["day"]] = path.virtual
+    read = partial(
+        _read_run,
+        scope=scope,
+        pages=pages,
+        order=order,
+        within=within,
+        limit=limit,
+    )
     answers: dict[str, bytes] = {}
     for channel_id, named in days.items():
         run: list[str] = []
@@ -288,16 +309,10 @@ async def read_days(
             if run and date.fromisoformat(day) - date.fromisoformat(
                 run[-1]
             ) != timedelta(days=1):
-                answers.update(
-                    await _read_run(
-                        channel_id, run, named, scope, fetch, within
-                    )
-                )
+                answers.update(await read(channel_id, run, named))
                 run = []
             run.append(day)
-        answers.update(
-            await _read_run(channel_id, run, named, scope, fetch, within)
-        )
+        answers.update(await read(channel_id, run, named))
     return answers
 
 
@@ -305,25 +320,51 @@ async def _read_run(
     channel_id: str,
     run: list[str],
     named: dict[str, str],
+    *,
     scope: TimeRange,
-    fetch: Callable[[str, str, str], Awaitable[list[dict[str, Any]]]],
+    pages: RunPages,
+    order: Callable[[dict[str, Any]], float],
     within: Callable[[dict[str, Any], float, float], bool],
+    limit: int,
 ) -> dict[str, bytes]:
-    """One run of a channel's consecutive days, fetched once.
+    """One run of a channel's consecutive days, walked once.
+
+    The walk stops, and the run is left out, once its messages pass
+    ``limit`` bytes a day: no more than that could be kept, and each
+    day's own read answers it.
 
     Args:
         channel_id (str): the channel.
         run (list[str]): its days, consecutive and ascending.
         named (dict[str, str]): each day's file, by day.
-        scope (TimeRange): the mount's time scope, bounding each day.
-        fetch (Callable): as ``read_days`` takes it.
+        scope (TimeRange): as ``read_days`` takes it.
+        pages (RunPages): as ``read_days`` takes it.
+        order (Callable): as ``read_days`` takes it.
         within (Callable): as ``read_days`` takes it.
+        limit (int): as ``read_days`` takes it.
     """
-    messages = await fetch(channel_id, run[0], run[-1])
+    budget = limit * len(run)
+    lines: list[tuple[dict[str, Any], bytes]] = []
+    size = 0
+    async with aclosing(pages(channel_id, run[0], run[-1])) as walk:
+        async for page in walk:
+            for message in page:
+                line = jsonl_bytes([message])
+                lines.append((message, line))
+                size += len(line)
+            if size > budget:
+                logger.debug(
+                    "read_days leaves out %s from %s: past %d bytes",
+                    channel_id,
+                    run[0],
+                    budget,
+                )
+                return {}
+    lines.sort(key=lambda pair: order(pair[0]))
     answers: dict[str, bytes] = {}
     for day in run:
         start, end = scope.day_bounds(day)
-        answers[named[day]] = jsonl_bytes(
-            [m for m in messages if within(m, start, end)]
-        )
+        body = b"".join(line for m, line in lines if within(m, start, end))
+        if len(body) <= limit:
+            answers[named[day]] = body
     return answers

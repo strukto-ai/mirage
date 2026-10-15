@@ -71,16 +71,19 @@ read = make_read(
 async def read_many(
     accessor: EmailAccessor,
     paths: list[PathSpec],
+    limit: int,
     index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, bytes]:
     """Several message files, one UID FETCH per folder for all of them.
 
-    A path that is no message file, or one its folder's listing does not
-    hold, is left out for its own read to answer.
+    A path that is no message file, one its folder's listing does not
+    hold, and one past ``limit`` bytes (as the listing sizes it, before
+    the fetch) is left out for its own read to answer.
 
     Args:
         accessor (EmailAccessor): the account.
         paths (list[PathSpec]): the files.
+        limit (int): the most bytes worth reading for one file.
         index (IndexCacheStore): index cache.
     """
     folders: dict[str, dict[str, str]] = {}
@@ -89,7 +92,7 @@ async def read_many(
         if match.kind != "message":
             continue
         entry = await resolve_entry(readdir, accessor, path, index)
-        if entry is not None:
+        if entry is not None and (entry.size or 0) <= limit:
             folders.setdefault(match.slots["folder"], {})[entry.id] = (
                 path.virtual
             )
@@ -97,6 +100,7 @@ async def read_many(
     for folder, uids in folders.items():
         for msg in await fetch_headers(accessor, folder, list(uids)):
             virtual = uids.get(str(msg.get("uid")))
-            if virtual is not None:
-                answers[virtual] = message_json_bytes(msg)
+            body = message_json_bytes(msg)
+            if virtual is not None and len(body) <= limit:
+                answers[virtual] = body
     return answers

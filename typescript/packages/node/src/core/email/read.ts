@@ -67,6 +67,7 @@ export const read = makeRead<EmailAccessor>(detectScope, {
 export async function readMany(
   accessor: EmailAccessor,
   paths: readonly PathSpec[],
+  limit: number,
   index?: IndexCacheStore,
 ): Promise<Map<string, Uint8Array>> {
   const folders = new Map<string, Map<string, string>>()
@@ -74,7 +75,7 @@ export async function readMany(
     const match = detectScope(path)
     if (match.kind !== 'message') continue
     const entry = await resolveEntry(readdir, accessor, path, index)
-    if (entry === null) continue
+    if (entry === null || (entry.size ?? 0) > limit) continue
     const folder = match.slots.folder ?? ''
     const uids = folders.get(folder) ?? new Map<string, string>()
     uids.set(entry.id, path.virtual)
@@ -84,7 +85,8 @@ export async function readMany(
   for (const [folder, uids] of folders) {
     for (const msg of await fetchHeaders(accessor, folder, [...uids.keys()])) {
       const virtual = uids.get(msg.uid)
-      if (virtual !== undefined) answers.set(virtual, messageJsonBytes(msg))
+      const body = messageJsonBytes(msg)
+      if (virtual !== undefined && body.byteLength <= limit) answers.set(virtual, body)
     }
   }
   return answers

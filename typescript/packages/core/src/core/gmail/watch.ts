@@ -18,6 +18,7 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { specFor } from '../../watch/delta.ts'
+import { type TokenManager } from '../google/client.ts'
 import { currentHistoryId, listHistory } from './history.ts'
 import { type GmailLabel, listLabels } from './labels.ts'
 import {
@@ -56,6 +57,57 @@ export function messagePaths(
 }
 
 /**
+ * Each label's folder name, by label id, as the root listing names it: a
+ * system label by its id, any other by its name. Mirrors Python's
+ * `label_folders`.
+ */
+export function labelFolders(labels: readonly GmailLabel[]): Map<string, string> {
+  return new Map(
+    labels.map((label) => [
+      label.id,
+      label.type === 'system' ? label.id : (label.name ?? label.id),
+    ]),
+  )
+}
+
+/**
+ * Record each label folder that appeared, left or was renamed, and move the
+ * known paths below a renamed one (or forget them below one that left), so a
+ * later change to one of its messages starts where the message now is.
+ * Mirrors Python's `_folders_moved`.
+ */
+function foldersMoved(
+  changes: [FileChangeKind, string][],
+  known: Map<string, string[]>,
+  prefix: string,
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>,
+): void {
+  for (const [labelId, name] of before) {
+    const now = after.get(labelId)
+    if (now === name) continue
+    const old = `${prefix}/${name}`
+    changes.push([FileChangeKind.DELETE, old])
+    const next = now === undefined ? null : `${prefix}/${now}`
+    if (next !== null) changes.push([FileChangeKind.CREATE, next])
+    for (const [mid, paths] of known) known.set(mid, moved(paths, old, next))
+  }
+  for (const [labelId, name] of after) {
+    if (!before.has(labelId)) changes.push([FileChangeKind.CREATE, `${prefix}/${name}`])
+  }
+}
+
+/**
+ * `paths` with each one below the folder `old` moved below `next`, or dropped
+ * when the folder left. Mirrors Python's `_moved`.
+ */
+function moved(paths: readonly string[], old: string, next: string | null): string[] {
+  const under = `${old}/`
+  if (next === null) return paths.filter((p) => !p.startsWith(under))
+  return paths.map((p) => (p.startsWith(under) ? next + p.slice(old.length) : p))
+}
+
+/**
  * Record how one message's paths moved: a path it left, one it reached, and
  * each message file it kept, whose labels changed. Mirrors Python's `_changed`.
  */
@@ -74,8 +126,10 @@ function changed(
 
 /**
  * Checkpointed delta over Gmail's history. The checkpoint holds the history id
- * the next pull starts after and, by message id, the paths of each message a
- * pull has seen. A record names a message by id only, so each one added or
+ * the next pull starts after, each label's folder name and, by message id, the
+ * paths of each message a pull has seen. History records no label created,
+ * renamed or deleted, so each pull lists the labels and compares the folders:
+ * one that appeared, left or moved is reported whatever its messages did. A record names a message by id only, so each one added or
  * relabeled is read to name its paths: one under each label it holds, in the
  * day it arrived. Its labels before the record follow from the label changes
  * the records carry, so a relabel moves exactly the paths it should, and a file
@@ -90,10 +144,8 @@ export class GmailDeltaHook implements DeltaHook {
   async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
     const tm = this.accessor.tokenManager
     const state = decode(checkpoint)
-    if (state === null) {
-      return new Delta({ changes: [], checkpoint: encode(await currentHistoryId(tm), new Map()) })
-    }
-    const [start, known] = state
+    if (state === null) return new Delta({ changes: [], checkpoint: await baseline(tm) })
+    const [start, folders, known] = state
     const observed = new Date()
     let records: Record<string, unknown>[]
     let latest: string
@@ -103,13 +155,14 @@ export class GmailDeltaHook implements DeltaHook {
       if ((err as { status?: unknown }).status !== 404) throw err
       console.debug(`gmail history ${start} is gone: ${String(err)}`)
       const lost = new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed })
-      return new Delta({
-        changes: [lost],
-        checkpoint: encode(await currentHistoryId(tm), new Map()),
-      })
+      return new Delta({ changes: [lost], checkpoint: await baseline(tm) })
     }
     const prefix = mountPrefixOf(root.virtual, root.vfsPath).replace(/\/+$/, '')
-    const labels = new Map((await listLabels(tm)).map((label) => [label.id, label]))
+    const listed = await listLabels(tm)
+    const labels = new Map(listed.map((label) => [label.id, label]))
+    const nowFolders = labelFolders(listed)
+    const changes: [FileChangeKind, string][] = []
+    foldersMoved(changes, known, prefix, folders, nowFolders)
     const added = new Set<string>()
     const first = new Map<string, Map<string, boolean>>()
     const gone: string[] = []
@@ -148,7 +201,6 @@ export class GmailDeltaHook implements DeltaHook {
         gone.push(item.message?.id ?? '')
       }
     }
-    const changes: [FileChangeKind, string][] = []
     for (const [mid, seen] of first) {
       if (gone.includes(mid)) continue
       let raw: GmailMessageRaw
@@ -186,29 +238,51 @@ export class GmailDeltaHook implements DeltaHook {
     if (unknown) {
       events.push(new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed }))
     }
-    return new Delta({ changes: events, checkpoint: encode(latest, known) })
+    return new Delta({ changes: events, checkpoint: encode(latest, nowFolders, known) })
   }
 }
 
-function encode(historyId: string, known: ReadonlyMap<string, readonly string[]>): string {
+/**
+ * A checkpoint at the mailbox's present: its history id and its label folders,
+ * with no message seen yet. Mirrors Python's `_baseline`.
+ */
+async function baseline(tm: TokenManager): Promise<string> {
+  const history = await currentHistoryId(tm)
+  return encode(history, labelFolders(await listLabels(tm)), new Map())
+}
+
+function encode(
+  historyId: string,
+  folders: ReadonlyMap<string, string>,
+  known: ReadonlyMap<string, readonly string[]>,
+): string {
+  const labels: Record<string, string> = {}
+  for (const id of [...folders.keys()].sort(compareCodePoints)) labels[id] = folders.get(id) ?? id
   const messages: Record<string, readonly string[]> = {}
   for (const mid of [...known.keys()].sort(compareCodePoints)) messages[mid] = known.get(mid) ?? []
-  return JSON.stringify({ gmail: { history: historyId, messages } })
+  return JSON.stringify({ gmail: { history: historyId, labels, messages } })
 }
 
 /**
- * The history id and the known paths a checkpoint holds, null for a baseline.
- * Mirrors Python's `_decode`.
+ * The history id, the label folders and the known paths a checkpoint holds,
+ * null for a baseline. Mirrors Python's `_decode`.
  */
-function decode(checkpoint: string | null): [string, Map<string, string[]>] | null {
+function decode(
+  checkpoint: string | null,
+): [string, Map<string, string>, Map<string, string[]>] | null {
   if (checkpoint === null) return null
   const data = JSON.parse(checkpoint) as {
-    gmail?: { history?: unknown; messages?: Record<string, unknown[]> }
+    gmail?: {
+      history?: unknown
+      labels?: Record<string, unknown>
+      messages?: Record<string, unknown[]>
+    }
   }
   const state = data.gmail
   if (state === undefined || typeof state.history !== 'string') return null
   return [
     state.history,
+    new Map(Object.entries(state.labels ?? {}).map(([id, name]) => [id, String(name)])),
     new Map(Object.entries(state.messages ?? {}).map(([mid, paths]) => [mid, paths.map(String)])),
   ]
 }

@@ -41,12 +41,16 @@ def _message(uid: str) -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_a_batch_fetches_a_folders_messages_at_once():
+    # A message the listing sizes past the limit is not fetched.
     names = {f"{DAY}/note__{uid}.email.json": uid for uid in ("101", "102")}
     gone = f"{DAY}/gone__103.email.json"
+    big = f"{DAY}/big__104.email.json"
 
     async def entry(readdir, accessor, path, index):
+        if path.virtual == big:
+            return SimpleNamespace(id="104", size=1 << 30)
         uid = names.get(path.virtual)
-        return None if uid is None else SimpleNamespace(id=uid)
+        return None if uid is None else SimpleNamespace(id=uid, size=300)
 
     fetch = AsyncMock(return_value=[_message("102"), _message("101")])
     with (
@@ -55,7 +59,8 @@ async def test_a_batch_fetches_a_folders_messages_at_once():
     ):
         answers = await read_many(
             SimpleNamespace(),
-            [PathSpec.from_str_path(p) for p in [*names, gone]],
+            [PathSpec.from_str_path(p) for p in [*names, gone, big]],
+            1 << 20,
             RAMIndexCacheStore(),
         )
     assert answers == {

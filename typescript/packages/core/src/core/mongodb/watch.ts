@@ -65,9 +65,9 @@ function removed(changed: Map<string, FileChangeKind>, place: string): void {
  * documents.jsonl and one schema.json, so the stream says exactly which files
  * moved: a document written or removed rewrites its collection's
  * documents.jsonl and every view's in that database (a view reads other
- * collections), an index or validator change its schema.json, and a
- * collection created, dropped or renamed is its directory appearing or
- * leaving. The checkpoint is the stream's resume token. A position the
+ * collections), an index or validator change its schema.json, a view's new
+ * pipeline both of its files (its `modify` names `viewOn`), and a collection
+ * created, dropped or renamed is its directory appearing or leaving. The checkpoint is the stream's resume token. A position the
  * server's history no longer holds answers UNKNOWN on the watch root, so
  * everything below is inventoried again. A server outside a replica set has
  * no change stream and refuses the watch. Mirrors Python's MongoDBDeltaHook.
@@ -128,13 +128,17 @@ export class MongoDBDeltaHook implements DeltaHook {
       }
       if (typeof name !== 'string') continue
       const place = `${base}/${COLLECTIONS}/${name}`
+      const details = (event.operationDescription ?? {}) as Record<string, unknown>
       if (typeof kind === 'string' && DATA_EVENTS.has(kind)) {
         changed.set(`${place}/documents.jsonl`, FileChangeKind.UPDATE)
         written.add(db)
+      } else if (kind === 'modify' && 'viewOn' in details) {
+        const view = `${base}/${VIEWS}/${name}`
+        changed.set(`${view}/schema.json`, FileChangeKind.UPDATE)
+        changed.set(`${view}/documents.jsonl`, FileChangeKind.UPDATE)
       } else if (typeof kind === 'string' && SCHEMA_EVENTS.has(kind)) {
         changed.set(`${place}/schema.json`, FileChangeKind.UPDATE)
       } else if (kind === 'create') {
-        const details = (event.operationDescription ?? {}) as Record<string, unknown>
         const dirname = 'viewOn' in details ? VIEWS : COLLECTIONS
         changed.set(`${base}/${dirname}/${name}`, FileChangeKind.CREATE)
       } else if (kind === 'drop') {

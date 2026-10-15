@@ -144,7 +144,7 @@ async def fetch_rows(
     limit: int,
     offset: int,
 ) -> list[dict[str, Any]]:
-    pk = await fetch_primary_key(conn, schema, name)
+    pk = await fetch_row_key(conn, schema, name)
     rows = await conn.fetch(
         f"SELECT * FROM {qualified(schema, name)}{key_order(pk)} "
         "LIMIT $1 OFFSET $2",
@@ -187,9 +187,13 @@ async def fetch_rows_after(
     pk: Sequence[str],
     after: tuple[Any, ...] | None,
     limit: int,
-) -> tuple[list[dict[str, Any]], tuple[Any, ...] | None]:
+    columns: set[str],
+    max_bytes: int,
+) -> tuple[list[dict[str, Any]] | None, tuple[Any, ...] | None]:
     """A keyed relation's rows past a key, in key order, and the key of
-    the last one.
+    the last one; None for the rows when their database JSON passes
+    ``max_bytes``, which the database answers before sending any of
+    them (``fetch_bounded_query``).
 
     Args:
         conn (asyncpg.Connection): the connection.
@@ -199,21 +203,28 @@ async def fetch_rows_after(
         after (tuple[Any, ...] | None): the key the rows come after, None
             for the first.
         limit (int): the most rows.
+        columns (set[str]): the table's column names.
+        max_bytes (int): the most database JSONL bytes to transfer.
     """
     where = ""
     params: list[Any] = [limit]
     if after is not None:
-        columns = ", ".join(quote_ident(c) for c in pk)
+        key = ", ".join(quote_ident(c) for c in pk)
         marks = ", ".join(f"${i + 2}" for i in range(len(pk)))
-        where = f" WHERE ({columns}) > ({marks})"
+        where = f" WHERE ({key}) > ({marks})"
         params.extend(after)
-    rows = await conn.fetch(
+    rows = await fetch_bounded_query(
+        conn,
         f"SELECT * FROM {qualified(schema, name)}{where}{key_order(pk)} "
         "LIMIT $1",
-        *params,
+        params,
+        columns,
+        max_bytes,
     )
+    if rows is None:
+        return None, after
     last = tuple(rows[-1][c] for c in pk) if rows else after
-    return [canonicalize_row(dict(r)) for r in rows], last
+    return [canonicalize_row(r) for r in rows], last
 
 
 async def fetch_bounded_rows(
@@ -237,14 +248,15 @@ async def fetch_bounded_rows(
     columns = {
         column["name"] for column in await fetch_columns(conn, schema, name)
     }
-    pk = await fetch_primary_key(conn, schema, name)
-    return await fetch_bounded_query(
+    pk = await fetch_row_key(conn, schema, name)
+    rows = await fetch_bounded_query(
         conn,
         f"SELECT * FROM {qualified(schema, name)}{key_order(pk)} LIMIT $1",
         [limit],
         columns,
         max_bytes,
     )
+    return None if rows is None else [canonicalize_row(r) for r in rows]
 
 
 async def fetch_bounded_query(
@@ -254,7 +266,8 @@ async def fetch_bounded_query(
     columns: set[str],
     max_bytes: int,
 ) -> list[dict[str, Any]] | None:
-    """Apply a byte budget before transferring a generated row query.
+    """Apply a byte budget before transferring a generated row query,
+    and answer its rows as the database gives them.
 
     Args:
         conn (asyncpg.Connection): the connection.
@@ -283,8 +296,7 @@ async def fetch_bounded_query(
     if size == 0:
         return []
     return [
-        canonicalize_row({k: v for k, v in dict(row).items() if k != marker})
-        for row in rows
+        {k: v for k, v in dict(row).items() if k != marker} for row in rows
     ]
 
 
@@ -396,9 +408,41 @@ async def fetch_primary_key(
         "JOIN information_schema.key_column_usage kcu "
         "  ON tc.constraint_name = kcu.constraint_name "
         " AND tc.table_schema = kcu.table_schema "
+        " AND tc.table_name = kcu.table_name "
         "WHERE tc.constraint_type = 'PRIMARY KEY' "
         "  AND tc.table_schema = $1 AND tc.table_name = $2 "
         "ORDER BY kcu.ordinal_position",
+        schema,
+        name,
+    )
+    return [r["column_name"] for r in rows]
+
+
+async def fetch_row_key(
+    conn: asyncpg.Connection, schema: str, name: str
+) -> list[str]:
+    """The columns a relation's rows are listed by: its primary key, when
+    that key is unique over every row a plain read returns.
+
+    A table with inheritance children reads their rows too, which its key
+    does not cover, so it has none and keeps its scan order; a
+    partitioned table's key covers every partition.
+
+    Args:
+        conn (asyncpg.Connection): the connection.
+        schema (str): the owning schema.
+        name (str): the relation.
+    """
+    rows = await conn.fetch(
+        "SELECT a.attname AS column_name FROM pg_constraint con "
+        "JOIN pg_class c ON c.oid = con.conrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "CROSS JOIN LATERAL unnest(con.conkey) WITH ORDINALITY "
+        "AS k(attnum, ord) "
+        "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum "
+        "WHERE con.contype = 'p' AND n.nspname = $1 AND c.relname = $2 "
+        "AND (c.relkind = 'p' OR NOT c.relhassubclass) "
+        "ORDER BY k.ord",
         schema,
         name,
     )

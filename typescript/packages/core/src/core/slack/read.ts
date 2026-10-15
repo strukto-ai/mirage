@@ -21,7 +21,12 @@ import { enoent } from '../../errors/fs.ts'
 import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { fetchMessagesForDay, getHistoryJsonl, type SlackMessage } from './history.ts'
+import {
+  fetchMessagesForDay,
+  getHistoryJsonl,
+  streamMessagesForDay,
+  type SlackMessage,
+} from './history.ts'
 import { readdir } from './readdir.ts'
 import { getUserProfile, userJsonBytes } from './users.ts'
 import { detectScope } from './scope.ts'
@@ -156,13 +161,18 @@ async function followChat(
 export const follow = perKind(detectScope, { messages: followChat })
 
 /** A run of a channel's days, fetched as one. Mirrors Python's `_fetch_run`. */
-function fetchRun(
+function runPages(
   accessor: SlackAccessor,
   channelId: string,
   first: string,
   last: string,
-): Promise<SlackMessage[]> {
-  return fetchMessagesForDay(accessor, channelId, first, undefined, last)
+): AsyncIterable<SlackMessage[]> {
+  return streamMessagesForDay(accessor, channelId, first, { lastDay: last })
+}
+
+/** A message's place among its day's lines. Mirrors Python's `_sort_key`. */
+function sortKey(message: SlackMessage): number {
+  return Number.parseFloat(message.ts)
 }
 
 /** Whether a message was posted in a day's bounds. Mirrors Python's `_posted_within`. */
@@ -177,6 +187,7 @@ function postedWithin(message: SlackMessage, start: number, end: number): boolea
 export function readMany(
   accessor: SlackAccessor,
   paths: readonly PathSpec[],
+  limit: number,
   index?: IndexCacheStore,
 ): Promise<Map<string, Uint8Array>> {
   return readDays(
@@ -186,7 +197,9 @@ export function readMany(
     paths,
     index,
     detectScope,
-    (channelId, first, last) => fetchRun(accessor, channelId, first, last),
+    (channelId, first, last) => runPages(accessor, channelId, first, last),
+    sortKey,
     postedWithin,
+    limit,
   )
 }

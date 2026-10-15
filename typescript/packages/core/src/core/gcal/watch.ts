@@ -20,10 +20,11 @@ import { eventTitle, makeEventFilename } from '../../vfs/gcal/event_entry.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { specFor } from '../../watch/delta.ts'
 import { ROOT } from '../hierarchy/scope.ts'
-import { syncEvents } from './client.ts'
-import { bucketName, bucketStart, clampedHhmm, daysCovered, eventSpan } from './day.ts'
+import { listed, syncEvents } from './client.ts'
+import { bucketName, bucketStart, clampedHhmm, dayBounds, daysCovered, eventSpan } from './day.ts'
 import { bucketZone, calendarIndex, FREE_BUSY_ROLE, scopedBucket } from './readdir.ts'
 import { detectScope } from './scope.ts'
+import { parseTime } from '../time_range.ts'
 
 /** Each event's files and `updated` stamp, by event id. */
 type Known = Map<string, [string[], string | null]>
@@ -33,7 +34,9 @@ type CalendarState = [string | null, Known]
 
 /**
  * The files an event is: one per day it covers that the mount's scope holds,
- * named as the bucket listing names it. Mirrors Python's `event_paths`.
+ * named as the bucket listing names it. A bucket whose listing leaves the
+ * event out (it falls outside the mount's time range) holds none of it.
+ * Mirrors Python's `event_paths`.
  */
 export function eventPaths(
   accessor: GCalAccessor,
@@ -46,6 +49,7 @@ export function eventPaths(
   const span = eventSpan(event, tz)
   if (typeof eventId !== 'string' || eventId === '' || span === null) return []
   const size = accessor.config.bucketDays
+  const scope = accessor.timeRange
   const summary = event.summary
   const title = eventTitle(typeof summary === 'string' ? summary : null, freeBusy)
   const paths: string[] = []
@@ -58,7 +62,11 @@ export function eventPaths(
       if ((err as { code?: string }).code !== 'ENOENT') throw err
       continue
     }
-    if (inScope.includes(day)) {
+    const [lo, hi] = dayBounds(inScope[0] ?? day, tz, inScope.length)
+    if (
+      inScope.includes(day) &&
+      (!scope.bounded || listed(span, ...scope.clip(parseTime(lo), parseTime(hi))))
+    ) {
       const name = makeEventFilename(
         eventId,
         clampedHhmm(span, day, tz),

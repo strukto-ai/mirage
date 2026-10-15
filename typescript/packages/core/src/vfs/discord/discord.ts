@@ -54,10 +54,10 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
 
   override readMany(
     paths: PathSpec[],
-    _limit: number,
+    limit: number,
     index?: IndexCacheStore,
   ): Promise<Map<string, Uint8Array>> {
-    return discordReadMany(this.accessor, paths, index)
+    return discordReadMany(this.accessor, paths, limit, index)
   }
 
   override readStream(

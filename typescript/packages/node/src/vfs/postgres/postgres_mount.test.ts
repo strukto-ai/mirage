@@ -71,6 +71,9 @@ function handleQuery(sql: string, params?: unknown[]): { rows: unknown[]; rowCou
   if (sql.startsWith('SELECT pg_total_relation_size')) {
     return ok([{ size: 4096 }])
   }
+  if (sql.includes("contype = 'p'")) {
+    return ok([{ column_name: 'id' }])
+  }
   if (sql.includes('pg_constraint') && sql.includes('ANY($1::text[])')) {
     return ok([])
   }
@@ -96,9 +99,10 @@ function handleQuery(sql: string, params?: unknown[]): { rows: unknown[]; rowCou
     return ok([{ count: tableRows }])
   }
   if (sql.startsWith('WITH data AS MATERIALIZED')) {
+    const keyed = sql.includes('WHERE ("id") > ($2)')
     const limit = Number(params?.[0] ?? 5)
-    const maxBytes = Number(params?.[1])
-    const rows = userRows(0, limit)
+    const maxBytes = Number(params?.[keyed ? 2 : 1])
+    const rows = userRows(keyed ? Number(params?.[1]) : 0, limit)
     const size = new TextEncoder().encode(
       rows.map((row) => JSON.stringify(row) + '\n').join(''),
     ).length
@@ -107,9 +111,6 @@ function handleQuery(sql: string, params?: unknown[]): { rows: unknown[]; rowCou
         ? [{ __mirage_bytes: size }]
         : rows.map((row) => ({ ...row, __mirage_bytes: size })),
     )
-  }
-  if (sql.startsWith('SELECT * FROM "public"."users" WHERE ("id") > ($2) ORDER BY "id" LIMIT')) {
-    return ok(userRows(Number(params?.[1]), Number(params?.[0])))
   }
   if (sql.startsWith('SELECT * FROM "public"."users" ORDER BY "id" LIMIT')) {
     return ok(userRows(Number(params?.[1] ?? 0), Number(params?.[0])))

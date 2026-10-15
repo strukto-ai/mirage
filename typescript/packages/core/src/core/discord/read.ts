@@ -22,7 +22,13 @@ import { resolveEntry } from '../hierarchy/probe.ts'
 import { makeRead, makeReadRange, perKind } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { downloadFile, downloadFileStream } from './files.ts'
-import { listMessagesForDay, getHistoryJsonl, snowflakeAt, type DiscordMessage } from './history.ts'
+import {
+  listMessagesForDay,
+  getHistoryJsonl,
+  snowflakeAt,
+  streamMessagesForDay,
+  type DiscordMessage,
+} from './history.ts'
 import { listMembers } from './members.ts'
 import { readdir } from './readdir.ts'
 import { compactJsonBytes } from '../render/json.ts'
@@ -148,13 +154,18 @@ async function followChat(
 export const follow = perKind(detectScope, { messages: followChat })
 
 /** A run of a channel's days, fetched as one. Mirrors Python's `_fetch_run`. */
-function fetchRun(
+function runPages(
   accessor: DiscordAccessor,
   channelId: string,
   first: string,
   last: string,
-): Promise<DiscordMessage[]> {
-  return listMessagesForDay(accessor, channelId, first, 100, undefined, last)
+): AsyncIterable<DiscordMessage[]> {
+  return streamMessagesForDay(accessor, channelId, first, 100, undefined, last)
+}
+
+/** A message's place among its day's lines. Mirrors Python's `_sort_key`. */
+function sortKey(message: DiscordMessage): bigint {
+  return BigInt(message.id)
 }
 
 /** Whether a message was posted in a day's bounds. Mirrors Python's `_posted_within`. */
@@ -169,6 +180,7 @@ function postedWithin(message: DiscordMessage, start: number, end: number): bool
 export function readMany(
   accessor: DiscordAccessor,
   paths: readonly PathSpec[],
+  limit: number,
   index?: IndexCacheStore,
 ): Promise<Map<string, Uint8Array>> {
   return readDays(
@@ -178,7 +190,9 @@ export function readMany(
     paths,
     index,
     detectScope,
-    (channelId, first, last) => fetchRun(accessor, channelId, first, last),
+    (channelId, first, last) => runPages(accessor, channelId, first, last),
+    sortKey,
     postedWithin,
+    limit,
   )
 }

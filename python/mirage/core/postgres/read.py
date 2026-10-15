@@ -16,6 +16,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
+import asyncpg
 import orjson
 
 from mirage.accessor.postgres import PostgresAccessor
@@ -255,7 +256,7 @@ async def _last_rows(
     cap = accessor.config.max_read_rows
     pool = await accessor.pool()
     async with pool.acquire() as conn:
-        pk = await client.fetch_primary_key(conn, schema, entity)
+        pk = await client.fetch_row_key(conn, schema, entity)
         if pk:
             rows, _ = await client.fetch_last_rows(
                 conn, schema, entity, pk, min(n, cap + 1)
@@ -303,14 +304,16 @@ async def read_stream(
 ) -> AsyncIterator[bytes]:
     """Stream a keyed table's rows.jsonl a page of rows at a time, in key
     order, the next page fetched only when the caller pulls it; any other
-    file, and a relation with no primary key, comes whole, as
-    :func:`read` gives it.
+    file, and a relation with no row key (``fetch_row_key``), comes
+    whole, as :func:`read` gives it.
 
     A table past ``max_read_rows`` rows or ``max_read_bytes`` bytes
     raises EFBIG once that much is out, rather than refusing it whole: a
     stream cannot know a table's size before it has paged through it,
     and a reader that stops first (``head -c``, ``grep -l``) never
-    reaches it.
+    reaches it. Each page asks for one row past what the row cap leaves
+    and is sent only when it fits what the byte cap leaves, so no page
+    holds more than the caps allow.
 
     Args:
         accessor (PostgresAccessor): backend handle.
@@ -320,12 +323,12 @@ async def read_stream(
     match = detect_scope(path)
     pk: list[str] = []
     if match.kind == "entity_rows":
+        schema, entity = match.slots["schema"], match.slots["entity"]
         await entity_guard(accessor, match, path.virtual)
         pool = await accessor.pool()
         async with pool.acquire() as conn:
-            pk = await client.fetch_primary_key(
-                conn, match.slots["schema"], match.slots["entity"]
-            )
+            pk = await client.fetch_row_key(conn, schema, entity)
+            columns = await _column_names(conn, schema, entity)
     if not pk:
         yield await read(accessor, path, index)
         return
@@ -333,15 +336,20 @@ async def read_stream(
     rows_out = bytes_out = 0
     after: tuple[Any, ...] | None = None
     while True:
+        limit = min(cfg.default_row_limit, cfg.max_read_rows - rows_out + 1)
         async with pool.acquire() as conn:
             rows, after = await client.fetch_rows_after(
                 conn,
-                match.slots["schema"],
-                match.slots["entity"],
+                schema,
+                entity,
                 pk,
                 after,
-                cfg.default_row_limit,
+                limit,
+                columns,
+                cfg.max_read_bytes - bytes_out,
             )
+        if rows is None:
+            raise efbig(path)
         page = bytearray()
         for row in rows:
             line = (row_line(row) + "\n").encode()
@@ -354,8 +362,24 @@ async def read_stream(
             page.extend(line)
         if page:
             yield bytes(page)
-        if len(rows) < cfg.default_row_limit:
+        if len(rows) < limit:
             return
+
+
+async def _column_names(
+    conn: asyncpg.Connection, schema: str, entity: str
+) -> set[str]:
+    """A relation's column names, which a byte-bounded page keeps its
+    size marker clear of.
+
+    Args:
+        conn (asyncpg.Connection): the connection.
+        schema (str): the owning schema.
+        entity (str): the relation.
+    """
+    return {
+        c["name"] for c in await client.fetch_columns(conn, schema, entity)
+    }
 
 
 async def _follow_rows(
@@ -387,54 +411,68 @@ async def _follow_rows(
     cap = accessor.config.max_read_rows
     pool = await accessor.pool()
     async with pool.acquire() as conn:
-        pk = await client.fetch_primary_key(conn, schema, entity)
+        pk = await client.fetch_row_key(conn, schema, entity)
         if not pk:
             return None
         rows, after = await client.fetch_last_rows(
             conn, schema, entity, pk, max(min(n, cap + 1), 1)
         )
+        columns = await _column_names(conn, schema, entity)
     if len(rows) > cap:
         raise efbig(path)
     return _followed_rows(
-        accessor, schema, entity, pk, after, rows[-n:] if n else [], interval
+        accessor,
+        path,
+        pk,
+        columns,
+        after,
+        rows[-n:] if n else [],
+        interval,
     )
 
 
 async def _followed_rows(
     accessor: PostgresAccessor,
-    schema: str,
-    entity: str,
+    path: PathSpec,
     pk: list[str],
+    columns: set[str],
     after: tuple[Any, ...] | None,
     rows: list[dict[str, Any]],
     interval: float,
 ) -> AsyncIterator[bytes]:
     """``rows``, then each row past ``after`` every ``interval`` seconds,
-    as rows.jsonl lines.
+    as rows.jsonl lines. One ask whose rows pass ``max_read_bytes``
+    raises EFBIG before any of them is sent.
 
     Args:
         accessor (PostgresAccessor): backend handle.
-        schema (str): the owning schema.
-        entity (str): the table.
-        pk (list[str]): its primary key's columns.
+        path (PathSpec): the rows file.
+        pk (list[str]): its table's row key.
+        columns (set[str]): its table's column names.
         after (tuple[Any, ...] | None): the last key seen.
         rows (list[dict[str, Any]]): the last rows, printed first.
         interval (float): seconds between two asks.
     """
     if rows:
         yield _lines(rows)
+    match = detect_scope(path)
+    cfg = accessor.config
     pool = await accessor.pool()
     while True:
         await asyncio.sleep(interval)
         async with pool.acquire() as conn:
             added, after = await client.fetch_rows_after(
                 conn,
-                schema,
-                entity,
+                match.slots["schema"],
+                match.slots["entity"],
                 pk,
                 after,
-                accessor.config.default_row_limit,
+                cfg.default_row_limit,
+                columns,
+                cfg.max_read_bytes,
             )
+        if added is None:
+            raise efbig(path)
         if added:
             yield _lines(added)
 

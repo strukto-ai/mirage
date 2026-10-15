@@ -56,6 +56,11 @@ async def test_events_name_the_files_they_change():
         _event("update", "books"),
         _event("create", "recent", operationDescription={"viewOn": "books"}),
         _event("createIndexes", "books"),
+        _event(
+            "modify",
+            "recent",
+            operationDescription={"viewOn": "books", "pipeline": []},
+        ),
         _event("insert", "old"),
         _event("rename", "old", to={"db": "lib", "coll": "new"}),
         _event("insert", "hidden", db="admin"),
@@ -79,9 +84,10 @@ async def test_events_name_the_files_they_change():
         (FileChangeKind.UPDATE, "/m/lib/collections/books/documents.jsonl"),
         (FileChangeKind.CREATE, "/m/lib/views/recent"),
         (FileChangeKind.UPDATE, "/m/lib/collections/books/schema.json"),
+        (FileChangeKind.UPDATE, "/m/lib/views/recent/schema.json"),
+        (FileChangeKind.UPDATE, "/m/lib/views/recent/documents.jsonl"),
         (FileChangeKind.DELETE, "/m/lib/collections/old"),
         (FileChangeKind.CREATE, "/m/lib/collections/new"),
-        (FileChangeKind.UPDATE, "/m/lib/views/recent/documents.jsonl"),
     ]
     assert json.loads(delta.checkpoint) == {"mongodb": NEXT}
 

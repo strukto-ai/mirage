@@ -58,12 +58,12 @@ function makeAccessor(
   const driver: PgDriver = {
     query: ((sql: string, params: unknown[] = []) => {
       calls.push([sql, params])
-      if (sql.includes('relhassubclass')) {
-        return Promise.resolve({ rows: relation, rowCount: relation.length })
-      }
-      if (sql.includes('PRIMARY KEY')) {
+      if (sql.includes("contype = 'p'")) {
         const named = key.map((name) => ({ column_name: name }))
         return Promise.resolve({ rows: named, rowCount: named.length })
+      }
+      if (sql.includes('relhassubclass')) {
+        return Promise.resolve({ rows: relation, rowCount: relation.length })
       }
       if (sql.includes('pg_attribute')) {
         return Promise.resolve({ rows: cols, rowCount: cols.length })

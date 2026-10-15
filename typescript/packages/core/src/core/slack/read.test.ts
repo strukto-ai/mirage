@@ -384,6 +384,7 @@ it('walks each run of days of a batch once', async () => {
   const answers = await readMany(
     new SlackAccessor(t),
     [...chats, '/mnt/slack/users/alice__U1.json'].map((v) => spec(v, '/mnt/slack')),
+    1 << 20,
     idx,
   )
   const lines = (body: Uint8Array | undefined): unknown[] =>
@@ -395,4 +396,24 @@ it('walks each run of days of a batch once', async () => {
   expect(chats.map((chat) => lines(answers.get(chat)))).toEqual([[on24], [on25], []])
   expect(answers.size).toBe(3)
   expect(t.calls.filter((call) => call.endpoint === 'conversations.history')).toHaveLength(2)
+  // A day past the limit is left out; a run past the limit a day stops walking
+  // and is left out whole.
+  const big = { ts: on24.ts, text: 'a'.repeat(12) }
+  const sized = new FakeTransport((_endpoint, params) => ({
+    ok: true,
+    messages: Number(params?.oldest) < Date.parse('2026-04-26T00:00:00Z') / 1000 ? [big, on25] : [],
+  }))
+  const limit = new TextEncoder().encode(`${JSON.stringify(on25)}\n`).byteLength + 10
+  for (const [size, kept] of [
+    [limit, [chats[1], chats[2]]],
+    [1, [chats[2]]],
+  ] as const) {
+    const got = await readMany(
+      new SlackAccessor(sized),
+      chats.map((v) => spec(v, '/mnt/slack')),
+      size,
+      idx,
+    )
+    expect([...got.keys()]).toEqual(kept)
+  }
 })

@@ -172,14 +172,23 @@ async def list_events(
             event
             for event in items
             if (span := event_span(event, time_zone or "UTC")) is not None
-            and span[0].timestamp() < hi
-            and (
-                span[1].timestamp() > lo
-                or span[0] == span[1]
-                and span[0].timestamp() >= lo
-            )
+            and listed(span, lo, hi)
         ]
     return items
+
+
+def listed(span: tuple[datetime, datetime], lo: float, hi: float) -> bool:
+    """Whether a listing of the window ``lo``..``hi`` keeps an event: one
+    that starts before the window ends and ends after it starts, or an
+    instant one at or after its start.
+
+    Args:
+        span (tuple[datetime, datetime]): the event's [start, end).
+        lo (float): the window's start, in epoch seconds.
+        hi (float): the window's end, in epoch seconds.
+    """
+    start, end = span[0].timestamp(), span[1].timestamp()
+    return start < hi and (end > lo or start == end and start >= lo)
 
 
 async def sync_events(

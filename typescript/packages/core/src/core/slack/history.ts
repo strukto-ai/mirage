@@ -56,22 +56,20 @@ export async function* streamMessagesForDay(
   }
 }
 
-/**
- * Every message of a channel-day, or only those after `after`, oldest first;
- * through `lastDay` for a run of days read as one.
- */
+/** Every message of a channel-day, or only those after `after`, oldest first. */
 export async function fetchMessagesForDay(
   accessor: SlackAccessor,
   channelId: string,
   dateStr: string,
   after?: string,
-  lastDay?: string,
 ): Promise<SlackMessage[]> {
   const messages: SlackMessage[] = []
-  for await (const page of streamMessagesForDay(accessor, channelId, dateStr, {
-    ...(after === undefined ? {} : { after }),
-    ...(lastDay === undefined ? {} : { lastDay }),
-  })) {
+  for await (const page of streamMessagesForDay(
+    accessor,
+    channelId,
+    dateStr,
+    after === undefined ? {} : { after },
+  )) {
     messages.push(...page)
   }
   messages.sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts))

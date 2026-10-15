@@ -139,18 +139,20 @@ async def _read_event(
 async def read_many(
     accessor: GCalAccessor,
     paths: list[PathSpec],
+    limit: int,
     index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, bytes]:
     """Read several event files, listing each day they name once.
 
     A day's listing answers every event asked of it, so a batch of one
     day's events costs what one read does. A path that is not an event
-    file, or names an event its day does not hold, is left out for its
-    own read to answer.
+    file, names an event its day does not hold, or renders past
+    ``limit`` bytes is left out for its own read to answer.
 
     Args:
         accessor (GCalAccessor): the mount's accessor.
         paths (list[PathSpec]): the files.
+        limit (int): the most bytes worth reading for one file.
         index (IndexCacheStore): the mount's index cache.
     """
     calendars = await calendar_index(accessor)
@@ -170,8 +172,9 @@ async def read_many(
     for (cal_id, day), events in days.items():
         for event in await _day_events(accessor, cal_id, day, tz):
             virtual = events.get(str(event.get("id")))
-            if virtual is not None:
-                answers[virtual] = compact_json_bytes(event)
+            body = compact_json_bytes(event)
+            if virtual is not None and len(body) <= limit:
+                answers[virtual] = body
     return answers
 
 

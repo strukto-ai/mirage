@@ -100,7 +100,7 @@ class GCalVFS(BaseVFS):
         limit: int,
         index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, bytes]:
-        return await _read_many(self.accessor, paths, index)
+        return await _read_many(self.accessor, paths, limit, index)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

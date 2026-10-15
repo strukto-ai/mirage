@@ -405,6 +405,7 @@ it('walks a run of days of a batch once', async () => {
   const answers = await readMany(
     new DiscordAccessor(t),
     chats.map((v) => spec(v, '/mnt/discord')),
+    1 << 20,
     idx,
   )
   const lines = (body: Uint8Array | undefined): unknown[] =>

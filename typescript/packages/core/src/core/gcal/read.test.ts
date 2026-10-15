@@ -105,6 +105,7 @@ it('lists each day of a batch once', async () => {
   const answers = await readMany(
     makeAccessor(),
     paths.map((path) => spec(path)),
+    1 << 20,
   )
   expect(new Map([...answers].map(([path, body]) => [path, parsed(body)]))).toEqual(
     new Map([
@@ -113,4 +114,13 @@ it('lists each day of a batch once', async () => {
     ]),
   )
   expect(API.listed).toHaveLength(1)
+  // An event past the limit is left out for its own read.
+  const [small] = [...answers].sort(([, a], [, b]) => a.byteLength - b.byteLength)
+  if (small === undefined) throw new Error('two events answered')
+  const capped = await readMany(
+    makeAccessor(),
+    paths.map((path) => spec(path)),
+    small[1].byteLength,
+  )
+  expect([...capped.keys()]).toEqual([small[0]])
 })

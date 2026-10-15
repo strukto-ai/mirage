@@ -28,6 +28,9 @@ TRASHED = {**MESSAGES[0], "labelIds": ["TRASH"]}
 NEW = _message(
     "n3", ["INBOX"], "2026-01-07", "Cy <cy@example.com>", "Hi", "hey"
 )
+WORK = _message(
+    "w1", ["Label_1"], "2026-01-08", "Di <di@example.com>", "Plan", "go"
+)
 
 
 def _gone() -> aiohttp.ClientResponseError:
@@ -40,7 +43,8 @@ class Mailbox:
     def __init__(self) -> None:
         self.history: dict[str, object] = {}
         self.now = "100"
-        self.messages = {m["id"]: m for m in (TRASHED, NEW)}
+        self.labels = LABELS
+        self.messages = {m["id"]: m for m in (TRASHED, NEW, WORK)}
 
     async def current_history_id(self, token_manager):
         return self.now
@@ -52,7 +56,7 @@ class Mailbox:
         return answer
 
     async def list_labels(self, token_manager):
-        return LABELS
+        return self.labels
 
     async def get_message_raw(self, token_manager, message_id):
         return self.messages[message_id]
@@ -122,3 +126,42 @@ async def test_a_watch_follows_each_message_s_labels(mailbox):
     lost = await hook.pull(ROOT, deleted.checkpoint)
     assert _pairs(lost) == [(FileChangeKind.UNKNOWN, "/gmail")]
     assert '"history": "200"' in (lost.checkpoint or "")
+
+
+async def test_a_watch_follows_the_label_folders(mailbox):
+    # History records no label created, renamed or deleted: each pull
+    # compares the folders, and a message below a renamed one moves with it.
+    hook = watch.build_delta_hook(MagicMock())
+    baseline = await hook.pull(ROOT, None)
+    mailbox.history["100"] = (
+        [{"messagesAdded": [{"message": {"id": "w1"}}]}],
+        "110",
+    )
+    seen = await hook.pull(ROOT, baseline.checkpoint)
+    plan = "2026-01-08/Plan__w1.gmail.json"
+    assert _pairs(seen) == [(FileChangeKind.CREATE, f"/gmail/Work/{plan}")]
+    mailbox.labels = [
+        *LABELS[:2],
+        {"id": "Label_1", "name": "Projects", "type": "user"},
+        {"id": "Label_2", "name": "Empty", "type": "user"},
+    ]
+    mailbox.messages["w1"] = {**WORK, "labelIds": ["Label_1", "INBOX"]}
+    mailbox.history["110"] = (
+        [{"labelsAdded": [{"message": {"id": "w1"}, "labelIds": ["INBOX"]}]}],
+        "120",
+    )
+    renamed = await hook.pull(ROOT, seen.checkpoint)
+    assert _pairs(renamed) == [
+        (FileChangeKind.DELETE, "/gmail/Work"),
+        (FileChangeKind.CREATE, "/gmail/Projects"),
+        (FileChangeKind.CREATE, "/gmail/Empty"),
+        (FileChangeKind.CREATE, f"/gmail/INBOX/{plan}"),
+        (FileChangeKind.UPDATE, f"/gmail/Projects/{plan}"),
+    ]
+    mailbox.labels = LABELS[:2]
+    mailbox.history["120"] = ([], "130")
+    removed = await hook.pull(ROOT, renamed.checkpoint)
+    assert _pairs(removed) == [
+        (FileChangeKind.DELETE, "/gmail/Projects"),
+        (FileChangeKind.DELETE, "/gmail/Empty"),
+    ]

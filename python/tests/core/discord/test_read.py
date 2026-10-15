@@ -14,7 +14,7 @@
 
 import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -166,6 +166,11 @@ async def test_only_a_chat_day_is_followed(api, accessor, index):
     assert await follow(accessor, spec(member), 1, 1.0, index) is None
 
 
+async def _walk(*pages):
+    for page in pages:
+        yield page
+
+
 async def test_a_batch_walks_a_run_of_days_once(api, accessor, index):
     nxt = "2024-01-16"
     on_day, later = (
@@ -179,11 +184,13 @@ async def test_a_batch_walks_a_run_of_days_once(api, accessor, index):
     )
     chats = [CHAT, f"/{CHANNEL}/{nxt}/chat.jsonl"]
     with patch(
-        "mirage.core.discord.read.list_messages_for_day",
-        new_callable=AsyncMock,
-        return_value=[on_day, later],
+        "mirage.core.discord.read.stream_messages_for_day",
+        new_callable=MagicMock,
+        return_value=_walk([later], [on_day]),
     ) as walk:
-        answers = await read_many(accessor, [spec(c) for c in chats], index)
+        answers = await read_many(
+            accessor, [spec(c) for c in chats], 1 << 20, index
+        )
     assert answers == {
         chats[0]: jsonl_bytes([on_day]),
         chats[1]: jsonl_bytes([later]),

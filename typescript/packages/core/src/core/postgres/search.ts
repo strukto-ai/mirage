@@ -15,7 +15,7 @@
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import type { PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
-import { fetchBoundedQuery, fetchPrimaryKey, keyOrder, qualified, quoteIdent } from './client.ts'
+import { fetchBoundedQuery, fetchRowKey, keyOrder, qualified, quoteIdent } from './client.ts'
 import { rowLine } from './read.ts'
 import { detectScope } from './scope.ts'
 
@@ -203,7 +203,7 @@ export async function linesContaining(
   let marker = '__mirage_row'
   while (names.has(marker)) marker += '_'
   const numbered = quoteIdent(marker)
-  const pk = await fetchPrimaryKey(accessor, schema, entity)
+  const pk = await fetchRowKey(accessor, schema, entity)
   const sql =
     pk.length > 0
       ? `SELECT * FROM ${source} WHERE ${where}${keyOrder(pk)} LIMIT $2`

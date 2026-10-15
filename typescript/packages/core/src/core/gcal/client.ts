@@ -111,13 +111,20 @@ export async function listEvents(
   return scope.bounded
     ? items.filter((event) => {
         const span = eventSpan(event, timeZone ?? 'UTC')
-        return (
-          span !== null &&
-          span[0] / 1000 < hi &&
-          (span[1] / 1000 > lo || (span[0] === span[1] && span[0] / 1000 >= lo))
-        )
+        return span !== null && listed(span, lo, hi)
       })
     : items
+}
+
+/**
+ * Whether a listing of the window `lo`..`hi` (epoch seconds) keeps an event
+ * spanning `span` (epoch ms): one that starts before the window ends and ends
+ * after it starts, or an instant one at or after its start. Mirrors Python's
+ * `listed`.
+ */
+export function listed(span: readonly [number, number], lo: number, hi: number): boolean {
+  const [start, end] = [span[0] / 1000, span[1] / 1000]
+  return start < hi && (end > lo || (start === end && start >= lo))
 }
 
 /**

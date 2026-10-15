@@ -28,7 +28,11 @@ export interface DiscordMessage extends Record<string, unknown> {
   attachments?: { id: string; [key: string]: unknown }[]
 }
 
-async function* streamMessagesForDay(
+/**
+ * A channel-day's messages, or a run of days' through `lastDay`, a page at a
+ * time, newest page first. Mirrors Python's `stream_messages_for_day`.
+ */
+export async function* streamMessagesForDay(
   accessor: DiscordAccessor,
   channelId: string,
   dateStr: string,
@@ -56,27 +60,16 @@ async function* streamMessagesForDay(
   }
 }
 
-/**
- * Every message of a channel-day, or only those after `after`, oldest first;
- * through `lastDay` for a run of days read as one.
- */
+/** Every message of a channel-day, or only those after `after`, oldest first. */
 export async function listMessagesForDay(
   accessor: DiscordAccessor,
   channelId: string,
   dateStr: string,
   pageSize = 100,
   after?: string,
-  lastDay?: string,
 ): Promise<DiscordMessage[]> {
   const out: DiscordMessage[] = []
-  for await (const page of streamMessagesForDay(
-    accessor,
-    channelId,
-    dateStr,
-    pageSize,
-    after,
-    lastDay,
-  )) {
+  for await (const page of streamMessagesForDay(accessor, channelId, dateStr, pageSize, after)) {
     out.push(...page)
   }
   out.sort((a, b) => {

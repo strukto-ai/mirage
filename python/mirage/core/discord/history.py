@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from mirage.core.api.client import SessionArg
@@ -43,7 +43,7 @@ async def stream_messages_for_day(
     session: SessionArg = None,
     after: str | None = None,
     last_day: str | None = None,
-) -> AsyncIterator[list[dict[str, Any]]]:
+) -> AsyncGenerator[list[dict[str, Any]], None]:
     """Stream message pages for a channel-day, or a run of days.
 
     Walks ``/channels/<id>/messages?after=<snowflake>&limit=N``
@@ -96,7 +96,6 @@ async def list_messages_for_day(
     page_size: int = 100,
     session: SessionArg = None,
     after: str | None = None,
-    last_day: str | None = None,
 ) -> list[dict[str, Any]]:
     """List all messages for a channel-day (eager).
 
@@ -108,8 +107,6 @@ async def list_messages_for_day(
         page_size (int): per-page limit.
         session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this id.
-        last_day (str | None): the last day of a run read as one, the
-            day itself when None.
 
     Returns:
         list[dict]: messages within the date, sorted oldest-first.
@@ -123,7 +120,6 @@ async def list_messages_for_day(
         page_size,
         session=session,
         after=after,
-        last_day=last_day,
     ):
         out.extend(page)
     out.sort(key=lambda m: int(m["id"]))

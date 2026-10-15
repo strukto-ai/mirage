@@ -119,10 +119,20 @@ async def test_a_batch_lists_each_day_once(gcal_api, index):
         "/primary/calendar.json",
     ]
     answers = await read_many(
-        make_accessor(), [spec(path) for path in paths], index
+        make_accessor(), [spec(path) for path in paths], 1 << 20, index
     )
     assert {path: json.loads(body) for path, body in answers.items()} == {
         paths[0]: EVENTS[0],
         paths[1]: EVENTS[1],
     }
     assert len(gcal_api.listed) == 1
+    # An event past the limit is left out for its own read.
+    small = min(answers, key=lambda path: len(answers[path]))
+    assert list(
+        await read_many(
+            make_accessor(),
+            [spec(path) for path in paths],
+            len(answers[small]),
+            index,
+        )
+    ) == [small]

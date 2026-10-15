@@ -58,10 +58,10 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
 
   override readMany(
     paths: PathSpec[],
-    _limit: number,
+    limit: number,
     index?: IndexCacheStore,
   ): Promise<Map<string, Uint8Array>> {
-    return slackReadMany(this.accessor, paths, index)
+    return slackReadMany(this.accessor, paths, limit, index)
   }
 
   override readStream(

@@ -109,6 +109,7 @@ async function readEvent(
 export async function readMany(
   accessor: GCalAccessor,
   paths: readonly PathSpec[],
+  limit: number,
 ): Promise<Map<string, Uint8Array>> {
   const calendars = await calendarIndex(accessor)
   const tz = bucketZone(accessor, calendars)
@@ -133,7 +134,8 @@ export async function readMany(
   for (const [calId, day, events] of days.values()) {
     for (const event of await dayEvents(accessor, calId, day, tz)) {
       const virtual = typeof event.id === 'string' ? events.get(event.id) : undefined
-      if (virtual !== undefined) answers.set(virtual, compactJsonBytes(event))
+      const body = compactJsonBytes(event)
+      if (virtual !== undefined && body.byteLength <= limit) answers.set(virtual, body)
     }
   }
   return answers

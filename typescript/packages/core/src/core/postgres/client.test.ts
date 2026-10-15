@@ -157,7 +157,7 @@ describe('estimatedRowCount / tableSizeBytes', () => {
 describe('fetchRows', () => {
   it('quotes identifiers, binds limit/offset and orders by the key', async () => {
     const { accessor, query } = makeAccessor((sql) =>
-      sql.includes('PRIMARY KEY') ? [{ column_name: 'id' }] : [{ id: 1, name: 'a' }],
+      sql.includes("contype = 'p'") ? [{ column_name: 'id' }] : [{ id: 1, name: 'a' }],
     )
     const out = await client.fetchRows(accessor, 'public', 'users', { limit: 10, offset: 5 })
     expect(out).toEqual([{ id: 1, name: 'a' }])
@@ -181,11 +181,40 @@ describe('fetchColumns', () => {
   })
 })
 
-describe('fetchPrimaryKey', () => {
-  it('returns column names in ordinal_position order', async () => {
+// Twin of test_fetch_a_key: another table's constraint can share the key's
+// name, and a parent's key does not cover its inheritance children's rows.
+describe.each([
+  ['fetchPrimaryKey', client.fetchPrimaryKey, 'tc.table_name = kcu.table_name'],
+  ['fetchRowKey', client.fetchRowKey, "(c.relkind = 'p' OR NOT c.relhassubclass)"],
+] as const)('%s', (_name, fetch, clause) => {
+  it('returns the key columns in key order', async () => {
     const { accessor, query } = makeAccessor([{ column_name: 'a' }, { column_name: 'b' }])
-    expect(await client.fetchPrimaryKey(accessor, 'public', 'users')).toEqual(['a', 'b'])
-    expect(query.mock.calls[0]?.[0]).toContain('ORDER BY kcu.ordinal_position')
+    expect(await fetch(accessor, 'public', 'users')).toEqual(['a', 'b'])
+    expect(query.mock.calls[0]?.[0]).toContain(clause)
+  })
+})
+
+// Twin of test_rows_after_a_key_come_within_a_byte_budget.
+describe('fetchRowsAfter', () => {
+  it.each([
+    [12, [[{ id: 2 }], [2]]],
+    [101, [null, [1]]],
+  ])('answers a %i-byte page against a 100-byte budget', async (size, expected) => {
+    const { accessor, query } = makeAccessor([{ id: 2, __mirage_bytes: size }])
+    expect(
+      await client.fetchRowsAfter(
+        accessor,
+        'public',
+        'users',
+        ['id'],
+        [1],
+        5,
+        new Set(['id']),
+        100,
+      ),
+    ).toEqual(expected)
+    expect(query.mock.calls[0]?.[0]).toContain('WHERE ("id") > ($2) ORDER BY "id" LIMIT $1')
+    expect(query.mock.calls[0]?.[1]).toEqual([5, 1, 100])
   })
 })
 
@@ -266,7 +295,7 @@ describe('fetchBoundedRows', () => {
     const { accessor, query } = makeAccessor((sql) =>
       sql.includes('information_schema.columns')
         ? [{ column_name: '__mirage_bytes', data_type: 'text', is_nullable: 'YES' }]
-        : sql.includes('PRIMARY KEY')
+        : sql.includes("contype = 'p'")
           ? []
           : [{ __mirage_bytes: null, __mirage_bytes_: size }],
     )

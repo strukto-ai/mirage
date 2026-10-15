@@ -30,8 +30,9 @@ import {
   countRows,
   estimateSize,
   fetchBoundedRows,
+  fetchColumns,
   fetchLastRows,
-  fetchPrimaryKey,
+  fetchRowKey,
   fetchRows,
   fetchRowsAfter,
 } from './client.ts'
@@ -50,11 +51,14 @@ export interface ReadOptions {
 /**
  * Stream a keyed table's rows.jsonl a page of rows at a time, in key order,
  * the next page fetched only when the caller pulls it; any other file, a
- * window, and a relation with no primary key comes whole, as `read` gives it.
- * A table past `maxReadRows` rows or `maxReadBytes` bytes throws EFBIG once
- * that much is out, rather than refusing it whole: a stream cannot know a
- * table's size before it has paged through it, and a reader that stops first
- * (`head -c`, `grep -l`) never reaches it. Mirrors Python's `read_stream`.
+ * window, and a relation with no row key (`fetchRowKey`) comes whole, as
+ * `read` gives it. A table past `maxReadRows` rows or `maxReadBytes` bytes
+ * throws EFBIG once that much is out, rather than refusing it whole: a stream
+ * cannot know a table's size before it has paged through it, and a reader that
+ * stops first (`head -c`, `grep -l`) never reaches it. Each page asks for one
+ * row past what the row cap leaves and is sent only when it fits what the byte
+ * cap leaves, so no page holds more than the caps allow. Mirrors Python's
+ * `read_stream`.
  */
 export async function* readStream(
   accessor: PostgresAccessor,
@@ -67,9 +71,11 @@ export async function* readStream(
   const schema = match.slots.schema ?? ''
   const entity = match.slots.entity ?? ''
   let pk: string[] = []
+  let columns: ReadonlySet<string> = new Set()
   if (match.kind === 'entity_rows' && options.limit == null && options.offset == null) {
     await entityGuard(accessor, match, spec.virtual)
-    pk = await fetchPrimaryKey(accessor, schema, entity)
+    pk = await fetchRowKey(accessor, schema, entity)
+    columns = await columnNames(accessor, schema, entity)
   }
   if (pk.length === 0) {
     yield await read(accessor, path, index, options)
@@ -81,14 +87,18 @@ export async function* readStream(
   let bytesOut = 0
   let after: readonly unknown[] | null = null
   for (;;) {
+    const limit = Math.min(cfg.defaultRowLimit, cfg.maxReadRows - rowsOut + 1)
     const [rows, last] = await fetchRowsAfter(
       accessor,
       schema,
       entity,
       pk,
       after,
-      cfg.defaultRowLimit,
+      limit,
+      columns,
+      cfg.maxReadBytes - bytesOut,
     )
+    if (rows === null) throw efbig(spec)
     after = last
     const page: string[] = []
     for (const row of rows) {
@@ -102,8 +112,20 @@ export async function* readStream(
       page.push(line)
     }
     if (page.length > 0) yield encoder.encode(page.join(''))
-    if (rows.length < cfg.defaultRowLimit) return
+    if (rows.length < limit) return
   }
+}
+
+/**
+ * A relation's column names, which a byte-bounded page keeps its size marker
+ * clear of. Mirrors Python's `_column_names`.
+ */
+async function columnNames(
+  accessor: PostgresAccessor,
+  schema: string,
+  entity: string,
+): Promise<ReadonlySet<string>> {
+  return new Set((await fetchColumns(accessor, schema, entity)).map((column) => column.name))
 }
 
 function entityKind(match: ScopeMatch): 'table' | 'view' {
@@ -263,7 +285,7 @@ async function lastRows(
   const schema = match.slots.schema ?? ''
   const entity = match.slots.entity ?? ''
   const cap = accessor.config.maxReadRows
-  const pk = await fetchPrimaryKey(accessor, schema, entity)
+  const pk = await fetchRowKey(accessor, schema, entity)
   if (pk.length > 0) {
     const [rows] = await fetchLastRows(accessor, schema, entity, pk, Math.min(n, cap + 1))
     if (rows.length > cap) throw efbig(path)
@@ -314,7 +336,7 @@ async function followRows(
   const schema = match.slots.schema ?? ''
   const entity = match.slots.entity ?? ''
   const cap = accessor.config.maxReadRows
-  const pk = await fetchPrimaryKey(accessor, schema, entity)
+  const pk = await fetchRowKey(accessor, schema, entity)
   if (pk.length === 0) return null
   const [rows, after] = await fetchLastRows(
     accessor,
@@ -323,24 +345,31 @@ async function followRows(
     pk,
     Math.max(Math.min(n, cap + 1), 1),
   )
+  const columns = await columnNames(accessor, schema, entity)
   if (rows.length > cap) throw efbig(path)
-  return followedRows(accessor, schema, entity, pk, after, n > 0 ? rows.slice(-n) : [], interval)
+  return followedRows(accessor, path, pk, columns, after, n > 0 ? rows.slice(-n) : [], interval)
 }
 
 /**
  * `rows`, then each row past `after` every `interval` seconds, as rows.jsonl
- * lines. An iterator rather than a generator, so closing ends a pull waiting
- * out its interval, as `followedDay` does. Mirrors Python's `_followed_rows`.
+ * lines. One ask whose rows pass `maxReadBytes` throws EFBIG before any of
+ * them is sent. An iterator rather than a generator, so closing ends a pull
+ * waiting out its interval, as `followedDay` does. Mirrors Python's
+ * `_followed_rows`.
  */
 function followedRows(
   accessor: PostgresAccessor,
-  schema: string,
-  entity: string,
+  path: PathSpec,
   pk: readonly string[],
+  columns: ReadonlySet<string>,
   after: readonly unknown[] | null,
   rows: readonly Record<string, unknown>[],
   interval: number,
 ): AsyncIterableIterator<Uint8Array> {
+  const match = detectScope(path)
+  const schema = match.slots.schema ?? ''
+  const entity = match.slots.entity ?? ''
+  const cfg = accessor.config
   let pending: Uint8Array | null = rows.length > 0 ? lines(rows) : null
   let last = after
   const stop = new AbortController()
@@ -356,9 +385,19 @@ function followedRows(
         for (;;) {
           await sleep(interval * 1000, stop.signal)
           const [added, next] = await abortable(
-            fetchRowsAfter(accessor, schema, entity, pk, last, accessor.config.defaultRowLimit),
+            fetchRowsAfter(
+              accessor,
+              schema,
+              entity,
+              pk,
+              last,
+              cfg.defaultRowLimit,
+              columns,
+              cfg.maxReadBytes,
+            ),
             stop.signal,
           )
+          if (added === null) throw efbig(path)
           last = next
           if (added.length > 0) return { value: lines(added), done: false }
         }

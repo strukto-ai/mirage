@@ -20,11 +20,12 @@ from http import HTTPStatus
 import aiohttp
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.core.gcal.client import sync_events
+from mirage.core.gcal.client import listed, sync_events
 from mirage.core.gcal.day import (
     bucket_name,
     bucket_start,
     clamped_hhmm,
+    day_bounds,
     days_covered,
     event_span,
 )
@@ -36,6 +37,7 @@ from mirage.core.gcal.readdir import (
 )
 from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ROOT
+from mirage.core.time_range import parse_time
 from mirage.types import Delta, FileChangeKind, FileEvent, JsonValue, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.vfs.gcal.event_entry import event_title, make_event_filename
@@ -59,7 +61,9 @@ def event_paths(
     free_busy: bool,
 ) -> list[str]:
     """The files an event is: one per day it covers that the mount's scope
-    holds, named as the bucket listing names it.
+    holds, named as the bucket listing names it. A bucket whose listing
+    leaves the event out (it falls outside the mount's time range) holds
+    none of it.
 
     Args:
         accessor (GCalAccessor): the mount's accessor.
@@ -73,6 +77,7 @@ def event_paths(
     if not isinstance(event_id, str) or not event_id or span is None:
         return []
     size = accessor.config.bucket_days
+    scope = accessor.time_range
     summary = event.get("summary")
     title = event_title(
         summary if isinstance(summary, str) else None, free_busy=free_busy
@@ -84,7 +89,11 @@ def event_paths(
             in_scope = scoped_bucket(accessor, bucket, tz, base)
         except FileNotFoundError:
             continue
-        if day in in_scope:
+        lo, hi = day_bounds(in_scope[0], tz, len(in_scope))
+        if day in in_scope and (
+            not scope.bounded
+            or listed(span, *scope.clip(parse_time(lo), parse_time(hi)))
+        ):
             name = make_event_filename(
                 event_id,
                 clamped_hhmm(span, day, tz),

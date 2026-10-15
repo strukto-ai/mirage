@@ -85,8 +85,9 @@ class MongoDBDeltaHook:
     the stream says exactly which files moved: a document written or
     removed rewrites its collection's documents.jsonl and every view's
     in that database (a view reads other collections), an index or
-    validator change its schema.json, and a collection created, dropped
-    or renamed is its directory appearing or leaving. The checkpoint is
+    validator change its schema.json, a view's new pipeline both of its
+    files (its ``modify`` names ``viewOn``), and a collection created,
+    dropped or renamed is its directory appearing or leaving. The checkpoint is
     the stream's resume token. A position the server's history no longer
     holds answers UNKNOWN on the watch root, so everything below is
     inventoried again. A server outside a replica set has no change
@@ -163,13 +164,17 @@ class MongoDBDeltaHook:
             if not isinstance(name, str):
                 continue
             place = f"{base}/{_COLLECTIONS}/{name}"
+            details = event.get("operationDescription") or {}
             if kind in _DATA_EVENTS:
                 changed[f"{place}/documents.jsonl"] = FileChangeKind.UPDATE
                 written.add(db)
+            elif kind == "modify" and "viewOn" in details:
+                view = f"{base}/{_VIEWS}/{name}"
+                changed[f"{view}/schema.json"] = FileChangeKind.UPDATE
+                changed[f"{view}/documents.jsonl"] = FileChangeKind.UPDATE
             elif kind in _SCHEMA_EVENTS:
                 changed[f"{place}/schema.json"] = FileChangeKind.UPDATE
             elif kind == "create":
-                details = event.get("operationDescription") or {}
                 dirname = _VIEWS if "viewOn" in details else _COLLECTIONS
                 changed[f"{base}/{dirname}/{name}"] = FileChangeKind.CREATE
             elif kind == "drop":

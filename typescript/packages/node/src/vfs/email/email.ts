@@ -79,10 +79,10 @@ export class EmailVFS extends BaseVFS {
 
   override readMany(
     paths: PathSpec[],
-    _limit: number,
+    limit: number,
     index?: IndexCacheStore,
   ): Promise<Map<string, Uint8Array>> {
-    return emailReadMany(this.accessor, paths, index)
+    return emailReadMany(this.accessor, paths, limit, index)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

@@ -69,6 +69,7 @@ describe('MongoDBDeltaHook', () => {
       event('update', 'books'),
       event('create', 'recent', 'lib', { operationDescription: { viewOn: 'books' } }),
       event('createIndexes', 'books'),
+      event('modify', 'recent', 'lib', { operationDescription: { viewOn: 'books', pipeline: [] } }),
       event('insert', 'old'),
       event('rename', 'old', 'lib', { to: { db: 'lib', coll: 'new' } }),
       event('insert', 'hidden', 'admin'),
@@ -86,9 +87,10 @@ describe('MongoDBDeltaHook', () => {
       [FileChangeKind.UPDATE, '/m/lib/collections/books/documents.jsonl'],
       [FileChangeKind.CREATE, '/m/lib/views/recent'],
       [FileChangeKind.UPDATE, '/m/lib/collections/books/schema.json'],
+      [FileChangeKind.UPDATE, '/m/lib/views/recent/schema.json'],
+      [FileChangeKind.UPDATE, '/m/lib/views/recent/documents.jsonl'],
       [FileChangeKind.DELETE, '/m/lib/collections/old'],
       [FileChangeKind.CREATE, '/m/lib/collections/new'],
-      [FileChangeKind.UPDATE, '/m/lib/views/recent/documents.jsonl'],
     ])
     expect(JSON.parse(delta.checkpoint ?? '')).toEqual({ mongodb: NEXT })
   })

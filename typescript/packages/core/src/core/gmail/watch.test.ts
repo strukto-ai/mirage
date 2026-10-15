@@ -15,11 +15,20 @@
 import { expect, it, vi } from 'vitest'
 import type * as MessagesModule from './messages.ts'
 
-const box = vi.hoisted(() => ({
-  history: new Map<string, unknown>(),
-  now: '100',
-  messages: new Map<string, unknown>(),
-}))
+const box = vi.hoisted(() => {
+  const labels = [
+    { id: 'INBOX', name: 'INBOX', type: 'system' },
+    { id: 'TRASH', name: 'TRASH', type: 'system' },
+    { id: 'Label_1', name: 'Work', type: 'user' },
+  ]
+  return {
+    history: new Map<string, unknown>(),
+    now: '100',
+    messages: new Map<string, unknown>(),
+    LABELS: labels,
+    labels,
+  }
+})
 
 vi.mock('./history.ts', () => ({
   currentHistoryId: () => Promise.resolve(box.now),
@@ -28,14 +37,7 @@ vi.mock('./history.ts', () => ({
     return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer)
   },
 }))
-vi.mock('./labels.ts', () => ({
-  listLabels: () =>
-    Promise.resolve([
-      { id: 'INBOX', name: 'INBOX', type: 'system' },
-      { id: 'TRASH', name: 'TRASH', type: 'system' },
-      { id: 'Label_1', name: 'Work', type: 'user' },
-    ]),
-}))
+vi.mock('./labels.ts', () => ({ listLabels: () => Promise.resolve(box.labels) }))
 vi.mock('./messages.ts', async () => {
   const actual = await vi.importActual<typeof MessagesModule>('./messages.ts')
   return {
@@ -119,4 +121,44 @@ it("follows each message's labels", async () => {
   const lost = await hook.pull(ROOT, deleted.checkpoint)
   expect(pairs(lost)).toEqual([[FileChangeKind.UNKNOWN, '/gmail']])
   expect(lost.checkpoint).toContain('"history":"200"')
+})
+
+// Twin of test_a_watch_follows_the_label_folders: history records no label
+// created, renamed or deleted, so each pull compares the folders, and a message
+// below a renamed one moves with it.
+it('follows the label folders', async () => {
+  box.labels = box.LABELS
+  const work = message('w1', ['Label_1'], '2026-01-08', 'Plan')
+  box.messages.set('w1', work)
+  const hook = buildDeltaHook({} as GmailAccessor)
+  const baseline = await hook.pull(ROOT, null)
+  box.history.set(box.now, [[{ messagesAdded: [{ message: { id: 'w1' } }] }], '110'])
+  const seen = await hook.pull(ROOT, baseline.checkpoint)
+  const plan = '2026-01-08/Plan__w1.gmail.json'
+  expect(pairs(seen)).toEqual([[FileChangeKind.CREATE, `/gmail/Work/${plan}`]])
+  box.labels = [
+    ...box.LABELS.slice(0, 2),
+    { id: 'Label_1', name: 'Projects', type: 'user' },
+    { id: 'Label_2', name: 'Empty', type: 'user' },
+  ]
+  box.messages.set('w1', { ...work, labelIds: ['Label_1', 'INBOX'] })
+  box.history.set('110', [
+    [{ labelsAdded: [{ message: { id: 'w1' }, labelIds: ['INBOX'] }] }],
+    '120',
+  ])
+  const renamed = await hook.pull(ROOT, seen.checkpoint)
+  expect(pairs(renamed)).toEqual([
+    [FileChangeKind.DELETE, '/gmail/Work'],
+    [FileChangeKind.CREATE, '/gmail/Projects'],
+    [FileChangeKind.CREATE, '/gmail/Empty'],
+    [FileChangeKind.CREATE, `/gmail/INBOX/${plan}`],
+    [FileChangeKind.UPDATE, `/gmail/Projects/${plan}`],
+  ])
+  box.labels = box.LABELS.slice(0, 2)
+  box.history.set('120', [[], '130'])
+  const removed = await hook.pull(ROOT, renamed.checkpoint)
+  expect(pairs(removed)).toEqual([
+    [FileChangeKind.DELETE, '/gmail/Projects'],
+    [FileChangeKind.DELETE, '/gmail/Empty'],
+  ])
 })

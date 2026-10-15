@@ -61,15 +61,20 @@ function message(uid: string): FetchedMessage {
 
 // Twin of test_a_batch_fetches_a_folders_messages_at_once.
 it('fetches a folder’s messages of a batch at once', async () => {
+  // A message the listing sizes past the limit is not fetched.
   const names = new Map(['101', '102'].map((uid) => [`${DAY}/note__${uid}.email.json`, uid]))
+  const big = `${DAY}/big__104.email.json`
   vi.mocked(probe.resolveEntry).mockImplementation((_readdir, _accessor, path) => {
-    const uid = names.get(typeof path === 'string' ? path : path.virtual)
-    return Promise.resolve(uid === undefined ? null : ({ id: uid } as never))
+    const virtual = typeof path === 'string' ? path : path.virtual
+    if (virtual === big) return Promise.resolve({ id: '104', size: 1 << 30 } as never)
+    const uid = names.get(virtual)
+    return Promise.resolve(uid === undefined ? null : ({ id: uid, size: 300 } as never))
   })
   const fetch = vi.mocked(client.fetchHeaders).mockResolvedValue([message('102'), message('101')])
   const answers = await readMany(
     {} as EmailAccessor,
-    [...names.keys(), `${DAY}/gone__103.email.json`].map((p) => PathSpec.fromStrPath(p)),
+    [...names.keys(), `${DAY}/gone__103.email.json`, big].map((p) => PathSpec.fromStrPath(p)),
+    1 << 20,
     new RAMIndexCacheStore(),
   )
   expect(answers).toEqual(

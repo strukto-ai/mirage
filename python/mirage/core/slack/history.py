@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from mirage.core.api.client import SessionArg
@@ -32,7 +32,7 @@ async def stream_messages_for_day(
     session: SessionArg = None,
     after: str | None = None,
     last_day: str | None = None,
-) -> AsyncIterator[list[dict[str, Any]]]:
+) -> AsyncGenerator[list[dict[str, Any]], None]:
     """Page-streaming history for a channel-day, or a run of days.
 
     Args:
@@ -82,7 +82,6 @@ async def fetch_messages_for_day(
     scope: TimeRange,
     session: SessionArg = None,
     after: str | None = None,
-    last_day: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all messages for a date as parsed dicts (eager).
 
@@ -93,8 +92,6 @@ async def fetch_messages_for_day(
         scope (TimeRange): the mount's time scope, clipping the day.
         session (SessionArg): pool or live session to ride.
         after (str | None): only the messages after this ``ts``.
-        last_day (str | None): the last day of a run read as one, the
-            day itself when None.
 
     Returns:
         list[dict]: messages sorted by ts ascending.
@@ -107,7 +104,6 @@ async def fetch_messages_for_day(
         scope,
         session=session,
         after=after,
-        last_day=last_day,
     ):
         messages.extend(page)
     messages.sort(key=lambda m: float(m.get("ts", "0")))

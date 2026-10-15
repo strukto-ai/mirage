@@ -212,10 +212,36 @@ async def test_fetch_columns(mock_conn):
 
 
 @pytest.mark.asyncio
-async def test_fetch_primary_key(mock_conn):
+@pytest.mark.parametrize(
+    "fetch, clause",
+    [
+        # Another table's constraint can share the key's name.
+        (client.fetch_primary_key, "tc.table_name = kcu.table_name"),
+        # A parent's key does not cover its inheritance children's rows.
+        (client.fetch_row_key, "(c.relkind = 'p' OR NOT c.relhassubclass)"),
+    ],
+)
+async def test_fetch_a_key(mock_conn, fetch, clause):
     mock_conn.fetch.return_value = [{"column_name": "id"}]
-    result = await client.fetch_primary_key(mock_conn, "public", "users")
-    assert result == ["id"]
+    assert await fetch(mock_conn, "public", "users") == ["id"]
+    assert clause in mock_conn.fetch.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "size, expected", [(12, ([{"id": 2}], (2,))), (101, (None, (1,)))]
+)
+async def test_rows_after_a_key_come_within_a_byte_budget(
+    mock_conn, size, expected
+):
+    mock_conn.fetch.return_value = [{"id": 2, "__mirage_bytes": size}]
+    result = await client.fetch_rows_after(
+        mock_conn, "public", "users", ["id"], (1,), 5, {"id"}, 100
+    )
+    assert result == expected
+    sql, *params = mock_conn.fetch.call_args.args
+    assert 'WHERE ("id") > ($2) ORDER BY "id" LIMIT $1' in sql
+    assert params == [5, 1, 100]
 
 
 @pytest.mark.asyncio

@@ -15,9 +15,16 @@
 import aiohttp
 import pytest
 
-from mirage.core.gcal.watch import build_delta_hook
+from mirage.core.gcal.watch import build_delta_hook, event_paths
 from mirage.types import FileChangeKind
-from tests.fixtures.gcal_api import EVENTS, PRIMARY, event, make_accessor, spec
+from tests.fixtures.gcal_api import (
+    EVENTS,
+    HK,
+    PRIMARY,
+    event,
+    make_accessor,
+    spec,
+)
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("gcal_api")]
 
@@ -107,3 +114,21 @@ async def test_a_watch_follows_each_event_s_files(monkeypatch):
         ),
     ]
     assert syncs.asked == [None, "t1", "t2", None]
+
+
+async def test_an_event_outside_the_time_range_is_no_file():
+    # The listing of its day leaves it out, so its changes name nothing.
+    accessor = make_accessor(
+        start_time="2026-08-12T12:00:00+08:00",
+        end_time="2026-08-12T18:00:00+08:00",
+    )
+    inside = event(
+        "eeee5",
+        "Lunch",
+        "2026-08-12T13:00:00+08:00",
+        "2026-08-12T14:00:00+08:00",
+    )
+    assert event_paths(accessor, "/primary", NEW, HK, False) == []
+    assert event_paths(accessor, "/primary", inside, HK, False) == [
+        "/primary/2026-08-12/eeee5__1300-1400_Lunch.gcal.json"
+    ]

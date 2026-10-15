@@ -87,8 +87,8 @@ export class GCalVFS extends BaseVFS {
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 
-  override readMany(paths: PathSpec[]): Promise<Map<string, Uint8Array>> {
-    return gcalReadMany(this.accessor, paths)
+  override readMany(paths: PathSpec[], limit: number): Promise<Map<string, Uint8Array>> {
+    return gcalReadMany(this.accessor, paths, limit)
   }
 
   override deltaHook(): DeltaHook {

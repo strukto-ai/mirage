@@ -178,7 +178,7 @@ export async function fetchRows(
   name: string,
   options: { limit: number; offset: number },
 ): Promise<Record<string, unknown>[]> {
-  const pk = await fetchPrimaryKey(accessor, schema, name)
+  const pk = await fetchRowKey(accessor, schema, name)
   const result = await accessor.store.query(
     `SELECT * FROM ${qualified(schema, name)}${keyOrder(pk)} LIMIT $1 OFFSET $2`,
     [options.limit, options.offset],
@@ -209,7 +209,9 @@ export async function fetchLastRows(
 
 /**
  * A keyed relation's rows past a key, in key order, and the key of the last
- * one. Mirrors Python's `fetch_rows_after`.
+ * one; null for the rows when their database JSON passes `maxBytes`, which the
+ * database answers before sending any of them (`fetchBoundedQuery`). Mirrors
+ * Python's `fetch_rows_after`.
  */
 export async function fetchRowsAfter(
   accessor: PostgresAccessor,
@@ -218,21 +220,27 @@ export async function fetchRowsAfter(
   pk: readonly string[],
   after: readonly unknown[] | null,
   limit: number,
-): Promise<[Record<string, unknown>[], readonly unknown[] | null]> {
+  columns: ReadonlySet<string>,
+  maxBytes: number,
+): Promise<[Record<string, unknown>[] | null, readonly unknown[] | null]> {
   let where = ''
   const params: unknown[] = [limit]
   if (after !== null) {
-    const columns = pk.map((column) => quoteIdent(column)).join(', ')
+    const key = pk.map((column) => quoteIdent(column)).join(', ')
     const marks = pk.map((_, i) => `$${String(i + 2)}`).join(', ')
-    where = ` WHERE (${columns}) > (${marks})`
+    where = ` WHERE (${key}) > (${marks})`
     params.push(...after)
   }
-  const result = await accessor.store.query(
+  const rows = await fetchBoundedQuery(
+    accessor,
     `SELECT * FROM ${qualified(schema, name)}${where}${keyOrder(pk)} LIMIT $1`,
     params,
+    columns,
+    maxBytes,
   )
-  const last = result.rows[result.rows.length - 1]
-  return [result.rows, last === undefined ? after : pk.map((column) => last[column])]
+  if (rows === null) return [null, after]
+  const last = rows[rows.length - 1]
+  return [rows, last === undefined ? after : pk.map((column) => last[column])]
 }
 
 /**
@@ -246,7 +254,7 @@ export async function fetchBoundedRows(
   options: { limit: number; maxBytes: number },
 ): Promise<Record<string, unknown>[] | null> {
   const columns = new Set((await fetchColumns(accessor, schema, name)).map((column) => column.name))
-  const pk = await fetchPrimaryKey(accessor, schema, name)
+  const pk = await fetchRowKey(accessor, schema, name)
   return fetchBoundedQuery(
     accessor,
     `SELECT * FROM ${qualified(schema, name)}${keyOrder(pk)} LIMIT $1`,
@@ -318,9 +326,37 @@ export async function fetchPrimaryKey(
       'JOIN information_schema.key_column_usage kcu ' +
       '  ON tc.constraint_name = kcu.constraint_name ' +
       ' AND tc.table_schema = kcu.table_schema ' +
+      ' AND tc.table_name = kcu.table_name ' +
       "WHERE tc.constraint_type = 'PRIMARY KEY' " +
       '  AND tc.table_schema = $1 AND tc.table_name = $2 ' +
       'ORDER BY kcu.ordinal_position',
+    [schema, name],
+  )
+  return result.rows.map((r) => r.column_name)
+}
+
+/**
+ * The columns a relation's rows are listed by: its primary key, when that key
+ * is unique over every row a plain read returns. A table with inheritance
+ * children reads their rows too, which its key does not cover, so it has none
+ * and keeps its scan order; a partitioned table's key covers every partition.
+ * Mirrors Python's `fetch_row_key`.
+ */
+export async function fetchRowKey(
+  accessor: PostgresAccessor,
+  schema: string,
+  name: string,
+): Promise<string[]> {
+  const result = await accessor.store.query<{ column_name: string }>(
+    'SELECT a.attname AS column_name FROM pg_constraint con ' +
+      'JOIN pg_class c ON c.oid = con.conrelid ' +
+      'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+      'CROSS JOIN LATERAL unnest(con.conkey) WITH ORDINALITY ' +
+      'AS k(attnum, ord) ' +
+      'JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum ' +
+      "WHERE con.contype = 'p' AND n.nspname = $1 AND c.relname = $2 " +
+      "AND (c.relkind = 'p' OR NOT c.relhassubclass) " +
+      'ORDER BY k.ord',
     [schema, name],
   )
   return result.rows.map((r) => r.column_name)

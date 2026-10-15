@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -263,6 +263,11 @@ async def test_only_a_chat_day_is_followed(accessor, index):
     )
 
 
+async def _walk(*pages):
+    for page in pages:
+        yield page
+
+
 async def test_a_batch_walks_each_run_of_days_once(accessor, index):
     await _populate_index(index)
     days = ["2023-11-14", "2023-11-15", "2023-11-17"]
@@ -285,13 +290,14 @@ async def test_a_batch_walks_each_run_of_days_once(accessor, index):
     on_14 = {"text": "a", "ts": "1699999999.000100"}
     on_15 = {"text": "b", "ts": "1700050000.000000"}
     with patch(
-        "mirage.core.slack.read.fetch_messages_for_day",
-        new_callable=AsyncMock,
-        side_effect=[[on_14, on_15], []],
-    ) as fetch:
+        "mirage.core.slack.read.stream_messages_for_day",
+        new_callable=MagicMock,
+        side_effect=[_walk([on_15], [on_14]), _walk()],
+    ) as walk:
         answers = await read_many(
             accessor,
             [spec(c) for c in [*chats, "/users/alice__U001.json"]],
+            1 << 20,
             index,
         )
     assert answers == {
@@ -300,6 +306,24 @@ async def test_a_batch_walks_each_run_of_days_once(accessor, index):
         chats[2]: jsonl_bytes([]),
     }
     assert [
-        (call.args[2], call.kwargs["last_day"])
-        for call in fetch.call_args_list
+        (call.args[2], call.kwargs["last_day"]) for call in walk.call_args_list
     ] == [("2023-11-14", "2023-11-15"), ("2023-11-17", "2023-11-17")]
+    # A day past the limit is left out; a run past the limit a day stops
+    # walking and is left out whole.
+    big = {"text": "a" * 12, "ts": on_14["ts"]}
+    limit = len(jsonl_bytes([on_15])) + 10
+    for size, kept in (
+        (limit, {chats[1]: jsonl_bytes([on_15]), chats[2]: b""}),
+        (1, {chats[2]: b""}),
+    ):
+        with patch(
+            "mirage.core.slack.read.stream_messages_for_day",
+            new_callable=MagicMock,
+            side_effect=[_walk([big, on_15]), _walk()],
+        ):
+            assert (
+                await read_many(
+                    accessor, [spec(c) for c in chats], size, index
+                )
+                == kept
+            )

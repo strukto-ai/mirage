@@ -15,7 +15,8 @@
 import { expect, it, vi } from 'vitest'
 import { FileChangeKind } from '../../types.ts'
 import type { JsonValue } from '../../types.ts'
-import { EVENTS, event, makeAccessor, PRIMARY, spec } from './_test_util.ts'
+import type * as ClientModule from './client.ts'
+import { EVENTS, event, HK, makeAccessor, PRIMARY, spec } from './_test_util.ts'
 
 const syncs = vi.hoisted(() => ({
   answers: new Map<string | null, unknown>(),
@@ -24,6 +25,7 @@ const syncs = vi.hoisted(() => ({
 
 vi.mock('./client.ts', async () => ({
   ...(await import('./_test_util.ts')).CLIENT,
+  listed: (await vi.importActual<typeof ClientModule>('./client.ts')).listed,
   syncEvents: (_tm: unknown, calendarId: string, token: string | null) => {
     expect(calendarId).toBe(PRIMARY.id)
     syncs.asked.push(token)
@@ -32,7 +34,7 @@ vi.mock('./client.ts', async () => ({
   },
 }))
 
-const { buildDeltaHook } = await import('./watch.ts')
+const { buildDeltaHook, eventPaths } = await import('./watch.ts')
 
 const DAY = '/primary/2026-08-11'
 const MOVED: Record<string, JsonValue> = {
@@ -69,4 +71,18 @@ it("follows each event's files", async () => {
     [FileChangeKind.UPDATE, '/primary/2026-08-12/ffff6__0900-1000_Retro.gcal.json'],
   ])
   expect(syncs.asked).toEqual([null, 't1', 't2', null])
+})
+
+// Twin of test_an_event_outside_the_time_range_is_no_file: the listing of its
+// day leaves it out, so its changes name nothing.
+it('names no file for an event outside the time range', () => {
+  const accessor = makeAccessor({
+    startTime: '2026-08-12T12:00:00+08:00',
+    endTime: '2026-08-12T18:00:00+08:00',
+  })
+  const inside = event('eeee5', 'Lunch', '2026-08-12T13:00:00+08:00', '2026-08-12T14:00:00+08:00')
+  expect(eventPaths(accessor, '/primary', NEW, HK, false)).toEqual([])
+  expect(eventPaths(accessor, '/primary', inside, HK, false)).toEqual([
+    '/primary/2026-08-12/eeee5__1300-1400_Lunch.gcal.json',
+  ])
 })

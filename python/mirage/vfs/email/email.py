@@ -71,7 +71,7 @@ class EmailVFS(BaseVFS):
         limit: int,
         index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, bytes]:
-        return await _read_many(self.accessor, paths, index)
+        return await _read_many(self.accessor, paths, limit, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX

@@ -23,7 +23,11 @@ from mirage.core.hierarchy.probe import resolve_entry
 from mirage.core.hierarchy.read import make_read, make_read_range, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.slack.client import download_file, download_file_stream
-from mirage.core.slack.history import fetch_messages_for_day, get_history_jsonl
+from mirage.core.slack.history import (
+    fetch_messages_for_day,
+    get_history_jsonl,
+    stream_messages_for_day,
+)
 from mirage.core.slack.readdir import readdir
 from mirage.core.slack.scope import detect_scope
 from mirage.core.slack.users import get_user_profile, user_json_bytes
@@ -195,10 +199,10 @@ async def _follow_chat(
 follow = per_kind(detect_scope, {"messages": _follow_chat})
 
 
-async def _fetch_run(
+def _run_pages(
     accessor: SlackAccessor, channel_id: str, first: str, last: str
-) -> list[dict[str, Any]]:
-    return await fetch_messages_for_day(
+) -> AsyncGenerator[list[dict[str, Any]], None]:
+    return stream_messages_for_day(
         accessor.config,
         channel_id,
         first,
@@ -208,6 +212,10 @@ async def _fetch_run(
     )
 
 
+def _sort_key(message: dict[str, Any]) -> float:
+    return float(message.get("ts", "0"))
+
+
 def _posted_within(message: dict[str, Any], start: float, end: float) -> bool:
     return start <= float(message["ts"]) < end
 
@@ -215,6 +223,7 @@ def _posted_within(message: dict[str, Any], start: float, end: float) -> bool:
 async def read_many(
     accessor: SlackAccessor,
     paths: list[PathSpec],
+    limit: int,
     index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, bytes]:
     """Several chat.jsonl files, one history walk per run of a channel's
@@ -223,6 +232,7 @@ async def read_many(
     Args:
         accessor (SlackAccessor): backend accessor.
         paths (list[PathSpec]): the files.
+        limit (int): the most bytes worth reading for one day.
         index (IndexCacheStore): cached directory entries.
     """
     return await read_days(
@@ -232,6 +242,8 @@ async def read_many(
         paths,
         index,
         detect_scope,
-        partial(_fetch_run, accessor),
+        partial(_run_pages, accessor),
+        _sort_key,
         _posted_within,
+        limit,
     )

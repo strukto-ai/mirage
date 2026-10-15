@@ -34,6 +34,7 @@ from mirage.core.gmail.readdir import (
     _date_from_internal,
     _msg_filename,
 )
+from mirage.core.google.client import TokenManager
 from mirage.types import Delta, FileChangeKind, FileEvent, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
@@ -76,6 +77,73 @@ def message_paths(
     return paths
 
 
+def label_folders(labels: list[dict[str, Any]]) -> dict[str, str]:
+    """Each label's folder name, by label id, as the root listing names it:
+    a system label by its id, any other by its name.
+
+    Args:
+        labels (list[dict[str, Any]]): The mailbox's labels.
+    """
+    return {
+        lb["id"]: lb["id"]
+        if lb.get("type") == "system"
+        else lb.get("name", lb["id"])
+        for lb in labels
+    }
+
+
+def _folders_moved(
+    changes: list[tuple[FileChangeKind, str]],
+    known: dict[str, list[str]],
+    prefix: str,
+    before: dict[str, str],
+    after: dict[str, str],
+) -> None:
+    """Record each label folder that appeared, left or was renamed, and
+    move the known paths below a renamed one (or forget them below one
+    that left), so a later change to one of its messages starts where
+    the message now is.
+
+    Args:
+        changes (list[tuple[FileChangeKind, str]]): The changes so far.
+        known (dict[str, list[str]]): Each seen message's paths.
+        prefix (str): The mount's prefix.
+        before (dict[str, str]): The folders the last pull saw, by id.
+        after (dict[str, str]): The folders now, by id.
+    """
+    for label_id, name in before.items():
+        now = after.get(label_id)
+        if now == name:
+            continue
+        old = f"{prefix}/{name}"
+        changes.append((FileChangeKind.DELETE, old))
+        new = None if now is None else f"{prefix}/{now}"
+        if new is not None:
+            changes.append((FileChangeKind.CREATE, new))
+        for mid, paths in known.items():
+            known[mid] = _moved(paths, old, new)
+    changes.extend(
+        (FileChangeKind.CREATE, f"{prefix}/{name}")
+        for label_id, name in after.items()
+        if label_id not in before
+    )
+
+
+def _moved(paths: list[str], old: str, new: str | None) -> list[str]:
+    """``paths`` with each one below the folder ``old`` moved below
+    ``new``, or dropped when the folder left.
+
+    Args:
+        paths (list[str]): A message's paths.
+        old (str): The folder it was below.
+        new (str | None): Where that folder is now, None when it left.
+    """
+    under = old + "/"
+    if new is None:
+        return [p for p in paths if not p.startswith(under)]
+    return [new + p[len(old) :] if p.startswith(under) else p for p in paths]
+
+
 def _changed(
     changes: list[tuple[FileChangeKind, str]],
     before: list[str],
@@ -102,8 +170,11 @@ def _changed(
 class GmailDeltaHook:
     """Checkpointed delta over Gmail's history.
 
-    The checkpoint holds the history id the next pull starts after and,
-    by message id, the paths of each message a pull has seen. A record
+    The checkpoint holds the history id the next pull starts after, each
+    label's folder name and, by message id, the paths of each message a
+    pull has seen. History records no label created, renamed or deleted,
+    so each pull lists the labels and compares the folders: one that
+    appeared, left or moved is reported whatever its messages did. A record
     names a message by id only, so each one added or relabeled is read to
     name its paths: one under each label it holds, in the day it arrived.
     Its labels before the record follow from the label changes the
@@ -131,8 +202,8 @@ class GmailDeltaHook:
         tm = self._accessor.token_manager
         state = _decode(checkpoint)
         if state is None:
-            return Delta((), _encode(await current_history_id(tm), {}))
-        start, known = state
+            return Delta((), await _baseline(tm))
+        start, folders, known = state
         observed = datetime.now(timezone.utc)
         try:
             records, latest = await list_history(tm, start)
@@ -143,9 +214,13 @@ class GmailDeltaHook:
             lost = FileEvent(
                 kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
             )
-            return Delta((lost,), _encode(await current_history_id(tm), {}))
+            return Delta((lost,), await _baseline(tm))
         prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
-        labels = {lb["id"]: lb for lb in await list_labels(tm)}
+        listed = await list_labels(tm)
+        labels = {lb["id"]: lb for lb in listed}
+        now_folders = label_folders(listed)
+        changes: list[tuple[FileChangeKind, str]] = []
+        _folders_moved(changes, known, prefix, folders, now_folders)
         added: set[str] = set()
         first: dict[str, dict[str, bool]] = {}
         gone: list[str] = []
@@ -163,7 +238,6 @@ class GmailDeltaHook:
                         seen.setdefault(label_id, removes)
             for item in record.get("messagesDeleted", []):
                 gone.append(item["message"]["id"])
-        changes: list[tuple[FileChangeKind, str]] = []
         for mid, seen in first.items():
             if mid in gone:
                 continue
@@ -207,18 +281,40 @@ class GmailDeltaHook:
                     kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
                 )
             )
-        return Delta(tuple(events), _encode(latest, known))
+        return Delta(tuple(events), _encode(latest, now_folders, known))
 
 
-def _encode(history_id: str, known: dict[str, list[str]]) -> str:
+async def _baseline(tm: TokenManager) -> str:
+    """A checkpoint at the mailbox's present: its history id and its
+    label folders, with no message seen yet.
+
+    Args:
+        tm (TokenManager): The mailbox's token manager.
+    """
+    history = await current_history_id(tm)
+    return _encode(history, label_folders(await list_labels(tm)), {})
+
+
+def _encode(
+    history_id: str, folders: dict[str, str], known: dict[str, list[str]]
+) -> str:
     return json.dumps(
-        {"gmail": {"history": history_id, "messages": known}}, sort_keys=True
+        {
+            "gmail": {
+                "history": history_id,
+                "labels": folders,
+                "messages": known,
+            }
+        },
+        sort_keys=True,
     )
 
 
-def _decode(checkpoint: str | None) -> tuple[str, dict[str, list[str]]] | None:
-    """The history id and the known paths a checkpoint holds, None for a
-    baseline.
+def _decode(
+    checkpoint: str | None,
+) -> tuple[str, dict[str, str], dict[str, list[str]]] | None:
+    """The history id, the label folders and the known paths a checkpoint
+    holds, None for a baseline.
 
     Args:
         checkpoint (str | None): What the previous pull handed out.
@@ -232,9 +328,12 @@ def _decode(checkpoint: str | None) -> tuple[str, dict[str, list[str]]] | None:
     ):
         return None
     messages = state.get("messages") or {}
-    return state["history"], {
-        mid: [str(p) for p in paths] for mid, paths in messages.items()
-    }
+    folders = state.get("labels") or {}
+    return (
+        state["history"],
+        {str(k): str(v) for k, v in folders.items()},
+        {mid: [str(p) for p in paths] for mid, paths in messages.items()},
+    )
 
 
 def build_delta_hook(accessor: GmailAccessor) -> DeltaHook:

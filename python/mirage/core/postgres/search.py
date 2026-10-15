@@ -21,6 +21,7 @@ from mirage.core.postgres.client import qualified, quote_ident
 from mirage.core.postgres.read import row_line
 from mirage.core.postgres.scope import detect_scope
 from mirage.types import PathSpec
+from mirage.utils.json_canonical import canonicalize_row
 
 # Types whose `::text` is the value exactly as a rows.jsonl line spells it,
 # so a LIKE over the cast finds every row whose line holds the text inside
@@ -242,7 +243,7 @@ async def lines_containing(
         marker = "__mirage_row"
         while marker in names:
             marker += "_"
-        pk = await client.fetch_primary_key(conn, schema, entity)
+        pk = await client.fetch_row_key(conn, schema, entity)
         if pk:
             sql = (
                 f"SELECT * FROM {source} WHERE {where}"
@@ -274,7 +275,7 @@ async def lines_containing(
     body = bytearray()
     for row in rows:
         row.pop(marker, None)
-        body.extend((row_line(row) + "\n").encode())
+        body.extend((row_line(canonicalize_row(row)) + "\n").encode())
         if len(body) > cfg.max_read_bytes:
             return None
     return bytes(body)

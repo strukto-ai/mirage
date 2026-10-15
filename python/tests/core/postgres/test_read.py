@@ -473,7 +473,7 @@ async def test_first_lines_past_the_ceiling_of_a_long_table_is_efbig():
 @pytest.mark.asyncio
 async def test_last_lines_takes_the_suffix_by_offset():
     with patch("mirage.core.postgres.read.client") as mc:
-        mc.fetch_primary_key = AsyncMock(return_value=[])
+        mc.fetch_row_key = AsyncMock(return_value=[])
         mc.count_rows = AsyncMock(return_value=1500)
         mc.fetch_rows = AsyncMock(side_effect=_windowed(1500))
         out = await last_lines(_accessor(), ROWS, 1200)
@@ -486,7 +486,7 @@ async def test_last_lines_takes_the_suffix_by_offset():
 @pytest.mark.asyncio
 async def test_last_lines_past_the_ceiling_is_efbig():
     with patch("mirage.core.postgres.read.client") as mc:
-        mc.fetch_primary_key = AsyncMock(return_value=[])
+        mc.fetch_row_key = AsyncMock(return_value=[])
         mc.count_rows = AsyncMock(return_value=30)
         mc.fetch_rows = AsyncMock(side_effect=_windowed(30))
         with pytest.raises(FileTooLargeError, match="rows.jsonl"):
@@ -498,7 +498,7 @@ async def test_last_lines_past_the_ceiling_is_efbig():
 async def test_last_lines_of_a_keyed_table_come_off_its_key():
     # No count: the rows are read off the end of the key.
     with patch("mirage.core.postgres.read.client") as mc:
-        mc.fetch_primary_key = AsyncMock(return_value=["id"])
+        mc.fetch_row_key = AsyncMock(return_value=["id"])
         mc.fetch_last_rows = AsyncMock(
             return_value=([{"id": 8}, {"id": 9}], (9,))
         )
@@ -516,7 +516,8 @@ async def test_a_keyed_table_streams_in_pages_up_to_its_ceiling():
         ([{"id": 3}, {"id": 4}], (4,)),
     ]
     with patch("mirage.core.postgres.read.client") as mc:
-        mc.fetch_primary_key = AsyncMock(return_value=["id"])
+        mc.fetch_row_key = AsyncMock(return_value=["id"])
+        mc.fetch_columns = AsyncMock(return_value=[{"name": "id"}])
         mc.fetch_rows_after = AsyncMock(side_effect=pages)
         got: list[bytes] = []
         with pytest.raises(FileTooLargeError, match="rows.jsonl"):
@@ -525,10 +526,23 @@ async def test_a_keyed_table_streams_in_pages_up_to_its_ceiling():
             ):
                 got.append(chunk)
     assert got == [b'{"id":1}\n{"id":2}\n', b'{"id":3}\n']
-    assert [c.args[4] for c in mc.fetch_rows_after.await_args_list] == [
-        None,
-        (2,),
-    ]
+    # Each page asks past its last key for one row past what the row cap
+    # leaves, within the bytes the byte cap leaves.
+    assert [
+        (c.args[4], c.args[5], c.args[7])
+        for c in mc.fetch_rows_after.await_args_list
+    ] == [(None, 2, 10 * 1024 * 1024), ((2,), 2, 10 * 1024 * 1024 - 18)]
+
+
+@pytest.mark.asyncio
+async def test_a_page_past_the_byte_cap_is_refused_before_it_is_sent():
+    with patch("mirage.core.postgres.read.client") as mc:
+        mc.fetch_row_key = AsyncMock(return_value=["id"])
+        mc.fetch_columns = AsyncMock(return_value=[{"name": "id"}])
+        mc.fetch_rows_after = AsyncMock(return_value=(None, None))
+        with pytest.raises(FileTooLargeError, match="rows.jsonl"):
+            async for _ in read_stream(_accessor(), ROWS):
+                pass
 
 
 @pytest.mark.asyncio
@@ -537,10 +551,11 @@ async def test_a_followed_table_prints_rows_past_the_last_key():
         patch("mirage.core.postgres.read.client") as mc,
         patch("mirage.core.postgres.read.asyncio.sleep", AsyncMock()),
     ):
-        mc.fetch_primary_key = AsyncMock(return_value=["id"])
+        mc.fetch_row_key = AsyncMock(return_value=["id"])
         mc.fetch_last_rows = AsyncMock(
             return_value=([{"id": 8}, {"id": 9}], (9,))
         )
+        mc.fetch_columns = AsyncMock(return_value=[{"name": "id"}])
         mc.fetch_rows_after = AsyncMock(
             side_effect=[([], (9,)), ([{"id": 10}], (10,))]
         )
@@ -557,7 +572,7 @@ async def test_a_followed_table_prints_rows_past_the_last_key():
 @pytest.mark.asyncio
 async def test_a_keyless_relation_is_not_followed():
     with patch("mirage.core.postgres.read.client") as mc:
-        mc.fetch_primary_key = AsyncMock(return_value=[])
+        mc.fetch_row_key = AsyncMock(return_value=[])
         assert await follow(_accessor(), ROWS, 1, 0.5) is None
 
 
