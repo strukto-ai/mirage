@@ -715,11 +715,13 @@ async function runArgv(
     if (!watched) return result
     const [stdout, io, node] = result
     const early = io.stderr ?? new Uint8Array()
+    const saved = node.stderr
     // postCommand judges the command once its result is final: a streamed
-    // output settles its exit code and the stderr it adds as it drains, so
-    // the method is asked when the stream ends or its reader stops, and at
-    // once for output already whole. A refusal leaves what was sent as sent:
-    // exit 126, the refusal line on stderr, the refusal record.
+    // output settles its exit code and the stderr it adds as it drains
+    // (unless the command saved that itself, as an external one does), so the
+    // method is asked when the stream ends or its reader stops, and at once
+    // for output already whole. A refusal leaves what was sent as sent: exit
+    // 126, the refusal line on stderr, the refusal record.
     const settle = async (): Promise<void> => {
       // A function hands back its last command's node, which keeps the
       // records that command made.
@@ -727,6 +729,7 @@ async function runArgv(
       node.records.push(...mine)
       const late = io.stderr
       if (
+        node.stderr === saved &&
         early instanceof Uint8Array &&
         late instanceof Uint8Array &&
         late.byteLength > early.byteLength &&

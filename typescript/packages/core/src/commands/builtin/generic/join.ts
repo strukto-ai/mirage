@@ -543,6 +543,7 @@ class Merge {
       }
       const eof1 = await this.runOf(0, seq1, head2)
       const eof2 = await this.runOf(1, seq2, head1)
+      if (this.fatal) return
       if (this.flags.pairables) {
         for (const line1 of eof1 ? seq1 : seq1.slice(0, -1)) {
           for (const line2 of eof2 ? seq2 : seq2.slice(0, -1)) yield this.emit(line1, line2)
@@ -551,6 +552,7 @@ class Merge {
       seq1 = eof1 ? [] : seq1.slice(-1)
       seq2 = eof2 ? [] : seq2.slice(-1)
     }
+    if (this.fatal) return
     yield* this.tail(0, seq1)
     yield* this.tail(1, seq2)
   }

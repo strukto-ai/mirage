@@ -680,12 +680,16 @@ class _Merge:
                 continue
             eof1 = await self.run_of(0, seq1, seq2[0])
             eof2 = await self.run_of(1, seq2, seq1[0])
+            if self.fatal:
+                return
             if self.flags.pairables:
                 for line1 in seq1 if eof1 else seq1[:-1]:
                     for line2 in seq2 if eof2 else seq2[:-1]:
                         yield self.emit(line1, line2)
             seq1 = [] if eof1 else seq1[-1:]
             seq2 = [] if eof2 else seq2[-1:]
+        if self.fatal:
+            return
         for which, run in ((0, seq1), (1, seq2)):
             async with aclosing(self.tail(which, run)) as tail:
                 async for chunk in tail:
