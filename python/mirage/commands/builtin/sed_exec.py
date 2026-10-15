@@ -27,6 +27,7 @@ from mirage.commands.builtin.sed_script import (
 )
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.errors.constants import FS_ERRORS
+from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource
@@ -138,18 +139,11 @@ SedFileContent = SedFileText | SedFileError | None
 
 @dataclass(frozen=True)
 class SedInput:
-    """One input operand in order.
-
-    Its text, or the error line GNU reports on reaching it, with the exit
-    code. A fatal error (a read error) stops the run there, as GNU
-    panics; any other is reported and skipped.
-    """
+    """One input operand in order: its text, or the stream it is read
+    from as the run reaches it."""
 
     name: str
     text: str | None = None
-    error: str = ""
-    code: int = 0
-    fatal: bool = False
     source: ByteSource | None = None
 
 
@@ -411,29 +405,34 @@ class SedMachine:
                 else _RANGE_INACTIVE
             )
 
-    def _open_next_file(self, ignore_fatal: bool = False) -> bool:
-        while self._file_idx < len(self._inputs):
-            nxt = self._inputs[self._file_idx]
-            self._file_idx += 1
-            self._file_name = nxt.name
-            if nxt.text is None and nxt.source is None:
-                if nxt.fatal:
-                    if not ignore_fatal:
-                        raise SedPanic(nxt.error)
-                else:
-                    self.stderr_lines.append(nxt.error)
-                    self.bad_code = max(self.bad_code, nxt.code)
-                continue
-            self._reader = AsyncLineIterator(
-                nxt.source
-                if nxt.source is not None
-                else from_byte_view(nxt.text or "", self.opts.utf8)
-            )
-            self._next_line = None
-            return True
-        return False
+    def _open_next_file(self) -> bool:
+        if self._file_idx >= len(self._inputs):
+            return False
+        nxt = self._inputs[self._file_idx]
+        self._file_idx += 1
+        self._file_name = nxt.name
+        self._reader = AsyncLineIterator(
+            nxt.source
+            if nxt.source is not None
+            else from_byte_view(nxt.text or "", self.opts.utf8)
+        )
+        self._next_line = None
+        return True
 
     async def _more(self, ignore_fatal: bool = False) -> bool:
+        """Read this operand's next line ahead; whether there is one.
+
+        A failed operand goes GNU sed 4.9's two ways. One that never
+        opens (a missing file) is reported, exit 2, and the run reads on.
+        One that opens and then fails to read (a directory, or a read that
+        breaks off) panics, exit 4, and nothing after it is read, except
+        by the look-ahead of ``$``, ``n`` and ``N``, which finds no data
+        there and goes on.
+
+        Args:
+            ignore_fatal (bool): looking ahead, where a read error ends
+                the operand quietly.
+        """
         if self._next_line is not None:
             return True
         if self._reader is None:
@@ -441,19 +440,25 @@ class SedMachine:
         try:
             raw, chomped = await self._reader.read_until(b"\n")
         except FS_ERRORS as exc:
+            opened = self._reader.loaded > 0 or isinstance(
+                exc, IsADirectoryError
+            )
             await self._reader.discard()
             self._reader = None
-            message = fs_error_line(
-                "sed", PathSpec.from_str_path(self._file_name), exc
-            )
-            if isinstance(exc, IsADirectoryError):
-                if not ignore_fatal:
-                    raise SedPanic(message) from exc
-            else:
-                self.stderr_lines.append(message)
+            if not opened:
+                self.stderr_lines.append(
+                    fs_error_line(
+                        "sed", PathSpec.from_str_path(self._file_name), exc
+                    )
+                )
                 self.bad_code = max(
                     self.bad_code, read_fail_exit_code("sed", exc)
                 )
+            elif not ignore_fatal:
+                name = "stdin" if self._file_name == "-" else self._file_name
+                raise SedPanic(
+                    f"sed: read error on {name}: {fs_strerror(exc) or exc}\n"
+                ) from exc
             return False
         if raw or chomped:
             self._next_line = _InputLine(
@@ -494,7 +499,7 @@ class SedMachine:
             return False
         if self.opts.separate:
             return True
-        while self._open_next_file(ignore_fatal=True):
+        while self._open_next_file():
             if await self._more(ignore_fatal=True):
                 return False
         return True

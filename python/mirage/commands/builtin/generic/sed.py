@@ -31,16 +31,13 @@ from mirage.commands.builtin.sed_script import (
     SedProgram,
     SedScriptPiece,
     compile_script,
-    looks_ahead,
 )
 from mirage.commands.builtin.utils.operands import (
     materialized_read,
     normalized_read,
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat
-from mirage.commands.builtin.utils.stream import (
-    is_stdin,
-)
+from mirage.commands.builtin.utils.stream import is_stdin, stdin_bytes
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -268,6 +265,8 @@ async def sed(
             characters rather than bytes.
     """
     read_bytes = materialized_read(read_stream)
+    if not in_place:
+        read_bytes = stdin_bytes(read_bytes, stdin)
     read = normalized_read(read_stream)
     pieces = (
         [SedScriptPiece("expr", script)] if isinstance(script, str) else script
@@ -302,29 +301,12 @@ async def sed(
         )
 
     stdin_source = ensure_stream(stdin or b"")
-    inputs: list[SedInput] = []
-    if not paths:
-        inputs.append(SedInput("-", source=stdin_source))
-    look_ahead = looks_ahead(program) and not separate
-    for p in paths:
-        if is_stdin(p):
-            inputs.append(SedInput("-", source=stdin_source))
-            continue
-        if inputs and inputs[-1].fatal and not look_ahead:
-            break
-        try:
-            source = read(p)
-        except FS_ERRORS as exc:
-            inputs.append(
-                SedInput(
-                    p.raw_path,
-                    error=fs_error_line("sed", p, exc),
-                    code=read_fail_exit_code("sed", exc),
-                    fatal=isinstance(exc, IsADirectoryError),
-                )
-            )
-        else:
-            inputs.append(SedInput(p.raw_path, source=source))
+    inputs = [
+        SedInput("-", source=stdin_source)
+        if is_stdin(p)
+        else SedInput(p.raw_path, source=read(p))
+        for p in paths
+    ] or [SedInput("-", source=stdin_source)]
     io = IOResult()
 
     async def output() -> AsyncIterator[bytes]:

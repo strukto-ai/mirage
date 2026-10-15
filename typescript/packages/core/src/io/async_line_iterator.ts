@@ -53,7 +53,7 @@ export class PipeInput implements AsyncIterableIterator<Uint8Array> {
 export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private readonly source: AsyncIterator<Uint8Array>
   private buf: Uint8Array<ArrayBuffer> = new Uint8Array(0)
-  private loaded = 0
+  private pulled = 0
   private exhausted = false
   private readonly budget = new YieldBudget()
   private linesSinceCheck = 0
@@ -86,7 +86,11 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   get position(): number {
-    return this.loaded - this.buf.byteLength
+    return this.pulled - this.buf.byteLength
+  }
+
+  get loaded(): number {
+    return this.pulled
   }
 
   async next(): Promise<IteratorResult<Uint8Array>> {
@@ -277,7 +281,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     this.pulling = true
     const result = await abortable(this.source.next(), signal)
     this.pulling = false
-    if (result.done !== true) this.loaded += result.value.byteLength
+    if (result.done !== true) this.pulled += result.value.byteLength
     return result
   }
 

@@ -33,7 +33,6 @@ import {
   SED_STDOUT,
   SedError,
   compileScript,
-  looksAhead,
   type SedProgram,
   type SedScriptPiece,
 } from '../sed_script.ts'
@@ -298,30 +297,10 @@ export async function sedGeneric(
   if (inPlace) return runInPlace(paths, program, machine, access, stream, write, utf8, opts.signal)
 
   const stdinSource = ensureStream(opts.stdin ?? new Uint8Array())
-  const inputs: SedInput[] = []
-  if (paths.length === 0) {
-    inputs.push({ name: '-', source: stdinSource })
-  }
-  const lookAhead = looksAhead(program) && !parsed.separate
-  for (const p of paths) {
-    if (isStdin(p)) {
-      inputs.push({ name: '-', source: stdinSource })
-      continue
-    }
-    const last = inputs.at(-1)
-    if (last !== undefined && 'fatal' in last && last.fatal && !lookAhead) break
-    try {
-      inputs.push({ name: p.rawPath, source: stream(p) })
-    } catch (error) {
-      if (!isFsError(error)) throw error
-      inputs.push({
-        name: p.rawPath,
-        error: fsErrorLine('sed', p, error),
-        code: readFailExitCode('sed', error),
-        fatal: (error as { code?: string }).code === 'EISDIR',
-      })
-    }
-  }
+  const inputs: SedInput[] = paths.map((p) =>
+    isStdin(p) ? { name: '-', source: stdinSource } : { name: p.rawPath, source: stream(p) },
+  )
+  if (inputs.length === 0) inputs.push({ name: '-', source: stdinSource })
   const io = new IOResult()
   async function* output(): AsyncGenerator<Uint8Array> {
     try {

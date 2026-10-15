@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isFsError, isEisdir } from '../../errors/fs.ts'
+import { fsStrerror, isFsError, isEisdir } from '../../errors/fs.ts'
 import { fsErrorLine } from '../../errors/render.ts'
 import { readFailExitCode } from '../spec/usage.ts'
 import { PathSpec } from '../../types.ts'
@@ -109,13 +109,14 @@ export class SedOutput {
 export type SedFileContent = { text: string } | { error: string } | null
 
 /**
- * One input operand in order: its text, or the error line GNU reports on
- * reaching it, with the exit code. A fatal error (a read error) stops the
- * run there, as GNU panics; any other is reported and skipped.
+ * One input operand in order: its text, or the stream it is read from as
+ * the run reaches it.
  */
-export type SedInput =
-  | { name: string; text?: string; source?: ByteSource }
-  | { name: string; error: string; code: number; fatal: boolean }
+export interface SedInput {
+  name: string
+  text?: string
+  source?: ByteSource
+}
 
 export interface SedRunOptions {
   suppress: boolean
@@ -295,29 +296,27 @@ export class SedMachine {
   }
 
   // Open the next operand; false when there is none.
-  private openNextFile(ignoreFatal = false): boolean {
-    for (;;) {
-      const next = this.inputs[this.fileIdx]
-      if (next === undefined) return false
-      this.fileIdx += 1
-      this.fileName = next.name
-      if ('error' in next) {
-        if (next.fatal) {
-          if (!ignoreFatal) throw new SedPanic(next.error)
-        } else {
-          this.stderrLines.push(next.error)
-          this.badCode = Math.max(this.badCode, next.code)
-        }
-        continue
-      }
-      this.reader = new AsyncLineIterator(
-        next.source ?? fromByteView(next.text ?? '', this.opts.utf8 ?? false),
-      )
-      this.nextLine = undefined
-      return true
-    }
+  private openNextFile(): boolean {
+    const next = this.inputs[this.fileIdx]
+    if (next === undefined) return false
+    this.fileIdx += 1
+    this.fileName = next.name
+    this.reader = new AsyncLineIterator(
+      next.source ?? fromByteView(next.text ?? '', this.opts.utf8 ?? false),
+    )
+    this.nextLine = undefined
+    return true
   }
 
+  /**
+   * Read this operand's next line ahead; whether there is one.
+   *
+   * A failed operand goes GNU sed 4.9's two ways. One that never opens (a
+   * missing file) is reported, exit 2, and the run reads on. One that opens
+   * and then fails to read (a directory, or a read that breaks off) panics,
+   * exit 4, and nothing after it is read, except by the look-ahead of `$`,
+   * `n` and `N` (`ignoreFatal`), which finds no data there and goes on.
+   */
   private async more(ignoreFatal = false): Promise<boolean> {
     if (this.nextLine !== undefined) return true
     if (this.reader === undefined) return false
@@ -326,14 +325,15 @@ export class SedMachine {
       ;[raw, chomped] = await this.reader.readUntil(10, this.signal)
     } catch (error) {
       if (!isFsError(error)) throw error
+      const opened = this.reader.loaded > 0 || isEisdir(error)
       await this.reader.discard()
       this.reader = undefined
-      const message = fsErrorLine('sed', PathSpec.fromStrPath(this.fileName), error)
-      if (isEisdir(error)) {
-        if (!ignoreFatal) throw new SedPanic(message)
-      } else {
-        this.stderrLines.push(message)
+      if (!opened) {
+        this.stderrLines.push(fsErrorLine('sed', PathSpec.fromStrPath(this.fileName), error))
         this.badCode = Math.max(this.badCode, readFailExitCode('sed', error))
+      } else if (!ignoreFatal) {
+        const name = this.fileName === '-' ? 'stdin' : this.fileName
+        throw new SedPanic(`sed: read error on ${name}: ${fsStrerror(error) ?? String(error)}\n`)
       }
       return false
     }
@@ -370,7 +370,7 @@ export class SedMachine {
   private async testEof(): Promise<boolean> {
     if (await this.more()) return false
     if (this.opts.separate) return true
-    while (this.openNextFile(true)) {
+    while (this.openNextFile()) {
       if (await this.more(true)) return false
     }
     return true

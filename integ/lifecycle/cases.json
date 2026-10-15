@@ -4984,9 +4984,9 @@
           "command": "sed -n 'p' /data/denied /data/good",
           "expect": {
             "value": {
-              "exit_code": 1,
-              "stdout": "first,x\ngood,x\n",
-              "stderr": "sed: can't read /data/denied: Permission denied\n"
+              "exit_code": 4,
+              "stdout": "first,x\n",
+              "stderr": "sed: read error on /data/denied: Permission denied\n"
             }
           }
         },

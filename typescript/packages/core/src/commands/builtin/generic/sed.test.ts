@@ -79,10 +79,11 @@ describe('sed operands after a directory (GNU sed 4.9)', () => {
       paths,
       [script],
       opts,
-      (p) => {
+      async function* (p) {
+        await Promise.resolve()
         reads.push(p.virtual)
         if (p.virtual === '/d') throw eisdir(p)
-        return yieldBytes(files.get(p.virtual) ?? new Uint8Array())
+        yield* yieldBytes(files.get(p.virtual) ?? new Uint8Array())
       },
       () => Promise.resolve(),
     )

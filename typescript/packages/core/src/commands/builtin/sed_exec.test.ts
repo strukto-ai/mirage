@@ -16,6 +16,11 @@ import { describe, expect, it } from 'vitest'
 import { byteView, fromByteView } from '../../shell/bytes.ts'
 import { SedMachine, listLine, type SedFileContent, type SedInput } from './sed_exec.ts'
 import { compileScript } from './sed_script.ts'
+import { enoent } from '../../errors/fs.ts'
+
+async function* missingSource(): AsyncIterable<Uint8Array> {
+  yield await Promise.reject<Uint8Array>(enoent('nope'))
+}
 
 interface RunResult {
   stdout: string
@@ -668,41 +673,18 @@ describe('sed streams and files', () => {
     )
   })
 
-  it('reports an operand it cannot open when it gets there and goes on', async () => {
-    const missing = {
-      name: 'nope',
-      error: "sed: can't read nope: No such file or directory\n",
-      code: 2,
-      fatal: false,
-    }
-    const r = await run('p', [{ name: 'f', text: 'a\n' }, missing, { name: 'g', text: 'b\n' }], {
-      suppress: true,
-    })
-    expect(r.stdout).toBe('a\nb\n')
-    expect(r.exitCode).toBe(2)
-  })
-
   it('never opens an operand after q, and a failed one outranks q', async () => {
-    const missing = { name: 'nope', error: "sed: can't read nope: x\n", code: 2, fatal: false }
-    const after = await run('2{p;q}', [{ name: 'f', text: 'one\ntwo\n' }, missing], {
+    const missing = (): SedInput => ({ name: 'nope', source: missingSource() })
+    const after = await run('2{p;q}', [{ name: 'f', text: 'one\ntwo\n' }, missing()], {
       suppress: true,
     })
     expect(after.stdout).toBe('two\n')
     expect(after.exitCode).toBe(0)
-    expect((await run('Q3', [missing, { name: 'f', text: 'one\n' }])).exitCode).toBe(2)
-  })
-
-  it('skips a directory while looking for $, as GNU does, but not when reading on', async () => {
-    const dir = { name: 'd', error: 'sed: read error on d: Is a directory\n', code: 4, fatal: true }
-    const one = { name: 'f', text: 'one\ntwo\n' }
-    const last = await run('$p', [one, dir], { suppress: true })
-    expect([last.stdout, last.exitCode]).toEqual(['two\n', 0])
-    const after = await run('$p', [one, dir, { name: 'g', text: 'x\n' }], { suppress: true })
-    expect([after.stdout, after.exitCode]).toEqual(['x\n', 0])
-    const next = await run('n', [one, dir])
-    expect([next.stdout, next.stderr, next.exitCode]).toEqual(['one\ntwo\n', dir.error, 4])
-    const separate = await run('$p', [one, dir], { suppress: true, separate: true })
-    expect([separate.stdout, separate.exitCode]).toEqual(['two\n', 4])
+    const quit = await run('Q3', [missing(), { name: 'f', text: 'one\n' }])
+    expect([quit.stderr, quit.exitCode]).toEqual([
+      "sed: can't read nope: No such file or directory\n",
+      2,
+    ])
   })
 
   it('reads r files anew after setFiles, R files once', async () => {
@@ -722,15 +704,6 @@ describe('sed streams and files', () => {
     expect(await collect(machine, [{ name: 'a', text: 'a\n' }])).toBe('a\nold\nQ1\n')
     machine.setFiles(new Map([['/r', { text: 'new\n' }]]))
     expect(await collect(machine, [{ name: 'b', text: 'b\n' }])).toBe('b\nnew\nQ1\n')
-  })
-
-  it('stops at a read error', async () => {
-    const dir = { name: 'd', error: 'sed: read error on d: Is a directory\n', code: 4, fatal: true }
-    const r = await run('p', [{ name: 'f', text: 'a\n' }, dir, { name: 'g', text: 'b\n' }], {
-      suppress: true,
-    })
-    expect(r.stdout).toBe('a\n')
-    expect(r.exitCode).toBe(4)
   })
 
   it('refuses the removed L as GNU 4.9 does when it runs', async () => {

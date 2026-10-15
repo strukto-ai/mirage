@@ -93,6 +93,10 @@ class AsyncLineIterator:
     def position(self) -> int:
         return self._loaded - len(self._buf)
 
+    @property
+    def loaded(self) -> int:
+        return self._loaded
+
     async def _next_chunk(self) -> bytes:
         data = await self._source.__anext__()
         self._loaded += len(data)

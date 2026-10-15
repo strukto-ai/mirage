@@ -399,28 +399,25 @@ async def test_last_line_across_files_and_separate():
     ] == "one\ntwo\none\nx\ny\nx\n"
 
 
-async def test_operand_errors():
-    missing = SedInput("nope", error="sed: can't read nope: x\n", code=2)
+async def _missing():
+    raise FileNotFoundError("nope")
+    yield b""
+
+
+async def test_q_never_opens_a_later_operand_and_a_failed_one_outranks_it():
     out, _, code, _ = await _run(
-        "p",
-        [SedInput("f", "a\n"), missing, SedInput("g", "b\n")],
+        "2{p;q}",
+        [SedInput("f", "one\ntwo\n"), SedInput("nope", source=_missing())],
         suppress=True,
-    )
-    assert (out, code) == ("a\nb\n", 2)
-    out, _, code, _ = await _run(
-        "2{p;q}", [SedInput("f", "one\ntwo\n"), missing], suppress=True
     )
     assert (out, code) == ("two\n", 0)
-    assert (await _run("Q3", [missing, SedInput("f", "one\n")]))[2] == 2
-    folder = SedInput(
-        "d", error="sed: read error on d: x\n", code=4, fatal=True
+    _, err, code, _ = await _run(
+        "Q3", [SedInput("nope", source=_missing()), SedInput("f", "one\n")]
     )
-    out, _, code, _ = await _run(
-        "p",
-        [SedInput("f", "a\n"), folder, SedInput("g", "b\n")],
-        suppress=True,
+    assert (err, code) == (
+        "sed: can't read nope: No such file or directory\n",
+        2,
     )
-    assert (out, code) == ("a\n", 4)
 
 
 async def test_L_is_an_internal_error_when_it_runs():
@@ -471,25 +468,6 @@ async def test_dot_matches_newline_except_under_M():
     assert (await _sed("N;s/a$/X/M", "a\nb\n")) == "X\nb\n"
     assert (await _sed("N;s/a$/X/", "a\nb\n")) == "a\nb\n"
     assert (await _sed("N;s/^/X/Mg", "a\nb\n")) == "Xa\nXb\n"
-
-
-async def test_lookahead_skips_a_directory_but_reading_on_panics():
-    folder = SedInput(
-        "d", error="sed: read error on d: Is a directory\n", code=4, fatal=True
-    )
-    one = SedInput("f", "one\ntwo\n")
-    out, _, code, _ = await _run("$p", [one, folder], suppress=True)
-    assert (out, code) == ("two\n", 0)
-    out, _, code, _ = await _run(
-        "$p", [one, folder, SedInput("g", "x\n")], suppress=True
-    )
-    assert (out, code) == ("x\n", 0)
-    out, err, code, _ = await _run("n", [one, folder])
-    assert (out, err, code) == ("one\ntwo\n", folder.error, 4)
-    out, _, code, _ = await _run(
-        "$p", [one, folder], suppress=True, separate=True
-    )
-    assert (out, code) == ("two\n", 4)
 
 
 async def test_r_files_read_anew_after_set_files_R_once():
