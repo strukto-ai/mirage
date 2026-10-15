@@ -75,7 +75,6 @@ export class GridFSVFS extends BaseVFS {
     await super.close()
   }
 
-  override readonly listsStats: boolean = true
   override readonly readsRanges: boolean = true
 
   override readonly maxGlobMatches: number = SCOPE_ERROR

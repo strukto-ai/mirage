@@ -53,7 +53,6 @@ export class ChromaVFS extends BaseVFS {
   override readonly prompt: string = PROMPT
   readonly config: ChromaConfigResolved
   override readonly accessor: ChromaAccessor
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],

@@ -52,7 +52,6 @@ export interface GCalVFSState {
 }
 
 export class GCalVFS extends BaseVFS {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     stat: ['entry'],
     unlink: ['entry'],

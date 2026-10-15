@@ -19,7 +19,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.index import IndexCacheStore
-from mirage.cache.index.config import IndexEntry
+from mirage.types import FileStat, FileType
 from mirage.vfs.gslides import GSlidesConfig, GSlidesVFS
 from mirage.workspace.files import Files
 
@@ -39,12 +39,11 @@ async def test_readdir():
         [
             (
                 "Deck__slide1.gslide.json",
-                IndexEntry(
-                    id="slide1",
+                FileStat(
                     name="Deck",
-                    resource_type="gslides/slide",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="Deck__slide1.gslide.json",
+                    type=FileType.FILE,
+                    modified="2026-04-01T00:00:00Z",
+                    fingerprint="slide1",
                 ),
             )
         ],

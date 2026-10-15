@@ -27,7 +27,6 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.config import (
     Evicted,
     IndexConfig,
-    IndexEntry,
     LookupStatus,
     RedisIndexConfig,
 )
@@ -35,6 +34,7 @@ from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
+from mirage.types import DirListing, FileStat, FileType
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import override
@@ -43,17 +43,7 @@ from tests.fixtures.vfs_io import override
 @pytest.mark.asyncio
 @pytest.mark.parametrize("store_kind", ["ram", "redis"])
 @pytest.mark.parametrize("phase", ["backend", "store"])
-@pytest.mark.parametrize(
-    "method",
-    [
-        "put",
-        "set_dir",
-        "set_partial_dir",
-        "seed_get",
-        "seed_list_dir",
-        "seed_entries",
-    ],
-)
+@pytest.mark.parametrize("method", ["set_dir", "set_partial_dir"])
 @pytest.mark.parametrize("shadow", [False, True])
 async def test_late_index_write_cannot_cross_mount_ownership(
     monkeypatch, store_kind, phase, method, shadow
@@ -69,7 +59,7 @@ async def test_late_index_write_cannot_cross_mount_ownership(
     ws = Workspace({prefix: vfs}, index=config)
     ws.add_mount("/alias", vfs)
     index = ws.mount(prefix).index_store
-    entry = IndexEntry(id="old", name="stale", resource_type="file")
+    entry = FileStat(name="stale", type=FileType.FILE, fingerprint="old")
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -78,37 +68,18 @@ async def test_late_index_write_cannot_cross_mount_ownership(
         await release.wait()
 
     if phase == "store":
-        store_method = method.removeprefix("seed_")
-        original = getattr(index, store_method)
+        original = getattr(index, method)
 
         async def delayed_store(*args, **kwargs):
             await pause()
             return await original(*args, **kwargs)
 
-        monkeypatch.setattr(index, store_method, delayed_store)
+        monkeypatch.setattr(index, method, delayed_store)
 
-    async def delayed_readdir(_accessor, _path, *, index, **_kwargs):
+    async def delayed_readdir(_accessor, _path):
         if phase == "backend":
             await pause()
-        if method == "put":
-            await index.put("/data/stale", entry)
-        elif method == "set_dir":
-            await index.set_dir("/data", [("stale", entry)])
-        elif method == "set_partial_dir":
-            await index.set_partial_dir("/data", [("stale", entry)])
-        else:
-            index.seed(
-                {"/data/stale": entry},
-                {"/data": ["/data/stale"]},
-                datetime.now(timezone.utc) + timedelta(hours=1),
-            )
-            if method == "seed_get":
-                await index.get("/data/stale")
-            elif method == "seed_list_dir":
-                await index.list_dir("/data")
-            else:
-                await index.entries()
-        return ["/data/stale"]
+        return DirListing([entry], partial=method == "set_partial_dir")
 
     override(ws.mount(prefix).vfs, "readdir", delayed_readdir)
     reading = asyncio.create_task(ws.vfs.readdir("/data"))
@@ -131,7 +102,7 @@ async def test_late_index_write_cannot_cross_mount_ownership(
             ws.add_mount("/data", replacement)
             await ws.vfs.readdir("/data")
         replaced = ws.mount("/data").index_store
-        fresh = IndexEntry(id="new", name="fresh", resource_type="file")
+        fresh = FileStat(name="fresh", type=FileType.FILE, fingerprint="new")
         await replaced.put("/data/fresh", fresh)
         release.set()
         await asyncio.wait_for(reading, timeout=5)
@@ -150,7 +121,7 @@ async def test_late_index_write_cannot_cross_mount_ownership(
                     own,
                     None,
                 )
-        assert (await replaced.get("/data/fresh")).entry.id == "new"
+        assert (await replaced.get("/data/fresh")).entry.fingerprint == "new"
     finally:
         release.set()
         await asyncio.gather(
@@ -241,8 +212,8 @@ class _SpyStore(RAMIndexCacheStore):
         await super().set_partial_dir(vfs_path, entries, expired_at)
 
 
-def _row(name: str = "a") -> IndexEntry:
-    return IndexEntry(id=name, name=name, resource_type="file")
+def _row(name: str = "a") -> FileStat:
+    return FileStat(name=name, type=FileType.FILE, fingerprint=name)
 
 
 def _owns_all(_key: str) -> bool:
@@ -476,8 +447,11 @@ def _gone_ledger() -> tuple[
     return ledger, on_gone
 
 
-def _child(name: str, kind: str = "file") -> IndexEntry:
-    return IndexEntry(id=name, name=name, resource_type=kind)
+def _child(name: str, kind: str = "file") -> FileStat:
+    folder = kind == "folder"
+    return FileStat(
+        name=name, type=FileType.DIRECTORY if folder else FileType.FILE
+    )
 
 
 @pytest.mark.asyncio
@@ -852,4 +826,6 @@ async def test_conditional_replacement_keeps_ownership(owned):
         )
         is owned
     )
-    assert (await store.get("/data/a")).entry.id == ("new" if owned else "a")
+    assert (await store.get("/data/a")).entry.fingerprint == (
+        "new" if owned else "a"
+    )

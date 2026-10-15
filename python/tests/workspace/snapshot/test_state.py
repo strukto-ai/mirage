@@ -182,11 +182,11 @@ class _NotesVFS(BaseVFS):
 
     accessor: NotesAccessor
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        parent = path.virtual.rstrip("/")
-        return [f"{parent}/{name}" for name in sorted(self.accessor.pages)]
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return [
+            FileStat(name=name, size=len(page.encode()), type=FileType.FILE)
+            for name, page in sorted(self.accessor.pages.items())
+        ]
 
     async def read(
         self,

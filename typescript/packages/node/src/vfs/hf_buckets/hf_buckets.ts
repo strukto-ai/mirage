@@ -75,7 +75,6 @@ export class HfBucketsVFS extends BaseVFS {
     this.accessor = new HfBucketsAccessor(this.config)
   }
 
-  override readonly listsStats: boolean = true
   override readonly readsRanges: boolean = true
 
   override readonly maxGlobMatches: number = SCOPE_ERROR

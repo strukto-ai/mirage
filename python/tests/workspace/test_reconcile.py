@@ -23,12 +23,7 @@ from uuid import uuid4
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.cache.index.config import (
-    Evicted,
-    IndexConfig,
-    IndexEntry,
-    RedisIndexConfig,
-)
+from mirage.cache.index.config import Evicted, IndexConfig, RedisIndexConfig
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
@@ -559,7 +554,9 @@ async def test_relist_preserves_nested_mount_subtree(
             [
                 (
                     "sub",
-                    IndexEntry(id="sub", name="sub", resource_type="folder"),
+                    FileStat(
+                        name="sub", type=FileType.DIRECTORY, fingerprint="sub"
+                    ),
                 )
             ],
         )
@@ -568,7 +565,9 @@ async def test_relist_preserves_nested_mount_subtree(
             [
                 (
                     "file",
-                    IndexEntry(id="file", name="file", resource_type="file"),
+                    FileStat(
+                        name="file", type=FileType.FILE, fingerprint="file"
+                    ),
                 )
             ],
         )
@@ -579,11 +578,16 @@ async def test_relist_preserves_nested_mount_subtree(
         rows = []
         if replacement:
             rows.append(
-                ("sub", IndexEntry(id="new", name="sub", resource_type="file"))
+                (
+                    "sub",
+                    FileStat(
+                        name="sub", type=FileType.FILE, fingerprint="new"
+                    ),
+                )
             )
         await index.set_dir("/data", rows)
         if replacement:
-            assert (await index.get("/data/sub")).entry.id == "new"
+            assert (await index.get("/data/sub")).entry.fingerprint == "new"
         assert await ws.cache.get("/data/sub/nested/file") == b"keep"
         assert ws.namespace.meta_for("/data/sub/nested/file").mode == 0o640
         assert (await nested.list_dir("/data/sub/nested")).entries == [
@@ -615,7 +619,9 @@ async def test_relist_batches_a_thousand_vanished_children():
         rows = [
             (
                 f"file-{i}",
-                IndexEntry(id=str(i), name=f"file-{i}", resource_type="file"),
+                FileStat(
+                    name=f"file-{i}", type=FileType.FILE, fingerprint=str(i)
+                ),
             )
             for i in range(1000)
         ]
@@ -916,7 +922,8 @@ async def test_listing_gate_refuses_a_moved_version_and_keeps_the_listing():
     async with _versioned(remote="v2") as (vfs, mount, rec):
         await _store(mount, "/m/a", "v1")
         await mount.index_store.put(
-            "/m/f.txt", IndexEntry(id="f", name="f.txt", resource_type="file")
+            "/m/f.txt",
+            FileStat(name="f.txt", type=FileType.FILE, fingerprint="f"),
         )
         async with command_scope():
             assert await rec.may_serve_listing(mount, "/m/a", "v1") is False
@@ -1121,7 +1128,7 @@ async def test_the_probe_hints_the_mount_index_row():
         await ws.namespace.ensure_loaded()
         mount = ws.namespace.mount_for("/data/f.txt")
         mount.read = ReadSpec(policy=ReadPolicy.FRESH)
-        row = IndexEntry(id="F1", name="f.txt", resource_type="file")
+        row = FileStat(name="f.txt", type=FileType.FILE, fingerprint="F1")
         await mount.index_store.set_dir("/data", [("f.txt", row)])
         await mount.index_store.set_dir("/elsewhere", [("g.txt", row)])
         assert (await mount.index.get("/data/f.txt")).entry is not None

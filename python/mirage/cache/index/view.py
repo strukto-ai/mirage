@@ -20,13 +20,13 @@ from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.config import (
     Evicted,
-    IndexRow,
     IndexSnapshot,
     ListResult,
     LookupResult,
     LookupStatus,
 )
 from mirage.cache.index.store import IndexCacheStore
+from mirage.types import FileStat
 
 
 class IndexView(IndexCacheStore):
@@ -182,18 +182,18 @@ class IndexView(IndexCacheStore):
                 }
             )
 
-    async def put(self, vfs_path: str, entry: IndexRow) -> None:
+    async def put(self, vfs_path: str, entry: FileStat) -> None:
         async with self._fence():
             if self._owns(vfs_path):
                 await self._store.put(vfs_path, entry)
 
-    async def add_entry(self, vfs_path: str, entry: IndexRow) -> None:
+    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
         async with self._fence():
             if self._owns(vfs_path):
                 await self._store.add_entry(vfs_path, entry)
 
     async def replace_if_unchanged(
-        self, vfs_path: str, predecessor: str, entry: IndexRow
+        self, vfs_path: str, predecessor: str, entry: FileStat
     ) -> bool:
         async with self._fence():
             if not self._owns(vfs_path):
@@ -205,7 +205,7 @@ class IndexView(IndexCacheStore):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -227,7 +227,7 @@ class IndexView(IndexCacheStore):
     async def set_partial_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None = None,
     ) -> None:
         await self._set_dir(
@@ -237,7 +237,7 @@ class IndexView(IndexCacheStore):
     async def _set_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None,
         *,
         partial: bool,
@@ -303,7 +303,7 @@ class IndexView(IndexCacheStore):
 
     def seed(
         self,
-        entries: dict[str, IndexRow],
+        entries: dict[str, FileStat],
         children: dict[str, list[str]],
         expires_at: datetime,
         *,
@@ -323,7 +323,7 @@ class IndexView(IndexCacheStore):
         for folder in snapshot.children:
             self._noted(folder)
 
-    async def entries(self) -> dict[str, IndexRow]:
+    async def entries(self) -> dict[str, FileStat]:
         async with self._fence():
             if not self._owns(self._prefix):
                 return {}

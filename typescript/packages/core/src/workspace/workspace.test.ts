@@ -18,7 +18,6 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CacheConfig } from '../cache/file/config.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import {
-  IndexEntry,
   IndexType,
   LookupStatus,
   type IndexConfig,
@@ -32,7 +31,15 @@ import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { vfsCall } from '../vfs/call.ts'
 import { Effect } from '../vfs/types.ts'
-import { DEFAULT_READ_TTL, FileType, MountMode, ReadPolicy, VFSName, PathSpec } from '../types.ts'
+import {
+  DEFAULT_READ_TTL,
+  FileStat,
+  FileType,
+  MountMode,
+  ReadPolicy,
+  VFSName,
+  PathSpec,
+} from '../types.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
@@ -73,7 +80,7 @@ describe('Workspace lifecycle', () => {
       })
       const directory = action === 'midpath' ? '/data/dir' : '/data'
       await shared.setDir(directory, [
-        ['stale.txt', new IndexEntry({ id: 'old', name: 'stale.txt', resourceType: 'file' })],
+        ['stale.txt', new FileStat({ name: 'stale.txt', type: FileType.FILE, fingerprint: 'old' })],
       ])
       await ws.cache.set('/data/file', bytes.encode('old'))
       ws.addMount('/data', replacement, MountMode.WRITE)
@@ -425,7 +432,11 @@ describe('Workspace dynamic mount index', () => {
           const ws = new Workspace({ [shadow ? '/' : '/data']: vfs }, { index: config })
           ws.addMount('/alias', vfs)
           const index = ws.mount(shadow ? '/' : '/data').indexStore
-          const entry = new IndexEntry({ id: 'old', name: 'private.txt', resourceType: 'file' })
+          const entry = new FileStat({
+            name: 'private.txt',
+            type: FileType.FILE,
+            fingerprint: 'old',
+          })
           try {
             await index.put('/data', entry)
             for (const path of ['/data', '/data/nested', '/database', '/alias']) {
@@ -1181,7 +1192,7 @@ it('unmount drains metadata globs and their index writes', async () => {
     expect(closed).toBe(false)
     if (index === undefined) throw new Error('missing index')
     await index.setDir('/data', [
-      ['late', new IndexEntry({ id: 'late', name: 'late', resourceType: 'file' })],
+      ['late', new FileStat({ name: 'late', type: FileType.FILE, fingerprint: 'late' })],
     ])
     return []
   }
@@ -1235,7 +1246,7 @@ it('hands glob a lock-held view it can write through', async () => {
       wrote = await Promise.race([
         seen
           .setDir('/data', [
-            ['row', new IndexEntry({ id: 'row', name: 'row', resourceType: 'file' })],
+            ['row', new FileStat({ name: 'row', type: FileType.FILE, fingerprint: 'row' })],
           ])
           .then(() => 'done'),
         new Promise((resolve) => {

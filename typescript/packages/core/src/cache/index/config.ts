@@ -14,35 +14,9 @@
 
 import { z } from 'zod'
 
-import { ContentType, FileStat, FileType } from '../../types.ts'
+import type { FileStat} from '../../types.ts';
+import { ContentType, FileType } from '../../types.ts'
 import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
-
-export const ResourceType = Object.freeze({
-  FILE: 'file',
-  FOLDER: 'folder',
-} as const)
-
-export type ResourceType = (typeof ResourceType)[keyof typeof ResourceType]
-
-function isKind(resourceType: string | undefined, kind: ResourceType): boolean {
-  if (resourceType === undefined) return false
-  return resourceType === kind || resourceType.endsWith(`/${kind}`)
-}
-
-/**
- * Whether a row's type names a folder: `folder` or `<backend>/folder`. A
- * backend may spell its kinds under its own prefix (`dropbox/folder`); a type
- * outside that convention (`wandb/directory`) is neither kind, nor is
- * `undefined`, a row a map lookup did not find.
- */
-export function isFolderKind(resourceType: string | undefined): boolean {
-  return isKind(resourceType, ResourceType.FOLDER)
-}
-
-/** Whether a row's type names a file: `file` or `<backend>/file`; as `isFolderKind`. */
-export function isFileKind(resourceType: string | undefined): boolean {
-  return isKind(resourceType, ResourceType.FILE)
-}
 
 export const LookupStatus = Object.freeze({
   EXPIRED: 'expired',
@@ -62,126 +36,6 @@ export const IndexType = Object.freeze({
 } as const)
 
 export type IndexType = (typeof IndexType)[keyof typeof IndexType]
-
-/**
- * The wire form of an entry: what pydantic writes for the Python
- * `IndexEntry`, snake_case and every field, so a row either language writes
- * is one the other reads. Requiredness mirrors the pydantic model, so a row
- * missing `resource_type` is refused rather than decoded with the field
- * empty. `extra` rides along because it is load-bearing (`size_bytes`, the
- * `folder.childCount` that `find -empty` reads on Graph backends).
- */
-export const IndexEntryWireSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  resource_type: z.string(),
-  remote_time: z.string().default(''),
-  index_time: z.string().default(''),
-  vfs_name: z.string().default(''),
-  size: z.number().int().nullable().default(null),
-  extra: z.record(z.string(), z.unknown()).default({}),
-})
-
-export type IndexEntryWire = z.output<typeof IndexEntryWireSchema>
-
-export interface IndexEntryInit {
-  id: string
-  name: string
-  resourceType: string
-  remoteTime?: string
-  indexTime?: string
-  vfsName?: string
-  size?: number | null
-  extra?: Record<string, unknown>
-}
-
-export class IndexEntry {
-  id: string
-  name: string
-  resourceType: string
-  remoteTime: string
-  indexTime: string
-  vfsName: string
-  size: number | null
-  extra: Record<string, unknown>
-
-  constructor(init: IndexEntryInit) {
-    this.id = init.id
-    this.name = init.name
-    this.resourceType = init.resourceType
-    this.remoteTime = init.remoteTime ?? ''
-    this.indexTime = init.indexTime ?? ''
-    this.vfsName = init.vfsName ?? ''
-    this.size = init.size ?? null
-    this.extra = init.extra ?? {}
-  }
-
-  copyWith(updates: Partial<IndexEntryInit>): IndexEntry {
-    return new IndexEntry({
-      id: updates.id ?? this.id,
-      name: updates.name ?? this.name,
-      resourceType: updates.resourceType ?? this.resourceType,
-      remoteTime: updates.remoteTime ?? this.remoteTime,
-      indexTime: updates.indexTime ?? this.indexTime,
-      vfsName: updates.vfsName ?? this.vfsName,
-      size: updates.size !== undefined ? updates.size : this.size,
-      extra: updates.extra ?? this.extra,
-    })
-  }
-
-  /** The wire form, so `JSON.stringify(entry)` is what `model_dump_json` writes. */
-  toJSON(): IndexEntryWire {
-    return {
-      id: this.id,
-      name: this.name,
-      resource_type: this.resourceType,
-      remote_time: this.remoteTime,
-      index_time: this.indexTime,
-      vfs_name: this.vfsName,
-      size: this.size,
-      extra: this.extra,
-    }
-  }
-
-  /** The twin of `model_validate_json`: a row the schema refuses throws. */
-  static fromJSON(raw: string): IndexEntry {
-    const w = IndexEntryWireSchema.parse(JSON.parse(raw))
-    return new IndexEntry({
-      id: w.id,
-      name: w.name,
-      resourceType: w.resource_type,
-      remoteTime: w.remote_time,
-      indexTime: w.index_time,
-      vfsName: w.vfs_name,
-      size: w.size,
-      extra: w.extra,
-    })
-  }
-}
-
-/**
- * What the index holds at a path: a backend's stat of it, or the older row a
- * backend that has not moved to stats still writes.
- */
-export type IndexRow = IndexEntry | FileStat
-
-/** Whether an index row names a folder; no row names nothing. */
-export function rowIsFolder(row: IndexRow | undefined): boolean {
-  if (row instanceof FileStat) return row.type === FileType.DIRECTORY
-  return isFolderKind(row?.resourceType)
-}
-
-/** Whether an index row names a file; no row names nothing. */
-export function rowIsFile(row: IndexRow | undefined): boolean {
-  if (row instanceof FileStat) return row.type !== FileType.DIRECTORY
-  return isFileKind(row?.resourceType)
-}
-
-/** `row` with the time it was indexed, when it carries one. */
-export function stamped(row: IndexRow, nowIso: string): IndexRow {
-  if (row instanceof FileStat || row.indexTime !== '') return row
-  return row.copyWith({ indexTime: nowIso })
-}
 
 /**
  * The wire form of a stat row: what pydantic writes for the Python
@@ -236,18 +90,15 @@ export interface SetDirOptions {
 
 /** Entry rows and directory children from one refill. */
 export interface IndexSnapshot {
-  readonly entries: ReadonlyMap<string, IndexEntry>
+  readonly entries: ReadonlyMap<string, FileStat>
   readonly children: ReadonlyMap<string, readonly string[]>
   /** The backend version the rows were read at, or null. */
   readonly version?: string | null
 }
 
 export interface LookupResult {
-  /**
-   * The row at the path. Typed as the older row while backends still read
-   * its fields; a row a stats listing kept is a `FileStat` at run time.
-   */
-  entry?: IndexEntry | null
+  /** The row at the path. */
+  entry?: FileStat | null
   status?: LookupStatus | null
 }
 

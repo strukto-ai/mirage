@@ -53,7 +53,6 @@ export class RAMVFS extends BaseVFS {
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
-  override readonly listsStats: boolean = true
   readonly store = new RAMStore()
   override readonly accessor = new RAMAccessor(this.store)
   override readonly prompt = PROMPT

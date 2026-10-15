@@ -37,7 +37,6 @@ export class HistoryViewVFS extends BaseVFS {
   // The view renders from in-memory events, so stat() sizes it by
   // rendering: cheap, no network, and never null.
   override readonly sizesAlwaysKnown = true
-  override readonly listsStats: boolean = true
   override readonly accessor: HistoryAccessor
 
   constructor(observer: Observer, session: string | null = null) {

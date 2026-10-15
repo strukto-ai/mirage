@@ -12,25 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { FileStat } from '../../types.ts'
 import { isEnoent } from '../../errors/fs.ts'
-import { type IndexEntry, ListedMiss, LookupStatus } from './config.ts'
+import { LookupStatus } from './config.ts'
 import type { IndexCacheStore } from './store.ts'
 import { withIndexLock } from './lock.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-
-/**
- * `entryOrListedMiss` for a caller that cannot ask by path: a complete
- * listing that omits the key answers null, whoever fetched it. Mirrors
- * Python's `entry_or_warm`.
- */
-export async function entryOrWarm(
-  index: IndexCacheStore,
-  virtualKey: string,
-  warm: (() => Promise<unknown>) | null,
-): Promise<IndexEntry | null> {
-  const found = await entryOrListedMiss(index, virtualKey, warm)
-  return found === ListedMiss.UNTRUSTED ? null : found
-}
 
 /**
  * Resolve an index entry, listing the parent directory once when its listing
@@ -52,27 +39,22 @@ export async function entryOrWarm(
  * reported as "no such file" both misdiagnoses the fault and hides that it is
  * worth retrying.
  *
- * A complete listing that omits the key answers without a warm: null when
- * the running command fetched it, `ListedMiss.UNTRUSTED` when it did not, so
- * a backend that can ask by path learns whether the miss is proof. Mirrors
- * Python's `entry_or_listed_miss`.
+ * Mirrors Python's entry_or_warm.
  *
  * @param index - the index to read, and to warm through `warm`.
  * @param virtualKey - the index key being resolved.
  * @param warm - lists the parent directory, populating the index; null when
  *   the key has no distinct parent to list.
  */
-export async function entryOrListedMiss(
+export async function entryOrWarm(
   index: IndexCacheStore,
   virtualKey: string,
   warm: (() => Promise<unknown>) | null,
-): Promise<IndexEntry | ListedMiss | null> {
+): Promise<FileStat | null> {
   const parent = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
   return withIndexLock(index, parent, async () => {
     let listing = await index.listDir(parent)
-    if (listing.entries != null && !listing.entries.includes(virtualKey)) {
-      return index.listedThisCommand(parent) ? null : ListedMiss.UNTRUSTED
-    }
+    if (listing.entries != null && !listing.entries.includes(virtualKey)) return null
     const hit = await index.get(virtualKey)
     if (
       hit.entry != null &&

@@ -49,7 +49,6 @@ export class EmailVFS extends BaseVFS {
   override readonly writePrompt: string = WRITE_PROMPT
   // IMAP search names messages; an attachment is read as usual.
   override readonly searchable: readonly string[] = ['*/*/*.email.json']
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],

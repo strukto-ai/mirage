@@ -19,12 +19,10 @@ if TYPE_CHECKING:
     from mirage.cache.index.config import (
         Evicted,
         IndexConfig,
-        IndexEntry,
         ListResult,
         LookupResult,
         LookupStatus,
         RedisIndexConfig,
-        ResourceType,
     )
     from mirage.cache.index.null import NULL_INDEX, NullIndexCacheStore
     from mirage.cache.index.ram import RAMIndexCacheStore
@@ -35,12 +33,10 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.cache.index.config": (
         "Evicted",
         "IndexConfig",
-        "IndexEntry",
         "ListResult",
         "LookupResult",
         "LookupStatus",
         "RedisIndexConfig",
-        "ResourceType",
     ),
     "mirage.cache.index.null": ("NULL_INDEX", "NullIndexCacheStore"),
     "mirage.cache.index.ram": ("RAMIndexCacheStore",),
@@ -55,7 +51,6 @@ __all__ = [
     "Evicted",
     "IndexCacheStore",
     "IndexConfig",
-    "IndexEntry",
     "ListResult",
     "LookupResult",
     "LookupStatus",
@@ -64,7 +59,6 @@ __all__ = [
     "RAMIndexCacheStore",
     "RedisIndexCacheStore",
     "RedisIndexConfig",
-    "ResourceType",
 ]
 
 

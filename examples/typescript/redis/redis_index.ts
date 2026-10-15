@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  IndexEntry,
+  FileStat,
+  FileType,
   RAMVFS,
   RedisIndexCacheStore,
   Workspace,
@@ -22,8 +23,8 @@ import {
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
 
-function file(name: string): IndexEntry {
-  return new IndexEntry({ id: name, name, resourceType: 'file' })
+function file(name: string): FileStat {
+  return new FileStat({ name, type: FileType.FILE })
 }
 
 async function main(): Promise<void> {

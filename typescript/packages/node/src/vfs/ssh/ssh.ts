@@ -63,7 +63,6 @@ export class SSHVFS extends BaseVFS {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly maxDuEntries: number | null = null
   override readonly indexTtl: number = 60
-  override readonly listsStats: boolean = true
   override readonly prompt = PROMPT
   readonly config: SSHConfig
   override readonly accessor: SSHAccessor

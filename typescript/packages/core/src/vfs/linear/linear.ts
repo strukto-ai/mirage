@@ -35,7 +35,6 @@ export interface LinearVFSState {
 }
 
 export class LinearVFS extends BaseVFS {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['parent'],

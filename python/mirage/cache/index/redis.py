@@ -32,12 +32,9 @@ from mirage.cache.file.utils import glob_escape
 from mirage.cache.index.config import (
     Evicted,
     IndexDirectory,
-    IndexEntry,
-    IndexRow,
     ListResult,
     LookupResult,
     LookupStatus,
-    stamped,
 )
 from mirage.cache.index.constants import (
     CHILDREN_PREFIX,
@@ -50,7 +47,6 @@ from mirage.cache.index.constants import (
 )
 from mirage.cache.index.store import IndexCacheStore
 from mirage.types import FileStat
-from mirage.utils.dates import to_iso_z
 from mirage.utils.ids import uuid7
 
 
@@ -58,20 +54,17 @@ def _text(value: str | bytes) -> str:
     return value.decode() if isinstance(value, bytes) else value
 
 
-def _row(raw: str | bytes) -> IndexRow:
+def _row(raw: str | bytes) -> FileStat:
     """An index row read back from its JSON.
 
     Args:
         raw (str | bytes): the stored JSON.
     """
-    decoded = json.loads(raw)
-    if "resource_type" in decoded:
-        return IndexEntry.model_validate(decoded)
-    return FileStat.model_validate(decoded)
+    return FileStat.model_validate(json.loads(raw))
 
 
 _PendingSeed = tuple[
-    dict[str, IndexRow], dict[str, list[str]], datetime, str | None
+    dict[str, FileStat], dict[str, list[str]], datetime, str | None
 ]
 
 _REPLACE_ENTRY = """
@@ -134,16 +127,9 @@ local function subtree(registry, root)
   paths[#paths + 1] = root
   return paths
 end
--- A row's kind: 'folder' or '<backend>/folder', 'file' or '<backend>/file'.
-local function is_kind(row_type, kind)
-  return type(row_type) == 'string' and (row_type == kind
-    or string.sub(row_type, -(#kind + 1)) == '/' .. kind)
-end
-local function row_kind(row)
-  if row.resource_type ~= nil then
-    return row.resource_type
-  end
-  return row.type == 'directory' and 'folder' or 'file'
+-- Whether a stored row, a FileStat's JSON, is a directory's.
+local function is_dir(row)
+  return row.type == 'directory'
 end
 """
 )
@@ -268,7 +254,7 @@ local function protected(path)
 end
 local named = {}
 for i = 7, #ARGV, 2 do
-  named[ARGV[i]] = row_kind(cjson.decode(ARGV[i + 1]))
+  named[ARGV[i]] = is_dir(cjson.decode(ARGV[i + 1]))
 end
 local seen, gone, folders = {}, {}, {}
 local function drop(path, buried)
@@ -277,8 +263,8 @@ local function drop(path, buried)
   end
   local row = redis.call('GET', ARGV[2] .. path)
   local folder = buried or redis.call('EXISTS', ARGV[3] .. path) == 1
-    or (row ~= false and is_kind(row_kind(cjson.decode(row)), 'folder'))
-  if named[path] and not (folder and is_kind(named[path], 'file')) then
+    or (row ~= false and is_dir(cjson.decode(row)))
+  if named[path] ~= nil and not (folder and not named[path]) then
     return
   end
   seen[path] = true
@@ -349,7 +335,7 @@ if raw then
   for _, path in ipairs(listing.entries) do
     local row = redis.call('GET', ARGV[1] .. path)
     local folder = redis.call('EXISTS', ARGV[2] .. path) == 1
-      or (row ~= false and is_kind(row_kind(cjson.decode(row)), 'folder'))
+      or (row ~= false and is_dir(cjson.decode(row)))
     local position = positions[path]
     if not position then
       entries[#entries + 1] = path
@@ -538,19 +524,15 @@ class RedisIndexCacheStore(IndexCacheStore):
 
     def seed(
         self,
-        entries: dict[str, IndexRow],
+        entries: dict[str, FileStat],
         children: dict[str, list[str]],
         expires_at: datetime,
         *,
         version: str | None = None,
     ) -> None:
-        now_iso = to_iso_z(datetime.now(timezone.utc))
         self._pending_seeds.append(
             (
-                {
-                    path: stamped(entry, now_iso)
-                    for path, entry in entries.items()
-                },
+                dict(entries),
                 {path: list(keys) for path, keys in children.items()},
                 expires_at,
                 version,
@@ -673,15 +655,14 @@ class RedisIndexCacheStore(IndexCacheStore):
             return LookupResult(status=LookupStatus.NOT_FOUND)
         return LookupResult(entry=_row(raw))
 
-    async def put(self, vfs_path: str, entry: IndexRow) -> None:
+    async def put(self, vfs_path: str, entry: FileStat) -> None:
         await self._flush_seed()
-        entry = stamped(entry, to_iso_z(datetime.now(timezone.utc)))
         pipe = self._client.pipeline()
         self._track_paths(pipe, [vfs_path])
         pipe.set(self._entry_key(vfs_path), entry.model_dump_json())
         await pipe.execute()
 
-    async def add_entry(self, vfs_path: str, entry: IndexRow) -> None:
+    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
         await self._flush_seed()
         folder = vfs_path.rsplit("/", 1)[0] or "/"
         now = datetime.now(timezone.utc)
@@ -704,7 +685,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             self._generation_key,
             f"{self._directory_generation_prefix}{folder}",
             self._entry_key(vfs_path),
-            stamped(entry, to_iso_z(now)).model_dump_json(),
+            entry.model_dump_json(),
             vfs_path,
             fresh.model_dump_json(),
             str(now.timestamp()),
@@ -712,14 +693,13 @@ class RedisIndexCacheStore(IndexCacheStore):
         await pipe.execute()
 
     async def replace_if_unchanged(
-        self, vfs_path: str, predecessor: str, entry: IndexRow
+        self, vfs_path: str, predecessor: str, entry: FileStat
     ) -> bool:
         await self._flush_seed()
         key = self._entry_key(vfs_path)
         raw = await self._client.get(key)
         if raw is None or _row(raw).model_dump() != json.loads(predecessor):
             return False
-        entry = stamped(entry, to_iso_z(datetime.now(timezone.utc)))
         result = await cast(
             Awaitable[int],
             self._client.eval(
@@ -759,7 +739,7 @@ class RedisIndexCacheStore(IndexCacheStore):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -779,7 +759,7 @@ class RedisIndexCacheStore(IndexCacheStore):
     async def set_partial_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None = None,
     ) -> None:
         await self._set_dir(
@@ -789,7 +769,7 @@ class RedisIndexCacheStore(IndexCacheStore):
     async def _set_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None,
         *,
         partial: bool,
@@ -799,7 +779,6 @@ class RedisIndexCacheStore(IndexCacheStore):
     ) -> list[Evicted]:
         await self._flush_seed()
         now = datetime.now(timezone.utc)
-        now_iso = to_iso_z(now)
         prefix = "/" if vfs_path == "/" else vfs_path + "/"
 
         generation = await self._generation(self._generation_key)
@@ -808,9 +787,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         )
         rows: list[tuple[str, str]] = []
         for name, entry in entries:
-            rows.append(
-                (prefix + name, stamped(entry, now_iso).model_dump_json())
-            )
+            rows.append((prefix + name, entry.model_dump_json()))
 
         expiry = (
             expired_at
@@ -865,9 +842,9 @@ class RedisIndexCacheStore(IndexCacheStore):
             dropped.append(Evicted(key, folder=bool(flag)))
         return dropped
 
-    async def entries(self) -> dict[str, IndexRow]:
+    async def entries(self) -> dict[str, FileStat]:
         await self._flush_seed()
-        entries: dict[str, IndexRow] = {}
+        entries: dict[str, FileStat] = {}
         cursor = 0
         while True:
             cursor, keys = await self._client.scan(

@@ -48,12 +48,19 @@ function key(path: PathSpec): string {
 
 /** A page per file, read from the accessor's pages. */
 class NotesVFS extends BaseVFS<NotesAccessor> {
-  override readdir(path: PathSpec): Promise<string[]> {
-    const parent = rstripSlash(path.virtual)
+  override readdir(): Promise<FileStat[]> {
     return Promise.resolve(
-      Object.keys(this.accessor.pages)
-        .sort()
-        .map((name) => `${parent}/${name}`),
+      Object.entries(this.accessor.pages)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(
+          ([name, page]) =>
+            new FileStat({
+              name,
+              size: ENC.encode(page).length,
+              type: FileType.FILE,
+              content: ContentType.TEXT,
+            }),
+        ),
     )
   }
 

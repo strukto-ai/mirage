@@ -18,9 +18,8 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.index import IndexEntry, ResourceType
 from mirage.core.disk.stat import stat
-from mirage.types import FileType, PathSpec, ReadPolicy, ReadSpec
+from mirage.types import FileStat, FileType, PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace.mount import Mount
@@ -165,11 +164,7 @@ async def test_a_folder_with_an_overlay_still_drops_the_index_under_fresh(
             [
                 (
                     "x.txt",
-                    IndexEntry(
-                        id="/d/x.txt",
-                        name="x.txt",
-                        resource_type=ResourceType.FILE,
-                    ),
+                    FileStat(name="x.txt", type=FileType.FILE),
                 )
             ],
         )

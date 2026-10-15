@@ -43,7 +43,7 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
     })
   }
 
-  override async readdir(path: PathSpec): Promise<string[]> { ... }
+  override async readdir(path: PathSpec): Promise<FileStat[]> { ... }
   override async read(path: PathSpec): Promise<Uint8Array> { ... }
   override async stat(path: PathSpec): Promise<FileStat> { ... }
 
@@ -73,14 +73,28 @@ The driver never sees the mount it runs under. The index store and the `vfs:` re
 Only `readdir`, `read`, and `stat` are required. Mirage derives a stream from
 `read`, existence checks from `stat`, and treats the resource as remote and
 available. A window of a file is cut from the whole `read` unless the class
-sets `readsRanges` true; then `read(path, index, offset, size)` receives the
+sets `readsRanges` true; then `read(path, handed, offset, size)` receives the
 window (`size === null` means through EOF) and fetches only that, and `file`
 then reads only the first bytes it sniffs. A derived stream still fetches the
 entire file; define `readStream` for large files.
 
-`readdir` returns each child's full virtual path (the directory's
-`path.virtual` joined with the child's name), and `stat` sets `FileStat.name`
-to the base name alone. `ls`, `find` and `grep` print what these two return.
+`readdir` returns each child's `FileStat`, filled in as `stat` would fill
+it, with `name` the base name alone. The mount keeps the listing and answers a
+stat of anything it names from that row, so a listing costs one request.
+Return a `DirListing` when one fetch proves more: `seeds` for the descendant
+listings it also names, `partial: true` for a filtered or truncated view, and
+`window: true` for a capped one that proves nothing absent.
+
+A function that needs what a listing already holds declares it in `handed`,
+keyed by function name (`override readonly handed = { stat: ['entry'] }`), and
+receives it in its `Handed` argument: `entry` (the row at the path) and
+`parent` (the row of its folder), and for `rename`, `copy` and `dirCopy` also
+`dstEntry` and `dstParent`. Each is `null` when nothing is there. The mount
+finds them in its stored listings and lists a folder only when none is stored,
+so a backend that addresses items by id reads the id off the row instead of
+resolving the path again. A function that creates something (`mkdir`,
+`create`, `write`) may return the new `FileStat`: the mount keeps it, and
+`mkdir -p` hands it as `parent` to the next level.
 
 Every other function is optional, and each stands alone:
 
@@ -169,8 +183,9 @@ that deletes or moves defines those functions.
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
 Use `path.vfsPath` to address your backend and `path.virtual` for workspace
-paths. Use the index passed to each function: the mount scopes it for
-ownership and freshness. Put shared behavior in the functions; a `commands`
+paths. Return what a function lists or creates and let the mount keep it; a
+function sees the index only when it declares `index` (see point lookups
+below). Put shared behavior in the functions; a `commands`
 override changes that shell command only. Optional mutations remain optional,
 and a function the VFS does not define reports `Operation not supported`.
 
@@ -210,9 +225,9 @@ search only tells them what they can skip, so their output never changes.
 
 | Function | Asked | Answer |
 | --- | --- | --- |
-| `filesContaining(path, text, { wholeWord, ignoreCase }, index?)` | which files under a walked directory may hold `text` | a `PathSpec[]`, or `null` |
-| `linesContaining(path, text, { ignoreCase }, index?)` | which lines of one file may hold `text` | those lines in file order, as bytes or a stream, or `null` |
-| `beforeFullScan(path, files, index?)` | a command is about to read every file under a directory it walks | resolve to scan, reject to refuse |
+| `filesContaining(path, text, { wholeWord, ignoreCase })` | which files under a walked directory may hold `text` | a `PathSpec[]`, or `null` |
+| `linesContaining(path, text, { ignoreCase })` | which lines of one file may hold `text` | those lines in file order, as bytes or a stream, or `null` |
+| `beforeFullScan(path, files)` | a command is about to read every file under a directory it walks | resolve to scan, reject to refuse |
 
 The arguments come from the command line:
 
@@ -369,14 +384,16 @@ Keep every import at module scope. If that would create a cycle, change the depe
 
 Implement only the operations the backend supports, as pure functions over the accessor. A read-only API-backed VFS usually starts with:
 
-- `readdir(accessor, path, index?)` returning child paths.
-- `read(accessor, path, index?)` returning bytes.
-- `stat(accessor, path, index?)` returning a `FileStat`.
+- `readdir(accessor, path)` returning each child's `FileStat`, or a `DirListing`.
+- `read(accessor, path)` returning bytes.
+- `stat(accessor, path)` returning a `FileStat`.
 
-A hierarchy backend writes its tree once, as the scope table in `core/<name>/scope.ts`, and builds the three operations from it: `makeReaddir(detectScope, { listers })`, `makeStat(detectScope, readdir, { entryStats })` and `makeRead(detectScope, readers, { stat })`. The kit holds these rules, and a new backend keeps them:
+Each may also take the handed `entry` and `parent`.
 
-- A reader that reaches the API by the ids in the path slots passes `stat` so the kit proves the file's parent through the listing first. Without it, a path outside the configured scope (Trello's `workspaceId` and `boardIds`) reads while `ls` and `stat` say it does not exist.
-- A listing that is a filtered or truncated view (one page of a bounded query, a time window, a glob-scoped span) returns `{ entries, seeds: {}, partial: true }`. Cached as the whole directory, it would prove every entry it left out absent.
+A hierarchy backend writes its tree once, as the scope table in `core/<name>/scope.ts`, and builds the three operations from it: `makeReaddir(detectScope, { listers })`, `makeStat(detectScope, { guards })` and `makeRead(detectScope, readers, { parented: true })`. The kit holds these rules, and a new backend keeps them:
+
+- A backend whose readers reach the API by the ids in the path slots passes `parented: true`, so the kit proves the file's parent through the row its listing names first. Without it, a path outside the configured scope (Trello's `workspaceId` and `boardIds`) reads while `ls` and `stat` say it does not exist.
+- A listing that is a filtered or truncated view (one page of a bounded query, a time window, a glob-scoped span) returns `new DirListing({ entries, partial: true })`. Cached as the whole directory, it would prove every entry it left out absent.
 - `entryStat('<idKey>', ...)` names the id under the key its path slot declares.
 - Id-addressed commands honor the same scope knobs the listing does (Trello's `commands/builtin/trello/_scope.ts`).
 
@@ -392,8 +409,8 @@ The VFS class defines the functions, each a thin call into the core:
 import { readdir as myReaddir } from '../../core/my_vfs/readdir.ts'
 
 export class MyVFS extends BaseVFS<MyAccessor> {
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return myReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return myReaddir(this.accessor, path)
   }
 }
 ```
@@ -430,6 +447,7 @@ export class MyVFS extends BaseVFS<MyAccessor> {
   override readonly cachesReads: boolean = true
   override readonly prompt: string = MY_PROMPT
   override readonly accessor: MyAccessor
+  override readonly handed = { stat: ['entry'] }
 
   constructor(config: MyConfig) {
     super()
@@ -437,16 +455,16 @@ export class MyVFS extends BaseVFS<MyAccessor> {
     this.accessor = new MyAccessor(this.config)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return myReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return myReaddir(this.accessor, path)
   }
 
-  override read(path: PathSpec, index?: IndexCacheStore): Promise<Uint8Array> {
-    return myRead(this.accessor, path, index)
+  override read(path: PathSpec): Promise<Uint8Array> {
+    return myRead(this.accessor, path)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return myStat(this.accessor, path, index)
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    return myStat(this.accessor, path, handed?.entry ?? null)
   }
 }
 ```
@@ -463,9 +481,9 @@ A `read: fresh` mount re-stats a cached file through a throwaway store that
 starts with none of the mount's rows (`ListingCheckStore`), so no cached
 row answers the check.
 A backend with a path lookup answers with one request for that path (Dropbox).
-A backend that addresses items only by id may, after checking that the index
-is a `ListingCheckStore`, read the mount's last row for
-the path with `await index.hint(key)` and address one request by its id (Box);
+A backend that addresses items only by id may declare `index` for `stat`. Under
+the check it is handed that store and no rows, and may read the mount's last
+row for the path with `await index.hint(key)` and address one request by its id (Box);
 it must then confirm from that answer alone that the item still sits at
 exactly this path, and otherwise resolve the path as it always does. The hint
 is a lead, never an answer: a stat built from its fields would let a stale row
@@ -476,8 +494,8 @@ pass a freshness check.
 Under `read: fresh`, a cached listing the running command did not write is listed again, unless the backend declares what to check it against. Declare `listingVersion` as a literal member, like `readRevalidatable`, so the spec generator can read it: `override readonly listingVersion: ListingVersion = ListingVersion.MOUNT`.
 
 - `ListingVersion.NONE` (the default): no version; every command re-lists.
-- `ListingVersion.MOUNT`: one version covers every listing of the mount (GitHub and the Hub use the head commit). A stat of the mount root through the gate's empty check store (`ListingCheckStore`, `cache/index/ram`) asks the backend and returns it as `fingerprint`; through any other index it names none and reads neither the index nor the backend, since nothing reads a root fingerprint off a mount-view stat. The tree fill stores the same value with every listing it writes (`seed(..., version)` or `setDir(..., { version })`).
-- `ListingVersion.FOLDER`: each listing carries its own folder's version (disk). A stat of the folder returns it as the fingerprint, and `readdir` reads it before listing and passes it to `setDir(path, entries, expiresAt, { version })`, so a change during the scan leaves the stored version behind.
+- `ListingVersion.MOUNT`: one version covers every listing of the mount (GitHub and the Hub use the head commit). A stat of the mount root through the gate's empty check store (`ListingCheckStore`, `cache/index/ram`) asks the backend and returns it as `fingerprint`; through any other index it names none and reads neither the index nor the backend, since nothing reads a root fingerprint off a mount-view stat. Every listing the tree fill returns carries the same value (`new DirListing({ entries, version })`).
+- `ListingVersion.FOLDER`: each listing carries its own folder's version (disk). A stat of the folder returns it as the fingerprint, and `readdir` reads it before listing and returns it as `new DirListing({ entries, version })`, so a change during the scan leaves the stored version behind.
 
 Take the version from a backend response, the same kind of token the stat answers, since the gate compares the two with `===`. Store `null` when there is nothing reliable to store; that listing re-lists.
 
@@ -585,7 +603,7 @@ snapshot behavior.
 
 ### Batch resource search
 
-A VFS may also define `searchMany(paths, query, index?)`. Use it when ranking
+A VFS may also define `searchMany(paths, query)`. Use it when ranking
 and `top_k` must apply once across several paths. `search` remains required.
 Resource search commands use `searchMany` when it is defined and otherwise
 concatenate single-path results; a declined request reports an error rather

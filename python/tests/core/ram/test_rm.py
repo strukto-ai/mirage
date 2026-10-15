@@ -16,11 +16,10 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import push_cache_manager
 from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.core.ram.rm import rm_r
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.vfs.ram.store import RAMStore
 
 
@@ -44,7 +43,7 @@ async def _seeded() -> tuple[
     cache = RAMFileCacheStore()
     index = RAMIndexCacheStore(ttl=600)
     await cache.set("/data/a/b/f.txt", b"hi\n")
-    entry = IndexEntry(id="1", name="f.txt", resource_type="file")
+    entry = FileStat(name="f.txt", type=FileType.FILE, fingerprint="1")
     await index.set_dir("/data/a", [("b", entry)])
     await index.set_dir("/data/a/b", [("f.txt", entry)])
     return RAMAccessor(store), cache, index

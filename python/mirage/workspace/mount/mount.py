@@ -270,17 +270,16 @@ def _wants(fn: Callable[..., Any]) -> frozenset[str]:
     return frozenset() if names is None else names & HANDED
 
 
-def _lists_stats(fn: Callable[..., Any]) -> bool:
-    """Whether a backend function answers from what the mount hands it
-    rather than from an index it takes: a ``readdir`` that does answers
-    stats for the mount to keep.
+def _takes_index(fn: Callable[..., Any]) -> bool:
+    """Whether a backend function takes the mount's index, to answer a
+    fresh check itself.
 
     Args:
         fn (Callable[..., Any]): the backend function.
     """
     target = fn.func if isinstance(fn, functools.partial) else fn
     names = _parameters(getattr(target, "__func__", target))
-    return names is not None and "index" not in names
+    return names is None or "index" in names
 
 
 def _handed_on(
@@ -1471,9 +1470,9 @@ class MountEntry:
 
     @property
     def _lists(self) -> bool:
-        """Whether the VFS answers listings as stats for the mount to
-        keep, rather than keeping its own in an index it takes."""
-        return self.vfs.supports("readdir") and _lists_stats(self.vfs.readdir)
+        """Whether the VFS lists, so the mount keeps its listings as
+        stats."""
+        return self.vfs.supports("readdir")
 
     def _backend_fn(self, fn: Callable[..., Any]) -> Callable[..., Any]:
         """The VFS function a mount wrapper calls, whose parameters say
@@ -1601,7 +1600,7 @@ class MountEntry:
             index (IndexCacheStore): the mount's index.
         """
         backend = self._backend_fn(fn)
-        if isinstance(index, ListingCheckStore) and not _lists_stats(backend):
+        if isinstance(index, ListingCheckStore) and _takes_index(backend):
             # Under a fresh check a function that takes the check's store
             # answers from its hints: walking for its stats would cost the
             # requests it saves.

@@ -56,8 +56,6 @@ export class SharePointVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readonly listsStats: boolean = true
-
   override readdir(path: PathSpec): Promise<FileStat[]> {
     return readdir(this.accessor, path)
   }

@@ -7,20 +7,19 @@ import pytest_asyncio
 from fakeredis.aioredis import FakeRedis
 from redis.asyncio import Redis
 
-from mirage.cache.index.config import IndexEntry, ListedMiss, LookupStatus
+from mirage.cache.index.config import LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
-from mirage.cache.index.warm import entry_or_listed_miss, entry_or_warm
+from mirage.cache.index.warm import entry_or_warm
 from mirage.errors.fs import enoent, enotdir
+from mirage.types import FileStat, FileType
 
 KEY = "/owned/notes.json"
 
 
-def entry_for(entry_id: str) -> IndexEntry:
-    return IndexEntry(
-        id=entry_id, name="notes", resource_type="gdocs", vfs_name="notes.json"
-    )
+def entry_for(entry_id: str) -> FileStat:
+    return FileStat(name="notes", type=FileType.FILE, fingerprint=entry_id)
 
 
 @pytest.mark.asyncio
@@ -34,7 +33,7 @@ async def test_custom_store_default_partial_write_drops_complete_membership():
     )
     assert (await index.list_dir("/owned")).entries is None
     assert (await index.get("/owned/old.json")).entry is None
-    assert (await index.get(KEY)).entry.id == "new"
+    assert (await index.get(KEY)).entry.fingerprint == "new"
 
 
 @pytest.mark.asyncio
@@ -47,7 +46,7 @@ async def test_returns_a_warm_hit_without_listing_the_parent():
         calls.append(1)
 
     got = await entry_or_warm(index, KEY, warm)
-    assert got is not None and got.id == "doc-1"
+    assert got is not None and got.fingerprint == "doc-1"
     assert not calls
 
 
@@ -61,7 +60,7 @@ async def test_lists_the_parent_once_then_serves_what_it_put_there():
         await index.put(KEY, entry_for("doc-2"))
 
     got = await entry_or_warm(index, KEY, warm)
-    assert got is not None and got.id == "doc-2"
+    assert got is not None and got.fingerprint == "doc-2"
     assert len(calls) == 1
 
 
@@ -146,13 +145,13 @@ async def test_retained_entries_require_a_fresh_parent(backend, outcome):
     try:
         await index.set_dir("/owned", [("notes.json", entry_for("old"))])
         await index.invalidate()
-        assert (await index.get(KEY)).entry.id == "old"
+        assert (await index.get(KEY)).entry.fingerprint == "old"
         if outcome == "error":
             with pytest.raises(RuntimeError, match="unavailable"):
                 await entry_or_warm(index, KEY, warm)
         else:
             got = await entry_or_warm(index, KEY, warm)
-            assert (got.id if got else None) == (
+            assert (got.fingerprint if got else None) == (
                 "new" if outcome == "updated" else None
             )
         assert calls == [1]
@@ -215,7 +214,7 @@ async def test_partial_membership_is_positive_only_and_expires(
     listing = await index.list_dir("/owned")
     assert listing.entries is None
     assert listing.partial_entries == [KEY]
-    assert (await entry_or_warm(index, KEY, warm)).id == "current"
+    assert (await entry_or_warm(index, KEY, warm)).fingerprint == "current"
     assert calls == []
     # An omitted row is not a negative cache hit, nor is retained metadata
     # proof of membership in the current page.
@@ -235,9 +234,9 @@ async def test_partial_membership_is_positive_only_and_expires(
         await index.invalidate()
     else:
         await index.clear()
-    assert (await entry_or_warm(index, KEY, warm)).id == "new"
+    assert (await entry_or_warm(index, KEY, warm)).fingerprint == "new"
     assert calls == [1, 1]
-    assert (await entry_or_warm(index, KEY, warm)).id == "new"
+    assert (await entry_or_warm(index, KEY, warm)).fingerprint == "new"
     assert calls == [1, 1]
     await index.set_dir("/owned", [])
     assert (await index.list_dir("/owned")).partial_entries is None
@@ -292,7 +291,7 @@ async def test_orphaned_metadata_requires_a_current_refresh(
     await index.put(KEY, entry_for("old"))
     if parent_state != "missing":
         await index.invalidate()
-    assert (await index.get(KEY)).entry.id == "old"
+    assert (await index.get(KEY)).entry.fingerprint == "old"
     assert (await index.list_dir("/owned")).status == (
         LookupStatus.EXPIRED
         if parent_state == "expired"
@@ -305,7 +304,7 @@ async def test_orphaned_metadata_requires_a_current_refresh(
                 await entry_or_warm(index, KEY, warm)
         else:
             got = await entry_or_warm(index, KEY, warm)
-            assert (got.id if got else None) == (
+            assert (got.fingerprint if got else None) == (
                 "new" if outcome in ("updated", "partial_updated") else None
             )
     assert len(calls) == (
@@ -345,7 +344,7 @@ async def test_parallel_parent_refreshes_are_one_transaction(
     found = await asyncio.gather(
         *(entry_or_warm(index, f"/owned/{key}", warm) for key in keys)
     )
-    assert [row.id if row else None for row in found] == keys
+    assert [row.fingerprint if row else None for row in found] == keys
     assert calls == 1
 
 
@@ -374,7 +373,7 @@ async def test_cancelled_parent_waiter_does_not_release_other_waiters():
         await cancelled
     release.set()
     found = await asyncio.gather(first, follower)
-    assert [row.id for row in found] == ["new", "new"]
+    assert [row.fingerprint for row in found] == ["new", "new"]
     assert calls == 1
 
 
@@ -390,7 +389,7 @@ async def test_parent_refresh_lock_releases_after_failure():
 
     with pytest.raises(RuntimeError, match="unavailable"):
         await entry_or_warm(index, KEY, failed)
-    assert (await entry_or_warm(index, KEY, retry)).id == "new"
+    assert (await entry_or_warm(index, KEY, retry)).fingerprint == "new"
 
 
 @pytest.mark.asyncio
@@ -415,67 +414,4 @@ async def test_partial_refresh_survives_through_its_own_retry():
     await asyncio.sleep(0)
     release.set()
     found = await asyncio.gather(first, second)
-    assert [row.id for row in found] == ["1", "2"]
-
-
-class _AskedIndex(RAMIndexCacheStore):
-    def __init__(self, listed: bool) -> None:
-        super().__init__()
-        self.listed = listed
-        self.asked: list[str] = []
-        self.listings = 0
-
-    def listed_this_command(self, folder: str) -> bool:
-        self.asked.append(folder)
-        return self.listed
-
-    async def list_dir(self, vfs_path: str):
-        self.listings += 1
-        return await super().list_dir(vfs_path)
-
-
-async def _seed(index: RAMIndexCacheStore, state: str) -> None:
-    rows = [("old.json", entry_for("old"))]
-    if state == "complete":
-        await index.set_dir("/owned", rows)
-    elif state == "expired":
-        await index.set_dir(
-            "/owned",
-            rows,
-            expired_at=datetime.now(timezone.utc) - timedelta(seconds=1),
-        )
-    elif state == "partial":
-        await index.set_partial_dir("/owned", rows)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "listed, state, found",
-    [
-        (False, "complete", ListedMiss.UNTRUSTED),
-        (True, "complete", None),
-        (False, "expired", None),
-        (False, "partial", None),
-        (False, "none", None),
-    ],
-    ids=[
-        "earlier-listing-lacks-it",
-        "this-command-listed-it",
-        "expired",
-        "partial",
-        "no-listing",
-    ],
-)
-async def test_entry_or_listed_miss_flags_only_an_untrusted_complete_miss(
-    listed, state, found
-):
-    # Only a complete, unexpired listing the running command did not fetch
-    # answers UNTRUSTED; with no warm, every other state answers None, as
-    # entry_or_warm does. The trust question names the key's folder, and
-    # the answer rides the one listing read the lookup makes (one MGET of
-    # the whole folder on a Redis index).
-    index = _AskedIndex(listed)
-    await _seed(index, state)
-    assert await entry_or_listed_miss(index, KEY, None) is found
-    assert set(index.asked) <= {"/owned"}
-    assert index.listings == 1
+    assert [row.fingerprint for row in found] == ["1", "2"]

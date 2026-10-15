@@ -16,7 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
-import { mountDiscord } from '../../vfs/discord/_test_util.ts'
+import { mountDiscord } from '../../workspace/fixtures/chat_fixture.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import {
   DiscordApiError,

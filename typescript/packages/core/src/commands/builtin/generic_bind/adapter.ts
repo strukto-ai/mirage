@@ -15,7 +15,6 @@
 import {
   Effect,
   Target,
-  type Handed,
   type ReadBytesOp,
   type ResolveGlobOp,
   type SearchQuery,
@@ -112,27 +111,13 @@ function withoutAccessor<T extends unknown[], R>(
   return (_accessor, ...args) => method(...args)
 }
 
-// What a command's index becomes on its way to a VFS function: nothing, for a
-// VFS whose listings the dispatcher keeps, which is handed no stats here,
-// with no mount to find them in.
-function indexFor(
-  vfs: BaseVFS,
-  index: IndexCacheStore | undefined,
-): IndexCacheStore | Handed | undefined {
-  return vfs.listsStats ? {} : index
-}
-
-// A VFS's listing as the paths a command walks. A VFS that answers its
-// children's stats is listed bare, with no mount to keep them: each stat names
-// a child of `path`. Mirrors Python's `_listed_paths`.
-async function listedPaths(
-  vfs: BaseVFS,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  const listed = await vfs.readdir(path, indexFor(vfs, index))
-  if (!vfs.listsStats) return listed as string[]
-  const rows = listed instanceof DirListing ? listed.entries : (listed as readonly FileStat[])
+// A VFS's listing as the paths a command walks, listed bare with no mount to
+// keep its rows: each row names a child of `path`. A command running on its
+// mount alone is handed no stats, with no mount to find them in. Mirrors
+// Python's `_listed_paths`.
+async function listedPaths(vfs: BaseVFS, path: PathSpec): Promise<string[]> {
+  const listed = await vfs.readdir(path, {})
+  const rows = listed instanceof DirListing ? listed.entries : listed
   const base = rstripSlash((path.pattern !== null ? path.dir : path).virtual)
   return rows.map((row) => `${base}/${row.name}`)
 }
@@ -162,14 +147,14 @@ function reader(
   offset?: number,
   size?: number | null,
 ) => Promise<Uint8Array> {
-  return (path, index, offset = 0, size = null) => {
+  return (path, _index, offset = 0, size = null) => {
     const renderer = vfs.supports('read')
       ? undefined
       : vfs.renderers[getExtension(path.virtual) ?? '']
-    if (renderer === undefined) return vfs.read(path, indexFor(vfs, index), offset, size)
+    if (renderer === undefined) return vfs.read(path, {}, offset, size)
     const render = (vfs as unknown as Record<string, typeof vfs.read>)[renderer]
     if (render === undefined) throw new TypeError(`${vfs.name}: no renderer named ${renderer}`)
-    return render.call(vfs, path, indexFor(vfs, index), offset, size)
+    return render.call(vfs, path, {}, offset, size)
   }
 }
 
@@ -188,17 +173,11 @@ export function commandIo(vfs: BaseVFS): CommandIO {
   const readBytes: ReadBytesOp = (_accessor, path, index) => read(path, index)
   const streams = has('readStream')
   return {
-    readdir: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
-      listedPaths(vfs, path, index),
-    ),
+    readdir: withoutAccessor((path: PathSpec) => listedPaths(vfs, path)),
     readBytes,
-    stat: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
-      vfs.stat(path, indexFor(vfs, index)),
-    ),
+    stat: withoutAccessor((path: PathSpec) => vfs.stat(path, {})),
     readStream: streams
-      ? withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
-          vfs.readStream(path, indexFor(vfs, index)),
-        )
+      ? withoutAccessor((path: PathSpec) => vfs.readStream(path, {}))
       : (a, p, i) => streamFromBytes(readBytes, a, p, i),
     ...(vfs.readsRanges
       ? {
@@ -250,13 +229,7 @@ export function commandIo(vfs: BaseVFS): CommandIO {
         }
       : {}),
     ...(has('unlink') ? { unlink: withoutAccessor((p: PathSpec) => vfs.unlink(p)) } : {}),
-    ...(has('rmdir')
-      ? {
-          rmdir: withoutAccessor((p: PathSpec, index?: IndexCacheStore) =>
-            vfs.rmdir(p, indexFor(vfs, index)),
-          ),
-        }
-      : {}),
+    ...(has('rmdir') ? { rmdir: withoutAccessor((p: PathSpec) => vfs.rmdir(p)) } : {}),
     ...(has('rmR') ? { rmR: withoutAccessor((p: PathSpec) => vfs.rmR(p)) } : {}),
     ...(has('rename')
       ? {
@@ -315,8 +288,8 @@ export function commandIo(vfs: BaseVFS): CommandIO {
               path: PathSpec,
               text: string,
               opts: { wholeWord: boolean; ignoreCase: boolean },
-              index?: IndexCacheStore,
-            ) => vfs.filesContaining(path, text, opts, index),
+              _index?: IndexCacheStore,
+            ) => vfs.filesContaining(path, text, opts, {}),
           ),
           searchable: vfs.searchable,
         }
@@ -328,51 +301,51 @@ export function commandIo(vfs: BaseVFS): CommandIO {
               path: PathSpec,
               text: string,
               opts: { ignoreCase: boolean },
-              index?: IndexCacheStore,
-            ) => vfs.linesContaining(path, text, opts, index),
+              _index?: IndexCacheStore,
+            ) => vfs.linesContaining(path, text, opts, {}),
           ),
         }
       : {}),
     ...(has('firstLines')
       ? {
-          firstLines: withoutAccessor((path: PathSpec, n: number, index?: IndexCacheStore) =>
-            vfs.firstLines(path, n, index),
+          firstLines: withoutAccessor((path: PathSpec, n: number, _index?: IndexCacheStore) =>
+            vfs.firstLines(path, n, {}),
           ),
         }
       : {}),
     ...(has('lastLines')
       ? {
-          lastLines: withoutAccessor((path: PathSpec, n: number, index?: IndexCacheStore) =>
-            vfs.lastLines(path, n, index),
+          lastLines: withoutAccessor((path: PathSpec, n: number, _index?: IndexCacheStore) =>
+            vfs.lastLines(path, n, {}),
           ),
         }
       : {}),
     ...(has('lineCount')
       ? {
-          lineCount: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
-            vfs.lineCount(path, index),
+          lineCount: withoutAccessor((path: PathSpec, _index?: IndexCacheStore) =>
+            vfs.lineCount(path, {}),
           ),
         }
       : {}),
     ...(has('checksum')
       ? {
-          checksum: withoutAccessor((path: PathSpec, algorithm: string, index?: IndexCacheStore) =>
-            vfs.checksum(path, algorithm, index),
+          checksum: withoutAccessor((path: PathSpec, algorithm: string, _index?: IndexCacheStore) =>
+            vfs.checksum(path, algorithm, {}),
           ),
         }
       : {}),
     ...(has('follow')
       ? {
           follow: withoutAccessor(
-            (path: PathSpec, n: number, interval: number, index?: IndexCacheStore) =>
-              vfs.follow(path, n, interval, index),
+            (path: PathSpec, n: number, interval: number, _index?: IndexCacheStore) =>
+              vfs.follow(path, n, interval, {}),
           ),
         }
       : {}),
     ...(has('readTree')
       ? {
-          readTree: withoutAccessor((path: PathSpec, index?: IndexCacheStore) =>
-            vfs.readTree(path, index),
+          readTree: withoutAccessor((path: PathSpec, _index?: IndexCacheStore) =>
+            vfs.readTree(path, {}),
           ),
         }
       : {}),

@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { toIsoZ } from '../../utils/dates.ts'
 import { KeyLock } from '../lock.ts'
 import { uuid7 } from '../../utils/ids.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
@@ -21,12 +20,9 @@ import { FileStat } from '../../types.ts'
 import {
   FileStatWireSchema,
   IndexDirectorySchema,
-  IndexEntry,
   LookupStatus,
-  stamped,
   type Evicted,
   type IndexDirectory,
-  type IndexRow,
   type ListResult,
   type LookupResult,
   type SetDirOptions,
@@ -76,10 +72,8 @@ return 1
 `
 
 /** An index row read back from its JSON. Mirrors Python's `_row`. */
-function row(raw: string): IndexRow {
-  const decoded = JSON.parse(raw) as Record<string, unknown>
-  if ('resource_type' in decoded) return IndexEntry.fromJSON(raw)
-  return new FileStat(FileStatWireSchema.parse(decoded))
+function row(raw: string): FileStat {
+  return new FileStat(FileStatWireSchema.parse(JSON.parse(raw)))
 }
 
 const PATH_RANGE = `
@@ -110,16 +104,9 @@ local function subtree(registry, root)
   paths[#paths + 1] = root
   return paths
 end
--- A row's kind: 'folder' or '<backend>/folder', 'file' or '<backend>/file'.
-local function is_kind(row_type, kind)
-  return type(row_type) == 'string' and (row_type == kind
-    or string.sub(row_type, -(#kind + 1)) == '/' .. kind)
-end
-local function row_kind(row)
-  if row.resource_type ~= nil then
-    return row.resource_type
-  end
-  return row.type == 'directory' and 'folder' or 'file'
+-- Whether a stored row, a FileStat's JSON, is a directory's.
+local function is_dir(row)
+  return row.type == 'directory'
 end
 `
 
@@ -239,7 +226,7 @@ local function protected(path)
 end
 local named = {}
 for i = 7, #ARGV, 2 do
-  named[ARGV[i]] = row_kind(cjson.decode(ARGV[i + 1]))
+  named[ARGV[i]] = is_dir(cjson.decode(ARGV[i + 1]))
 end
 local seen, gone, folders = {}, {}, {}
 local function drop(path, buried)
@@ -248,8 +235,8 @@ local function drop(path, buried)
   end
   local row = redis.call('GET', ARGV[2] .. path)
   local folder = buried or redis.call('EXISTS', ARGV[3] .. path) == 1
-    or (row ~= false and is_kind(row_kind(cjson.decode(row)), 'folder'))
-  if named[path] and not (folder and is_kind(named[path], 'file')) then
+    or (row ~= false and is_dir(cjson.decode(row)))
+  if named[path] ~= nil and not (folder and not named[path]) then
     return
   end
   seen[path] = true
@@ -319,7 +306,7 @@ if raw then
   for _, path in ipairs(listing.entries) do
     local row = redis.call('GET', ARGV[1] .. path)
     local folder = redis.call('EXISTS', ARGV[2] .. path) == 1
-      or (row ~= false and is_kind(row_kind(cjson.decode(row)), 'folder'))
+      or (row ~= false and is_dir(cjson.decode(row)))
     local position = positions[path]
     if not position then
       entries[#entries + 1] = path
@@ -340,7 +327,7 @@ prune(KEYS[4], {ARGV[1], ARGV[2], ARGV[3], ARGV[4]},
 `
 
 interface PendingSeed {
-  entries: Map<string, IndexRow>
+  entries: Map<string, FileStat>
   children: Map<string, string[]>
   expiresAt: number
   version: string | null
@@ -437,14 +424,13 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   }
 
   seed(
-    entries: ReadonlyMap<string, IndexEntry>,
+    entries: ReadonlyMap<string, FileStat>,
     children: ReadonlyMap<string, readonly string[]>,
     expiresAt: Date,
     version: string | null = null,
   ): void {
-    const nowIso = toIsoZ(new Date())
     this.pendingSeeds.push({
-      entries: new Map([...entries].map(([path, entry]) => [path, stamped(entry, nowIso)])),
+      entries: new Map(entries),
       children: new Map([...children].map(([path, keys]) => [path, [...keys]])),
       expiresAt: expiresAt.getTime() / 1000,
       version,
@@ -612,14 +598,14 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     })
   }
 
-  async entries(): Promise<Map<string, IndexEntry>> {
+  async entries(): Promise<Map<string, FileStat>> {
     await this.flushSeed()
     const c = await this.client()
-    const entries = new Map<string, IndexEntry>()
+    const entries = new Map<string, FileStat>()
     for await (const batch of c.scanIterator({ MATCH: `${globEscape(this.entryPrefix)}*` })) {
       for (const key of Array.isArray(batch) ? batch : [batch]) {
         const raw = await c.get(key)
-        if (raw !== null) entries.set(key.slice(this.entryPrefix.length), row(raw) as IndexEntry)
+        if (raw !== null) entries.set(key.slice(this.entryPrefix.length), row(raw))
       }
     }
     return entries
@@ -630,19 +616,19 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const c = await this.client()
     const raw = await c.get(this.entryKey(vfsPath))
     if (raw === null) return { status: LookupStatus.NOT_FOUND }
-    return { entry: row(raw) as IndexEntry }
+    return { entry: row(raw) }
   }
 
-  async put(vfsPath: string, entry: IndexRow): Promise<void> {
+  async put(vfsPath: string, entry: FileStat): Promise<void> {
     await this.flushSeed()
     const c = await this.client()
     const pipe = c.multi()
     this.trackPaths(pipe, [vfsPath])
-    pipe.set(this.entryKey(vfsPath), JSON.stringify(stamped(entry, toIsoZ(new Date()))))
+    pipe.set(this.entryKey(vfsPath), JSON.stringify(entry))
     await pipe.exec()
   }
 
-  async addEntry(vfsPath: string, entry: IndexRow): Promise<void> {
+  async addEntry(vfsPath: string, entry: FileStat): Promise<void> {
     await this.flushSeed()
     const c = await this.client()
     const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
@@ -663,7 +649,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       keys: [this.childrenKey(folder), this.generationKey, `${this.generationKey}:${folder}`],
       arguments: [
         this.entryKey(vfsPath),
-        JSON.stringify(stamped(entry, toIsoZ(now))),
+        JSON.stringify(entry),
         vfsPath,
         JSON.stringify(fresh),
         String(now.getTime() / 1000),
@@ -675,14 +661,14 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   override async replaceIfUnchanged(
     path: string,
     predecessor: string,
-    entry: IndexRow,
+    entry: FileStat,
   ): Promise<boolean> {
     await this.flushSeed()
     const c = await this.client()
     const key = this.entryKey(path)
     const raw = await c.get(key)
     if (raw === null || JSON.stringify(row(raw)) !== predecessor) return false
-    const stored = stamped(entry, toIsoZ(new Date()))
+    const stored = entry
     return (
       (await c.eval(REPLACE_ENTRY, { keys: [key], arguments: [raw, JSON.stringify(stored)] })) === 1
     )
@@ -711,7 +697,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
 
   async setDir(
     vfsPath: string,
-    entries: readonly [string, IndexRow][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
     options: SetDirOptions = {},
   ): Promise<Evicted[]> {
@@ -728,7 +714,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
 
   override async setPartialDir(
     vfsPath: string,
-    entries: readonly [string, IndexRow][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
   ): Promise<void> {
     await this.storeDir(vfsPath, entries, expiredAt, true, false)
@@ -736,7 +722,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
 
   private async storeDir(
     vfsPath: string,
-    entries: readonly [string, IndexRow][],
+    entries: readonly [string, FileStat][],
     expiredAt: Date | null | undefined,
     partial: boolean,
     evict: boolean,
@@ -746,13 +732,12 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     await this.flushSeed()
     const c = await this.client()
     const now = new Date()
-    const nowIso = toIsoZ(now)
     const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
     const generation = await this.generation(c, this.generationKey)
     const directory = await this.generation(c, `${this.generationKey}:${vfsPath}`)
     const rows: [string, string][] = []
     for (const [name, entry] of entries) {
-      rows.push([prefix + name, JSON.stringify(stamped(entry, nowIso))])
+      rows.push([prefix + name, JSON.stringify(entry)])
     }
     const listing: IndexDirectory = {
       entries: rows.map(([path]) => path),

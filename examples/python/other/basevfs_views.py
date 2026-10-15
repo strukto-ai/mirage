@@ -3,7 +3,6 @@ import re
 
 from mirage import (
     CLI,
-    NULL_INDEX,
     Accessor,
     Argument,
     BaseVFS,
@@ -13,7 +12,6 @@ from mirage import (
     ContentType,
     FileStat,
     FileType,
-    IndexCacheStore,
     IOResult,
     MountMode,
     PathSpec,
@@ -54,28 +52,30 @@ class NotesVFS(BaseVFS):
             sizes_always_known=True,
         )
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
         if path.vfs_path.strip("/"):
             page_bytes(self.accessor, path)
             raise NotADirectoryError(path.virtual)
-        parent = path.virtual.rstrip("/")
-        return [f"{parent}/{name}" for name in sorted(self.accessor.pages)]
+        return [
+            FileStat(
+                name=name,
+                type=FileType.FILE,
+                content=ContentType.TEXT,
+                size=len(page.encode("utf-8")),
+            )
+            for name, page in sorted(self.accessor.pages.items())
+        ]
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
         self.accessor.read_calls += 1
         return page_bytes(self.accessor, path)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
+    async def stat(self, path: PathSpec) -> FileStat:
         name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
         if not path.vfs_path.strip("/"):
             return FileStat(name=name, type=FileType.DIRECTORY, size=None)
@@ -92,7 +92,6 @@ class NotesVFS(BaseVFS):
         text: str,
         *,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> bytes | None:
         """The lines of one page holding ``text``, so grep and rg skip the read.
 
@@ -103,7 +102,6 @@ class NotesVFS(BaseVFS):
             path (PathSpec): the page grep or rg would read.
             text (str): plain text every match holds.
             ignore_case (bool): whether case folds.
-            index (IndexCacheStore): the mount's metadata view.
         """
         self.accessor.search_calls += 1
         page = page_bytes(self.accessor, path)

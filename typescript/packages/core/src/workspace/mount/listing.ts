@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexRow } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { enoent } from '../../errors/fs.ts'
@@ -77,12 +76,12 @@ export async function keepListing(
   listed: readonly FileStat[] | DirListing,
 ): Promise<string[]> {
   const listing = listed instanceof DirListing ? listed : new DirListing({ entries: listed })
-  const rows: [string, IndexRow][] = listing.entries.map((row) => [row.name, row])
+  const rows: [string, FileStat][] = listing.entries.map((row) => [row.name, row])
   if (listing.partial) await index.setPartialDir(key, rows)
   else await index.setDir(key, rows, null, { window: listing.window, version: listing.version })
   const stem = key === '/' ? '' : key
   for (const [relative, children] of listing.seeds) {
-    const seeded: [string, IndexRow][] = children.map((row) => [row.name, row])
+    const seeded: [string, FileStat][] = children.map((row) => [row.name, row])
     await index.setDir(`${stem}/${relative.replace(/^\/+|\/+$/g, '')}`, seeded, null, {
       window: listing.window,
       version: listing.version,
@@ -168,7 +167,7 @@ export async function keepTree(
   tree: ReadonlyMap<string, FileStat>,
 ): Promise<void> {
   const base = key === '/' ? '' : key
-  const listings = new Map<string, [string, IndexRow][]>([[key, []]])
+  const listings = new Map<string, [string, FileStat][]>([[key, []]])
   for (const relative of [...tree.keys()].sort(compareCodePoints)) {
     const row = tree.get(relative)
     if (row === undefined) continue

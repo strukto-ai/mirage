@@ -19,7 +19,6 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.accessor.base import Accessor
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.cli import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import Argument, CommandSpec
@@ -73,39 +72,7 @@ def _node(pages: dict, key: str):
     return node
 
 
-async def readdir(
-    accessor: WikiAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
-    node = _node(accessor.pages, path.vfs_path)
-    if not isinstance(node, dict):
-        raise NotADirectoryError(path.virtual)
-    parent = path.virtual.rstrip("/")
-    return [
-        f"{parent}/{name}" + ("/" if isinstance(child, dict) else "")
-        for name, child in node.items()
-    ]
-
-
-async def read_bytes(
-    accessor: WikiAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> bytes:
-    node = _node(accessor.pages, path.vfs_path)
-    if isinstance(node, dict):
-        raise IsADirectoryError(path.virtual)
-    return node.encode()
-
-
-async def stat(
-    accessor: WikiAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    node = _node(accessor.pages, path.vfs_path)
-    name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+def _row(name: str, node: dict | str) -> FileStat:
     if isinstance(node, dict):
         return FileStat(name=name, size=None, type=FileType.DIRECTORY)
     return FileStat(
@@ -114,6 +81,25 @@ async def stat(
         type=FileType.FILE,
         content=ContentType.TEXT,
     )
+
+
+async def readdir(accessor: WikiAccessor, path: PathSpec) -> list[FileStat]:
+    node = _node(accessor.pages, path.vfs_path)
+    if not isinstance(node, dict):
+        raise NotADirectoryError(path.virtual)
+    return [_row(name, child) for name, child in node.items()]
+
+
+async def read_bytes(accessor: WikiAccessor, path: PathSpec) -> bytes:
+    node = _node(accessor.pages, path.vfs_path)
+    if isinstance(node, dict):
+        raise IsADirectoryError(path.virtual)
+    return node.encode()
+
+
+async def stat(accessor: WikiAccessor, path: PathSpec) -> FileStat:
+    name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
+    return _row(name, _node(accessor.pages, path.vfs_path))
 
 
 @command("wiki_hello", vfs="wiki", spec=CommandSpec())
@@ -126,25 +112,17 @@ class WikiVFS(BaseVFS):
 
     name = "wiki"
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
-        data = await read_bytes(self.accessor, path, index)
+        data = await read_bytes(self.accessor, path)
         return data[offset : None if size is None else offset + size]
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await stat(self.accessor, path)
 
 
 def make_vfs(**kwargs) -> BaseVFS:

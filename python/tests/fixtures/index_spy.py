@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from mirage.cache.index import Evicted, IndexEntry, RAMIndexCacheStore
+from mirage.cache.index import Evicted, RAMIndexCacheStore
+from mirage.types import FileStat
 
 
 class WindowSpy(RAMIndexCacheStore):
@@ -18,7 +19,7 @@ class WindowSpy(RAMIndexCacheStore):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexEntry]],
+        entries: list[tuple[str, FileStat]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,

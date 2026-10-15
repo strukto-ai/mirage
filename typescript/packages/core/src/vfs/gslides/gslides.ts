@@ -59,7 +59,6 @@ export class GSlidesVFS extends BaseVFS {
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
   }
 
-  override readonly listsStats: boolean = true
   override readonly handed = {
     unlink: ['entry'],
   } as const

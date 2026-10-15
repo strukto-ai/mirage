@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IndexEntry, LookupStatus, ResourceType } from './config.ts'
+import { FileStat, FileType } from '../../types.ts'
+import { LookupStatus } from './config.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from './ram.ts'
 
-function mkEntry(id: string, name: string, type: string = ResourceType.FILE): IndexEntry {
-  return new IndexEntry({ id, name, resourceType: type })
+function mkEntry(id: string, name: string): FileStat {
+  return new FileStat({ name, type: FileType.FILE, fingerprint: id })
 }
 
 describe('RAMIndexCacheStore', () => {
@@ -28,26 +29,12 @@ describe('RAMIndexCacheStore', () => {
     expect(result.entry).toBeUndefined()
   })
 
-  it('put then get returns the entry with indexTime set', async () => {
+  it('put then get returns the entry', async () => {
     const store = new RAMIndexCacheStore()
     await store.put('/a', mkEntry('1', 'a'))
     const result = await store.get('/a')
     expect(result.status).toBeUndefined()
-    expect(result.entry?.id).toBe('1')
-    expect(result.entry?.indexTime).not.toBe('')
-  })
-
-  it('preserves provided indexTime on put', async () => {
-    const store = new RAMIndexCacheStore()
-    const entry = new IndexEntry({
-      id: '1',
-      name: 'a',
-      resourceType: ResourceType.FILE,
-      indexTime: '2024-01-01T00:00:00Z',
-    })
-    await store.put('/a', entry)
-    const result = await store.get('/a')
-    expect(result.entry?.indexTime).toBe('2024-01-01T00:00:00Z')
+    expect(result.entry?.fingerprint).toBe('1')
   })
 
   it('listDir returns NOT_FOUND when not set', async () => {
@@ -70,7 +57,7 @@ describe('RAMIndexCacheStore', () => {
     const store = new RAMIndexCacheStore()
     await store.setDir('/dir', [['x', mkEntry('1', 'x')]])
     const result = await store.get('/dir/x')
-    expect(result.entry?.id).toBe('1')
+    expect(result.entry?.fingerprint).toBe('1')
   })
 
   it('listDir returns EXPIRED after TTL', async () => {
@@ -160,7 +147,7 @@ describe('RAMIndexCacheStore', () => {
 
   it('a scratch store hints the row its source holds', async () => {
     const src = new RAMIndexCacheStore()
-    await src.setDir('/m/a', [['c.txt', mkEntry('F1', 'c.txt', 'box/file')]])
+    await src.setDir('/m/a', [['c.txt', mkEntry('F1', 'c.txt')]])
     const scratch = new ListingCheckStore({ hints: src })
     const row = (await src.get('/m/a/c.txt')).entry
     expect(row).toBeDefined()
@@ -172,7 +159,7 @@ describe('RAMIndexCacheStore', () => {
   // backend cached metadata as truth -- the #1040 bug.
   it('a hint is never an answer', async () => {
     const src = new RAMIndexCacheStore()
-    await src.setDir('/m/a', [['c.txt', mkEntry('F1', 'c.txt', 'box/file')]])
+    await src.setDir('/m/a', [['c.txt', mkEntry('F1', 'c.txt')]])
     const scratch = new ListingCheckStore({ hints: src })
     expect((await scratch.get('/m/a/c.txt')).entry).toBeUndefined()
     expect((await scratch.listDir('/m/a')).entries).toBeUndefined()
@@ -183,11 +170,7 @@ describe('RAMIndexCacheStore', () => {
   // expired listing is still a usable address.
   it('an expired row still hints', async () => {
     const src = new RAMIndexCacheStore({ ttl: 60 })
-    await src.setDir(
-      '/m/a',
-      [['c.txt', mkEntry('F1', 'c.txt', 'box/file')]],
-      new Date('2000-01-01T00:00:00Z'),
-    )
+    await src.setDir('/m/a', [['c.txt', mkEntry('F1', 'c.txt')]], new Date('2000-01-01T00:00:00Z'))
     expect((await src.listDir('/m/a')).status).toBe(LookupStatus.EXPIRED)
     const scratch = new ListingCheckStore({ hints: src })
     expect(await scratch.hint('/m/a/c.txt')).not.toBeNull()

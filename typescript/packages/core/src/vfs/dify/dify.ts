@@ -46,7 +46,6 @@ export class DifyVFS extends BaseVFS {
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = false
   override readonly prompt: string = PROMPT
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],

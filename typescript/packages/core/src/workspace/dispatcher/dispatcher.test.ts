@@ -1855,8 +1855,12 @@ class Tape extends BaseVFS {
   reads = 0
   closed = false
 
-  override readdir(): Promise<string[]> {
-    return Promise.resolve([...this.files.keys()].map((name) => `/tape/${name}`))
+  override readdir(): Promise<FileStat[]> {
+    return Promise.resolve(
+      [...this.files.entries()].map(
+        ([name, data]) => new FileStat({ name, type: FileType.FILE, size: data.byteLength }),
+      ),
+    )
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

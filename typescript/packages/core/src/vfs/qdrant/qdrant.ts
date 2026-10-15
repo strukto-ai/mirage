@@ -42,8 +42,6 @@ export interface QdrantVFSState {
 }
 
 export class QdrantVFS extends BaseVFS {
-  override readonly listsStats: boolean = true
-
   override readonly name: string = VFSName.QDRANT
   // readdir seeds exact rendered sizes from the scroll payloads and stat
   // falls back to rendering the row itself, so sizes are exact either way.

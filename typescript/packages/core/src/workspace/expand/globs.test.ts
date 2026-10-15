@@ -40,7 +40,7 @@ class EchoGlobVFS extends BaseVFS {
   override close(): Promise<void> {
     return Promise.resolve()
   }
-  override readdir(): Promise<string[]> {
+  override readdir(): Promise<FileStat[]> {
     return Promise.resolve([])
   }
   answer(path: PathSpec): Promise<PathSpec[]> {
@@ -85,7 +85,7 @@ class GlobVFS extends BaseVFS {
   override close(): Promise<void> {
     return Promise.resolve()
   }
-  override readdir(): Promise<string[]> {
+  override readdir(): Promise<FileStat[]> {
     return Promise.resolve([])
   }
   answer(): Promise<PathSpec[]> {

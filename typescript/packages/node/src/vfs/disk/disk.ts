@@ -84,7 +84,6 @@ export class DiskVFS extends BaseVFS {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly maxDuEntries: number | null = null
   override readonly indexTtl: number = 60
-  override readonly listsStats: boolean = true
   override readonly prompt = PROMPT
   // Each folder's listing is stored at the folder's own version (inode and
   // change times, core/disk/listing_version.ts), so a fresh mount re-lists

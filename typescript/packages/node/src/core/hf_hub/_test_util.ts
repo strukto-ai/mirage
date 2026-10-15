@@ -15,9 +15,9 @@
 import { createHash } from 'node:crypto'
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import type { Evicted, IndexEntry, SetDirOptions } from '@struktoai/mirage-core/cache/index/config'
+import type { Evicted, SetDirOptions } from '@struktoai/mirage-core/cache/index/config'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import type { DirListing} from '@struktoai/mirage-core/types';
+import type { DirListing } from '@struktoai/mirage-core/types'
 import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -494,7 +494,7 @@ export class ExpiredOnArrival extends RAMIndexCacheStore {
 
   override setDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
     options?: SetDirOptions,
   ): Promise<Evicted[]> {
@@ -503,14 +503,14 @@ export class ExpiredOnArrival extends RAMIndexCacheStore {
 
   override setPartialDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
   ): Promise<void> {
     return super.setPartialDir(path, entries, this.expiryFor(path, expiredAt))
   }
 
   override seed(
-    entries: ReadonlyMap<string, IndexEntry>,
+    entries: ReadonlyMap<string, FileStat>,
     children: ReadonlyMap<string, readonly string[]>,
     expiresAt: Date,
     version: string | null = null,

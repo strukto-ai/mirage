@@ -17,8 +17,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { IndexEntry, ResourceType } from '@struktoai/mirage-core/cache/index/config'
-import { FileType, MountMode, ReadPolicy } from '@struktoai/mirage-core/types'
+import { FileStat, FileType, MountMode, ReadPolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Reconciler } from '@struktoai/mirage-core/workspace/reconcile'
 import { spec, tmpRoot } from '../../test-utils.ts'
@@ -86,10 +85,7 @@ describe('core/disk/stat folder probe', () => {
         await ws.namespace.setAttrs('/m/d', { uid: 1000 })
         const mount = ws.namespace.mountFor('/m/d')
         await mount.indexStore.setDir('/m/d', [
-          [
-            'x.txt',
-            new IndexEntry({ id: '/d/x.txt', name: 'x.txt', resourceType: ResourceType.FILE }),
-          ],
+          ['x.txt', new FileStat({ name: 'x.txt', type: FileType.FILE })],
         ])
         expect((await mount.indexStore.listDir('/m/d')).entries ?? null).not.toBeNull()
         await new Reconciler(ws.cache, ws.namespace).reconcileRead(mount, '/m/d')

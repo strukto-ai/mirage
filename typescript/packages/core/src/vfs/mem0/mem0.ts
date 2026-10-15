@@ -19,7 +19,6 @@ export interface Mem0VFSState {
 }
 
 export class Mem0VFS extends BaseVFS {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     read: ['entry'],
     stat: ['entry'],

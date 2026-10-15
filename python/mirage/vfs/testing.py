@@ -73,8 +73,6 @@ async def _entry(vfs: BaseVFS, path: PathSpec) -> FileStat | None:
         vfs (BaseVFS): the VFS being validated.
         path (PathSpec): the path, keyed below the mount.
     """
-    if "index" in inspect.signature(vfs.readdir).parameters:
-        return None
     prefix = mount_prefix_of(path.virtual, path.vfs_path)
     names = [name for name in path.vfs_path.strip("/").split("/") if name]
     found: FileStat | None = None
@@ -167,12 +165,8 @@ async def check_read_contract(
         fixture.directory, **_taken(vfs.readdir, store, folder)
     )
     rows = listed.entries if isinstance(listed, DirListing) else listed
-    names = [
-        row.name if isinstance(row, FileStat) else row.rstrip("/")
-        for row in rows
-    ]
     child = fixture.file.virtual.rstrip("/").rsplit("/", 1)[-1]
-    assert fixture.file.virtual in names or child in names, (
+    assert child in [row.name for row in rows], (
         "readdir must include the child"
     )
     stored = (

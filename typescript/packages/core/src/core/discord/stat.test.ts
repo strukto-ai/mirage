@@ -14,7 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileType, type FileStat } from '../../types.ts'
-import { FakeDiscordTransport, mountDiscord, type Responder } from '../../vfs/discord/_test_util.ts'
+import { FakeDiscordTransport, type Responder } from '../../vfs/discord/_test_util.ts'
+import { mountDiscord } from '../../workspace/fixtures/chat_fixture.ts'
 import type { DiscordResponse, DiscordTransport } from './client.ts'
 
 const GUILD = '/mnt/discord/My Server__G1'

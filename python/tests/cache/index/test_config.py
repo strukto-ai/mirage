@@ -17,56 +17,36 @@ from pydantic import ValidationError
 
 from mirage.cache.index import (
     IndexConfig,
-    IndexEntry,
     ListResult,
     LookupResult,
     LookupStatus,
     RedisIndexConfig,
-    ResourceType,
 )
 from mirage.cache.index.config import IndexType
+from mirage.types import ContentType, FileStat, FileType
 
-# The one wire format: what pydantic writes for IndexEntry, snake_case and
-# every field. `config.test.ts` pins the same literal.
+# The one wire format a row is stored in: what pydantic writes for a
+# FileStat, snake_case and every field. `config.test.ts` pins the same
+# literal.
 WIRE = (
-    '{"id":"/a.txt","name":"a.txt","resource_type":"file",'
-    '"remote_time":"2026-01-01T00:00:00Z",'
-    '"index_time":"2026-01-01T00:00:00Z","vfs_name":"","size":6,'
-    '"extra":{}}'
+    '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z",'
+    '"fingerprint":"v1","revision":null,"type":"file","content":"text",'
+    '"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,'
+    '"birthtime":null,"dev":null,"extra":{}}'
 )
 
 
-def test_index_entry_defaults():
-    entry = IndexEntry(id="1", name="f", resource_type="file")
-    assert entry.remote_time == ""
-    assert entry.index_time == ""
-    assert entry.vfs_name == ""
-    assert entry.size is None
-
-
-def test_index_entry_with_size():
-    entry = IndexEntry(id="1", name="f", resource_type="file", size=1024)
-    assert entry.size == 1024
-
-
-def test_index_entry_json_is_the_shared_wire_format():
-    entry = IndexEntry(
-        id="/a.txt",
+def test_a_rows_json_is_the_shared_wire_format():
+    row = FileStat(
         name="a.txt",
-        resource_type="file",
-        remote_time="2026-01-01T00:00:00Z",
-        index_time="2026-01-01T00:00:00Z",
         size=6,
+        modified="2026-01-01T00:00:00Z",
+        fingerprint="v1",
+        type=FileType.FILE,
+        content=ContentType.TEXT,
     )
-    assert entry.model_dump_json() == WIRE
-    assert IndexEntry.model_validate_json(WIRE) == entry
-
-
-def test_index_entry_json_refuses_a_camel_case_row():
-    with pytest.raises(ValidationError):
-        IndexEntry.model_validate_json(
-            '{"id":"/c","name":"c","resourceType":"file"}'
-        )
+    assert row.model_dump_json() == WIRE
+    assert FileStat.model_validate_json(WIRE) == row
 
 
 def test_lookup_result_not_found():
@@ -76,7 +56,7 @@ def test_lookup_result_not_found():
 
 
 def test_lookup_result_with_entry():
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE)
     result = LookupResult(entry=entry)
     assert result.entry is not None
     assert result.status is None
@@ -91,11 +71,6 @@ def test_list_result_with_entries():
 def test_list_result_expired():
     result = ListResult(status=LookupStatus.EXPIRED)
     assert result.entries is None
-
-
-def test_resource_type_enum():
-    assert ResourceType.FILE == "file"
-    assert ResourceType.FOLDER == "folder"
 
 
 def test_index_config_defaults():

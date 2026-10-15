@@ -41,7 +41,6 @@ interface Node {
 /** A store that knows its entries only by id, as Drive does. */
 class Folders extends BaseVFS {
   override readonly name: string = 'folders'
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     stat: ['entry'],
@@ -409,7 +408,6 @@ describe('a kept listing', () => {
 // outside it is still there when its channel is. Mirrors Python's `Days`.
 class Days extends BaseVFS {
   override readonly name: string = 'days'
-  override readonly listsStats: boolean = true
   override readonly handed = { readdir: ['entry'], stat: ['entry', 'parent'] } as const
   readonly calls: string[] = []
 

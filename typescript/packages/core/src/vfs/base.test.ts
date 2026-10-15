@@ -16,7 +16,6 @@ import { CLIHandler } from '../commands/cli/types.ts'
 import { describe, expect, it } from 'vitest'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import { command, type Command } from '../commands/config.ts'
 import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { CLI, type CLIInvocation } from '../commands/cli/types.ts'
@@ -33,6 +32,7 @@ import { BaseVFS, VFS_BRAND, type VFSOptions } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
 import { RAMStore } from './ram/store.ts'
 import { vfsStateRequiresOverride } from './secrets.ts'
+import type { Handed } from './types.ts'
 
 const ENC = new TextEncoder()
 
@@ -68,15 +68,20 @@ function node(pages: Tree, key: string): Tree | string {
   return current
 }
 
-function readdir(accessor: WikiAccessor, path: PathSpec): Promise<string[]> {
+function row(name: string, found: Tree | string): FileStat {
+  if (typeof found !== 'string') return new FileStat({ name, size: null, type: FileType.DIRECTORY })
+  return new FileStat({
+    name,
+    size: ENC.encode(found).length,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
+  })
+}
+
+function readdir(accessor: WikiAccessor, path: PathSpec): Promise<FileStat[]> {
   const found = node(accessor.pages, path.vfsPath)
   if (typeof found === 'string') throw new Error(`ENOTDIR: ${path.virtual}`)
-  const parent = path.virtual.replace(/\/+$/, '')
-  return Promise.resolve(
-    Object.entries(found).map(
-      ([name, child]) => `${parent}/${name}${typeof child === 'string' ? '' : '/'}`,
-    ),
-  )
+  return Promise.resolve(Object.entries(found).map(([name, child]) => row(name, child)))
 }
 
 function readBytes(accessor: WikiAccessor, path: PathSpec): Promise<Uint8Array> {
@@ -89,16 +94,7 @@ function stat(accessor: WikiAccessor, path: PathSpec): Promise<FileStat> {
   const found = node(accessor.pages, path.vfsPath)
   const trimmed = path.virtual.replace(/\/+$/, '')
   const name = trimmed.slice(trimmed.lastIndexOf('/') + 1) || '/'
-  if (typeof found !== 'string')
-    return Promise.resolve(new FileStat({ name, size: null, type: FileType.DIRECTORY }))
-  return Promise.resolve(
-    new FileStat({
-      name,
-      size: ENC.encode(found).length,
-      type: FileType.FILE,
-      content: ContentType.TEXT,
-    }),
-  )
+  return Promise.resolve(row(name, found))
 }
 
 const wikiHello: readonly Command[] = command({
@@ -110,13 +106,13 @@ const wikiHello: readonly Command[] = command({
 
 /** A plug-in VFS over a tree of pages: the three required reads. */
 class WikiVFS extends BaseVFS<WikiAccessor> {
-  override readdir(path: PathSpec): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     return readdir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    _index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {

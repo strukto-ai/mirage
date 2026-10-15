@@ -55,7 +55,6 @@ export class AirtableVFS extends BaseVFS {
   override readonly prompt: string = PROMPT
   override readonly writePrompt: string = WRITE_PROMPT
   override readonly accessor: AirtableAccessor
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry', 'parent'],

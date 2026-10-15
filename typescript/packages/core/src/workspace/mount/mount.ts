@@ -129,7 +129,7 @@ type OpCall = (scope: PathSpec, args: readonly unknown[], kwargs: OpKwargs) => u
 
 type ReadFn = (
   path: PathSpec,
-  index?: IndexCacheStore | Handed,
+  handed?: Handed,
   offset?: number,
   size?: number | null,
 ) => Promise<Uint8Array>
@@ -211,7 +211,7 @@ async function readWindow(
   ranges: boolean,
   path: PathSpec,
   kwargs: OpKwargs,
-  slot: IndexCacheStore | Handed | undefined,
+  handed: Handed | undefined,
 ): Promise<Uint8Array> {
   const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0
   const size = typeof kwargs.size === 'number' ? kwargs.size : null
@@ -219,13 +219,13 @@ async function readWindow(
   const whole = offset === 0 && size === null
   if (ranges && !whole) {
     try {
-      return await read(path, slot, offset, size)
+      return await read(path, handed, offset, size)
     } catch (err) {
       if (!isUnsatisfiableRange(err)) throw err
       return new Uint8Array(0)
     }
   }
-  const data = await read(path, slot)
+  const data = await read(path, handed)
   return whole ? data : sliceWindow(data, offset, size)
 }
 
@@ -430,7 +430,7 @@ export class MountEntry {
   /** Expand one pattern, keyed below the mount, through the VFS's `readdir` and `stat`. */
   glob(path: PathSpec, index?: IndexCacheStore, access?: SessionAccess): Promise<PathSpec[]> {
     const io = this.ioFor(access)
-    const listing = this.vfs.listsStats
+    const listing = this.lists
       ? {
           readdir: (_accessor: unknown, p: PathSpec, store?: IndexCacheStore) =>
             this.listed(p, store ?? this.index),
@@ -689,10 +689,7 @@ export class MountEntry {
    * Mirrors Python's `MountEntry._callers`.
    */
   callers(name: string, filetype: string | null, vfs: BaseVFS = this.vfs): OpCall[] {
-    // What rides where a function takes its index: the handed stats, for a
-    // VFS whose listings the mount keeps.
-    const slot = (kw: OpKwargs): IndexCacheStore | Handed | undefined =>
-      vfs.listsStats ? (kw.handed as Handed | undefined) : kw.index
+    // What rides beside the path: the handed stats.
     const handed = (kw: OpKwargs): Handed | undefined => kw.handed as Handed | undefined
     if (name === 'read') {
       const levels: OpCall[] = []
@@ -702,12 +699,12 @@ export class MountEntry {
           ? undefined
           : (vfs as unknown as Record<string, ReadFn | undefined>)[renderer]
       if (render !== undefined) {
-        levels.push((scope, _args, kw) => readWindow(render.bind(vfs), true, scope, kw, slot(kw)))
+        levels.push((scope, _args, kw) => readWindow(render.bind(vfs), true, scope, kw, handed(kw)))
       }
       if (vfs.supports('read')) {
-        const read: ReadFn = (path, index, offset, size) =>
-          vfs.read(path, index, offset, size, callerSignal())
-        levels.push((scope, _args, kw) => readWindow(read, vfs.readsRanges, scope, kw, slot(kw)))
+        const read: ReadFn = (path, given, offset, size) =>
+          vfs.read(path, given, offset, size, callerSignal())
+        levels.push((scope, _args, kw) => readWindow(read, vfs.readsRanges, scope, kw, handed(kw)))
       }
       return levels
     }
@@ -734,26 +731,32 @@ export class MountEntry {
     if (!vfs.supports(name)) return []
     switch (name) {
       case 'readdir':
-        return [(scope, _args, kw) => vfs.readdir(scope, slot(kw))]
+        return [(scope, _args, kw) => vfs.readdir(scope, handed(kw))]
       case 'stat':
-        return [(scope, _args, kw) => vfs.stat(scope, slot(kw))]
+        return [(scope, _args, kw) => vfs.stat(scope, handed(kw))]
       case 'write':
         return [(scope, args, kw) => vfs.write(scope, writeData(args), callerSignal(), handed(kw))]
       case 'append':
-        return [(scope, args, kw) => vfs.append(scope, writeData(args), slot(kw), callerSignal())]
+        return [(scope, args, kw) => vfs.append(scope, writeData(args), handed(kw), callerSignal())]
       case 'pwrite':
         return [
           (scope, args, kw) =>
-            vfs.pwrite(scope, writeData(args), offsetArg(args[1], scope), slot(kw), callerSignal()),
+            vfs.pwrite(
+              scope,
+              writeData(args),
+              offsetArg(args[1], scope),
+              handed(kw),
+              callerSignal(),
+            ),
         ]
       case 'create':
         return [(scope, _args, kw) => vfs.create(scope, handed(kw))]
       case 'mkdir':
         return [(scope, _args, kw) => this.mkdir(scope, kw.parents === true, kw.index, handed(kw))]
       case 'unlink':
-        return [(scope, _args, kw) => vfs.unlink(scope, slot(kw))]
+        return [(scope, _args, kw) => vfs.unlink(scope, handed(kw))]
       case 'rmdir':
-        return [(scope, _args, kw) => vfs.rmdir(scope, slot(kw))]
+        return [(scope, _args, kw) => vfs.rmdir(scope, handed(kw))]
       case 'rename':
         return [(scope, args, kw) => vfs.rename(scope, dstArg(args[0]), handed(kw))]
       case 'copy':
@@ -763,21 +766,21 @@ export class MountEntry {
       case 'rm_r':
         return [(scope, _args, kw) => vfs.rmR(scope, handed(kw))]
       case 'first_lines':
-        return [(scope, args, kw) => vfs.firstLines(scope, args[0] as number, slot(kw))]
+        return [(scope, args, kw) => vfs.firstLines(scope, args[0] as number, handed(kw))]
       case 'last_lines':
-        return [(scope, args, kw) => vfs.lastLines(scope, args[0] as number, slot(kw))]
+        return [(scope, args, kw) => vfs.lastLines(scope, args[0] as number, handed(kw))]
       case 'line_count':
-        return [(scope, _args, kw) => vfs.lineCount(scope, slot(kw))]
+        return [(scope, _args, kw) => vfs.lineCount(scope, handed(kw))]
       case 'checksum':
-        return [(scope, args, kw) => vfs.checksum(scope, args[0] as string, slot(kw))]
+        return [(scope, args, kw) => vfs.checksum(scope, args[0] as string, handed(kw))]
       case 'follow':
         return [
-          (scope, args, kw) => vfs.follow(scope, args[0] as number, args[1] as number, slot(kw)),
+          (scope, args, kw) => vfs.follow(scope, args[0] as number, args[1] as number, handed(kw)),
         ]
       case 'read_tree':
-        return [(scope, _args, kw) => vfs.readTree(scope, slot(kw))]
+        return [(scope, _args, kw) => vfs.readTree(scope, handed(kw))]
       case 'search':
-        return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, slot(kw))]
+        return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, handed(kw))]
       case 'files_containing':
         return [
           (scope, args, kw) =>
@@ -785,7 +788,7 @@ export class MountEntry {
               scope,
               args[0] as string,
               { wholeWord: kw.whole_word === true, ignoreCase: kw.ignore_case === true },
-              slot(kw),
+              handed(kw),
             ),
         ]
       case 'lines_containing':
@@ -795,13 +798,13 @@ export class MountEntry {
               scope,
               args[0] as string,
               { ignoreCase: kw.ignore_case === true },
-              slot(kw),
+              handed(kw),
             ),
         ]
       case 'before_full_scan':
         return [
           (scope, _args, kw) =>
-            vfs.beforeFullScan(scope, typeof kw.files === 'number' ? kw.files : null, slot(kw)),
+            vfs.beforeFullScan(scope, typeof kw.files === 'number' ? kw.files : null, handed(kw)),
         ]
       case 'truncate':
         return [
@@ -864,7 +867,7 @@ export class MountEntry {
 
   /** The VFS's read of a whole file, handed what is at its path. */
   private async readAt(index: IndexCacheStore, path: PathSpec): Promise<Uint8Array> {
-    return this.vfs.read(path, (await this.handedFor('read', path, null, index)) ?? index)
+    return this.vfs.read(path, await this.handedFor('read', path, null, index))
   }
 
   /** The VFS's write of a whole file, handed what is at its path and the directory it goes in. */
@@ -873,7 +876,7 @@ export class MountEntry {
       path,
       data,
       callerSignal(),
-      (await this.handedFor('write', path, null, index)) ?? undefined,
+      await this.handedFor('write', path, null, index),
     )
   }
 
@@ -923,6 +926,14 @@ export class MountEntry {
   }
 
   /** The index key of this mount's root, which no listing names. */
+  /**
+   * Whether the VFS lists, so the mount keeps its listings as stats. Mirrors
+   * Python's `_lists`.
+   */
+  private get lists(): boolean {
+    return this.vfs.supports('readdir')
+  }
+
   private get rootKey(): string {
     return rstripSlash(this.prefix) || '/'
   }
@@ -951,7 +962,7 @@ export class MountEntry {
    */
   private async entry(scope: PathSpec, index: IndexCacheStore): Promise<FileStat | null> {
     const key = indexKey(this.prefix, scope)
-    if (key === this.rootKey || !this.vfs.listsStats) return null
+    if (key === this.rootKey || !this.lists) return null
     if (this.cacheManager !== null && !(index instanceof ListingCheckStore)) {
       const probed = this.cacheManager.probedStat(scope)
       if (probed !== null) return probed
@@ -990,34 +1001,31 @@ export class MountEntry {
     const key = indexKey(this.prefix, path)
     const stored = await storedListing(index, key)
     if (stored !== null) return stored
-    const handed = (await this.handedFor('readdir', path, null, index)) ?? {}
+    const handed = await this.handedFor('readdir', path, null, index)
     const seeded = await storedListing(index, key)
     if (seeded !== null) return seeded
     const listed = await this.vfs.readdir(path, handed)
-    return keepListing(index, key, listed as readonly FileStat[] | DirListing)
+    return keepListing(index, key, listed)
   }
 
   /** A stat of `path` on this mount, as `callKeyed` answers one. Mirrors Python's `_stat`. */
   private async statAt(index: IndexCacheStore, path: PathSpec): Promise<FileStat> {
-    if (!this.vfs.listsStats) return this.vfs.stat(path, index)
     const key = indexKey(this.prefix, path)
     const stored = key === this.rootKey ? null : this.whole(await storedStat(index, key))
     if (stored !== null) return stored
-    return this.vfs.stat(path, (await this.handedFor('stat', path, null, index)) ?? {})
+    return this.vfs.stat(path, await this.handedFor('stat', path, null, index))
   }
 
   /**
    * The stats the VFS's function `name` declares, each found in the stored
-   * listings; null for a VFS whose listings the mount does not keep.
-   * Mirrors Python's `_handed`.
+   * listings. Mirrors Python's `_handed`.
    */
   private async handedFor(
     name: string,
     scope: PathSpec,
     dst: PathSpec | null,
     index: IndexCacheStore,
-  ): Promise<Handed | null> {
-    if (!this.vfs.listsStats) return null
+  ): Promise<Handed> {
     const wants = this.wants(name)
     const handed: { -readonly [K in keyof Handed]: Handed[K] } = {}
     if (wants.includes('index')) {
@@ -1062,10 +1070,9 @@ export class MountEntry {
     const dst = args[0] instanceof PathSpec ? args[0] : null
     const handed = found ?? (await this.handedFor(name, scope, dst, index))
     try {
-      return await call(scope, args, handed === null ? kwargs : { ...kwargs, handed })
+      return await call(scope, args, { ...kwargs, handed })
     } catch (err) {
       if (
-        handed === null ||
         !isEnoent(err) ||
         !HANDED.some((stat) => handed[stat] != null) ||
         (name === 'stat' && handed.entry == null)
@@ -1074,7 +1081,7 @@ export class MountEntry {
     }
     await this.forget(scope, dst, index)
     const again = await this.handedFor(name, scope, dst, index)
-    return call(scope, args, { ...kwargs, handed: again ?? {} })
+    return call(scope, args, { ...kwargs, handed: again })
   }
 
   /** Drop the listings a stale stat was handed from. Mirrors Python's `_forget`. */
@@ -1143,7 +1150,7 @@ export class MountEntry {
     index: IndexCacheStore,
     signal: AbortSignal | undefined,
   ): AsyncIterable<Uint8Array> {
-    const handed = (await this.handedFor('readStream', scope, null, index)) ?? {}
+    const handed = await this.handedFor('readStream', scope, null, index)
     yield* vfs.readStream(scope, handed, signal)
   }
 
@@ -1173,7 +1180,7 @@ export class MountEntry {
     const index = kwargs.index ?? this.index
     const answer = async (): Promise<unknown> => {
       let found: Handed | null = null
-      if (vfs.listsStats && STORED_OPS.has(name)) {
+      if (this.lists && STORED_OPS.has(name)) {
         let stored = await this.stored(name, scope, index)
         if (stored === null && name === 'readdir') {
           // Finding the rows a listing is handed lists its parent, whose
@@ -1187,7 +1194,7 @@ export class MountEntry {
         const result = await this.run(name, call, scope, args, kwargs, index, found)
         found = null
         if (result === null || result === undefined) continue
-        const kept = vfs.listsStats ? await this.kept(name, scope, index, result) : result
+        const kept = this.lists ? await this.kept(name, scope, index, result) : result
         if (name === 'stat') this.noteLive(scope, index, kept)
         return kept
       }
@@ -1195,7 +1202,7 @@ export class MountEntry {
     }
     // One listing of a folder at a time: a reader arriving while another
     // lists it waits, then answers from what that one kept.
-    if (name === 'readdir' && vfs.listsStats) {
+    if (name === 'readdir' && this.lists) {
       return withIndexLock(index, indexKey(this.prefix, scope), answer)
     }
     return answer()
@@ -1216,7 +1223,7 @@ export class MountEntry {
       this.read.policy === ReadPolicy.FRESH &&
       result instanceof FileStat &&
       !(index instanceof ListingCheckStore) &&
-      this.vfs.listsStats &&
+      this.lists &&
       this.wants('stat').length === 0
     ) {
       manager.noteProbed(scope, result)
@@ -1269,9 +1276,9 @@ export class MountEntry {
     const signal = callerSignal()
     const stream = withMountContext(
       withPullTimeout(
-        vfs.listsStats && this.wants('readStream').length > 0
+        this.wants('readStream').length > 0
           ? this.readEntryStream(vfs, scope, this.index, signal)
-          : vfs.readStream(scope, this.index, signal),
+          : vfs.readStream(scope, {}, signal),
         limit?.timeoutSeconds ?? null,
         'read',
       ),

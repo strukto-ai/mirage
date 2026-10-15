@@ -16,18 +16,18 @@ import hashlib
 
 import pytest
 
-from mirage.cache.index.config import IndexEntry
 from mirage.core.box.fingerprint import entry_token, read_token, token_of
+from mirage.types import FileStat, FileType
 
 SHA = hashlib.sha1(b"hello").hexdigest()
 
 
-def _entry(**extra) -> IndexEntry:
-    return IndexEntry(
-        id="F1",
+def _entry(**extra) -> FileStat:
+    return FileStat(
         name="a.txt",
-        resource_type="box/file",
-        remote_time="2026-04-01T00:00:00+00:00",
+        type=FileType.FILE,
+        modified="2026-04-01T00:00:00+00:00",
+        fingerprint="F1",
         extra=extra,
     )
 

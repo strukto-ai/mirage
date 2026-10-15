@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
-import { IndexEntry, LookupStatus } from '../cache/index/config.ts'
+import { LookupStatus } from '../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import { CacheManager } from '../cache/manager.ts'
-import { FileChangeKind, FileEvent, PathSpec } from '../types.ts'
+import { FileChangeKind, FileEvent, PathSpec, FileStat, FileType } from '../types.ts'
 import type { CacheInvalidator, WatchMount, WatchRegistry } from './base.ts'
 import { RAMWatchQueue } from './queue/ram.ts'
 import { Watcher } from './watcher.ts'
@@ -71,8 +71,9 @@ function realWatcher(): {
   return { watcher, cache, index }
 }
 
-function row(name: string, resourceType = 'file'): IndexEntry {
-  return new IndexEntry({ id: name, name, resourceType })
+function row(name: string, kind = 'file'): FileStat {
+  const type = kind === 'folder' ? FileType.DIRECTORY : FileType.FILE
+  return new FileStat({ name, type, fingerprint: name })
 }
 
 function moved(from: string, to: string): FileEvent {
@@ -110,7 +111,7 @@ describe('Watcher', () => {
     const levels = ['/nc', '/nc/data', '/nc/data/sub']
     for (const level of levels) {
       await index.setDir(level, [
-        ['child', new IndexEntry({ id: '1', name: 'child', resourceType: 'file' })],
+        ['child', new FileStat({ name: 'child', type: FileType.FILE, fingerprint: '1' })],
       ])
     }
     const manager = new CacheManager(null, index, '/nc/', false)

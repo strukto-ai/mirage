@@ -22,7 +22,7 @@ from typing import TypeVar
 from mirage.cache.context import capture_read
 from mirage.cache.file.io import latest_fingerprint, mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
-from mirage.cache.index.config import Evicted, IndexRow
+from mirage.cache.index.config import Evicted
 from mirage.cache.index.constants import (
     CHECKED_LIMIT,
     LISTING_TRUST_WINDOW,
@@ -440,7 +440,7 @@ class CacheManager:
         path: PathSpec,
         generation: int,
         predecessor: str,
-        entry: IndexRow,
+        entry: FileStat,
     ) -> None:
         """Retain a live fallback row only while its predecessor still owns the slot.
 
@@ -448,7 +448,7 @@ class CacheManager:
             path (PathSpec): confirmed file path.
             generation (int): generation before the remote check.
             predecessor (str): serialized previous index row.
-            entry (IndexRow): confirmed replacement row.
+            entry (FileStat): confirmed replacement row.
         """
         key = self._cache_key(path)
         async with self.mutation():

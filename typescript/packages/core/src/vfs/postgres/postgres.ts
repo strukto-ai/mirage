@@ -35,7 +35,6 @@ import type { Handed } from '../types.ts'
  * packages build over their own transport.
  */
 export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     read: ['parent'],
     stat: ['entry'],

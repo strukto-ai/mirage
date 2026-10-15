@@ -13,7 +13,7 @@ from fakeredis.aioredis import FakeRedis
 from redis.asyncio import Redis
 
 from mirage.cache.index import redis as redis_index
-from mirage.cache.index.config import IndexEntry, LookupStatus
+from mirage.cache.index.config import LookupStatus
 from mirage.cache.index.constants import (
     CHILDREN_PREFIX,
     DEFAULT_KEY_PREFIX,
@@ -21,6 +21,7 @@ from mirage.cache.index.constants import (
     REGISTRY_PAGE,
 )
 from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.types import FileStat, FileType
 
 
 @pytest_asyncio.fixture(params=["fake", "redis"])
@@ -62,7 +63,7 @@ def client():
     value.set = AsyncMock()
     value.delete = AsyncMock()
     value.get = AsyncMock(
-        return_value=(b'{"id":"a","name":"a.txt","resource_type":"file"}')
+        return_value=(b'{"name":"a.txt","type":"file","fingerprint":"a"}')
     )
     pipe = MagicMock()
     pipe.execute = AsyncMock()
@@ -102,7 +103,7 @@ async def test_invalidate_dir_is_one_script_over_its_three_keys(client):
 async def test_entries_decodes_keys_and_json(client):
     store = RedisIndexCacheStore(client=client, key_prefix="test:")
     entries = await store.entries()
-    assert entries["/folder/a.txt"].id == "a"
+    assert entries["/folder/a.txt"].fingerprint == "a"
 
 
 @pytest.mark.asyncio
@@ -124,8 +125,8 @@ async def test_seed_flushes_before_first_lookup(client):
     store = RedisIndexCacheStore(client=client)
     store.seed(
         {
-            "/folder/a.txt": IndexEntry(
-                id="a", name="a.txt", resource_type="file"
+            "/folder/a.txt": FileStat(
+                name="a.txt", type=FileType.FILE, fingerprint="a"
             )
         },
         {"/folder": ["/folder/a.txt"]},
@@ -144,7 +145,7 @@ async def test_failed_seed_flush_remains_retryable(client):
     client.mget.return_value = [b"d"]
     store = RedisIndexCacheStore(client=client)
     store.seed(
-        {"/a": IndexEntry(id="a", name="a", resource_type="file")},
+        {"/a": FileStat(name="a", type=FileType.FILE, fingerprint="a")},
         {"/": ["/a"]},
         datetime.now(timezone.utc) + timedelta(hours=1),
     )
@@ -163,7 +164,7 @@ async def test_concurrent_readers_flush_each_seed_once(client):
     client.mget.return_value = [b"d"]
     store = RedisIndexCacheStore(client=client)
     store.seed(
-        {"/a": IndexEntry(id="a", name="a", resource_type="file")},
+        {"/a": FileStat(name="a", type=FileType.FILE, fingerprint="a")},
         {"/": ["/a"]},
         datetime.now(timezone.utc) + timedelta(hours=1),
     )
@@ -197,7 +198,7 @@ async def test_global_invalidation_expires_year_long_listings(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    row = IndexEntry(id="old", name="old.txt", resource_type="file")
+    row = FileStat(name="old.txt", type=FileType.FILE, fingerprint="old")
     deadline = datetime.now(timezone.utc) + timedelta(days=365)
     rows = [] if empty else [("old.txt", row)]
     try:
@@ -273,7 +274,7 @@ async def test_scoped_invalidations_respect_literal_namespaces(
         for suffix in ("literal[1]:", "literal1:")
     ]
     store, neighbor = stores
-    row = IndexEntry(id="a", name="a.txt", resource_type="file")
+    row = FileStat(name="a.txt", type=FileType.FILE, fingerprint="a")
     try:
         for target in stores:
             for directory in ("/repo[1]", "/repo1"):
@@ -395,8 +396,8 @@ async def test_scalar_initialization_does_not_adopt_replacement_tokens(
     target = generation_key if scope == "global" else f"{generation_key}:/repo"
     original_set = client.set
     original_pipeline = client.pipeline
-    fresh = IndexEntry(id="new", name="new.txt", resource_type="file")
-    stale = IndexEntry(id="old", name="old.txt", resource_type="file")
+    fresh = FileStat(name="new.txt", type=FileType.FILE, fingerprint="new")
+    stale = FileStat(name="old.txt", type=FileType.FILE, fingerprint="old")
 
     async def refill():
         await writer.set_dir("/repo", [("new.txt", fresh)])
@@ -532,7 +533,7 @@ async def test_seed_initialization_does_not_adopt_replacement_tokens(
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
     writer = RedisIndexCacheStore(client=client, key_prefix=prefix)
     original_pipeline = client.pipeline
-    fresh = IndexEntry(id="new", name="new.txt", resource_type="file")
+    fresh = FileStat(name="new.txt", type=FileType.FILE, fingerprint="new")
 
     async def refill():
         await writer.set_dir("/repo", [("new.txt", fresh)])
@@ -559,8 +560,8 @@ async def test_seed_initialization_does_not_adopt_replacement_tokens(
         monkeypatch.setattr(client, "pipeline", pipeline_during_refill)
         store.seed(
             {
-                "/repo/old.txt": IndexEntry(
-                    id="old", name="old.txt", resource_type="file"
+                "/repo/old.txt": FileStat(
+                    name="old.txt", type=FileType.FILE, fingerprint="old"
                 )
             },
             {"/repo": ["/repo/old.txt"]},
@@ -581,8 +582,8 @@ async def test_subtree_eviction_finishes_before_a_newer_listing(
     client, prefix = rolling_client
     first = RedisIndexCacheStore(client=client, key_prefix=prefix)
     second = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    folder = IndexEntry(id="sub", name="sub", resource_type="folder")
-    child = IndexEntry(id="new", name="new", resource_type="file")
+    folder = FileStat(name="sub", type=FileType.DIRECTORY, fingerprint="sub")
+    child = FileStat(name="new", type=FileType.FILE, fingerprint="new")
     await first.set_dir("/d", [("sub", folder)])
     await first.set_dir("/d/sub", [("new", child)])
     evaluate = client.eval
@@ -610,8 +611,8 @@ async def test_subtree_eviction_does_not_scan_unrelated_keys(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    folder = IndexEntry(id="sub", name="sub", resource_type="folder")
-    child = IndexEntry(id="child", name="child", resource_type="file")
+    folder = FileStat(name="sub", type=FileType.DIRECTORY, fingerprint="sub")
+    child = FileStat(name="child", type=FileType.FILE, fingerprint="child")
     await store.set_dir("/d", [("sub", folder)])
     await store.put("/d/sub/unlisted/deep", child)
     store.seed(
@@ -649,8 +650,8 @@ async def test_subtree_eviction_recovers_an_evicted_path_registry(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    folder = IndexEntry(id="sub", name="sub", resource_type="folder")
-    child = IndexEntry(id="child", name="child", resource_type="file")
+    folder = FileStat(name="sub", type=FileType.DIRECTORY, fingerprint="sub")
+    child = FileStat(name="child", type=FileType.FILE, fingerprint="child")
     await store.set_dir("/d", [("sub", folder)])
     await store.put("/d/sub/unlisted/deep", child)
     await store.set_dir("/d/sub/buried", [("child", child)])
@@ -671,7 +672,7 @@ async def test_path_registry_prunes_removed_rows_but_preserves_tombstones(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    child = IndexEntry(id="child", name="child", resource_type="file")
+    child = FileStat(name="child", type=FileType.FILE, fingerprint="child")
     registry = prefix + "mirage:idx:paths"
     await store.clear()
     await store.put("/put-only", child)
@@ -695,7 +696,7 @@ async def test_registry_prefix_invalidation_accepts_trailing_slashes(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    child = IndexEntry(id="child", name="child", resource_type="file")
+    child = FileStat(name="child", type=FileType.FILE, fingerprint="child")
     await store.set_dir("/literal[1]", [("child", child)])
     await store.set_dir("/literal[1]/nested", [("child", child)])
     await store.put("/literal[1]sibling/child", child)
@@ -718,7 +719,7 @@ async def test_cold_registry_recovery_never_scans_inside_lua(
     store = RedisIndexCacheStore(
         client=client, key_prefix=prefix + "literal[1]:"
     )
-    child = IndexEntry(id="child", name="child", resource_type="file")
+    child = FileStat(name="child", type=FileType.FILE, fingerprint="child")
     await store.put("/d/sub/orphan", child)
     evaluate = client.eval
     pipeline = client.pipeline
@@ -748,7 +749,14 @@ end}
     await client.delete(prefix + "literal[1]:mirage:idx:paths")
     await store.set_dir(
         "/d",
-        [("sub", IndexEntry(id="sub", name="sub", resource_type="folder"))],
+        [
+            (
+                "sub",
+                FileStat(
+                    name="sub", type=FileType.DIRECTORY, fingerprint="sub"
+                ),
+            )
+        ],
     )
     await store.set_dir("/d", [])
     assert (await store.get("/d/sub/orphan")).entry is None
@@ -761,7 +769,7 @@ async def test_large_wipes_page_the_registry(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    child = IndexEntry(id="child", name="child", resource_type="file")
+    child = FileStat(name="child", type=FileType.FILE, fingerprint="child")
     store.seed(
         {f"/d/{i}": child for i in range(400)},
         {},
@@ -798,8 +806,8 @@ end}
     assert (await store.get("/d/399")).entry is None
 
 
-def _row(name: str) -> tuple[str, IndexEntry]:
-    return name, IndexEntry(id=name, name=name, resource_type="file")
+def _row(name: str) -> tuple[str, FileStat]:
+    return name, FileStat(name=name, type=FileType.FILE, fingerprint=name)
 
 
 @pytest.mark.asyncio
@@ -873,8 +881,8 @@ async def test_registry_recovery_restarts_if_evicted_during_a_scan(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    child = IndexEntry(id="child", name="child", resource_type="file")
-    folder = IndexEntry(id="sub", name="sub", resource_type="folder")
+    child = FileStat(name="child", type=FileType.FILE, fingerprint="child")
+    folder = FileStat(name="sub", type=FileType.DIRECTORY, fingerprint="sub")
     await store.set_dir("/d", [("sub", folder)])
     await store.put("/d/sub/old", child)
     await client.delete(prefix + "mirage:idx:paths")
@@ -904,7 +912,7 @@ async def test_paged_invalidation_cannot_leave_a_refill_naming_deleted_rows(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    child = IndexEntry(id="child", name="child", resource_type="file")
+    child = FileStat(name="child", type=FileType.FILE, fingerprint="child")
     await store.set_dir(directory, [(f"{i:03}", child) for i in range(300)])
     evaluate = client.eval
     refilled = False
@@ -932,7 +940,11 @@ async def test_holds_subtree_sees_a_seed_not_yet_flushed(rolling_client):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
     store.seed(
-        {"/x/dir/sub/f": IndexEntry(id="f", name="f", resource_type="file")},
+        {
+            "/x/dir/sub/f": FileStat(
+                name="f", type=FileType.FILE, fingerprint="f"
+            )
+        },
         {"/x/dir/sub": ["/x/dir/sub/f"]},
         datetime.now(timezone.utc) + timedelta(hours=1),
     )
@@ -945,7 +957,7 @@ async def test_holds_subtree_recovers_an_evicted_path_registry(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    child = IndexEntry(id="f", name="f", resource_type="file")
+    child = FileStat(name="f", type=FileType.FILE, fingerprint="f")
     await store.set_dir("/x/dir/sub", [("f", child)])
     await client.delete(prefix + "mirage:idx:paths")
     # An empty registry would read as "nothing below", so a folder
@@ -955,7 +967,7 @@ async def test_holds_subtree_recovers_an_evicted_path_registry(
 
 
 async def _buried(store: RedisIndexCacheStore, count: int) -> None:
-    child = IndexEntry(id="g", name="g", resource_type="file")
+    child = FileStat(name="g", type=FileType.FILE, fingerprint="g")
     for i in range(count):
         await store.set_dir(f"/x/dir/a{i:04}", [("g", child)])
         await store.invalidate_dir(f"/x/dir/a{i:04}")
@@ -993,7 +1005,7 @@ async def test_a_live_listing_at_the_end_of_a_full_page_is_found(
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
     await _buried(store, REGISTRY_PAGE - 1)
-    child = IndexEntry(id="g", name="g", resource_type="file")
+    child = FileStat(name="g", type=FileType.FILE, fingerprint="g")
     await store.set_dir("/x/dir/z", [("g", child)])
     assert await store.holds_subtree("/x/dir") is True
 
@@ -1005,12 +1017,12 @@ async def test_redis_conditional_replacement_is_atomic(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    original = IndexEntry(
-        id="a",
+    original = FileStat(
         name="a",
-        resource_type="file",
+        type=FileType.FILE,
         size=2,
-        remote_time="2026-09-05T10:55:39.123000Z",
+        modified="2026-09-05T10:55:39.123000Z",
+        fingerprint="a",
         extra={"nested": {"tags": ["x", "y"]}},
     )
     await store.set_dir("/dir", [("a", original)], version="v1")
@@ -1044,16 +1056,15 @@ async def test_redis_conditional_replacement_is_atomic(
             old.model_dump_json(),
             old.model_copy(
                 update={
-                    "id": "confirmed",
+                    "fingerprint": "confirmed",
                     "name": "confirmed",
-                    "index_time": "",
                 }
             ),
         ) is (peer == "none")
     assert calls == 1
     current = (await store.get("/dir/a")).entry
     if peer == "none":
-        assert current.id == "confirmed"
+        assert current.fingerprint == "confirmed"
     else:
         assert current == (latest if peer == "replace" else None)
     assert await client.get(listing_key) == listing_raw

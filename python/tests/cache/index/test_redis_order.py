@@ -17,8 +17,8 @@ import os
 import pytest
 import pytest_asyncio
 
-from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.types import FileStat, FileType
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -38,15 +38,15 @@ async def test_set_dir_preserves_insertion_order(store):
     entries = [
         (
             "2026-05-03_zebra__id3.gdoc.json",
-            IndexEntry(id="3", name="zebra", resource_type="gdocs/file"),
+            FileStat(name="zebra", type=FileType.FILE, fingerprint="3"),
         ),
         (
             "2026-05-02_apple__id2.gdoc.json",
-            IndexEntry(id="2", name="apple", resource_type="gdocs/file"),
+            FileStat(name="apple", type=FileType.FILE, fingerprint="2"),
         ),
         (
             "2026-05-01_mango__id1.gdoc.json",
-            IndexEntry(id="1", name="mango", resource_type="gdocs/file"),
+            FileStat(name="mango", type=FileType.FILE, fingerprint="1"),
         ),
     ]
     await store.set_dir("/gdocs/owned", entries)

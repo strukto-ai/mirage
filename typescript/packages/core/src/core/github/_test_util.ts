@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GitHubAccessor } from '../../accessor/github.ts'
-import type { Evicted, IndexEntry, SetDirOptions } from '../../cache/index/config.ts'
+import type { Evicted, SetDirOptions } from '../../cache/index/config.ts'
+import type { FileStat } from '../../types.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { HttpGitHubTransport } from './client.ts'
 import { CODE_SEARCH_SIZE_LIMIT } from './constants.ts'
@@ -448,7 +449,7 @@ export class ExpiredOnArrival extends RAMIndexCacheStore {
 
   override setDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
     options?: SetDirOptions,
   ): Promise<Evicted[]> {
@@ -457,14 +458,14 @@ export class ExpiredOnArrival extends RAMIndexCacheStore {
 
   override setPartialDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
   ): Promise<void> {
     return super.setPartialDir(path, entries, this.expiryFor(path, expiredAt))
   }
 
   override seed(
-    entries: ReadonlyMap<string, IndexEntry>,
+    entries: ReadonlyMap<string, FileStat>,
     children: ReadonlyMap<string, readonly string[]>,
     expiresAt: Date,
     version: string | null = null,

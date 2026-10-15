@@ -19,12 +19,12 @@ from typing import Any
 
 import pytest
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.observe.context import RecordingScope, record, start_op
-from mirage.types import DriftPolicy, MountMode, PathSpec
+from mirage.types import DriftPolicy, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
@@ -96,11 +96,11 @@ def test_strict_load_raises_when_s3_etag_drifts(tmp_path):
         asyncio.run(
             index.put(
                 "/s3/data.csv",
-                IndexEntry(
-                    id="data.csv",
+                FileStat(
                     name="data.csv",
-                    resource_type="file",
+                    type=FileType.FILE,
                     size=len(b"version 1 bytes\n"),
+                    fingerprint="data.csv",
                 ),
             )
         )

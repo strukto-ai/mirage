@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { FileStat, FileType } from '../../types.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IndexEntry, LookupStatus } from './config.ts'
+import { LookupStatus } from './config.ts'
 import { REGISTRY_PAGE } from './constants.ts'
 import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
 
@@ -28,8 +29,9 @@ describe('RedisIndexCacheStore default keyPrefix', () => {
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
 
-function entry(id: string, name: string, resourceType = 'file'): IndexEntry {
-  return new IndexEntry({ id, name, resourceType })
+function entry(id: string, name: string, kind = 'file'): FileStat {
+  const type = kind === 'folder' ? FileType.DIRECTORY : FileType.FILE
+  return new FileStat({ name, type, fingerprint: id })
 }
 
 describe.skipIf(skip)('RedisIndexCacheStore', () => {
@@ -61,9 +63,13 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
     if (old == null) throw new Error('missing seeded row')
     const client = await redis()
     const key = (store as unknown as { entryKey: (path: string) => string }).entryKey('/dir/a')
-    const raw = JSON.stringify(Object.fromEntries(Object.entries(old.toJSON()).reverse()), null, 2)
+    const raw = JSON.stringify(
+      Object.fromEntries(Object.entries(JSON.parse(JSON.stringify(old)) as object).reverse()),
+      null,
+      2,
+    )
     await client.set(key, raw)
-    const latest = old.copyWith({ size: 9 })
+    const latest = old.with({ size: 9 })
     const listingKey = (store as unknown as { childrenKey: (path: string) => string }).childrenKey(
       '/dir',
     )
@@ -85,7 +91,7 @@ describe.skipIf(skip)('RedisIndexCacheStore', () => {
       spy.mockRestore()
     }
     const current = (await store.get('/dir/a')).entry ?? null
-    if (peer === 'none') expect(current?.id).toBe('confirmed')
+    if (peer === 'none') expect(current?.fingerprint).toBe('confirmed')
     else expect(current).toEqual(peer === 'replace' ? latest : null)
     expect(await client.get(listingKey)).toBe(listingRaw)
   })
@@ -652,7 +658,7 @@ ${script}`,
     await store.setDir('/empty', [])
     await store.invalidate()
 
-    expect((await store.get('/snapshot/a')).entry?.id).toBe('new')
+    expect((await store.get('/snapshot/a')).entry?.fingerprint).toBe('new')
     expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
     expect((await store.listDir('/empty')).status).toBe(LookupStatus.EXPIRED)
     await store.setDir('/snapshot', [])
@@ -723,47 +729,47 @@ ${script}`,
     expect(r.status).toBe(LookupStatus.NOT_FOUND)
   })
 
-  // The one wire format: what pydantic writes for the Python IndexEntry,
-  // snake_case and every field. `test_redis.py` pins the same literal, so an
-  // entry either language writes is one the other reads (#1020).
-  it('writes the entry JSON Python writes', async () => {
+  // The one wire format: what pydantic writes for a FileStat, snake_case and
+  // every field. `test_redis.py` pins the same literal, so a row either
+  // language writes is one the other reads.
+  it('writes the row JSON Python writes', async () => {
     await store.put(
       '/a.txt',
-      new IndexEntry({
-        id: '/a.txt',
+      new FileStat({
         name: 'a.txt',
-        resourceType: 'file',
-        remoteTime: '2026-01-01T00:00:00Z',
-        indexTime: '2026-01-01T00:00:00Z',
+        type: FileType.FILE,
         size: 6,
+        modified: '2026-01-01T00:00:00Z',
+        fingerprint: '/a.txt',
       }),
     )
     const c = await redis()
     expect(await c.get(`${prefix}mirage:idx:entry:/a.txt`)).toBe(
-      '{"id":"/a.txt","name":"a.txt","resource_type":"file","remote_time":"2026-01-01T00:00:00Z","index_time":"2026-01-01T00:00:00Z","vfs_name":"","size":6,"extra":{}}',
+      '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z","fingerprint":"/a.txt","revision":null,"type":"file","content":null,"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"extra":{}}',
     )
   })
 
-  it('reads the entry JSON Python writes', async () => {
+  it('reads the row JSON Python writes', async () => {
     const c = await redis()
     await c.set(
       `${prefix}mirage:idx:entry:/b.txt`,
-      '{"id":"/b.txt","name":"b.txt","resource_type":"file","remote_time":"","index_time":"2026-01-01T00:00:00Z","vfs_name":"","size":null,"extra":{"size_bytes":9}}',
+      '{"name":"b.txt","size":null,"modified":null,"fingerprint":"/b.txt","revision":null,"type":"file","content":null,"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"extra":{"size_bytes":9}}',
     )
     const r = await store.get('/b.txt')
-    expect(r.entry?.resourceType).toBe('file')
-    expect(r.entry?.indexTime).toBe('2026-01-01T00:00:00Z')
+    expect(r.entry?.type).toBe(FileType.FILE)
     expect(r.entry?.size).toBeNull()
     expect(r.entry?.extra).toEqual({ size_bytes: 9 })
   })
 
   it('put + get round-trips entry metadata', async () => {
     const extra = { drive_id: 'drive-a', nested: { slug: 'alpha', tags: ['x', 'y'] } }
-    await store.put('/a', new IndexEntry({ id: 'id-a', name: 'a', resourceType: 'file', extra }))
+    await store.put(
+      '/a',
+      new FileStat({ name: 'a', type: FileType.FILE, fingerprint: 'id-a', extra }),
+    )
     const r = await store.get('/a')
-    expect(r.entry?.id).toBe('id-a')
+    expect(r.entry?.fingerprint).toBe('id-a')
     expect(r.entry?.name).toBe('a')
-    expect(r.entry?.indexTime).not.toBe('')
     expect(r.entry?.extra).toEqual(extra)
   })
 
@@ -772,7 +778,7 @@ ${script}`,
     await store.setDir('/dir', [
       [
         'with-extra',
-        new IndexEntry({ id: 'id-extra', name: 'with-extra', resourceType: 'file', extra }),
+        new FileStat({ name: 'with-extra', type: FileType.FILE, fingerprint: 'id-extra', extra }),
       ],
       ['without-extra', entry('id-empty', 'without-extra')],
     ])
@@ -883,7 +889,7 @@ describe('Redis client protocol', () => {
   it.each([0, 1])('conditional replacement passes exact wire bytes to CAS: %s', async (result) => {
     const { value, pipeline } = client()
     const old = entry('old', 'a')
-    const raw = ' { "resource_type": "file", "name": "a", "id": "old" } '
+    const raw = ' { "type": "file", "name": "a", "fingerprint": "old" } '
     vi.mocked(value.get).mockResolvedValue(raw)
     vi.mocked(value.eval).mockResolvedValue(result)
     const store = new RedisIndexCacheStore({ client: value })
@@ -898,7 +904,7 @@ describe('Redis client protocol', () => {
     expect(call[1].arguments[0]).toBe(raw)
     const replacement = call[1].arguments[1]
     if (replacement === undefined) throw new Error('missing CAS replacement')
-    expect(IndexEntry.fromJSON(replacement).id).toBe('confirmed')
+    expect((JSON.parse(replacement) as { fingerprint: string }).fingerprint).toBe('confirmed')
     expect(value.set).not.toHaveBeenCalled()
     expect(pipeline.exec).not.toHaveBeenCalled()
   })

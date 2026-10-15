@@ -17,7 +17,6 @@ import errno
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Action, Policy
 from mirage.policy.types import VfsContext
@@ -47,19 +46,16 @@ class Shelf(BaseVFS):
         super().__init__()
         self.files: dict[str, bytes] = {"a.txt": b"old\n"}
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return [f"/shelf/{name}" for name in sorted(self.files)]
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return [
+            FileStat(name=name, type=FileType.FILE, size=len(data))
+            for name, data in sorted(self.files.items())
+        ]
 
-    async def read(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> bytes:
+    async def read(self, path: PathSpec) -> bytes:
         return self.files[path.vfs_path.strip("/")]
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
+    async def stat(self, path: PathSpec) -> FileStat:
         key = path.vfs_path.strip("/")
         if not key:
             return FileStat(name="/", type=FileType.DIRECTORY, size=None)

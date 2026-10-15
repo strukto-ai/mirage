@@ -16,19 +16,15 @@ import asyncio
 import os
 import time
 
-from mirage import Workspace
-from mirage.cache.index import (
-    IndexEntry,
-    RedisIndexCacheStore,
-    RedisIndexConfig,
-)
+from mirage import FileStat, FileType, Workspace
+from mirage.cache.index import RedisIndexCacheStore, RedisIndexConfig
 from mirage.vfs.ram import RAMVFS
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 
-def _file(name: str) -> IndexEntry:
-    return IndexEntry(id=name, name=name, resource_type="file")
+def _file(name: str) -> FileStat:
+    return FileStat(name=name, type=FileType.FILE)
 
 
 async def main() -> None:

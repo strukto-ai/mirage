@@ -19,14 +19,12 @@ from copy import deepcopy
 from pathlib import Path
 
 from mirage import (
-    NULL_INDEX,
     Accessor,
     BaseVFS,
     CommandSpec,
     ContentType,
     FileStat,
     FileType,
-    IndexCacheStore,
     IOResult,
     MountMode,
     PathSpec,
@@ -77,27 +75,38 @@ def _pages(pages: dict, prefix: str = ""):
             yield f"{prefix}{name}", child
 
 
+def _row(name: str, node, known_sizes: bool) -> FileStat:
+    if isinstance(node, dict):
+        return FileStat(name=name, size=None, type=FileType.DIRECTORY)
+    data = node.encode()
+    # The fingerprint is the content's own hash: the stable identity a
+    # snapshot records for every read and a load checks for drift.
+    return FileStat(
+        name=name,
+        size=len(data) if known_sizes else None,
+        type=FileType.FILE,
+        content=ContentType.TEXT,
+        fingerprint=hashlib.sha256(data).hexdigest()[:16],
+    )
+
+
 class PagesVFS(BaseVFS):
     """Markdown pages read from the accessor's dict."""
 
     accessor: WikiAccessor
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
+    # Each child is listed as its stat answers it, so a listing also
+    # answers the stats of what it names.
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
         node = _node(self.accessor.pages, path.vfs_path)
         if not isinstance(node, dict):
             raise NotADirectoryError(path.virtual)
-        parent = path.virtual.rstrip("/")
-        return [
-            f"{parent}/{name}" + ("/" if isinstance(child, dict) else "")
-            for name, child in node.items()
-        ]
+        known = self.accessor.known_sizes
+        return [_row(name, child, known) for name, child in node.items()]
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
@@ -108,23 +117,10 @@ class PagesVFS(BaseVFS):
             raise IsADirectoryError(path.virtual)
         return node.encode()
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
+    async def stat(self, path: PathSpec) -> FileStat:
         node = _node(self.accessor.pages, path.vfs_path)
         name = path.virtual.rstrip("/").rsplit("/", 1)[-1] or "/"
-        if isinstance(node, dict):
-            return FileStat(name=name, size=None, type=FileType.DIRECTORY)
-        data = node.encode()
-        # The fingerprint is the content's own hash: the stable identity a
-        # snapshot records for every read and a load checks for drift.
-        return FileStat(
-            name=name,
-            size=len(data) if self.accessor.known_sizes else None,
-            type=FileType.FILE,
-            content=ContentType.TEXT,
-            fingerprint=hashlib.sha256(data).hexdigest()[:16],
-        )
+        return _row(name, node, self.accessor.known_sizes)
 
     # Optional: say which pages may hold a text, and grep and rg read
     # only those. What they print is unchanged; None reads every page.
@@ -136,7 +132,6 @@ class PagesVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec]:
         fold = str.lower if ignore_case else str
         return [

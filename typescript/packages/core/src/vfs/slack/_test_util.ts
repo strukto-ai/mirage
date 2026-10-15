@@ -16,8 +16,6 @@ import { SlackAccessor, type SlackResourceLike } from '../../accessor/slack.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { SlackResponse, SlackTransport } from '../../core/slack/client.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SlackVFSBase } from './slack.ts'
 
 export interface FakeCall {
@@ -87,27 +85,5 @@ export async function seedChannel(
       ],
     ])
     await index.setDir(`${dateKey}/files`, [])
-  }
-}
-
-/**
- * Run `line` in a workspace with the fake mounted at /mnt/slack and channel
- * general__C1 listed with `dates`.
- */
-export async function runSlack(
-  transport: FakeSlackTransport,
-  line: string,
-  dates: string[],
-): Promise<{ stdout: string; exitCode: number }> {
-  const ws = new Workspace(
-    { '/mnt/slack/': makeFakeVfs(transport) },
-    { shellParser: await getTestParser() },
-  )
-  try {
-    await seedChannel(ws.mount('/mnt/slack').index, '/mnt/slack', 'general__C1', 'C1', { dates })
-    const io = await ws.shell(line)
-    return { stdout: new TextDecoder().decode(io.stdout), exitCode: io.exitCode }
-  } finally {
-    await ws.close()
   }
 }

@@ -140,8 +140,6 @@ export class OPFSVFS extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readonly listsStats: boolean = true
-
   override readdir(path: PathSpec): Promise<FileStat[]> {
     return opfsReaddir(this.accessor, path)
   }

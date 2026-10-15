@@ -18,10 +18,10 @@ import pytest
 
 from mirage.cache.index import (
     IndexCacheStore,
-    IndexEntry,
     LookupStatus,
     RAMIndexCacheStore,
 )
+from mirage.types import FileStat, FileType
 
 
 @pytest.fixture
@@ -31,12 +31,11 @@ def store():
 
 @pytest.fixture
 def entry():
-    return IndexEntry(
-        id="file1",
+    return FileStat(
         name="Test File",
-        resource_type="text/plain",
-        remote_time="2026-04-01T00:00:00.000Z",
-        vfs_name="test_file.txt",
+        type=FileType.FILE,
+        modified="2026-04-01T00:00:00.000Z",
+        fingerprint="file1",
     )
 
 
@@ -45,16 +44,8 @@ async def test_put_and_get(store, entry):
     await store.put("/folder/test_file.txt", entry)
     result = await store.get("/folder/test_file.txt")
     assert result.entry is not None
-    assert result.entry.id == "file1"
+    assert result.entry.fingerprint == "file1"
     assert result.entry.name == "Test File"
-
-
-@pytest.mark.asyncio
-async def test_put_sets_index_time(store, entry):
-    await store.put("/folder/test_file.txt", entry)
-    result = await store.get("/folder/test_file.txt")
-    assert result.entry is not None
-    assert result.entry.index_time != ""
 
 
 @pytest.mark.asyncio
@@ -75,21 +66,11 @@ async def test_set_dir_and_list(store):
     entries = [
         (
             "a.txt",
-            IndexEntry(
-                id="a",
-                name="A",
-                resource_type="text/plain",
-                vfs_name="a.txt",
-            ),
+            FileStat(name="A", type=FileType.FILE, fingerprint="a"),
         ),
         (
             "b.txt",
-            IndexEntry(
-                id="b",
-                name="B",
-                resource_type="text/plain",
-                vfs_name="b.txt",
-            ),
+            FileStat(name="B", type=FileType.FILE, fingerprint="b"),
         ),
     ]
     await store.set_dir("/mydir", entries)
@@ -103,12 +84,7 @@ async def test_set_dir_root(store):
     entries = [
         (
             "top.txt",
-            IndexEntry(
-                id="t",
-                name="T",
-                resource_type="text/plain",
-                vfs_name="top.txt",
-            ),
+            FileStat(name="T", type=FileType.FILE, fingerprint="t"),
         ),
     ]
     await store.set_dir("/", entries)
@@ -122,12 +98,7 @@ async def test_list_dir_expired(store):
     entries = [
         (
             "file.txt",
-            IndexEntry(
-                id="f",
-                name="F",
-                resource_type="text/plain",
-                vfs_name="file.txt",
-            ),
+            FileStat(name="F", type=FileType.FILE, fingerprint="f"),
         ),
     ]
     past = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -141,12 +112,7 @@ async def test_list_dir_fresh(store):
     entries = [
         (
             "file.txt",
-            IndexEntry(
-                id="f",
-                name="F",
-                resource_type="text/plain",
-                vfs_name="file.txt",
-            ),
+            FileStat(name="F", type=FileType.FILE, fingerprint="f"),
         ),
     ]
     future = datetime.now(timezone.utc) + timedelta(seconds=3600)

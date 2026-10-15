@@ -3,10 +3,9 @@ import asyncio
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.types import FileChangeKind, PathSpec
+from mirage.types import FileChangeKind, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import (
     mount_key,
     mount_prefix_of,
@@ -92,7 +91,7 @@ def test_event_helpers_lift_onto_the_mount(mount, child):
 async def _evicted(mount: str, child: str, kind: FileChangeKind) -> bool:
     """Whether the listing at ``mount/child`` was actually dropped."""
     cache, index = RAMFileCacheStore(), RAMIndexCacheStore(ttl=600)
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir(f"{mount}/{child}", [("leaf.txt", entry)])
     manager = CacheManager(cache, index, f"{mount}/", True)
     path = _spec(mount, child)
@@ -116,7 +115,7 @@ def test_evictions_that_drop_a_listing_reach_the_real_key(mount, child, kind):
 async def _parent_evicted(mount: str, child: str) -> bool:
     """Whether a write under ``mount/child`` dropped that directory."""
     cache, index = RAMFileCacheStore(), RAMIndexCacheStore(ttl=600)
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir(f"{mount}/{child}", [("leaf.txt", entry)])
     manager = CacheManager(cache, index, f"{mount}/", True)
     await manager.invalidate_after_write(
@@ -137,7 +136,7 @@ def test_a_write_drops_the_parent_listing_at_the_real_key(mount, child):
 async def _subtree_evicted(mount: str, child: str) -> bool:
     """Whether UNKNOWN reached a listing nested under ``mount/child``."""
     cache, index = RAMFileCacheStore(), RAMIndexCacheStore(ttl=600)
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir(f"{mount}/{child}/nested", [("leaf.txt", entry)])
     manager = CacheManager(cache, index, f"{mount}/", True)
     await manager.invalidate_subtree(_spec(mount, child))

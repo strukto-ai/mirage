@@ -32,7 +32,6 @@ import type { Handed } from '../types.ts'
  */
 export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
   override readonly readsRanges: boolean = true
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry', 'parent'],

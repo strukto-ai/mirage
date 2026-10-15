@@ -35,7 +35,6 @@ import type { Handed } from '../types.ts'
 export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   override readonly maxDuEntries: number | null = DU_MAX_ENTRIES
   override readonly readsRanges: boolean = true
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry', 'parent'],

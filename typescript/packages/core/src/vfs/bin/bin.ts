@@ -33,7 +33,6 @@ export class BinViewVFS extends BaseVFS {
   override readonly cachesReads = false
   // A stub's size is its rendering: cheap, no network, never null.
   override readonly sizesAlwaysKnown = true
-  override readonly listsStats: boolean = true
   override readonly accessor: BinAccessor
 
   constructor(programs: () => string[], note: (name: string) => string | null) {

@@ -33,7 +33,6 @@ import type { Handed } from '../types.ts'
  * packages build over their own transport.
  */
 export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     stat: ['entry'],
   } as const

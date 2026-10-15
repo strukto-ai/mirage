@@ -7,14 +7,10 @@ import pytest
 import pytest_asyncio
 from fakeredis.aioredis import FakeRedis
 
-from mirage.cache.index import (
-    Evicted,
-    IndexEntry,
-    LookupStatus,
-    RAMIndexCacheStore,
-)
+from mirage.cache.index import Evicted, LookupStatus, RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
+from mirage.types import FileStat, FileType
 
 
 @pytest_asyncio.fixture(params=["ram", "fake-redis", "redis"])
@@ -57,12 +53,12 @@ def store(store_factory):
 
 
 def entry(name="a"):
-    return IndexEntry(
-        id=name,
+    return FileStat(
         name=name,
-        resource_type="file",
+        type=FileType.FILE,
         size=2,
-        remote_time="2026-09-05T10:55:39.123000Z",
+        modified="2026-09-05T10:55:39.123000Z",
+        fingerprint=name,
         extra={"nested": {"tags": ["x", "y"]}},
     )
 
@@ -74,11 +70,7 @@ async def test_listing_lifecycle(store):
     assert (await store.list_dir("/dir")).entries == []
     await store.set_dir("/dir", [("b", entry("b")), ("a", entry())])
     assert (await store.list_dir("/dir")).entries == ["/dir/b", "/dir/a"]
-    got = (await store.get("/dir/a")).entry
-    assert got.model_dump(exclude={"index_time"}) == entry().model_dump(
-        exclude={"index_time"}
-    )
-    assert got.index_time
+    assert (await store.get("/dir/a")).entry == entry()
     await store.invalidate_dir("/dir")
     assert (await store.list_dir("/dir")).status == LookupStatus.NOT_FOUND
     assert (await store.get("/dir/a")).status == LookupStatus.NOT_FOUND
@@ -179,7 +171,7 @@ async def test_a_listing_expires_after_the_ttl(store_factory):
 
 
 def folder(name):
-    return IndexEntry(id=name, name=name, resource_type="folder")
+    return FileStat(name=name, type=FileType.DIRECTORY, fingerprint=name)
 
 
 @pytest.mark.asyncio
@@ -370,19 +362,14 @@ async def test_prefix_invalidation_preserves_excluded_subtrees(store):
     assert (await store.get("/dir/nested2/a")).status == LookupStatus.NOT_FOUND
 
 
-# A backend may spell its kinds with its own prefix; a folder replaced by
-# a file is the same swap either way.
-KINDS = [("folder", "file"), ("dropbox/folder", "dropbox/file")]
+def _sub(kind: FileType) -> FileStat:
+    return FileStat(name="sub", type=kind)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prior", ["listed", "invalidated", "unlisted"])
-@pytest.mark.parametrize(("folder_kind", "file_kind"), KINDS)
-async def test_directory_replaced_by_file_evicts_old_subtree(
-    store, prior, folder_kind, file_kind
-):
-    old = IndexEntry(id="sub", name="sub", resource_type=folder_kind)
-    new = IndexEntry(id="sub", name="sub", resource_type=file_kind)
+async def test_directory_replaced_by_file_evicts_old_subtree(store, prior):
+    old, new = _sub(FileType.DIRECTORY), _sub(FileType.FILE)
     if prior == "unlisted":
         await store.put("/dir/sub", old)
     else:
@@ -396,7 +383,7 @@ async def test_directory_replaced_by_file_evicts_old_subtree(
     assert await store.set_dir(
         "/dir", [("sub", new)], excluded=("/dir/sub/nested",)
     ) == [Evicted("/dir/sub", folder=True)]
-    assert (await store.get("/dir/sub")).entry.resource_type == file_kind
+    assert (await store.get("/dir/sub")).entry.type is FileType.FILE
     assert (await store.list_dir("/dir")).entries == ["/dir/sub"]
     assert (await store.list_dir("/dir/sub")).status == LookupStatus.NOT_FOUND
     for path in ["/dir/sub/old", "/dir/sub/unlisted"]:
@@ -408,15 +395,12 @@ async def test_directory_replaced_by_file_evicts_old_subtree(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prior", ["listed", "invalidated", "unlisted"])
-@pytest.mark.parametrize(("folder_kind", "file_kind"), KINDS)
 async def test_folder_known_by_its_row_replaced_by_file_evicts_rows(
-    store, prior, folder_kind, file_kind
+    store, prior
 ):
-    # The folder's own listing was never cached, so only its row's kind
-    # says it was a folder; a store reading the generic type alone keeps
-    # the rows under it.
-    old = IndexEntry(id="sub", name="sub", resource_type=folder_kind)
-    new = IndexEntry(id="sub", name="sub", resource_type=file_kind)
+    # The folder's own listing was never cached, so only its row's type
+    # says it was a folder.
+    old, new = _sub(FileType.DIRECTORY), _sub(FileType.FILE)
     if prior == "unlisted":
         await store.put("/dir/sub", old)
     else:
@@ -432,42 +416,8 @@ async def test_folder_known_by_its_row_replaced_by_file_evicts_rows(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prior", ["listed", "invalidated", "unlisted"])
-@pytest.mark.parametrize(
-    ("old_kind", "new_kind"),
-    [
-        ("trello/boards_dir", "trello/board"),
-        ("dropbox/folder", "postgres/entity_file"),
-    ],
-)
-async def test_unknown_kind_change_preserves_subtree(
-    store, prior, old_kind, new_kind
-):
-    # Only a type spelled as a file (`file` or `<backend>/file`) proves a
-    # folder became a file; `entity_file` ends in "file" without being
-    # one. Any other change of type proves nothing, so a cached subtree,
-    # and the overlays a cleanup would drop with it, stay.
-    old = IndexEntry(id="sub", name="sub", resource_type=old_kind)
-    new = IndexEntry(id="sub", name="sub", resource_type=new_kind)
-    if prior == "unlisted":
-        await store.put("/dir/sub", old)
-    else:
-        await store.set_dir("/dir", [("sub", old)])
-    await store.set_dir("/dir/sub", [("keep", entry("keep"))])
-    if prior == "invalidated":
-        await store.invalidate_dir("/dir")
-    assert await store.set_dir("/dir", [("sub", new)]) == []
-    assert (await store.list_dir("/dir/sub")).entries == ["/dir/sub/keep"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("prior", ["listed", "invalidated", "unlisted"])
-@pytest.mark.parametrize(
-    "resource_type", ["wandb/directory", "notion/page", "dropbox/folder"]
-)
-async def test_backend_directory_relist_preserves_subtree(
-    store, prior, resource_type
-):
-    child = IndexEntry(id="sub", name="sub", resource_type=resource_type)
+async def test_directory_relist_preserves_subtree(store, prior):
+    child = _sub(FileType.DIRECTORY)
     if prior != "unlisted":
         await store.set_dir("/dir", [("sub", child)])
     await store.set_dir("/dir/sub", [("keep", entry("keep"))])
@@ -521,7 +471,7 @@ async def test_repeated_partial_invalidation_preserves_folder_evidence(
         await store.get("/dir/sub/orphan")
     ).status == LookupStatus.NOT_FOUND
     if retained:
-        assert (await store.get("/dir/sub")).entry.resource_type == "file"
+        assert (await store.get("/dir/sub")).entry.type is FileType.FILE
     else:
         assert (await store.get("/dir/sub")).status == LookupStatus.NOT_FOUND
 
@@ -598,28 +548,12 @@ async def test_an_unversioned_seed_clears_the_version(store):
             [], ["/d", "folder"], "normal", "/d", False, id="folder row"
         ),
         pytest.param(
-            [],
-            ["/d", "box/folder"],
-            "normal",
-            "/d",
-            False,
-            id="backend folder row",
-        ),
-        pytest.param(
             ["/d/sub"],
             ["/d", "file"],
             "normal",
             "/d",
             True,
             id="listing below file row",
-        ),
-        pytest.param(
-            ["/d/sub"],
-            ["/d", "box/folder"],
-            "normal",
-            "/d",
-            True,
-            id="listing below backend folder row",
         ),
         pytest.param(
             ["/", "/d", "/d/sub"],
@@ -654,9 +588,8 @@ async def test_an_unversioned_seed_clears_the_version(store):
 )
 async def test_holds_subtree(store, listings, row, state, probe, expected):
     if row is not None:
-        await store.put(
-            row[0], IndexEntry(id="row", name="row", resource_type=row[1])
-        )
+        kind = FileType.DIRECTORY if row[1] == "folder" else FileType.FILE
+        await store.put(row[0], FileStat(name="row", type=kind))
     if state == "seeded":
         store.seed(
             {},
@@ -701,9 +634,9 @@ async def test_conditional_replacement_preserves_listing(store, expired):
         "/dir/a", old.model_dump_json(), replacement
     )
     current = (await store.get("/dir/a")).entry
-    assert current.id == "confirmed" and current.index_time
+    assert current == replacement
     assert await store.list_dir("/dir") == listing
-    pinned = replacement.model_copy(update={"index_time": "pinned"})
+    pinned = replacement.model_copy(update={"modified": "pinned"})
     assert await store.replace_if_unchanged(
         "/dir/a", current.model_dump_json(), pinned
     )
@@ -723,7 +656,7 @@ async def test_conditional_replacement_preserves_listing(store, expired):
 
 @pytest.mark.asyncio
 async def test_conditional_replacement_observes_pending_seed(store):
-    old = entry().model_copy(update={"index_time": "old"})
+    old = entry().model_copy(update={"modified": "old"})
     await store.put("/dir/a", old)
     seeded = old.model_copy(
         update={"extra": {"nested": {"tags": ["changed"]}}}

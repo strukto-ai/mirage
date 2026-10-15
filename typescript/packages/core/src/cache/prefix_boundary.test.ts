@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileChangeKind, PathSpec } from '../types.ts'
+import { FileChangeKind, PathSpec, FileStat, FileType } from '../types.ts'
 import { mountKey, mountPrefixOf, stripMount, underPath } from '../utils/key_prefix.ts'
 import { eventAt, virtualOf } from '../watch/events.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
-import { IndexEntry } from './index/config.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { CacheManager } from './manager.ts'
 
@@ -44,8 +43,8 @@ function stores(): [RAMFileCacheStore, RAMIndexCacheStore] {
   return [new RAMFileCacheStore(), new RAMIndexCacheStore({ ttl: 600 })]
 }
 
-function entry(): IndexEntry {
-  return new IndexEntry({ id: '1', name: 'f', resourceType: 'file' })
+function entry(): FileStat {
+  return new FileStat({ name: 'f', type: FileType.FILE, fingerprint: '1' })
 }
 
 describe.each(CASES)('mount %s holding %s', (mount, child) => {

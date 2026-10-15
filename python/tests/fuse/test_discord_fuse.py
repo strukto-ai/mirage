@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage import Workspace
-from mirage.cache.index import IndexEntry
 from mirage.core.discord.entry import (
     channel_dirname,
     channel_entry,
@@ -29,7 +28,7 @@ from mirage.core.discord.entry import (
     member_filename,
 )
 from mirage.fuse.fs import MirageFS
-from mirage.types import ContentType, FileType, MountMode
+from mirage.types import ContentType, FileStat, FileType, MountMode
 from mirage.vfs.discord import DiscordConfig, DiscordVFS
 from mirage.workspace.files import Files
 
@@ -59,11 +58,11 @@ FAKE_JSONL = (
 
 # The day lister records chat.jsonl's exact rendered size, so a sizeless
 # entry is the sealed-day case, which is what getattr reports 0 for.
-CHAT_ENTRY = IndexEntry(
-    id=f"{CHANNEL_PAYLOAD['id']}:{DATE}:chat",
+CHAT_ENTRY = FileStat(
     name=FILE,
-    resource_type="discord/chat_jsonl",
-    vfs_name=FILE,
+    type=FileType.FILE,
+    content=ContentType.TEXT,
+    fingerprint=f"{CHANNEL_PAYLOAD['id']}:{DATE}:chat",
 )
 
 

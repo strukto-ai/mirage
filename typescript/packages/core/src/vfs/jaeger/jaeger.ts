@@ -26,7 +26,6 @@ import type { Handed } from '../types.ts'
  * over its own transport.
  */
 export class JaegerVFSBase extends BaseVFS<JaegerAccessor> {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     stat: ['entry'],
   } as const

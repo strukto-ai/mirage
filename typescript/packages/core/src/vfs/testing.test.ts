@@ -50,8 +50,6 @@ const DOC_MISSING = new PathSpec({
 
 /** The three required reads over a RAM store, whole reads sliced. */
 class Minimal extends BaseVFS<RAMAccessor> {
-  override readonly listsStats: boolean = true
-
   override readdir(path: PathSpec): Promise<FileStat[]> {
     return ramReaddir(this.accessor, path)
   }
@@ -96,8 +94,6 @@ class LenientStat extends Minimal {
 /** Serves its one filetype through a renderer and defines no read. */
 class RenderedOnly extends BaseVFS<RAMAccessor> {
   override readonly renderers: Readonly<Record<string, string>> = { '.gdoc.json': 'readDoc' }
-
-  override readonly listsStats: boolean = true
 
   override readdir(path: PathSpec): Promise<FileStat[]> {
     return ramReaddir(this.accessor, path)

@@ -45,7 +45,6 @@ export class NextcloudVFS extends BaseVFS {
   // WebDAV PROPFIND carries getcontentlength for every file; readdir
   // backfills any lister-omitted size with one stat per affected file.
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly listsStats: boolean = true
   override readonly supportsSnapshot = true
   override readonly prompt = PROMPT
   override readonly accessor: NextcloudAccessor

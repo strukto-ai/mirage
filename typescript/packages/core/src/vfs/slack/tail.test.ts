@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FakeSlackTransport, runSlack } from './_test_util.ts'
+import { FakeSlackTransport } from './_test_util.ts'
+import { runSlack } from '../../workspace/fixtures/chat_fixture.ts'
 
 describe('slack tail', () => {
   it('returns last N lines with -n', async () => {

@@ -12,13 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { FileStat } from '../../types.ts'
 import { withCacheMutation } from '../file/io.ts'
 import type { FileCache } from '../file/mixin.ts'
 import {
   LookupStatus,
   type Evicted,
-  type IndexEntry,
-  type IndexRow,
   type IndexSnapshot,
   type ListResult,
   type LookupResult,
@@ -122,7 +121,7 @@ export class IndexView extends IndexCacheStore {
   }
 
   seed(
-    entries: ReadonlyMap<string, IndexEntry>,
+    entries: ReadonlyMap<string, FileStat>,
     children: ReadonlyMap<string, readonly string[]>,
     expiresAt: Date,
     version: string | null = null,
@@ -138,9 +137,9 @@ export class IndexView extends IndexCacheStore {
     for (const folder of snapshot.children.keys()) this.noted(folder)
   }
 
-  entries(): Promise<Map<string, IndexEntry>> {
+  entries(): Promise<Map<string, FileStat>> {
     return this.fence(async () => {
-      if (!this.owns(this.prefix)) return new Map<string, IndexEntry>()
+      if (!this.owns(this.prefix)) return new Map<string, FileStat>()
       const entries = await this.inner.entries()
       return new Map([...entries].filter(([path]) => this.owns(path)))
     })
@@ -187,13 +186,13 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
-  put(path: string, entry: IndexRow): Promise<void> {
+  put(path: string, entry: FileStat): Promise<void> {
     return this.fence(async () => {
       if (this.owns(path)) await this.inner.put(path, entry)
     })
   }
 
-  addEntry(path: string, entry: IndexRow): Promise<void> {
+  addEntry(path: string, entry: FileStat): Promise<void> {
     return this.fence(async () => {
       if (this.owns(path)) await this.inner.addEntry(path, entry)
     })
@@ -202,7 +201,7 @@ export class IndexView extends IndexCacheStore {
   override replaceIfUnchanged(
     path: string,
     predecessor: string,
-    entry: IndexRow,
+    entry: FileStat,
   ): Promise<boolean> {
     return this.fence(() =>
       this.owns(path)
@@ -213,7 +212,7 @@ export class IndexView extends IndexCacheStore {
 
   setDir(
     path: string,
-    entries: readonly [string, IndexRow][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
     options: SetDirOptions = {},
   ): Promise<Evicted[]> {
@@ -233,7 +232,7 @@ export class IndexView extends IndexCacheStore {
 
   override setPartialDir(
     path: string,
-    entries: readonly [string, IndexRow][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
   ): Promise<void> {
     return this.storeDir(path, entries, expiredAt, true, false).then(() => undefined)
@@ -241,7 +240,7 @@ export class IndexView extends IndexCacheStore {
 
   private storeDir(
     path: string,
-    entries: readonly [string, IndexRow][],
+    entries: readonly [string, FileStat][],
     expiredAt: Date | null | undefined,
     partial: boolean,
     window: boolean,

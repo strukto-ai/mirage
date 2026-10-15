@@ -22,7 +22,6 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 
 export class DocumentVFS extends BaseVFS<DocumentAccessor> {
-  override readonly listsStats: boolean = true
   globalView = false
   readonly sessions = new Map<string, number>()
   constructor(

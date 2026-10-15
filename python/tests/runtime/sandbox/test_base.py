@@ -17,12 +17,11 @@ import asyncio
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.cache.index.config import IndexEntry
 from mirage.io.types import materialize
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 from mirage.runtime.types import RunResult
-from mirage.types import Limit
+from mirage.types import FileStat, FileType, Limit
 
 
 class RecordingSandbox(RemoteSandbox):
@@ -210,7 +209,9 @@ async def test_remote_line_invalidates_local_read_caches():
     )
     try:
         mount = next(m for m in ws._registry.mounts() if m.prefix == "/data/")
-        stale = IndexEntry(id="stale", name="stale.txt", resource_type="ram")
+        stale = FileStat(
+            name="stale.txt", type=FileType.FILE, fingerprint="stale"
+        )
         await mount.index_store.put("/stale.txt", stale)
         await ws.shell("python3 anything")
         looked = await mount.index_store.get("/stale.txt")

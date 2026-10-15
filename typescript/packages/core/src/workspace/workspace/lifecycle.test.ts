@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { IndexEntry } from '../../cache/index/config.ts'
 import { command } from '../../commands/config.ts'
 import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { CapacityState } from '../../types.ts'
+import { CapacityState, FileStat, FileType } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type JobRunner, JobStatus } from '../../shell/job_table/index.ts'
 import {
@@ -508,7 +507,7 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
   const invalidate = index[method].bind(index)
   await index.put(
     '/outside-scope',
-    new IndexEntry({ id: 'stale', name: 'stale', resourceType: 'ram' }),
+    new FileStat({ name: 'stale', type: FileType.FILE, fingerprint: 'stale' }),
   )
   vi.spyOn(index, method).mockImplementation(async () => {
     enter()

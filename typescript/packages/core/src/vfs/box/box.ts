@@ -54,7 +54,6 @@ export class BoxVFS extends BaseVFS {
   // checks its bytes against the row it resolved through.
   override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],

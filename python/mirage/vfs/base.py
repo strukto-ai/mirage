@@ -272,10 +272,8 @@ class BaseVFS:
         return list(self._commands)
 
     @vfs_call(effect=Effect.READ, target=Target.DIR)
-    async def readdir(
-        self, path: PathSpec
-    ) -> list[str] | list[FileStat] | DirListing:
-        """List the children of a directory.
+    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
+        """List the children of a directory, each as its stat answers it.
 
         Args:
             path (PathSpec): the directory.

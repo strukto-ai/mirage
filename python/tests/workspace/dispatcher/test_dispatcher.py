@@ -1933,8 +1933,11 @@ class Tape(BaseVFS):
         self.reads = 0
         self.closed = False
 
-    async def readdir(self, path: PathSpec) -> list[str]:
-        return [f"/tape/{name}" for name in self.files]
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return [
+            FileStat(name=name, type=FileType.FILE, size=len(data))
+            for name, data in self.files.items()
+        ]
 
     async def stat(self, path: PathSpec) -> FileStat:
         key = path.vfs_path.strip("/")

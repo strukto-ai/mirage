@@ -21,7 +21,7 @@ import { rstripSlash } from '../utils/slash.ts'
 import { drainBudget, type FileCache } from './file/mixin.ts'
 import { concat } from '../utils/bytes.ts'
 import type { IndexCacheStore } from './index/store.ts'
-import type { Evicted, IndexEntry } from './index/config.ts'
+import type { Evicted } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
 import { commandStarted, soleCommandStarted, tick } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
@@ -371,7 +371,7 @@ export class CacheManager {
     path: PathSpec,
     generation: number,
     predecessor: string,
-    entry: IndexEntry,
+    entry: FileStat,
   ): Promise<void> {
     const key = this.cacheKey(path)
     return this.withMutation(async () => {

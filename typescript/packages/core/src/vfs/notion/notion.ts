@@ -26,7 +26,6 @@ import type { Handed } from '../types.ts'
  * packages build over their own transport.
  */
 export class NotionVFSBase extends BaseVFS<NotionAccessor> {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry', 'parent'],
     read: ['parent'],

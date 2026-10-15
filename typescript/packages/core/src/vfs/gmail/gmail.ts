@@ -48,7 +48,6 @@ export class GmailVFS extends BaseVFS {
   override readonly writePrompt: string = WRITE_PROMPT
   // The listing keeps each message's text; an attachment is read as usual.
   override readonly searchable: readonly string[] = ['*/*/*.gmail.json']
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],

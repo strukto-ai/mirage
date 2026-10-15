@@ -68,7 +68,6 @@ export class RedisResourceBase extends BaseVFS {
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
-  override readonly listsStats: boolean = true
   override readonly prompt: string = PROMPT
   readonly store: RedisStoreLike
   override readonly accessor: RedisAccessor

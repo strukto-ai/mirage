@@ -17,7 +17,8 @@
 
 import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
 import {
-  IndexEntry,
+  FileStat,
+  FileType,
   RAMVFS,
   RedisIndexCacheStore,
   Workspace,
@@ -79,19 +80,19 @@ async function close(ws: Workspace, store: RedisIndexCacheStore): Promise<void> 
 
 async function write(prefix: string): Promise<void> {
   const { ws, store } = makeStore(prefix)
-  const fileEntry = new IndexEntry({
-    id: FILE,
+  const fileEntry = new FileStat({
     name: FILE_NAME,
-    resourceType: 'file',
-    remoteTime: REMOTE_TIME,
+    type: FileType.FILE,
+    modified: REMOTE_TIME,
     size: 6,
+    fingerprint: FILE,
     extra: { ...EXTRA },
   })
-  const folderEntry = new IndexEntry({
-    id: `${DIR}/${FOLDER_NAME}`,
+  const folderEntry = new FileStat({
     name: FOLDER_NAME,
-    resourceType: 'folder',
-    remoteTime: REMOTE_TIME,
+    type: FileType.DIRECTORY,
+    modified: REMOTE_TIME,
+    fingerprint: `${DIR}/${FOLDER_NAME}`,
   })
   await store.setDir(DIR, [
     [FILE_NAME, fileEntry],
@@ -120,13 +121,12 @@ async function read(prefix: string): Promise<void> {
     entry !== null &&
       entry !== undefined &&
       (got.status ?? null) === null &&
-      entry.id === FILE &&
+      entry.fingerprint === FILE &&
       entry.name === FILE_NAME &&
-      entry.resourceType === 'file' &&
-      entry.remoteTime === REMOTE_TIME &&
+      entry.type === FileType.FILE &&
+      entry.modified === REMOTE_TIME &&
       entry.size === 6 &&
-      JSON.stringify(entry.extra) === JSON.stringify(EXTRA) &&
-      entry.indexTime !== '',
+      JSON.stringify(entry.extra) === JSON.stringify(EXTRA),
     JSON.stringify(got),
   )
   const listing = await store.listDir(DIR)
@@ -188,12 +188,15 @@ async function read(prefix: string): Promise<void> {
     JSON.stringify(kept),
   )
   await store.setDir(DIR, [
-    [FOLDER_NAME, new IndexEntry({ id: 'replacement', name: FOLDER_NAME, resourceType: 'file' })],
+    [
+      FOLDER_NAME,
+      new FileStat({ name: FOLDER_NAME, type: FileType.FILE, fingerprint: 'replacement' }),
+    ],
   ])
   const replaced = await store.get(`${DIR}/${FOLDER_NAME}`)
   check(
     'ts read: replacement file survives foreign subtree eviction',
-    replaced.entry?.resourceType === 'file',
+    replaced.entry?.type === FileType.FILE,
   )
   for (const path of [`${DIR}/${FOLDER_NAME}/${FILE_NAME}`, `${DIR}/${FOLDER_NAME}/unlisted`]) {
     check(

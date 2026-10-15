@@ -26,8 +26,6 @@ import type { SearchQuery } from '../types.ts'
  * over its own transport.
  */
 export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
-  override readonly listsStats: boolean = true
-
   override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
     return readdir(this.accessor, path)
   }

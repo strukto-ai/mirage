@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   type Evicted,
   type SetDirOptions,
-  IndexEntry,
   IndexType,
   LookupStatus,
   type IndexConfig,
@@ -29,19 +28,22 @@ import { RedisIndexCacheStore } from './redis.ts'
 import { IndexCacheStore } from './store.ts'
 import { IndexView } from './view.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
-/** A RAM mount whose functions are handed the index, to write into it late. */
+/** A RAM mount whose stat is handed the index, to write into it late. */
 class Indexed extends RAMVFS {
-  override readonly listsStats: boolean = false
+  override readonly handed: Readonly<Partial<Record<string, readonly (keyof Handed)[]>>> = {
+    stat: ['index'],
+  }
 }
 
 const cases = ['backend', 'store'].flatMap((phase) =>
-  ['put', 'setDir', 'setPartialDir'].flatMap((method) =>
+  ['setDir', 'setPartialDir'].flatMap((method) =>
     [false, true].map((shadow) => ({ phase, method, shadow })),
   ),
 )
@@ -75,13 +77,14 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const release = new Promise<void>((resolve) => {
           resume = resolve
         })
-        backend.stat = async (_path, index) => {
+        backend.stat = async (_path, handed) => {
+          const index = handed?.index
           if (!(index instanceof IndexCacheStore)) throw new Error('missing index')
           enter()
           await release
           await index.put(
             '/data/stale',
-            new IndexEntry({ id: 'old', name: 'stale', resourceType: 'file' }),
+            new FileStat({ name: 'stale', type: FileType.FILE, fingerprint: 'old' }),
           )
           return new FileStat({
             name: 'source',
@@ -109,14 +112,14 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           await ws.vfs.readdir('/data')
           await fresh.put(
             '/data/fresh',
-            new IndexEntry({ id: 'new', name: 'fresh', resourceType: 'file' }),
+            new FileStat({ name: 'fresh', type: FileType.FILE, fingerprint: 'new' }),
           )
           resume()
           expect(await reading).toBe(op === 'rename' ? 'EACCES' : 'EINVAL')
           for (const candidate of [index, fresh]) {
             expect((await candidate.get('/data/stale')).status).toBe(LookupStatus.NOT_FOUND)
           }
-          expect((await fresh.get('/data/fresh')).entry?.id).toBe('new')
+          expect((await fresh.get('/data/fresh')).entry?.fingerprint).toBe('new')
         } finally {
           resume()
           await reading
@@ -144,7 +147,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const ws = new Workspace({ [prefix]: vfs }, { index: config })
         ws.addMount('/alias', vfs)
         const index = ws.mount(prefix).indexStore
-        const entry = new IndexEntry({ id: 'old', name: 'stale', resourceType: 'file' })
+        const entry = new FileStat({ name: 'stale', type: FileType.FILE, fingerprint: 'old' })
         let enter = (): void => undefined
         let resume = (): void => undefined
         const entered = new Promise<void>((resolve) => {
@@ -158,13 +161,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           await release
         }
         if (phase === 'store') {
-          if (method === 'put') {
-            const original = index.put.bind(index)
-            vi.spyOn(index, 'put').mockImplementation(async (...args) => {
-              await pause()
-              await original(...args)
-            })
-          } else if (method === 'setPartialDir') {
+          if (method === 'setPartialDir') {
             const original = index.setPartialDir.bind(index)
             vi.spyOn(index, 'setPartialDir').mockImplementation(async (...args) => {
               await pause()
@@ -178,14 +175,9 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
             })
           }
         }
-        backend.readdir = async (_path, index) => {
-          if (!(index instanceof IndexCacheStore)) throw new Error('missing index')
+        backend.readdir = async () => {
           if (phase === 'backend') await pause()
-          if (method === 'put') await index.put('/data/stale', entry)
-          else if (method === 'setPartialDir')
-            await index.setPartialDir('/data', [['stale', entry]])
-          else await index.setDir('/data', [['stale', entry]])
-          return ['/data/stale']
+          return new DirListing({ entries: [entry], partial: method === 'setPartialDir' })
         }
         const reading = ws.vfs.readdir('/data')
         let changing: Promise<unknown> | undefined
@@ -217,23 +209,21 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           const fresh = ws.mount('/data').indexStore
           await fresh.put(
             '/data/fresh',
-            new IndexEntry({ id: 'new', name: 'fresh', resourceType: 'file' }),
+            new FileStat({ name: 'fresh', type: FileType.FILE, fingerprint: 'new' }),
           )
           resume()
           await reading
           for (const candidate of [index, fresh]) {
             expect((await candidate.get('/data/stale')).status).toBe(LookupStatus.NOT_FOUND)
             expect((await candidate.listDir('/data')).entries ?? []).not.toContain('/data/stale')
-            if (method !== 'put') {
-              const listing = await candidate.listDir('/data')
-              // One redis keyspace backs every mount, so each handle reads the
-              // replacement's own listing; ram gives each mount its own store.
-              const shares = candidate === fresh || type === IndexType.REDIS
-              const own = shares ? ['/data/own'] : null
-              expect([listing.entries ?? null, listing.partialEntries ?? null]).toEqual([own, null])
-            }
+            const listing = await candidate.listDir('/data')
+            // One redis keyspace backs every mount, so each handle reads the
+            // replacement's own listing; ram gives each mount its own store.
+            const shares = candidate === fresh || type === IndexType.REDIS
+            const own = shares ? ['/data/own'] : null
+            expect([listing.entries ?? null, listing.partialEntries ?? null]).toEqual([own, null])
           }
-          expect((await fresh.get('/data/fresh')).entry?.id).toBe('new')
+          expect((await fresh.get('/data/fresh')).entry?.fingerprint).toBe('new')
         } finally {
           resume()
           await Promise.allSettled([reading, changing])
@@ -255,7 +245,7 @@ it('filters seeded snapshots and entries through mount ownership', async () => {
     '/data',
     (path) => active && (path === '/data' || path === '/data/a'),
   )
-  const entry = new IndexEntry({ id: 'a', name: 'a', resourceType: 'file' })
+  const entry = new FileStat({ name: 'a', type: FileType.FILE, fingerprint: 'a' })
   try {
     view.seed(
       new Map([
@@ -276,7 +266,7 @@ it('filters seeded snapshots and entries through mount ownership', async () => {
   }
 })
 
-const ROW = new IndexEntry({ id: 'a', name: 'a', resourceType: 'file' })
+const ROW = new FileStat({ name: 'a', type: FileType.FILE, fingerprint: 'a' })
 
 function settleWithin<T>(work: Promise<T>, ms: number): Promise<'done' | 'pending'> {
   return Promise.race([
@@ -374,7 +364,7 @@ describe('a lock-held view', () => {
     }
     try {
       if (owned) {
-        expect((await store.get('/data/p')).entry?.id).toBe('a')
+        expect((await store.get('/data/p')).entry?.fingerprint).toBe('a')
         expect((await store.listDir('/data/full')).entries).toEqual(['/data/full/a'])
         expect((await store.listDir('/data/part')).partialEntries).toEqual(['/data/part/a'])
       } else {
@@ -403,7 +393,7 @@ class ExpirySpy extends RAMIndexCacheStore {
   readonly asked: (Date | null | undefined)[] = []
   override setDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
     options?: SetDirOptions,
   ): Promise<Evicted[]> {
@@ -412,7 +402,7 @@ class ExpirySpy extends RAMIndexCacheStore {
   }
   override setPartialDir(
     path: string,
-    entries: readonly [string, IndexEntry][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
   ): Promise<void> {
     this.asked.push(expiredAt)
@@ -573,8 +563,12 @@ describe('the view caps listing expiry at the mount ttl', () => {
 })
 
 describe('IndexView cleanup after a re-list', () => {
-  const row = (name: string, resourceType = 'file'): IndexEntry =>
-    new IndexEntry({ id: name, name, resourceType })
+  const row = (name: string, kind = 'file'): FileStat =>
+    new FileStat({
+      name,
+      type: kind === 'folder' ? FileType.DIRECTORY : FileType.FILE,
+      fingerprint: name,
+    })
 
   function ledger(): [Evicted[], (gone: readonly Evicted[]) => Promise<void>] {
     const seen: Evicted[] = []
@@ -704,7 +698,8 @@ describe('IndexView cleanup after a re-list', () => {
 })
 
 describe('the listing gate', () => {
-  const row = (name: string): IndexEntry => new IndexEntry({ id: name, name, resourceType: 'file' })
+  const row = (name: string): FileStat =>
+    new FileStat({ name, type: FileType.FILE, fingerprint: name })
 
   function gate(answer: boolean): [string[], (key: string) => Promise<boolean>] {
     const asked: string[] = []
@@ -962,7 +957,7 @@ it.each([false, true])('conditional replacement keeps ownership: %s', async (own
   if (old == null) throw new Error('missing seeded row')
   const view = new IndexView(store, new RAMFileCacheStore(), '/data', () => owned)
   expect(
-    await view.replaceIfUnchanged('/data/a', JSON.stringify(old), old.copyWith({ id: 'new' })),
+    await view.replaceIfUnchanged('/data/a', JSON.stringify(old), old.with({ fingerprint: 'new' })),
   ).toBe(owned)
-  expect((await store.get('/data/a')).entry?.id).toBe(owned ? 'new' : old.id)
+  expect((await store.get('/data/a')).entry?.fingerprint).toBe(owned ? 'new' : old.fingerprint)
 })

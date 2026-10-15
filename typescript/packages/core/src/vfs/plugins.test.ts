@@ -37,8 +37,6 @@ const PATH = new PathSpec({
 
 /** A plug-in VFS over the RAM store with only the required reads. */
 class Minimal extends BaseVFS<RAMAccessor> {
-  override readonly listsStats: boolean = true
-
   override readdir(path: PathSpec): Promise<FileStat[]> {
     return ramReaddir(this.accessor, path)
   }

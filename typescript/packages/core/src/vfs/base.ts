@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { Command } from '../commands/config.ts'
 import { enotsup } from '../errors/fs.ts'
 import type { ByteSource } from '../io/types.ts'
@@ -225,12 +224,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
   readonly handed: Readonly<Partial<Record<string, readonly (keyof Handed)[]>>> = {}
 
   /**
-   * Whether `readdir` answers stats for the mount to keep, rather than
-   * keeping its own listings in the index it takes. Python reads it off
-   * `readdir` taking no index.
-   */
-  readonly listsStats: boolean = false
-  /**
    * The version every listing of this mount is pinned at, when its ref names
    * a commit outright (github's full-sha ref; see `pinOf` in
    * vfs/github/github.ts for why that cannot move). A stored listing whose
@@ -327,10 +320,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** List the children of a directory. */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
-  readdir(
-    path: PathSpec,
-    _index?: IndexCacheStore | Handed,
-  ): Promise<string[] | readonly FileStat[] | DirListing> {
+  readdir(path: PathSpec, _handed?: Handed): Promise<readonly FileStat[] | DirListing> {
     return Promise.reject(enotsup(this.name, 'readdir', path))
   }
 
@@ -342,7 +332,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
   read(
     path: PathSpec,
-    _index?: IndexCacheStore | Handed,
+    _handed?: Handed,
     _offset = 0,
     _size: number | null = null,
     _signal?: AbortSignal,
@@ -352,7 +342,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** Describe a path; rejects with ENOENT when nothing is there. */
   @vfsCall({ effect: Effect.METADATA })
-  stat(path: PathSpec, _index?: IndexCacheStore | Handed): Promise<FileStat> {
+  stat(path: PathSpec, _handed?: Handed): Promise<FileStat> {
     return Promise.reject(enotsup(this.name, 'stat', path))
   }
 
@@ -360,11 +350,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * Stream a file's bytes as the caller pulls them. A VFS that does not
    * define it is read whole instead.
    */
-  readStream(
-    path: PathSpec,
-    _index?: IndexCacheStore | Handed,
-    _signal?: AbortSignal,
-  ): AsyncIterable<Uint8Array> {
+  readStream(path: PathSpec, _handed?: Handed, _signal?: AbortSignal): AsyncIterable<Uint8Array> {
     throw enotsup(this.name, 'readStream', path)
   }
 
@@ -386,11 +372,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * `max_read_rows`).
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  firstLines(
-    path: PathSpec,
-    _n: number,
-    _index?: IndexCacheStore | Handed,
-  ): Promise<Uint8Array | null> {
+  firstLines(path: PathSpec, _n: number, _handed?: Handed): Promise<Uint8Array | null> {
     return Promise.reject(enotsup(this.name, 'firstLines', path))
   }
 
@@ -405,11 +387,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * when the answer passes a ceiling on one read).
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  lastLines(
-    path: PathSpec,
-    _n: number,
-    _index?: IndexCacheStore | Handed,
-  ): Promise<Uint8Array | null> {
+  lastLines(path: PathSpec, _n: number, _handed?: Handed): Promise<Uint8Array | null> {
     return Promise.reject(enotsup(this.name, 'lastLines', path))
   }
 
@@ -422,7 +400,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * file's read error otherwise.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  lineCount(path: PathSpec, _index?: IndexCacheStore | Handed): Promise<number | null> {
+  lineCount(path: PathSpec, _handed?: Handed): Promise<number | null> {
     return Promise.reject(enotsup(this.name, 'lineCount', path))
   }
 
@@ -440,11 +418,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * with the file's read error otherwise.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  checksum(
-    path: PathSpec,
-    _algorithm: string,
-    _index?: IndexCacheStore | Handed,
-  ): Promise<string | null> {
+  checksum(path: PathSpec, _algorithm: string, _handed?: Handed): Promise<string | null> {
     return Promise.reject(enotsup(this.name, 'checksum', path))
   }
 
@@ -468,7 +442,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     path: PathSpec,
     _n: number,
     _interval: number,
-    _index?: IndexCacheStore | Handed,
+    _handed?: Handed,
   ): Promise<AsyncIterable<Uint8Array> | null> {
     return Promise.reject(enotsup(this.name, 'follow', path))
   }
@@ -487,10 +461,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * `read_tree`.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
-  readTree(
-    path: PathSpec,
-    _index?: IndexCacheStore | Handed,
-  ): Promise<Map<string, FileStat> | null> {
+  readTree(path: PathSpec, _handed?: Handed): Promise<Map<string, FileStat> | null> {
     return Promise.reject(enotsup(this.name, 'readTree', path))
   }
 
@@ -514,7 +485,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   append(
     path: PathSpec,
     _data: Uint8Array,
-    _index?: IndexCacheStore | Handed,
+    _handed?: Handed,
     _signal?: AbortSignal,
   ): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'append', path))
@@ -531,7 +502,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     path: PathSpec,
     _data: Uint8Array,
     _offset: number,
-    _index?: IndexCacheStore | Handed,
+    _handed?: Handed,
     _signal?: AbortSignal,
   ): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'pwrite', path))
@@ -551,7 +522,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /** Remove a file. */
   @vfsCall({ effect: Effect.REMOVE, target: Target.FILE })
-  unlink(path: PathSpec, _index?: IndexCacheStore | Handed): Promise<void> {
+  unlink(path: PathSpec, _handed?: Handed): Promise<void> {
     return Promise.reject(enotsup(this.name, 'unlink', path))
   }
 
@@ -560,7 +531,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * rmdir's hidden-remnant walk lists through.
    */
   @vfsCall({ effect: Effect.REMOVE, target: Target.DIR })
-  rmdir(path: PathSpec, _index?: IndexCacheStore | Handed): Promise<void> {
+  rmdir(path: PathSpec, _handed?: Handed): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rmdir', path))
   }
 
@@ -635,7 +606,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   search(
     path: PathSpec,
     _query: SearchQuery,
-    _index?: IndexCacheStore | Handed,
+    _handed?: Handed,
   ): Promise<[string, string][] | null> {
     return Promise.reject(enotsup(this.name, 'search', path))
   }
@@ -644,7 +615,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   searchMany(
     paths: PathSpec[],
     _query: SearchQuery,
-    _index?: IndexCacheStore | Handed,
+    _handed?: Handed,
   ): Promise<[string, string][] | null> {
     return Promise.reject(enotsup(this.name, 'search', paths[0] ?? ''))
   }
@@ -694,7 +665,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _path: PathSpec,
     _text: string,
     _opts: { wholeWord: boolean; ignoreCase: boolean },
-    _index?: IndexCacheStore | Handed,
+    _handed?: Handed,
   ): Promise<PathSpec[] | null> {
     return Promise.resolve(null)
   }
@@ -722,7 +693,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _path: PathSpec,
     _text: string,
     _opts: { ignoreCase: boolean },
-    _index?: IndexCacheStore | Handed,
+    _handed?: Handed,
   ): Promise<ByteSource | null> {
     return Promise.resolve(null)
   }
@@ -741,11 +712,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * @param index the mount's index.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
-  beforeFullScan(
-    _path: PathSpec,
-    _files: number | null,
-    _index?: IndexCacheStore | Handed,
-  ): Promise<void> {
+  beforeFullScan(_path: PathSpec, _files: number | null, _handed?: Handed): Promise<void> {
     return Promise.resolve()
   }
 

@@ -12,18 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { FileStat, FileType } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { enoent, enotdir } from '../../errors/fs.ts'
-import { IndexEntry, ListedMiss, LookupStatus } from './config.ts'
+import { LookupStatus } from './config.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import { IndexCacheStore } from './store.ts'
-import { entryOrListedMiss, entryOrWarm } from './warm.ts'
+import { entryOrWarm } from './warm.ts'
 
 const KEY = '/owned/notes.json'
 
-function entryFor(id: string): IndexEntry {
-  return new IndexEntry({ id, name: 'notes', resourceType: 'gdocs', vfsName: 'notes.json' })
+function entryFor(id: string): FileStat {
+  return new FileStat({ name: 'notes', type: FileType.FILE, fingerprint: id })
 }
 
 describe('cache/index/warm: entryOrWarm', () => {
@@ -35,7 +36,7 @@ describe('cache/index/warm: entryOrWarm', () => {
     ])
     expect((await index.listDir('/owned')).entries).toBeUndefined()
     expect((await index.get('/owned/old.json')).entry).toBeUndefined()
-    expect((await index.get(KEY)).entry?.id).toBe('new')
+    expect((await index.get(KEY)).entry?.fingerprint).toBe('new')
   })
 
   it('returns a warm hit without listing the parent', async () => {
@@ -46,7 +47,7 @@ describe('cache/index/warm: entryOrWarm', () => {
       calls += 1
       return Promise.resolve()
     })
-    expect(got?.id).toBe('doc-1')
+    expect(got?.fingerprint).toBe('doc-1')
     expect(calls).toBe(0)
   })
 
@@ -57,7 +58,7 @@ describe('cache/index/warm: entryOrWarm', () => {
       calls += 1
       await index.put(KEY, entryFor('doc-2'))
     })
-    expect(got?.id).toBe('doc-2')
+    expect(got?.fingerprint).toBe('doc-2')
     expect(calls).toBe(1)
   })
 
@@ -121,7 +122,7 @@ for (const backend of ['ram', 'redis']) {
             const listing = await index.listDir('/owned')
             expect(listing.entries).toBeUndefined()
             expect(listing.partialEntries).toEqual([KEY])
-            expect((await entryOrWarm(index, KEY, warm))?.id).toBe('current')
+            expect((await entryOrWarm(index, KEY, warm))?.fingerprint).toBe('current')
             expect(calls).toBe(0)
             expect(await entryOrWarm(index, '/owned/other.json', warm)).toBeNull()
             expect(calls).toBe(1)
@@ -135,9 +136,9 @@ for (const backend of ['ram', 'redis']) {
             else if (stale === 'prefix') await index.invalidatePrefix('/owned')
             else if (stale === 'all') await index.invalidate()
             else await index.clear()
-            expect((await entryOrWarm(index, KEY, warm))?.id).toBe('new')
+            expect((await entryOrWarm(index, KEY, warm))?.fingerprint).toBe('new')
             expect(calls).toBe(2)
-            expect((await entryOrWarm(index, KEY, warm))?.id).toBe('new')
+            expect((await entryOrWarm(index, KEY, warm))?.fingerprint).toBe('new')
             expect(calls).toBe(2)
             await index.setDir('/owned', [])
             expect((await index.listDir('/owned')).partialEntries).toBeUndefined()
@@ -183,13 +184,13 @@ for (const backend of ['ram', 'redis']) {
               // without ever publishing a complete parent directory.
               await index.put(KEY, entryFor('old'))
               if (invalidated) await index.invalidate()
-              expect((await index.get(KEY)).entry?.id).toBe('old')
+              expect((await index.get(KEY)).entry?.fingerprint).toBe('old')
               expect((await index.listDir('/owned')).status).toBe(LookupStatus.NOT_FOUND)
               for (let attempt = 0; attempt < 2; attempt += 1) {
                 if (outcome === 'error')
                   await expect(entryOrWarm(index, KEY, warm)).rejects.toThrow('unavailable')
                 else
-                  expect((await entryOrWarm(index, KEY, warm))?.id ?? null).toBe(
+                  expect((await entryOrWarm(index, KEY, warm))?.fingerprint ?? null).toBe(
                     outcome === 'updated' ? 'new' : null,
                   )
               }
@@ -197,7 +198,7 @@ for (const backend of ['ram', 'redis']) {
               expect(calls).toBe(incomplete ? 2 : 1)
               if (outcome !== 'updated') expect((await index.get(KEY)).entry ?? null).toBeNull()
               if (outcome === 'renamed')
-                expect((await index.get('/owned/renamed.json')).entry?.id).toBe('old')
+                expect((await index.get('/owned/renamed.json')).entry?.fingerprint).toBe('old')
             } finally {
               await index.clear()
               await index.close()
@@ -223,7 +224,7 @@ for (const backend of ['ram', 'redis']) {
         try {
           await index.put(KEY, entryFor('old'))
           await index.invalidate()
-          expect((await entryOrWarm(index, KEY, warm))?.id).toBe('new')
+          expect((await entryOrWarm(index, KEY, warm))?.fingerprint).toBe('new')
           expect(await entryOrWarm(index, KEY, warm)).toBeNull()
           expect(await entryOrWarm(index, KEY, warm)).toBeNull()
           expect(calls).toBe(3)
@@ -259,11 +260,11 @@ for (const backend of ['ram', 'redis']) {
           try {
             await index.setDir('/owned', [['notes.json', entryFor('old')]])
             await index.invalidate()
-            expect((await index.get(KEY)).entry?.id).toBe('old')
+            expect((await index.get(KEY)).entry?.fingerprint).toBe('old')
             if (outcome === 'error')
               await expect(entryOrWarm(index, KEY, warm)).rejects.toThrow('unavailable')
             else
-              expect((await entryOrWarm(index, KEY, warm))?.id ?? null).toBe(
+              expect((await entryOrWarm(index, KEY, warm))?.fingerprint ?? null).toBe(
                 outcome === 'updated' ? 'new' : null,
               )
             expect(calls).toBe(1)
@@ -319,7 +320,7 @@ for (const backend of ['ram', 'redis']) {
           const found = await Promise.all(
             keys.map((key) => entryOrWarm(index, `/owned/${key}`, warm)),
           )
-          expect(found.map((row) => row?.id)).toEqual(keys)
+          expect(found.map((row) => row?.fingerprint)).toEqual(keys)
           expect(calls).toBe(1)
         } finally {
           await index.clear()
@@ -358,7 +359,7 @@ it('keeps a partial refresh available through its own retry', async () => {
   })
   release()
   const found = await Promise.all([first, second])
-  expect(found.map((row) => row?.id)).toEqual(['1', '2'])
+  expect(found.map((row) => row?.fingerprint)).toEqual(['1', '2'])
 })
 
 it('releases a parent after the refresh rejects', async () => {
@@ -369,53 +370,5 @@ it('releases a parent after the refresh rejects', async () => {
   const found = await entryOrWarm(index, KEY, () =>
     index.setDir('/owned', [['notes.json', entryFor('new')]]),
   )
-  expect(found?.id).toBe('new')
-})
-
-function past(): Date {
-  return new Date(Date.now() - 1000)
-}
-
-class AskedIndex extends RAMIndexCacheStore {
-  readonly asked: string[] = []
-  listings = 0
-
-  constructor(private readonly listed: boolean) {
-    super()
-  }
-
-  override listedThisCommand(folder: string): boolean {
-    this.asked.push(folder)
-    return this.listed
-  }
-
-  override listDir(vfsPath: string): ReturnType<RAMIndexCacheStore['listDir']> {
-    this.listings += 1
-    return super.listDir(vfsPath)
-  }
-}
-
-describe('cache/index/warm: entryOrListedMiss', () => {
-  // Only a complete, unexpired listing the running command did not fetch
-  // answers UNTRUSTED; with no warm, every other state answers null, as
-  // entryOrWarm does. The trust question names the key's folder, and the
-  // answer rides the one listing read the lookup makes (one MGET of the whole
-  // folder on a Redis index).
-  it.each([
-    ['earlier-listing-lacks-it', false, 'absent', ListedMiss.UNTRUSTED],
-    ['this-command-listed-it', true, 'absent', null],
-    ['expired', false, 'expired', null],
-    ['partial', false, 'partial', null],
-    ['no-listing', false, 'none', null],
-  ] as const)('%s', async (_id, listed, state, found) => {
-    const index = new AskedIndex(listed)
-    if (state === 'absent') await index.setDir('/owned', [['old.json', entryFor('old')]])
-    if (state === 'expired') {
-      await index.setDir('/owned', [['old.json', entryFor('old')]], past())
-    }
-    if (state === 'partial') await index.setPartialDir('/owned', [['old.json', entryFor('old')]])
-    expect(await entryOrListedMiss(index, KEY, null)).toBe(found)
-    expect(index.asked.every((folder) => folder === '/owned')).toBe(true)
-    expect(index.listings).toBe(1)
-  })
+  expect(found?.fingerprint).toBe('new')
 })

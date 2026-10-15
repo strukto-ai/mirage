@@ -35,7 +35,6 @@ export interface TrelloVFSState {
 }
 
 export class TrelloVFS extends BaseVFS {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['parent'],

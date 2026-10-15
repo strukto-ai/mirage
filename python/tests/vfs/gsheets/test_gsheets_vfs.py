@@ -19,7 +19,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.index import IndexCacheStore
-from mirage.cache.index.config import IndexEntry
+from mirage.types import FileStat, FileType
 from mirage.vfs.gsheets import GSheetsConfig, GSheetsVFS
 from mirage.workspace.files import Files
 
@@ -39,12 +39,11 @@ async def test_readdir():
         [
             (
                 "Budget__sheet1.gsheet.json",
-                IndexEntry(
-                    id="sheet1",
+                FileStat(
                     name="Budget",
-                    resource_type="gsheets/sheet",
-                    remote_time="2026-04-01T00:00:00Z",
-                    vfs_name="Budget__sheet1.gsheet.json",
+                    type=FileType.FILE,
+                    modified="2026-04-01T00:00:00Z",
+                    fingerprint="sheet1",
                 ),
             )
         ],

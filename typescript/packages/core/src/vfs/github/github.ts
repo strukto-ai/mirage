@@ -123,7 +123,6 @@ export class GitHubVFS extends BaseVFS {
   }
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
-  override readonly listsStats: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],

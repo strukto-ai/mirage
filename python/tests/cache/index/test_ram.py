@@ -16,9 +16,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore
+from mirage.cache.index import RAMIndexCacheStore
 from mirage.cache.index.config import LookupStatus
 from mirage.cache.index.ram import ListingCheckStore
+from mirage.types import FileStat, FileType
 
 
 @pytest.fixture
@@ -28,14 +29,14 @@ def store():
 
 @pytest.mark.asyncio
 async def test_entries_stored_in_dict(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.put("/f.txt", entry)
     assert "/f.txt" in store._entries
 
 
 @pytest.mark.asyncio
 async def test_children_stored_in_dict(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.set_dir("/dir", [("f.txt", entry)])
     assert "/dir" in store._children
     assert store._children["/dir"] == ["/dir/f.txt"]
@@ -43,7 +44,7 @@ async def test_children_stored_in_dict(store):
 
 @pytest.mark.asyncio
 async def test_expiry_stored_in_dict(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.set_dir("/dir", [("f.txt", entry)])
     assert "/dir" in store._expiry
     assert isinstance(store._expiry["/dir"], datetime)
@@ -51,7 +52,7 @@ async def test_expiry_stored_in_dict(store):
 
 @pytest.mark.asyncio
 async def test_invalidate_dir_evicts_child_entries(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.set_dir("/dir", [("f.txt", entry)])
     assert (await store.get("/dir/f.txt")).entry is not None
     await store.invalidate_dir("/dir")
@@ -67,7 +68,7 @@ async def test_invalidate_dir_evicts_child_entries(store):
 # backend knows to refetch.
 @pytest.mark.asyncio
 async def test_invalidate_expires_without_discarding(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.set_dir("/dir", [("f.txt", entry)])
     await store.invalidate()
     assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
@@ -78,7 +79,7 @@ async def test_invalidate_expires_without_discarding(store):
 
 @pytest.mark.asyncio
 async def test_invalidate_expires_every_directory(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.set_dir("/a", [("f.txt", entry)])
     await store.set_dir("/b", [("g.txt", entry)])
     await store.invalidate()
@@ -96,7 +97,7 @@ async def test_invalidate_leaves_an_unlisted_directory_absent(store):
 
 @pytest.mark.asyncio
 async def test_clear_empties_all_dicts(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.put("/f.txt", entry)
     await store.set_dir("/dir", [("f.txt", entry)])
     await store.clear()
@@ -107,7 +108,7 @@ async def test_clear_empties_all_dicts(store):
 
 @pytest.mark.asyncio
 async def test_locks_cleaned_after_clear(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.put("/a", entry)
     await store.put("/b", entry)
     await store.clear()
@@ -116,7 +117,7 @@ async def test_locks_cleaned_after_clear(store):
 
 @pytest.mark.asyncio
 async def test_invalidate_prefix_drops_nested_listings(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.set_dir("/chan/2026-08-15", [("chat.jsonl", entry)])
     await store.set_dir("/chan/2026-08-15/files", [("a.png", entry)])
     await store.invalidate_prefix("/chan/2026-08-15")
@@ -127,7 +128,7 @@ async def test_invalidate_prefix_drops_nested_listings(store):
 
 @pytest.mark.asyncio
 async def test_invalidate_dir_leaves_nested_listing(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.set_dir("/chan/2026-08-15", [("chat.jsonl", entry)])
     await store.set_dir("/chan/2026-08-15/files", [("a.png", entry)])
     await store.invalidate_dir("/chan/2026-08-15")
@@ -136,7 +137,7 @@ async def test_invalidate_dir_leaves_nested_listing(store):
 
 @pytest.mark.asyncio
 async def test_invalidate_prefix_respects_path_boundary(store):
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await store.set_dir("/chan/day", [("a", entry)])
     await store.set_dir("/chan/daytime", [("b", entry)])
     await store.invalidate_prefix("/chan/day")
@@ -145,8 +146,8 @@ async def test_invalidate_prefix_respects_path_boundary(store):
     assert "/chan/daytime/b" in store._entries
 
 
-def _row(name: str = "c.txt") -> IndexEntry:
-    return IndexEntry(id="F1", name=name, resource_type="box/file")
+def _row(name: str = "c.txt") -> FileStat:
+    return FileStat(name=name, type=FileType.FILE, fingerprint="F1")
 
 
 @pytest.mark.asyncio

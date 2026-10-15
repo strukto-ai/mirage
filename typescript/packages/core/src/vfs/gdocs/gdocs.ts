@@ -59,7 +59,6 @@ export class GDocsVFS extends BaseVFS {
     this.accessor = new GDocsAccessor({ tokenManager: tm })
   }
 
-  override readonly listsStats: boolean = true
   override readonly handed = {
     unlink: ['entry'],
   } as const

@@ -22,7 +22,7 @@ from mirage.cache.context import publish_read
 from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import NULL_INDEX
-from mirage.cache.index.config import IndexEntry, LookupStatus
+from mirage.cache.index.config import LookupStatus
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
@@ -56,7 +56,10 @@ async def _seed(cache: RAMFileCacheStore, index: RAMIndexCacheStore) -> None:
     await index.set_dir(
         "/data/arch",
         [
-            ("h.txt", IndexEntry(id="h", name="h.txt", resource_type="file")),
+            (
+                "h.txt",
+                FileStat(name="h.txt", type=FileType.FILE, fingerprint="h"),
+            ),
         ],
     )
 
@@ -77,7 +80,7 @@ def test_write_evicts_file_and_parent_listing():
     assert listed is False
 
 
-async def _unlink_case() -> tuple[bool, bool, IndexEntry | None]:
+async def _unlink_case() -> tuple[bool, bool, FileStat | None]:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", True)
@@ -279,7 +282,7 @@ async def _subtree_case() -> tuple[bool, bool, bool, bool]:
     cache, index = _stores()
     await cache.set("/data/chan/day/chat.jsonl", b"one\n")
     await cache.set("/data/chan/day/files/a.png", b"png")
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir("/data/chan/day", [("chat.jsonl", entry)])
     await index.set_dir("/data/chan/day/files", [("a.png", entry)])
     await index.set_dir("/data/chan", [("day", entry)])
@@ -303,7 +306,7 @@ def test_invalidate_subtree_drops_nested_bodies_and_listings():
 
 async def _write_leaves_subtree_case() -> bool:
     cache, index = _stores()
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir("/data/chan/day/files", [("a.png", entry)])
     manager = CacheManager(cache, index, "/data/", True)
     await manager.invalidate_after_write(PathSpec.from_str_path("/chan/day"))
@@ -357,7 +360,10 @@ async def test_removing_a_file_does_unlink_work_and_nothing_more():
     await index.set_dir(
         "/data",
         [
-            (name, IndexEntry(id=name, name=name, resource_type="folder"))
+            (
+                name,
+                FileStat(name=name, type=FileType.DIRECTORY, fingerprint=name),
+            )
             for name in ("d", "e")
         ],
     )
@@ -380,9 +386,11 @@ async def test_removing_a_file_does_unlink_work_and_nothing_more():
     assert await cache.exists("/data/d/g") is True
     assert await cache.exists("/data/e/h") is True
     assert (await index.list_dir("/data")).entries == ["/data/d", "/data/e"]
-    assert {
-        key: row.resource_type for key, row in (await index.entries()).items()
-    } == {"/data/d": "folder", "/data/e": "folder", "/data/e/h": "file"}
+    assert {key: row.type for key, row in (await index.entries()).items()} == {
+        "/data/d": FileType.DIRECTORY,
+        "/data/e": FileType.DIRECTORY,
+        "/data/e/h": FileType.FILE,
+    }
     assert (await index.list_dir("/data/d")).entries is None
     assert (await index.list_dir("/data/e")).entries == ["/data/e/h"]
     assert evict.call_count == 0
@@ -413,7 +421,7 @@ async def test_a_failed_removal_still_drops_the_body_and_listings(stage):
 
 async def _prefix_lookalike_case() -> bool:
     cache, index = _stores()
-    entry = IndexEntry(id="1", name="f", resource_type="file")
+    entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir("/d/day", [("chat.jsonl", entry)])
     manager = CacheManager(cache, index, "/d/", True)
     await manager.invalidate_after_unlink(PathSpec.from_str_path("/day"))
@@ -427,8 +435,8 @@ def test_a_relative_path_that_looks_prefixed_is_still_prefixed():
     assert _run(_prefix_lookalike_case()) is False
 
 
-def _entry(name: str = "a") -> IndexEntry:
-    return IndexEntry(id=name, name=name, resource_type="file")
+def _entry(name: str = "a") -> FileStat:
+    return FileStat(name=name, type=FileType.FILE, fingerprint=name)
 
 
 async def _waits_for_the_lock(cache: RAMFileCacheStore, view) -> bool:
@@ -772,7 +780,10 @@ async def _relisted_gone(manager: CacheManager, index) -> None:
     await view.set_dir(
         "/data/arch",
         [
-            ("h.txt", IndexEntry(id="h", name="h.txt", resource_type="file")),
+            (
+                "h.txt",
+                FileStat(name="h.txt", type=FileType.FILE, fingerprint="h"),
+            ),
         ],
     )
     await view.set_dir("/data/arch", [])
@@ -889,8 +900,8 @@ async def test_retained_fallback_row_is_fenced(interference):
     manager = CacheManager(
         cache, index, "/data/", True, owns_path=lambda _: owns[0]
     )
-    old = IndexEntry(id="old", name="a", resource_type="file")
-    new = old.model_copy(update={"id": "confirmed"})
+    old = FileStat(name="a", type=FileType.FILE, fingerprint="old")
+    new = old.model_copy(update={"fingerprint": "confirmed"})
     await index.set_dir("/data", [("a", old)])
     listing = await index.list_dir("/data")
     old = (await index.get("/data/a")).entry
@@ -911,18 +922,20 @@ async def test_retained_fallback_row_is_fenced(interference):
                 PathSpec.from_str_path("/data/a")
             )
         elif interference == "replace":
-            await index.put("/data/a", old.model_copy(update={"id": "newer"}))
+            await index.put(
+                "/data/a", old.model_copy(update={"fingerprint": "newer"})
+            )
         elif interference == "unmount":
             owns[0] = False
     await pending
     row = (await index.get("/data/a")).entry
     if interference == "none":
-        assert row.id == new.id
+        assert row.fingerprint == new.fingerprint
         assert await index.list_dir("/data") == listing
     elif interference == "replace":
-        assert row.id == "newer"
+        assert row.fingerprint == "newer"
     else:
-        assert row is None or row.id == "old"
+        assert row is None or row.fingerprint == "old"
 
 
 @pytest.mark.asyncio
@@ -934,9 +947,7 @@ async def test_retention_cannot_overwrite_a_peer_workspace(
     manager = CacheManager(cache, index, "/data/", True)
     peer = CacheManager(RAMFileCacheStore(), index, "/data/", True)
     path = PathSpec.from_str_path("/data/a")
-    old = IndexEntry(
-        id="old", name="a", resource_type="file", index_time="old"
-    )
+    old = FileStat(name="a", type=FileType.FILE, fingerprint="old")
     latest = old.model_copy(update={"size": 9})
     await index.put(path.virtual, old)
     original_get = index.get
@@ -968,7 +979,7 @@ async def test_retention_cannot_overwrite_a_peer_workspace(
         path,
         manager.generation,
         old.model_dump_json(),
-        old.model_copy(update={"id": "confirmed"}),
+        old.model_copy(update={"fingerprint": "confirmed"}),
     )
     assert interferences == 1
     result = (await original_get(path.virtual)).entry

@@ -12,15 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type {
-  Evicted,
-  IndexEntry,
-  IndexRow,
-  IndexSnapshot,
-  ListResult,
-  LookupResult,
-  SetDirOptions,
-} from './config.ts'
+import type { FileStat } from '../../types.ts'
+import type { Evicted, IndexSnapshot, ListResult, LookupResult, SetDirOptions } from './config.ts'
 
 export abstract class IndexCacheStore {
   /** Seconds a listing lives when its writer names no expiry. */
@@ -31,7 +24,7 @@ export abstract class IndexCacheStore {
    * listed folder, and null clears it.
    */
   abstract seed(
-    entries: ReadonlyMap<string, IndexEntry>,
+    entries: ReadonlyMap<string, FileStat>,
     children: ReadonlyMap<string, readonly string[]>,
     expiresAt: Date,
     version?: string | null,
@@ -40,9 +33,9 @@ export abstract class IndexCacheStore {
   scopeSnapshot(snapshot: IndexSnapshot): IndexSnapshot {
     return snapshot
   }
-  abstract entries(): Promise<Map<string, IndexEntry>>
+  abstract entries(): Promise<Map<string, FileStat>>
   abstract get(vfsPath: string): Promise<LookupResult>
-  abstract put(vfsPath: string, entry: IndexRow): Promise<void>
+  abstract put(vfsPath: string, entry: FileStat): Promise<void>
   /**
    * Keep a row a create just made, named in its parent's listing. A listing
    * held for the parent gains the name, in order, and stays what it was: a
@@ -50,9 +43,9 @@ export abstract class IndexCacheStore {
    * With none held, the parent gets a partial listing that names the one
    * entry, which proves it without proving anything absent.
    */
-  abstract addEntry(vfsPath: string, entry: IndexRow): Promise<void>
+  abstract addEntry(vfsPath: string, entry: FileStat): Promise<void>
   /** Atomically replace an existing row without renewing its listing; custom stores may decline. */
-  replaceIfUnchanged(_path: string, _predecessor: string, _entry: IndexRow): Promise<boolean> {
+  replaceIfUnchanged(_path: string, _predecessor: string, _entry: FileStat): Promise<boolean> {
     return Promise.resolve(false)
   }
   abstract listDir(vfsPath: string): Promise<ListResult>
@@ -65,7 +58,7 @@ export abstract class IndexCacheStore {
    */
   abstract setDir(
     vfsPath: string,
-    entries: readonly [string, IndexRow][],
+    entries: readonly [string, FileStat][],
     expiredAt?: Date | null,
     options?: SetDirOptions,
   ): Promise<Evicted[]>
@@ -88,7 +81,7 @@ export abstract class IndexCacheStore {
    */
   async setPartialDir(
     vfsPath: string,
-    entries: readonly [string, IndexRow][],
+    entries: readonly [string, FileStat][],
     _expiredAt?: Date | null,
   ): Promise<void> {
     await this.invalidateDir(vfsPath)

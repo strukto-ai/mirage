@@ -17,12 +17,12 @@ from datetime import datetime
 
 from mirage.cache.index.config import (
     Evicted,
-    IndexRow,
     ListResult,
     LookupResult,
     LookupStatus,
 )
 from mirage.cache.index.store import IndexCacheStore
+from mirage.types import FileStat
 
 
 class NullIndexCacheStore(IndexCacheStore):
@@ -45,7 +45,7 @@ class NullIndexCacheStore(IndexCacheStore):
 
     def seed(
         self,
-        entries: dict[str, IndexRow],
+        entries: dict[str, FileStat],
         children: dict[str, list[str]],
         expires_at: datetime,
         *,
@@ -53,10 +53,10 @@ class NullIndexCacheStore(IndexCacheStore):
     ) -> None:
         return None
 
-    async def put(self, vfs_path: str, entry: IndexRow) -> None:
+    async def put(self, vfs_path: str, entry: FileStat) -> None:
         return None
 
-    async def add_entry(self, vfs_path: str, entry: IndexRow) -> None:
+    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
         return None
 
     async def list_dir(self, vfs_path: str) -> ListResult:
@@ -65,7 +65,7 @@ class NullIndexCacheStore(IndexCacheStore):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -74,7 +74,7 @@ class NullIndexCacheStore(IndexCacheStore):
     ) -> list[Evicted]:
         return []
 
-    async def entries(self) -> dict[str, IndexRow]:
+    async def entries(self) -> dict[str, FileStat]:
         return {}
 
     async def invalidate_entry(self, vfs_path: str) -> None:

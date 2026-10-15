@@ -14,7 +14,6 @@
 
 from collections.abc import Awaitable, Callable
 
-from mirage.cache.index.config import IndexRow
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.warm import entry_or_warm
 from mirage.errors.fs import enoent
@@ -102,7 +101,7 @@ async def keep_listing(
         listed (list[FileStat] | DirListing): the backend's answer.
     """
     listing = listed if isinstance(listed, DirListing) else DirListing(listed)
-    rows: list[tuple[str, IndexRow]] = [
+    rows: list[tuple[str, FileStat]] = [
         (row.name, row) for row in listing.entries
     ]
     if listing.partial:
@@ -113,7 +112,7 @@ async def keep_listing(
         )
     stem = "" if key == "/" else key
     for relative, children in listing.seeds.items():
-        seeded: list[tuple[str, IndexRow]] = [
+        seeded: list[tuple[str, FileStat]] = [
             (row.name, row) for row in children
         ]
         await index.set_dir(
@@ -223,7 +222,7 @@ async def keep_tree(
         tree (dict[str, FileStat]): the read, keyed below ``key``.
     """
     base = "" if key == "/" else key
-    listings: dict[str, list[tuple[str, IndexRow]]] = {key: []}
+    listings: dict[str, list[tuple[str, FileStat]]] = {key: []}
     for relative, row in sorted(tree.items()):
         if not relative:
             await index.put(key, row)

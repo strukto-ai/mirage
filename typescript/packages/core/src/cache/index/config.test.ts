@@ -12,64 +12,41 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { ZodError } from 'zod'
 import { errorSummary } from '../../secrets/summary.ts'
 import {
+  FileStatWireSchema,
   type IndexConfig,
   IndexDirectorySchema,
-  IndexEntry,
   IndexType,
   normalizeIndexConfig,
 } from './config.ts'
 
-// The one wire format: what pydantic writes for the Python IndexEntry,
-// snake_case and every field. `test_config.py` pins the same literal.
+// The one wire format a row is stored in: what pydantic writes for a
+// FileStat, snake_case and every field. `test_config.py` pins the same literal.
 const WIRE =
-  '{"id":"/a.txt","name":"a.txt","resource_type":"file","remote_time":"2026-01-01T00:00:00Z","index_time":"2026-01-01T00:00:00Z","vfs_name":"","size":6,"extra":{}}'
+  '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z","fingerprint":"v1","revision":null,"type":"file","content":"text","mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"extra":{}}'
 
-describe('IndexEntry JSON', () => {
-  it('stringifies to the JSON Python writes', () => {
-    const entry = new IndexEntry({
-      id: '/a.txt',
+describe('row JSON', () => {
+  it('stringifies to the JSON Python writes, and reads it back', () => {
+    const row = new FileStat({
       name: 'a.txt',
-      resourceType: 'file',
-      remoteTime: '2026-01-01T00:00:00Z',
-      indexTime: '2026-01-01T00:00:00Z',
       size: 6,
+      modified: '2026-01-01T00:00:00Z',
+      fingerprint: 'v1',
+      type: FileType.FILE,
+      content: ContentType.TEXT,
     })
-    expect(JSON.stringify(entry)).toBe(WIRE)
-  })
-
-  it('reads the JSON Python writes, defaults included', () => {
-    const entry = IndexEntry.fromJSON(
-      '{"id":"/b.txt","name":"b.txt","resource_type":"file","extra":{"size_bytes":9}}',
-    )
-    expect(entry).toEqual(
-      new IndexEntry({
-        id: '/b.txt',
-        name: 'b.txt',
-        resourceType: 'file',
-        extra: { size_bytes: 9 },
-      }),
-    )
-    expect(entry.remoteTime).toBe('')
-    expect(entry.size).toBeNull()
-  })
-
-  it('round-trips', () => {
-    const entry = IndexEntry.fromJSON(WIRE)
-    expect(JSON.stringify(entry)).toBe(WIRE)
+    expect(JSON.stringify(row)).toBe(WIRE)
+    expect(new FileStat(FileStatWireSchema.parse(JSON.parse(WIRE)))).toEqual(row)
   })
 
   // A row the schema refuses is an error, as `model_validate_json` raises,
   // never a hit with the field empty.
-  it('refuses a row missing a required field', () => {
-    expect(() => IndexEntry.fromJSON('{"id":"/c","name":"c"}')).toThrow()
-  })
-
-  it('refuses a camelCase row', () => {
-    expect(() => IndexEntry.fromJSON('{"id":"/c","name":"c","resourceType":"file"}')).toThrow()
+  it('refuses a row missing its type', () => {
+    expect(() => FileStatWireSchema.parse(JSON.parse('{"name":"c"}'))).toThrow()
   })
 })
 

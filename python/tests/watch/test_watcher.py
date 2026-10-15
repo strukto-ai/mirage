@@ -6,10 +6,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
-from mirage.cache.index.config import IndexEntry, LookupStatus
+from mirage.cache.index.config import LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.types import FileChangeKind, FileEvent, PathSpec
+from mirage.types import (
+    FileChangeKind,
+    FileEvent,
+    FileStat,
+    FileType,
+    PathSpec,
+)
 from mirage.watch.queue.ram import RAMWatchQueue
 from mirage.watch.source import Subscriber
 from mirage.watch.watcher import Watcher
@@ -123,7 +129,9 @@ async def test_a_nested_create_drops_every_listing_to_the_mount_root():
             [
                 (
                     "child",
-                    IndexEntry(id="1", name="child", resource_type="file"),
+                    FileStat(
+                        name="child", type=FileType.FILE, fingerprint="1"
+                    ),
                 )
             ],
         )
@@ -488,8 +496,11 @@ def _real_watcher() -> tuple[Watcher, RAMFileCacheStore, RAMIndexCacheStore]:
     return Watcher(FakeRegistry(entry)), cache, index
 
 
-def _row(name: str, kind: str = "file") -> IndexEntry:
-    return IndexEntry(id=name, name=name, resource_type=kind)
+def _row(name: str, kind: str = "file") -> FileStat:
+    folder = kind == "folder"
+    return FileStat(
+        name=name, type=FileType.DIRECTORY if folder else FileType.FILE
+    )
 
 
 @pytest.mark.asyncio

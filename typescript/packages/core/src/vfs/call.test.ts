@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import { enoent } from '../errors/fs.ts'
 import type { Action, VfsContext } from '../policy/types.ts'
 import { runWithSession } from '../context/session_context.ts'
@@ -36,8 +35,12 @@ class Shelf extends BaseVFS {
   override readonly cachesReads: boolean = true
   readonly files = new Map<string, Uint8Array>([['a.txt', ENC.encode('old\n')]])
 
-  override readdir(_path: PathSpec, _index?: IndexCacheStore): Promise<string[]> {
-    return Promise.resolve([...this.files.keys()].sort().map((name) => `/shelf/${name}`))
+  override readdir(_path: PathSpec): Promise<FileStat[]> {
+    return Promise.resolve(
+      [...this.files.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([name, data]) => new FileStat({ name, type: FileType.FILE, size: data.length })),
+    )
   }
 
   override read(path: PathSpec): Promise<Uint8Array> {

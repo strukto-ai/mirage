@@ -19,7 +19,6 @@ export interface WandbVFSState {
 }
 
 export class WandbVFS extends BaseVFS {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     stat: ['entry'],
   } as const

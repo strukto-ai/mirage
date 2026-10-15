@@ -48,8 +48,6 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     return `${this.name}:${workspace}:${volume}${rstripSlash(cfg.rootPath)}`
   }
 
-  override readonly listsStats: boolean = true
-
   override readdir(path: PathSpec): Promise<FileStat[]> {
     return dbxReaddir(this.accessor, path)
   }

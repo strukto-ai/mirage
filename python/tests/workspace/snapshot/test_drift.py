@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from mirage.cache.index.config import IndexEntry, IndexRow
 from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.observe.record import (
     CONTENT_CHANGING_OPS,
@@ -432,12 +431,14 @@ def test_a_drift_check_offers_no_hints():
             [
                 (
                     "a.txt",
-                    IndexEntry(id="1", name="a.txt", resource_type="file"),
+                    FileStat(
+                        name="a.txt", type=FileType.FILE, fingerprint="1"
+                    ),
                 )
             ],
         )
     )
-    seen: list[IndexRow | None] = []
+    seen: list[FileStat | None] = []
 
     async def call(op, path, index):
         assert (await restored.get("/m/a.txt")).entry is not None

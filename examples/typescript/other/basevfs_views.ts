@@ -55,13 +55,22 @@ class NotesVFS extends BaseVFS<NotesAccessor> {
     })
   }
 
-  override async readdir(path: PathSpec): Promise<string[]> {
+  override async readdir(path: PathSpec): Promise<FileStat[]> {
     if (path.vfsPath.replace(/^\/+|\/+$/g, '') !== '') {
       pageBytes(this.accessor, path)
       throw enotdir(path)
     }
-    const parent = path.virtual.replace(/\/+$/, '')
-    return [...this.accessor.pages.keys()].sort().map((name) => `${parent}/${name}`)
+    return [...this.accessor.pages.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(
+        ([name, page]) =>
+          new FileStat({
+            name,
+            type: FileType.FILE,
+            content: ContentType.TEXT,
+            size: ENC.encode(page).length,
+          }),
+      )
   }
 
   override async read(path: PathSpec): Promise<Uint8Array> {

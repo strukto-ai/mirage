@@ -15,12 +15,8 @@
 import { DiscordAccessor, type DiscordResourceLike } from '../../accessor/discord.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from '../../core/discord/client.ts'
-import { FileStat, FileType, MountMode } from '../../types.ts'
-import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { FileStat, FileType } from '../../types.ts'
 import { DiscordVFSBase } from './discord.ts'
-
-const PARSER = await getTestParser()
 
 export interface FakeCall {
   method: DiscordMethod
@@ -63,14 +59,6 @@ class FakeDiscordVFS extends DiscordVFSBase implements DiscordResourceLike {
 
 export function makeFakeVfs(transport: DiscordTransport): DiscordVFSBase {
   return new FakeDiscordVFS(new DiscordAccessor(transport))
-}
-
-/** The workspace a test asks the fake through, mounted at /mnt/discord. */
-export function mountDiscord(transport: DiscordTransport): Workspace {
-  return new Workspace(
-    { '/mnt/discord/': makeFakeVfs(transport) },
-    { mode: MountMode.WRITE, shellParser: PARSER },
-  )
 }
 
 export async function seedChannel(
@@ -118,25 +106,5 @@ export async function seedChannel(
     // The real day fetch seeds the files listing in the same write, so the
     // fixture does too; without it a walk would refetch the day.
     await index.setDir(`${dateKey}/files`, [])
-  }
-}
-
-/**
- * Run `line` in a workspace with the fake mounted at /mnt/discord and
- * channel general__C1 of guild My Server__G1 listed with `dates`.
- */
-export async function runDiscord(
-  transport: DiscordTransport,
-  line: string,
-  dates: string[],
-): Promise<{ stdout: string; exitCode: number }> {
-  const ws = mountDiscord(transport)
-  try {
-    const index = ws.mount('/mnt/discord').index
-    await seedChannel(index, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', { dates })
-    const io = await ws.shell(line)
-    return { stdout: new TextDecoder().decode(io.stdout), exitCode: io.exitCode }
-  } finally {
-    await ws.close()
   }
 }

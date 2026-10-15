@@ -34,9 +34,8 @@ sys.path[:] = [p for p in sys.path if p not in (_INTEG_DIR, "")]
 import asyncio
 import os
 
-from mirage import Workspace
+from mirage import FileStat, FileType, Workspace
 from mirage.cache.index import (
-    IndexEntry,
     LookupStatus,
     RedisIndexCacheStore,
     RedisIndexConfig,
@@ -94,19 +93,19 @@ async def write(prefix: str) -> None:
     """Record one listing with a file and a folder under it, and one
     empty listing."""
     ws, store = make_store(prefix)
-    file_entry = IndexEntry(
-        id=FILE,
+    file_entry = FileStat(
         name=FILE_NAME,
-        resource_type="file",
-        remote_time=REMOTE_TIME,
+        type=FileType.FILE,
+        modified=REMOTE_TIME,
         size=6,
+        fingerprint=FILE,
         extra=dict(EXTRA),
     )
-    folder_entry = IndexEntry(
-        id=f"{DIR}/{FOLDER_NAME}",
+    folder_entry = FileStat(
         name=FOLDER_NAME,
-        resource_type="folder",
-        remote_time=REMOTE_TIME,
+        type=FileType.DIRECTORY,
+        modified=REMOTE_TIME,
+        fingerprint=f"{DIR}/{FOLDER_NAME}",
     )
     await store.set_dir(
         DIR, [(FILE_NAME, file_entry), (FOLDER_NAME, folder_entry)]
@@ -136,13 +135,12 @@ async def read(prefix: str) -> None:
         "py read: entry field by field",
         entry is not None
         and got.status is None
-        and entry.id == FILE
+        and entry.fingerprint == FILE
         and entry.name == FILE_NAME
-        and entry.resource_type == "file"
-        and entry.remote_time == REMOTE_TIME
+        and entry.type is FileType.FILE
+        and entry.modified == REMOTE_TIME
         and entry.size == 6
-        and entry.extra == EXTRA
-        and entry.index_time != "",
+        and entry.extra == EXTRA,
         f"got {got!r}",
     )
     listing = await store.list_dir(DIR)
@@ -209,8 +207,10 @@ async def read(prefix: str) -> None:
         [
             (
                 FOLDER_NAME,
-                IndexEntry(
-                    id="replacement", name=FOLDER_NAME, resource_type="file"
+                FileStat(
+                    name=FOLDER_NAME,
+                    type=FileType.FILE,
+                    fingerprint="replacement",
                 ),
             )
         ],
@@ -218,7 +218,7 @@ async def read(prefix: str) -> None:
     replaced = await store.get(f"{DIR}/{FOLDER_NAME}")
     check(
         "py read: replacement file survives foreign subtree eviction",
-        replaced.entry is not None and replaced.entry.resource_type == "file",
+        replaced.entry is not None and replaced.entry.type is FileType.FILE,
     )
     for path in [
         f"{DIR}/{FOLDER_NAME}/{FILE_NAME}",

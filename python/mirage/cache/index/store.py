@@ -17,11 +17,11 @@ from datetime import datetime
 
 from mirage.cache.index.config import (
     Evicted,
-    IndexRow,
     IndexSnapshot,
     ListResult,
     LookupResult,
 )
+from mirage.types import FileStat
 
 
 class IndexCacheStore:
@@ -53,7 +53,7 @@ class IndexCacheStore:
 
     def seed(
         self,
-        entries: dict[str, IndexRow],
+        entries: dict[str, FileStat],
         children: dict[str, list[str]],
         expires_at: datetime,
         *,
@@ -64,7 +64,7 @@ class IndexCacheStore:
         Repeated seeds merge by path. Clear discards queued snapshots.
 
         Args:
-            entries (dict[str, IndexRow]): rows by path.
+            entries (dict[str, FileStat]): rows by path.
             children (dict[str, list[str]]): each listed folder's children.
             expires_at (datetime): when the listings expire.
             version (str | None): the backend version the snapshot was read
@@ -73,10 +73,10 @@ class IndexCacheStore:
         """
         raise NotImplementedError
 
-    async def put(self, vfs_path: str, entry: IndexRow) -> None:
+    async def put(self, vfs_path: str, entry: FileStat) -> None:
         raise NotImplementedError
 
-    async def add_entry(self, vfs_path: str, entry: IndexRow) -> None:
+    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
         """Keep a row a create just made, named in its parent's listing.
 
         A listing held for the parent gains the name, in order, and stays
@@ -87,12 +87,12 @@ class IndexCacheStore:
 
         Args:
             vfs_path (str): mount-absolute entry key.
-            entry (IndexRow): the created entry.
+            entry (FileStat): the created entry.
         """
         raise NotImplementedError
 
     async def replace_if_unchanged(
-        self, vfs_path: str, predecessor: str, entry: IndexRow
+        self, vfs_path: str, predecessor: str, entry: FileStat
     ) -> bool:
         """Replace an existing row atomically without renewing its listing.
 
@@ -101,7 +101,7 @@ class IndexCacheStore:
         Args:
             vfs_path (str): mount-absolute entry key.
             predecessor (str): serialized row captured before the probe.
-            entry (IndexRow): confirmed replacement metadata.
+            entry (FileStat): confirmed replacement metadata.
         """
         return False
 
@@ -111,7 +111,7 @@ class IndexCacheStore:
     async def set_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -129,7 +129,7 @@ class IndexCacheStore:
 
         Args:
             vfs_path (str): the listed directory's virtual path.
-            entries (Sequence[tuple[str, IndexRow]]): every child.
+            entries (Sequence[tuple[str, FileStat]]): every child.
             expired_at (datetime | None): optional freshness deadline.
             window (bool): the entries are a capped window, not every
                 child.
@@ -153,13 +153,13 @@ class IndexCacheStore:
         """
         return None
 
-    async def entries(self) -> dict[str, IndexRow]:
+    async def entries(self) -> dict[str, FileStat]:
         raise NotImplementedError
 
     async def set_partial_dir(
         self,
         vfs_path: str,
-        entries: Sequence[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, FileStat]],
         expired_at: datetime | None = None,
     ) -> None:
         """Cache observed children without claiming a complete directory.
@@ -172,7 +172,7 @@ class IndexCacheStore:
 
         Args:
             vfs_path (str): the listed directory's virtual path.
-            entries (Sequence[tuple[str, IndexRow]]): observed children.
+            entries (Sequence[tuple[str, FileStat]]): observed children.
             expired_at (datetime | None): optional freshness deadline.
         """
         await self.invalidate_dir(vfs_path)

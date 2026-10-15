@@ -16,7 +16,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { GitHubAccessor } from '../accessor/github.ts'
 import { read as githubRead } from '../core/github/read.ts'
 import { stat as githubStat } from '../core/github/stat.ts'
-import { IndexEntry } from '../cache/index/config.ts'
 import { LISTING_TRUST_WINDOW } from '../cache/index/constants.ts'
 import { shiftPerformanceNow } from '../cache/_test_util.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from '../cache/index/ram.ts'
@@ -492,10 +491,10 @@ it.each([
       const index = ws.mount('/data').index
       const nested = ws.mount('/data/sub/nested').index
       await index.setDir('/data', [
-        ['sub', new IndexEntry({ id: 'sub', name: 'sub', resourceType: 'folder' })],
+        ['sub', new FileStat({ name: 'sub', type: FileType.DIRECTORY, fingerprint: 'sub' })],
       ])
       await nested.setDir('/data/sub/nested', [
-        ['file', new IndexEntry({ id: 'file', name: 'file', resourceType: 'file' })],
+        ['file', new FileStat({ name: 'file', type: FileType.FILE, fingerprint: 'file' })],
       ])
       await ws.cache.set('/data/sub/old', ENC.encode('old'))
       await ws.cache.set('/data/sub/nested/file', ENC.encode('keep'))
@@ -504,10 +503,10 @@ it.each([
       await index.setDir(
         '/data',
         replacement
-          ? [['sub', new IndexEntry({ id: 'new', name: 'sub', resourceType: 'file' })]]
+          ? [['sub', new FileStat({ name: 'sub', type: FileType.FILE, fingerprint: 'new' })]]
           : [],
       )
-      if (replacement) expect((await index.get('/data/sub')).entry?.id).toBe('new')
+      if (replacement) expect((await index.get('/data/sub')).entry?.fingerprint).toBe('new')
       expect(await ws.cache.get('/data/sub/nested/file')).toEqual(ENC.encode('keep'))
       expect(ws.namespace.metaFor('/data/sub/nested/file')?.mode).toBe(0o640)
       expect((await nested.listDir('/data/sub/nested')).entries).toEqual(['/data/sub/nested/file'])
@@ -525,9 +524,9 @@ it('batches a thousand vanished children in one cleanup', async () => {
   try {
     await ws.namespace.ensureLoaded()
     const mount = ws.mount('/data')
-    const rows: [string, IndexEntry][] = Array.from({ length: 1000 }, (_, i) => [
+    const rows: [string, FileStat][] = Array.from({ length: 1000 }, (_, i) => [
       `file-${String(i)}`,
-      new IndexEntry({ id: String(i), name: `file-${String(i)}`, resourceType: 'file' }),
+      new FileStat({ name: `file-${String(i)}`, type: FileType.FILE, fingerprint: String(i) }),
     ])
     await mount.index.setDir('/data', rows)
     for (const [name] of rows) {
@@ -833,7 +832,7 @@ describe('the listing version gate', () => {
       await store(mount, '/m/a', 'v1')
       await mount.indexStore.put(
         '/m/f.txt',
-        new IndexEntry({ id: 'f', name: 'f.txt', resourceType: 'file' }),
+        new FileStat({ name: 'f.txt', type: FileType.FILE, fingerprint: 'f' }),
       )
       expect(await inCommand(rec, mount, '/m/a', 'v1')).toBe(false)
       expect(vfs.stats).toEqual(['/m'])
@@ -1040,13 +1039,13 @@ it('the probe hints the mount index row', async () => {
     await ws.namespace.ensureLoaded()
     const path = '/data/f.txt'
     const mount = withFresh(mountOf(ws, path))
-    const row = new IndexEntry({ id: 'F1', name: 'f.txt', resourceType: 'file' })
+    const row = new FileStat({ name: 'f.txt', type: FileType.FILE, fingerprint: 'F1' })
     await mount.indexStore.setDir('/data', [['f.txt', row]])
     await mount.indexStore.setDir('/elsewhere', [['g.txt', row]])
     const held = (await mount.index.get(path)).entry
     expect(held).toBeDefined()
     expect((await mount.indexStore.get('/elsewhere/g.txt')).entry).toBeDefined()
-    const seen: (IndexEntry | null)[] = []
+    const seen: (FileStat | null)[] = []
     vi.spyOn(mount, 'callKeyed').mockImplementation(async (_op, _p, _args, kwargs) => {
       const index = kwargs?.index
       if (!(index instanceof ListingCheckStore))

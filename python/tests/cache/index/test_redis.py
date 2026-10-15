@@ -19,8 +19,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import pytest_asyncio
 
-from mirage.cache.index import IndexEntry, LookupStatus
+from mirage.cache.index import LookupStatus
 from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.types import FileStat, FileType
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -37,12 +38,11 @@ async def store(redis_prefix):
 
 @pytest_asyncio.fixture()
 def entry():
-    return IndexEntry(
-        id="file1",
+    return FileStat(
         name="Test File",
-        resource_type="text/plain",
-        remote_time="2026-04-01T00:00:00.000Z",
-        vfs_name="test_file.txt",
+        type=FileType.FILE,
+        modified="2026-04-01T00:00:00.000Z",
+        fingerprint="file1",
     )
 
 
@@ -51,29 +51,8 @@ async def test_put_and_get(store, entry):
     await store.put("/folder/test_file.txt", entry)
     result = await store.get("/folder/test_file.txt")
     assert result.entry is not None
-    assert result.entry.id == "file1"
+    assert result.entry.fingerprint == "file1"
     assert result.entry.name == "Test File"
-
-
-@pytest.mark.asyncio
-async def test_put_sets_index_time(store, entry):
-    await store.put("/folder/test_file.txt", entry)
-    result = await store.get("/folder/test_file.txt")
-    assert result.entry is not None
-    assert result.entry.index_time != ""
-
-
-@pytest.mark.asyncio
-async def test_put_preserves_existing_index_time(store):
-    entry = IndexEntry(
-        id="b",
-        name="b.txt",
-        resource_type="file",
-        index_time="2026-01-01T00:00:00",
-    )
-    await store.put("/data/b.txt", entry)
-    result = await store.get("/data/b.txt")
-    assert result.entry.index_time == "2026-01-01T00:00:00"
 
 
 @pytest.mark.asyncio
@@ -94,15 +73,11 @@ async def test_set_dir_and_list(store):
     entries = [
         (
             "a.txt",
-            IndexEntry(
-                id="a", name="A", resource_type="text/plain", vfs_name="a.txt"
-            ),
+            FileStat(name="A", type=FileType.FILE, fingerprint="a"),
         ),
         (
             "b.txt",
-            IndexEntry(
-                id="b", name="B", resource_type="text/plain", vfs_name="b.txt"
-            ),
+            FileStat(name="B", type=FileType.FILE, fingerprint="b"),
         ),
     ]
     await store.set_dir("/mydir", entries)
@@ -116,12 +91,7 @@ async def test_set_dir_root(store):
     entries = [
         (
             "top.txt",
-            IndexEntry(
-                id="t",
-                name="T",
-                resource_type="text/plain",
-                vfs_name="top.txt",
-            ),
+            FileStat(name="T", type=FileType.FILE, fingerprint="t"),
         ),
     ]
     await store.set_dir("/", entries)
@@ -133,12 +103,12 @@ async def test_set_dir_root(store):
 @pytest.mark.asyncio
 async def test_set_dir_entries_are_retrievable(store):
     entries = [
-        ("x.csv", IndexEntry(id="x1", name="x.csv", resource_type="file"))
+        ("x.csv", FileStat(name="x.csv", type=FileType.FILE, fingerprint="x1"))
     ]
     await store.set_dir("/root", entries)
     result = await store.get("/root/x.csv")
     assert result.entry is not None
-    assert result.entry.id == "x1"
+    assert result.entry.fingerprint == "x1"
 
 
 @pytest.mark.asyncio
@@ -146,12 +116,7 @@ async def test_list_dir_expired(store):
     entries = [
         (
             "file.txt",
-            IndexEntry(
-                id="f",
-                name="F",
-                resource_type="text/plain",
-                vfs_name="file.txt",
-            ),
+            FileStat(name="F", type=FileType.FILE, fingerprint="f"),
         ),
     ]
     past = datetime.now(timezone.utc) + timedelta(seconds=1)
@@ -166,12 +131,7 @@ async def test_list_dir_fresh(store):
     entries = [
         (
             "file.txt",
-            IndexEntry(
-                id="f",
-                name="F",
-                resource_type="text/plain",
-                vfs_name="file.txt",
-            ),
+            FileStat(name="F", type=FileType.FILE, fingerprint="f"),
         ),
     ]
     future = datetime.now(timezone.utc) + timedelta(seconds=3600)
@@ -188,7 +148,7 @@ async def test_set_dir_overwrites_previous(store):
         [
             (
                 "old.txt",
-                IndexEntry(id="o", name="old.txt", resource_type="file"),
+                FileStat(name="old.txt", type=FileType.FILE, fingerprint="o"),
             )
         ],
     )
@@ -197,7 +157,7 @@ async def test_set_dir_overwrites_previous(store):
         [
             (
                 "new.txt",
-                IndexEntry(id="n", name="new.txt", resource_type="file"),
+                FileStat(name="new.txt", type=FileType.FILE, fingerprint="n"),
             )
         ],
     )
@@ -239,7 +199,9 @@ async def test_key_prefix_isolation(redis_prefix):
     )
     await s1.clear()
     await s2.clear()
-    await s1.put("/shared", IndexEntry(id="a", name="a", resource_type="file"))
+    await s1.put(
+        "/shared", FileStat(name="a", type=FileType.FILE, fingerprint="a")
+    )
     assert (await s2.get("/shared")).status == LookupStatus.NOT_FOUND
     assert (await s1.get("/shared")).entry is not None
     await s1.clear()
@@ -276,14 +238,14 @@ async def test_invalidate_prefix_handles_glob_metacharacters(store, entry):
     assert (await store.list_dir("/chan/ab")).entries is not None
 
 
-# The one wire format: what pydantic writes for IndexEntry, snake_case and
-# every field. `redis.test.ts` pins the same literal, so an entry either
-# language writes is one the other reads (#1020).
+# The one wire format: what pydantic writes for a FileStat, snake_case and
+# every field. `redis.test.ts` pins the same literal, so a row either
+# language writes is one the other reads.
 ENTRY_WIRE = (
-    '{"id":"/a.txt","name":"a.txt","resource_type":"file",'
-    '"remote_time":"2026-01-01T00:00:00Z",'
-    '"index_time":"2026-01-01T00:00:00Z","vfs_name":"","size":6,'
-    '"extra":{}}'
+    '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z",'
+    '"fingerprint":"/a.txt","revision":null,"type":"file","content":null,'
+    '"mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,'
+    '"birthtime":null,"dev":null,"extra":{}}'
 )
 
 
@@ -291,13 +253,12 @@ ENTRY_WIRE = (
 async def test_entry_wire_format_is_the_shared_json(store):
     await store.put(
         "/a.txt",
-        IndexEntry(
-            id="/a.txt",
+        FileStat(
             name="a.txt",
-            resource_type="file",
-            remote_time="2026-01-01T00:00:00Z",
-            index_time="2026-01-01T00:00:00Z",
+            type=FileType.FILE,
             size=6,
+            modified="2026-01-01T00:00:00Z",
+            fingerprint="/a.txt",
         ),
     )
     assert await store._client.get(store._entry_key("/a.txt")) == ENTRY_WIRE

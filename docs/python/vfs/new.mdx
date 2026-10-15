@@ -16,8 +16,7 @@ Everything an out-of-tree backend needs is exported from the `mirage` package ro
 ```python
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-from mirage import (NULL_INDEX, Accessor, BaseVFS, FileStat, IndexCacheStore,
-                    PathSpec)
+from mirage import Accessor, BaseVFS, FileStat, PathSpec
 
 
 class JiraConfig(BaseModel):
@@ -46,21 +45,13 @@ class JiraVFS(BaseVFS):
             prompt="Issues rendered as .json files.",
         )
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]: ...
+    async def readdir(self, path: PathSpec) -> list[FileStat]: ...
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes: ...
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat: ...
+    async def stat(self, path: PathSpec) -> FileStat: ...
 ```
 
 Mount it like any builtin: `Workspace({"/jira/": JiraVFS(cfg)})`. A class rather than a
@@ -81,9 +72,22 @@ available. A window of a file is cut from the whole `read` unless the class sets
 only the first bytes it sniffs. A derived stream still fetches the entire
 file; define `read_stream` for large files.
 
-`readdir` returns each child's full virtual path (the directory's
-`path.virtual` joined with the child's name), and `stat` sets `FileStat.name`
-to the base name alone. `ls`, `find` and `grep` print what these two return.
+`readdir` returns each child's `FileStat`, filled in as `stat` would fill
+it, with `name` the base name alone. The mount keeps the listing and answers a
+stat of anything it names from that row, so a listing costs one request.
+Return a `DirListing` when one fetch proves more: `seeds` for the descendant
+listings it also names, `partial=True` for a filtered or truncated view, and
+`window=True` for a capped one that proves nothing absent.
+
+A function that needs what a listing already holds declares it by parameter
+name: `entry` (the row at the path) and `parent` (the row of its folder), and
+for `rename`, `copy` and `dir_copy` also `dst_entry` and `dst_parent`. Each is
+`None` when nothing is there. The mount finds them in its stored listings and
+lists a folder only when none is stored, so a backend that addresses items by
+id reads the id off the row instead of resolving the path again. A function
+that creates something (`mkdir`, `create`, `write`) may return the new
+`FileStat`: the mount keeps it, and `mkdir -p` hands it as `parent` to the
+next level.
 
 Every other function is optional, and each stands alone:
 
@@ -172,8 +176,9 @@ The driver never sees the mount it runs under. The index store and the `vfs:` re
 | Namespace | The workspace owns symlinks, nested mounts and metadata overlays; the backend implements its own tree. |
 
 Use `path.vfs_path` to address your backend and `path.virtual` for workspace
-paths. Use the index passed to each function: the mount scopes it for
-ownership and freshness. Put shared behavior in the functions; a `commands=`
+paths. Return what a function lists or creates and let the mount keep it; a
+function sees the index only when it declares `index` (see point lookups
+below). Put shared behavior in the functions; a `commands=`
 override changes that shell command only. Optional mutations remain optional,
 and a function the VFS does not define reports `Operation not supported`.
 
@@ -192,10 +197,7 @@ from mirage import SearchQuery
 
 class JiraVFS(BaseVFS):
     async def search(
-        self,
-        path: PathSpec,
-        query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
+        self, path: PathSpec, query: SearchQuery
     ) -> list[tuple[str, str]] | None:
         # Interpret query.query and validate the options your resource supports.
         ...
@@ -254,9 +256,7 @@ from mirage.utils.key_prefix import mounted_path
 
 
 class WikiVFS(BaseVFS):
-    async def files_containing(
-        self, path, text, *, whole_word, ignore_case, index=NULL_INDEX
-    ):
+    async def files_containing(self, path, text, *, whole_word, ignore_case):
         if not whole_word:
             return None
         hits = await self.api.search(text, under=path.vfs_path)
@@ -264,7 +264,7 @@ class WikiVFS(BaseVFS):
             return None
         return [mounted_path(path, "/" + hit.key) for hit in hits]
 
-    async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
+    async def before_full_scan(self, path, *, files=None):
         if files is not None and files > 5000:
             raise ValueError(f"{files} files in scope, narrow the path")
 ```
@@ -383,15 +383,17 @@ Keep every import at module scope. If that creates a cycle, change the dependenc
 
 Implement only the operations the backend supports, as pure functions over the accessor. A read-only API-backed mount usually starts with:
 
-- `readdir(accessor, path, index)` returning child paths.
-- `read(accessor, path, index)` returning bytes.
-- `stat(accessor, path, index)` returning `FileStat`.
+- `readdir(accessor, path)` returning each child's `FileStat`, or a `DirListing`.
+- `read(accessor, path)` returning bytes.
+- `stat(accessor, path)` returning `FileStat`.
+
+Each may also take the handed `entry` and `parent`.
 
 Every client call passes `session=accessor.pool` (or takes the accessor, as Jaeger's does); without it `api_request` opens a fresh session per request. `tests/commands/test_client_calls_pass_session.py` fails a call that omits it.
 
-A hierarchy backend writes its tree once, as `SCOPES` in `core/<name>/scope.py`, and builds the three operations from it: `make_readdir(detect_scope, listers=...)`, `make_stat(detect_scope, readdir, entry_stats=...)` and `make_read(detect_scope, readers, stat=stat)`. The kit holds these rules, and a new backend keeps them:
+A hierarchy backend writes its tree once, as `SCOPES` in `core/<name>/scope.py`, and builds the three operations from it: `make_readdir(detect_scope, listers=...)`, `make_stat(detect_scope, guards=...)` and `make_read(detect_scope, readers, parented=True)`. The kit holds these rules, and a new backend keeps them:
 
-- A reader that reaches the API by the ids in the path slots passes `stat=` so the kit proves the file's parent through the listing first. Without it, a path outside the configured scope (Trello's `workspace_id` and `board_ids`) reads while `ls` and `stat` say it does not exist.
+- A backend whose readers reach the API by the ids in the path slots passes `parented=True`, so the kit proves the file's parent through the row its listing names first. Without it, a path outside the configured scope (Trello's `workspace_id` and `board_ids`) reads while `ls` and `stat` say it does not exist.
 - A listing that is a filtered or truncated view (one page of a bounded query, a time window, a glob-scoped span) returns `DirListing(entries, partial=True)`. Cached as the whole directory, it would prove every entry it left out absent.
 - `entry_stat("<id_key>", ...)` names the id under the key its path slot declares.
 - `FileStat.size` is the rendered byte length or `None`, never a storage-side number. Set `sizes_always_known` only when every listed size is computed from the same payload a read renders.
@@ -403,14 +405,13 @@ Use explicit types:
 
 ```python
 from mirage.accessor.base import Accessor
-from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, PathSpec
 
 
 async def stat(
     accessor: Accessor,
     path: PathSpec,
-    index: IndexCacheStore | None,
+    entry: FileStat | None = None,
 ) -> FileStat:
     ...
 ```
@@ -422,15 +423,12 @@ Add write, append, create, unlink, rename, or directory operations only when the
 The VFS class defines the functions, each a thin call into the core:
 
 ```python
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.my_vfs.readdir import readdir as _readdir
 
 
 class MyVFS(BaseVFS):
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await _readdir(self.accessor, path)
 ```
 
 The mount serves exactly what the class defines: commands and the dispatcher
@@ -459,7 +457,6 @@ Subclass `BaseVFS`, declare the facts as class attributes, and define the functi
 
 ```python
 from mirage.accessor.my_vfs import MyAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.my_vfs.read import read as _read
 from mirage.core.my_vfs.readdir import readdir as _readdir
 from mirage.core.my_vfs.stat import stat as _stat
@@ -477,24 +474,18 @@ class MyVFS(BaseVFS):
         self.config = config
         self.accessor = MyAccessor(config)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await _readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
-        return await _read(self.accessor, path, index)
+        return await _read(self.accessor, path)
 
     async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+        return await _stat(self.accessor, path, entry)
 ```
 
 The mount builds the commands and the dispatcher from the class when the driver is placed; a driver never registers anything onto itself.
@@ -507,9 +498,9 @@ A `read: fresh` mount re-stats a cached file through a throwaway store that
 starts with none of the mount's rows (`ListingCheckStore`), so no cached
 row answers the check.
 A backend with a path lookup answers with one request for that path (Dropbox).
-A backend that addresses items only by id may, after checking that the index
-is a `ListingCheckStore`, read the mount's last row for
-the path with `await index.hint(key)` and address one request by its id (Box);
+A backend that addresses items only by id may declare `index` on `stat`. Under
+the check it is handed that store and no rows, and may read the mount's last
+row for the path with `await index.hint(key)` and address one request by its id (Box);
 it must then confirm from that answer alone that the item still sits at
 exactly this path, and otherwise resolve the path as it always does. The hint
 is a lead, never an answer: a stat built from its fields would let a stale row
@@ -520,8 +511,8 @@ pass a freshness check.
 Under `read: fresh`, a cached listing the running command did not write is listed again, unless the backend declares what to check it against. Declare `listing_version` (`mirage.types.ListingVersion`) as a class attribute, like `read_revalidatable`:
 
 - `NONE` (the default): no version; every command re-lists.
-- `MOUNT`: one version covers every listing of the mount (GitHub and the Hub use the head commit). A stat of the mount root through the gate's empty check store (`mirage.cache.index.ram.ListingCheckStore`) asks the backend and returns it as `FileStat.fingerprint`; through any other index it names none and reads neither the index nor the backend, since nothing reads a root fingerprint off a mount-view stat. The tree fill seeds the same value with every listing it writes (`seed(..., version=...)`).
-- `FOLDER`: each listing carries its own folder's version (disk). A stat of the folder returns it as the fingerprint, and `readdir` reads it before listing and passes it to `set_dir(..., version=...)`, so a change during the scan leaves the stored version behind.
+- `MOUNT`: one version covers every listing of the mount (GitHub and the Hub use the head commit). A stat of the mount root through the gate's empty check store (`mirage.cache.index.ram.ListingCheckStore`) asks the backend and returns it as `FileStat.fingerprint`; through any other index it names none and reads neither the index nor the backend, since nothing reads a root fingerprint off a mount-view stat. Every listing the tree fill returns carries the same value (`DirListing(..., version=...)`).
+- `FOLDER`: each listing carries its own folder's version (disk). A stat of the folder returns it as the fingerprint, and `readdir` reads it before listing and returns it as `DirListing(..., version=...)`, so a change during the scan leaves the stored version behind.
 
 Take the version from a backend response, the same kind of token the stat answers, since the gate compares the two with `==`. Store `None` when there is nothing reliable to store; that listing re-lists.
 
@@ -629,7 +620,7 @@ snapshot behavior.
 
 ### Batch resource search
 
-A VFS may also define `search_many(paths, query, index)`. Use it when ranking
+A VFS may also define `search_many(paths, query)`. Use it when ranking
 and `top_k` must apply once across several paths. `search` remains required.
 Resource search commands use `search_many` when it is defined and otherwise
 concatenate single-path results; a declined request raises an error rather

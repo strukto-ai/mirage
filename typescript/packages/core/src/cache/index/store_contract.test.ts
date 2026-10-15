@@ -1,5 +1,6 @@
+import { FileStat, FileType } from '../../types.ts'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { IndexEntry, LookupStatus } from './config.ts'
+import { LookupStatus } from './config.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import { IndexCacheStore } from './store.ts'
@@ -8,17 +9,17 @@ import { RAMFileCacheStore } from '../file/ram.ts'
 
 const REDIS_URL = process.env.REDIS_URL
 
-function folder(name: string): IndexEntry {
-  return new IndexEntry({ id: name, name, resourceType: 'folder' })
+function folder(name: string): FileStat {
+  return new FileStat({ name, type: FileType.DIRECTORY, fingerprint: name })
 }
 
-function entry(name = 'a'): IndexEntry {
-  return new IndexEntry({
-    id: name,
+function entry(name = 'a'): FileStat {
+  return new FileStat({
     name,
-    resourceType: 'file',
+    type: FileType.FILE,
     size: 2,
-    remoteTime: '2026-09-05T10:55:39.123000Z',
+    modified: '2026-09-05T10:55:39.123000Z',
+    fingerprint: name,
     extra: { nested: { tags: ['x', 'y'] } },
   })
 }
@@ -67,10 +68,9 @@ for (const backend of ['ram', 'redis']) {
           const current = (await store.get('/dir/a')).entry
 
           if (current == null) throw new Error('missing seeded row')
-          expect(current.id).toBe('confirmed')
-          expect(current.indexTime).not.toBe('')
+          expect(current).toEqual(replacement)
           expect(await store.listDir('/dir')).toEqual(listing)
-          const pinned = replacement.copyWith({ indexTime: 'pinned' })
+          const pinned = replacement.with({ modified: 'pinned' })
           expect(await store.replaceIfUnchanged('/dir/a', JSON.stringify(current), pinned)).toBe(
             true,
           )
@@ -95,9 +95,9 @@ for (const backend of ['ram', 'redis']) {
       )
 
       it('conditional replacement observes pending seed', async () => {
-        const old = entry().copyWith({ indexTime: 'old' })
+        const old = entry().with({ modified: 'old' })
         await store.put('/dir/a', old)
-        const seeded = old.copyWith({ extra: { nested: { tags: ['changed'] } } })
+        const seeded = old.with({ extra: { nested: { tags: ['changed'] } } })
         store.seed(
           new Map([['/dir/a', seeded]]),
           new Map([['/dir', ['/dir/a']]]),
@@ -109,53 +109,42 @@ for (const backend of ['ram', 'redis']) {
         expect((await store.get('/dir/a')).entry).toEqual(seeded)
       })
 
-      // A backend may spell its kinds with its own prefix; a folder replaced
-      // by a file is the same swap either way.
-      const KINDS: [string, string][] = [
-        ['folder', 'file'],
-        ['dropbox/folder', 'dropbox/file'],
-      ]
-      const SWAPS = ['listed', 'invalidated', 'unlisted'].flatMap((prior) =>
-        KINDS.map(([folderKind, fileKind]) => [prior, folderKind, fileKind] as const),
-      )
-      it.each(SWAPS)(
-        'clears a directory replaced by a file (prior=%s, %s -> %s)',
-        async (prior, folderKind, fileKind) => {
-          const old = new IndexEntry({ id: 'sub', name: 'sub', resourceType: folderKind })
-          const next = new IndexEntry({ id: 'sub', name: 'sub', resourceType: fileKind })
-          if (prior === 'unlisted') await store.put('/dir/sub', old)
-          else await store.setDir('/dir', [['sub', old]])
-          await store.setDir('/dir/sub', [['old', entry('old')]])
-          await store.put('/dir/sub/unlisted', entry('unlisted'))
-          await store.setDir('/dir/sub/nested', [['keep', entry('keep')]])
-          await store.setDir('/dir/sub2', [['keep', entry('keep')]])
-          if (prior === 'invalidated') await store.invalidateDir('/dir')
-          expect(
-            await store.setDir('/dir', [['sub', next]], undefined, {
-              excluded: ['/dir/sub/nested'],
-            }),
-          ).toEqual([{ path: '/dir/sub', folder: true }])
-          expect((await store.get('/dir/sub')).entry?.resourceType).toBe(fileKind)
-          expect((await store.listDir('/dir')).entries).toEqual(['/dir/sub'])
-          expect((await store.listDir('/dir/sub')).status).toBe(LookupStatus.NOT_FOUND)
-          for (const path of ['/dir/sub/old', '/dir/sub/unlisted']) {
-            expect((await store.get(path)).status).toBe(LookupStatus.NOT_FOUND)
-          }
-          for (const path of ['/dir/sub/nested', '/dir/sub2']) {
-            expect((await store.listDir(path)).entries).toEqual([path + '/keep'])
-          }
-          expect(await store.setDir('/dir', [['sub', next]])).toEqual([])
-        },
-      )
+      const sub = (type: FileType): FileStat => new FileStat({ name: 'sub', type })
+      const PRIORS = ['listed', 'invalidated', 'unlisted']
+      it.each(PRIORS)('clears a directory replaced by a file (prior=%s)', async (prior) => {
+        const old = sub(FileType.DIRECTORY)
+        const next = sub(FileType.FILE)
+        if (prior === 'unlisted') await store.put('/dir/sub', old)
+        else await store.setDir('/dir', [['sub', old]])
+        await store.setDir('/dir/sub', [['old', entry('old')]])
+        await store.put('/dir/sub/unlisted', entry('unlisted'))
+        await store.setDir('/dir/sub/nested', [['keep', entry('keep')]])
+        await store.setDir('/dir/sub2', [['keep', entry('keep')]])
+        if (prior === 'invalidated') await store.invalidateDir('/dir')
+        expect(
+          await store.setDir('/dir', [['sub', next]], undefined, {
+            excluded: ['/dir/sub/nested'],
+          }),
+        ).toEqual([{ path: '/dir/sub', folder: true }])
+        expect((await store.get('/dir/sub')).entry?.type).toBe(FileType.FILE)
+        expect((await store.listDir('/dir')).entries).toEqual(['/dir/sub'])
+        expect((await store.listDir('/dir/sub')).status).toBe(LookupStatus.NOT_FOUND)
+        for (const path of ['/dir/sub/old', '/dir/sub/unlisted']) {
+          expect((await store.get(path)).status).toBe(LookupStatus.NOT_FOUND)
+        }
+        for (const path of ['/dir/sub/nested', '/dir/sub2']) {
+          expect((await store.listDir(path)).entries).toEqual([path + '/keep'])
+        }
+        expect(await store.setDir('/dir', [['sub', next]])).toEqual([])
+      })
 
-      // The folder's own listing was never cached, so only its row's kind
-      // says it was a folder; a store reading the generic type alone keeps
-      // the rows under it.
-      it.each(SWAPS)(
-        'clears rows under a folder known by its row, replaced by a file (prior=%s, %s -> %s)',
-        async (prior, folderKind, fileKind) => {
-          const old = new IndexEntry({ id: 'sub', name: 'sub', resourceType: folderKind })
-          const next = new IndexEntry({ id: 'sub', name: 'sub', resourceType: fileKind })
+      // The folder's own listing was never cached, so only its row's type
+      // says it was a folder.
+      it.each(PRIORS)(
+        'clears rows under a folder known by its row, replaced by a file (prior=%s)',
+        async (prior) => {
+          const old = sub(FileType.DIRECTORY)
+          const next = sub(FileType.FILE)
           if (prior === 'unlisted') await store.put('/dir/sub', old)
           else await store.setDir('/dir', [['sub', old]])
           await store.put('/dir/sub/stray', entry('stray'))
@@ -167,48 +156,17 @@ for (const backend of ['ram', 'redis']) {
         },
       )
 
-      // Only a type spelled as a file (`file` or `<backend>/file`) proves a
-      // folder became a file; `entity_file` ends in "file" without being one.
-      // Any other change of type proves nothing, so a cached subtree, and the
-      // overlays a cleanup would drop with it, stay.
-      const UNKNOWN: [string, string][] = [
-        ['trello/boards_dir', 'trello/board'],
-        ['dropbox/folder', 'postgres/entity_file'],
-      ]
-      it.each(
-        ['listed', 'invalidated', 'unlisted'].flatMap((prior) =>
-          UNKNOWN.map(([oldKind, newKind]) => [prior, oldKind, newKind] as const),
-        ),
-      )(
-        'preserves a subtree across an unknown change of kind (prior=%s, %s -> %s)',
-        async (prior, oldKind, newKind) => {
-          const old = new IndexEntry({ id: 'sub', name: 'sub', resourceType: oldKind })
-          const next = new IndexEntry({ id: 'sub', name: 'sub', resourceType: newKind })
-          if (prior === 'unlisted') await store.put('/dir/sub', old)
-          else await store.setDir('/dir', [['sub', old]])
-          await store.setDir('/dir/sub', [['keep', entry('keep')]])
-          if (prior === 'invalidated') await store.invalidateDir('/dir')
-          expect(await store.setDir('/dir', [['sub', next]])).toEqual([])
-          expect((await store.listDir('/dir/sub')).entries).toEqual(['/dir/sub/keep'])
-        },
-      )
-
-      it.each(['listed', 'invalidated', 'unlisted'])(
-        'preserves backend directory subtrees on re-list (prior=%s)',
-        async (prior) => {
-          for (const resourceType of ['wandb/directory', 'notion/page', 'dropbox/folder']) {
-            const child = new IndexEntry({ id: 'sub', name: 'sub', resourceType })
-            if (prior !== 'unlisted') await store.setDir('/dir', [['sub', child]])
-            await store.setDir('/dir/sub', [['keep', entry('keep')]])
-            if (prior === 'invalidated') await store.invalidateDir('/dir')
-            expect(await store.setDir('/dir', [['sub', child]])).toEqual([])
-            expect((await store.listDir('/dir/sub')).entries).toEqual(['/dir/sub/keep'])
-            expect((await store.get('/dir/sub/keep')).entry).toBeDefined()
-            expect(await store.setDir('/dir', [])).toEqual([{ path: '/dir/sub', folder: true }])
-            expect((await store.get('/dir/sub/keep')).status).toBe(LookupStatus.NOT_FOUND)
-          }
-        },
-      )
+      it.each(PRIORS)('preserves directory subtrees on re-list (prior=%s)', async (prior) => {
+        const child = sub(FileType.DIRECTORY)
+        if (prior !== 'unlisted') await store.setDir('/dir', [['sub', child]])
+        await store.setDir('/dir/sub', [['keep', entry('keep')]])
+        if (prior === 'invalidated') await store.invalidateDir('/dir')
+        expect(await store.setDir('/dir', [['sub', child]])).toEqual([])
+        expect((await store.listDir('/dir/sub')).entries).toEqual(['/dir/sub/keep'])
+        expect((await store.get('/dir/sub/keep')).entry).toBeDefined()
+        expect(await store.setDir('/dir', [])).toEqual([{ path: '/dir/sub', folder: true }])
+        expect((await store.get('/dir/sub/keep')).status).toBe(LookupStatus.NOT_FOUND)
+      })
 
       it('prefix invalidation preserves excluded subtrees', async () => {
         for (const path of ['/dir/nested', '/dir/nested/sub', '/dir/nested2']) {
@@ -254,9 +212,7 @@ for (const backend of ['ram', 'redis']) {
           ['a', entry()],
         ])
         expect((await store.listDir('/dir')).entries).toEqual(['/dir/b', '/dir/a'])
-        const got = (await store.get('/dir/a')).entry
-        expect(got).toEqual(entry().copyWith({ indexTime: got?.indexTime ?? '' }))
-        expect(got?.indexTime).not.toBe('')
+        expect((await store.get('/dir/a')).entry).toEqual(entry())
         await store.invalidateDir('/dir')
         expect((await store.listDir('/dir')).status).toBe(LookupStatus.NOT_FOUND)
         expect((await store.get('/dir/a')).status).toBe(LookupStatus.NOT_FOUND)
@@ -388,16 +344,7 @@ for (const backend of ['ram', 'redis']) {
         ['generation expired', ['/d/sub'], null, 'invalidated', '/d', true],
         ['file row', [], ['/d', 'file'], 'normal', '/d', false],
         ['folder row', [], ['/d', 'folder'], 'normal', '/d', false],
-        ['backend folder row', [], ['/d', 'box/folder'], 'normal', '/d', false],
         ['listing below file row', ['/d/sub'], ['/d', 'file'], 'normal', '/d', true],
-        [
-          'listing below backend folder row',
-          ['/d/sub'],
-          ['/d', 'box/folder'],
-          'normal',
-          '/d',
-          true,
-        ],
         ['buried listings', ['/', '/d', '/d/sub'], null, 'buried', '/d', false],
         ['row below', [], ['/d/sub/f', 'file'], 'normal', '/d', false],
         ['lookalikes', ['/d-old/sub', '/d.bak', '/dx'], null, 'normal', '/d', false],
@@ -409,7 +356,8 @@ for (const backend of ['ram', 'redis']) {
         ['partial', ['/d/sub'], null, 'partial', '/d', true],
       ])('holdsSubtree: %s', async (_name, listings, row, state, probe, expected) => {
         if (row !== null) {
-          await store.put(row[0], new IndexEntry({ id: 'row', name: 'row', resourceType: row[1] }))
+          const kind = row[1] === 'folder' ? FileType.DIRECTORY : FileType.FILE
+          await store.put(row[0], new FileStat({ name: 'row', type: kind }))
         }
         if (state === 'seeded') {
           store.seed(
@@ -637,7 +585,7 @@ for (const backend of ['ram', 'redis']) {
             { path: '/dir/sub', folder: true },
           ])
           expect((await store.get('/dir/sub/orphan')).status).toBe(LookupStatus.NOT_FOUND)
-          if (retained) expect((await store.get('/dir/sub')).entry?.resourceType).toBe('file')
+          if (retained) expect((await store.get('/dir/sub')).entry?.type).toBe(FileType.FILE)
           else expect((await store.get('/dir/sub')).status).toBe(LookupStatus.NOT_FOUND)
         },
       )

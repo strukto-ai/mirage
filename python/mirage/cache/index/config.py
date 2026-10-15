@@ -14,44 +14,11 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from mirage.cache.index.constants import DEFAULT_KEY_PREFIX
-from mirage.types import FileStat, FileType
-
-
-class ResourceType(str, Enum):
-    FILE = "file"
-    FOLDER = "folder"
-
-
-def is_folder_kind(resource_type: str) -> bool:
-    """Whether a row's type names a folder: ``folder`` or ``<backend>/folder``.
-
-    A backend may spell its kinds under its own prefix (``dropbox/folder``);
-    a type outside that convention (``wandb/directory``) is neither kind.
-
-    Args:
-        resource_type (str): the row's ``resource_type``.
-    """
-    return _is_kind(resource_type, ResourceType.FOLDER)
-
-
-def is_file_kind(resource_type: str) -> bool:
-    """Whether a row's type names a file: ``file`` or ``<backend>/file``.
-
-    Args:
-        resource_type (str): the row's ``resource_type``.
-    """
-    return _is_kind(resource_type, ResourceType.FILE)
-
-
-def _is_kind(resource_type: str, kind: ResourceType) -> bool:
-    return resource_type == kind.value or resource_type.endswith(
-        "/" + kind.value
-    )
+from mirage.types import FileStat
 
 
 class IndexType(str, Enum):
@@ -64,62 +31,6 @@ class LookupStatus(str, Enum):
     NOT_FOUND = "not_found"
 
 
-class ListedMiss(Enum):
-    """A name missing from a cached listing this command did not fetch."""
-
-    UNTRUSTED = "untrusted"
-
-
-class IndexEntry(BaseModel):
-    id: str
-    name: str
-    resource_type: str
-    remote_time: str = ""
-    index_time: str = ""
-    vfs_name: str = ""
-    size: int | None = None
-    extra: dict[str, Any] = Field(default_factory=dict)
-
-
-# What the index holds at a path: a backend's stat of it, or the older
-# row a backend that has not moved to stats still writes.
-IndexRow: TypeAlias = IndexEntry | FileStat
-
-
-def row_is_folder(row: IndexRow) -> bool:
-    """Whether an index row names a folder.
-
-    Args:
-        row (IndexRow): the row.
-    """
-    if isinstance(row, FileStat):
-        return row.type is FileType.DIRECTORY
-    return is_folder_kind(row.resource_type)
-
-
-def row_is_file(row: IndexRow) -> bool:
-    """Whether an index row names a file.
-
-    Args:
-        row (IndexRow): the row.
-    """
-    if isinstance(row, FileStat):
-        return row.type is not FileType.DIRECTORY
-    return is_file_kind(row.resource_type)
-
-
-def stamped(row: IndexRow, now_iso: str) -> IndexRow:
-    """``row`` with the time it was indexed, when it carries one.
-
-    Args:
-        row (IndexRow): the row.
-        now_iso (str): the time to stamp.
-    """
-    if isinstance(row, FileStat) or row.index_time:
-        return row
-    return row.model_copy(update={"index_time": now_iso})
-
-
 @dataclass(frozen=True, slots=True)
 class IndexSnapshot:
     """Entry rows and directory children from one refill.
@@ -127,7 +38,7 @@ class IndexSnapshot:
     ``version`` is the backend's version the rows were read at, or None.
     """
 
-    entries: dict[str, IndexRow]
+    entries: dict[str, FileStat]
     children: dict[str, list[str]]
     version: str | None = None
 
@@ -145,7 +56,7 @@ class Evicted:
 
 
 class LookupResult(BaseModel):
-    entry: IndexRow | None = None
+    entry: FileStat | None = None
     status: LookupStatus | None = None
 
 

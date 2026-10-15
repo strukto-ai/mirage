@@ -307,21 +307,15 @@ def _without_accessor(method: Callable[..., Any]) -> OperationFn:
 async def _listed_paths(
     vfs: BaseVFS, path: PathSpec, index: IndexCacheStore = NULL_INDEX
 ) -> list[str]:
-    """A VFS's listing as the paths a command walks.
-
-    A VFS that answers its children's stats is listed bare, with no
-    dispatcher to keep them: each stat names a child of ``path``.
+    """A VFS's listing as the paths a command walks, listed bare with no
+    dispatcher to keep its rows: each row names a child of ``path``.
 
     Args:
         vfs (BaseVFS): the VFS.
         path (PathSpec): the directory.
-        index (IndexCacheStore): the command's index, for a VFS that
-            keeps its own listings.
+        index (IndexCacheStore): unused; the command table's signature.
     """
-    readdir: Callable[..., Awaitable[Any]] = vfs.readdir
-    if "index" in inspect.signature(readdir).parameters:
-        return list(await readdir(path, index=index))
-    listed = await readdir(path)
+    listed = await vfs.readdir(path)
     rows = listed.entries if isinstance(listed, DirListing) else listed
     base = (path.dir if path.pattern else path).virtual.rstrip("/")
     return [f"{base}/{row.name}" for row in rows]

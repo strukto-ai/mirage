@@ -22,7 +22,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../types.ts'
 import { withCacheMutation } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
-import { IndexEntry, LookupStatus } from './index/config.ts'
+import { LookupStatus } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { RedisIndexCacheStore } from './index/redis.ts'
@@ -48,13 +48,13 @@ async function seeded(): Promise<[RAMFileCacheStore, RAMIndexCacheStore]> {
   const index = new RAMIndexCacheStore({ ttl: 600 })
   await cache.set('/data/arch/h.txt', new TextEncoder().encode('two\n'))
   await index.setDir('/data/arch', [
-    ['h.txt', new IndexEntry({ id: 'h', name: 'h.txt', resourceType: 'file' })],
+    ['h.txt', new FileStat({ name: 'h.txt', type: FileType.FILE, fingerprint: 'h' })],
   ])
   return [cache, index]
 }
 
-function file(name: string): IndexEntry {
-  return new IndexEntry({ id: name, name, resourceType: 'file' })
+function file(name: string): FileStat {
+  return new FileStat({ name, type: FileType.FILE, fingerprint: name })
 }
 
 const REDIS_URL = process.env.REDIS_URL
@@ -150,7 +150,7 @@ describe('CacheManager', () => {
   it('invalidateSubtree drops nested bodies and listings', async () => {
     const cache = new RAMFileCacheStore()
     const index = new RAMIndexCacheStore({ ttl: 600 })
-    const entry = new IndexEntry({ id: '1', name: 'f', resourceType: 'file' })
+    const entry = new FileStat({ name: 'f', type: FileType.FILE, fingerprint: '1' })
     await cache.set('/data/chan/day/chat.jsonl', new TextEncoder().encode('one\n'))
     await cache.set('/data/chan/day/files/a.png', new TextEncoder().encode('png'))
     await index.setDir('/data/chan/day', [['chat.jsonl', entry]])
@@ -167,7 +167,7 @@ describe('CacheManager', () => {
   it('a write does not reach into the subtree', async () => {
     const cache = new RAMFileCacheStore()
     const index = new RAMIndexCacheStore({ ttl: 600 })
-    const entry = new IndexEntry({ id: '1', name: 'f', resourceType: 'file' })
+    const entry = new FileStat({ name: 'f', type: FileType.FILE, fingerprint: '1' })
     await index.setDir('/data/chan/day/files', [['a.png', entry]])
     const manager = new CacheManager(cache, index, '/data/', true)
     await manager.invalidateAfterWrite(PathSpec.fromStrPath('/chan/day'))
@@ -224,7 +224,10 @@ describe('CacheManager', () => {
     await cache.set('/data/e/h', new TextEncoder().encode('h'))
     await index.setDir(
       '/data',
-      ['d', 'e'].map((name) => [name, new IndexEntry({ id: name, name, resourceType: 'folder' })]),
+      ['d', 'e'].map((name) => [
+        name,
+        new FileStat({ name, type: FileType.DIRECTORY, fingerprint: name }),
+      ]),
     )
     await index.setDir('/data/d', [
       ['f', file('f')],
@@ -241,11 +244,11 @@ describe('CacheManager', () => {
     expect(await cache.exists('/data/e/h')).toBe(true)
     expect((await index.listDir('/data')).entries).toEqual(['/data/d', '/data/e'])
     expect(
-      Object.fromEntries([...(await index.entries())].map(([key, row]) => [key, row.resourceType])),
+      Object.fromEntries([...(await index.entries())].map(([key, row]) => [key, row.type])),
     ).toEqual({
-      '/data/d': 'folder',
-      '/data/e': 'folder',
-      '/data/e/h': 'file',
+      '/data/d': FileType.DIRECTORY,
+      '/data/e': FileType.DIRECTORY,
+      '/data/e/h': FileType.FILE,
     })
     expect((await index.listDir('/data/d')).entries).toBeUndefined()
     expect((await index.listDir('/data/e')).entries).toEqual(['/data/e/h'])
@@ -314,7 +317,7 @@ describe('CacheManager', () => {
     // which is an eviction that hits no key.
     const cache = new RAMFileCacheStore()
     const index = new RAMIndexCacheStore({ ttl: 600 })
-    const entry = new IndexEntry({ id: '1', name: 'f', resourceType: 'file' })
+    const entry = new FileStat({ name: 'f', type: FileType.FILE, fingerprint: '1' })
     await index.setDir('/d/day', [['chat.jsonl', entry]])
     const manager = new CacheManager(cache, index, '/d/', true)
     await manager.invalidateAfterUnlink(PathSpec.fromStrPath('/day'))
@@ -395,7 +398,7 @@ describe('CacheManager index views', () => {
     const view = manager.scopeIndex(b)
     expect((view as IndexView).store).toBe(b)
     await view.setDir('/data', [
-      ['x', new IndexEntry({ id: 'x', name: 'x', resourceType: 'file' })],
+      ['x', new FileStat({ name: 'x', type: FileType.FILE, fingerprint: 'x' })],
     ])
     expect((await b.listDir('/data')).entries).toEqual(['/data/x'])
     expect((await a.listDir('/data')).entries).toBeUndefined()
@@ -711,7 +714,7 @@ describe('what a probe saw this command', () => {
       async (m, index) => {
         const view = m.scopeIndex(index)
         await view.setDir('/data/arch', [
-          ['h.txt', new IndexEntry({ id: 'h', name: 'h.txt', resourceType: 'file' })],
+          ['h.txt', new FileStat({ name: 'h.txt', type: FileType.FILE, fingerprint: 'h' })],
         ])
         await view.setDir('/data/arch', [])
       },
@@ -775,8 +778,8 @@ it.each(['none', 'write', 'replace', 'unmount'])(
     const index = new RAMIndexCacheStore()
     let owns = true
     const manager = new CacheManager(cache, index, '/data/', true, () => owns)
-    let old = new IndexEntry({ id: 'old', name: 'a', resourceType: 'file' })
-    const confirmed = old.copyWith({ id: 'confirmed' })
+    let old = new FileStat({ name: 'a', type: FileType.FILE, fingerprint: 'old' })
+    const confirmed = old.with({ fingerprint: 'confirmed' })
     await index.setDir('/data', [['a', old]])
     const listing = await index.listDir('/data')
     old = (await index.get('/data/a')).entry ?? old
@@ -791,16 +794,17 @@ it.each(['none', 'write', 'replace', 'unmount'])(
       )
       await Promise.resolve()
       if (interference === 'write') await manager.invalidateAfterWrite('/data/a')
-      else if (interference === 'replace') await index.put('/data/a', old.copyWith({ id: 'newer' }))
+      else if (interference === 'replace')
+        await index.put('/data/a', old.with({ fingerprint: 'newer' }))
       else if (interference === 'unmount') owns = false
     })
     await pending
     const row = (await index.get('/data/a')).entry
     if (interference === 'none') {
-      expect(row?.id).toBe(confirmed.id)
+      expect(row?.fingerprint).toBe(confirmed.fingerprint)
       expect(await index.listDir('/data')).toEqual(listing)
-    } else if (interference === 'replace') expect(row?.id).toBe('newer')
-    else expect(row == null || row.id === 'old').toBe(true)
+    } else if (interference === 'replace') expect(row?.fingerprint).toBe('newer')
+    else expect(row == null || row.fingerprint === 'old').toBe(true)
   },
 )
 
@@ -811,8 +815,8 @@ it.each(['replace', 'delete'])(
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     const peer = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     const path = PathSpec.fromStrPath('/data/a')
-    const old = new IndexEntry({ id: 'old', name: 'a', resourceType: 'file', indexTime: 'old' })
-    const latest = old.copyWith({ size: 9 })
+    const old = new FileStat({ name: 'a', type: FileType.FILE, fingerprint: 'old' })
+    const latest = old.with({ size: 9 })
     await index.put(path.virtual, old)
     const originalGet = index.get.bind(index)
     let interferences = 0
@@ -840,7 +844,7 @@ it.each(['replace', 'delete'])(
         path,
         manager.generation,
         JSON.stringify(old),
-        old.copyWith({ id: 'confirmed' }),
+        old.with({ fingerprint: 'confirmed' }),
       )
       expect(interferences).toBe(1)
       expect((await originalGet(path.virtual)).entry ?? null).toEqual(

@@ -135,8 +135,8 @@ describe('Mount.runCommand glob operands', () => {
   // would destroy what the handler needs. Python's dispatcher never
   // expands either.
   class GlobbingVFS extends StubVFS {
-    override readdir(): Promise<string[]> {
-      return Promise.resolve(['/ram/a.txt'])
+    override readdir(): Promise<FileStat[]> {
+      return Promise.resolve([new FileStat({ name: 'a.txt', type: FileType.FILE })])
     }
   }
   const pattern = new PathSpec({

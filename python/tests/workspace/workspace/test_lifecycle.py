@@ -24,7 +24,6 @@ import pytest
 
 from mirage.cache.index.config import (
     IndexConfig,
-    IndexEntry,
     LookupStatus,
     RedisIndexConfig,
 )
@@ -41,7 +40,14 @@ from mirage.shell.console import (
     RAMConsoleStore,
 )
 from mirage.shell.job_table import JobStatus
-from mirage.types import CapacityResult, CapacityState, MountMode, PathSpec
+from mirage.types import (
+    CapacityResult,
+    CapacityState,
+    FileStat,
+    FileType,
+    MountMode,
+    PathSpec,
+)
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.vfs.call import vfs_call
@@ -107,7 +113,9 @@ async def test_first_mount_access_prepares_expansion(action):
         [
             (
                 "stale.txt",
-                IndexEntry(id="old", name="stale.txt", resource_type="file"),
+                FileStat(
+                    name="stale.txt", type=FileType.FILE, fingerprint="old"
+                ),
             )
         ],
     )
@@ -382,7 +390,7 @@ async def test_mount_change_invalidates_index_before_replacement(
     ws = Workspace({"/" if shadow else "/data": vfs}, index=config)
     ws.add_mount("/alias", vfs)
     index = ws.mount("/" if shadow else "/data").index_store
-    entry = IndexEntry(id="old", name="private.txt", resource_type="file")
+    entry = FileStat(name="private.txt", type=FileType.FILE, fingerprint="old")
     try:
         await index.put("/data", entry)
         for path in ("/data", "/data/nested", "/database", "/alias"):
@@ -983,7 +991,9 @@ async def test_unmount_drains_metadata_glob_and_its_index_writes(monkeypatch):
             [
                 (
                     "late",
-                    IndexEntry(id="late", name="late", resource_type="file"),
+                    FileStat(
+                        name="late", type=FileType.FILE, fingerprint="late"
+                    ),
                 )
             ],
         )
@@ -1042,8 +1052,8 @@ async def test_a_glob_writes_its_listing_through_a_lock_held_view(monkeypatch):
                 [
                     (
                         "seen",
-                        IndexEntry(
-                            id="seen", name="seen", resource_type="file"
+                        FileStat(
+                            name="seen", type=FileType.FILE, fingerprint="seen"
                         ),
                     )
                 ],
@@ -1073,7 +1083,7 @@ async def test_unmount_drains_service_index_invalidation(monkeypatch, kind):
     invalidate = getattr(index, method)
     await index.put(
         "/outside-scope",
-        IndexEntry(id="stale", name="stale", resource_type="ram"),
+        FileStat(name="stale", type=FileType.FILE, fingerprint="stale"),
     )
 
     async def delayed_invalidate():

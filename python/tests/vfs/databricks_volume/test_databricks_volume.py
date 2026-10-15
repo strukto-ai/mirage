@@ -21,12 +21,12 @@ import pytest
 from pydantic import ValidationError
 
 from mirage import MountMode, Workspace
-from mirage.cache.index import IndexEntry, LookupStatus
+from mirage.cache.index import LookupStatus
 from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
 from mirage.core.databricks_volume.stream import read_stream
-from mirage.types import PathSpec, VFSName
+from mirage.types import FileStat, FileType, PathSpec, VFSName
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.databricks_volume import (
     DatabricksVolumeConfig,
@@ -472,10 +472,10 @@ async def test_workspace_write_mode_invalidates_parent_directory_index():
         [
             (
                 "old.txt",
-                IndexEntry(
-                    id="/dbx/old.txt",
+                FileStat(
                     name="old.txt",
-                    resource_type="file",
+                    type=FileType.FILE,
+                    fingerprint="/dbx/old.txt",
                 ),
             )
         ],
@@ -490,10 +490,10 @@ async def test_workspace_write_mode_invalidates_parent_directory_index():
         [
             (
                 "new.txt",
-                IndexEntry(
-                    id="/dbx/new.txt",
+                FileStat(
                     name="new.txt",
-                    resource_type="file",
+                    type=FileType.FILE,
+                    fingerprint="/dbx/new.txt",
                 ),
             )
         ],
@@ -506,10 +506,10 @@ async def test_workspace_write_mode_invalidates_parent_directory_index():
         [
             (
                 "empty.txt",
-                IndexEntry(
-                    id="/dbx/empty.txt",
+                FileStat(
                     name="empty.txt",
-                    resource_type="file",
+                    type=FileType.FILE,
+                    fingerprint="/dbx/empty.txt",
                 ),
             )
         ],

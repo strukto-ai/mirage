@@ -90,17 +90,35 @@ function pageEntries(pages: Tree, prefix = ""): [string, string][] {
   );
 }
 
+function row(name: string, found: Tree | string, knownSizes: boolean): FileStat {
+  if (typeof found !== "string")
+    return new FileStat({ name, size: null, type: FileType.DIRECTORY });
+  const data = ENC.encode(found);
+  // The fingerprint is the content's own hash: the stable identity a
+  // snapshot records for every read and a load checks for drift.
+  const fingerprint = createHash("sha256")
+    .update(data)
+    .digest("hex")
+    .slice(0, 16);
+  return new FileStat({
+    name,
+    size: knownSizes ? data.length : null,
+    type: FileType.FILE,
+    content: ContentType.TEXT,
+    fingerprint,
+  });
+}
+
 // Markdown pages read from the accessor's tree.
 class PagesVFS extends BaseVFS<WikiAccessor> {
-  override readdir(path: PathSpec): Promise<string[]> {
+  // Each child is listed as its stat answers it, so a listing also
+  // answers the stats of what it names.
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     const found = node(this.accessor.pages, path.vfsPath);
     if (typeof found === "string") throw enotdir(path);
-    const parent = rstripSlash(path.virtual);
+    const known = this.accessor.knownSizes;
     return Promise.resolve(
-      Object.entries(found).map(
-        ([name, child]) =>
-          `${parent}/${name}${typeof child === "string" ? "" : "/"}`,
-      ),
+      Object.entries(found).map(([name, child]) => row(name, child, known)),
     );
   }
 
@@ -116,26 +134,7 @@ class PagesVFS extends BaseVFS<WikiAccessor> {
     const found = node(this.accessor.pages, path.vfsPath);
     const trimmed = rstripSlash(path.virtual);
     const name = trimmed.slice(trimmed.lastIndexOf("/") + 1) || "/";
-    if (typeof found !== "string")
-      return Promise.resolve(
-        new FileStat({ name, size: null, type: FileType.DIRECTORY }),
-      );
-    const data = ENC.encode(found);
-    // The fingerprint is the content's own hash: the stable identity a
-    // snapshot records for every read and a load checks for drift.
-    const fingerprint = createHash("sha256")
-      .update(data)
-      .digest("hex")
-      .slice(0, 16);
-    return Promise.resolve(
-      new FileStat({
-        name,
-        size: this.accessor.knownSizes ? data.length : null,
-        type: FileType.FILE,
-        content: ContentType.TEXT,
-        fingerprint,
-      }),
-    );
+    return Promise.resolve(row(name, found, this.accessor.knownSizes));
   }
 
   // Optional: say which pages may hold a text, and grep and rg read only

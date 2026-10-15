@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry } from '../cache/index/config.ts'
 import { ListingCheckStore } from '../cache/index/ram.ts'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -21,7 +20,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Accessor } from '../accessor/base.ts'
 import { record, revisionFor, runWithRecording, startOp } from '../observe/context.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
+import type { Handed } from '../vfs/types.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
@@ -76,6 +75,11 @@ class FakeRemoteVFS extends BaseVFS {
   override readonly cachesReads = true
   override readonly supportsSnapshot = true
   override readonly accessor: FakeRemoteAccessor
+  // Stat reads whatever the index it is handed holds, the way a warm
+  // backend would hide drift.
+  override readonly handed: Readonly<Partial<Record<string, readonly (keyof Handed)[]>>> = {
+    stat: ['index'],
+  }
 
   constructor(accessor: FakeRemoteAccessor) {
     super()
@@ -116,8 +120,8 @@ class FakeRemoteVFS extends BaseVFS {
     return Promise.resolve(entry.bytes)
   }
 
-  override async stat(scope: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    const cached = await index?.get(scope.virtual)
+  override async stat(scope: PathSpec, handed?: Handed): Promise<FileStat> {
+    const cached = await handed?.index?.get(scope.virtual)
     if (cached?.entry !== undefined && cached.entry !== null) {
       return new FileStat({ name: cached.entry.name, type: FileType.FILE })
     }
@@ -217,7 +221,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
       const index = loaded.namespace.mountFor('/remote/a.txt').index
       await index.put(
         '/remote/a.txt',
-        new IndexEntry({ id: 'a', name: 'a.txt', resourceType: 'file', size: 2 }),
+        new FileStat({ name: 'a.txt', type: FileType.FILE, size: 2, fingerprint: 'a' }),
       )
       const read =
         surface === 'shell'
@@ -247,13 +251,14 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     const { writeFileSync } = await import('node:fs')
     writeFileSync(snap, await writeSnapshotTar(manifest, blobs))
 
-    const seen: (IndexEntry | null)[] = []
+    const seen: (FileStat | null)[] = []
     const hinting = new FakeRemoteVFS(accessor)
     const stat = hinting.stat.bind(hinting)
-    hinting.stat = async (scope, index) => {
+    hinting.stat = async (scope, handed) => {
+      const index = handed?.index
       if (!(index instanceof ListingCheckStore)) throw new Error('the drift check passed no check')
       seen.push(await index.hint('/remote/a.txt'))
-      return stat(scope, index)
+      return stat(scope, handed)
     }
     const loaded = await Workspace.load(
       snap,
@@ -264,7 +269,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
       const index = loaded.namespace.mountFor('/remote/a.txt').index
       await index.put(
         '/remote/a.txt',
-        new IndexEntry({ id: 'a', name: 'a.txt', resourceType: 'file', size: 2 }),
+        new FileStat({ name: 'a.txt', type: FileType.FILE, size: 2, fingerprint: 'a' }),
       )
       expect((await index.get('/remote/a.txt')).entry).toBeDefined()
       if (surface === 'shell') await loaded.shell('cat /remote/a.txt')

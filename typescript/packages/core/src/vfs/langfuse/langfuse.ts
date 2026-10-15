@@ -34,7 +34,6 @@ export interface LangfuseVFSState {
 }
 
 export class LangfuseVFS extends BaseVFS {
-  override readonly listsStats: boolean = true
   override readonly handed = {
     stat: ['entry'],
   } as const

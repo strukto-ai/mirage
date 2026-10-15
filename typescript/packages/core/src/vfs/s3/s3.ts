@@ -41,7 +41,6 @@ import { tree as s3Tree } from '../../core/s3/readdir.ts'
  * packages build over their own transport.
  */
 export class S3VFSBase extends BaseVFS<S3Accessor> {
-  override readonly listsStats: boolean = true
   override readonly readsRanges: boolean = true
   override readonly maxGlobMatches: number = SCOPE_ERROR
 

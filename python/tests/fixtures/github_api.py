@@ -25,9 +25,10 @@ from typing import Any
 
 from aiohttp import web
 
-from mirage.cache.index import Evicted, IndexEntry
+from mirage.cache.index import Evicted
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.constants import CODE_SEARCH_SIZE_LIMIT
+from mirage.types import FileStat
 
 SYMLINK = "120000"
 REGULAR = "100644"
@@ -500,7 +501,7 @@ class _ExpiredOnArrival(RAMIndexCacheStore):
 
     def seed(
         self,
-        entries: dict[str, IndexEntry],
+        entries: dict[str, FileStat],
         children: dict[str, list[str]],
         expires_at: datetime,
         *,
@@ -514,7 +515,7 @@ class _ExpiredOnArrival(RAMIndexCacheStore):
     async def _set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexEntry]],
+        entries: list[tuple[str, FileStat]],
         expired_at: datetime | None,
         *,
         partial: bool,

@@ -12,6 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { IndexEntry } from './config.ts'
-
 export { IndexCacheStore } from './store.ts'
