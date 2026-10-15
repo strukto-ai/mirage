@@ -124,13 +124,14 @@ export function reseatTree(
  * Mirrors Python's `refresh_tree`.
  *
  * Returns:
- *   Record<string, TreeEntry> | null: the tree, keyed by repo-relative path,
- *   at `accessor.treeVersion`; null when GitHub truncated it, which then
- *   names only some paths.
+ *   { tree, version } | null: the tree, keyed by repo-relative path, and the
+ *   head it was read at, taken from this response rather than the accessor a
+ *   concurrent refresh may have reseated since; null when GitHub truncated
+ *   it, which then names only some paths.
  */
 export async function refreshTree(
   accessor: GitHubAccessor,
-): Promise<Record<string, TreeEntry> | null> {
+): Promise<{ tree: Record<string, TreeEntry>; version: string | null } | null> {
   const { tree, truncated, sha } = await fetchTree(
     accessor.transport,
     accessor.owner,
@@ -138,7 +139,7 @@ export async function refreshTree(
     accessor.ref,
   )
   const current = reseatTree(accessor, tree, truncated, sha)
-  return truncated ? null : current
+  return truncated ? null : { tree: current, version: sha }
 }
 
 /**

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { stat } from './stat.ts'
@@ -23,8 +23,13 @@ const QUICKSTART = '/knowledge/guides/quickstart'
 
 function accessorCounting(calls: unknown[]): ChromaAccessor {
   const collection = {
-    get: (args: unknown) => {
+    get: (args: { ids?: string[] }) => {
       calls.push(args)
+      if (args.ids !== undefined) {
+        return Promise.resolve({
+          documents: [JSON.stringify({ 'guides/quickstart': { size: 12 } })],
+        })
+      }
       return Promise.resolve({
         documents: ['first'],
         metadatas: [{ page_slug: 'guides/quickstart', chunk_index: 0 }],
@@ -68,5 +73,20 @@ describe('chroma stat', () => {
     expect(calls).toHaveLength(1)
     const kept: unknown = (await index.get(QUICKSTART)).entry
     expect(kept instanceof FileStat ? kept.size : null).toBe(5)
+  })
+
+  it('reads the row from the tree under a fresh check', async () => {
+    // A fresh check is handed no row: the stat asks the collection.
+    const accessor = accessorCounting([])
+    const result = await stat(accessor, path, null, new ListingCheckStore())
+    expect([result.name, result.size]).toEqual(['quickstart', 5])
+    const missing = new PathSpec({
+      vfsPath: mountKey('/knowledge/guides/nope', '/knowledge'),
+      virtual: '/knowledge/guides/nope',
+      directory: '/knowledge/guides/nope',
+    })
+    await expect(stat(accessor, missing, null, new ListingCheckStore())).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

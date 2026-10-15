@@ -44,15 +44,18 @@ def _taken(
     fn: Callable[..., Any],
     store: IndexCacheStore,
     entry: FileStat | None,
+    parent: FileStat | None = None,
 ) -> dict[str, Any]:
     """What a VFS function is handed beside its path, as the mount hands
-    it: the store where it takes an index, and what is at its path where
-    it declares ``entry``.
+    it: the store where it takes an index, what is at its path where it
+    declares ``entry``, and its folder's row where it declares
+    ``parent``.
 
     Args:
         fn (Callable[..., Any]): the VFS function.
         store (IndexCacheStore): the store for a function that keeps one.
         entry (FileStat | None): what is at the path.
+        parent (FileStat | None): what is at the path's folder.
     """
     params = inspect.signature(fn).parameters
     taken: dict[str, Any] = {}
@@ -60,14 +63,18 @@ def _taken(
         taken["index"] = store
     if "entry" in params and entry is not None:
         taken["entry"] = entry
+    if "parent" in params and parent is not None:
+        taken["parent"] = parent
     return taken
 
 
-async def _entry(vfs: BaseVFS, path: PathSpec) -> FileStat | None:
-    """What is at ``path``, found by listing each directory from the
-    mount root down, each handed what its own parent's listing named, as
-    the mount finds it. None for a VFS that keeps its own index, and for
-    a path nothing is at.
+async def _rows_at(
+    vfs: BaseVFS, path: PathSpec
+) -> tuple[FileStat | None, FileStat | None]:
+    """What is at ``path`` and at its folder, found by listing each
+    directory from the mount root down, each handed what its own
+    parent's listing named, as the mount finds it. None for the root,
+    which no listing names, and for a path nothing is at.
 
     Args:
         vfs (BaseVFS): the VFS being validated.
@@ -76,25 +83,30 @@ async def _entry(vfs: BaseVFS, path: PathSpec) -> FileStat | None:
     prefix = mount_prefix_of(path.virtual, path.vfs_path)
     names = [name for name in path.vfs_path.strip("/").split("/") if name]
     found: FileStat | None = None
+    above: FileStat | None = None
     for depth, name in enumerate(names):
         key = "/".join(names[:depth])
         virtual = f"{prefix}/{key}" if key else prefix or "/"
         folder = PathSpec(virtual=virtual, directory=virtual, vfs_path=key)
         listed = await vfs.readdir(
-            folder, **_taken(vfs.readdir, RAMIndexCacheStore(), found)
+            folder,
+            **_taken(vfs.readdir, RAMIndexCacheStore(), found, above),
         )
         rows = listed.entries if isinstance(listed, DirListing) else listed
-        found = next(
-            (
-                row
-                for row in rows
-                if isinstance(row, FileStat) and row.name == name
+        above, found = (
+            found,
+            next(
+                (
+                    row
+                    for row in rows
+                    if isinstance(row, FileStat) and row.name == name
+                ),
+                None,
             ),
-            None,
         )
         if found is None:
-            return None
-    return found
+            return None, above
+    return found, above
 
 
 async def _check_windows(
@@ -102,6 +114,7 @@ async def _check_windows(
     path: PathSpec,
     store: IndexCacheStore,
     entry: FileStat | None,
+    parent: FileStat | None,
     data: bytes,
 ) -> None:
     """Check that ``read`` answers a byte window of ``data``.
@@ -111,6 +124,7 @@ async def _check_windows(
         path (PathSpec): the file.
         store (IndexCacheStore): the store handed to the read.
         entry (FileStat | None): what is at the file.
+        parent (FileStat | None): what is at the file's folder.
         data (bytes): the whole file as ``read`` answers it.
     """
     if not data:
@@ -119,7 +133,10 @@ async def _check_windows(
     for size in (min(3, len(data) - offset), None):
         end = None if size is None else offset + size
         actual = await read(
-            path, offset=offset, size=size, **_taken(read, store, entry)
+            path,
+            offset=offset,
+            size=size,
+            **_taken(read, store, entry, parent),
         )
         assert actual == data[offset:end], (
             "read must use offset and byte count"
@@ -146,23 +163,25 @@ async def check_read_contract(
     store = (
         index if index is not None else RAMIndexCacheStore(ttl=vfs.index_ttl)
     )
-    entry = await _entry(vfs, fixture.file)
-    folder = await _entry(vfs, fixture.directory)
+    entry, folder = await _rows_at(vfs, fixture.file)
+    _, above = await _rows_at(vfs, fixture.directory)
     render = _renderer(vfs, fixture.file)
     read = render or vfs.read
-    data = await read(fixture.file, **_taken(read, store, entry))
+    data = await read(fixture.file, **_taken(read, store, entry, folder))
     assert data == fixture.content, "read differs from fixture content"
-    info = await vfs.stat(fixture.file, **_taken(vfs.stat, store, entry))
+    info = await vfs.stat(
+        fixture.file, **_taken(vfs.stat, store, entry, folder)
+    )
     assert info.type == FileType.FILE, "fixture must stat as a file"
     assert info.size is None or info.size == len(data), (
         "stat size must be rendered byte length or None"
     )
     parent = await vfs.stat(
-        fixture.directory, **_taken(vfs.stat, store, folder)
+        fixture.directory, **_taken(vfs.stat, store, folder, above)
     )
     assert parent.type == FileType.DIRECTORY, "parent must stat as a directory"
     listed = await vfs.readdir(
-        fixture.directory, **_taken(vfs.readdir, store, folder)
+        fixture.directory, **_taken(vfs.readdir, store, folder, above)
     )
     rows = listed.entries if isinstance(listed, DirListing) else listed
     child = fixture.file.virtual.rstrip("/").rsplit("/", 1)[-1]
@@ -170,14 +189,14 @@ async def check_read_contract(
         "readdir must include the child"
     )
     stored = (
-        await vfs.read(fixture.file, **_taken(vfs.read, store, entry))
+        await vfs.read(fixture.file, **_taken(vfs.read, store, entry, folder))
         if render is not None and vfs.supports("read")
         else data
     )
     if vfs.supports("read_stream"):
         parts: list[bytes] = []
         source = vfs.read_stream(
-            fixture.file, **_taken(vfs.read_stream, store, entry)
+            fixture.file, **_taken(vfs.read_stream, store, entry, folder)
         )
         try:
             async for part in source:
@@ -191,19 +210,22 @@ async def check_read_contract(
         streamed = b"".join(parts)
         assert streamed == stored, "read_stream differs from read"
     if render is not None:
-        await _check_windows(render, fixture.file, store, entry, data)
+        await _check_windows(render, fixture.file, store, entry, folder, data)
     if vfs.reads_ranges and vfs.supports("read"):
-        await _check_windows(vfs.read, fixture.file, store, entry, stored)
+        await _check_windows(
+            vfs.read, fixture.file, store, entry, folder, stored
+        )
     if vfs.supports("exists"):
-        assert await vfs.exists(fixture.file), (
-            "exists rejected the fixture file"
-        )
-        assert not await vfs.exists(fixture.missing), (
-            "exists accepted a missing file"
-        )
+        exists: Callable[..., Awaitable[bool]] = vfs.exists
+        assert await exists(
+            fixture.file, **_taken(exists, store, entry, folder)
+        ), "exists rejected the fixture file"
+        assert not await exists(
+            fixture.missing, **_taken(exists, store, None, folder)
+        ), "exists accepted a missing file"
     for call in (vfs.stat, _renderer(vfs, fixture.missing) or vfs.read):
         try:
-            await call(fixture.missing, **_taken(call, store, None))
+            await call(fixture.missing, **_taken(call, store, None, folder))
         except FileNotFoundError:
             continue
         raise AssertionError("missing paths must raise FileNotFoundError")

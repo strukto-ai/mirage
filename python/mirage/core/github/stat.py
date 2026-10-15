@@ -81,9 +81,10 @@ async def stat(
     if not (accessor.tree_loaded and accessor.truncated):
         whole = await refresh_tree(accessor)
         if whole is not None:
-            if rel not in whole:
+            tree, _ = whole
+            if rel not in tree:
                 raise enoent(path.virtual)
-            return row_of(whole[rel], rel.rsplit("/", 1)[-1])
+            return row_of(tree[rel], rel.rsplit("/", 1)[-1])
     found = await _walked(accessor, rel)
     if found is None:
         raise enoent(path.virtual)
@@ -132,13 +133,14 @@ async def tree(
     fetched = await refresh_tree(accessor)
     if fetched is None:
         return None
+    whole, _ = fetched
     base = path.mount_path.strip("/")
-    if base and getattr(fetched.get(base), "type", None) != "tree":
+    if base and getattr(whole.get(base), "type", None) != "tree":
         return None
     lead = base + "/" if base else ""
     return {
         key[len(lead) :]: row_of(entry, key.rsplit("/", 1)[-1])
-        for key, entry in fetched.items()
+        for key, entry in whole.items()
         if key.startswith(lead) and key != base
     }
 

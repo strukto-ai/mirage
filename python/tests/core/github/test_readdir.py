@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.accessor.github import GitHubAccessor
@@ -71,6 +73,31 @@ def _names(listing: DirListing) -> list[str]:
 )
 async def test_readdir_lists_a_folder_of_the_tree(accessor, rel, names):
     assert _names(await readdir(accessor, _spec(rel))) == names
+
+
+@pytest.mark.asyncio
+async def test_each_listing_is_versioned_by_its_own_trees_head(
+    tree, monkeypatch
+):
+    # Two listings whose trees land together: the second reseats the
+    # accessor before the first one's listing is built.
+    heads = ["HEAD1", "HEAD2"]
+    landed = asyncio.Event()
+
+    async def fetch_tree(config, owner, repo, ref, session=None):
+        head = heads.pop(0)
+        await landed.wait()
+        return dict(tree), False, head
+
+    monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
+    shared = GitHubAccessor(GitHubConfig(token="t"), "o", "r", "main")
+    both = asyncio.gather(
+        readdir(shared, _spec("src")), readdir(shared, _spec(""))
+    )
+    await asyncio.sleep(0)
+    landed.set()
+    first, second = await both
+    assert [first.version, second.version] == ["HEAD1", "HEAD2"]
 
 
 @pytest.mark.asyncio

@@ -166,6 +166,11 @@ function dstArg(value: unknown): PathSpec {
   return value
 }
 
+/** What rides beside the path: the handed stats. */
+function handedOf(kw: OpKwargs): Handed | undefined {
+  return kw.handed as Handed | undefined
+}
+
 /**
  * Refuse a keyword the function `name` does not take: the TypeError a direct
  * call raises in Python, never silently dropped. The mount hands every
@@ -690,8 +695,6 @@ export class MountEntry {
    * Mirrors Python's `MountEntry._callers`.
    */
   callers(name: string, filetype: string | null, vfs: BaseVFS = this.vfs): OpCall[] {
-    // What rides beside the path: the handed stats.
-    const handed = (kw: OpKwargs): Handed | undefined => kw.handed as Handed | undefined
     if (name === 'read') {
       const levels: OpCall[] = []
       const renderer = filetype !== null ? vfs.renderers[filetype] : undefined
@@ -700,12 +703,16 @@ export class MountEntry {
           ? undefined
           : (vfs as unknown as Record<string, ReadFn | undefined>)[renderer]
       if (render !== undefined) {
-        levels.push((scope, _args, kw) => readWindow(render.bind(vfs), true, scope, kw, handed(kw)))
+        levels.push((scope, _args, kw) =>
+          readWindow(render.bind(vfs), true, scope, kw, handedOf(kw)),
+        )
       }
       if (vfs.supports('read')) {
         const read: ReadFn = (path, given, offset, size) =>
           vfs.read(path, given, offset, size, callerSignal())
-        levels.push((scope, _args, kw) => readWindow(read, vfs.readsRanges, scope, kw, handed(kw)))
+        levels.push((scope, _args, kw) =>
+          readWindow(read, vfs.readsRanges, scope, kw, handedOf(kw)),
+        )
       }
       return levels
     }
@@ -732,13 +739,17 @@ export class MountEntry {
     if (!vfs.supports(name)) return []
     switch (name) {
       case 'readdir':
-        return [(scope, _args, kw) => vfs.readdir(scope, handed(kw))]
+        return [(scope, _args, kw) => vfs.readdir(scope, handedOf(kw))]
       case 'stat':
-        return [(scope, _args, kw) => vfs.stat(scope, handed(kw))]
+        return [(scope, _args, kw) => vfs.stat(scope, handedOf(kw))]
       case 'write':
-        return [(scope, args, kw) => vfs.write(scope, writeData(args), callerSignal(), handed(kw))]
+        return [
+          (scope, args, kw) => vfs.write(scope, writeData(args), callerSignal(), handedOf(kw)),
+        ]
       case 'append':
-        return [(scope, args, kw) => vfs.append(scope, writeData(args), handed(kw), callerSignal())]
+        return [
+          (scope, args, kw) => vfs.append(scope, writeData(args), handedOf(kw), callerSignal()),
+        ]
       case 'pwrite':
         return [
           (scope, args, kw) =>
@@ -746,42 +757,45 @@ export class MountEntry {
               scope,
               writeData(args),
               offsetArg(args[1], scope),
-              handed(kw),
+              handedOf(kw),
               callerSignal(),
             ),
         ]
       case 'create':
-        return [(scope, _args, kw) => vfs.create(scope, handed(kw))]
+        return [(scope, _args, kw) => vfs.create(scope, handedOf(kw))]
       case 'mkdir':
-        return [(scope, _args, kw) => this.mkdir(scope, kw.parents === true, kw.index, handed(kw))]
+        return [
+          (scope, _args, kw) => this.mkdir(scope, kw.parents === true, kw.index, handedOf(kw)),
+        ]
       case 'unlink':
-        return [(scope, _args, kw) => vfs.unlink(scope, handed(kw))]
+        return [(scope, _args, kw) => vfs.unlink(scope, handedOf(kw))]
       case 'rmdir':
-        return [(scope, _args, kw) => vfs.rmdir(scope, handed(kw))]
+        return [(scope, _args, kw) => vfs.rmdir(scope, handedOf(kw))]
       case 'rename':
-        return [(scope, args, kw) => vfs.rename(scope, dstArg(args[0]), handed(kw))]
+        return [(scope, args, kw) => vfs.rename(scope, dstArg(args[0]), handedOf(kw))]
       case 'copy':
-        return [(scope, args, kw) => vfs.copy(scope, dstArg(args[0]), callerSignal(), handed(kw))]
+        return [(scope, args, kw) => vfs.copy(scope, dstArg(args[0]), callerSignal(), handedOf(kw))]
       case 'dir_copy':
-        return [(scope, args, kw) => vfs.dirCopy(scope, dstArg(args[0]), handed(kw))]
+        return [(scope, args, kw) => vfs.dirCopy(scope, dstArg(args[0]), handedOf(kw))]
       case 'rm_r':
-        return [(scope, _args, kw) => vfs.rmR(scope, handed(kw))]
+        return [(scope, _args, kw) => vfs.rmR(scope, handedOf(kw))]
       case 'first_lines':
-        return [(scope, args, kw) => vfs.firstLines(scope, args[0] as number, handed(kw))]
+        return [(scope, args, kw) => vfs.firstLines(scope, args[0] as number, handedOf(kw))]
       case 'last_lines':
-        return [(scope, args, kw) => vfs.lastLines(scope, args[0] as number, handed(kw))]
+        return [(scope, args, kw) => vfs.lastLines(scope, args[0] as number, handedOf(kw))]
       case 'line_count':
-        return [(scope, _args, kw) => vfs.lineCount(scope, handed(kw))]
+        return [(scope, _args, kw) => vfs.lineCount(scope, handedOf(kw))]
       case 'checksum':
-        return [(scope, args, kw) => vfs.checksum(scope, args[0] as string, handed(kw))]
+        return [(scope, args, kw) => vfs.checksum(scope, args[0] as string, handedOf(kw))]
       case 'follow':
         return [
-          (scope, args, kw) => vfs.follow(scope, args[0] as number, args[1] as number, handed(kw)),
+          (scope, args, kw) =>
+            vfs.follow(scope, args[0] as number, args[1] as number, handedOf(kw)),
         ]
       case 'read_tree':
-        return [(scope, _args, kw) => vfs.readTree(scope, handed(kw))]
+        return [(scope, _args, kw) => vfs.readTree(scope, handedOf(kw))]
       case 'search':
-        return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, handed(kw))]
+        return [(scope, args, kw) => vfs.search(scope, args[0] as SearchQuery, handedOf(kw))]
       case 'files_containing':
         return [
           (scope, args, kw) =>
@@ -789,7 +803,7 @@ export class MountEntry {
               scope,
               args[0] as string,
               { wholeWord: kw.whole_word === true, ignoreCase: kw.ignore_case === true },
-              handed(kw),
+              handedOf(kw),
             ),
         ]
       case 'lines_containing':
@@ -799,21 +813,21 @@ export class MountEntry {
               scope,
               args[0] as string,
               { ignoreCase: kw.ignore_case === true },
-              handed(kw),
+              handedOf(kw),
             ),
         ]
       case 'before_full_scan':
         return [
           (scope, _args, kw) =>
-            vfs.beforeFullScan(scope, typeof kw.files === 'number' ? kw.files : null, handed(kw)),
+            vfs.beforeFullScan(scope, typeof kw.files === 'number' ? kw.files : null, handedOf(kw)),
         ]
       case 'truncate':
         return [
           (scope, args, kw) =>
-            vfs.truncate(scope, lengthArg(args[0]), kw.no_create === true, handed(kw)),
+            vfs.truncate(scope, lengthArg(args[0]), kw.no_create === true, handedOf(kw)),
         ]
       case 'setattr':
-        return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields, handed(kw))]
+        return [(scope, _args, kw) => vfs.setattr(scope, kw as SetAttrFields, handedOf(kw))]
       default: {
         const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[name]
         return method === undefined ? [] : [(scope, args) => method.call(vfs, scope, ...args)]
@@ -1036,10 +1050,11 @@ export class MountEntry {
    */
   private async listed(path: PathSpec, index: IndexCacheStore): Promise<string[]> {
     const key = indexKey(this.prefix, path)
-    const stored = await storedListing(index, key)
+    const glob = path.pattern !== null
+    const stored = await storedListing(index, key, glob)
     if (stored !== null) return stored
     const handed = await this.handedFor('readdir', path, null, index)
-    const seeded = await storedListing(index, key)
+    const seeded = await storedListing(index, key, glob)
     if (seeded !== null) return seeded
     const listed = await this.vfs.readdir(path, handed)
     return keepListing(index, key, listed)

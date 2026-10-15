@@ -41,8 +41,8 @@ export async function readdir(
 ): Promise<DirListing> {
   const rel = stripSlash((path.pattern !== null ? path.dir : path).mountPath)
   if (!accessor.truncated) {
-    const tree = await refreshTree(accessor)
-    if (tree !== null) return treeListing(tree, rel, accessor.treeVersion, path.virtual)
+    const fetched = await refreshTree(accessor)
+    if (fetched !== null) return treeListing(fetched.tree, rel, fetched.version, path.virtual)
   }
   let sha: string
   if (rel === '') sha = accessor.ref

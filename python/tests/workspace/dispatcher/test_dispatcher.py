@@ -550,6 +550,43 @@ async def test_a_tree_copy_merges_beside_a_link_at_the_destination():
         assert ws._namespace.readlink("/ram/e/d/stale") == "gone"
 
 
+class TreeCopyRAM(RAMVFS):
+    """A RAM store that keeps its listings and copies a tree in one op,
+    as OneDrive's server-side copy does."""
+
+    index_ttl = 60
+    local = False
+
+    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
+        store = self._store
+        base = "/" + src.vfs_path.strip("/")
+        landing = "/" + dst.vfs_path.strip("/")
+        for name in list(store.dirs):
+            if name.startswith(base + "/"):
+                store.dirs.add(landing + name[len(base) :])
+        for name, data in list(store.files.items()):
+            if name.startswith(base + "/"):
+                store.files[landing + name[len(base) :]] = data
+
+
+@pytest.mark.asyncio
+async def test_a_tree_copy_drops_the_listing_an_empty_directory_joins():
+    # The copy wrote no file, so only the directory it made says which
+    # listing changed.
+    ws = Workspace({"/ram/": TreeCopyRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /ram/s/e /ram/d && echo x > /ram/d/x")
+        assert (await ws.shell("ls /ram/d")).stdout == b"x\n"
+        await ws.dispatch(
+            "dir_copy",
+            PathSpec.from_str_path("/ram/s"),
+            dst=PathSpec.from_str_path("/ram/d"),
+        )
+        assert (await ws.shell("ls /ram/d")).stdout == b"e\nx\n"
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_copy_writes_through_a_link_at_the_destination():
     # A copy writes its destination as a write does: the bytes land in

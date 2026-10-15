@@ -763,6 +763,9 @@
     "_handed_on": "Python passes a wrapped backend function the stats and the index its signature names; TypeScript passes them where the function takes its index, as each VFS declares in `handed`.",
     "_takes_index": "Python reads whether a backend function takes the index off its signature; a TypeScript VFS declares `index` for it in `handed`.",
     "_wants": "Python reads the stats a backend function takes off its parameter names; a TypeScript VFS declares them by method in `handed`, which the mount's `wants` reads."
+   },
+   "typescript_only": {
+    "handedOf": "TypeScript carries a call's handed stats in its keyword bag and reads them off it; Python passes them to the backend function as keywords."
    }
   }
  }

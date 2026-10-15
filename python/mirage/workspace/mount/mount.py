@@ -1596,12 +1596,13 @@ class MountEntry:
             index (IndexCacheStore): the mount's index.
         """
         key = index_key(self.prefix, path)
-        stored = await stored_listing(index, key)
+        glob = path.pattern is not None
+        stored = await stored_listing(index, key, glob=glob)
         if stored is not None:
             return stored
         readdir: Callable[..., Awaitable[Any]] = self.vfs.readdir
         handed = await self._handed(readdir, path, {}, index)
-        stored = await stored_listing(index, key)
+        stored = await stored_listing(index, key, glob=glob)
         if stored is not None:
             return stored
         listed = await readdir(path, **_handed_on(readdir, index, **handed))

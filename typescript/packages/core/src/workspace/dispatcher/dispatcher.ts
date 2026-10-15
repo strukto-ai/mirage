@@ -2287,10 +2287,11 @@ export class Dispatcher {
   }
 
   /**
-   * What a tree copy changed under `dst`: each file it wrote. The copy merges
-   * into what `dst` already held, so a file it left keeps its cached copy and
-   * the version a conditional write needs; the files it wrote are the
-   * source's, listed after the copy. Mirrors Python's
+   * What a tree copy changed under `dst`: each entry it wrote. The copy
+   * merges into what `dst` already held, so a file it left keeps its cached
+   * copy and the version a conditional write needs; the files and
+   * directories it wrote are the source's, listed after the copy, so an
+   * empty directory it made drops its folder's listing too. Mirrors Python's
    * Dispatcher._settle_tree_copy.
    */
   private async settleTreeCopy(src: PathSpec, dst: PathSpec): Promise<void> {
@@ -2298,25 +2299,28 @@ export class Dispatcher {
     if (mount === null) return
     const base = rstripSlash(src.virtual)
     const landing = rstripSlash(dst.virtual)
-    for (const virtual of await this.filesBelow(mount, src.virtual)) {
+    for (const virtual of await this.entriesBelow(mount, src.virtual)) {
       await this.invalidateAfterWriteByPath(landing + virtual.slice(base.length))
     }
   }
 
-  /** Every file at any depth under `root`, through the mount's own listing. */
-  private async filesBelow(mount: MountEntry, root: string): Promise<string[]> {
-    const files: string[] = []
+  /**
+   * Every file and directory at any depth under `root`, through the mount's
+   * own listing.
+   */
+  private async entriesBelow(mount: MountEntry, root: string): Promise<string[]> {
+    const found: string[] = []
     const pending = [root]
     for (let directory = pending.pop(); directory !== undefined; directory = pending.pop()) {
       const entries = (await mount.call('readdir', directory)) as string[]
       for (const entry of entries) {
         const child = rstripSlash(entry)
+        found.push(child)
         const row = (await mount.call('stat', child)) as FileStat
         if (row.type === FileType.DIRECTORY) pending.push(child)
-        else files.push(child)
       }
     }
-    return files
+    return found
   }
 
   /** A number naming one store object, the same for every mount of it. */

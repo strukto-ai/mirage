@@ -35,6 +35,7 @@ import { followedDay } from '../../core/time_range.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { ident } from '../../utils/stat_view.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
@@ -351,6 +352,23 @@ describe('the node table answers every verb that names a link', () => {
       expect(res.exitCode).toBe(0)
       expect(DEC.decode((await ws.shell('cat /ram/e/d/a.txt')).stdout)).toBe('hi\n')
       expect(DEC.decode((await ws.shell('readlink /ram/e/d/stale')).stdout)).toBe('gone\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('drops the listing an empty directory a tree copy made joins', async () => {
+    // The copy wrote no file, so only the directory it made says which
+    // listing changed.
+    const ws = new Workspace(
+      { '/ram/': new TreeCopyRAM() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.shell('mkdir -p /ram/s/e /ram/d && echo x > /ram/d/x')
+      expect(DEC.decode((await ws.shell('ls /ram/d')).stdout)).toBe('x\n')
+      await ws.dispatch('dir_copy', '/ram/s', [PathSpec.fromStrPath('/ram/d')])
+      expect(DEC.decode((await ws.shell('ls /ram/d')).stdout)).toBe('e\nx\n')
     } finally {
       await ws.close()
     }
@@ -1562,6 +1580,27 @@ describe("a command's own op is judged on the paths the dispatcher reaches", () 
     }
   })
 })
+
+/**
+ * A RAM store that keeps its listings and copies a tree in one op, as
+ * OneDrive's server-side copy does. Mirrors Python's `TreeCopyRAM`.
+ */
+class TreeCopyRAM extends RAMVFS {
+  override readonly indexTtl: number = 60
+  override readonly local: boolean = false
+
+  override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
+    const base = '/' + stripSlash(src.vfsPath)
+    const landing = '/' + stripSlash(dst.vfsPath)
+    for (const name of [...this.store.dirs]) {
+      if (name.startsWith(base + '/')) this.store.dirs.add(landing + name.slice(base.length))
+    }
+    for (const [name, data] of [...this.store.files]) {
+      if (name.startsWith(base + '/')) this.store.files.set(landing + name.slice(base.length), data)
+    }
+    return Promise.resolve()
+  }
+}
 
 /**
  * A RAM mount that answers pwrite the way S3 and redis do: read the file,

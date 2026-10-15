@@ -36,10 +36,10 @@ export async function tree(
   const fetched = await refreshTree(accessor)
   if (fetched === null) return null
   const base = stripSlash(path.mountPath)
-  if (base !== '' && fetched[base]?.type !== 'tree') return null
+  if (base !== '' && fetched.tree[base]?.type !== 'tree') return null
   const lead = base === '' ? '' : `${base}/`
   const found = new Map<string, FileStat>()
-  for (const [key, entry] of Object.entries(fetched)) {
+  for (const [key, entry] of Object.entries(fetched.tree)) {
     if (key === base || !key.startsWith(lead)) continue
     found.set(key.slice(lead.length), rowOf(entry, key.slice(key.lastIndexOf('/') + 1)))
   }
@@ -82,7 +82,7 @@ export async function stat(
   if (!accessor.truncated) {
     const whole = await refreshTree(accessor)
     if (whole !== null) {
-      const row = whole[rel]
+      const row = whole.tree[rel]
       if (row === undefined) throw enoent(path.virtual)
       return rowOf(row, rel.slice(rel.lastIndexOf('/') + 1))
     }

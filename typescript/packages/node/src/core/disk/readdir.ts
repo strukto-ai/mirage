@@ -35,8 +35,9 @@ async function rowOf(
     const st = await lstat(nodePath.join(full, entry.name), { bigint: true })
     return statOf(entry.name, st, nowNs, versioned)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw err
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+    console.debug(`${nodePath.join(full, entry.name)} left during the scan: ${String(err)}`)
+    return null
   }
 }
 

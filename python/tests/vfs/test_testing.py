@@ -88,6 +88,27 @@ class LenientStat(Minimal):
         return await super().stat(path)
 
 
+class RowsHanded(Minimal):
+    """Reads through its folder's row and answers existence from the row
+    at the path, as Trello and Box do."""
+
+    async def read(
+        self,
+        path: PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        parent: FileStat | None = None,
+    ) -> bytes:
+        if parent is None:
+            raise FileNotFoundError(path.virtual)
+        return await super().read(path, offset, size)
+
+    async def exists(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> bool:
+        return entry is not None
+
+
 class RenderedOnly(BaseVFS):
     """Serves its one filetype through a renderer and defines no read."""
 
@@ -170,6 +191,27 @@ async def test_a_builtin_meets_the_contract():
     ram = RAMVFS()
     await ram_write(ram.accessor, FILE, CONTENT)
     await check_read_contract(ram, FIXTURE)
+
+
+@pytest.mark.asyncio
+async def test_a_vfs_handed_its_rows_meets_the_contract():
+    nested = PathSpec(
+        virtual="/data/sub/a.txt", directory="/data/sub", vfs_path="sub/a.txt"
+    )
+    folder = PathSpec(virtual="/data/sub", directory="/data", vfs_path="sub")
+    missing = PathSpec(
+        virtual="/data/sub/missing",
+        directory="/data/sub",
+        vfs_path="sub/missing",
+    )
+    store = RAMStore()
+    store.dirs.add("/sub")
+    accessor = RAMAccessor(store)
+    await ram_write(accessor, nested, CONTENT)
+    await check_read_contract(
+        RowsHanded(accessor=accessor),
+        ReadFixture(nested, folder, missing, CONTENT),
+    )
 
 
 @pytest.mark.asyncio

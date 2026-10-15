@@ -2465,11 +2465,13 @@ class Dispatcher:
     async def _settle_tree_copy(
         self, mount: MountEntry, src: PathSpec, dst: PathSpec
     ) -> None:
-        """What a tree copy changed under ``dst``: each file it wrote.
+        """What a tree copy changed under ``dst``: each entry it wrote.
 
         The copy merges into what ``dst`` already held, so a file it left
         keeps its cached copy and the version a conditional write needs;
-        the files it wrote are the source's, listed after the copy.
+        the files and directories it wrote are the source's, listed after
+        the copy, so an empty directory it made drops its folder's
+        listing too.
 
         Args:
             mount (MountEntry): the mount the copy ran on.
@@ -2478,31 +2480,30 @@ class Dispatcher:
         """
         base = src.virtual.rstrip("/")
         landing = dst.virtual.rstrip("/")
-        for virtual in await self._files_below(mount, src.virtual):
+        for virtual in await self._entries_below(mount, src.virtual):
             await self.invalidate_after_write(
                 mount, PathSpec.from_str_path(landing + virtual[len(base) :])
             )
 
-    async def _files_below(self, mount: MountEntry, root: str) -> list[str]:
-        """Every file at any depth under ``root``, through the mount's own
-        listing.
+    async def _entries_below(self, mount: MountEntry, root: str) -> list[str]:
+        """Every file and directory at any depth under ``root``, through
+        the mount's own listing.
 
         Args:
             mount (MountEntry): the mount serving ``root``.
             root (str): absolute virtual directory path.
         """
-        files: list[str] = []
+        entries: list[str] = []
         pending = [root]
         while pending:
             directory = pending.pop()
             for entry in await mount.call("readdir", directory):
                 child = entry.rstrip("/")
+                entries.append(child)
                 row = await mount.call("stat", child)
                 if row.type is FileType.DIRECTORY:
                     pending.append(child)
-                else:
-                    files.append(child)
-        return files
+        return entries
 
     async def _moved_source_is_dir(self, path: PathSpec) -> bool:
         """Whether a rename's source stats as a directory.

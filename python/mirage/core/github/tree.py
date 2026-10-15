@@ -371,23 +371,25 @@ def reseat_tree(
 
 async def refresh_tree(
     accessor: GitHubAccessor,
-) -> dict[str, TreeEntry] | None:
+) -> tuple[dict[str, TreeEntry], str | None] | None:
     """Fetch the ref's recursive tree and reseat the accessor on it.
 
     Args:
         accessor (GitHubAccessor): the mount's accessor.
 
     Returns:
-        dict[str, TreeEntry] | None: the tree, keyed by repo-relative
-        path, at ``accessor.tree_version``; None when GitHub truncated it,
-        which then names only some paths.
+        tuple[dict[str, TreeEntry], str | None] | None: the tree, keyed by
+        repo-relative path, and the head it was read at, taken from this
+        response rather than the accessor a concurrent refresh may have
+        reseated since; None when GitHub truncated it, which then names
+        only some paths.
     """
     ref = await ensure_ref(accessor)
     tree, truncated, head = await fetch_tree(
         accessor.config, accessor.owner, accessor.repo, ref, accessor.pool
     )
     reseat_tree(accessor, tree, truncated, head)
-    return None if truncated else tree
+    return None if truncated else (tree, head)
 
 
 async def ensure_tree(accessor: GitHubAccessor) -> None:

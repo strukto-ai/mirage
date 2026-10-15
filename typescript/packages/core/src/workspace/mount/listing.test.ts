@@ -423,6 +423,17 @@ class Days extends BaseVFS {
     this.calls.push(`list ${key}`)
     if (key === '')
       return Promise.resolve([new FileStat({ name: 'chan', type: FileType.DIRECTORY })])
+    if (key === 'chan' && path.pattern !== null) {
+      return Promise.resolve(
+        new DirListing({
+          entries: [
+            new FileStat({ name: 'd1', type: FileType.DIRECTORY }),
+            new FileStat({ name: 'd3', type: FileType.DIRECTORY }),
+          ],
+          window: true,
+        }),
+      )
+    }
     if (key === 'chan') {
       return Promise.resolve(
         new DirListing({
@@ -476,6 +487,21 @@ describe('a window', () => {
       expect(store.calls.length).toBeGreaterThan(0)
       expect(store.calls.every((call) => call === 'stat chan/d1')).toBe(true)
       await expect(ws.dispatch('stat', '/w/chan/x1')).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('lets a glob past it ask the backend', async () => {
+    const store = new Days()
+    const ws = new Workspace(
+      { '/w/': store },
+      { mode: MountMode.READ, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.dispatch('readdir', '/w/chan')
+      const io = await ws.shell('echo /w/chan/d*')
+      expect(new TextDecoder().decode(io.stdout)).toBe('/w/chan/d1 /w/chan/d3\n')
     } finally {
       await ws.close()
     }

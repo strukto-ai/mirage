@@ -394,6 +394,14 @@ class Days(BaseVFS):
         self.calls.append(f"list {key}")
         if not key:
             return [FileStat(name="chan", type=FileType.DIRECTORY)]
+        if key == "chan" and path.pattern is not None:
+            return DirListing(
+                [
+                    FileStat(name="d1", type=FileType.DIRECTORY),
+                    FileStat(name="d3", type=FileType.DIRECTORY),
+                ],
+                window=True,
+            )
         if key == "chan":
             return DirListing(
                 [FileStat(name="d3", type=FileType.DIRECTORY)], window=True
@@ -432,6 +440,18 @@ async def test_a_name_beyond_a_window_is_the_backends_to_answer():
         assert store.calls and all(c == "stat chan/d1" for c in store.calls)
         with pytest.raises(FileNotFoundError):
             await ws.dispatch("stat", _at("/w/chan/x1"))
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_glob_past_a_window_asks_the_backend():
+    store = Days()
+    ws = Workspace({"/w/": (store, MountMode.READ)})
+    try:
+        await ws.dispatch("readdir", _at("/w/chan"))
+        r = await ws.shell("echo /w/chan/d*")
+        assert await r.stdout_str() == "/w/chan/d1 /w/chan/d3\n"
     finally:
         await ws.close()
 

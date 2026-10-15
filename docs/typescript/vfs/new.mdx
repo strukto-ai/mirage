@@ -86,7 +86,7 @@ listings it also names, `partial: true` for a filtered or truncated view, and
 `window: true` for a capped one that proves nothing absent.
 
 A function that needs what a listing already holds declares it in `handed`,
-keyed by function name (`override readonly handed = { stat: ['entry'] }`), and
+keyed by function name (`override readonly handed = { stat: ['entry'] } as const`), and
 receives it in its `Handed` argument: `entry` (the row at the path) and
 `parent` (the row of its folder), and for `rename`, `copy` and `dirCopy` also
 `dstEntry` and `dstParent`. Each is `null` when nothing is there. The mount
@@ -447,7 +447,7 @@ export class MyVFS extends BaseVFS<MyAccessor> {
   override readonly cachesReads: boolean = true
   override readonly prompt: string = MY_PROMPT
   override readonly accessor: MyAccessor
-  override readonly handed = { stat: ['entry'] }
+  override readonly handed = { stat: ['entry'] } as const
 
   constructor(config: MyConfig) {
     super()

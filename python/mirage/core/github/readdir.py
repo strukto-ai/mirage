@@ -48,9 +48,10 @@ async def readdir(
     """
     rel = (path.dir if path.pattern else path).mount_path.strip("/")
     if not (accessor.tree_loaded and accessor.truncated):
-        tree = await refresh_tree(accessor)
-        if tree is not None:
-            return tree_listing(tree, rel, accessor.tree_version, path.virtual)
+        fetched = await refresh_tree(accessor)
+        if fetched is not None:
+            tree, version = fetched
+            return tree_listing(tree, rel, version, path.virtual)
     if not rel:
         sha = await ensure_ref(accessor)
     elif entry is None:

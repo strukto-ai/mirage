@@ -18,7 +18,7 @@ import { read as ramRead } from '../core/ram/read.ts'
 import { readdir as ramReaddir } from '../core/ram/readdir.ts'
 import { stat as ramStat } from '../core/ram/stat.ts'
 import { write as ramWrite } from '../core/ram/write.ts'
-import { eacces } from '../errors/fs.ts'
+import { eacces, enoent } from '../errors/fs.ts'
 import { FileStat, FileType, PathSpec } from '../types.ts'
 import type { Handed } from './types.ts'
 import { sliceWindow } from '../utils/ranges.ts'
@@ -88,6 +88,28 @@ class LenientStat extends Minimal {
       return Promise.resolve(new FileStat({ name: 'missing', type: FileType.FILE, size: 0 }))
     }
     return super.stat(path)
+  }
+}
+
+/**
+ * Reads through its folder's row and answers existence from the row at the
+ * path, as Trello and Box do. Mirrors Python's `RowsHanded`.
+ */
+class RowsHanded extends Minimal {
+  override readonly handed = { read: ['parent'], exists: ['entry'] } as const
+
+  override async read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<Uint8Array> {
+    if (handed?.parent == null) throw enoent(path.virtual)
+    return super.read(path, handed, offset, size)
+  }
+
+  override exists(_path: PathSpec, handed?: Handed): Promise<boolean> {
+    return Promise.resolve(handed?.entry != null)
   }
 }
 
@@ -164,6 +186,28 @@ describe('the read contract', () => {
     const ram = new RAMVFS()
     await ramWrite(ram.accessor, FILE, CONTENT)
     await checkReadContract(ram, FIXTURE)
+  })
+
+  it('a VFS handed its rows meets it', async () => {
+    const file = new PathSpec({
+      virtual: '/data/sub/a.txt',
+      directory: '/data/sub',
+      vfsPath: 'sub/a.txt',
+    })
+    const store = new RAMStore()
+    store.dirs.add('/sub')
+    const accessor = new RAMAccessor(store)
+    await ramWrite(accessor, file, CONTENT)
+    await checkReadContract(new RowsHanded({ name: 'custom', accessor }), {
+      file,
+      directory: new PathSpec({ virtual: '/data/sub', directory: '/data', vfsPath: 'sub' }),
+      missing: new PathSpec({
+        virtual: '/data/sub/missing',
+        directory: '/data/sub',
+        vfsPath: 'sub/missing',
+      }),
+      content: CONTENT,
+    })
   })
 
   it('a rendered filetype meets it through its renderer', async () => {

@@ -72,7 +72,9 @@ async def test_du_sums_the_tree_it_reads_once(
     monkeypatch, operand, flags, expected
 ):
     monkeypatch.setitem(
-        tree.__globals__, "refresh_tree", AsyncMock(return_value=TREE)
+        tree.__globals__,
+        "refresh_tree",
+        AsyncMock(return_value=(TREE, "head")),
     )
     table = CommandIO(
         readdir=_unlisted,

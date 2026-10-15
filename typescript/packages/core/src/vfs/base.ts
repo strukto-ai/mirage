@@ -355,7 +355,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Whether anything is at `path`; derived from `stat` when not defined. */
-  exists(path: PathSpec): Promise<boolean> {
+  exists(path: PathSpec, _handed?: Handed): Promise<boolean> {
     return Promise.reject(enotsup(this.name, 'exists', path))
   }
 

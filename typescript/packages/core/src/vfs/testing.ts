@@ -39,29 +39,36 @@ function renderer(vfs: BaseVFS, path: PathSpec): BaseVFS['read'] | undefined {
 }
 
 // What a VFS function is handed beside its path, as the mount hands it: the
-// store, for a function that takes one, and what is at its path. Mirrors
-// Python's `_taken`.
-function taken(store: IndexCacheStore, found: FileStat | null): Handed {
-  return { index: store, entry: found }
+// store, for a function that takes one, what is at its path, and its
+// folder's row. Mirrors Python's `_taken`.
+function taken(
+  store: IndexCacheStore,
+  found: FileStat | null,
+  parent: FileStat | null = null,
+): Handed {
+  return { index: store, entry: found, parent }
 }
 
-// What is at `path`, found by listing each directory from the mount root
-// down, each handed what its own parent's listing named, as the mount finds
-// it. Null for a path nothing is at. Mirrors Python's `_entry`.
-async function entry(vfs: BaseVFS, path: PathSpec): Promise<FileStat | null> {
+// What is at `path` and at its folder, found by listing each directory from
+// the mount root down, each handed what its own parent's listing named, as
+// the mount finds it. Null for the root, which no listing names, and for a
+// path nothing is at. Mirrors Python's `_rows_at`.
+async function rowsAt(vfs: BaseVFS, path: PathSpec): Promise<[FileStat | null, FileStat | null]> {
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const names = path.vfsPath.split('/').filter((name) => name !== '')
   let found: FileStat | null = null
+  let above: FileStat | null = null
   for (const [depth, name] of names.entries()) {
     const key = names.slice(0, depth).join('/')
     const virtual = key !== '' ? `${prefix}/${key}` : prefix || '/'
     const folder = new PathSpec({ virtual, directory: virtual, vfsPath: key })
-    const listed = await vfs.readdir(folder, { entry: found })
+    const listed = await vfs.readdir(folder, { entry: found, parent: above })
     const rows = listed instanceof DirListing ? listed.entries : listed
+    above = found
     found = rows.find((row) => row.name === name) ?? null
-    if (found === null) return null
+    if (found === null) return [null, above]
   }
-  return found
+  return [found, above]
 }
 
 // Check that `read` answers a byte window of `data`, the whole file as
@@ -100,8 +107,10 @@ export async function checkReadContract(
   index?: IndexCacheStore,
 ): Promise<void> {
   const store = index ?? new RAMIndexCacheStore({ ttl: vfs.indexTtl })
-  const file = taken(store, await entry(vfs, fixture.file))
-  const folder = taken(store, await entry(vfs, fixture.directory))
+  const [entry, folderRow] = await rowsAt(vfs, fixture.file)
+  const [, above] = await rowsAt(vfs, fixture.directory)
+  const file = taken(store, entry, folderRow)
+  const folder = taken(store, folderRow, above)
   const render = renderer(vfs, fixture.file)
   const data = await (render ?? vfs.read.bind(vfs))(fixture.file, file)
   check(sameBytes(data, fixture.content), 'read differs from fixture content')
@@ -137,12 +146,12 @@ export async function checkReadContract(
   if (vfs.readsRanges && vfs.supports('read')) {
     await checkWindows(vfs.read.bind(vfs), fixture.file, file, stored)
   }
+  const missing = taken(store, null, folderRow)
   if (vfs.supports('exists')) {
-    check(await vfs.exists(fixture.file), 'exists rejected the fixture file')
-    check(!(await vfs.exists(fixture.missing)), 'exists accepted a missing file')
+    check(await vfs.exists(fixture.file, file), 'exists rejected the fixture file')
+    check(!(await vfs.exists(fixture.missing, missing)), 'exists accepted a missing file')
   }
   const readMissing = renderer(vfs, fixture.missing) ?? vfs.read.bind(vfs)
-  const missing = taken(store, null)
   for (const call of [
     (p: PathSpec) => vfs.stat(p, missing),
     (p: PathSpec) => readMissing(p, missing),

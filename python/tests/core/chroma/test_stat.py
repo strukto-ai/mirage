@@ -14,7 +14,10 @@
 
 import pytest
 
-from mirage.types import ContentType
+from mirage.cache.index.ram import ListingCheckStore
+from mirage.core.chroma.stat import stat
+from mirage.types import ContentType, PathSpec
+from mirage.utils.key_prefix import mount_key
 from mirage.vfs.chroma import ChromaVFS
 from tests.fixtures.mounted import Mounted
 
@@ -27,3 +30,20 @@ async def test_stat_file(chroma_accessor, quickstart_path):
     assert result.name == "quickstart"
     assert result.size == 12
     assert result.modified == "2026-02-01T00:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_check_reads_the_row_from_the_tree(
+    chroma_accessor, quickstart_path
+):
+    # A fresh check is handed no row: the stat asks the collection.
+    result = await stat(
+        chroma_accessor, quickstart_path, None, ListingCheckStore()
+    )
+    assert [result.name, result.size] == ["quickstart", 12]
+    missing = PathSpec.from_str_path(
+        "/knowledge/guides/nope",
+        mount_key("/knowledge/guides/nope", "/knowledge"),
+    )
+    with pytest.raises(FileNotFoundError):
+        await stat(chroma_accessor, missing, None, ListingCheckStore())

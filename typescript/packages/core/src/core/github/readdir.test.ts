@@ -70,6 +70,34 @@ describe('github readdir', () => {
     expect([src[0]?.size, src[0]?.fingerprint]).toEqual([120, 'bbb'])
   })
 
+  it('versions each listing by the head its own tree was read at', async () => {
+    // Two listings whose trees land together: the second reseats the
+    // accessor before the first one's listing is built.
+    const heads = ['HEAD1', 'HEAD2']
+    let release = (): void => undefined
+    const landed = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const transport = {
+      get: async () => {
+        const sha = heads.shift()
+        await landed
+        return { tree: TREE, truncated: false, sha }
+      },
+    } as unknown as GitHubTransport
+    const shared = new GitHubAccessor({
+      transport,
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      defaultBranch: 'main',
+    })
+    const both = Promise.all([readdir(shared, spec('src')), readdir(shared, spec(''))])
+    release()
+    const [first, second] = await both
+    expect([first.version, second.version]).toEqual(['HEAD1', 'HEAD2'])
+  })
+
   it('refuses what is no folder', async () => {
     await expect(readdir(accessor(), spec('nonexistent'))).rejects.toMatchObject({
       code: 'ENOENT',
