@@ -71,33 +71,6 @@ def test_the_chokepoints_read_the_gate():
     assert {"files_containing", "lines_containing"} <= set(_DISPATCHED_SLOTS)
 
 
-def test_every_wired_find_core_forks_to_the_guarded_walk():
-    """A bespoke find that passes ``find_core=`` classifies on the raw
-    tree, so its module must hold the same fork the factory builder
-    has: the gate plus ``find_walk_generic``. The generic's tail filter
-    hides the names, but only the walk classifies correctly (-empty on
-    a directory whose only child is hidden must still match)."""
-    commands, failed = _registered()
-    assert not failed, f"builtin modules would not import: {failed}"
-    offenders = []
-    for cmd in commands:
-        if cmd.name != "find":
-            continue
-        fn = inspect.unwrap(cmd.fn)
-        source_file = inspect.getsourcefile(fn) or ""
-        if "/generic_bind/" in source_file:
-            continue
-        source = inspect.getsource(inspect.getmodule(fn))
-        if "find_core=" not in source:
-            continue
-        if GATE not in source or "find_walk_generic" not in source:
-            offenders.append(f"{cmd.vfs}/{cmd.name} ({source_file})")
-    assert not offenders, (
-        "these find wrappers wire a native core without forking to the "
-        f"guarded walk under {GATE}: {offenders}"
-    )
-
-
 def test_no_backend_registers_its_own_grep_or_rg():
     """A mount's search is ``files_containing`` and ``lines_containing``,
     which only the generic's reads ask, through the dispatcher; a backend grep

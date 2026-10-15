@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -509,28 +509,6 @@ def drop_pruned(
     return [
         r for r in rows if not any(r.startswith(s) and r != s for s in stems)
     ]
-
-
-async def settle_pending_prunes(
-    node: PredNode, mtime_of: Callable[[str], Awaitable[float | None]]
-) -> None:
-    """Decide every pending prune by asking for its directory's mtime.
-
-    The backend judged its entries without their mtimes, so a prune
-    reached past ``-newermt`` or ``-mtime`` is only pending; the caller's
-    overlay-aware stat answers for the directory here, and a directory
-    the test rejects keeps its contents (``find d -newermt X -prune``
-    skips only the directories newer than ``X``, as GNU does).
-
-    Args:
-        node (PredNode): the evaluated tree holding the ledger.
-        mtime_of (Callable): epoch-second mtime of one mount-relative
-            key, None when the directory reports none or is gone.
-    """
-    mtimes: dict[str, float | None] = {}
-    for pend in pending_prunes(node):
-        mtimes[pend.entry.key] = await mtime_of(pend.entry.key)
-    settle_prunes(node, mtimes)
 
 
 def tree_has_empty(node: PredNode) -> bool:

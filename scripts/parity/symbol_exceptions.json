@@ -1,5 +1,5 @@
 {
-  "baseline": 3728,
+  "baseline": 3726,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -725,6 +725,20 @@
   "runtime/types": {
    "python_only": {
     "ByteReader": "Python stream readers and asyncssh implement readexactly; TypeScript transports expose Web ReadableStreams."
+   }
+  },
+  "commands/builtin/generic/find": {
+   "typescript_only": {
+    "findGeneric": "TypeScript's find hands its walk to findGeneric as a find callback; Python's builder calls find_walk_generic, which walks directly.",
+    "withRootRow": "findGeneric swaps the find callback's row for the start point with its own; Python's find_walk_generic gets the start point's row from the walk.",
+    "applyMtimeFilter": "findGeneric filters the find callback's rows by overlay mtime; Python's find_walk_generic walks with the overlay stat, so the walk applies -mtime itself.",
+    "rowMtime": "Asks the overlay mtime of one find-callback row for findGeneric's prune settling; Python's walk reads it off the stat it already has.",
+    "rowSpec": "Builds the stat probe's path for one find-callback row in findGeneric; Python's walk stats PathSpecs it already holds."
+   }
+  },
+  "core/generic/find_eval": {
+   "typescript_only": {
+    "settlePendingPrunes": "findGeneric settles the prunes its find callback left pending by asking each directory's mtime; Python's walk settles them inside walk_find through settle_prunes."
    }
   }
  }

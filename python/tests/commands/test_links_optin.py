@@ -34,7 +34,7 @@ LINK_AWARE = ("ls", "stat", "find", "file")
 GENERIC_CALLS = {
     "ls": ("ls_generic(",),
     "stat": ("stat_generic(", "generic_stat("),
-    "find": ("find_generic(", "find_walk_generic(", "resolve_start("),
+    "find": ("find_walk_generic(", "resolve_start("),
     "file": ("file_generic(",),
 }
 
