@@ -21,7 +21,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
 const ESCAPES: Record<string, string> = { n: '\n', t: '\t', '\\': '\\', '0': '' }
 

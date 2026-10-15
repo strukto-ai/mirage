@@ -72,7 +72,7 @@ async def strings(
     io = IOResult()
     read = stdin_stream(read_stream, stdin, dash=False)
     sources = [
-        reported_stream(_strings_stream(read(p), min_len), io, p, "strings")
+        _strings_stream(reported_stream(read(p), io, p, "strings"), min_len)
         for p in paths
     ]
     return (

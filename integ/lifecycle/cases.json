@@ -4913,7 +4913,8 @@
             "config": {
               "files": {
                 "/denied": "first,x\nsecond,y\n",
-                "/good": "good,x\n"
+                "/good": "good,x\n",
+                "/half": "firstabc,more\n"
               },
               "chunk_size": 8,
               "fail_after": 1,
@@ -4981,6 +4982,17 @@
         },
         {
           "op": "exec",
+          "command": "strings /data/half /data/good",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "firstabc\ngood,x\n",
+              "stderr": "strings: /data/half: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
           "command": "sed -n 'p' /data/denied /data/good",
           "expect": {
             "value": {
@@ -4998,7 +5010,7 @@
           "path": "/data",
           "expect": {
             "value": {
-              "closed": 7
+              "closed": 8
             }
           }
         },
@@ -5275,6 +5287,75 @@
               "closed": 1,
               "pulls": 1
             }
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_sed_reads_across_mounts_on_demand",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 6,
+              "repeat": 100000
+            }
+          },
+          "/more": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/x": "x\n"
+              },
+              "chunk_size": 6
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "sed q /data/log.txt /more/x",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "stream_stats",
+          "path": "/more",
+          "expect": {
+            "value": {
+              "pulls": 0,
+              "closed": 0
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
           }
         }
       ]

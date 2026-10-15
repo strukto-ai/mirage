@@ -18,7 +18,7 @@ import functools
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
-from typing import Any, cast
+from typing import Any
 
 from mirage.commands.builtin.generic.cp import TransferLinks
 from mirage.commands.builtin.generic.crossmount.types import (
@@ -46,7 +46,12 @@ from mirage.errors.fs import eisdir
 from mirage.errors.render import fs_error_line
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks as byte_chunks
-from mirage.io.stream import discard_streams, ensure_stream, materialize
+from mirage.io.stream import (
+    close_quietly,
+    discard_streams,
+    ensure_stream,
+    materialize,
+)
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -57,7 +62,7 @@ from mirage.view.types import LinkView
 def file_stream_op(
     dispatch: DispatchFn,
 ) -> Callable[[PathSpec], AsyncIterator[bytes]]:
-    """A directory-aware whole-file reader over the dispatcher.
+    """A directory-aware streamed reader over the dispatcher.
 
     Mirrors ``fileStreamOp``.
 
@@ -69,7 +74,14 @@ def file_stream_op(
         info = await dispatched_call(dispatch, "stat", path)
         if info.type is FileType.DIRECTORY:
             raise eisdir(path.virtual)
-        yield cast(bytes, await dispatched_call(dispatch, "read", path))
+        source = ensure_stream(
+            await dispatched_call(dispatch, "read", path, stream=True)
+        )
+        try:
+            async for chunk in source:
+                yield chunk
+        finally:
+            await close_quietly(source)
 
     return stream
 

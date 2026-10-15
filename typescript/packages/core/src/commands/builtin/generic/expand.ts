@@ -25,7 +25,7 @@ import { mapStream } from '../utils/lines.ts'
 import { quoteText } from '../../quote.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
 // GNU's scanner is `c_isdigit`, which is ASCII. A unicode-aware test (a `\d`
 // class with the `u` flag, JavaScript's `Number.parseInt` on a full-width

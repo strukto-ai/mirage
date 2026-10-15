@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "record_filters_keep_a_bom_inside_a_record",
+      "seq": 13720008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qbom && printf 'a\\n\\357\\273\\277b\\n' > /data/qbom/x && printf 'a\\nb\\n' > /data/qbom/y && comm /data/qbom/x /data/qbom/y; paste /data/qbom/x /data/qbom/y; fold /data/qbom/x; expand /data/qbom/x; unexpand /data/qbom/x",
+      "expect": {
+        "exit": 0,
+        "stdout": "\t\ta\n\tb\n﻿b\na\ta\n﻿b\tb\na\n﻿b\na\n﻿b\na\n﻿b\n",
+        "stderr": ""
+      },
+      "note": "A record that starts with U+FEFF keeps it: comm pairs nothing on it, and paste, fold, expand and unexpand pass it through. Each record is decoded on its own, so a decoder that drops a leading BOM would lose it. Pinned in debian:stable-slim."
+    }
+  ]
+}

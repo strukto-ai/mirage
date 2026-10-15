@@ -69,7 +69,7 @@ export function stringsGeneric(
   const { minLen } = parseFlags(opts.flags)
   const io = new IOResult()
   const sources = paths.map((p) =>
-    reportedStream(stringsStream(stream(p), minLen), io, p, 'strings'),
+    stringsStream(reportedStream(stream(p), io, p, 'strings'), minLen),
   )
   return [
     paths.length > 0 ? asyncChain(sources) : stringsStream(opts.stdin ?? new Uint8Array(), minLen),

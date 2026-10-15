@@ -24,7 +24,7 @@ import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
 // comm's options; `checkOrder` is the later of --check-order and
 // --nocheck-order, null when neither was given.

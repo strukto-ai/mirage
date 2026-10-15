@@ -24,7 +24,7 @@ import { asyncChain } from '../../../io/stream.ts'
 import { mapStream } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
 function unexpandLine(line: string, tabsize: number, allSpaces: boolean): string {
   if (allSpaces) {

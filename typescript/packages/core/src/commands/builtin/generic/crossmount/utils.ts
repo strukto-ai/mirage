@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { abortable } from '../../../../utils/abort.ts'
-import { discardStreams } from '../../../../io/stream.ts'
+import { discardStreams, ensureStream } from '../../../../io/stream.ts'
 import { chunks } from '../../../../io/cooperative.ts'
 import { concat as concatBytes } from '../../../../utils/bytes.ts'
 import { isStdin } from '../../utils/stream.ts'
@@ -162,13 +162,13 @@ export function readBytesOp(dispatch: DispatchFn): (p: PathSpec) => Promise<Uint
   }
 }
 
-/** A directory-aware whole-file reader. */
+/** A directory-aware streamed reader. Mirrors Python's `file_stream_op`. */
 export function fileStreamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<Uint8Array> {
   const stat = statOp(dispatch)
-  const read = readBytesOp(dispatch)
   async function* stream(path: PathSpec): AsyncIterable<Uint8Array> {
     if ((await stat(path)).type === FileType.DIRECTORY) throw eisdir(path)
-    yield await read(path)
+    const [data] = await dispatch('read', path, [], { stream: true })
+    yield* ensureStream(data as ByteSource)
   }
   return stream
 }
