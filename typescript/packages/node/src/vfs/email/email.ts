@@ -28,7 +28,7 @@ import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { sliceWindow } from '@struktoai/mirage-core/utils/ranges'
 import { readdir as emailReaddir } from '../../core/email/readdir.ts'
-import { read as emailRead } from '../../core/email/read.ts'
+import { read as emailRead, readMany as emailReadMany } from '../../core/email/read.ts'
 import { stat as emailStat } from '../../core/email/stat.ts'
 import { filesContaining as emailFilesContaining } from '../../core/email/search.ts'
 
@@ -75,6 +75,14 @@ export class EmailVFS extends BaseVFS {
   ): Promise<Uint8Array> {
     const data = await emailRead(this.accessor, path, index)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    _limit: number,
+    index?: IndexCacheStore,
+  ): Promise<Map<string, Uint8Array>> {
+    return emailReadMany(this.accessor, paths, index)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {

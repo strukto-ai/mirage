@@ -13,8 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.email import EmailAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.core.email.client import fetch_attachment, fetch_message
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.core.email.client import (
+    fetch_attachment,
+    fetch_headers,
+    fetch_message,
+)
 from mirage.core.email.readdir import readdir
 from mirage.core.email.render import message_json_bytes
 from mirage.core.email.scope import detect_scope
@@ -62,3 +66,37 @@ read = make_read(
         "attachment": _read_attachment,
     },
 )
+
+
+async def read_many(
+    accessor: EmailAccessor,
+    paths: list[PathSpec],
+    index: IndexCacheStore = NULL_INDEX,
+) -> dict[str, bytes]:
+    """Several message files, one UID FETCH per folder for all of them.
+
+    A path that is no message file, or one its folder's listing does not
+    hold, is left out for its own read to answer.
+
+    Args:
+        accessor (EmailAccessor): the account.
+        paths (list[PathSpec]): the files.
+        index (IndexCacheStore): index cache.
+    """
+    folders: dict[str, dict[str, str]] = {}
+    for path in paths:
+        match = detect_scope(path)
+        if match.kind != "message":
+            continue
+        entry = await resolve_entry(readdir, accessor, path, index)
+        if entry is not None:
+            folders.setdefault(match.slots["folder"], {})[entry.id] = (
+                path.virtual
+            )
+    answers: dict[str, bytes] = {}
+    for folder, uids in folders.items():
+        for msg in await fetch_headers(accessor, folder, list(uids)):
+            virtual = uids.get(str(msg.get("uid")))
+            if virtual is not None:
+                answers[virtual] = message_json_bytes(msg)
+    return answers

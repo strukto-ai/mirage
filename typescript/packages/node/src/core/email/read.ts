@@ -19,7 +19,7 @@ import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { fetchAttachment, fetchMessage } from './client.ts'
+import { fetchAttachment, fetchHeaders, fetchMessage } from './client.ts'
 import { readdir } from './readdir.ts'
 import { messageJsonBytes } from './render.ts'
 import { detectScope } from './scope.ts'
@@ -58,3 +58,34 @@ export const read = makeRead<EmailAccessor>(detectScope, {
   message: readMessage,
   attachment: readAttachment,
 })
+
+/**
+ * Several message files, one UID FETCH per folder for all of them. A path
+ * that is no message file, or one its folder's listing does not hold, is
+ * left out for its own read to answer. Mirrors Python's `read_many`.
+ */
+export async function readMany(
+  accessor: EmailAccessor,
+  paths: readonly PathSpec[],
+  index?: IndexCacheStore,
+): Promise<Map<string, Uint8Array>> {
+  const folders = new Map<string, Map<string, string>>()
+  for (const path of paths) {
+    const match = detectScope(path)
+    if (match.kind !== 'message') continue
+    const entry = await resolveEntry(readdir, accessor, path, index)
+    if (entry === null) continue
+    const folder = match.slots.folder ?? ''
+    const uids = folders.get(folder) ?? new Map<string, string>()
+    uids.set(entry.id, path.virtual)
+    folders.set(folder, uids)
+  }
+  const answers = new Map<string, Uint8Array>()
+  for (const [folder, uids] of folders) {
+    for (const msg of await fetchHeaders(accessor, folder, [...uids.keys()])) {
+      const virtual = uids.get(msg.uid)
+      if (virtual !== undefined) answers.set(virtual, messageJsonBytes(msg))
+    }
+  }
+  return answers
+}

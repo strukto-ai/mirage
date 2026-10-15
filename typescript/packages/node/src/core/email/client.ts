@@ -365,26 +365,28 @@ export async function fetchHeaders(
   const lock = await lockMailbox(imap, folder)
   try {
     const results: FetchedMessage[] = []
-    for (const uid of uids) {
-      // Full source (not headers-only) by default: listings need the MIME
-      // structure to surface attachment dirs, mirroring the python backend.
-      const msg = await imap.fetchOne(
-        uid,
+    const batchSize = 25
+    for (let i = 0; i < uids.length; i += batchSize) {
+      // One UID FETCH per batch. Full source (not headers-only) by default:
+      // listings need the MIME structure to surface attachment dirs,
+      // mirroring the python backend.
+      for await (const msg of imap.fetch(
+        uids.slice(i, i + batchSize).join(','),
         headerOnly
           ? { headers: true, uid: true, internalDate: true }
           : { source: true, flags: true, uid: true, internalDate: true },
         { uid: true },
-      )
-      if (msg === false) continue
-      const raw = headerOnly ? msg.headers : msg.source
-      const source = raw instanceof Buffer ? new Uint8Array(raw) : new Uint8Array(0)
-      const parsed = await parseRfc822(source)
-      results.push({
-        ...parsed,
-        uid,
-        flags: msg.flags !== undefined ? [...msg.flags] : [],
-        internalDate: internalDateOf(msg.internalDate),
-      })
+      )) {
+        const raw = headerOnly ? msg.headers : msg.source
+        const source = raw instanceof Buffer ? new Uint8Array(raw) : new Uint8Array(0)
+        const parsed = await parseRfc822(source)
+        results.push({
+          ...parsed,
+          uid: String(msg.uid),
+          flags: msg.flags !== undefined ? [...msg.flags] : [],
+          internalDate: internalDateOf(msg.internalDate),
+        })
+      }
     }
     return results
   } finally {

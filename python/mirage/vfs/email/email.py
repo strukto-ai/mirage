@@ -18,6 +18,7 @@ from mirage.accessor.email import EmailAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.email.config import EmailConfig
 from mirage.core.email.read import read as _read
+from mirage.core.email.read import read_many as _read_many
 from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.search import files_containing as _files_containing
 from mirage.core.email.stat import stat as _stat
@@ -63,6 +64,14 @@ class EmailVFS(BaseVFS):
     ) -> bytes:
         data = await _read(self.accessor, path, index)
         return slice_window(data, offset, size)
+
+    async def read_many(
+        self,
+        paths: list[PathSpec],
+        limit: int,
+        index: IndexCacheStore = NULL_INDEX,
+    ) -> dict[str, bytes]:
+        return await _read_many(self.accessor, paths, index)
 
     async def stat(
         self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
