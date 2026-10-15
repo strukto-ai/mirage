@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from functools import partial
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,6 +26,7 @@ from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.constants import RESULT_HEADER
 from mirage.core.dropbox.read import read, read_stream
 from mirage.core.dropbox.readdir import readdir
+from mirage.core.generic.rewrite import truncate_by_rewrite
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -383,10 +385,12 @@ async def test_a_live_read_names_what_dropbox_answered(streamed):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("door", ["read", "stream", "index-less"])
-async def test_a_live_read_refuses_another_case(index, door):
+@pytest.mark.parametrize("door", ["read", "stream", "truncate"])
+async def test_a_live_read_in_another_case(index, door):
     # A download by path matches names case-insensitively; the listing
-    # does not, so a file stored as N is not n.
+    # does not, so past a listing a file stored as N is not n. Truncate's
+    # index-less read keeps N's bytes: its upload lands on N, which a miss
+    # would have zeroed.
     result = json.dumps({".tag": "file", "name": "N", "content_hash": "h"})
 
     async def stream(_tm, _path, on_response=None):
@@ -403,10 +407,15 @@ async def test_a_live_read_refuses_another_case(index, door):
         ),
         patch("mirage.core.dropbox.read.dropbox_download_stream", new=stream),
     ):
+        if door == "truncate":
+            write = AsyncMock()
+            await truncate_by_rewrite(
+                partial(read, make_accessor()), write, n, 4, False
+            )
+            assert write.await_args.args == (n, DATA[:4])
+            return
         with pytest.raises(FileNotFoundError):
             if door == "stream":
                 [c async for c in read_stream(make_accessor(), n, index)]
-            elif door == "read":
-                await read(make_accessor(), n, index)
             else:
-                await read(make_accessor(), n)
+                await read(make_accessor(), n, index)

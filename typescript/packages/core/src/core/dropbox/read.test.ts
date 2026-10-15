@@ -36,6 +36,7 @@ import * as client from './client.ts'
 import type { DropboxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { read, readStream } from './read.ts'
+import { truncateByRewrite } from '../generic/rewrite.ts'
 import { runWithRecording } from '../../observe/context.ts'
 
 const STUB_TM = {} as DropboxTokenManager
@@ -279,8 +280,10 @@ describe('dropbox read past an earlier listing', () => {
   })
 
   // A download by path matches names case-insensitively; the listing does
-  // not, so a file stored as N is not n.
-  it('refuses a file in another case', async () => {
+  // not, so past a listing a file stored as N is not n. Truncate's index-less
+  // read keeps N's bytes: its upload lands on N, which a miss would have
+  // zeroed.
+  it('refuses a file in another case past a listing', async () => {
     vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([1]), header('N')])
     vi.mocked(client.dropboxDownloadStream).mockImplementation(
       async function* (_tm, _path, onResponse) {
@@ -291,6 +294,8 @@ describe('dropbox read past an earlier listing', () => {
     )
     await expect(read(makeAccessor(), n, await listed())).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(drain(makeAccessor(), await listed())).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(read(makeAccessor(), n)).rejects.toMatchObject({ code: 'ENOENT' })
+    const write = vi.fn(() => Promise.resolve())
+    await truncateByRewrite((p) => read(makeAccessor(), p), write, n, 1, false)
+    expect(write.mock.calls).toEqual([[n, new Uint8Array([1])]])
   })
 })

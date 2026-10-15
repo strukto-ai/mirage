@@ -75,14 +75,17 @@ export async function read(
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
   const window = windowFor(options?.offset ?? 0, options?.size ?? null)
-  // Index-less callers (emulated truncate) download by path.
-  const byPath = index === undefined || (await resolveRead(accessor, path, index))
+  // Index-less callers (emulated truncate) download by path and keep the file
+  // Dropbox resolves the name to, in whatever case: their rewrite uploads over
+  // that same file, so calling it absent would zero it.
+  const indexLess = index === undefined
+  const byPath = !indexLess && (await resolveRead(accessor, path, index))
   const timer = startOp()
   let download: [Uint8Array, string | null]
   try {
     download = await dropboxDownload(accessor.tokenManager, dropboxPathOf(accessor, path), window)
   } catch (err) {
-    const refusal = byPath ? byPathRefusal(path, err) : null
+    const refusal = byPath || indexLess ? byPathRefusal(path, err) : null
     if (refusal !== null) throw refusal
     throw err
   }

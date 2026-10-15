@@ -103,15 +103,20 @@ async def read(
         size (int | None): how many bytes, or None for the rest.
     """
     window = window_for(offset, size)
-    # Index-less callers (emulated truncate) download by path.
-    by_path = index is NULL_INDEX or await _resolve_read(accessor, path, index)
+    # Index-less callers (emulated truncate) download by path and keep the
+    # file Dropbox resolves the name to, in whatever case: their rewrite
+    # uploads over that same file, so calling it absent would zero it.
+    index_less = index is NULL_INDEX
+    by_path = not index_less and await _resolve_read(accessor, path, index)
     timer = start_op()
     try:
         data, result = await dropbox_download(
             accessor.token_manager, dropbox_path_of(accessor, path), window
         )
     except DropboxApiError as exc:
-        refusal = _by_path_refusal(path, exc) if by_path else None
+        refusal = (
+            _by_path_refusal(path, exc) if by_path or index_less else None
+        )
         if refusal is not None:
             raise refusal from exc
         raise
