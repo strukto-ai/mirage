@@ -11,13 +11,13 @@ The workspace connects through Codex's exec-server relay, set up on the [Codex p
 ## Install
 
 ```bash
-npm install -g @struktoai/mirage-cli redis
+npm install -g @struktoai/mirage-cli
 npm install openai
 ```
 
 ## Workspace
 
-`/workspace`, where OpenAI's examples work, is scratch space in memory. `/redis` keeps what the agent saves there after the workspace closes:
+`/workspace`, where OpenAI's examples work, is scratch space in memory. `/redis` keeps what the agent saves there after the workspace closes, which needs a Redis server and the `redis` package next to the CLI:
 
 ```yaml workspace.yaml
 mode: write
@@ -32,6 +32,7 @@ mounts:
 
 ```bash
 docker run -d -p 6379:6379 redis
+npm install -g redis
 mirage workspace create workspace.yaml --id demo
 mirage shell -w demo -c 'cat > /workspace/orders.csv' < orders.csv
 ```

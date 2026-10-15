@@ -9,11 +9,17 @@ icon: /images/claude-logo.svg
 ## Install
 
 ```bash
-docker run -d -p 6379:6379 redis
-uv add 'mirage-ai[claude-managed-agents,redis]'
+uv add 'mirage-ai[claude-managed-agents]'
 ```
 
 ## Run a worker
+
+The workspace here keeps its files in Redis next to RAM, which needs a Redis server and the `redis` extra:
+
+```bash
+docker run -d -p 6379:6379 redis
+uv add 'mirage-ai[redis]'
+```
 
 Create a self-hosted environment and an agent with the `agent_toolset_20260401` toolset as [Anthropic's guide](https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes) shows, then serve its sessions from the workspace:
 
