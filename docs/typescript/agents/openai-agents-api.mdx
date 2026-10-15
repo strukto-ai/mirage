@@ -6,7 +6,7 @@ icon: /images/openai-logo.svg
 
 OpenAI's [Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) runs the agent on OpenAI's servers. With a `self_hosted` environment, its shell commands, file reads and patches run in a Mirage workspace, under the workspace's profile and mount modes. No sandbox holds the files.
 
-The workspace connects through Codex's exec-server relay, set up on the [Codex page](/typescript/agents/codex#exec-server-forward).
+The workspace connects through Codex's exec-server relay, set up on the [Codex page](/typescript/agents/codex#exec-server-forward). The Agents API is in beta.
 
 ## Install
 
@@ -33,6 +33,7 @@ mounts:
 ```bash
 docker run -d -p 6379:6379 redis
 mirage workspace create workspace.yaml --id demo
+mirage shell -w demo -c 'cat > /workspace/orders.csv' < orders.csv
 ```
 
 ## Create a session
@@ -42,7 +43,7 @@ import OpenAI from 'openai'
 
 const client = new OpenAI()
 const session = await client.beta.agents.sessions.create({
-  agent: { model: 'gpt-6-astra' },
+  agent: { model: 'gpt-6-luna' },
   environment: { type: 'self_hosted', workspace_directory: '/workspace' },
 })
 console.log(session.environment.id, session.environment.remote_url)
@@ -50,6 +51,42 @@ console.log(session.environment.id, session.environment.remote_url)
 
 ## Connect the workspace
 
-Hand the session's `environment.id` and `environment.remote_url`, with an [environment key](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted#authentication), to [`codex exec-server forward`](/typescript/agents/codex#exec-server-forward) pointed at workspace `demo`. Then [send input](https://developers.openai.com/api/docs/guides/agents-api/sessions#send-input) to the session. The agent's commands run in the workspace, and what it writes lands in its mounts.
+Hand the session's `environment.id` and `environment.remote_url`, with an [environment key](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted#authentication), to [`codex exec-server forward`](/typescript/agents/codex#exec-server-forward) pointed at workspace `demo`. The agent's commands then run in the workspace, and what it writes lands in its mounts.
 
-The Agents API is in beta.
+## Run a task
+
+Open the session's event stream, then send the task. The agent's reply streams back while its commands run in the workspace:
+
+```ts
+import { randomUUID } from 'node:crypto'
+
+const stream = await client.beta.agents.sessions.events.stream(session.id)
+await client.beta.agents.sessions.events.create(session.id, {
+  events: [
+    {
+      type: 'agent.session.input.message',
+      input: [
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: 'Total the amount per customer in /workspace/orders.csv and save the totals as a markdown table to /redis/report.md.' }],
+        },
+      ],
+    },
+  ],
+  'Idempotency-Key': randomUUID(),
+})
+for await (const event of stream) {
+  if (event.type === 'agent.session.turn.output_text.delta') process.stdout.write(event.delta)
+  else if (event.type === 'agent.session.turn.completed' || event.type === 'agent.session.turn.failed') break
+}
+```
+
+The report stays in Redis after the session ends:
+
+```bash
+mirage shell -w demo -c 'cat /redis/report.md'
+```
+
+## Example
+
+[`examples/typescript/agents/openai-agents-api/redis_report.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai-agents-api/redis_report.ts) runs the whole flow: it seeds `/workspace/orders.csv`, starts `mirage codex-exec` and `codex exec-server forward`, sends the task and prints the report.
