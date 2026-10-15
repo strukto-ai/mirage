@@ -368,7 +368,11 @@ describe('read stand-ins', () => {
       '{"id":8}\n{"id":9}\n',
     )
     expect(client.countRows).not.toHaveBeenCalled()
-    expect(vi.mocked(client.fetchLastRows).mock.calls[0]?.slice(3)).toEqual([['id'], 2])
+    expect(vi.mocked(client.fetchLastRows).mock.calls[0]?.slice(3)).toEqual([
+      ['id'],
+      2,
+      new Set(['id']),
+    ])
   })
 
   // Twin of test_a_keyed_table_streams_in_pages_up_to_its_ceiling.

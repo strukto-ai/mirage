@@ -16,7 +16,7 @@ import { expect, it, vi } from 'vitest'
 import { FileChangeKind } from '../../types.ts'
 import type { JsonValue } from '../../types.ts'
 import type * as ClientModule from './client.ts'
-import { EVENTS, event, HK, makeAccessor, PRIMARY, spec } from './_test_util.ts'
+import { API, EVENTS, event, HK, makeAccessor, PRIMARY, spec } from './_test_util.ts'
 
 const syncs = vi.hoisted(() => ({
   answers: new Map<string | null, unknown>(),
@@ -85,4 +85,37 @@ it('names no file for an event outside the time range', () => {
   expect(eventPaths(accessor, '/primary', inside, HK, false)).toEqual([
     '/primary/2026-08-12/eeee5__1300-1400_Lunch.gcal.json',
   ])
+})
+
+// Twin of test_a_watch_follows_a_calendar_s_details_and_zone.
+it("follows a calendar's details and zone", async () => {
+  syncs.answers = new Map<string | null, unknown>([
+    [null, [[EVENTS[0]], 't1']],
+    ['t1', [[], 't2']],
+  ])
+  syncs.asked = []
+  API.calendars = [PRIMARY]
+  try {
+    const hook = buildDeltaHook(makeAccessor())
+    const root = spec('/primary')
+    const baseline = await hook.pull(root, null)
+    // Its own details are its calendar.json, which no event names.
+    API.calendars = [{ ...PRIMARY, summary: 'Renamed' }]
+    const renamed = await hook.pull(root, baseline.checkpoint)
+    expect(renamed.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+      [FileChangeKind.UPDATE, '/primary/calendar.json'],
+    ])
+    // A new zone moves the day an event falls on: it is synced whole.
+    API.calendars = [{ ...PRIMARY, summary: 'Renamed', timeZone: 'America/Los_Angeles' }]
+    syncs.answers.set(null, [[EVENTS[0]], 't3'])
+    const moved = await hook.pull(root, renamed.checkpoint)
+    expect(syncs.asked.at(-1)).toBeNull()
+    expect(moved.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+      [FileChangeKind.UPDATE, '/primary/calendar.json'],
+      [FileChangeKind.DELETE, `${DAY}/aaaa1__0900-1030_PhD_Defense.gcal.json`],
+      [FileChangeKind.CREATE, '/primary/2026-08-10/aaaa1__1800-1930_PhD_Defense.gcal.json'],
+    ])
+  } finally {
+    API.reset()
+  }
 })

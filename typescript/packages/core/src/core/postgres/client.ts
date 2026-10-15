@@ -187,9 +187,26 @@ export async function fetchRows(
 }
 
 /**
+ * Each key column's text, selected under a name no column of the relation
+ * has, for a page to start after. node-pg reads a timestamp as a millisecond
+ * `Date`, so the driver's value of a key finer than that sorts before the row
+ * it came from, and the page after it would answer that row again; the text
+ * is the exact key. asyncpg keeps exact values, so Python pages from the row.
+ */
+function keyTexts(pk: readonly string[], columns: ReadonlySet<string>): [string, string[]] {
+  let marker = '__mirage_key'
+  while (pk.some((_, i) => columns.has(`${marker}${String(i)}`))) marker += '_'
+  const names = pk.map((_, i) => `${marker}${String(i)}`)
+  const select = pk.map(
+    (column, i) => `, ${quoteIdent(column)}::text AS ${quoteIdent(names[i] ?? '')}`,
+  )
+  return [select.join(''), names]
+}
+
+/**
  * A keyed relation's last `limit` rows, in key order, read off the end of its
- * key with no count, and the key of the last one. Mirrors Python's
- * `fetch_last_rows`.
+ * key with no count, and the exact key of the last one (`keyTexts`). Mirrors
+ * Python's `fetch_last_rows`.
  */
 export async function fetchLastRows(
   accessor: PostgresAccessor,
@@ -197,21 +214,28 @@ export async function fetchLastRows(
   name: string,
   pk: readonly string[],
   limit: number,
+  columns: ReadonlySet<string>,
 ): Promise<[Record<string, unknown>[], unknown[] | null]> {
+  const [select, names] = keyTexts(pk, columns)
   const result = await accessor.store.query(
-    `SELECT * FROM (SELECT * FROM ${qualified(schema, name)}${keyOrder(pk, true)} ` +
+    `SELECT *${select} FROM (SELECT * FROM ${qualified(schema, name)}${keyOrder(pk, true)} ` +
       `LIMIT $1) last${keyOrder(pk)}`,
     [limit],
   )
   const last = result.rows[result.rows.length - 1]
-  return [result.rows, last === undefined ? null : pk.map((column) => last[column])]
+  return [
+    result.rows.map((row) =>
+      Object.fromEntries(Object.entries(row).filter(([k]) => !names.includes(k))),
+    ),
+    last === undefined ? null : names.map((column) => last[column]),
+  ]
 }
 
 /**
- * A keyed relation's rows past a key, in key order, and the key of the last
- * one; null for the rows when their database JSON passes `maxBytes`, which the
- * database answers before sending any of them (`fetchBoundedQuery`). Mirrors
- * Python's `fetch_rows_after`.
+ * A keyed relation's rows past a key, in key order, and the exact key of the
+ * last one (`keyTexts`); null for the rows when their database JSON passes
+ * `maxBytes`, which the database answers before sending any of them
+ * (`fetchBoundedQuery`). Mirrors Python's `fetch_rows_after`.
  */
 export async function fetchRowsAfter(
   accessor: PostgresAccessor,
@@ -231,16 +255,20 @@ export async function fetchRowsAfter(
     where = ` WHERE (${key}) > (${marks})`
     params.push(...after)
   }
+  const [select, names] = keyTexts(pk, columns)
   const rows = await fetchBoundedQuery(
     accessor,
-    `SELECT * FROM ${qualified(schema, name)}${where}${keyOrder(pk)} LIMIT $1`,
+    `SELECT *${select} FROM ${qualified(schema, name)}${where}${keyOrder(pk)} LIMIT $1`,
     params,
-    columns,
+    new Set([...columns, ...names]),
     maxBytes,
   )
   if (rows === null) return [null, after]
   const last = rows[rows.length - 1]
-  return [rows, last === undefined ? after : pk.map((column) => last[column])]
+  return [
+    rows.map((row) => Object.fromEntries(Object.entries(row).filter(([k]) => !names.includes(k)))),
+    last === undefined ? after : names.map((column) => last[column]),
+  ]
 }
 
 /**

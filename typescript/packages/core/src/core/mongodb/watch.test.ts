@@ -82,17 +82,34 @@ describe('MongoDBDeltaHook', () => {
       },
       ['lib'],
     ).pull(ROOT, JSON.stringify({ mongodb: TOKEN }))
+    // A write also rewrites the schema.json sampled from the documents, and a
+    // collection created, dropped or renamed the database.json listing it.
     expect(delta.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
       [FileChangeKind.CREATE, '/m/lib/collections/books'],
+      [FileChangeKind.UPDATE, '/m/lib/database.json'],
       [FileChangeKind.UPDATE, '/m/lib/collections/books/documents.jsonl'],
-      [FileChangeKind.CREATE, '/m/lib/views/recent'],
       [FileChangeKind.UPDATE, '/m/lib/collections/books/schema.json'],
+      [FileChangeKind.CREATE, '/m/lib/views/recent'],
       [FileChangeKind.UPDATE, '/m/lib/views/recent/schema.json'],
       [FileChangeKind.UPDATE, '/m/lib/views/recent/documents.jsonl'],
       [FileChangeKind.DELETE, '/m/lib/collections/old'],
       [FileChangeKind.CREATE, '/m/lib/collections/new'],
     ])
     expect(JSON.parse(delta.checkpoint ?? '')).toEqual({ mongodb: NEXT })
+  })
+
+  // Twin of test_a_watch_below_a_dropped_collection_sees_its_root_go.
+  it('tells a watch below a dropped collection its root went', async () => {
+    const root = PathSpec.fromStrPath(
+      '/m/lib/collections/books/documents.jsonl',
+      'lib/collections/books/documents.jsonl',
+    )
+    const delta = await hook({
+      drainChanges: () => Promise.resolve([[event('drop', 'books')], NEXT]),
+    }).pull(root, JSON.stringify({ mongodb: TOKEN }))
+    expect(delta.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+      [FileChangeKind.DELETE, '/m/lib/collections/books/documents.jsonl'],
+    ])
   })
 
   // Twin of test_a_lost_position_reinventories_the_root.

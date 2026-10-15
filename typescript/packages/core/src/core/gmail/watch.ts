@@ -17,7 +17,7 @@ import { Delta, FileChangeKind, FileEvent, type PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../watch/base.ts'
-import { specFor } from '../../watch/delta.ts'
+import { changesUnder } from '../../watch/delta.ts'
 import { type TokenManager } from '../google/client.ts'
 import { currentHistoryId, listHistory } from './history.ts'
 import { type GmailLabel, listLabels } from './labels.ts'
@@ -237,10 +237,7 @@ export class GmailDeltaHook implements DeltaHook {
       if (was !== undefined) changed(changes, was, [])
       else if (!added.has(mid)) unknown = true
     }
-    const top = root.virtual.replace(/\/+$/, '')
-    const events = changes
-      .filter(([, v]) => v === top || v.startsWith(`${top}/`))
-      .map(([kind, v]) => new FileEvent({ kind, path: specFor(root, v), timestamp: observed }))
+    const events = changesUnder(root, changes, observed)
     if (unknown) {
       events.push(new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed }))
     }

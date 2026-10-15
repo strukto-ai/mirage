@@ -13,16 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GCalAccessor } from '../../accessor/gcal.ts'
-import { Delta, FileChangeKind, FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
+import { Delta, FileChangeKind, type JsonValue, type PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { eventTitle, makeEventFilename } from '../../vfs/gcal/event_entry.ts'
+import { CALENDAR_FILE, eventTitle, makeEventFilename } from '../../vfs/gcal/event_entry.ts'
 import type { DeltaHook } from '../../watch/base.ts'
-import { specFor } from '../../watch/delta.ts'
+import { changesUnder } from '../../watch/delta.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { listed, syncEvents } from './client.ts'
 import { bucketName, bucketStart, clampedHhmm, dayBounds, daysCovered, eventSpan } from './day.ts'
-import { bucketZone, calendarIndex, FREE_BUSY_ROLE, scopedBucket } from './readdir.ts'
+import {
+  bucketZone,
+  calendarIndex,
+  calendarPayload,
+  FREE_BUSY_ROLE,
+  scopedBucket,
+} from './readdir.ts'
 import { detectScope } from './scope.ts'
 import { parseTime } from '../time_range.ts'
 
@@ -102,7 +108,11 @@ function changed(
  * leaves every file it was. A token Calendar no longer honors (410) is answered
  * by listing the calendar whole and comparing each event's stamp, so nothing is
  * lost or reported twice. A calendar added to or removed from the account is
- * its directory appearing or leaving. Mirrors Python's GCalDeltaHook.
+ * its directory appearing or leaving, and its own details changed are its
+ * calendar.json, which the checkpoint keeps as it was rendered. The checkpoint
+ * also keeps the zone days are bucketed in: when it moves, every event's files
+ * may move, so each calendar is synced whole again. Mirrors Python's
+ * GCalDeltaHook.
  */
 export class GCalDeltaHook implements DeltaHook {
   constructor(private readonly accessor: GCalAccessor) {}
@@ -113,34 +123,40 @@ export class GCalDeltaHook implements DeltaHook {
     const prefix = mountPrefixOf(root.virtual, root.vfsPath).replace(/\/+$/, '')
     const match = detectScope(root)
     const wanted = match.kind === ROOT ? null : (match.slots.calendar ?? null)
-    const previous = decode(checkpoint)
+    const decoded = decode(checkpoint)
+    const [zone, previous, shown] = decoded ?? [null, null, new Map<string, string>()]
     const states = new Map<string, CalendarState>()
+    const details = new Map<string, string>()
     const changes: [FileChangeKind, string][] = []
     for (const [name, entry] of [...calendars].sort(([a], [b]) => compareCodePoints(a, b))) {
       const calId = entry.id
       if ((wanted !== null && name !== wanted) || typeof calId !== 'string') continue
       const base = `${prefix}/${name}`
       const freeBusy = entry.accessRole === FREE_BUSY_ROLE
-      const last = previous?.get(name) ?? null
+      let last = previous?.get(name) ?? null
+      const shownNow = new TextDecoder().decode(calendarPayload(entry, tz))
+      details.set(name, shownNow)
       if (previous !== null && last === null) changes.push([FileChangeKind.CREATE, base])
+      else if (last !== null && shown.get(name) !== shownNow) {
+        changes.push([FileChangeKind.UPDATE, `${base}/${CALENDAR_FILE}`])
+      }
+      if (last !== null && zone !== tz) last = [null, last[1]]
       states.set(
         name,
         await this.sync(calId, base, tz, freeBusy, last, last !== null ? changes : []),
       )
     }
-    if (previous === null) return new Delta({ changes: [], checkpoint: encode(states) })
+    if (previous === null) {
+      return new Delta({ changes: [], checkpoint: encode(tz, states, details) })
+    }
     for (const name of [...previous.keys()].sort(compareCodePoints)) {
       if (!states.has(name) && (wanted === null || name === wanted)) {
         changes.push([FileChangeKind.DELETE, `${prefix}/${name}`])
       }
     }
-    const observed = new Date()
-    const top = root.virtual.replace(/\/+$/, '')
     return new Delta({
-      changes: changes
-        .filter(([, v]) => v === top || v.startsWith(`${top}/`))
-        .map(([kind, v]) => new FileEvent({ kind, path: specFor(root, v), timestamp: observed })),
-      checkpoint: encode(states),
+      changes: changesUnder(root, changes, new Date()),
+      checkpoint: encode(tz, states, details),
     })
   }
 
@@ -194,8 +210,12 @@ export class GCalDeltaHook implements DeltaHook {
   }
 }
 
-function encode(states: ReadonlyMap<string, CalendarState>): string {
-  const gcal: Record<string, unknown> = {}
+function encode(
+  zone: string,
+  states: ReadonlyMap<string, CalendarState>,
+  details: ReadonlyMap<string, string>,
+): string {
+  const calendars: Record<string, unknown> = {}
   for (const [name, [token, known]] of [...states].sort(([a], [b]) => compareCodePoints(a, b))) {
     const events: Record<string, unknown> = {}
     for (const [eventId, [paths, updated]] of [...known].sort(([a], [b]) =>
@@ -203,31 +223,39 @@ function encode(states: ReadonlyMap<string, CalendarState>): string {
     )) {
       events[eventId] = { paths, updated }
     }
-    gcal[name] = { events, token }
+    calendars[name] = { details: details.get(name) ?? '', events, token }
   }
-  return JSON.stringify({ gcal })
+  return JSON.stringify({ gcal: { calendars, zone } })
 }
 
-/** Each calendar's state a checkpoint holds, null for a baseline. Mirrors Python's `_decode`. */
-function decode(checkpoint: string | null): Map<string, CalendarState> | null {
+/**
+ * The bucket zone, each calendar's state and each calendar's calendar.json a
+ * checkpoint holds, null for a baseline. Mirrors Python's `_decode`.
+ */
+function decode(
+  checkpoint: string | null,
+): [string | null, Map<string, CalendarState>, Map<string, string>] | null {
   if (checkpoint === null) return null
-  const data = JSON.parse(checkpoint) as { gcal?: unknown }
-  const states = data.gcal
-  if (typeof states !== 'object' || states === null) return null
+  const data = JSON.parse(checkpoint) as { gcal?: { zone?: unknown; calendars?: unknown } }
+  const state = data.gcal
+  if (state === undefined) return null
   const out = new Map<string, CalendarState>()
-  for (const [name, raw] of Object.entries(states as Record<string, unknown>)) {
-    const state = raw as {
+  const details = new Map<string, string>()
+  for (const [name, raw] of Object.entries((state.calendars ?? {}) as Record<string, unknown>)) {
+    const row = raw as {
       token?: unknown
+      details?: unknown
       events?: Record<string, { paths?: unknown; updated?: unknown }>
     }
     const known: Known = new Map()
-    for (const [eventId, row] of Object.entries(state.events ?? {})) {
-      const paths = Array.isArray(row.paths) ? row.paths.map(String) : []
-      known.set(eventId, [paths, typeof row.updated === 'string' ? row.updated : null])
+    for (const [eventId, event] of Object.entries(row.events ?? {})) {
+      const paths = Array.isArray(event.paths) ? event.paths.map(String) : []
+      known.set(eventId, [paths, typeof event.updated === 'string' ? event.updated : null])
     }
-    out.set(name, [typeof state.token === 'string' ? state.token : null, known])
+    details.set(name, typeof row.details === 'string' ? row.details : '')
+    out.set(name, [typeof row.token === 'string' ? row.token : null, known])
   }
-  return out
+  return [typeof state.zone === 'string' ? state.zone : null, out, details]
 }
 
 /** Build the Calendar delta hook (`GCalDeltaHook`). Mirrors Python's `build_delta_hook`. */

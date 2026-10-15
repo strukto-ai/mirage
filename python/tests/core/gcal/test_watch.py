@@ -132,3 +132,42 @@ async def test_an_event_outside_the_time_range_is_no_file():
     assert event_paths(accessor, "/primary", inside, HK, False) == [
         "/primary/2026-08-12/eeee5__1300-1400_Lunch.gcal.json"
     ]
+
+
+def _primary(**changed: str) -> list[dict]:
+    return [{**PRIMARY, **changed}]
+
+
+async def test_a_watch_follows_a_calendar_s_details_and_zone(
+    monkeypatch, gcal_api
+):
+    syncs = Syncs({None: ([EVENTS[0]], "t1"), "t1": ([], "t2")})
+    monkeypatch.setattr("mirage.core.gcal.watch.sync_events", syncs)
+    gcal_api.calendars = _primary()
+    hook = build_delta_hook(make_accessor())
+    root = spec("/primary")
+    baseline = await hook.pull(root, None)
+    # Its own details are its calendar.json, which no event names.
+    gcal_api.calendars = _primary(summary="Renamed")
+    renamed = await hook.pull(root, baseline.checkpoint)
+    assert [(c.kind, c.path.virtual) for c in renamed.changes] == [
+        (FileChangeKind.UPDATE, "/primary/calendar.json")
+    ]
+    # A new zone moves the day an event falls on: it is synced whole.
+    gcal_api.calendars = _primary(
+        summary="Renamed", timeZone="America/Los_Angeles"
+    )
+    syncs.answers[None] = ([EVENTS[0]], "t3")
+    moved = await hook.pull(root, renamed.checkpoint)
+    assert syncs.asked[-1] is None
+    assert [(c.kind, c.path.virtual) for c in moved.changes] == [
+        (FileChangeKind.UPDATE, "/primary/calendar.json"),
+        (
+            FileChangeKind.DELETE,
+            f"{DAY}/aaaa1__0900-1030_PhD_Defense.gcal.json",
+        ),
+        (
+            FileChangeKind.CREATE,
+            "/primary/2026-08-10/aaaa1__1800-1930_PhD_Defense.gcal.json",
+        ),
+    ]

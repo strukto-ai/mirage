@@ -194,27 +194,36 @@ describe.each([
   })
 })
 
-// Twin of test_rows_after_a_key_come_within_a_byte_budget.
+// Twin of test_rows_after_a_key_come_within_a_byte_budget. The next page
+// starts after the key's text: node-pg reads a timestamp key as a millisecond
+// Date, which would sort before the row it came from.
 describe('fetchRowsAfter', () => {
+  const after = ['1970-01-01 00:00:00+00']
+  const exact = '1970-01-01 00:00:00.000001+00'
   it.each([
-    [12, [[{ id: 2 }], [2]]],
-    [101, [null, [1]]],
+    [12, [[{ at: new Date(0) }], [exact]]],
+    [101, [null, after]],
   ])('answers a %i-byte page against a 100-byte budget', async (size, expected) => {
-    const { accessor, query } = makeAccessor([{ id: 2, __mirage_bytes: size }])
+    const { accessor, query } = makeAccessor([
+      { at: new Date(0), __mirage_key0: exact, __mirage_bytes: size },
+    ])
     expect(
       await client.fetchRowsAfter(
         accessor,
         'public',
-        'users',
-        ['id'],
-        [1],
+        'events',
+        ['at'],
+        after,
         5,
-        new Set(['id']),
+        new Set(['at']),
         100,
       ),
     ).toEqual(expected)
-    expect(query.mock.calls[0]?.[0]).toContain('WHERE ("id") > ($2) ORDER BY "id" LIMIT $1')
-    expect(query.mock.calls[0]?.[1]).toEqual([5, 1, 100])
+    expect(query.mock.calls[0]?.[0]).toContain(
+      'SELECT *, "at"::text AS "__mirage_key0" FROM "public"."events" WHERE ("at") > ($2) ' +
+        'ORDER BY "at" LIMIT $1',
+    )
+    expect(query.mock.calls[0]?.[1]).toEqual([5, ...after, 100])
   })
 })
 

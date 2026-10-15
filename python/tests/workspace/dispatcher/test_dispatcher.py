@@ -2240,6 +2240,16 @@ async def test_a_hide_drops_its_files_from_a_search(secret_hidden):
         assert vfs.batches == [["/ram/d/a.txt", "/ram/d"]]
 
 
+class SeenSearches(Policy):
+    def __init__(self) -> None:
+        self.done: list[str] = []
+
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
+        if ctx.call.name == "search":
+            self.done.append(ctx.path.virtual)
+        return None
+
+
 @pytest.mark.asyncio
 async def test_scopes_on_two_mounts_are_searched_one_by_one():
     one, two = _searched(), _searched()
@@ -2257,6 +2267,20 @@ async def test_scopes_on_two_mounts_are_searched_one_by_one():
         "/two/d/secret/b.txt",
     ]
     assert one.batches == two.batches == []
+    # A post_vfs policy judges each scope's answer, so the scopes of one
+    # mount are searched one by one too.
+    seen, vfs = SeenSearches(), _searched()
+    with Workspace({"/ram/": vfs}, policies=[seen]) as ws:
+        await ws.dispatch(
+            "search",
+            _path("/ram/d/a.txt"),
+            query=SearchQuery("a"),
+            scopes=[_path("/ram/d/secret")],
+        )
+    assert (vfs.batches, seen.done) == (
+        [],
+        ["/ram/d/a.txt", "/ram/d/secret"],
+    )
 
 
 @pytest.mark.asyncio

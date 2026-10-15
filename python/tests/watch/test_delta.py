@@ -1,9 +1,10 @@
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
 import pytest
 
 from mirage.types import FileChangeKind, PathSpec, WalkEntry
-from mirage.watch.delta import ListingDeltaHook
+from mirage.watch.delta import ListingDeltaHook, changes_under
 
 
 def _walk_from(tree: dict[str, str | None]):
@@ -114,3 +115,25 @@ async def test_directory_fingerprint_not_reported():
     delta = await hook.pull(_root(), base.checkpoint)
     created = {c.path.virtual: c for c in delta.changes}
     assert created["/nc/sub/x.txt"].metadata.fingerprint == "e1"
+
+
+def test_changes_under_a_root_name_it_when_a_parent_moves():
+    # A change below the root is itself; one at a parent is the root's:
+    # the parent removed removes it, anything else may have moved it.
+    root = PathSpec.from_str_path("/m/a/b/f.txt", vfs_path="a/b/f.txt")
+    at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    events = changes_under(
+        root,
+        [
+            (FileChangeKind.UPDATE, "/m/a/b/f.txt"),
+            (FileChangeKind.UPDATE, "/m/a/c.txt"),
+            (FileChangeKind.DELETE, "/m/a/b"),
+            (FileChangeKind.CREATE, "/m/a"),
+        ],
+        at,
+    )
+    assert [(e.kind, e.path.virtual, e.path.vfs_path) for e in events] == [
+        (FileChangeKind.UPDATE, "/m/a/b/f.txt", "a/b/f.txt"),
+        (FileChangeKind.DELETE, "/m/a/b/f.txt", "a/b/f.txt"),
+        (FileChangeKind.UNKNOWN, "/m/a/b/f.txt", "a/b/f.txt"),
+    ]

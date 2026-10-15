@@ -38,7 +38,7 @@ from mirage.core.google.client import TokenManager
 from mirage.types import Delta, FileChangeKind, FileEvent, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
-from mirage.watch.delta import spec_for
+from mirage.watch.delta import changes_under
 
 logger = logging.getLogger(__name__)
 
@@ -275,12 +275,7 @@ class GmailDeltaHook:
                 _changed(changes, was, [])
             elif mid not in added:
                 unknown = True
-        top = root.virtual.rstrip("/")
-        events = [
-            FileEvent(kind=kind, path=spec_for(root, v), timestamp=observed)
-            for kind, v in changes
-            if v == top or v.startswith(top + "/")
-        ]
+        events = changes_under(root, changes, observed)
         if unknown:
             events.append(
                 FileEvent(

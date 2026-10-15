@@ -102,7 +102,9 @@ function handleQuery(sql: string, params?: unknown[]): { rows: unknown[]; rowCou
     const keyed = sql.includes('WHERE ("id") > ($2)')
     const limit = Number(params?.[0] ?? 5)
     const maxBytes = Number(params?.[keyed ? 2 : 1])
-    const rows = userRows(keyed ? Number(params?.[1]) : 0, limit)
+    const rows = userRows(keyed ? Number(params?.[1]) : 0, limit).map((row) =>
+      sql.includes('"id"::text AS "__mirage_key0"') ? { ...row, __mirage_key0: row.id } : row,
+    )
     const size = new TextEncoder().encode(
       rows.map((row) => JSON.stringify(row) + '\n').join(''),
     ).length

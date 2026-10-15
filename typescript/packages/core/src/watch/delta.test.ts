@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FileChangeKind, PathSpec, type WalkEntry } from '../types.ts'
-import { ListingDeltaHook, specFor } from './delta.ts'
+import { changesUnder, ListingDeltaHook, specFor } from './delta.ts'
 
 function walkFrom(tree: Map<string, string | null>) {
   return async function* walk(): AsyncGenerator<WalkEntry> {
@@ -65,5 +65,29 @@ describe('ListingDeltaHook', () => {
       size: 2,
       modified: '2026-01-02T00:00:00Z',
     })
+  })
+})
+
+// Twin of test_changes_under_a_root_name_it_when_a_parent_moves: a change below
+// the root is itself; one at a parent is the root's: the parent removed removes
+// it, anything else may have moved it.
+describe('changesUnder', () => {
+  it('names the root when a parent moves', () => {
+    const root = PathSpec.fromStrPath('/m/a/b/f.txt', 'a/b/f.txt')
+    const events = changesUnder(
+      root,
+      [
+        [FileChangeKind.UPDATE, '/m/a/b/f.txt'],
+        [FileChangeKind.UPDATE, '/m/a/c.txt'],
+        [FileChangeKind.DELETE, '/m/a/b'],
+        [FileChangeKind.CREATE, '/m/a'],
+      ],
+      new Date(0),
+    )
+    expect(events.map((e) => [e.kind, e.path.virtual, e.path.vfsPath])).toEqual([
+      [FileChangeKind.UPDATE, '/m/a/b/f.txt', 'a/b/f.txt'],
+      [FileChangeKind.DELETE, '/m/a/b/f.txt', 'a/b/f.txt'],
+      [FileChangeKind.UNKNOWN, '/m/a/b/f.txt', 'a/b/f.txt'],
+    ])
   })
 })

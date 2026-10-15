@@ -874,8 +874,10 @@ export class Dispatcher {
    * ranks a batch, past the same checks each scope's own search meets: each
    * is walked and followed, a path rule or a coded preVfs policy reaching
    * below any of them declines the batch (null), and every hit the session
-   * hides is dropped. Otherwise each scope is searched on its own and the
-   * hits joined in scope order. Mirrors Python's Dispatcher._search_together.
+   * hides is dropped. Otherwise, and while a postVfs policy speaks for the
+   * session (it judges each scope's answer on its own), each scope is
+   * searched on its own and the hits joined in scope order. Mirrors Python's
+   * Dispatcher._search_together.
    */
   private async searchTogether(
     scopes: readonly PathSpec[],
@@ -898,7 +900,8 @@ export class Dispatcher {
       first === undefined ||
       owner === null ||
       !owner.vfs.supports('searchMany') ||
-      calls.some((call) => this.namespace.tryMountFor(call.path.virtual) !== owner)
+      calls.some((call) => this.namespace.tryMountFor(call.path.virtual) !== owner) ||
+      (await this.policies.wantsFor('postVfs', this.sessionId()))
     ) {
       const hits: [string, string][] = []
       for (const typed of scopes) {

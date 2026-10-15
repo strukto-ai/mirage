@@ -33,16 +33,21 @@ from mirage.core.gcal.readdir import (
     FREE_BUSY_ROLE,
     bucket_zone,
     calendar_index,
+    calendar_payload,
     scoped_bucket,
 )
 from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.time_range import parse_time
-from mirage.types import Delta, FileChangeKind, FileEvent, JsonValue, PathSpec
+from mirage.types import Delta, FileChangeKind, JsonValue, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
-from mirage.vfs.gcal.event_entry import event_title, make_event_filename
+from mirage.vfs.gcal.event_entry import (
+    CALENDAR_FILE,
+    event_title,
+    make_event_filename,
+)
 from mirage.watch.base import DeltaHook
-from mirage.watch.delta import spec_for
+from mirage.watch.delta import changes_under
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +142,11 @@ class GCalDeltaHook:
     every file it was. A token Calendar no longer honors (410) is answered
     by listing the calendar whole and comparing each event's stamp, so
     nothing is lost or reported twice. A calendar added to or removed from
-    the account is its directory appearing or leaving.
+    the account is its directory appearing or leaving, and its own
+    details changed are its calendar.json, which the checkpoint keeps as
+    it was rendered. The checkpoint also keeps the zone days are bucketed
+    in: when it moves, every event's files may move, so each calendar is
+    synced whole again.
     """
 
     def __init__(self, accessor: GCalAccessor) -> None:
@@ -160,8 +169,12 @@ class GCalDeltaHook:
         prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
         match = detect_scope(root)
         wanted = None if match.kind == ROOT else match.slots.get("calendar")
-        previous = _decode(checkpoint)
+        decoded = _decode(checkpoint)
+        zone, previous, shown = (
+            (None, None, {}) if decoded is None else decoded
+        )
         states: dict[str, CalendarState] = {}
+        details: dict[str, str] = {}
         changes: list[tuple[FileChangeKind, str]] = []
         for name, entry in sorted(calendars.items()):
             cal_id = entry.get("id")
@@ -172,8 +185,15 @@ class GCalDeltaHook:
             base = f"{prefix}/{name}"
             free_busy = entry.get("accessRole") == FREE_BUSY_ROLE
             last = None if previous is None else previous.get(name)
+            details[name] = calendar_payload(entry, tz).decode()
             if previous is not None and last is None:
                 changes.append((FileChangeKind.CREATE, base))
+            elif last is not None and shown.get(name) != details[name]:
+                changes.append(
+                    (FileChangeKind.UPDATE, f"{base}/{CALENDAR_FILE}")
+                )
+            if last is not None and zone != tz:
+                last = (None, last[1])
             states[name] = await self._sync(
                 cal_id,
                 base,
@@ -183,23 +203,16 @@ class GCalDeltaHook:
                 changes if last is not None else [],
             )
         if previous is None:
-            return Delta((), _encode(states))
+            return Delta((), _encode(tz, states, details))
         changes.extend(
             (FileChangeKind.DELETE, f"{prefix}/{name}")
             for name in sorted(set(previous) - set(states))
             if wanted is None or name == wanted
         )
         observed = datetime.now(timezone.utc)
-        top = root.virtual.rstrip("/")
         return Delta(
-            tuple(
-                FileEvent(
-                    kind=kind, path=spec_for(root, v), timestamp=observed
-                )
-                for kind, v in changes
-                if v == top or v.startswith(top + "/")
-            ),
-            _encode(states),
+            tuple(changes_under(root, changes, observed)),
+            _encode(tz, states, details),
         )
 
     async def _sync(
@@ -263,26 +276,35 @@ class GCalDeltaHook:
         return nxt, known
 
 
-def _encode(states: dict[str, CalendarState]) -> str:
+def _encode(
+    zone: str, states: dict[str, CalendarState], details: dict[str, str]
+) -> str:
     return json.dumps(
         {
             "gcal": {
-                name: {
-                    "token": token,
-                    "events": {
-                        event_id: {"paths": paths, "updated": updated}
-                        for event_id, (paths, updated) in known.items()
-                    },
-                }
-                for name, (token, known) in states.items()
+                "zone": zone,
+                "calendars": {
+                    name: {
+                        "token": token,
+                        "details": details.get(name, ""),
+                        "events": {
+                            event_id: {"paths": paths, "updated": updated}
+                            for event_id, (paths, updated) in known.items()
+                        },
+                    }
+                    for name, (token, known) in states.items()
+                },
             }
         },
         sort_keys=True,
     )
 
 
-def _decode(checkpoint: str | None) -> dict[str, CalendarState] | None:
-    """Each calendar's state a checkpoint holds, None for a baseline.
+def _decode(
+    checkpoint: str | None,
+) -> tuple[str | None, dict[str, CalendarState], dict[str, str]] | None:
+    """The bucket zone, each calendar's state and each calendar's
+    calendar.json a checkpoint holds, None for a baseline.
 
     Args:
         checkpoint (str | None): What the previous pull handed out.
@@ -290,24 +312,27 @@ def _decode(checkpoint: str | None) -> dict[str, CalendarState] | None:
     if checkpoint is None:
         return None
     data = json.loads(checkpoint)
-    states = data.get("gcal") if isinstance(data, dict) else None
-    if not isinstance(states, dict):
+    state = data.get("gcal") if isinstance(data, dict) else None
+    if not isinstance(state, dict):
         return None
+    zone = state.get("zone")
     out: dict[str, CalendarState] = {}
-    for name, state in states.items():
-        token = state.get("token")
-        events = state.get("events") or {}
+    details: dict[str, str] = {}
+    for name, row in (state.get("calendars") or {}).items():
+        token = row.get("token")
+        events = row.get("events") or {}
+        details[name] = str(row.get("details") or "")
         out[name] = (
             token if isinstance(token, str) else None,
             {
                 event_id: (
-                    [str(v) for v in row.get("paths") or []],
-                    row.get("updated"),
+                    [str(v) for v in event.get("paths") or []],
+                    event.get("updated"),
                 )
-                for event_id, row in events.items()
+                for event_id, event in events.items()
             },
         )
-    return out
+    return zone if isinstance(zone, str) else None, out, details
 
 
 def build_delta_hook(accessor: GCalAccessor) -> DeltaHook:

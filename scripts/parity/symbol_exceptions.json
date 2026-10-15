@@ -740,6 +740,11 @@
    "typescript_only": {
     "settlePendingPrunes": "findGeneric settles the prunes its find callback left pending by asking each directory's mtime; Python's walk settles them inside walk_find through settle_prunes."
    }
+  },
+  "core/postgres/client": {
+   "typescript_only": {
+    "keyTexts": "node-pg reads a timestamp key as a millisecond Date, so a TypeScript keyset page starts after the key's text form; asyncpg's values are exact, so Python pages from the row itself."
+   }
   }
  }
 }

@@ -1054,8 +1054,10 @@ class Dispatcher:
         and its VFS ranks a batch, past the same checks each scope's own
         search meets: each is walked and followed, a path rule or a coded
         pre_vfs policy reaching below any of them declines the batch
-        (None), and every hit the session hides is dropped. Otherwise each
-        scope is searched on its own and the hits joined in scope order.
+        (None), and every hit the session hides is dropped. Otherwise, and
+        while a post_vfs policy speaks for the session (it judges each
+        scope's answer on its own), each scope is searched on its own and
+        the hits joined in scope order.
 
         Args:
             scopes (list[PathSpec]): the scopes, as the caller named them.
@@ -1078,6 +1080,9 @@ class Dispatcher:
             or any(
                 self._namespace.try_mount_for(call.path.virtual) is not mount
                 for call in calls
+            )
+            or await self._namespace.registry.policies.wants_for(
+                "post_vfs", _session_id(caller)
             )
         ):
             hits: list[tuple[str, str]] = []

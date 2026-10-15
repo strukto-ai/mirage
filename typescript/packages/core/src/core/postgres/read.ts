@@ -294,7 +294,14 @@ async function lastRows(
   const cap = accessor.config.maxReadRows
   const pk = await fetchRowKey(accessor, schema, entity)
   if (pk.length > 0) {
-    const [rows] = await fetchLastRows(accessor, schema, entity, pk, Math.min(n, cap + 1))
+    const [rows] = await fetchLastRows(
+      accessor,
+      schema,
+      entity,
+      pk,
+      Math.min(n, cap + 1),
+      await columnNames(accessor, schema, entity),
+    )
     if (rows.length > cap) throw efbig(path)
     return lines(rows)
   }
@@ -345,14 +352,15 @@ async function followRows(
   const cap = accessor.config.maxReadRows
   const pk = await fetchRowKey(accessor, schema, entity)
   if (pk.length === 0) return null
+  const columns = await columnNames(accessor, schema, entity)
   const [rows, after] = await fetchLastRows(
     accessor,
     schema,
     entity,
     pk,
     Math.max(Math.min(n, cap + 1), 1),
+    columns,
   )
-  const columns = await columnNames(accessor, schema, entity)
   if (rows.length > cap) throw efbig(path)
   return followedRows(accessor, path, pk, columns, after, n > 0 ? rows.slice(-n) : [], interval)
 }

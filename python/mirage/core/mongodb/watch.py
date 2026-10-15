@@ -35,7 +35,7 @@ from mirage.errors.fs import enotsup
 from mirage.types import Delta, FileChangeKind, FileEvent, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
-from mirage.watch.delta import spec_for
+from mirage.watch.delta import changes_under
 
 logger = logging.getLogger(__name__)
 
@@ -83,11 +83,14 @@ class MongoDBDeltaHook:
 
     A collection is one ``documents.jsonl`` and one ``schema.json``, so
     the stream says exactly which files moved: a document written or
-    removed rewrites its collection's documents.jsonl and every view's
-    in that database (a view reads other collections), an index or
-    validator change its schema.json, a view's new pipeline both of its
-    files (its ``modify`` names ``viewOn``), and a collection created,
-    dropped or renamed is its directory appearing or leaving. The checkpoint is
+    removed rewrites its collection's documents.jsonl and the schema.json
+    sampled from it, and both files of every view in that database (a
+    view reads other collections), an index or validator change its
+    schema.json, a view's new pipeline both of its files (its ``modify``
+    names ``viewOn``), and a collection created, dropped or renamed is
+    its directory appearing or leaving, and its database's
+    database.json, which lists it. A watch below a directory removed is
+    told its root went (``changes_under``). The checkpoint is
     the stream's resume token. A position the server's history no longer
     holds answers UNKNOWN on the watch root, so everything below is
     inventoried again. A server outside a replica set has no change
@@ -167,6 +170,7 @@ class MongoDBDeltaHook:
             details = event.get("operationDescription") or {}
             if kind in _DATA_EVENTS:
                 changed[f"{place}/documents.jsonl"] = FileChangeKind.UPDATE
+                changed[f"{place}/schema.json"] = FileChangeKind.UPDATE
                 written.add(db)
             elif kind == "modify" and "viewOn" in details:
                 view = f"{base}/{_VIEWS}/{name}"
@@ -177,29 +181,34 @@ class MongoDBDeltaHook:
             elif kind == "create":
                 dirname = _VIEWS if "viewOn" in details else _COLLECTIONS
                 changed[f"{base}/{dirname}/{name}"] = FileChangeKind.CREATE
+                changed[f"{base}/database.json"] = FileChangeKind.UPDATE
             elif kind == "drop":
                 _removed(changed, place)
                 changed[f"{base}/{_VIEWS}"] = FileChangeKind.UNKNOWN
+                changed[f"{base}/database.json"] = FileChangeKind.UPDATE
             elif kind == "rename":
                 to = event.get("to") or {}
                 _removed(changed, place)
+                changed[f"{base}/database.json"] = FileChangeKind.UPDATE
                 if isinstance(to.get("db"), str) and isinstance(
                     to.get("coll"), str
                 ):
-                    moved = f"{prefix}/{to['db']}/{_COLLECTIONS}/{to['coll']}"
+                    target = f"{prefix}/{to['db']}"
+                    moved = f"{target}/{_COLLECTIONS}/{to['coll']}"
                     changed[moved] = FileChangeKind.CREATE
+                    changed[f"{target}/database.json"] = FileChangeKind.UPDATE
         for db in sorted(written):
             client = self._accessor.client
             for view in await list_collections(client, db, EntityKind.VIEW):
-                file = f"{prefix}/{db}/{_VIEWS}/{view}/documents.jsonl"
-                changed.setdefault(file, FileChangeKind.UPDATE)
-        top = root.virtual.rstrip("/")
+                for file in ("documents.jsonl", "schema.json"):
+                    changed.setdefault(
+                        f"{prefix}/{db}/{_VIEWS}/{view}/{file}",
+                        FileChangeKind.UPDATE,
+                    )
         return tuple(
-            FileEvent(
-                kind=kind, path=spec_for(root, virtual), timestamp=observed
+            changes_under(
+                root, ((kind, v) for v, kind in changed.items()), observed
             )
-            for virtual, kind in changed.items()
-            if virtual == top or virtual.startswith(top + "/")
         )
 
 

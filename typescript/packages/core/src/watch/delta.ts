@@ -32,6 +32,36 @@ export function specFor(root: PathSpec, virtual: string): PathSpec {
 }
 
 /**
+ * The changes a watch on `root` reports: each at or below it as itself, and
+ * each at a directory above it as the root's own, since that directory removed
+ * removes the root, and any other change to it may have moved the root
+ * (UNKNOWN). Mirrors Python `changes_under`.
+ */
+export function changesUnder(
+  root: PathSpec,
+  changes: Iterable<readonly [FileChangeKind, string]>,
+  observed: Date,
+): FileEvent[] {
+  const top = rstripSlash(root.virtual)
+  const events: FileEvent[] = []
+  for (const [kind, virtual] of changes) {
+    if (virtual === top || virtual.startsWith(`${top}/`)) {
+      events.push(new FileEvent({ kind, path: specFor(root, virtual), timestamp: observed }))
+    } else if (top.startsWith(`${rstripSlash(virtual)}/`)) {
+      const gone = kind === FileChangeKind.DELETE
+      events.push(
+        new FileEvent({
+          kind: gone ? kind : FileChangeKind.UNKNOWN,
+          path: root,
+          timestamp: observed,
+        }),
+      )
+    }
+  }
+  return events
+}
+
+/**
  * Classify two `{virtual: fingerprint}` snapshots as changes.
  *
  * A key only in `current` is a CREATE, one only in `previous` a DELETE, and a

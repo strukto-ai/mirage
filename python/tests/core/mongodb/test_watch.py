@@ -79,11 +79,14 @@ async def test_events_name_the_files_they_change():
         delta = await _hook(databases=["lib"]).pull(
             ROOT, json.dumps({"mongodb": TOKEN})
         )
+    # A write also rewrites the schema.json sampled from the documents, and
+    # a collection created, dropped or renamed the database.json listing it.
     assert [(c.kind, c.path.virtual) for c in delta.changes] == [
         (FileChangeKind.CREATE, "/m/lib/collections/books"),
+        (FileChangeKind.UPDATE, "/m/lib/database.json"),
         (FileChangeKind.UPDATE, "/m/lib/collections/books/documents.jsonl"),
-        (FileChangeKind.CREATE, "/m/lib/views/recent"),
         (FileChangeKind.UPDATE, "/m/lib/collections/books/schema.json"),
+        (FileChangeKind.CREATE, "/m/lib/views/recent"),
         (FileChangeKind.UPDATE, "/m/lib/views/recent/schema.json"),
         (FileChangeKind.UPDATE, "/m/lib/views/recent/documents.jsonl"),
         (FileChangeKind.DELETE, "/m/lib/collections/old"),
@@ -113,3 +116,19 @@ async def test_a_server_outside_a_replica_set_refuses_the_watch():
     with patch("mirage.core.mongodb.watch.drain_changes", drain):
         with pytest.raises(OperationNotSupportedError):
             await _hook().pull(ROOT, None)
+
+
+@pytest.mark.asyncio
+async def test_a_watch_below_a_dropped_collection_sees_its_root_go():
+    root = PathSpec.from_str_path(
+        "/m/lib/collections/books/documents.jsonl",
+        vfs_path="lib/collections/books/documents.jsonl",
+    )
+    with patch(
+        "mirage.core.mongodb.watch.drain_changes",
+        AsyncMock(return_value=([_event("drop", "books")], NEXT)),
+    ):
+        delta = await _hook().pull(root, json.dumps({"mongodb": TOKEN}))
+    assert [(c.kind, c.path.virtual) for c in delta.changes] == [
+        (FileChangeKind.DELETE, "/m/lib/collections/books/documents.jsonl")
+    ]

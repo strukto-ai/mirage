@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from mirage.runtime.python.host.host_io import with_host_io
@@ -41,6 +42,43 @@ def spec_for(root: PathSpec, virtual: str) -> PathSpec:
     """
     cut = len(root.virtual.rstrip("/")) - len(root.vfs_path)
     return PathSpec.from_str_path(virtual, vfs_path=virtual[cut:].strip("/"))
+
+
+def changes_under(
+    root: PathSpec,
+    changes: Iterable[tuple[FileChangeKind, str]],
+    observed: datetime,
+) -> list[FileEvent]:
+    """The changes a watch on ``root`` reports: each at or below it as
+    itself, and each at a directory above it as the root's own, since
+    that directory removed removes the root, and any other change to it
+    may have moved the root (UNKNOWN).
+
+    Args:
+        root (PathSpec): Watch root.
+        changes (Iterable[tuple[FileChangeKind, str]]): Each change and
+            the virtual path it is at.
+        observed (datetime): Timestamp every event carries.
+    """
+    top = root.virtual.rstrip("/")
+    events: list[FileEvent] = []
+    for kind, virtual in changes:
+        if virtual == top or virtual.startswith(top + "/"):
+            events.append(
+                FileEvent(
+                    kind=kind, path=spec_for(root, virtual), timestamp=observed
+                )
+            )
+        elif top.startswith(virtual.rstrip("/") + "/"):
+            gone = kind is FileChangeKind.DELETE
+            events.append(
+                FileEvent(
+                    kind=kind if gone else FileChangeKind.UNKNOWN,
+                    path=root,
+                    timestamp=observed,
+                )
+            )
+    return events
 
 
 def diff_snapshots(

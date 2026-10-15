@@ -2235,6 +2235,25 @@ describe('a hide filters a one-call read', () => {
     } finally {
       await ws.close()
     }
+    // A postVfs policy judges each scope's answer, so the scopes of one mount
+    // are searched one by one too.
+    const done: string[] = []
+    const seen: Policy = {
+      postVfs: (ctx: VfsResultContext) => {
+        if (ctx.call.name === 'search') done.push(ctx.path.virtual)
+        return null
+      },
+    }
+    const vfs = searched()
+    const judged = new Workspace({ '/ram': vfs }, { policies: [seen] })
+    try {
+      await judged.dispatch('search', '/ram/d/a.txt', [{ query: 'a', options: {} }], {
+        scopes: [PathSpec.fromStrPath('/ram/d/secret')],
+      })
+      expect([vfs.batches, done]).toEqual([[], ['/ram/d/a.txt', '/ram/d/secret']])
+    } finally {
+      await judged.close()
+    }
   })
 
   // Twin of test_a_read_ahead_keeps_what_one_batch_answers.
