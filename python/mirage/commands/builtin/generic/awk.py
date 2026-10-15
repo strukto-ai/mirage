@@ -12,13 +12,14 @@ from typing import Any
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.awk_types import USAGE, AwkFlags
-from mirage.commands.builtin.utils.paths import dispatch_stat
+from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.constants import ROOT_CWD
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context.session_context import current_caller
 from mirage.core.awk import (
     AwkIOError,
     AwkRuntimeError,
@@ -31,7 +32,7 @@ from mirage.core.awk import (
 from mirage.core.awk.builtins import unescape
 from mirage.core.awk.value import text as text_value
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
-from mirage.errors.fs import eisdir, fs_strerror
+from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
@@ -45,7 +46,7 @@ from mirage.shell.bytes import (
     text_view,
 )
 from mirage.shell.join import shell_join
-from mirage.types import FileType, PathSpec
+from mirage.types import PathSpec
 from mirage.view.types import NamespaceView
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
@@ -162,6 +163,7 @@ class AwkStreams:
         self.dispatch = dispatch
         self.cwd = cwd
         self.shell = shell
+        self.caller = current_caller()
 
     async def stdin_view(self) -> AsyncIterator[bytes]:
         async for chunk in self.stdin:
@@ -171,15 +173,8 @@ class AwkStreams:
         if self.dispatch is None:
             raise AwkIOError(posix_phrase(FsCondition.ENOENT))
         path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
-        # A keyed store reads a directory as nothing at all, and other
-        # backends fail it in their own words, so the stat goes first to
-        # fail it the way a POSIX read does.
-        if (
-            await dispatch_stat(self.dispatch, path)
-        ).type == FileType.DIRECTORY:
-            raise eisdir(path)
-        data, _ = await self.dispatch("read", path, stream=True)
-        async with aclosing(chunks(data)) as source:
+        stream = caller_stream(self.dispatch, self.caller, path)
+        async with aclosing(chunks(stream)) as source:
             async for chunk in source:
                 yield chunk
 

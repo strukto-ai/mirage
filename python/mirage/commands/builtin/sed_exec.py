@@ -40,6 +40,8 @@ from mirage.shell.bytes import byte_view, from_byte_view, text_view
 from mirage.types import PathSpec
 from mirage.utils.posix import compile_posix_regex
 
+logger = logging.getLogger(__name__)
+
 SED_LINE_LENGTH = 70
 
 _LIST_ESCAPES = {
@@ -635,14 +637,14 @@ class SedMachine:
                 f"sed: read error on {name}: {fs_strerror(exc)}\n"
             ) from exc
         except FS_ERRORS as exc:
-            logging.getLogger(__name__).debug(
-                "sed auxiliary file %s: %s", name, exc
-            )
+            logger.debug("sed auxiliary file %s: %s", name, exc)
 
-    async def _dump_append_queue(self) -> AsyncGenerator[int, None]:
+    async def _dump_append_queue(
+        self, queue: list[tuple[str, str | None]] | None = None
+    ) -> AsyncGenerator[int, None]:
         self._main.flush_newline()
-        queue = self._append_queue
-        self._append_queue = []
+        if queue is None:
+            queue, self._append_queue = self._append_queue, []
         for text, rfile in queue:
             self._main.raw(text)
             if rfile is not None:
@@ -832,15 +834,11 @@ class SedMachine:
                 return
             elif c == "r":
                 if cmd.prepend:
-                    self._main.flush_newline()
                     async with aclosing(
-                        self._file_stream(
-                            cmd.fname, self._files.get(cmd.fname)
-                        )
-                    ) as source:
-                        async for part in source:
-                            self._main.raw(byte_view(part, self.opts.utf8))
-                            yield -1
+                        self._dump_append_queue([("", cmd.fname)])
+                    ) as steps:
+                        async for status in steps:
+                            yield status
                 else:
                     self._append_queue.append(("", cmd.fname))
             elif c == "R":

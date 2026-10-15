@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     dispatched_slots,
     read_ahead,
 )
+from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
@@ -101,7 +102,7 @@ def dispatch_io(
     def read_stream(
         accessor: Accessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
     ) -> AsyncIterator[bytes]:
-        return _caller_stream(dispatch, current_caller(), path, ahead)
+        return caller_stream(dispatch, current_caller(), path, ahead)
 
     return CommandIO(
         readdir=readdir,
@@ -119,31 +120,32 @@ def dispatch_io(
     )
 
 
-async def _caller_stream(
+async def caller_stream(
     dispatch: DispatchFn,
     caller: Caller,
     path: PathSpec,
-    ahead: Callable[[PathSpec], Awaitable[None]],
+    ahead: Callable[[PathSpec], Awaitable[None]] | None = None,
 ) -> AsyncIterator[bytes]:
     """A streamed read that opens as the command that asked for it.
 
     It opens at the first pull, which can come after that command ended,
     so it opens under the command's caller: a ``fresh`` mount trusts only
-    the listings that command made.
+    the listings that command made. A directory fails with EISDIR, as a
+    POSIX read does, before a keyed store reads it as nothing.
 
     Args:
         dispatch (DispatchFn): policy-checked operation dispatcher.
         caller (Caller): the asking command's caller.
         path (PathSpec): the file.
-        ahead (Callable[[PathSpec], Awaitable[None]]): what the read
-            awaits first (``read_ahead``).
+        ahead (Callable[[PathSpec], Awaitable[None]] | None): what the
+            read awaits first (``read_ahead``).
     """
     token = bind_caller(caller)
     try:
-        info, _ = await dispatch("stat", path)
-        if cast(FileStat, info).type == FileType.DIRECTORY:
+        if (await dispatch_stat(dispatch, path)).type == FileType.DIRECTORY:
             raise eisdir(path)
-        await ahead(path)
+        if ahead is not None:
+            await ahead(path)
         data, _ = await dispatch("read", path, stream=True)
     finally:
         reset_caller(token)
@@ -172,7 +174,7 @@ async def run_dispatch(
     ``fresh`` mount trusts only the listings that command made, so a lazy
     stream read after it ends would be served the previous command's. A
     builder that ``streams`` only reads, and each read opens as this
-    command (``_caller_stream``), so its output is handed on live.
+    command (``caller_stream``), so its output is handed on live.
 
     Args:
         builder (GenericCommand): the command's existing generic binding.

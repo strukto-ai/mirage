@@ -26,7 +26,7 @@ import {
   argsText,
   decodeUtf8,
   errorReport,
-  formatJqOutput,
+  formatOne,
   haltReport,
   jqCheck,
   jqOptions,
@@ -475,7 +475,7 @@ export class MainLoop {
     try {
       if (this.opts.nullInput) {
         const [run, position] = await this.run('null', this.reader.position())
-        for (const value of run.outputs) yield formatJqOutput([value], this.opts)
+        for (const value of run.outputs) yield formatOne(value, this.opts)
         this.settle(run, position)
         return
       }
@@ -488,7 +488,7 @@ export class MainLoop {
           return
         }
         const [run, position] = await this.run(item, this.reader.position())
-        for (const value of run.outputs) yield formatJqOutput([value], this.opts)
+        for (const value of run.outputs) yield formatOne(value, this.opts)
         if (this.settle(run, position)) return
       }
     } finally {

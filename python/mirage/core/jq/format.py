@@ -254,16 +254,6 @@ def format_one(text: str, opts: JqOptions) -> bytes:
     return prefix + body + _terminator(opts)
 
 
-def format_jq_output(texts: list[str], opts: JqOptions) -> bytes:
-    """Render every output of a jq program, one per line.
-
-    Args:
-        texts (list[str]): jq's compact dump of each output, in order.
-        opts (JqOptions): resolved output options.
-    """
-    return b"".join(format_one(text, opts) for text in texts)
-
-
 def printable(run: JqRun[str], opts: JqOptions) -> JqRun[str]:
     """The run as jq's main loop gets to print it: --raw-output0 refuses a
     raw string that holds a NUL, which ends the run with an error there,

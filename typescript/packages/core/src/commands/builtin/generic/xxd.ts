@@ -47,6 +47,11 @@ const CANNOT_SEEK = 'xxd: Sorry, cannot seek.\n'
 const STRTOL_PATTERN = /^\s*([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)/
 // The most NUL bytes one chunk carries when a dump's offset skips ahead.
 const GAP_CHUNK = 65536
+// What a plain dump's bytes decode to, and the ones it skips.
+const HEX_DIGITS = Int8Array.from({ length: 256 }, (_, c) =>
+  /[0-9a-fA-F]/.test(String.fromCharCode(c)) ? Number.parseInt(String.fromCharCode(c), 16) : -1,
+)
+const PLAIN_BLANKS: ReadonlySet<number> = new Set([0x20, 0x09, 0x0d, 0x0a])
 
 function padLeft(s: string, width: number, ch = ' '): string {
   return s.length >= width ? s : ch.repeat(width - s.length) + s
@@ -152,53 +157,75 @@ function reverseLine(raw: string): [number | null, Uint8Array] {
 }
 
 /**
- * Decode a hexdump into runs of bytes and the offsets they go to. A plain
- * (-p) dump has no offsets, so its one run continues from the start; a
- * character that is not a hex digit ends its line, and the digits pair
- * across lines. Mirrors Python's _reverse_runs.
+ * Decode a hexdump into runs of bytes and the offsets they go to. Mirrors
+ * Python's _reverse_runs.
  */
 async function* reverseRuns(
   source: AsyncIterable<Uint8Array>,
-  plain = false,
 ): AsyncIterable<[number | null, Uint8Array]> {
   const reader = new AsyncLineIterator(source)
-  let pending = ''
   let first = true
   try {
     for (;;) {
       const [raw, ended] = await reader.readUntil(0x0a)
       if (raw.length === 0 && !ended) return
       const line = DEC.decode(raw)
-      if (!plain) {
-        if (first && line !== '' && !line.includes(':')) {
-          const lines = [line]
-          let more = ended
-          while (more) {
-            const [rest, next] = await reader.readUntil(0x0a)
-            lines.push(DEC.decode(rest))
-            more = next
-          }
-          if (lines.some((row) => row.includes(':'))) {
-            for (const row of lines) if (row !== '') yield reverseLine(row)
-          } else {
-            const digits = lines.map((row) => /^[0-9A-Fa-f\s]*/.exec(row)?.[0] ?? '').join('')
-            yield [null, unhex(digits.replace(/\s+/g, ''))]
-          }
-          return
+      if (first && line !== '' && !line.includes(':')) {
+        const lines = [line]
+        let more = ended
+        while (more) {
+          const [rest, next] = await reader.readUntil(0x0a)
+          lines.push(DEC.decode(rest))
+          more = next
         }
-        if (line !== '') {
-          first = false
-          yield reverseLine(line)
+        if (lines.some((row) => row.includes(':'))) {
+          for (const row of lines) if (row !== '') yield reverseLine(row)
+        } else {
+          const digits = lines.map((row) => /^[0-9A-Fa-f\s]*/.exec(row)?.[0] ?? '').join('')
+          yield [null, unhex(digits.replace(/\s+/g, ''))]
         }
-        continue
+        return
       }
-      const digits = pending + (/^[0-9A-Fa-f\s]*/.exec(line)?.[0] ?? '').replace(/\s+/g, '')
-      const paired = Math.floor(digits.length / 2) * 2
-      pending = digits.slice(paired)
-      if (paired > 0) yield [null, unhex(digits.slice(0, paired))]
+      if (line !== '') {
+        first = false
+        yield reverseLine(line)
+      }
     }
   } finally {
     await reader.discard()
+  }
+}
+
+/**
+ * Decode a plain (-p) hexdump as it arrives, as xxd 2024-12-07 does. Space,
+ * tab, CR and LF never count, so two digits make a byte across them and
+ * across lines. Any other byte is ignored before the first digit and after a
+ * skipped line; past that it drops a digit left without its pair, and a run
+ * of them skips the rest of the line. Mirrors Python's _plain_runs.
+ */
+async function* plainRuns(
+  source: AsyncIterable<Uint8Array>,
+): AsyncIterable<[number | null, Uint8Array]> {
+  let [high, low, lead, skip] = [0, -1, true, false]
+  for await (const part of chunks(source)) {
+    const out: number[] = []
+    for (const c of part) {
+      if (skip) {
+        if (c === 0x0a) [skip, lead] = [false, true]
+        continue
+      }
+      if (PLAIN_BLANKS.has(c)) continue
+      const before = high
+      high = low
+      low = HEX_DIGITS[c] ?? -1
+      if (low < 0 && lead) continue
+      lead = false
+      if (high >= 0 && low >= 0) {
+        out.push((high << 4) | low)
+        low = -1
+      } else if (low < 0 && high < 0 && before < 0) skip = true
+    }
+    if (out.length > 0) yield [null, Uint8Array.from(out)]
   }
 }
 
@@ -215,7 +242,7 @@ async function* xxdReverseStream(
   plain = false,
 ): AsyncIterable<Uint8Array> {
   let position = 0
-  for await (const [offset, data] of reverseRuns(source, plain)) {
+  for await (const [offset, data] of (plain ? plainRuns : reverseRuns)(source)) {
     if (data.byteLength === 0) continue
     if (offset !== null && offset < position) {
       if (io !== null) {
@@ -246,7 +273,7 @@ async function reverseSegments(
 ): Promise<[number, Uint8Array][]> {
   const segments: { start: number; end: number; parts: Uint8Array[] }[] = []
   let position = 0
-  for await (const [offset, data] of reverseRuns(source, plain)) {
+  for await (const [offset, data] of (plain ? plainRuns : reverseRuns)(source)) {
     if (data.byteLength === 0) continue
     if (offset !== null) position = offset
     const last = segments.at(-1)

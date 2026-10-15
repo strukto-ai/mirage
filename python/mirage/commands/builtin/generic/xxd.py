@@ -45,6 +45,9 @@ STRTOL_PATTERN = re.compile(
 )
 # The most NUL bytes one chunk carries when a dump's offset skips ahead.
 GAP_CHUNK = 65536
+# What a plain dump's bytes decode to, and the ones it skips.
+HEX_DIGITS = {c: int(chr(c), 16) for c in b"0123456789abcdefABCDEF"}
+PLAIN_BLANKS = frozenset(b" \t\r\n")
 
 
 async def _xxd_dump_stream(
@@ -140,19 +143,13 @@ def _reverse_line(line: str) -> tuple[int | None, bytes]:
 
 async def _reverse_runs(
     source: AsyncIterator[bytes],
-    plain: bool = False,
 ) -> AsyncGenerator[tuple[int | None, bytes], None]:
     """Decode a hexdump into runs of bytes and the offsets they go to.
-
-    A plain (``-p``) dump has no offsets, so its one run continues from
-    the start; a character that is not a hex digit ends its line, and the
-    digits pair across lines.
 
     Args:
         source (AsyncIterator[bytes]): The hexdump.
     """
     reader = AsyncLineIterator(source)
-    pending = ""
     first = True
     try:
         while True:
@@ -160,39 +157,66 @@ async def _reverse_runs(
             if not raw and not ended:
                 return
             line = raw.decode(errors="replace")
-            if not plain:
-                if first and line and ":" not in line:
-                    lines = [line]
-                    while ended:
-                        rest, ended = await reader.read_until(b"\n")
-                        lines.append(rest.decode(errors="replace"))
-                    if any(":" in row for row in lines):
-                        for row in lines:
-                            if row:
-                                yield _reverse_line(row)
-                    else:
-                        digits = "".join(
-                            match.group()
-                            for row in lines
-                            if (match := re.match(r"[0-9A-Fa-f\s]*", row))
-                            is not None
-                        )
-                        yield None, _unhex(re.sub(r"\s+", "", digits))
-                    return
-                if line:
-                    first = False
-                    yield _reverse_line(line)
-                continue
-            match = re.match(r"[0-9A-Fa-f\s]*", line)
-            digits = pending + re.sub(
-                r"\s+", "", match.group() if match else ""
-            )
-            paired = len(digits) // 2 * 2
-            pending = digits[paired:]
-            if paired:
-                yield None, _unhex(digits[:paired])
+            if first and line and ":" not in line:
+                lines = [line]
+                while ended:
+                    rest, ended = await reader.read_until(b"\n")
+                    lines.append(rest.decode(errors="replace"))
+                if any(":" in row for row in lines):
+                    for row in lines:
+                        if row:
+                            yield _reverse_line(row)
+                else:
+                    digits = "".join(
+                        match.group()
+                        for row in lines
+                        if (match := re.match(r"[0-9A-Fa-f\s]*", row))
+                        is not None
+                    )
+                    yield None, _unhex(re.sub(r"\s+", "", digits))
+                return
+            if line:
+                first = False
+                yield _reverse_line(line)
     finally:
         await reader.discard()
+
+
+async def _plain_runs(
+    source: AsyncIterator[bytes],
+) -> AsyncGenerator[tuple[int | None, bytes], None]:
+    """Decode a plain (``-p``) hexdump as it arrives, as xxd 2024-12-07 does.
+
+    Space, tab, CR and LF never count, so two digits make a byte across
+    them and across lines. Any other byte is ignored before the first
+    digit and after a skipped line; past that it drops a digit left
+    without its pair, and a run of them skips the rest of the line.
+
+    Args:
+        source (AsyncIterator[bytes]): The hexdump.
+    """
+    high, low, lead, skip = 0, -1, True, False
+    async with aclosing(chunks(source)) as parts:
+        async for part in parts:
+            out = bytearray()
+            for c in part:
+                if skip:
+                    if c == 0x0A:
+                        skip, lead = False, True
+                    continue
+                if c in PLAIN_BLANKS:
+                    continue
+                before, high, low = high, low, HEX_DIGITS.get(c, -1)
+                if low < 0 and lead:
+                    continue
+                lead = False
+                if high >= 0 and low >= 0:
+                    out.append(high << 4 | low)
+                    low = -1
+                elif low < 0 and high < 0 and before < 0:
+                    skip = True
+            if out:
+                yield None, bytes(out)
 
 
 async def _xxd_reverse_stream(
@@ -212,7 +236,9 @@ async def _xxd_reverse_stream(
         io (IOResult | None): The result to mark on a backward seek.
     """
     position = 0
-    async with aclosing(_reverse_runs(source, plain)) as runs:
+    async with aclosing(
+        (_plain_runs if plain else _reverse_runs)(source)
+    ) as runs:
         async for offset, data in runs:
             if not data:
                 continue
@@ -243,7 +269,9 @@ async def _reverse_segments(
     """
     segments: list[tuple[int, bytearray]] = []
     position = 0
-    async with aclosing(_reverse_runs(source, plain)) as runs:
+    async with aclosing(
+        (_plain_runs if plain else _reverse_runs)(source)
+    ) as runs:
         async for offset, data in runs:
             if not data:
                 continue

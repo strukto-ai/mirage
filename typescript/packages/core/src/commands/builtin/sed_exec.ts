@@ -271,8 +271,8 @@ export class SedMachine {
     try {
       while (!this.stopped()) {
         if (this.appendQueue.length > 0) {
-          for await (const status of this.dumpAppendQueue()) {
-            if (status !== -1) this.quitCode = status
+          for await (const _ of this.dumpAppendQueue()) {
+            void _
             if (out.chunks.length > 0) {
               const chunk = out.chunks.join('')
               out.chunks.length = 0
@@ -503,10 +503,9 @@ export class SedMachine {
     }
   }
 
-  private async *dumpAppendQueue(): AsyncGenerator<number> {
+  private async *dumpAppendQueue(queue?: AppendItem[]): AsyncGenerator<number> {
     this.main.flushNewline()
-    const queue = this.appendQueue
-    this.appendQueue = []
+    if (queue === undefined) [queue, this.appendQueue] = [this.appendQueue, []]
     for (const item of queue) {
       if (item.text !== undefined) this.main.raw(item.text)
       if (item.rfile !== undefined) {
@@ -698,16 +697,8 @@ export class SedMachine {
             return
           case 'r':
             if (cmd.fname !== undefined) {
-              if (cmd.prepend === true) {
-                this.main.flushNewline()
-                for await (const part of this.fileStream(
-                  cmd.fname,
-                  this.files.get(cmd.fname) ?? null,
-                )) {
-                  this.main.raw(byteView(part, this.opts.utf8))
-                  yield -1
-                }
-              } else this.appendQueue.push({ rfile: cmd.fname })
+              if (cmd.prepend === true) yield* this.dumpAppendQueue([{ rfile: cmd.fname }])
+              else this.appendQueue.push({ rfile: cmd.fname })
             }
             break
           case 'R': {

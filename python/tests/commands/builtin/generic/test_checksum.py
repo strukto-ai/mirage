@@ -12,27 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
+
 import pytest
 
 from mirage.commands.builtin.generic.checksum import checksum
 from mirage.types import PathSpec
 
-
-class _FakeDigest:
-    def __init__(self):
-        self._data = b""
-
-    def update(self, data: bytes) -> None:
-        self._data += data
-
-    def hexdigest(self) -> str:
-        # Content-addressed fake: '5a' + the body's text, zero-padded to an
-        # md5's 32 digits, which the check line parser accepts as hex when
-        # bodies are hex-safe.
-        return ("5a" + self._data.decode()).ljust(32, "0")
-
-
-_DIGEST = "5aabc".ljust(32, "0")
+_DIGEST = hashlib.md5(b"abc").hexdigest()
 
 
 def _spec(path: str) -> PathSpec:
@@ -65,7 +52,6 @@ async def _run_check(
     read_bytes, read_stream = _fs(files)
     out, io = await checksum(
         [_spec(p) for p in (paths or ["/sums.txt"])],
-        factory=_FakeDigest,
         algorithm="md5",
         read_bytes=read_bytes,
         read_stream=read_stream,
@@ -124,7 +110,6 @@ async def test_non_fs_read_failure_propagates():
     with pytest.raises(RuntimeError, match="403 Forbidden"):
         await checksum(
             [_spec("/sums.txt")],
-            factory=_FakeDigest,
             algorithm="md5",
             read_bytes=read_bytes,
             read_stream=read_stream,
@@ -148,7 +133,6 @@ async def test_a_stored_digest_stands_in_for_the_read():
     read_bytes, _ = _fs({})
     out, io = await checksum(
         [_spec("/a"), _spec("/b")],
-        factory=_FakeDigest,
         algorithm="md5",
         read_bytes=read_bytes,
         read_stream=read_stream,
@@ -175,7 +159,6 @@ async def test_check_reads_the_bytes_and_asks_no_stored_digest():
     read_bytes, read_stream = _fs({"/list": f"{_DIGEST}  /f\n", "/f": "abc"})
     out, io = await checksum(
         [_spec("/list")],
-        factory=_FakeDigest,
         algorithm="md5",
         read_bytes=read_bytes,
         read_stream=read_stream,
@@ -190,7 +173,6 @@ async def test_a_failed_stored_digest_is_reported_and_the_rest_hash():
     read_bytes, read_stream = _fs({})
     out, io = await checksum(
         [_spec("/a"), _spec("/b"), _spec("/c")],
-        factory=_FakeDigest,
         algorithm="md5",
         read_bytes=read_bytes,
         read_stream=read_stream,

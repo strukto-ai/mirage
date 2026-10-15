@@ -14,10 +14,10 @@
 
 import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
-import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
-import { checksumGeneric, hashSource } from './checksum.ts'
+import { checksumGeneric } from './checksum.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -52,12 +52,8 @@ function makeStream(files: Record<string, string>) {
   }
 }
 
-// Content-addressed fake: the digest of a body is '5a' + the body's text,
-// zero-padded to an md5's 32 digits, which parseCheckLine accepts as hex
-// when bodies are hex-safe.
-const hasher = async (source: ByteSource): Promise<string> =>
-  `5a${DEC.decode(await materialize(source))}`.padEnd(32, '0')
-const DIGEST = '5aabc'.padEnd(32, '0')
+// The md5 of 'abc'.
+const DIGEST = '900150983cd24fb0d6963f7d28e17f72'
 
 async function runCheck(
   files: Record<string, string>,
@@ -69,7 +65,6 @@ async function runCheck(
     paths.map(spec),
     opts({ check: true, ...flags }, cwd),
     makeStream(files),
-    hasher,
     'md5sum',
   )
   const [out, io] = result ?? [null, new IOResult()]
@@ -115,14 +110,12 @@ describe('checksum --check', () => {
       return gen()
     }
     await expect(
-      checksumGeneric([spec('/sums.txt')], opts({ check: true }), stream, hasher, 'md5sum'),
+      checksumGeneric([spec('/sums.txt')], opts({ check: true }), stream, 'md5sum'),
     ).rejects.toThrow('403 Forbidden')
   })
 })
 
 describe('a stored digest', () => {
-  const fake = async (b: ByteSource): Promise<string> => `h${DEC.decode(await materialize(b))}`
-
   // Mirrors python's test_a_stored_digest_stands_in_for_the_read.
   it('stands in for the read', async () => {
     const reads: string[] = []
@@ -139,13 +132,12 @@ describe('a stored digest', () => {
       [spec('/a'), spec('/b')],
       opts({}),
       read,
-      fake,
       'md5sum',
       () => Promise.resolve(null),
       stored,
     )
     expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe(
-      `${'f'.repeat(32)}  /a\nhabc  /b\n`,
+      `${'f'.repeat(32)}  /a\n${DIGEST}  /b\n`,
     )
     expect(asked).toEqual([
       ['/a', 'md5'],
@@ -161,7 +153,6 @@ describe('a stored digest', () => {
       [spec('/list')],
       opts({ check: true }),
       makeStream({ '/list': `${DIGEST}  /f\n`, '/f': 'abc' }),
-      hasher,
       'md5sum',
       () => Promise.resolve(null),
       stored,
@@ -180,7 +171,6 @@ it('reports a failed stored digest and hashes the rest', async () => {
     [spec('/a'), spec('/b'), spec('/c')],
     opts({}),
     makeStream({}),
-    hasher,
     'md5sum',
     () => Promise.resolve(null),
     stored,
@@ -189,30 +179,4 @@ it('reports a failed stored digest and hashes the rest', async () => {
   expect(DEC.decode(await materialize(out))).toBe(`${'f'.repeat(32)}  /a\n${'f'.repeat(32)}  /c\n`)
   expect(io.exitCode).toBe(1)
   expect(DEC.decode(await materialize(io.stderr))).toBe('md5sum: /b: No such file or directory\n')
-})
-
-it.each([
-  ['md5', '900150983cd24fb0d6963f7d28e17f72'],
-  ['sha1', 'a9993e364706816aba3e25717850c26c9cd0d89d'],
-  ['sha256', 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'],
-  [
-    'sha384',
-    'cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7',
-  ],
-  [
-    'sha512',
-    'ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f',
-  ],
-])('hashes split input with %s and closes the source', async (algorithm, expected) => {
-  let closed = false
-  async function* source(): AsyncGenerator<Uint8Array> {
-    await Promise.resolve()
-    try {
-      for (const char of 'abc') yield ENC.encode(char)
-    } finally {
-      closed = true
-    }
-  }
-  expect(await hashSource(source(), algorithm)).toBe(expected)
-  expect(closed).toBe(true)
 })

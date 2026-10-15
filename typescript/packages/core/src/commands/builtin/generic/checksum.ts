@@ -21,7 +21,6 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { usageExitCode, usageHint } from '../../spec/usage.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { ensureStream } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -29,15 +28,15 @@ import { fsStrerror, isEisdir, isFsError, isMissingPath, isWalkError } from '../
 import { fsErrorLine } from '../../../errors/render.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { STDIN_HEADER_NAME, STDIN_OPERAND } from '../utils/constants.ts'
-import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
-import { closeQuietly } from '../../../io/stream.ts'
+import { isStdin, stdinStream } from '../utils/stream.ts'
+import { callerStream } from '../generic_bind/dispatch.ts'
+import { currentCaller } from '../../../context/session_context.ts'
 import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 export type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-export type Hasher = (source: ByteSource) => Promise<string>
 // The mount's stored digest of a file for an algorithm, or null to read it.
 export type StoredDigest = (p: PathSpec, algorithm: string) => Promise<string | null>
 
@@ -53,7 +52,7 @@ interface ChecksumFlags {
   readonly warn: boolean
 }
 
-export async function hashSource(source: ByteSource, algorithm: string): Promise<string> {
+async function hashSource(source: ByteSource, algorithm: string): Promise<string> {
   if (algorithm === 'md5' || algorithm === 'sha1') {
     const hash = algorithm === 'md5' ? new Md5() : new Sha1()
     for await (const part of chunks(source)) hash.update(part)
@@ -64,19 +63,53 @@ export async function hashSource(source: ByteSource, algorithm: string): Promise
   return hash.digest('hex')
 }
 
-async function hashStream(source: AsyncIterable<Uint8Array>, hasher: Hasher): Promise<string> {
-  return hasher(source)
+async function report(io: IOResult, prog: string, path: PathSpec, err: unknown): Promise<void> {
+  io.stderr = concat([await materialize(io.stderr), ENC.encode(fsErrorLine(prog, path, err))])
+  io.exitCode = 1
 }
 
-async function* singleStream(
-  source: AsyncIterable<Uint8Array>,
-  label: string,
-  hasher: Hasher,
-  name: string,
-  flags: ChecksumFlags,
-): AsyncIterable<Uint8Array> {
-  const digest = await hashStream(source, hasher)
-  yield ENC.encode(hashLine(digest, label, name, flags))
+/**
+ * One line per operand, its digest asked of `stored` (once `stat` has found a
+ * file there) before the file is read; one that fails is reported and the
+ * rest still print. `read` opens an operand now, inside the command's cache
+ * scope. Mirrors Python's hash_operands.
+ */
+export async function hashOperands(
+  paths: readonly PathSpec[],
+  read: Stream,
+  algorithm: string,
+  prog: string,
+  render: (digest: string, label: string) => string,
+  stat?: (p: PathSpec) => Promise<unknown>,
+  stored?: StoredDigest,
+): Promise<[AsyncIterable<Uint8Array>, IOResult]> {
+  const io = new IOResult()
+  const pending: [PathSpec, string | null, ByteSource][] = []
+  for (const p of paths) {
+    let digest: string | null = null
+    try {
+      if (stored !== undefined && !isStdin(p)) {
+        await stat?.(p)
+        digest = await stored(p, algorithm)
+      }
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      await report(io, prog, p, err)
+      continue
+    }
+    pending.push([p, digest, digest === null ? read(p) : new Uint8Array()])
+  }
+  async function* output(): AsyncIterable<Uint8Array> {
+    for (const [p, digest, source] of pending) {
+      try {
+        yield ENC.encode(render(digest ?? (await hashSource(source, algorithm)), p.rawPath))
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        await report(io, prog, p, err)
+      }
+    }
+  }
+  return [output(), io]
 }
 
 function algorithmName(name: string): string {
@@ -178,20 +211,14 @@ export function dispatchedReader(
   dispatch: NonNullable<CommandOpts['dispatch']>,
   stream: Stream,
 ): Stream {
-  return async function* read(path: PathSpec): AsyncIterable<Uint8Array> {
-    if (isStdin(path)) {
-      yield* stream(path)
-      return
-    }
-    const [data] = await dispatch('read', path)
-    yield* ensureStream(data as ByteSource)
-  }
+  const caller = currentCaller()
+  return (path) => (isStdin(path) ? stream(path) : callerStream(dispatch, caller, path))
 }
 
 async function checkFile(
   stream: Stream,
   p: PathSpec,
-  hasher: Hasher,
+  algorithm: string,
   name: string,
   opts: CommandOpts,
   flags: ChecksumFlags,
@@ -229,7 +256,7 @@ async function checkFile(
     const [expected, filename] = parsed
     let digest: string
     try {
-      digest = await hashStream(listed(checkTarget(filename, opts.cwd, mountPrefix)), hasher)
+      digest = await hashSource(listed(checkTarget(filename, opts.cwd, mountPrefix)), algorithm)
     } catch (error) {
       if (!isWalkError(error)) throw error
       // GNU --ignore-missing skips only absence; a permission or
@@ -316,12 +343,12 @@ export async function checksumGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   read: Stream,
-  hasher: Hasher,
   name: string,
   stat?: (p: PathSpec) => Promise<unknown>,
   stored?: StoredDigest,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(opts.flags, name)
+  const algorithm = name.slice(0, -3)
   const stream = stdinStream(read, opts.stdin)
   if (parsed.check) {
     let output = ''
@@ -334,7 +361,7 @@ export async function checksumGeneric(
     for (const p of paths.length > 0 ? paths : [STDIN_OPERAND]) {
       let checked: [string, string, number]
       try {
-        checked = await checkFile(stream, p, hasher, name, opts, parsed)
+        checked = await checkFile(stream, p, algorithm, name, opts, parsed)
       } catch (error) {
         if (!isWalkError(error)) throw error
         const label = p.rawPath !== '' ? p.rawPath : p.virtual
@@ -354,49 +381,13 @@ export async function checksumGeneric(
       new IOResult({ stderr: errors === '' ? null : ENC.encode(errors), exitCode }),
     ]
   }
-  if (paths.length > 0) {
-    const algorithm = name.slice(0, -3)
-    const io = new IOResult()
-    const sources: (AsyncIterable<Uint8Array> | null)[] = []
-    const digests: (string | null)[] = []
-    for (const p of paths) {
-      let digest: string | null = null
-      try {
-        if (stat !== undefined && stored !== undefined && !isStdin(p)) {
-          await stat(p)
-          digest = await stored(p, algorithm)
-        }
-        sources.push(digest === null ? stream(p) : null)
-        digests.push(digest)
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        io.stderr = concat([await materialize(io.stderr), ENC.encode(fsErrorLine(name, p, err))])
-        io.exitCode = 1
-        sources.push(null)
-        digests.push(null)
-      }
-    }
-    async function* output(): AsyncIterable<Uint8Array> {
-      for (const [i, p] of paths.entries()) {
-        const source = sources[i]
-        try {
-          let digest = digests[i] ?? null
-          if (digest === null) {
-            if (source == null) continue
-            digest = await hasher(source)
-          }
-          yield ENC.encode(hashLine(digest, p.rawPath, name, parsed))
-        } catch (err) {
-          if (!isFsError(err)) throw err
-          io.stderr = concat([await materialize(io.stderr), ENC.encode(fsErrorLine(name, p, err))])
-          io.exitCode = 1
-        } finally {
-          if (source != null) await closeQuietly(source)
-        }
-      }
-    }
-    return [output(), io]
-  }
-  const source: AsyncIterable<Uint8Array> = resolveSource(opts.stdin)
-  return [singleStream(source, '-', hasher, name, parsed), new IOResult()]
+  return hashOperands(
+    paths.length > 0 ? paths : [STDIN_OPERAND],
+    stream,
+    algorithm,
+    name,
+    (digest, label) => hashLine(digest, label, name, parsed),
+    stat,
+    stored,
+  )
 }

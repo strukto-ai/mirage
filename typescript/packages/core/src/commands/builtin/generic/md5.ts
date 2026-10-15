@@ -12,17 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { isStdin } from '../utils/stream.ts'
-import { isFsError } from '../../../errors/fs.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
-import { hashSource, type StoredDigest } from './checksum.ts'
-import { concat } from '../../../utils/bytes.ts'
+import { STDIN_OPERAND } from '../utils/constants.ts'
+import { stdinStream } from '../utils/stream.ts'
+import { hashOperands, type StoredDigest } from './checksum.ts'
 
-const ENC = new TextEncoder()
+function md5Line(digest: string, label: string): string {
+  return `${digest}  ${label}\n`
+}
 
+/**
+ * Run BSD md5 over resolved operands. An operand's digest is asked of
+ * `stored` first, once `stat` has found a file there, and the file is read
+ * only when there is none. Mirrors Python's md5_generic.
+ */
 export async function md5Generic(
   paths: PathSpec[],
   opts: CommandOpts,
@@ -30,42 +34,13 @@ export async function md5Generic(
   stat?: (p: PathSpec) => Promise<unknown>,
   stored?: StoredDigest,
 ): Promise<CommandFnResult> {
-  const io = new IOResult()
-  const sources: {
-    path: PathSpec
-    digest: string | null
-    source: AsyncIterable<Uint8Array> | null
-  }[] = []
-  for (const path of paths) {
-    try {
-      let digest: string | null = null
-      if (stored !== undefined && !isStdin(path)) {
-        await stat?.(path)
-        digest = await stored(path, 'md5')
-      }
-      sources.push({ path, digest, source: digest === null ? stream(path) : null })
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      io.stderr = concat([await materialize(io.stderr), ENC.encode(fsErrorLine('md5', path, err))])
-      io.exitCode = 1
-    }
-  }
-  async function* output(): AsyncIterable<Uint8Array> {
-    if (paths.length === 0) {
-      const digest = await hashSource(opts.stdin ?? new Uint8Array(), 'md5')
-      yield ENC.encode(digest + '  -\n')
-      return
-    }
-    for (const { path: p, digest: storedDigest, source } of sources) {
-      try {
-        const digest = storedDigest ?? (await hashSource(source ?? new Uint8Array(), 'md5'))
-        yield ENC.encode(digest + '  ' + p.rawPath + '\n')
-      } catch (err) {
-        if (!isFsError(err)) throw err
-        io.stderr = concat([await materialize(io.stderr), ENC.encode(fsErrorLine('md5', p, err))])
-        io.exitCode = 1
-      }
-    }
-  }
-  return [output(), io]
+  return hashOperands(
+    paths.length > 0 ? paths : [STDIN_OPERAND],
+    paths.length > 0 ? stream : stdinStream(stream, opts.stdin),
+    'md5',
+    'md5',
+    md5Line,
+    stat,
+    stored,
+  )
 }

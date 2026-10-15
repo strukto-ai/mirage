@@ -26,7 +26,6 @@ from mirage.core.jq.eval import (
 from mirage.core.jq.format import (
     dump_text,
     error_report,
-    format_jq_output,
     format_one,
     halt_report,
     load_failure,
@@ -69,7 +68,6 @@ __all__ = [
     "decode_utf8",
     "dump_text",
     "error_report",
-    "format_jq_output",
     "format_one",
     "halt_report",
     "jq_check",

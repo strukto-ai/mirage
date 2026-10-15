@@ -225,13 +225,6 @@ export function formatOne(text: string, opts: JqOptions): Uint8Array {
   return concat([prefix, body, terminator(opts)])
 }
 
-/** Render every output of a jq program, jq's compact dump of each, one per line. */
-export function formatJqOutput(texts: readonly string[], opts: JqOptions): Uint8Array {
-  const parts: Uint8Array[] = []
-  for (const text of texts) parts.push(formatOne(text, opts))
-  return concat(parts)
-}
-
 /**
  * The run as jq's main loop gets to print it: --raw-output0 refuses a raw
  * string that holds a NUL, which ends the run with an error there, the

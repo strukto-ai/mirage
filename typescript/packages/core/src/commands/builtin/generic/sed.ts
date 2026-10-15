@@ -17,16 +17,16 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { eisdir, fsStrerror, isFsError, isStaleWrite } from '../../../errors/fs.ts'
+import { fsStrerror, isFsError, isStaleWrite } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
-import { dispatchStat } from '../utils/paths.ts'
+import { callerStream } from '../generic_bind/dispatch.ts'
+import { currentCaller } from '../../../context/session_context.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readFailExitCode } from '../../spec/usage.ts'
 import { ensureStream } from '../../../io/stream.ts'
-import { chunks } from '../../../io/cooperative.ts'
-import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
-import { FileType, PathSpec } from '../../../types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { SED_MISSING_SCRIPT, SED_NO_INPUT_EXIT, SED_NO_INPUT_FILES } from '../constants.ts'
 import {
@@ -71,27 +71,13 @@ function scriptFiles(opts: CommandOpts, stream: Stream, write: Write): ScriptFil
     })
   }
   const dispatch = opts.dispatch
+  const caller = currentCaller()
+  const open = (name: string): AsyncIterable<Uint8Array> =>
+    dispatch === undefined ? stream(spec(name)) : callerStream(dispatch, caller, spec(name))
   return {
     virtual: (name) => resolvePath(name, opts.cwd),
-    async read(name) {
-      if (dispatch === undefined) return materialize(stream(spec(name)))
-      // A keyed store reads a directory as nothing at all, so the stat
-      // goes first to fail it the way a POSIX read does.
-      const path = spec(name)
-      if ((await dispatchStat(dispatch)(path)).type === FileType.DIRECTORY) throw eisdir(path)
-      const [data] = await dispatch('read', path)
-      return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
-    },
-    async *stream(name) {
-      const path = spec(name)
-      if (dispatch === undefined) {
-        yield* stream(path)
-        return
-      }
-      if ((await dispatchStat(dispatch)(path)).type === FileType.DIRECTORY) throw eisdir(path)
-      const [data] = await dispatch('read', path, [], { stream: true })
-      yield* chunks(data as ByteSource)
-    },
+    read: (name) => materialize(open(name)),
+    stream: open,
     async write(name, data) {
       if (dispatch === undefined) {
         await write(spec(name), data)

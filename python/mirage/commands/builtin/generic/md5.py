@@ -1,18 +1,21 @@
-from collections.abc import AsyncIterator
-
-from mirage.commands.builtin.generic.checksum import StoredDigest, hash_source
+from mirage.commands.builtin.generic.checksum import (
+    StoredDigest,
+    hash_operands,
+)
+from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     normalized_read,
     split_readable,
 )
-from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import CommandOpts
-from mirage.errors.constants import FS_ERRORS
-from mirage.errors.render import fs_error_line
-from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.shell.bytes import encode_text
+from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+
+
+def _md5_line(digest: str, label: str) -> bytes:
+    return f"{digest}  {label}\n".encode()
 
 
 async def md5(
@@ -31,43 +34,16 @@ async def md5(
         stored (StoredDigest | None): the mount's stored digest, asked
             before an operand is read.
     """
-    io = IOResult()
-    read = normalized_read(read_stream)
-    sources: list[tuple[PathSpec, str | None, ByteSource]] = []
-    for p in paths:
-        try:
-            digest = (
-                await stored(p, "md5")
-                if stored is not None and not is_stdin(p)
-                else None
-            )
-            sources.append((p, digest, read(p) if digest is None else b""))
-        except FS_ERRORS as exc:
-            io.stderr = await materialize(io.stderr) + encode_text(
-                fs_error_line("md5", p, exc)
-            )
-            io.exit_code = 1
-
-    async def output() -> AsyncIterator[bytes]:
-        if not paths:
-            digest = await hash_source(resolve_source(stdin), "md5")
-            yield f"{digest}  -\n".encode()
-            return
-        for p, cached_digest, source in sources:
-            try:
-                digest = (
-                    cached_digest
-                    if cached_digest is not None
-                    else await hash_source(source, "md5")
-                )
-                yield f"{digest}  {p.raw_path}\n".encode()
-            except FS_ERRORS as exc:
-                io.stderr = await materialize(io.stderr) + encode_text(
-                    fs_error_line("md5", p, exc)
-                )
-                io.exit_code = 1
-
-    return output(), io
+    return await hash_operands(
+        paths or [STDIN_OPERAND],
+        normalized_read(read_stream)
+        if paths
+        else stdin_stream(read_stream, stdin),
+        "md5",
+        "md5",
+        _md5_line,
+        stored,
+    )
 
 
 async def md5_generic(

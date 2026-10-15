@@ -16,9 +16,9 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.md5 import md5_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
-    bound_op,
     bound_uncached,
     dir_aware_stat,
+    dir_aware_stream,
     resolve_or_empty,
 )
 from mirage.commands.config import CommandIO, CommandOpts
@@ -39,7 +39,7 @@ async def md5(
         list(texts),
         opts,
         dir_aware_stat(ops, accessor, opts),
-        bound_op(ops.read_bytes, accessor, opts.index),
+        dir_aware_stream(ops, accessor, opts),
         bound_uncached(ops.checksum, accessor, opts.index),
     )
 

@@ -1,5 +1,3 @@
-import hashlib
-
 from mirage.commands.builtin.generic.checksum import (
     StoredDigest,
     checksum_generic,
@@ -23,8 +21,6 @@ async def sha384sum_generic(
         opts,
         stat,
         stream,
-        factory=hashlib.sha384,
-        algorithm="sha384",
         name="sha384sum",
         stored=stored,
     )

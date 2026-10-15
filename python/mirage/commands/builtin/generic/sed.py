@@ -16,6 +16,7 @@ from mirage.commands.builtin.constants import (
     SED_NO_INPUT_EXIT,
     SED_NO_INPUT_FILES,
 )
+from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.sed_exec import (
     SED_LINE_LENGTH,
     SedFileContent,
@@ -38,15 +39,15 @@ from mirage.commands.builtin.utils.operands import (
     materialized_read,
     normalized_read,
 )
-from mirage.commands.builtin.utils.paths import dispatch_stat
-from mirage.commands.builtin.utils.stream import is_stdin, stdin_bytes
+from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.context.session_context import Caller, current_caller
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import eacces, eisdir, fs_strerror
+from mirage.errors.fs import eacces, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition, StaleWriteError
@@ -61,7 +62,7 @@ from mirage.shell.bytes import (
     from_byte_view,
     utf8_locale,
 )
-from mirage.types import FileType, PathSpec, PolymorphicReadFn
+from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
 
@@ -79,12 +80,12 @@ class _ScriptFiles:
     write otherwise.
     """
 
-    read_bytes: ReadBytes
     read_stream: PolymorphicReadFn
     write_bytes: WriteBytes | None
     dispatch: DispatchFn | None
     cwd: str
     prefix: str
+    caller: Caller
 
     def spec(self, name: str) -> PathSpec:
         resolved = resolve_path(name, self.cwd)
@@ -99,29 +100,15 @@ class _ScriptFiles:
         )
 
     async def read(self, name: str) -> bytes:
-        path = self.spec(name)
-        if self.dispatch is None:
-            return await self.read_bytes(path)
-        # A keyed store reads a directory as nothing at all, so the stat
-        # goes first to fail it the way a POSIX read does.
-        if (
-            await dispatch_stat(self.dispatch, path)
-        ).type == FileType.DIRECTORY:
-            raise eisdir(path)
-        data, _ = await self.dispatch("read", path)
-        return await materialize(data)
+        return await materialize(self.stream(name))
 
     async def stream(self, name: str) -> AsyncIterator[bytes]:
         path = self.spec(name)
-        if self.dispatch is None:
-            source = normalized_read(self.read_stream)(path)
-        else:
-            if (
-                await dispatch_stat(self.dispatch, path)
-            ).type == FileType.DIRECTORY:
-                raise eisdir(path)
-            data, _ = await self.dispatch("read", path, stream=True)
-            source = ensure_stream(data)
+        source = (
+            normalized_read(self.read_stream)(path)
+            if self.dispatch is None
+            else caller_stream(self.dispatch, self.caller, path)
+        )
         async with aclosing(chunks(source)) as data:
             async for part in data:
                 yield part
@@ -289,15 +276,17 @@ async def sed(
         utf8 (bool): a UTF-8 locale: the script and the input are
             characters rather than bytes.
     """
-    read_bytes = materialized_read(read_stream)
-    if not in_place:
-        read_bytes = stdin_bytes(read_bytes, stdin)
     read = normalized_read(read_stream)
     pieces = (
         [SedScriptPiece("expr", script)] if isinstance(script, str) else script
     )
     access = _ScriptFiles(
-        read_bytes, read_stream, write_bytes, dispatch, cwd, prefix
+        read_stream if in_place else stdin_stream(read_stream, stdin),
+        write_bytes,
+        dispatch,
+        cwd,
+        prefix,
+        current_caller(),
     )
     try:
         program = compile_script(pieces, extended, utf8)
@@ -326,7 +315,12 @@ async def sed(
     )
     if in_place:
         return await _run_in_place(
-            paths, program, machine, access, read_bytes, write_bytes
+            paths,
+            program,
+            machine,
+            access,
+            materialized_read(read_stream),
+            write_bytes,
         )
 
     stdin_source = ensure_stream(stdin or b"")

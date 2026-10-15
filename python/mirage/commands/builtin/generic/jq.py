@@ -26,7 +26,7 @@ from mirage.core.jq import (
     args_text,
     decode_utf8,
     error_report,
-    format_jq_output,
+    format_one,
     halt_report,
     jq_check,
     jq_run_texts,
@@ -555,7 +555,7 @@ class MainLoop:
                     "null", self._reader.position()
                 )
                 for value in run.outputs:
-                    yield format_jq_output([value], self._opts)
+                    yield format_one(value, self._opts)
                 self._settle(run, position)
                 return
             while not self._reader.failures():
@@ -569,7 +569,7 @@ class MainLoop:
                     return
                 run, position = await self._run(item, self._reader.position())
                 for value in run.outputs:
-                    yield format_jq_output([value], self._opts)
+                    yield format_one(value, self._opts)
                 if self._settle(run, position):
                     return
         finally:

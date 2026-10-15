@@ -17,7 +17,7 @@ import { isStdin, resolveSource } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, FileType } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import {
@@ -33,16 +33,10 @@ import {
   type CommandRun,
 } from '../../../core/awk/index.ts'
 import { USAGE, type AwkFlags } from './awk_types.ts'
-import { dispatchStat } from '../utils/paths.ts'
+import { callerStream } from '../generic_bind/dispatch.ts'
+import { currentCaller } from '../../../context/session_context.ts'
 
-import {
-  eisdir,
-  fsStrerror,
-  isEnotdir,
-  isFsError,
-  isMissingPath,
-  isWalkError,
-} from '../../../errors/fs.ts'
+import { fsStrerror, isEnotdir, isFsError, isMissingPath, isWalkError } from '../../../errors/fs.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 
@@ -118,6 +112,7 @@ export class AwkStreams implements AwkHost {
   private readonly stream: Stream
   private readonly stdin: AsyncIterator<Uint8Array>
   private readonly opts: CommandOpts
+  private readonly caller = currentCaller()
 
   constructor(operands: readonly PathSpec[], stream: Stream, opts: CommandOpts) {
     this.operands = operands
@@ -137,13 +132,7 @@ export class AwkStreams implements AwkHost {
   private async *readPath(name: string | PathSpec): AsyncIterable<Uint8Array> {
     const dispatch = this.opts.dispatch
     if (dispatch === undefined) throw new AwkIOError(posixPhrase('ENOENT'))
-    const path = PathSpec.fromStrPath(name, undefined, this.opts.cwd)
-    // A keyed store reads a directory as nothing at all, and other backends
-    // fail it in their own words, so the stat goes first to fail it the way
-    // a POSIX read does.
-    if ((await dispatchStat(dispatch)(path)).type === FileType.DIRECTORY) throw eisdir(path)
-    const [data] = await dispatch('read', path, [], { stream: true })
-    yield* chunks(data as ByteSource)
+    yield* callerStream(dispatch, this.caller, PathSpec.fromStrPath(name, undefined, this.opts.cwd))
   }
 
   /** A `-f` program file: /dev/stdin reads the shared stdin cursor. */

@@ -21,7 +21,7 @@ from mirage.core.jq import (
     JqRun,
     dump_text,
     error_report,
-    format_jq_output,
+    format_one,
     halt_report,
     jq_run_texts,
     load_failure,
@@ -114,12 +114,12 @@ STRING_LAYOUTS = [
 
 @pytest.mark.parametrize("opts, expected", LAYOUTS)
 def test_an_output_is_laid_out_the_way_jq_prints_it(opts, expected):
-    assert format_jq_output([DOC], opts) == expected
+    assert format_one(DOC, opts) == expected
 
 
 @pytest.mark.parametrize("opts, expected", STRING_LAYOUTS)
 def test_a_string_output_is_printed_the_way_jq_prints_it(opts, expected):
-    assert format_jq_output([STRING], opts) == expected
+    assert format_one(STRING, opts) == expected
 
 
 def test_the_hand_layout_is_jqs_too():
@@ -156,31 +156,26 @@ def test_sort_keys_orders_by_code_point_and_reads_escaped_keys(compact):
     )
 
 
-def test_format_jq_no_outputs_is_empty_bytes():
-    assert format_jq_output([], PRETTY) == b""
-    assert format_jq_output([], RAW) == b""
-
-
 def test_format_jq_raw_leaves_non_strings_as_json():
-    assert format_jq_output(['"a"', "1.000"], RAW) == b"a\n1.000\n"
+    assert format_one('"a"', RAW) + format_one("1.000", RAW) == b"a\n1.000\n"
 
 
 def test_join_output_writes_no_separator():
     opts = JqOptions(raw_output=True, join_output=True, compact=True)
-    assert format_jq_output(['"a"', '"b"'], opts) == b"ab"
+    assert format_one('"a"', opts) + format_one('"b"', opts) == b"ab"
 
 
 def test_raw_output0_terminates_with_nul_and_beats_join():
     opts = JqOptions(
         raw_output=True, join_output=True, nul_output=True, compact=True
     )
-    assert format_jq_output(['"a"', '"b"'], opts) == b"a\x00b\x00"
+    assert format_one('"a"', opts) + format_one('"b"', opts) == b"a\x00b\x00"
 
 
 def test_seq_puts_rs_before_each_value_but_not_a_raw_string():
     opts = JqOptions(seq=True, raw_output=True, compact=True)
     assert (
-        format_jq_output(["1.000", '"x"', "[]"], opts)
+        b"".join(format_one(text, opts) for text in ["1.000", '"x"', "[]"])
         == b"\x1e1.000\nx\n\x1e[]\n"
     )
 
@@ -206,7 +201,7 @@ def test_outputs_keep_the_spelling_jq_gives_them():
     run = jq_run_texts(
         '{"b":1.000,"1":2}', "., .b, (.b + 0), (1e17 * 1), -0, keys_unsorted"
     )
-    assert format_jq_output(run.outputs, COMPACT) == (
+    assert b"".join(format_one(text, COMPACT) for text in run.outputs) == (
         b'{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n'
     )
 

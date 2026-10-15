@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { checksumGeneric, hashSource, type StoredDigest, type Stream } from './checksum.ts'
+import { checksumGeneric, type StoredDigest, type Stream } from './checksum.ts'
 
 export async function sha512sumGeneric(
   paths: PathSpec[],
@@ -23,13 +23,5 @@ export async function sha512sumGeneric(
   stat?: (p: PathSpec) => Promise<unknown>,
   stored?: StoredDigest,
 ): Promise<CommandFnResult> {
-  return checksumGeneric(
-    paths,
-    opts,
-    stream,
-    (source) => hashSource(source, 'sha512'),
-    'sha512sum',
-    stat,
-    stored,
-  )
+  return checksumGeneric(paths, opts, stream, 'sha512sum', stat, stored)
 }

@@ -3,8 +3,9 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
-from typing import Protocol
+from functools import partial
 
+from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.constants import (
     STDIN_HEADER_NAME,
     STDIN_OPERAND,
@@ -18,7 +19,6 @@ from mirage.commands.builtin.utils.operands import (
 )
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
-    resolve_source,
     stdin_stat,
     stdin_stream,
 )
@@ -28,11 +28,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import usage_exit_code, usage_hint
+from mirage.context.session_context import current_caller
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.cooperative import chunks
-from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -144,13 +144,6 @@ def parse_flags(flags: Mapping[str, FlagValue], name: str) -> ChecksumFlags:
     )
 
 
-class Digest(Protocol):
-    def update(self, data: bytes) -> None: ...
-
-    def hexdigest(self) -> str: ...
-
-
-DigestFactory = Callable[..., Digest]
 # The mount's stored digest of a file for an algorithm, or None to read it.
 StoredDigest = Callable[[PathSpec, str], Awaitable[str | None]]
 
@@ -169,6 +162,65 @@ async def hash_source(source: ByteSource, algorithm: str) -> str:
     return digest.hexdigest()
 
 
+async def _report(
+    io: IOResult, prog: str, path: PathSpec, exc: OSError
+) -> None:
+    io.stderr = await materialize(io.stderr) + encode_text(
+        fs_error_line(prog, path, exc)
+    )
+    io.exit_code = 1
+
+
+async def hash_operands(
+    paths: list[PathSpec],
+    read: Callable[[PathSpec], ByteSource],
+    algorithm: str,
+    prog: str,
+    render: Callable[[str, str], bytes],
+    stored: StoredDigest | None = None,
+) -> tuple[AsyncIterator[bytes], IOResult]:
+    """One line per operand, its digest asked of ``stored`` before the
+    file is read; one that fails is reported and the rest still print.
+
+    Args:
+        paths (list[PathSpec]): the operands, stdin as ``-``.
+        read (Callable[[PathSpec], ByteSource]): an operand's bytes,
+            opened now, inside the command's cache scope.
+        algorithm (str): the hashlib algorithm name.
+        prog (str): the command named on stderr.
+        render (Callable[[str, str], bytes]): the line for a digest and
+            the operand as spelled.
+        stored (StoredDigest | None): the mount's stored digest.
+    """
+    io = IOResult()
+    pending: list[tuple[PathSpec, str | None, ByteSource]] = []
+    for p in paths:
+        try:
+            digest = (
+                await stored(p, algorithm)
+                if stored is not None and not is_stdin(p)
+                else None
+            )
+        except FS_ERRORS as exc:
+            await _report(io, prog, p, exc)
+            continue
+        pending.append((p, digest, b"" if digest is not None else read(p)))
+
+    async def output() -> AsyncIterator[bytes]:
+        for p, digest, source in pending:
+            try:
+                yield render(
+                    digest
+                    if digest is not None
+                    else await hash_source(source, algorithm),
+                    p.raw_path,
+                )
+            except FS_ERRORS as exc:
+                await _report(io, prog, p, exc)
+
+    return output(), io
+
+
 def _hash_line(
     digest: str,
     label: str,
@@ -182,49 +234,6 @@ def _hash_line(
         return f"{algorithm.upper()} ({label}) = {digest}{ending}".encode()
     marker = "*" if binary else " "
     return f"{digest} {marker}{label}{ending}".encode()
-
-
-async def _hash_stream(
-    source: AsyncIterator[bytes],
-    label: str,
-    factory: DigestFactory,
-    algorithm: str,
-    binary: bool,
-    tag: bool,
-    zero: bool,
-) -> AsyncIterator[bytes]:
-    h = factory()
-    async with aclosing(chunks(source)) as data:
-        async for chunk in data:
-            h.update(chunk)
-    yield _hash_line(h.hexdigest(), label, algorithm, binary, tag, zero)
-
-
-async def _hash_multi(
-    paths: list[PathSpec],
-    digests: list[str | None],
-    sources: list[ByteSource],
-    factory: DigestFactory,
-    algorithm: str,
-    binary: bool,
-    tag: bool,
-    zero: bool,
-    io: IOResult,
-) -> AsyncIterator[bytes]:
-    for p, digest, source in zip(paths, digests, sources):
-        try:
-            if digest is None:
-                h = factory()
-                async with aclosing(chunks(source)) as data:
-                    async for chunk in data:
-                        h.update(chunk)
-                digest = h.hexdigest()
-            yield _hash_line(digest, p.raw_path, algorithm, binary, tag, zero)
-        except FS_ERRORS as exc:
-            io.stderr = await materialize(io.stderr) + encode_text(
-                fs_error_line(f"{algorithm}sum", p, exc)
-            )
-            io.exit_code = 1
 
 
 _PLAIN_LINE = re.compile(r"^([0-9a-fA-F]+) [ *](.*)$")
@@ -296,15 +305,12 @@ def dispatched_reader(
         stream (Callable[[PathSpec], AsyncIterator[bytes]]): the
             command's stdin-aware reader.
     """
+    caller = current_caller()
 
-    async def read(path: PathSpec) -> AsyncIterator[bytes]:
+    def read(path: PathSpec) -> AsyncIterator[bytes]:
         if is_stdin(path):
-            async for chunk in stream(path):
-                yield chunk
-            return
-        data, _ = await dispatch("read", path)
-        async for chunk in ensure_stream(data):
-            yield chunk
+            return stream(path)
+        return caller_stream(dispatch, caller, path)
 
     return read
 
@@ -341,7 +347,6 @@ async def _hash_check(
     path: PathSpec,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
-    factory: DigestFactory,
     algorithm: str,
     cwd: str,
     cwd_prefix: str,
@@ -387,10 +392,8 @@ async def _hash_check(
         parsed_lines += 1
         expected_hash, filename = parsed
         target = _resolve_check_target(filename, cwd, mount_prefix)
-        h = factory()
         try:
-            async for chunk in read_stream(target):
-                h.update(chunk)
+            digest = await hash_source(read_stream(target), algorithm)
         except WALK_ERRORS as exc:
             # GNU --ignore-missing skips only absence; a permission or
             # transport-shaped failure still reports and fails the check.
@@ -403,7 +406,7 @@ async def _hash_check(
             lines.append(f"{filename}: FAILED open or read")
             read_failures += 1
             continue
-        if h.hexdigest() == expected_hash:
+        if digest == expected_hash:
             verified += 1
             if not quiet:
                 lines.append(f"{filename}: OK")
@@ -463,11 +466,9 @@ async def _hash_check(
 async def checksum(
     paths: list[PathSpec],
     *,
-    factory: DigestFactory,
     algorithm: str,
     read_bytes: Callable[..., Awaitable[bytes]],
     read_stream: Callable[..., AsyncIterator[bytes]],
-    stdin: ByteSource | None = None,
     check: bool = False,
     binary: bool = False,
     tag: bool = False,
@@ -487,12 +488,10 @@ async def checksum(
     under ``check`` is always verified against the bytes.
 
     Args:
-        paths (list[PathSpec]): the operands.
-        factory (DigestFactory): the digest constructor.
-        algorithm (str): its name, e.g. ``"md5"``.
+        paths (list[PathSpec]): the operands, none for stdin.
+        algorithm (str): the hashlib algorithm name, e.g. ``"md5"``.
         read_bytes (Callable): bound whole reader.
-        read_stream (Callable): bound streamed reader.
-        stdin (ByteSource | None): the line's input.
+        read_stream (Callable): bound streamed reader, stdin for ``-``.
         check (bool): -c.
         binary (bool): -b.
         tag (bool): --tag.
@@ -522,7 +521,6 @@ async def checksum(
                     p,
                     read_bytes,
                     read_stream,
-                    factory,
                     algorithm,
                     cwd_dir,
                     cwd_prefix,
@@ -544,34 +542,16 @@ async def checksum(
         return b"".join(outs), IOResult(
             exit_code=exit_code, stderr=b"".join(errs) or None
         )
-    if paths:
-        kept: list[PathSpec] = []
-        digests: list[str | None] = []
-        err = b""
-        for p in paths:
-            try:
-                digest = (
-                    await stored(p, algorithm)
-                    if stored is not None and not is_stdin(p)
-                    else None
-                )
-            except FS_ERRORS as exc:
-                err += encode_text(fs_error_line(f"{algorithm}sum", p, exc))
-                continue
-            kept.append(p)
-            digests.append(digest)
-        sources = [
-            read_stream(p) if digest is None else b""
-            for p, digest in zip(kept, digests)
-        ]
-        io = IOResult(exit_code=1 if err else 0, stderr=err or None)
-        return _hash_multi(
-            kept, digests, sources, factory, algorithm, binary, tag, zero, io
-        ), io
-    source = resolve_source(stdin)
-    return _hash_stream(
-        source, "-", factory, algorithm, binary, tag, zero
-    ), IOResult()
+    return await hash_operands(
+        paths or [STDIN_OPERAND],
+        read_stream,
+        algorithm,
+        f"{algorithm}sum",
+        partial(
+            _hash_line, algorithm=algorithm, binary=binary, tag=tag, zero=zero
+        ),
+        stored,
+    )
 
 
 async def checksum_generic(
@@ -581,8 +561,6 @@ async def checksum_generic(
     stat: StatFn,
     stream: PolymorphicReadFn,
     *,
-    factory: DigestFactory,
-    algorithm: str,
     name: str,
     stored: StoredDigest | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -600,20 +578,19 @@ async def checksum_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
-        factory (DigestFactory): Digest constructor, e.g. hashlib.md5.
-        algorithm (str): Digest name for rendered lines, e.g. ``"md5"``.
-        name (str): The invoked command name, for its spec and stderr.
+        name (str): The invoked command name (``md5sum``, ...), for its
+            spec and stderr; its digest is the name without ``sum``.
         stored (StoredDigest | None): the mount's ``checksum``, the
             digest it keeps, asked before an operand is read.
     """
     parsed = parse_flags(opts.flags, name)
+    algorithm = name.removesuffix("sum")
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, opts.stdin)
     if parsed.check:
         # With no operand the checksum list is stdin.
         return await checksum(
             paths or [STDIN_OPERAND],
-            factory=factory,
             algorithm=algorithm,
             read_bytes=materialized_read(stream),
             read_stream=(
@@ -621,7 +598,6 @@ async def checksum_generic(
                 if opts.dispatch is not None
                 else normalized_read(stream)
             ),
-            stdin=opts.stdin,
             check=True,
             strict=parsed.strict,
             ignore_missing=parsed.ignore_missing,
@@ -636,11 +612,9 @@ async def checksum_generic(
     return await merge_split_errors(
         await checksum(
             readable,
-            factory=factory,
             algorithm=algorithm,
             read_bytes=materialized_read(stream),
             read_stream=normalized_read(stream),
-            stdin=opts.stdin,
             binary=parsed.binary,
             tag=parsed.tag,
             zero=parsed.zero,
@@ -652,8 +626,6 @@ async def checksum_generic(
 
 
 __all__ = [
-    "Digest",
-    "DigestFactory",
     "StoredDigest",
     "checksum",
     "checksum_generic",

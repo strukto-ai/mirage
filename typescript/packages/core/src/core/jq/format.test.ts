@@ -14,14 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { jqRunTexts } from './eval.ts'
-import {
-  dumpText,
-  errorReport,
-  formatJqOutput,
-  haltReport,
-  loadFailure,
-  printable,
-} from './format.ts'
+import { dumpText, errorReport, formatOne, haltReport, loadFailure, printable } from './format.ts'
 import { jqOptions, type JqOptions } from './types.ts'
 import { eacces, eisdir, enoent } from '../../errors/fs.ts'
 
@@ -103,22 +96,19 @@ const STRING_LAYOUTS: [string, JqOptions, string][] = [
   ['-a', jqOptions({ asciiOutput: true }), `"\\u00fc\\ud83d\\ude00\\u007f\\u0000"\n`],
 ]
 
-describe('formatJqOutput', () => {
+describe('formatOne', () => {
   it.each(LAYOUTS)('lays an output out the way jq prints it under %s', (_, opts, expected) => {
-    expect(DEC.decode(formatJqOutput([DOC], opts))).toBe(expected)
+    expect(DEC.decode(formatOne(DOC, opts))).toBe(expected)
   })
 
   it.each(STRING_LAYOUTS)('prints a string the way jq prints it under %s', (_, opts, expected) => {
-    expect(DEC.decode(formatJqOutput([STRING], opts))).toBe(expected)
-  })
-
-  it('returns empty bytes when there are no outputs', () => {
-    expect(formatJqOutput([], PRETTY)).toEqual(new Uint8Array(0))
-    expect(formatJqOutput([], RAW)).toEqual(new Uint8Array(0))
+    expect(DEC.decode(formatOne(STRING, opts))).toBe(expected)
   })
 
   it('leaves non-strings as JSON when raw=true', () => {
-    expect(DEC.decode(formatJqOutput(['"a"', '1.000'], RAW))).toBe('a\n1.000\n')
+    expect(['"a"', '1.000'].map((text) => DEC.decode(formatOne(text, RAW))).join('')).toBe(
+      'a\n1.000\n',
+    )
   })
 
   it('lays out a value nested as deep as jq reads', () => {
@@ -146,7 +136,7 @@ describe('formatJqOutput', () => {
       '{"b":1.000,"1":2}',
       '., .b, (.b + 0), (1e17 * 1), -0, keys_unsorted',
     )
-    expect(DEC.decode(formatJqOutput(run.outputs, COMPACT))).toBe(
+    expect(run.outputs.map((text) => DEC.decode(formatOne(text, COMPACT))).join('')).toBe(
       '{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n',
     )
   })
@@ -155,17 +145,21 @@ describe('formatJqOutput', () => {
 describe('jq output flags', () => {
   it('writes no separator under -j', () => {
     const opts = jqOptions({ rawOutput: true, joinOutput: true, compact: true })
-    expect(DEC.decode(formatJqOutput(['"a"', '"b"'], opts))).toBe('ab')
+    expect(['"a"', '"b"'].map((text) => DEC.decode(formatOne(text, opts))).join('')).toBe('ab')
   })
 
   it('terminates with NUL under --raw-output0, which beats -j', () => {
     const opts = jqOptions({ rawOutput: true, joinOutput: true, nulOutput: true, compact: true })
-    expect(formatJqOutput(['"a"', '"b"'], opts)).toEqual(new Uint8Array([97, 0, 98, 0]))
+    expect(['"a"', '"b"'].map((text) => DEC.decode(formatOne(text, opts))).join('')).toBe(
+      'a\x00b\x00',
+    )
   })
 
   it('puts RS before each value under --seq, but not before a raw string', () => {
     const opts = jqOptions({ seq: true, rawOutput: true, compact: true })
-    expect(DEC.decode(formatJqOutput(['1.000', '"x"', '[]'], opts))).toBe('\x1e1.000\nx\n\x1e[]\n')
+    expect(['1.000', '"x"', '[]'].map((text) => DEC.decode(formatOne(text, opts))).join('')).toBe(
+      '\x1e1.000\nx\n\x1e[]\n',
+    )
   })
 })
 

@@ -1,5 +1,3 @@
-import hashlib
-
 from mirage.commands.builtin.generic.checksum import (
     StoredDigest,
     checksum_generic,
@@ -23,8 +21,6 @@ async def md5sum_generic(
         opts,
         stat,
         stream,
-        factory=hashlib.md5,
-        algorithm="md5",
         name="md5sum",
         stored=stored,
     )
