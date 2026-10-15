@@ -6,14 +6,15 @@ import { cutGeneric } from './cut.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
+function stat(path: PathSpec): Promise<FileStat> {
+  if (path.virtual === '/missing') {
+    return Promise.reject(Object.assign(new Error(path.virtual), { code: 'ENOENT' }))
+  }
+  return Promise.resolve(new FileStat({ name: path.virtual, type: FileType.FILE }))
+}
+
 it.each(['', 'first,x\n'])('reports late read errors and continues (%j)', async (prefix) => {
   const closed: string[] = []
-  function stat(path: PathSpec): Promise<FileStat> {
-    if (path.virtual === '/missing') {
-      return Promise.reject(Object.assign(new Error(path.virtual), { code: 'ENOENT' }))
-    }
-    return Promise.resolve(new FileStat({ name: path.virtual, type: FileType.FILE }))
-  }
   async function* source(path: PathSpec): AsyncIterable<Uint8Array> {
     await Promise.resolve()
     try {
@@ -55,7 +56,7 @@ it.each([new Error('backend failed'), new DOMException('cancelled', 'AbortError'
       ['/failed', '/untouched'].map((p) => PathSpec.fromStrPath(p)),
       { stdin: null, flags: { fields: '1' }, cwd: '/' },
       source,
-      (path) => Promise.resolve(new FileStat({ name: path.virtual, type: FileType.FILE })),
+      stat,
     )
     if (result === null) throw new Error('cut returned no result')
     await expect(materialize(result[0])).rejects.toBe(error)

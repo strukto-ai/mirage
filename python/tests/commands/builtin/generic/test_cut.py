@@ -113,15 +113,16 @@ async def test_cut_records_survive_one_byte_chunks(data, expected):
     assert await materialize(output) == expected
 
 
+async def _stat(path: PathSpec) -> FileStat:
+    if path.virtual == "/missing":
+        raise FileNotFoundError(path.virtual)
+    return FileStat(name=path.virtual, type=FileType.FILE)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prefix", [b"", b"first,x\n"])
 async def test_cut_reports_late_read_errors_and_continues(prefix):
     closed = []
-
-    async def stat(path):
-        if path.virtual == "/missing":
-            raise FileNotFoundError(path.virtual)
-        return FileStat(name=path.virtual, type=FileType.FILE)
 
     async def source(path):
         try:
@@ -137,7 +138,7 @@ async def test_cut_reports_late_read_errors_and_continues(prefix):
         [PathSpec.from_str_path(p) for p in ("/missing", "/denied", "/good")],
         [],
         CommandOpts(flags={"fields": "1", "delimiter": ","}),
-        stat,
+        _stat,
         source,
     )
     assert (
