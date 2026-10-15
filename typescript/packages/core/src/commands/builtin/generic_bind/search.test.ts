@@ -1,4 +1,3 @@
-import type { PathSource } from '../../../vfs/types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -83,7 +82,7 @@ class SearchRAM extends RAMVFS {
     scope: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-  ): Promise<PathSource> {
+  ): Promise<PathSpec[]> {
     this.asked.push([text, opts.wholeWord])
     const found = [...this.store.files]
       .filter(
@@ -423,41 +422,3 @@ it.each<[string, string, (message: string) => Error, [string, number] | null]>([
     expect([await run(vfs, line), vfs.reads]).toEqual([['', ...out], []])
   }
 })
-
-it.each([false, true])(
-  'requires streamed candidates to finish before pruning (fail=%s)',
-  async (fail) => {
-    let closed = false
-    class StreamSearchRAM extends SearchRAM {
-      override async filesContaining(
-        scope: PathSpec,
-        text: string,
-        opts: { wholeWord: boolean; ignoreCase: boolean },
-      ): Promise<PathSource> {
-        const found = await super.filesContaining(scope, text, opts)
-        async function* entries(): AsyncGenerator<PathSpec> {
-          try {
-            for await (const item of found) {
-              yield item
-              if (fail) throw new Error('truncated search')
-            }
-          } finally {
-            closed = true
-          }
-        }
-        return entries()
-      }
-    }
-    const mount = new StreamSearchRAM({ lines: null })
-    const result = await run(mount, 'grep -r ada /d', ['/d/sub/d.txt'])
-    if (fail) {
-      expect(result[0]).toBe('')
-      expect(result[2]).not.toBe(0)
-    } else {
-      expect(result).toEqual(
-        await run(new SearchRAM({ lines: null }), 'grep -r ada /d', ['/d/sub/d.txt']),
-      )
-    }
-    expect(closed).toBe(true)
-  },
-)

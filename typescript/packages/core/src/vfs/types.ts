@@ -168,16 +168,13 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
 ) => Promise<[string, string][] | null>
 
 /** Files under `path` whose content may contain `text`; null when the search cannot answer for every file. */
-export type PathSource = PathSpec[] | AsyncIterable<PathSpec>
-export type TreeSource = Map<string, FileStat> | AsyncIterable<readonly [string, FileStat]>
-
 export type FilesContainingOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   text: string,
   opts: { wholeWord: boolean; ignoreCase: boolean },
   index?: IndexCacheStore,
-) => Promise<PathSource | null>
+) => Promise<PathSpec[] | null>
 
 /** The lines of `path` that may contain `text`, in file order, whole or streamed; null when the search cannot answer for this file. */
 export type LinesContainingOp<A extends Accessor = Accessor> = (
@@ -224,7 +221,7 @@ export type ReadTreeOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
-) => Promise<TreeSource | null>
+) => Promise<Map<string, FileStat> | null>
 
 /** The last `n` lines of `path`, then the lines added to it; null when the file is to be polled. */
 export type FollowOp<A extends Accessor = Accessor> = (

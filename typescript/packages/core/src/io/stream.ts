@@ -129,19 +129,3 @@ export async function* yieldBytes(data: Uint8Array): AsyncIterable<Uint8Array> {
 export function ensureStream(src: ByteSource): AsyncIterable<Uint8Array> {
   return src instanceof Uint8Array ? yieldBytes(src) : src
 }
-
-/** Collect a complete typed answer; async iterator cleanup also runs on failure. */
-export async function collectItems<T>(source: Iterable<T> | AsyncIterable<T>): Promise<T[]> {
-  if (!(Symbol.asyncIterator in source)) return Array.from(source)
-  const iterator = source[Symbol.asyncIterator]()
-  const result: T[] = []
-  try {
-    for (;;) {
-      const item = await iterator.next()
-      if (item.done === true) return result
-      result.push(item.value)
-    }
-  } finally {
-    await iterator.return?.()
-  }
-}

@@ -65,7 +65,7 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
-from mirage.io.stream import close_quietly, collect_items
+from mirage.io.stream import close_quietly
 from mirage.io.types import PipeStream
 from mirage.observe.context import (
     RecordingScope,
@@ -1029,7 +1029,7 @@ class Dispatcher:
         served = await self._serve_cached(call, mount, boundary, mark)
         if served is not None:
             return served, IOResult()
-        result = await self._filter(
+        result = self._filter(
             call, await self._call(call, mount, self._filler(call, mount))
         )
         if (
@@ -1862,8 +1862,6 @@ class Dispatcher:
         found = await mount.call("read_tree", call.path.virtual)
         if found is None:
             return None
-        if not isinstance(found, dict):
-            found = dict(await collect_items(found))
         visible = _visible_answer("read_tree", call.vis, call.path, found)
         return sum(st.type is FileType.FILE for st in visible.values())
 
@@ -2058,7 +2056,7 @@ class Dispatcher:
             ),
         )
 
-    async def _filter(self, call: _Call, result: Any) -> Any:
+    def _filter(self, call: _Call, result: Any) -> Any:
         """Merge the namespace into a backend answer and drop hidden names.
 
         A listing gains the child mounts and links the namespace holds
@@ -2069,13 +2067,6 @@ class Dispatcher:
             call (_Call): the op that ran.
             result (Any): the backend's answer.
         """
-        if result is not None:
-            if call.name == "read_tree" and not isinstance(result, dict):
-                result = dict(await collect_items(result))
-            elif call.name == "files_containing" and not isinstance(
-                result, list
-            ):
-                result = await collect_items(result)
         if call.name == "readdir":
             return _visible_entries(
                 merge_readdir(

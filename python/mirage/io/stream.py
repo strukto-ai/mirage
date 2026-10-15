@@ -185,19 +185,3 @@ def ensure_stream(src: ByteSource) -> AsyncIterator[bytes]:
         AsyncIterator[bytes]: ``src`` itself, or ``yield_bytes(src)``.
     """
     return yield_bytes(src) if isinstance(src, bytes) else src
-
-
-async def collect_items(source: Iterable[_T] | AsyncIterator[_T]) -> list[_T]:
-    """Collect a complete typed answer, closing its cursor on failure.
-
-    Args:
-        source (Iterable | AsyncIterator): records whose EOF certifies completeness.
-    """
-    if not isinstance(source, AsyncIterator):
-        return list(source)
-    try:
-        return [item async for item in source]
-    finally:
-        close = getattr(source, "aclose", None)
-        if close is not None:
-            await close()

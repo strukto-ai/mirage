@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { collectItems } from '../../../io/stream.ts'
-import type { TreeSource } from '../../../vfs/types.ts'
 import type { CommandIO, CommandOpts } from '../../config.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
@@ -275,12 +273,12 @@ async function linkedTree<A extends Accessor>(
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
-): Promise<TreeSource | null> {
+): Promise<Map<string, FileStat> | null> {
   const found = await readTree(accessor, path, index)
   const base = path.virtual.replace(/\/+$/, '') + '/'
   const rows = links.subtree(base)
   if (found === null || rows.length === 0) return found
-  const merged = new Map(await collectItems(found))
+  const merged = new Map(found)
   for (const [key, row] of rows) merged.set(key.slice(base.length), row)
   return merged
 }

@@ -117,6 +117,7 @@ async def test_no_answer_walks_the_usual_way_and_asks_once(mount):
 
 @pytest.mark.asyncio
 async def test_a_backends_refusal_propagates():
+
     readdir, _ = _walk(_Mount(refuse=enotsup))
     with pytest.raises(OSError):
         await readdir(PathSpec.from_str_path("/m"))
@@ -239,33 +240,3 @@ async def test_a_refused_tree_copy_leaves_the_destination_alone(line, out):
 async def test_a_command_reading_named_files_asks_nothing(line):
     vfs, _, stderr, code = await _guarded(line)
     assert (vfs.scans, stderr, code) == ([], b"", 0)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fail", [False, True])
-async def test_async_tree_is_closed_and_only_installed_at_eof(fail):
-    closed = []
-
-    async def entries():
-        try:
-            for entry in _found().items():
-                yield entry
-            if fail:
-                raise OSError("truncated listing")
-        finally:
-            closed.append(True)
-
-    mount = _Mount(entries())
-    answered = set()
-    readdir, stat = _walk(mount, answered)
-    path = PathSpec.from_str_path("/m")
-    if fail:
-        with pytest.raises(OSError, match="truncated listing"):
-            await readdir(path)
-        assert answered == set()
-        await stat(PathSpec.from_str_path("/m/b.txt"))
-        assert mount.calls == ["stat /m/b.txt"]
-    else:
-        assert await readdir(path) == ["/m/a", "/m/b.txt", "/m/e"]
-        assert (await stat(PathSpec.from_str_path("/m/b.txt"))).size == 2
-    assert closed == [True]

@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { collectItems } from '../../io/stream.ts'
-import type { TreeSource, PathSource } from '../../vfs/types.ts'
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import { isFolderKind } from '../../cache/index/config.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -854,7 +852,7 @@ export class Dispatcher {
       return [cached, new IOResult()]
     }
     const [answer, dst, fullArgs] = await this.callBackend(call, mount, vfs, scope, mode)
-    const result = await this.filter(call, answer)
+    const result = this.filter(call, answer)
     if (
       (DISPATCH_WRITE_OPS.has(name) || (call.write && !POLICY_WRITE_OPS.has(name))) &&
       !SERIAL_WRITE_OPS.has(name)
@@ -1573,14 +1571,9 @@ export class Dispatcher {
    */
   private async visibleFiles(mount: MountEntry, vfs: BaseVFS, call: Call): Promise<number | null> {
     if (!vfs.supports('read_tree')) return null
-    const found = (await mount.call('read_tree', call.path.virtual)) as TreeSource | null
+    const found = (await mount.call('read_tree', call.path.virtual)) as Map<string, FileStat> | null
     if (found === null) return null
-    const visible = visibleAnswer(
-      'read_tree',
-      call.vis,
-      call.path,
-      new Map(await collectItems(found)),
-    ) as Map<string, FileStat>
+    const visible = visibleAnswer('read_tree', call.vis, call.path, found) as Map<string, FileStat>
     return [...visible.values()].filter((st) => st.type === FileType.FILE).length
   }
 
@@ -1834,13 +1827,7 @@ export class Dispatcher {
    * it and loses every name the session hides; a stat gains the attribute
    * overlay recorded at its path. Mirrors Python's Dispatcher._filter.
    */
-  private async filter(call: Call, result: unknown): Promise<unknown> {
-    if (result !== null && result !== undefined) {
-      if (call.name === 'read_tree' && !(result instanceof Map))
-        result = new Map(await collectItems(result as TreeSource))
-      else if (call.name === 'files_containing' && !Array.isArray(result))
-        result = await collectItems(result as PathSource)
-    }
+  private filter(call: Call, result: unknown): unknown {
     if (call.name === 'readdir' && Array.isArray(result)) {
       return visibleEntries(
         mergeReaddir(

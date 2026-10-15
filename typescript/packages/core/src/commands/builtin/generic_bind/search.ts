@@ -16,7 +16,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 
-import { closeQuietly, collectItems, ensureStream } from '../../../io/stream.ts'
+import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { byteView, utf8Locale } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -336,20 +336,8 @@ export async function searchReads<A extends Accessor>(
         ),
       ),
     )
-    const complete: (PathSpec[] | null)[] = []
-    let consumed = 0
-    try {
-      for (const answer of answers) {
-        consumed += 1
-        complete.push(answer === null ? null : await collectItems(answer))
-      }
-    } finally {
-      for (const answer of answers.slice(consumed)) {
-        if (answer !== null && !Array.isArray(answer)) await closeQuietly(answer)
-      }
-    }
-    if (complete.every((answer) => answer !== null)) {
-      hits = new Set(complete.flatMap((answer) => answer.map((hit) => hit.vfsPath.toLowerCase())))
+    if (answers.every((answer) => answer !== null)) {
+      hits = new Set(answers.flatMap((answer) => answer.map((hit) => hit.vfsPath.toLowerCase())))
     }
   }
   if (hits === null && lines === undefined) {

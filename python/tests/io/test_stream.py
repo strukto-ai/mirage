@@ -22,7 +22,6 @@ from mirage.io.stream import (
     SharedStdin,
     async_chain,
     close_quietly,
-    collect_items,
     discard_streams,
     drain,
     ensure_stream,
@@ -251,36 +250,3 @@ async def test_a_close_cancels_the_pull_in_flight_in_the_consumers_task():
         await pulling
     assert consumer == [pulling]
     assert events == ["source closed", "handler closed"]
-
-
-@pytest.mark.parametrize("fail", [False, True])
-def test_collect_items_closes_typed_cursor_on_eof_and_failure(fail):
-    class Cursor:
-        def __init__(self):
-            self.count = 0
-            self.closed = False
-
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            self.count += 1
-            if self.count == 1:
-                return "candidate"
-            if fail:
-                raise OSError("truncated answer")
-            raise StopAsyncIteration
-
-        async def aclose(self):
-            self.closed = True
-
-    async def run():
-        cursor = Cursor()
-        if fail:
-            with pytest.raises(OSError, match="truncated answer"):
-                await collect_items(cursor)
-        else:
-            assert await collect_items(cursor) == ["candidate"]
-        assert cursor.closed
-
-    asyncio.run(run())

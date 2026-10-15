@@ -19,17 +19,15 @@ from typing import Any
 from mirage.commands.errors import UsageError
 from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition, WalkDeclinedError
-from mirage.io.stream import collect_items
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.vfs.types import TreeSource
 
 logger = logging.getLogger(__name__)
 
 # The conditions under which a guard's path reaches no directory to scan.
 _NO_DIRECTORY = (FsCondition.ENOENT, FsCondition.ENOTDIR, FsCondition.ELOOP)
 
-ReadTree = Callable[..., Awaitable[TreeSource | None]]
+ReadTree = Callable[..., Awaitable[dict[str, FileStat] | None]]
 WalkCall = Callable[..., Awaitable[Any]]
 
 
@@ -154,11 +152,7 @@ def tree_walk(
             except WalkDeclinedError:
                 found = None
             if found is not None:
-                found = dict(
-                    await collect_items(
-                        found.items() if isinstance(found, dict) else found
-                    )
-                )
+                found = dict(found)
                 roots[virtual] = (found, _listings(found))
                 hit = virtual, ""
         if hit is not None:

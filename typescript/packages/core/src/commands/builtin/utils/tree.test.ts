@@ -1,4 +1,3 @@
-import type { TreeSource } from '../../../vfs/types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,10 +37,10 @@ class Mount {
   readonly asked: string[] = []
   readonly calls: string[] = []
   constructor(
-    readonly answer: TreeSource | null = null,
+    readonly answer: Map<string, FileStat> | null = null,
     readonly refuse?: (vfs: string, op: string, path: PathSpec) => Error,
   ) {}
-  readTree = (path: PathSpec): Promise<TreeSource | null> => {
+  readTree = (path: PathSpec): Promise<Map<string, FileStat> | null> => {
     this.asked.push(path.virtual)
     if (this.refuse !== undefined) return Promise.reject(this.refuse('ram', 'read_tree', path))
     return Promise.resolve(this.answer)
@@ -229,32 +228,3 @@ describe('a whole-directory read asks the mount first', () => {
     expect([vfs.scans, stderr, code]).toEqual([[], '', 0])
   })
 })
-
-it.each([false, true])(
-  'closes async tree and only installs a complete answer (fail=%s)',
-  async (fail) => {
-    let closed = false
-    async function* entries(): AsyncGenerator<[string, FileStat]> {
-      await Promise.resolve()
-      try {
-        yield* found()
-        if (fail) throw new Error('truncated listing')
-      } finally {
-        closed = true
-      }
-    }
-    const mount = new Mount(entries())
-    const answered = new Set<string>()
-    const [readdir, stat] = mount.walk(answered)
-    if (fail) {
-      await expect(readdir(at('/m'))).rejects.toThrow('truncated listing')
-      expect([...answered]).toEqual([])
-      await stat(at('/m/b.txt'))
-      expect(mount.calls).toEqual(['stat /m/b.txt'])
-    } else {
-      expect(await readdir(at('/m'))).toEqual(['/m/a', '/m/b.txt', '/m/e'])
-      expect((await stat(at('/m/b.txt'))).size).toBe(2)
-    }
-    expect(closed).toBe(true)
-  },
-)

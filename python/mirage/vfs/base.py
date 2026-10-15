@@ -35,10 +35,8 @@ from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import (
     Effect,
-    PathSource,
     SearchQuery,
     Target,
-    TreeSource,
 )
 from mirage.watch.base import DeltaHook
 
@@ -470,7 +468,7 @@ class BaseVFS:
         self,
         path: PathSpec,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> TreeSource | None:
+    ) -> dict[str, FileStat] | None:
         """Every entry under a directory, in one answer.
 
         ``find``, ``du``, ``ls -R``, ``tree``, ``grep -r`` and ``rg`` ask
@@ -480,10 +478,8 @@ class BaseVFS:
         stands in for the walk: every file and directory below ``path``,
         keyed by its path below ``path`` (``a``, ``a/b.txt``), each with
         the stat ``stat`` gives for it.
-        An async iterator may yield (key, stat) entries. Successful EOF
-        certifies completeness; failures must propagate, and the consumer
-        closes the cursor. Entries are collected before sorting directory
-        names. Return None to walk ``readdir`` the usual way; raise what
+        The walk lists each directory from it in name order. Return None
+        to have the command walk ``readdir`` the usual way; raise what
         ``readdir`` of ``path`` raises otherwise.
 
         Args:
@@ -754,7 +750,7 @@ class BaseVFS:
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> PathSource | None:
+    ) -> list[PathSpec] | None:
         """Files under ``path`` whose content may contain ``text``.
 
         grep and rg still walk, filter, order and label every file, and
@@ -767,8 +763,6 @@ class BaseVFS:
         lags writes), and every file is read; raise to refuse the
         command, and the error's message is what it prints. The
         dispatcher drops every file the session hides from the answer.
-        An async iterator may yield candidates; only successful EOF makes
-        the answer complete enough to exclude files from a scan.
 
         Args:
             path (PathSpec): a directory walked: one of grep's directory
