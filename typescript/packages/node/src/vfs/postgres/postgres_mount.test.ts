@@ -42,8 +42,15 @@ vi.mock('pg', () => ({
   Pool: PoolCtor,
 }))
 
-let largeRows = 5
+let tableRows = 5
 let largeWidth = 64
+
+function userRows(from: number, limit: number): Record<string, string>[] {
+  return Array.from({ length: Math.max(0, Math.min(limit, tableRows - from)) }, (_, i) => ({
+    id: String(from + i + 1),
+    name: `user_${String(from + i + 1)}`,
+  }))
+}
 
 function handleQuery(sql: string, params?: unknown[]): { rows: unknown[]; rowCount: number } {
   if (sql.includes('information_schema.schemata')) {
@@ -83,18 +90,15 @@ function handleQuery(sql: string, params?: unknown[]): { rows: unknown[]; rowCou
     return ok([])
   }
   if (sql.startsWith('EXPLAIN (FORMAT JSON)')) {
-    return ok([{ 'QUERY PLAN': [{ Plan: { 'Plan Rows': largeRows, 'Plan Width': largeWidth } }] }])
+    return ok([{ 'QUERY PLAN': [{ Plan: { 'Plan Rows': tableRows, 'Plan Width': largeWidth } }] }])
   }
   if (sql.startsWith('SELECT COUNT(*)')) {
-    return ok([{ count: 5 }])
+    return ok([{ count: tableRows }])
   }
   if (sql.startsWith('WITH data AS MATERIALIZED')) {
     const limit = Number(params?.[0] ?? 5)
     const maxBytes = Number(params?.[1])
-    const rows = Array.from({ length: Math.min(limit, 5) }, (_, i) => ({
-      id: String(i + 1),
-      name: `user_${String(i + 1)}`,
-    }))
+    const rows = userRows(0, limit)
     const size = new TextEncoder().encode(
       rows.map((row) => JSON.stringify(row) + '\n').join(''),
     ).length
@@ -104,14 +108,11 @@ function handleQuery(sql: string, params?: unknown[]): { rows: unknown[]; rowCou
         : rows.map((row) => ({ ...row, __mirage_bytes: size })),
     )
   }
-  if (sql.startsWith('SELECT * FROM "public"."users" LIMIT')) {
-    const limit = (params?.[0] as number | undefined) ?? 5
-    const offset = (params?.[1] as number | undefined) ?? 0
-    const rows = Array.from({ length: Math.min(limit, 5 - offset) }, (_, i) => ({
-      id: String(offset + i + 1),
-      name: `user_${String(offset + i + 1)}`,
-    }))
-    return ok(rows)
+  if (sql.startsWith('SELECT * FROM "public"."users" WHERE ("id") > ($2) ORDER BY "id" LIMIT')) {
+    return ok(userRows(Number(params?.[1]), Number(params?.[0])))
+  }
+  if (sql.startsWith('SELECT * FROM "public"."users" ORDER BY "id" LIMIT')) {
+    return ok(userRows(Number(params?.[1] ?? 0), Number(params?.[0])))
   }
   if (sql.startsWith('SELECT current_database()')) {
     return ok([{ db: 'acme' }])
@@ -130,7 +131,7 @@ describe('PostgresVFS mount integration', () => {
   beforeEach(() => {
     pools.length = 0
     PoolCtor.mockClear()
-    largeRows = 5
+    tableRows = 5
     largeWidth = 64
     vfs = new PostgresVFS({ dsn: 'postgres://localhost/acme' })
     ws = new Workspace({ '/pg': vfs }, { mode: MountMode.READ })
@@ -198,18 +199,24 @@ describe('PostgresVFS mount integration', () => {
     expect(JSON.parse(lines[0] ?? '')).toEqual({ id: '1', name: 'user_1' })
   })
 
-  it('cat surfaces size guard as exit_code=1 + stderr when table is large', async () => {
-    largeRows = 50_000
-    largeWidth = 100
+  it('cat prints rows up to the read cap, then File too large', async () => {
+    // Rows stream in key order, so the cap trips once that many are out.
+    tableRows = 50_000
+    await ws.close()
+    ws = new Workspace(
+      { '/pg': new PostgresVFS({ dsn: 'postgres://localhost/acme', maxReadRows: 3 }) },
+      { mode: MountMode.READ },
+    )
     const r = await ws.shell('cat /pg/public/tables/users/rows.jsonl')
     expect(r.exitCode).toBe(1)
+    expect(new TextDecoder().decode(r.stdout).trim().split('\n')).toHaveLength(3)
     expect(new TextDecoder().decode(r.stderr)).toBe(
       'cat: /pg/public/tables/users/rows.jsonl: File too large\n',
     )
   })
 
   it('head -n 2 pushes down to fetchRows and bypasses guard', async () => {
-    largeRows = 50_000
+    tableRows = 50_000
     largeWidth = 100
     const r = await ws.shell('head -n 2 /pg/public/tables/users/rows.jsonl')
     const lines = new TextDecoder().decode(r.stdout).trim().split('\n')
