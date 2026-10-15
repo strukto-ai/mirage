@@ -24,16 +24,17 @@ async for event in ws.watch("/nc/Documents"):
 
 No setup call is needed: the watch runtime attaches lazily on first use, and an
 idle workspace carries no watch state at all. Mirage runs **no server and no
-background loop**. Detection is yours (a webhook receiver or a small poll
-loop); Mirage's job is everything after the signal: cache invalidation, scope
-matching, and delivery.
+background loop**. The signal is the provider's push, received by your service:
+either a payload that names the change, or a ping that says only that something
+changed. Mirage's job is everything after it: turning it into paths, cache
+invalidation, scope matching, and delivery.
 
 ```mermaid
 flowchart LR
-    NC[Backend<br/>Nextcloud, S3, ...] -->|webhook| RX[Your receiver]
-    NC -->|delta pull| PL[Your poll loop]
-    RX --> N["ws.notify(event)"]
-    PL --> N
+    BE[Backend<br/>Nextcloud, Drive, ...] -->|payload| RX[Your receiver]
+    BE -->|ping| RX
+    RX -->|"to_events(payload)"| N["ws.notify(event)"]
+    RX -->|"delta_hook().pull()"| N
     N --> INV[invalidate caches<br/>path + ancestor listings<br/>+ removed subtree if a listing is cached]
     INV --> Q[per-watch queues<br/>scope matching]
     Q --> W["async for event in ws.watch(...)"]
@@ -76,7 +77,8 @@ class FileEvent:
 
 `FileMetadata` carries `fingerprint` (the backend's ETag/rev, or an
 `mtime|size` composite), `size`, and `modified`. Producers fill only what their
-signal honestly knows: a listing walk fills all three, a webhook payload none.
+signal honestly knows: a payload that describes the file can fill them, a ping
+fills none.
 
 `unknown` is the overflow signal: if a burst exceeds the queue cap, pending
 events collapse into one `unknown` event per watch root, meaning
@@ -91,18 +93,19 @@ is retained at or below that path. Without one, descendant file bodies can
 remain cached until their TTL. An `unknown` event always invalidates the
 subtree, regardless of retained listings.
 
-## Push Mode
+## Payloads
 
-Your service hosts the endpoint; mirage opens no socket and runs no watcher.
-What arrives is the provider's own payload, and turning that into a path is
-the only real work. Four backends ship a mapper for it:
+Your service hosts the endpoint; Mirage opens no socket and runs no watcher.
+When the provider's push names what changed, the backend's mapper turns that
+payload into paths:
 
 ```python
 from mirage.core.slack.watch import SlackEventHook
 
 hook = SlackEventHook(vfs.accessor)
 
-async def handle(request):                     # your aiohttp/FastAPI route
+
+async def handle(request):
     event = (await request.json())["event"]
     for change in await hook.to_events(root, event["type"], event):
         await ws.notify(change)
@@ -110,22 +113,26 @@ async def handle(request):                     # your aiohttp/FastAPI route
 ```
 
 You import the mapper for the backend you mounted rather than asking the
-mount for one, because a push payload has no vendor-neutral shape: the code
-that builds the call already names the backend, so a generic accessor would
-buy nothing.
+mount for one, because a payload has no vendor-neutral shape: the code that
+builds the call already names the backend.
 
-| Backend | Import | Notification |
+| Backend | Import | Payload |
 | --- | --- | --- |
 | Slack | `mirage.core.slack.watch.SlackEventHook` | Events API delivery (inner `event` object) |
 | Disk | `mirage.core.disk.watch.DiskEventHook` | watchdog `FileSystemEvent` fields (`src_path`, `dest_path`) |
 | Redis | `mirage.core.redis.watch.RedisEventHook` | keyspace notification (`__keyevent@N__:<verb>`, the key) |
-| Box | `mirage.core.box.watch.BoxEventHook` | one `/events` entry, read after the long poll (`realtime_server`) answers `new_change` |
+| S3 | `mirage.core.s3.watch.S3EventHook` | one record of an S3 Event Notification, with its `eventName` |
+| GitHub | `mirage.core.github.watch.GitHubEventHook` | a `push` webhook delivery, with its `X-GitHub-Event` header |
+| Nextcloud | `mirage.core.nextcloud.watch.NextcloudEventHook` | a `webhook_listeners` delivery, with its `event.class` |
+| MongoDB | `mirage.core.mongodb.watch.MongoDBEventHook` | one change stream event, with its `operationType` |
+| GridFS | `mirage.core.gridfs.watch.GridFSEventHook` | one change stream event on `<bucket>.files` |
+| Box | `mirage.core.box.watch.BoxEventHook` | one `/events` entry |
 
 A mapper answers with zero or more `FileEvent`s and never invents a path it
-was not told about. When a notification names only a scope, it returns
-`UNKNOWN` on that directory, which the watcher reads as "re-inventory
-everything below": IMAP IDLE says a mailbox changed, not which message, and
-a Slack `file_shared` cannot name the rendered filename.
+was not told about. When a payload names only a scope, it returns `UNKNOWN`
+on that directory, which the watcher reads as "re-inventory everything
+below": a forced GitHub push does not say which files changed, and a Slack
+`file_shared` cannot name the rendered filename.
 
 Slack is where the mapping earns its place. A message maps to
 `channels/<name>__<CID>/<YYYY-MM-DD>/chat.jsonl`, and the day is bucketed in
@@ -136,55 +143,65 @@ is the other trap: `chat.jsonl` renders `conversations.history`, which returns
 parents only, so a reply appears in no day file at all. What changed is the
 parent's `reply_count`, in the parent's day. Runnable example:
 [`examples/python/slack/slack_watch.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/slack/slack_watch.py).
+A Nextcloud receiver, with the one-time `occ` registration commands, is
+[`examples/python/nextcloud/watch.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py).
+One that needs no credentials,
+[`examples/python/disk/watch.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/disk/watch.py),
+maps filesystem watcher events with `DiskEventHook` and reads the changed file
+back through the workspace.
 
-For a backend with no mapper, build the `FileEvent` yourself. Nextcloud's
-`webhook_listeners` app (Nextcloud 30+) POSTs on every file event:
+For a backend with no mapper, build the `FileEvent` yourself:
 
 ```python
-async def handle(request):
-    payload = await request.json()
-    kind = KIND_BY_CLASS.get(payload["event"]["class"])   # NodeCreatedEvent -> create ...
-    node = payload["event"]["node"]["path"]               # /admin/files/data/report.txt
-    virtual = "/nc/" + node.removeprefix("/admin/files/") # -> /nc/data/report.txt
-    await ws.notify(FileEvent(kind=kind,
-                              path=PathSpec.from_str_path(virtual),
-                              timestamp=datetime.now(timezone.utc)))
+await ws.notify(
+    FileEvent(
+        kind=FileChangeKind.CREATE,
+        path=PathSpec.from_str_path("/s3/exports/jan.csv"),
+        timestamp=datetime.now(timezone.utc),
+    )
+)
+```
+
+## Pings
+
+Many providers push only a ping: Gmail and Calendar push notifications, Drive
+`changes.watch` channels, Graph change notifications for OneDrive and
+SharePoint, Dropbox webhooks and `list_folder/longpoll`, and Box's long poll
+all say that something changed, not what. A mount on one of those backends has
+a `delta_hook()`, and your receiver answers each ping with one `pull` from the
+checkpoint the last one handed back:
+
+```python
+hook = ws.registry.mount_for("/drive").vfs.delta_hook()
+root = PathSpec.from_str_path("/drive", vfs_path="")
+checkpoint = (await hook.pull(root, None)).checkpoint
+
+
+async def on_ping(request):
+    global checkpoint
+    delta = await hook.pull(root, checkpoint)
+    checkpoint = delta.checkpoint
+    for change in delta.changes:
+        await ws.notify(change)
     return web.json_response({"ok": True})
 ```
 
-The full runnable version, including the one-time `occ` registration commands,
-is [`examples/python/nextcloud/watch.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py).
+Each pull reads the provider's own change feed from a cursor: Gmail history,
+the Calendar sync token, Drive `changes.list`, Graph `/delta`, Dropbox
+`list_folder/continue`, Box `/events`. None of them lists the tree. The
+baseline pull (`checkpoint=None`) takes the cursor at the present and reports
+nothing, so a ping missed while your service was down is caught up by the next
+one. A cursor the provider no longer honors (a Dropbox reset, a Graph
+`resyncRequired`, a Gmail history id it no longer keeps) answers `unknown` on
+the watch root and starts again from the present.
 
-## Pull Mode
-
-Backends that implement `delta_hook()` answer one question:
-*what changed under this root since the last checkpoint?* Eleven VFS
-families ship one today, listed in the [Watch Matrix](/python/watch-matrix)
-with the fingerprint each one compares on. A baseline pull
-(`checkpoint=None`) emits nothing; every later pull diffs against the
-checkpoint you hand back. The whole consumer poller is:
-
-```python
-hook = ws.registry.mount_for("/nc").vfs.delta_hook()
-checkpoint = None
-while True:
-    delta = await hook.pull(root, checkpoint)
-    checkpoint = delta.checkpoint
-    for event in delta.changes:
-        await ws.notify(event)
-    await asyncio.sleep(30)
-```
-
-A runnable version needing no credentials is
-[`examples/python/disk/watch.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/disk/watch.py):
-it writes to the mount's directory behind mirage's back, pulls the diff, and
-reads the changed file back through the workspace.
-
-Pull is self-healing: it diffs current backend state against your checkpoint,
-so events missed while your service was down surface on the next pull. A
-common production shape is push-first with a pull at startup as recovery, or
-webhook-as-doorbell: on any webhook, pump the pull once and trust its diff
-rather than the payload.
+A feed that names items by id says where an item is now, not where it was, so
+the checkpoint also keeps the path of each item a pull has placed: a later
+rename or delete leaves that path. An item seen for the first time is a
+`create` when the provider says it is as it was made, and an `update`
+otherwise. Runnable example:
+[`examples/python/dropbox/watch.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/watch.py)
+answers each `list_folder/longpoll` with one pull.
 
 ## Queues
 
@@ -231,10 +248,10 @@ loops end cleanly) and the workspace returns to its idle state; the next
   invalidated on the mount that owns its path (longest prefix). Detection
   stays per backend, so each mount needs its own signal feeding
   `ws.notify`.
-- The TypeScript API has the same delivery, queue, and delta-hook design; see
-  [TypeScript Watch](/typescript/watch).
-- Pull detection ships for eleven VFS families; push mode works with any
-  backend today since `ws.notify` accepts events from any detection you run.
-  See the [Watch Matrix](/python/watch-matrix) for per-VFS support.
+- The TypeScript API has the same delivery, queues, mappers and ping
+  handlers; see [TypeScript Watch](/typescript/watch).
+- Mappers and ping handlers ship for the backends in the
+  [Watch Matrix](/python/watch-matrix); `ws.notify` accepts events from any
+  detection you run, so every backend is watchable.
 - Events are in-memory and at-most-once per subscriber; durable queues and
   acknowledgement are future work.

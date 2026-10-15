@@ -1,12 +1,12 @@
 import asyncio
 import os
-from datetime import datetime, timezone
 
 from aiohttp import web
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.types import FileChangeKind, FileEvent, PathSpec
+from mirage.core.nextcloud.watch import NextcloudEventHook
+from mirage.types import FileChangeKind, PathSpec
 from mirage.vfs.nextcloud import NextcloudConfig, NextcloudVFS
 
 load_dotenv(".env.development")
@@ -14,12 +14,13 @@ load_dotenv(".env.development")
 MOUNT = "/nc"
 PORT = int(os.environ.get("WEBHOOK_PORT", "8990"))
 
-# Nextcloud webhook_listeners event class -> mirage change kind.
-KIND_BY_CLASS = {
-    "OCP\\Files\\Events\\Node\\NodeCreatedEvent": FileChangeKind.CREATE,
-    "OCP\\Files\\Events\\Node\\NodeWrittenEvent": FileChangeKind.UPDATE,
-    "OCP\\Files\\Events\\Node\\NodeDeletedEvent": FileChangeKind.DELETE,
-}
+# The webhook_listeners event classes to register a webhook for.
+EVENT_CLASSES = (
+    "OCP\\Files\\Events\\Node\\NodeCreatedEvent",
+    "OCP\\Files\\Events\\Node\\NodeWrittenEvent",
+    "OCP\\Files\\Events\\Node\\NodeDeletedEvent",
+    "OCP\\Files\\Events\\Node\\NodeRenamedEvent",
+)
 
 config = NextcloudConfig(
     url=os.environ["NEXTCLOUD_URL"],
@@ -28,55 +29,30 @@ config = NextcloudConfig(
 )
 vfs = NextcloudVFS(config)
 ws = Workspace({MOUNT: vfs}, mode=MountMode.WRITE)
-files_prefix = f"/{config.username}/files"
 
 
 class WebhookReceiver:
     """The consumer-owned push endpoint: Nextcloud POSTs here.
 
     Mirage hosts no server; this receiver lives in your own service and
-    just imports mirage. Each payload is mapped to a FileEvent and
-    injected via ws.notify — no polling anywhere, no setup call: the
-    watch runtime attaches lazily on first use.
+    just imports mirage. ``NextcloudEventHook`` maps each delivery onto
+    the mount, and every change goes to ws.notify. No polling anywhere,
+    no setup call: the watch runtime attaches lazily on first use.
     """
 
     def __init__(self, workspace: Workspace) -> None:
         self._ws = workspace
-
-    def to_virtual(self, node_path: str) -> str:
-        """Map Nextcloud's real path to the mirage virtual path.
-
-        Nextcloud reports ``/<user>/files/<rel>`` (``node.path``); the
-        mount is rooted at that same files directory, so stripping the
-        prefix and prepending the mount yields the virtual path:
-        ``/admin/files/data/report.txt`` -> ``/nc/data/report.txt``.
-
-        Args:
-            node_path (str): ``node.path`` from the webhook payload.
-        """
-        rel = (
-            node_path[len(files_prefix) :]
-            if node_path.startswith(files_prefix)
-            else node_path
-        )
-        return MOUNT + "/" + rel.strip("/")
+        self._hook = NextcloudEventHook(vfs.accessor)
+        self._root = PathSpec.from_str_path(MOUNT, vfs_path="")
 
     async def handle(self, request: web.Request) -> web.Response:
         payload = await request.json()
-        event = payload.get("event", {})
-        kind = KIND_BY_CLASS.get(event.get("class", ""))
-        if kind is None:
-            return web.json_response({"ok": True, "skipped": True})
-        virtual = self.to_virtual(event.get("node", {}).get("path", ""))
-        change = FileEvent(
-            kind=kind,
-            path=PathSpec.from_str_path(virtual),
-            timestamp=datetime.fromtimestamp(
-                int(payload.get("time", 0)), tz=timezone.utc
-            ),
-        )
-        await self._ws.notify(change)
-        print(f"webhook: {kind.value} {virtual}")
+        event_class = payload.get("event", {}).get("class", "")
+        for change in await self._hook.to_events(
+            self._root, event_class, payload
+        ):
+            await self._ws.notify(change)
+            print(f"webhook: {change.kind.value} {change.path.virtual}")
         return web.json_response({"ok": True})
 
 
@@ -90,7 +66,7 @@ def print_registration_help() -> None:
     print("One-time Nextcloud setup (admin):")
     print("  1. Enable the app:  occ app:enable webhook_listeners")
     print("  2. Register one webhook per event class, e.g.:")
-    for cls in KIND_BY_CLASS:
+    for cls in EVENT_CLASSES:
         escaped = cls.replace("\\", "\\\\")
         print(
             f'     curl -u {config.username}:*** -H "OCS-APIRequest: true"'
@@ -118,7 +94,7 @@ async def main() -> None:
     print_registration_help()
 
     print(
-        f"watching {MOUNT} — create/edit/delete files in the Nextcloud"
+        f"watching {MOUNT}: create/edit/delete files in the Nextcloud"
         " UI, changes stream here (Ctrl-C to stop):\n"
     )
     try:

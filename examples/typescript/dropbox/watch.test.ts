@@ -4,7 +4,8 @@ import { spawn } from 'node:child_process'
 import { Delta, FileEvent, FileChangeKind, PathSpec } from '@struktoai/mirage-core/types'
 import { cursorOf, longpoll, runLongpoll, runWithShutdown } from './watch.ts'
 
-const checkpoint = (c: string): string => JSON.stringify({ _dbx: 1, c, s: { '/dropbox/a': 'old' } })
+const checkpoint = (cursor: string): string =>
+  JSON.stringify({ dropbox: { cursor, seen: { a: 'old' } } })
 
 test('longpoll refreshes its cursor after every pull and honors idle backoff', async () => {
   const calls: (string | number)[][] = []
@@ -67,8 +68,8 @@ test('longpoll sends no authorization and treats reset as a pull with the old ch
   })
 })
 
-test('unsupported checkpoint versions fail loudly', () => {
-  assert.throws(() => cursorOf('{"_dbx":2,"c":"a"}'), /Unsupported/)
+test('an unknown checkpoint fails loudly', () => {
+  assert.throws(() => cursorOf('{"_dbx":1,"c":"a"}'), /Expected/)
 })
 
 test('a missing root retries, preserves its snapshot, and notifies before polling', async () => {
@@ -79,7 +80,7 @@ test('a missing root retries, preserves its snapshot, and notifies before pollin
     timestamp: new Date(0),
   })
   const states = [
-    new Delta({ changes: [], checkpoint: '{}' }),
+    new Delta({ changes: [], checkpoint: checkpoint('') }),
     new Delta({ changes: [change], checkpoint: checkpoint('recovered') }),
   ]
   const calls: unknown[] = []
@@ -109,7 +110,7 @@ test('a missing root retries, preserves its snapshot, and notifies before pollin
   assert.deepEqual(calls, [
     ['pull', null],
     ['pause', 30],
-    ['pull', '{}'],
+    ['pull', checkpoint('')],
     ['notify', change],
     ['poll', 'recovered'],
   ])
@@ -139,7 +140,7 @@ for (const [stage, closeDelay] of [
           await fetch('http://127.0.0.1:' + server.address().port)
           throw new Error('stalled pull unexpectedly completed')
         }
-        return new Delta({ changes: [], checkpoint: JSON.stringify({ _dbx: 1, c: 'cursor', s: {} }) })
+        return new Delta({ changes: [], checkpoint: JSON.stringify({ dropbox: { cursor: 'cursor', seen: {} } }) })
       } }
       await runWithShutdown(
         () => runLongpoll(hook, PathSpec.fromStrPath('/dropbox', ''), async () => {},

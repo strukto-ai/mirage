@@ -18,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 from mirage import MountMode, Workspace
+from mirage.core.disk.watch import DiskEventHook
 from mirage.types import PathSpec
 from mirage.vfs.disk import DiskVFS
 
@@ -25,7 +26,7 @@ MOUNT = "/data"
 
 
 def seed(root: Path) -> None:
-    """Lay down the files the baseline pull will record.
+    """Lay down the files the mount starts with.
 
     Args:
         root (Path): Directory the mount is rooted at.
@@ -35,43 +36,44 @@ def seed(root: Path) -> None:
     (root / "reports" / "q2.txt").write_text("second quarter\n")
 
 
-def write_behind_mirage(root: Path) -> None:
-    """Change the directory the way an outside writer would.
+def write_behind_mirage(root: Path) -> list[tuple[str, dict[str, str]]]:
+    """Change the directory the way an outside writer would, and return
+    what a filesystem watcher (watchdog, inotify, FSEvents) reports.
 
     Nothing here goes through the workspace: this stands in for the
-    teammate, cron job or pipeline that mirage has to detect rather
-    than be told about.
+    teammate, cron job or pipeline that mirage has to be told about.
 
     Args:
         root (Path): Directory the mount is rooted at.
     """
-    (root / "reports" / "q3.txt").write_text("third quarter\n")
-    (root / "reports" / "q1.txt").write_text("first quarter, revised\n")
-    (root / "reports" / "q2.txt").unlink()
+    reports = root / "reports"
+    (reports / "q3.txt").write_text("third quarter\n")
+    (reports / "q1.txt").write_text("first quarter, revised\n")
+    (reports / "q2.txt").unlink()
+    return [
+        ("created", {"src_path": str(reports / "q3.txt")}),
+        ("modified", {"src_path": str(reports / "q1.txt")}),
+        ("deleted", {"src_path": str(reports / "q2.txt")}),
+    ]
 
 
 async def main() -> None:
-    tmp = Path(tempfile.mkdtemp())
+    tmp = Path(tempfile.mkdtemp()).resolve()
     seed(tmp)
 
     vfs = DiskVFS(root=str(tmp))
     ws = Workspace({MOUNT: vfs}, mode=MountMode.READ)
-    hook = vfs.delta_hook()
+    hook = DiskEventHook(vfs.accessor)
     root = PathSpec.from_str_path(MOUNT, vfs_path="")
 
-    # A baseline pull records state and reports nothing. Hand the
-    # checkpoint back on the next call and it diffs against it.
-    delta = await hook.pull(root, None)
-    checkpoint = delta.checkpoint
-    print(f"baseline: {len(delta.changes)} changes")
+    result = await ws.shell(f"cat {MOUNT}/reports/q1.txt")
+    print(f"read before: {(await result.stdout_str()).strip()!r}")
 
-    write_behind_mirage(tmp)
-
-    delta = await hook.pull(root, checkpoint)
-    print(f"\npull: {len(delta.changes)} changes")
-    for change in sorted(delta.changes, key=lambda c: c.path.virtual):
-        print(f"  {change.kind.value:6} {change.path.virtual}")
-        await ws.notify(change)
+    print("\nwatcher events:")
+    for event_type, payload in write_behind_mirage(tmp):
+        for change in await hook.to_events(root, event_type, payload):
+            print(f"  {change.kind.value:6} {change.path.virtual}")
+            await ws.notify(change)
 
     # notify invalidates the caches for the changed path and its
     # ancestor listings before delivering, so a read after an event

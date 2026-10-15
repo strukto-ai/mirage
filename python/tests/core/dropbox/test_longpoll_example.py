@@ -19,7 +19,7 @@ EXAMPLE = runpy.run_path(
 
 
 def checkpoint(cursor):
-    return json.dumps({"_dbx": 1, "c": cursor, "s": {"/dropbox/a": "old"}})
+    return json.dumps({"dropbox": {"cursor": cursor, "seen": {"a": "old"}}})
 
 
 @pytest.mark.asyncio
@@ -64,10 +64,11 @@ async def test_longpoll_uses_latest_cursor_and_honors_idle_backoff():
 @pytest.mark.asyncio
 async def test_missing_root_retries_then_notifies_before_next_poll():
     state = checkpoint("recovered")
+    missing = checkpoint("")
     change = MagicMock()
     hook = MagicMock()
     hook.pull = AsyncMock(
-        side_effect=[Delta((), "{}"), Delta((change,), state)]
+        side_effect=[Delta((), missing), Delta((change,), state)]
     )
     notify, pause = AsyncMock(), AsyncMock()
     poll = AsyncMock(side_effect=asyncio.CancelledError)
@@ -78,7 +79,7 @@ async def test_missing_root_retries_then_notifies_before_next_poll():
     pause.assert_awaited_once_with(30)
     notify.assert_awaited_once_with(change)
     poll.assert_awaited_once_with("recovered")
-    assert hook.pull.await_args_list[1].args[1] == "{}"
+    assert hook.pull.await_args_list[1].args[1] == missing
 
 
 @pytest.mark.asyncio
@@ -103,6 +104,6 @@ async def test_longpoll_http_contract(status, payload, expected):
     )
 
 
-def test_checkpoint_version_is_not_silently_ignored():
-    with pytest.raises(ValueError, match="Unsupported"):
-        EXAMPLE["cursor_of"]('{"_dbx": 2, "c": "cursor"}')
+def test_an_unknown_checkpoint_is_not_silently_ignored():
+    with pytest.raises(ValueError, match="Expected"):
+        EXAMPLE["cursor_of"]('{"_dbx": 1, "c": "cursor"}')

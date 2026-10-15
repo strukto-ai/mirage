@@ -8,15 +8,15 @@ const LONGPOLL_URL = 'https://notify.dropboxapi.com/2/files/list_folder/longpoll
 const TIMEOUT = 30
 
 export function cursorOf(checkpoint: string | null): string | null {
-  // This example knows Dropbox's v1 envelope. Keep the entire checkpoint for
-  // pull, including its last applied snapshot, instead of storing just a cursor.
-  const data: unknown = checkpoint === null ? {} : JSON.parse(checkpoint)
-  if (data === null || typeof data !== 'object')
-    throw new Error('Expected a Dropbox checkpoint object')
-  if (!('_dbx' in data)) return null
-  if (data._dbx !== 1 || !('c' in data) || typeof data.c !== 'string')
-    throw new Error('Unsupported Dropbox checkpoint format')
-  return data.c || null
+  // This example knows where the Dropbox checkpoint keeps its cursor. Hand the
+  // WHOLE checkpoint back to pull: it also holds the seen paths.
+  const data: unknown = checkpoint === null ? null : JSON.parse(checkpoint)
+  const state =
+    data !== null && typeof data === 'object' && 'dropbox' in data ? data.dropbox : null
+  if (state === null || typeof state !== 'object')
+    throw new Error('Expected a Dropbox checkpoint')
+  const cursor = 'cursor' in state ? state.cursor : null
+  return typeof cursor === 'string' && cursor !== '' ? cursor : null
 }
 
 export async function longpoll(cursor: string, signal: AbortSignal): Promise<[boolean, number]> {

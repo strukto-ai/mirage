@@ -17,16 +17,13 @@ TIMEOUT = 30
 
 
 def cursor_of(checkpoint: str | None) -> str | None:
-    # This example intentionally knows Dropbox's v1 checkpoint envelope.
-    # Retain the WHOLE checkpoint for pull: it also contains the last snapshot.
-    data = json.loads(checkpoint) if checkpoint is not None else {}
-    if not isinstance(data, dict):
-        raise ValueError("Expected a Dropbox checkpoint object")
-    if "_dbx" not in data:
-        return None
-    if data.get("_dbx") != 1 or not isinstance(data.get("c"), str):
-        raise ValueError("Unsupported Dropbox checkpoint format")
-    return data["c"] or None
+    # This example knows where the Dropbox checkpoint keeps its cursor.
+    # Hand the WHOLE checkpoint back to pull: it also holds the seen paths.
+    data = json.loads(checkpoint) if checkpoint is not None else None
+    state = data.get("dropbox") if isinstance(data, dict) else None
+    if not isinstance(state, dict):
+        raise ValueError("Expected a Dropbox checkpoint")
+    return state.get("cursor") or None
 
 
 async def longpoll(
@@ -39,8 +36,8 @@ async def longpoll(
         if response.status == 409:
             failure = await response.json()
             if failure.get("error", {}).get(".tag") == "reset":
-                # Pull with the OLD checkpoint: continue detects the reset and
-                # relists while diffing against the preserved snapshot.
+                # Pull with the OLD checkpoint: continue sees the reset and
+                # reports the watch root as unknown with a fresh cursor.
                 return True, 0
         response.raise_for_status()
         result = await response.json()

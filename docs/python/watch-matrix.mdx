@@ -1,6 +1,6 @@
 ---
 title: Watch Matrix
-description: Which VFS types support watch today, and which detection path (push mapping or pull delta hook) each one has.
+description: Which VFS types support watch today, and whether each one maps a push payload or answers a ping.
 icon: table-cells
 ---
 
@@ -12,133 +12,89 @@ Watching splits into two halves, and they have different support stories:
   Delivery is notify-driven: any detection you run maps its signal to a
   `FileEvent` and injects it, and Mirage handles invalidation, scope matching,
   and the event stream. No per-backend code is involved.
-- **Detection** is per-backend. The **Pull** column marks mounts whose
-  `delta_hook()` ships with Mirage (checkpointed diff, the self-healing truth
-  path). The **Push signal** column names the provider mechanism your receiver
-  would subscribe to; mapping its payload to a `FileEvent` is consumer code,
-  and Mirage ships a sample where marked.
+- **Detection** is the provider's push, per backend. Where the push names
+  the change, Mirage ships a **mapper** (`to_events`) that turns the payload
+  into paths. Where the push is only a **ping**, the mount's `delta_hook()`
+  answers it with one read of the provider's change feed.
 
-| VFS | Pull (`delta_hook`) | Fingerprint | Push signal (provider-side) | Sample |
-| --- | --- | --- | --- | --- |
-| Nextcloud | ✓ recursive PROPFIND | WebDAV ETag | `webhook_listeners` app (Nextcloud 30+) | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py) + integ receiver |
-| S3 / S3-compatible | ✓ recursive `list_objects_v2` | object ETag | S3 Event Notifications (SQS/EventBridge) | — |
-| GitHub | ✓ recursive git tree | blob sha | repository webhooks (push events) | — |
-| Dropbox | ✓ `list_folder/continue` (walk is reset) | `content_hash` | `list_folder/longpoll` + cursor delta | [`dropbox/watch.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/watch.py) |
-| GridFS | ✓ `fs.files` prefix query | revision ObjectId | MongoDB change streams | — |
-| Hugging Face | ✓ recursive tree listing | Hub ETag | — | — |
-| Disk | ✓ recursive directory walk | mtime\|size | inotify / FSEvents / watchdog, mapped by `DiskEventHook` | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/disk/watch.py) |
-| SSH / SFTP | ✓ per-directory descent | mtime\|size | — | — |
-| Google Drive | ✓ per-folder descent | `modifiedTime` | `changes.watch` push channels | — |
-| OneDrive / SharePoint | ✓ per-folder descent | `cTag` | Graph change notifications + delta API | — |
-| Box | ✓ `/events` stream (walk is reset) | content `sha1` | Box `/events` long poll, mapped by `BoxEventHook` | — |
-| Slack | — | — | Events API, mapped by `SlackEventHook` | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/slack/slack_watch.py) |
-| Redis | — | — | keyspace notifications, mapped by `RedisEventHook` | — |
-| RAM, others | — | — | (no external writers to observe) | — |
+| VFS | Push signal (provider-side) | Mirage answers it with | Sample |
+| --- | --- | --- | --- |
+| Disk | inotify / FSEvents / watchdog | mapper `DiskEventHook` | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/disk/watch.py) |
+| S3 / S3-compatible | S3 Event Notifications (SQS, SNS, EventBridge) | mapper `S3EventHook` | |
+| GitHub | repository `push` webhooks | mapper `GitHubEventHook` | |
+| Nextcloud | `webhook_listeners` (Nextcloud 30+) | mapper `NextcloudEventHook` | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py) |
+| MongoDB | change streams | mapper `MongoDBEventHook` | |
+| GridFS | change streams on `<bucket>.files` | mapper `GridFSEventHook` | |
+| Slack | Events API | mapper `SlackEventHook` | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/slack/slack_watch.py) |
+| Redis | keyspace notifications | mapper `RedisEventHook` | |
+| Box | `/events` long poll (`realtime_server`) | ping: `delta_hook()` reads `/events`; mapper `BoxEventHook` per entry | |
+| Dropbox | webhooks, `list_folder/longpoll` | ping: `delta_hook()` reads `list_folder/continue` | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/watch.py) |
+| Gmail | Pub/Sub push (`historyId`) | ping: `delta_hook()` reads `history.list` | |
+| Google Calendar | `events.watch` channels | ping: `delta_hook()` reads the sync token | |
+| Google Drive, Docs, Sheets, Slides | `changes.watch` channels | ping: `delta_hook()` reads `changes.list` | |
+| OneDrive / SharePoint | Graph change notifications | ping: `delta_hook()` reads `/delta` | |
+| SSH, Hugging Face, Postgres, RAM, others | none Mirage can receive | | |
 
-The **Fingerprint** column is what decides UPDATE. A content-addressed one
-(GitHub's blob sha, S3's single-part ETag, Dropbox's `content_hash`, Box's
-`sha1`) reports
-nothing when a write stores identical bytes. `mtime|size` cannot: rewriting a
-file with its own contents moves the mtime, so disk and SSH report an UPDATE.
-That is the filesystem's own resolution, not a Mirage choice.
+A mapper reads the payload and, at most, the backend for what the payload
+leaves out (GridFS counts the revisions a name has left; MongoDB lists a
+database's views). A ping handler reads the change feed from its cursor and
+never walks the tree. Calendar issues a sync token only at the end of a full
+sync, so it reads a calendar whole for its baseline and when its token
+expires.
 
-### Cost per pull
+## What a ping handler keeps
 
-Not every hook costs the same, and the poll cadence should follow the shape:
+The checkpoint `pull` hands back is opaque, but it is more than the feed's
+cursor. A feed that names items by id (Drive, Graph, Box) says where an item
+is now, not where it was, so the checkpoint keeps the path of each item a pull
+has placed, and a later rename, move or delete leaves that path. An item seen
+for the first time is a `create` when the provider says it is as it was made
+(its created and modified times agree, or the feed says it was added) and an
+`update` otherwise; where it was before is left to the index's expiry.
 
-- **One request per pull**, whatever the tree: GitHub (one recursive tree
-  call), Nextcloud (one recursive PROPFIND), Hugging Face, and GridFS (one
-  prefix query). S3 is one request per 1000 keys.
-- **One request per directory**: Google Drive and OneDrive/SharePoint key
-  their trees by opaque id and offer no whole-subtree listing, so the walk
-  descends folder by folder. SFTP does too, for the same reason. Box has the
-  same tree, but its pull reads the `/events` stream instead: an idle pull is
-  one request, and the per-folder walk only runs as the reset.
+A cursor the provider no longer honors answers `unknown` on the watch root and
+a fresh cursor: a Dropbox reset, a Graph `resyncRequired`, a Gmail history id
+past what Gmail keeps, and a Box stream position older than two weeks, since
+Box replays whatever it still has rather than refusing an old position.
 
-Where a provider offers a native cursor (Dropbox `list_folder/continue`, Graph
-`/delta`, Drive `changes.list`), that is a **faster** pull, not a more correct
-one, and it does not replace the walk: a server may invalidate a cursor at any
-time, and the only answer to that is a full listing. Those fast paths belong
-behind `pull()` with the walk as their reset.
+## What "Delivery ✓" buys you without a mapper
 
-## What "Delivery ✓" buys you without a hook
-
-Even with no shipped detection, any backend is watchable end to end the moment
-you have a signal from anywhere:
+Any backend is watchable end to end the moment you have a signal from
+anywhere:
 
 ```python
-async for event in ws.watch("/s3/exports/*.csv"):   # any mount, today
+async for event in ws.watch("/s3/exports/*.csv"):
     ...
 
-# your S3 SQS consumer, your GitHub webhook route, your cron diff:
-await ws.notify(FileEvent(kind=FileChangeKind.CREATE,
-                          path=PathSpec.from_str_path("/s3/exports/jan.csv"),
-                          timestamp=datetime.now(timezone.utc)))
+await ws.notify(
+    FileEvent(
+        kind=FileChangeKind.CREATE,
+        path=PathSpec.from_str_path("/s3/exports/jan.csv"),
+        timestamp=datetime.now(timezone.utc),
+    )
+)
 ```
 
 `watch()` is an async generator, so it subscribes on the first iteration, not at
 the call: the loop and the `notify` call belong to different tasks (a request
-handler, a poll loop). Awaiting `notify` before anything consumes the iterator
-drops the event.
+handler, a queue consumer). Awaiting `notify` before anything consumes the
+iterator drops the event.
 
 The guarantee is identical on every backend: caches for the changed path and
 its ancestor listings are invalidated before delivery, plus the cached subtree
 of a removed folder that still has a listing cached at or under it, so reads
 after an event are fresh within the limit [Watch](/python/watch) describes.
 
-One thing every backend has to agree on for that to hold: the index is
-keyed by the mount-absolute path (`/m/data/x`), which is what
-`CacheManager` builds when it evicts. GitHub was the one exception, keying
-its by the repo-relative path because its index is a materialized git
-tree, and the mismatch was silent: evicting a key an index never held
-succeeds, so a GitHub mount kept serving pre-change bytes with nothing
-failing anywhere a caller could see. It now keys like the rest, and the
-repo-relative path logic that wanted the other spelling (`find`, `du`,
-grep's scope counter) reads the git tree on the accessor instead, which is
-where a repo-relative path belongs.
+## The Dropbox longpoll example
 
-## Adding pull detection to a backend
-
-`ListingDeltaHook` is generic; a backend earns the **Pull** column with one
-small walk class that lists entries with fingerprints:
-
-```python
-class S3Walk:
-    async def __call__(self, root):
-        async for obj in list_objects(prefix=root.vfs_path):
-            yield WalkEntry(virtual=..., is_dir=False,
-                            fingerprint=obj.etag,      # backend-native version
-                            size=obj.size, modified=obj.last_modified)
-
-def delta_hook(self):
-    return ListingDeltaHook(S3Walk(self.accessor))
-```
-
-Two shared helpers cover the shapes that recur, so a new backend usually
-writes neither loop itself:
-
-- **`synth_dirs`** (`mirage/watch/walk.py`) builds the directory rows a prefix
-  store implies but does not store. An object store has no directories, so a
-  walk that reported only keys would show a file appearing inside a directory
-  that never appeared. S3 and GridFS use it, and it takes explicitly stored
-  markers too, so an empty directory made by `mkdir` is still reported.
-- **`ReaddirWalk`** covers a backend with no recursive listing at all. It
-  descends through the backend's own `readdir` and `stat`, exactly as `find`
-  does, and gives each pull a **fresh private index**. That is what keeps the
-  DeltaHook contract: the index is not Mirage's read cache, so the walk cannot
-  compare the cache to itself, and it starts empty every pull. It has to exist
-  at all because Drive, Box and Graph resolve a path's id through the index its
-  parent's readdir populated; a null index makes every path below the root read
-  as absent.
-
-The [Dropbox longpoll example](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/watch.py) owns the loop in the embedding
-program: establish a baseline with `pull`, wait for `list_folder/longpoll`,
-then pull and `notify` each change. No EventHook or library background loop is
-needed. The example extracts the cursor from the **latest** v1 checkpoint
-(`_dbx: 1`, `c`), while passing the entire checkpoint back to `pull`. This is
-Dropbox-specific example code; other consumers should treat checkpoints as opaque.
-On reset, pull with the old checkpoint so the existing hook can relist and diff
-against its saved snapshot. A missing watch root retries after 30 seconds.
+The [Dropbox longpoll example](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/watch.py)
+owns the loop in the embedding program: take a baseline with `pull`, wait for
+`list_folder/longpoll`, then pull and `notify` each change. The example reads
+the cursor from the checkpoint (`dropbox.cursor`) to longpoll on it, while
+passing the entire checkpoint back to `pull`. This is Dropbox-specific example
+code; other consumers should treat checkpoints as opaque. On a reset, pull with
+the old checkpoint: the hook reports the watch root as `unknown` and takes a
+fresh cursor. A missing watch root retries after 30 seconds.
 
 Set `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, and `DROPBOX_REFRESH_TOKEN`;
 optionally set `DROPBOX_ROOT_PATH`. From the repo root, run
@@ -147,25 +103,7 @@ the current request and closes the HTTP session and workspace.
 
 Dropbox's [longpoll endpoint](https://docs.dropboxapi.com/dropbox-api/api-reference/user-endpoints/files/list-folder-longpoll)
 uses the notification host without an Authorization header. Its timeout is
-30–480 seconds; the HTTP timeout must also allow up to 90 seconds of server
+30 to 480 seconds; the HTTP timeout must also allow up to 90 seconds of server
 jitter. The returned `backoff` is a required minimum delay before the next
 longpoll, including a response with no changes. The examples let transport or
 unexpected API failures surface and close their resources on cancellation.
-
-Dropbox `pull` already uses `list_folder/continue` and keeps the listing walk
-as the reset path. Box `pull` reads the account's `/events` stream from a
-stored `stream_position` and places each event through its `path_collection`.
-Box never refuses an old position and may repeat an event or send it out of
-order, so the tree is walked again once the last walk is two weeks old, and
-whenever an event moves the watch root itself or a folder above it. Other
-backends with a native cursor (Graph delta, Drive `changes.list`) can do the
-same: the opaque checkpoint is the server cursor, and consumers cannot tell the
-difference. Keep the walk as the reset path, though. A cursor is a promise the
-server keeps, and when it breaks (`path/reset`, `resyncRequired`) a full
-listing is the only answer.
-
-A walk that knows it saw only part of the tree must raise
-`IncompleteWalkError` rather than return what it has. A snapshot diff reads
-every unlisted path as a DELETE, so a partial listing does not degrade into
-fewer events, it invents wrong ones. GitHub does this when the API truncates a
-large repository's tree.
