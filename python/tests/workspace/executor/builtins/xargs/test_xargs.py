@@ -1009,15 +1009,17 @@ async def test_parallel_abort_stops_an_open_input_and_joins_started_commands():
     assert closed.is_set()
 
 
+async def _fails_past_the_pipe(line, **kwargs):
+    return IOResult(stdout=b"x" * CAPACITY * 2, stderr=b"oops\n", exit_code=1)
+
+
 @pytest.mark.asyncio
 async def test_early_close_keeps_a_cut_short_childs_status_and_stderr():
-    async def execute(line, **kwargs):
-        return IOResult(
-            stdout=b"x" * CAPACITY * 2, stderr=b"oops\n", exit_code=1
-        )
-
     out, io, _ = await stream_xargs(
-        execute, ["echo"], EvaluationContext(make_session()), b"a"
+        _fails_past_the_pipe,
+        ["echo"],
+        EvaluationContext(make_session()),
+        b"a",
     )
     await anext(out)
     await out.aclose()
