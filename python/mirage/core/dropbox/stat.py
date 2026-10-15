@@ -12,25 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
-from functools import partial
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.config import ListedMiss
 from mirage.cache.index.ram import ListingCheckStore
-from mirage.cache.index.warm import entry_or_listed_miss
-from mirage.core.dropbox.api import get_metadata, list_folder
+from mirage.core.dropbox.api import list_folder, lookup
 from mirage.core.dropbox.client import DropboxApiError
-from mirage.core.dropbox.constants import CONTENT_HASH, MISS_SUMMARIES
+from mirage.core.dropbox.constants import CONTENT_HASH
 from mirage.core.dropbox.fingerprint import token_of
-from mirage.core.dropbox.paths import dropbox_path_of
+from mirage.core.dropbox.paths import dropbox_path_of, spelled_otherwise
 from mirage.core.dropbox.readdir import dropbox_path_from_key, readdir
+from mirage.core.hierarchy.probe import resolve_listed_entry
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 def stat_from_entry(entry: dict[str, Any]) -> FileStat:
@@ -66,17 +64,10 @@ async def _stat_from_api(
 ) -> FileStat:
     # One get_metadata: for index-less callers, the fresh checks' store
     # and a name missing from a listing the running command did not fetch.
-    # Only a not_found or not_folder 409 is a miss; any other names a path
-    # that may exist. get_metadata matches names case-insensitively.
-    try:
-        entry = await get_metadata(
-            accessor.token_manager, dropbox_path_of(accessor, path)
-        )
-    except DropboxApiError as exc:
-        if exc.status == 409 and exc.summary.startswith(MISS_SUMMARIES):
-            raise enoent(path.virtual) from exc
-        raise
-    if entry.get("name") != posixpath.basename(path.vfs_path.strip("/")):
+    entry = await lookup(
+        accessor.token_manager, dropbox_path_of(accessor, path)
+    )
+    if entry is None or spelled_otherwise(path, entry):
         raise enoent(path.virtual)
     return stat_from_entry(entry)
 
@@ -97,15 +88,7 @@ async def stat(
 
     entry = (await index.get(virtual_key)).entry
     if entry is None:
-        parent_virtual = virtual_key.rsplit("/", 1)[0] or "/"
-        parent = PathSpec(
-            virtual=parent_virtual,
-            directory=parent_virtual,
-            vfs_path=mount_key(parent_virtual, prefix),
-        )
-        found = await entry_or_listed_miss(
-            index, virtual_key, partial(readdir, accessor, parent, index=index)
-        )
+        found = await resolve_listed_entry(readdir, accessor, path, index)
         if found is ListedMiss.UNTRUSTED:
             return await _stat_from_api(accessor, path)
         if found is None:

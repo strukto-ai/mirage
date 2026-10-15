@@ -25,3 +25,20 @@ export function dropboxPathOf(accessor: DropboxAccessor, path: PathSpec): string
   const key = stripSlash(p)
   return key === '' ? accessor.rootPath : `${accessor.rootPath}/${key}`
 }
+
+/**
+ * Whether Dropbox answered for `path` with a name in another case.
+ *
+ * Dropbox matches a path case-insensitively, a listing does not: a file stored
+ * as `N` is not `n`. An answer without a name proves nothing, and calling it
+ * absent would let a write go out over a file that is there. Mirrors Python's
+ * `spelled_otherwise`.
+ */
+export function spelledOtherwise(
+  path: PathSpec,
+  entry: { readonly name?: unknown } | null,
+): boolean {
+  const key = stripSlash(path.vfsPath)
+  const named = entry?.name
+  return typeof named === 'string' && named !== key.slice(key.lastIndexOf('/') + 1)
+}

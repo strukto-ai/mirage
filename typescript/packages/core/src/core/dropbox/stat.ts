@@ -12,20 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { ListedMiss } from '../../cache/index/config.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
-import { entryOrListedMiss } from '../../cache/index/warm.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { DropboxApiError } from './client.ts'
-import { getMetadata, listFolder, type DropboxEntry } from './api.ts'
-import { dropboxPathOf } from './paths.ts'
-import { CONTENT_HASH, MISS_SUMMARIES } from './constants.ts'
+import { listFolder, lookup, type DropboxEntry } from './api.ts'
+import { dropboxPathOf, spelledOtherwise } from './paths.ts'
+import { CONTENT_HASH } from './constants.ts'
 import { tokenOf } from './fingerprint.ts'
 import { readdir as coreReaddir, dropboxPathFromKey } from './readdir.ts'
+import { resolveListedEntry } from '../hierarchy/probe.ts'
 import { enoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 
@@ -54,25 +54,10 @@ export function statFromEntry(entry: DropboxEntry): FileStat {
 }
 
 // One get_metadata: for index-less callers, the fresh checks' store and a
-// name missing from a listing the running command did not fetch. Only a
-// not_found or not_folder 409 is a miss; any other names a path that may
-// exist. get_metadata matches names case-insensitively.
+// name missing from a listing the running command did not fetch.
 async function statFromApi(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat> {
-  let entry: DropboxEntry
-  try {
-    entry = await getMetadata(accessor.tokenManager, dropboxPathOf(accessor, path))
-  } catch (err) {
-    if (
-      err instanceof DropboxApiError &&
-      err.status === 409 &&
-      MISS_SUMMARIES.some((miss) => err.summary.startsWith(miss))
-    ) {
-      throw enoent(path.virtual)
-    }
-    throw err
-  }
-  const key = stripSlash(path.vfsPath)
-  if (entry.name !== key.slice(key.lastIndexOf('/') + 1)) throw enoent(path.virtual)
+  const entry = await lookup(accessor.tokenManager, dropboxPathOf(accessor, path))
+  if (entry === null || spelledOtherwise(path, entry)) throw enoent(path.virtual)
   return statFromEntry(entry)
 }
 
@@ -89,16 +74,7 @@ export async function stat(
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   let entry = (await index.get(virtualKey)).entry ?? null
   if (entry === null) {
-    const parentVirtual = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
-    const parent = new PathSpec({
-      virtual: parentVirtual,
-      directory: parentVirtual,
-      resolved: false,
-      vfsPath: mountKey(parentVirtual, prefix),
-    })
-    const found = await entryOrListedMiss(index, virtualKey, () =>
-      coreReaddir(accessor, parent, index),
-    )
+    const found = await resolveListedEntry(coreReaddir, accessor, path, index)
     if (found === ListedMiss.UNTRUSTED) return statFromApi(accessor, path)
     if (found === null) throw enoent(path.virtual)
     entry = found

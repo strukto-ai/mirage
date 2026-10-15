@@ -18,7 +18,8 @@ from typing import Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import IndexCacheStore, IndexEntry
-from mirage.cache.index.warm import entry_or_warm
+from mirage.cache.index.config import ListedMiss
+from mirage.cache.index.warm import entry_or_listed_miss
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec, StatFn
 from mirage.utils.key_prefix import (
@@ -141,6 +142,24 @@ async def resolve_entry(
         path (PathSpec): VFS-relative path being resolved.
         index (IndexCacheStore): index cache.
     """
+    found = await resolve_listed_entry(readdir, accessor, path, index)
+    return None if found is ListedMiss.UNTRUSTED else found
+
+
+async def resolve_listed_entry(
+    readdir: ReaddirFn[A], accessor: A, path: PathSpec, index: IndexCacheStore
+) -> IndexEntry | ListedMiss | None:
+    """``resolve_entry`` for a backend that can ask by path.
+
+    A name missing from a cached listing the running command did not
+    fetch answers ``ListedMiss.UNTRUSTED`` (``entry_or_listed_miss``).
+
+    Args:
+        readdir (ReaddirFn): the backend's readdir.
+        accessor (Accessor): backend accessor.
+        path (PathSpec): VFS-relative path being resolved.
+        index (IndexCacheStore): index cache.
+    """
     prefix = mount_prefix_of(path.virtual, path.vfs_path)
     key = path.vfs_path.strip("/")
     virtual_key = prefix + "/" + key if key else prefix or "/"
@@ -157,7 +176,7 @@ async def resolve_entry(
             ),
             index=index,
         )
-    return await entry_or_warm(index, virtual_key, warm)
+    return await entry_or_listed_miss(index, virtual_key, warm)
 
 
 async def ancestor_entry(

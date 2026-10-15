@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import type { IndexEntry } from '../../cache/index/config.ts'
+import { type IndexEntry, ListedMiss } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { entryOrWarm } from '../../cache/index/warm.ts'
+import { entryOrListedMiss } from '../../cache/index/warm.ts'
 import { PathSpec, type StatFn } from '../../types.ts'
 import { enoent, isEnoent } from '../../errors/fs.ts'
 import { mountKey, mountPrefixOf, mountedPath } from '../../utils/key_prefix.ts'
@@ -118,6 +118,22 @@ export async function resolveEntry<A extends Accessor>(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<IndexEntry | null> {
+  const found = await resolveListedEntry(readdir, accessor, path, index)
+  return found === ListedMiss.UNTRUSTED ? null : found
+}
+
+/**
+ * `resolveEntry` for a backend that can ask by path: a name missing from a
+ * cached listing the running command did not fetch answers
+ * `ListedMiss.UNTRUSTED` (`entryOrListedMiss`). Mirrors Python's
+ * `resolve_listed_entry`.
+ */
+export async function resolveListedEntry<A extends Accessor>(
+  readdir: ReaddirFn<A>,
+  accessor: A,
+  path: PathSpec,
+  index?: IndexCacheStore,
+): Promise<IndexEntry | ListedMiss | null> {
   if (index === undefined) return null
   const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const key = stripSlash(path.vfsPath)
@@ -137,7 +153,7 @@ export async function resolveEntry<A extends Accessor>(
             index,
           )
       : null
-  return entryOrWarm(index, virtualKey, warm)
+  return entryOrListedMiss(index, virtualKey, warm)
 }
 
 /** Resolve the index entry `up` levels above the path. Mirrors Python's `ancestor_entry`. */

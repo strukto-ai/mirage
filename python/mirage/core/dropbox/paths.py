@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import posixpath
+from typing import Any
+
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
@@ -30,3 +33,21 @@ def dropbox_path_of(accessor: DropboxAccessor, path: PathSpec) -> str:
         p = p[len(prefix) :] or "/"
     key = p.strip("/")
     return accessor.root_path if not key else f"{accessor.root_path}/{key}"
+
+
+def spelled_otherwise(path: PathSpec, entry: dict[str, Any] | None) -> bool:
+    """Whether Dropbox answered for ``path`` with a name in another case.
+
+    Dropbox matches a path case-insensitively, a listing does not: a file
+    stored as ``N`` is not ``n``. An answer without a name proves nothing,
+    and calling it absent would let a write go out over a file that is
+    there.
+
+    Args:
+        path (PathSpec): the path asked for.
+        entry (dict[str, Any] | None): the metadata Dropbox answered.
+    """
+    named = None if entry is None else entry.get("name")
+    return isinstance(named, str) and named != posixpath.basename(
+        path.vfs_path.strip("/")
+    )
