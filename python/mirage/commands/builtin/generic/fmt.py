@@ -1,13 +1,14 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Generator, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import (
-    materialized_read,
     merge_split_errors,
+    reported_stream,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    read_stdin_async,
+    resolve_source,
     stdin_stat,
     stdin_stream,
 )
@@ -15,6 +16,8 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.cooperative import chunks
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -94,7 +97,6 @@ class _Formatter:
 
     def __init__(
         self,
-        data: bytes,
         max_width: int,
         goal_width: int,
         prefix: str | None,
@@ -103,8 +105,6 @@ class _Formatter:
         crown: bool,
         uniform: bool,
     ) -> None:
-        self.data = data
-        self.pos = 0
         self.max_width = max_width
         self.goal_width = goal_width
         lead = (prefix or "").encode()
@@ -132,21 +132,16 @@ class _Formatter:
         self.next_break: list[int] = []
         self.line_length: list[int] = []
 
-    def run(self) -> bytes:
-        self.next_char = self.get_prefix()
-        while self.get_paragraph():
+    def run(self) -> Generator[None, int, None]:
+        self.next_char = yield from self.get_prefix()
+        while (yield from self.get_paragraph()):
             self.fmt_paragraph()
             self.put_paragraph(len(self.words))
-        return bytes(self.out)
 
-    def getc(self) -> int:
-        if self.pos >= len(self.data):
-            return EOF
-        c = self.data[self.pos]
-        self.pos += 1
-        return c
+    def getc(self) -> Generator[None, int, int]:
+        return (yield)
 
-    def get_paragraph(self) -> bool:
+    def get_paragraph(self) -> Generator[None, int, bool]:
         self.last_line_length = 0
         c = self.next_char
         while (
@@ -155,17 +150,17 @@ class _Formatter:
             or self.in_column
             < self.next_prefix_indent + self.prefix_full_length
         ):
-            c = self.copy_rest(c)
+            c = yield from self.copy_rest(c)
             if c == EOF:
                 self.next_char = EOF
                 return False
             self.out.append(10)
-            c = self.get_prefix()
+            c = yield from self.get_prefix()
         self.prefix_indent = self.next_prefix_indent
         self.first_indent = self.in_column
         self.para = bytearray()
         self.words = []
-        c = self.get_line(c)
+        c = yield from self.get_line(c)
         self.set_other_indent(self.same_para(c))
         if self.split:
             pass
@@ -173,19 +168,19 @@ class _Formatter:
             if self.same_para(c) and (
                 self.crown or self.in_column != self.first_indent
             ):
-                c = self.get_line(c)
+                c = yield from self.get_line(c)
                 while (
                     self.same_para(c) and self.in_column == self.other_indent
                 ):
-                    c = self.get_line(c)
+                    c = yield from self.get_line(c)
         else:
             while self.same_para(c) and self.in_column == self.other_indent:
-                c = self.get_line(c)
+                c = yield from self.get_line(c)
         self.words[-1].period = self.words[-1].final = True
         self.next_char = c
         return True
 
-    def copy_rest(self, c: int) -> int:
+    def copy_rest(self, c: int) -> Generator[None, int, int]:
         self.out_column = 0
         if self.in_column > self.next_prefix_indent or c not in (10, EOF):
             self.put_space(self.next_prefix_indent)
@@ -202,7 +197,7 @@ class _Formatter:
                 self.out.append(10)
         while c not in (10, EOF):
             self.out.append(c)
-            c = self.getc()
+            c = yield from self.getc()
         return c
 
     def same_para(self, c: int) -> bool:
@@ -213,7 +208,7 @@ class _Formatter:
             and c not in (10, EOF)
         )
 
-    def get_line(self, c: int) -> int:
+    def get_line(self, c: int) -> Generator[None, int, int]:
         while True:
             word = _Word(start=len(self.para))
             while True:
@@ -221,14 +216,14 @@ class _Formatter:
                     self.set_other_indent(True)
                     self.flush_paragraph(word)
                 self.para.append(c)
-                c = self.getc()
+                c = yield from self.getc()
                 if c == EOF or c in SPACES:
                     break
             word.length = len(self.para) - word.start
             self.in_column += word.length
             self.check_punctuation(word)
             start = self.in_column
-            c = self.get_space(c)
+            c = yield from self.get_space(c)
             word.space = self.in_column - start
             word.final = c == EOF or (
                 word.period and (c == 10 or word.space > 1)
@@ -241,11 +236,11 @@ class _Formatter:
             self.words.append(word)
             if c in (10, EOF):
                 break
-        return self.get_prefix()
+        return (yield from self.get_prefix())
 
-    def get_prefix(self) -> int:
+    def get_prefix(self) -> Generator[None, int, int]:
         self.in_column = 0
-        c = self.get_space(self.getc())
+        c = yield from self.get_space((yield from self.getc()))
         if not self.prefix:
             self.next_prefix_indent = min(
                 self.prefix_lead_space, self.in_column
@@ -256,10 +251,10 @@ class _Formatter:
             if c != byte:
                 return c
             self.in_column += 1
-            c = self.getc()
-        return self.get_space(c)
+            c = yield from self.getc()
+        return (yield from self.get_space(c))
 
-    def get_space(self, c: int) -> int:
+    def get_space(self, c: int) -> Generator[None, int, int]:
         while True:
             if c == 32:
                 self.in_column += 1
@@ -268,7 +263,7 @@ class _Formatter:
                 self.in_column = (self.in_column // TAB_WIDTH + 1) * TAB_WIDTH
             else:
                 return c
-            c = self.getc()
+            c = yield from self.getc()
 
     def check_punctuation(self, word: _Word) -> None:
         text = self.para[word.start : word.start + word.length]
@@ -434,7 +429,7 @@ def _widths(width: int | None, goal: int | None) -> tuple[int, int]:
 async def fmt(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     width: int | None = None,
     goal: int | None = None,
@@ -446,23 +441,52 @@ async def fmt(
 ) -> tuple[ByteSource | None, IOResult]:
     max_width, goal_width = _widths(width, goal)
 
-    def run(data: bytes) -> bytes:
-        return _Formatter(
-            data,
-            max_width,
-            goal_width,
-            prefix,
-            split_only,
-            tagged,
-            crown,
-            uniform,
-        ).run()
+    io = IOResult()
+    read = stdin_stream(read_stream, stdin)
+    sources = [reported_stream(read(p), io, p, "fmt") for p in paths]
+    if not paths:
+        sources = [resolve_source(stdin)]
+    return async_chain(
+        [
+            _fmt_stream(
+                source,
+                _Formatter(
+                    max_width,
+                    goal_width,
+                    prefix,
+                    split_only,
+                    tagged,
+                    crown,
+                    uniform,
+                ),
+            )
+            for source in sources
+        ]
+    ), io
 
-    if paths:
-        # GNU formats each file on its own: a paragraph never runs from one
-        # file into the next.
-        return b"".join([run(await read_bytes(p)) for p in paths]), IOResult()
-    return run(await read_stdin_async(stdin) or b""), IOResult()
+
+async def _fmt_stream(
+    source: ByteSource, formatter: _Formatter
+) -> AsyncIterator[bytes]:
+    machine = formatter.run()
+    next(machine)
+    try:
+        async with aclosing(chunks(source)) as bounded:
+            async for part in bounded:
+                for byte in part:
+                    machine.send(byte)
+                if formatter.out:
+                    yield bytes(formatter.out)
+                    formatter.out.clear()
+        while True:
+            try:
+                machine.send(EOF)
+            except StopIteration:
+                break
+        if formatter.out:
+            yield bytes(formatter.out)
+    finally:
+        machine.close()
 
 
 async def fmt_generic(
@@ -491,7 +515,7 @@ async def fmt_generic(
     return await merge_split_errors(
         await fmt(
             readable,
-            read_bytes=materialized_read(stream),
+            read_stream=stream,
             stdin=opts.stdin,
             width=parsed.width,
             goal=parsed.goal,

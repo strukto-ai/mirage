@@ -1,22 +1,26 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.stream import read_stdin_async
+from mirage.commands.builtin.utils.operands import (
+    normalized_read,
+    reported_stream,
+)
+from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn
 
 
 async def look(
     paths: list[PathSpec],
     prefix: str,
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     fold_case: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -24,21 +28,32 @@ async def look(
         raise extra_operand_error(
             CommandName.LOOK, paths[1].raw_path or paths[1].virtual
         )
-    if paths:
-        raw = await read_bytes(paths[0])
-    else:
-        stdin_raw = await read_stdin_async(stdin)
-        raw = stdin_raw if stdin_raw is not None else b""
-    text = raw.decode(errors="replace")
+    io = IOResult(exit_code=1)
+    source = (
+        normalized_read(read_stream)(paths[0])
+        if paths
+        else resolve_source(stdin)
+    )
+    output = _look_stream(source, prefix, fold_case, io)
+    return (
+        reported_stream(output, io, paths[0], "look") if paths else output
+    ), io
+
+
+async def _look_stream(
+    source: ByteSource, prefix: str, fold_case: bool, io: IOResult
+) -> AsyncIterator[bytes]:
     cmp_prefix = prefix.lower() if fold_case else prefix
-    matched: list[str] = []
-    for line in split_lines(text):
-        cmp_line = line.lower() if fold_case else line
-        if cmp_line.startswith(cmp_prefix):
-            matched.append(line)
-    if not matched:
-        return None, IOResult(exit_code=1)
-    return ("\n".join(matched) + "\n").encode(), IOResult()
+    reader = AsyncLineIterator(source)
+    try:
+        async for raw in reader:
+            line = raw.decode(errors="replace")
+            cmp_line = line.lower() if fold_case else line
+            if cmp_line.startswith(cmp_prefix):
+                io.exit_code = 0
+                yield (line + "\n").encode()
+    finally:
+        await reader.discard()
 
 
 __all__ = ["look"]
@@ -58,7 +73,7 @@ async def look_generic(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
     if not texts:
         raise ValueError("look: missing prefix")
@@ -66,7 +81,7 @@ async def look_generic(
     return await look(
         paths,
         texts[0],
-        read_bytes=read_bytes,
+        read_stream=read_stream,
         stdin=opts.stdin,
         fold_case=parsed.fold_case,
     )

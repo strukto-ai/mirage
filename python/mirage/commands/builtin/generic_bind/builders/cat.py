@@ -40,7 +40,6 @@ async def cat(
         opts,
         dir_aware_stat(ops, accessor, opts),
         bound_op(ops.read_stream, accessor, opts.index),
-        local=ops.local,
     )
 
 

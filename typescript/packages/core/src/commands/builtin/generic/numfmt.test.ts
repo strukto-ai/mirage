@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { materialize } from '../../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 
 import type { CommandOpts } from '../../config.ts'
@@ -26,12 +28,13 @@ async function run(value: string, flags: CommandOpts['flags'] = {}): Promise<str
     cwd: '/',
     vfs: { kind: 'ram' } as never,
   } as CommandOpts
-  const result = await numfmtGeneric([value], opts)
+  const result = numfmtGeneric([value], opts)
   const io = result?.[1]
+  const out = await materialize(result?.[0])
   if (io !== undefined && io.exitCode !== 0) {
     throw new UsageError((await io.stderrStr()).replace(/\n$/, ''), io.exitCode)
   }
-  return DEC.decode(result?.[0] as Uint8Array).replace(/\n$/, '')
+  return DEC.decode(out).replace(/\n$/, '')
 }
 
 describe('numfmt --to=none rendering', () => {

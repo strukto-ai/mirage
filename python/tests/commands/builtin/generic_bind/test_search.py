@@ -299,7 +299,7 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
         (
             "rg --stats ada /d | head -2",
             "both",
-            EVERY,
+            None,
             "",
             True,
         ),
@@ -496,3 +496,42 @@ def test_a_mount_may_refuse_a_full_scan(line, mount, refuse, out):
         assert _run(vfs, line) == _run(RAMVFS(), line)
     else:
         assert (_run(vfs, line), vfs.reads) == ((b"", *out), [])
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_streamed_candidates_must_finish_before_they_can_prune(fail):
+    closed = []
+
+    class StreamSearchRAM(SearchRAM):
+        async def files_containing(
+            self, path, text, *, whole_word, ignore_case, index=NULL_INDEX
+        ):
+            found = await super().files_containing(
+                path,
+                text,
+                whole_word=whole_word,
+                ignore_case=ignore_case,
+                index=index,
+            )
+
+            async def entries():
+                try:
+                    for item in found:
+                        yield item
+                        if fail:
+                            raise OSError("truncated search")
+                finally:
+                    closed.append(True)
+
+            return entries()
+
+    mount = StreamSearchRAM(lines=None)
+    result = _run(mount, "grep -r ada /d", hide=("/d/sub/d.txt",))
+    if fail:
+        assert result[0] == b""
+        assert result[2] != 0
+    else:
+        assert result == _run(
+            SearchRAM(lines=None), "grep -r ada /d", hide=("/d/sub/d.txt",)
+        )
+    assert closed == [True]

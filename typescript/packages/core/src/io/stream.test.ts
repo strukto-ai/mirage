@@ -18,6 +18,7 @@ import {
   SharedStdin,
   asyncChain,
   closeQuietly,
+  collectItems,
   discardStreams,
   drain,
   ensureStream,
@@ -154,4 +155,27 @@ it('shares a lazy cursor across early exit and concurrent readers', async () => 
   expect((await other.next()).done).toBe(true)
   expect((await shared[Symbol.asyncIterator]().next()).done).toBe(true)
   expect(pulls).toEqual(['', 'abc', '', 'def'])
+})
+
+it.each([false, true])('closes a typed cursor after EOF or rejection (fail=%s)', async (fail) => {
+  let count = 0
+  let closed = false
+  const cursor: AsyncIterableIterator<string> = {
+    [Symbol.asyncIterator]() {
+      return this
+    },
+    next() {
+      count += 1
+      if (count === 1) return Promise.resolve({ done: false, value: 'candidate' })
+      if (fail) return Promise.reject(new Error('truncated answer'))
+      return Promise.resolve({ done: true, value: undefined })
+    },
+    return() {
+      closed = true
+      return Promise.resolve({ done: true, value: undefined })
+    },
+  }
+  if (fail) await expect(collectItems(cursor)).rejects.toThrow('truncated answer')
+  else expect(await collectItems(cursor)).toEqual(['candidate'])
+  expect(closed).toBe(true)
 })

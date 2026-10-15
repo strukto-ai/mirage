@@ -35,8 +35,10 @@ from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import (
     Effect,
+    PathSource,
     SearchQuery,
     Target,
+    TreeSource,
 )
 from mirage.watch.base import DeltaHook
 
@@ -342,7 +344,7 @@ class BaseVFS:
     @vfs_call(effect=Effect.READ, target=Target.FILE)
     async def first_lines(
         self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
-    ) -> bytes | None:
+    ) -> ByteSource | None:
         """The first ``n`` lines of a file, without reading the rest.
 
         ``head -n N`` asks this before it reads, so a backend that can
@@ -354,6 +356,9 @@ class BaseVFS:
         raise the file's read error otherwise (``EFBIG`` when the answer
         passes a ceiling on one read, such as ``max_read_rows``).
 
+        Return bytes or async byte chunks. The consumer closes the iterator;
+        this partial-file answer is never installed as a full cached file.
+
         Args:
             path (PathSpec): the file.
             n (int): how many lines, at least 1.
@@ -364,7 +369,7 @@ class BaseVFS:
     @vfs_call(effect=Effect.READ, target=Target.FILE)
     async def last_lines(
         self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
-    ) -> bytes | None:
+    ) -> ByteSource | None:
         """The last ``n`` lines of a file, without reading the rest.
 
         ``tail -n N`` asks this before it reads, and ``tail -f`` for its
@@ -374,6 +379,9 @@ class BaseVFS:
         instead. Return None to have the file read the usual way; raise
         the file's read error otherwise (``EFBIG`` when the answer passes
         a ceiling on one read).
+
+        Return bytes or async byte chunks. The consumer closes the iterator;
+        this partial-file answer is never installed as a full cached file.
 
         Args:
             path (PathSpec): the file.
@@ -462,7 +470,7 @@ class BaseVFS:
         self,
         path: PathSpec,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> dict[str, FileStat] | None:
+    ) -> TreeSource | None:
         """Every entry under a directory, in one answer.
 
         ``find``, ``du``, ``ls -R``, ``tree``, ``grep -r`` and ``rg`` ask
@@ -472,8 +480,10 @@ class BaseVFS:
         stands in for the walk: every file and directory below ``path``,
         keyed by its path below ``path`` (``a``, ``a/b.txt``), each with
         the stat ``stat`` gives for it.
-        The walk lists each directory from it in name order. Return None
-        to have the command walk ``readdir`` the usual way; raise what
+        An async iterator may yield (key, stat) entries. Successful EOF
+        certifies completeness; failures must propagate, and the consumer
+        closes the cursor. Entries are collected before sorting directory
+        names. Return None to walk ``readdir`` the usual way; raise what
         ``readdir`` of ``path`` raises otherwise.
 
         Args:
@@ -744,7 +754,7 @@ class BaseVFS:
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> list[PathSpec] | None:
+    ) -> PathSource | None:
         """Files under ``path`` whose content may contain ``text``.
 
         grep and rg still walk, filter, order and label every file, and
@@ -757,6 +767,8 @@ class BaseVFS:
         lags writes), and every file is read; raise to refuse the
         command, and the error's message is what it prints. The
         dispatcher drops every file the session hides from the answer.
+        An async iterator may yield candidates; only successful EOF makes
+        the answer complete enough to exclude files from a scan.
 
         Args:
             path (PathSpec): a directory walked: one of grep's directory

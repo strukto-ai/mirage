@@ -955,32 +955,34 @@ export async function rgGeneric(
     for await (const h of found) listed.push(h)
     found = replay(sortHaystacks(listed, f))
   }
-  let result: CommandFnResult
-  if (f.listFiles) result = await listFiles(found, f, warnings)
-  else if (pat === null) return usage(RG_NO_PATTERN)
-  else {
+  const io = new IOResult()
+  if (f.listFiles) return noted([listFiles(found, f, warnings, io), io], notes, f)
+  if (pat === null) return usage(RG_NO_PATTERN)
+  const pattern = pat
+  async function* output(): AsyncIterable<Uint8Array> {
     const worker = new Worker()
     try {
-      result = await searchAll(
+      yield* searchAll(
         worker,
         found,
         paths,
-        pat,
+        pattern,
         f,
         stream,
         first,
         warnings,
         implicit,
         opts.cwd,
+        io,
         opts.signal,
         opts.shell,
       )
     } finally {
+      await found.return(undefined)
       await worker.close()
     }
   }
-  if (result === null) return result
-  return noted(result, notes, f)
+  return noted([output(), io], notes, f)
 }
 
 // A search's result with --ignore-file's notes ahead of its stderr, as
@@ -1231,26 +1233,26 @@ export async function* haystacks(
   }
 }
 
-function stderrOf(records: readonly string[]): { stderr?: Uint8Array } {
-  const stderr = formatOptionalRecords(records)
-  return stderr === null ? {} : { stderr }
-}
-
 // --files: every path the search would read, and nothing searched.
-async function listFiles(
+async function* listFiles(
   found: AsyncIterable<Haystack>,
   f: RgFlags,
   warnings: string[],
-): Promise<CommandFnResult> {
+  io: IOResult,
+): AsyncIterable<Uint8Array> {
   const term = f.null ? '\0' : '\n'
-  const out: Uint8Array[] = []
+  let selected = false
   for await (const h of found) {
-    out.push(encodeText(printedPath(h.shown, f) + term))
+    selected = true
     if (f.quiet) break
+    yield encodeText(printedPath(h.shown, f) + term)
   }
-  const code = exitCodeFor(out.length > 0, warnings.length > 0, f.quiet)
-  const body = f.quiet ? new Uint8Array(0) : concat(out)
-  return [body, new IOResult({ exitCode: code, ...stderrOf(f.noMessages ? [] : warnings) })]
+  io.exitCode = exitCodeFor(selected, warnings.length > 0, f.quiet)
+  if (!f.noMessages)
+    io.stderr = concat([
+      await materialize(io.stderr),
+      formatOptionalRecords(warnings) ?? new Uint8Array(),
+    ])
 }
 
 /**
@@ -1289,7 +1291,7 @@ async function preprocessed(
   return [io.stdout === null ? new Uint8Array() : await materialize(io.stdout), null]
 }
 
-async function searchAll(
+async function* searchAll(
   worker: Worker,
   found: AsyncIterable<Haystack>,
   paths: readonly PathSpec[],
@@ -1301,15 +1303,24 @@ async function searchAll(
   implicit: boolean,
   // The session's working directory, which --pre-glob's globs are rooted at.
   cwd: string,
+  io: IOResult,
   signal?: AbortSignal,
   // Runs --pre's command in the session.
   shell?: ShellFn,
-): Promise<CommandFnResult> {
+): AsyncIterable<Uint8Array> {
   const multi = paths.length > 1
   let lone = !multi
   const context = printsContext(f)
   const preGlobs = new Overrides(f.preGlobs ?? [], [], false)
-  const out: Uint8Array[] = []
+  const progressive = ![
+    f.stats,
+    f.json,
+    f.searchZip,
+    f.countOnly,
+    f.countMatches,
+    f.filesOnly,
+    f.filesWithoutMatch,
+  ].some((flag) => flag === true)
   let printed = false
   let selected = false
   let skipped = false
@@ -1326,6 +1337,7 @@ async function searchAll(
     const label = !f.noFilename && (walked || multi || f.withFilename || f.vimgrep) ? name : null
     const tally: Tally = { selected: false }
     const chunks: Uint8Array[] = []
+    let filePrinted = false
     let damaged = false
     const faults: GzipDataError[] = []
     const began = performance.now()
@@ -1373,7 +1385,18 @@ async function searchAll(
         pipe,
         worker,
       )) {
-        chunks.push(c)
+        if (progressive) {
+          if (!filePrinted) {
+            if (label !== null && headed(f)) {
+              if (printed) yield ENC.encode('\n')
+              if (tally.binary !== true) yield encodeText(label + (f.null ? '\0' : recordEnd(f)))
+            } else if (context && printed && f.contextSeparator !== null) {
+              yield encodeText(f.contextSeparator + '\n')
+            }
+            filePrinted = printed = true
+          }
+          yield c
+        } else chunks.push(c)
       }
       const [fault] = faults
       if (fault !== undefined) throw fault
@@ -1400,10 +1423,11 @@ async function searchAll(
       if (chunks.length > 0) {
         const begin = jsonLine({ type: 'begin', data: { path: jsonText(name) } })
         const sent = begin.length + chunks.reduce((sum, c) => sum + c.length, 0)
-        out.push(begin, ...chunks)
+        yield begin
+        yield* chunks
         if (!damaged) {
           totals.add(tally, sent, elapsed)
-          out.push(totals.endRecord(name, tally, sent, elapsed))
+          yield totals.endRecord(name, tally, sent, elapsed)
         }
       } else if (f.quiet && tally.selected && !damaged) {
         totals.add(tally, 0, elapsed)
@@ -1412,16 +1436,16 @@ async function searchAll(
       // -c and -l counts and names are not what --stats counts.
       let sent = listingOrCount ? 0 : chunks.reduce((sum, c) => sum + c.length, 0)
       if (label !== null && headed(f)) {
-        if (printed) out.push(ENC.encode('\n'))
+        if (printed) yield ENC.encode('\n')
         if (tally.binary !== true) {
           const heading = encodeText(label + (f.null ? '\0' : recordEnd(f)))
-          out.push(heading)
+          yield heading
           sent += heading.length
         }
       } else if (context && printed && f.contextSeparator !== null) {
-        out.push(encodeText(f.contextSeparator + '\n'))
+        yield encodeText(f.contextSeparator + '\n')
       }
-      out.push(...chunks)
+      yield* chunks
       printed = true
       if (!damaged) totals.add(tally, sent, elapsed)
     } else if (!damaged) {
@@ -1431,12 +1455,12 @@ async function searchAll(
     if (f.quiet && tally.selected && f.stats !== true && f.json !== true) break
   }
   const total = (performance.now() - started) / 1000
-  if (records) out.push(totals.summaryRecord(total))
+  if (records) yield totals.summaryRecord(total)
   else if (f.stats === true) {
     // ripgrep's parallel searcher gives the last --heading group its blank
     // line too; one thread, as for a lone file, does not.
-    if (printed && headed(f) && runsParallel(f) && !lone) out.push(ENC.encode('\n'))
-    out.push(totals.statsBlock(total))
+    if (printed && headed(f) && runsParallel(f) && !lone) yield ENC.encode('\n')
+    yield totals.statsBlock(total)
   }
   // ripgrep's status under --files-without-match follows the listing, not
   // the matching: 0 when a file was listed, 1 when every file matched
@@ -1450,7 +1474,11 @@ async function searchAll(
     if (!f.noMessages) shown.push(NOTHING_SEARCHED)
     code = 2
   }
-  return [concat(out), new IOResult({ exitCode: code, ...stderrOf(shown) })]
+  io.exitCode = code
+  io.stderr = concat([
+    await materialize(io.stderr),
+    formatOptionalRecords(shown) ?? new Uint8Array(),
+  ])
 }
 
 // The flags with -H added, unless -I is the line's last word on it.

@@ -17,6 +17,8 @@ import { neverOpened } from './utils/stream.ts'
 import { fsErrorLine } from '../../errors/render.ts'
 import { readFailExitCode } from '../spec/usage.ts'
 import { PathSpec } from '../../types.ts'
+import { chunks } from '../../io/cooperative.ts'
+import { READ_FAILURES } from '../../errors/constants.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -107,7 +109,10 @@ export class SedOutput {
  * `null` when it could not be opened (GNU reads that as empty), or the
  * read-error line GNU panics with (a directory opens and then fails).
  */
-export type SedFileContent = { text: string } | { error: string } | null
+export interface SedFileSource {
+  read(): AsyncIterable<Uint8Array>
+}
+export type SedFileContent = { text: string } | { error: string } | SedFileSource | null
 
 /**
  * One input operand in order: its text, or the stream it is read from as
@@ -192,7 +197,10 @@ export class SedMachine {
   private readonly noDefaultOutput: boolean
   private readonly regexCache = new Map<SedRegex, RegExp>()
   private readonly globalCache = new Map<SedRegex, RegExp>()
-  private readonly readers = new Map<string, { lines: string[]; pos: number } | null>()
+  private readonly readers = new Map<
+    string,
+    { lines: string[]; pos: number } | AsyncLineIterator | null
+  >()
   private readonly rangeState: number[]
   private readonly a2Number: number[]
   private readonly specialOut = new SedOutput(this.stdout.chunks)
@@ -262,7 +270,16 @@ export class SedMachine {
     this.resetAtNextFile = true
     try {
       while (!this.stopped()) {
-        if (this.appendQueue.length > 0) this.dumpAppendQueue()
+        if (this.appendQueue.length > 0) {
+          for await (const status of this.dumpAppendQueue()) {
+            if (status !== -1) this.quitCode = status
+            if (out.chunks.length > 0) {
+              const chunk = out.chunks.join('')
+              out.chunks.length = 0
+              yield chunk
+            }
+          }
+        }
         if (out.chunks.length > 0) {
           const chunk = out.chunks.join('')
           out.chunks.length = 0
@@ -283,6 +300,9 @@ export class SedMachine {
       this.stderrLines.push(err.message)
     } finally {
       await this.reader?.discard()
+      for (const reader of this.readers.values()) {
+        if (reader instanceof AsyncLineIterator) await reader.discard()
+      }
     }
     if (out.chunks.length > 0) {
       yield out.chunks.join('')
@@ -355,7 +375,8 @@ export class SedMachine {
         this.lineNumber = 0
         this.hold = ''
         this.resetAddresses()
-        for (const reader of this.readers.values()) if (reader !== null) reader.pos = 0
+        for (const reader of this.readers.values())
+          if (reader !== null && !(reader instanceof AsyncLineIterator)) reader.pos = 0
         this.resetAtNextFile = this.opts.separate
       }
       if (!this.openNextFile()) return false
@@ -463,20 +484,37 @@ export class SedMachine {
     this.files = files
   }
 
-  private fileText(name: string): string {
-    const content = this.files.get(name) ?? null
-    if (content === null) return ''
+  private async *fileStream(name: string, content: SedFileContent): AsyncIterable<Uint8Array> {
+    if (content === null) return
     if ('error' in content) throw new SedPanic(content.error)
-    return content.text
+    if ('text' in content) {
+      yield fromByteView(content.text, this.opts.utf8)
+      return
+    }
+    try {
+      yield* chunks(content.read(), this.signal)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      const code = (err as { code?: string }).code
+      if (code !== undefined && READ_FAILURES.has(code)) {
+        throw new SedPanic('sed: read error on ' + name + ': ' + String(fsStrerror(err)) + '\n')
+      }
+      console.debug('sed auxiliary file ' + name + ': ' + String(err))
+    }
   }
 
-  private dumpAppendQueue(): void {
+  private async *dumpAppendQueue(): AsyncGenerator<number> {
     this.main.flushNewline()
     const queue = this.appendQueue
     this.appendQueue = []
     for (const item of queue) {
       if (item.text !== undefined) this.main.raw(item.text)
-      if (item.rfile !== undefined) this.main.raw(this.fileText(item.rfile))
+      if (item.rfile !== undefined) {
+        for await (const part of this.fileStream(item.rfile, this.files.get(item.rfile) ?? null)) {
+          this.main.raw(byteView(part, this.opts.utf8))
+          yield -1
+        }
+      }
     }
   }
 
@@ -491,15 +529,24 @@ export class SedMachine {
     return out
   }
 
-  private readLine(name: string): string | null {
+  private async readLine(name: string): Promise<string | null> {
     let reader = this.readers.get(name)
     if (reader === undefined) {
       const content = this.opts.readerFiles.get(name) ?? null
       if (content !== null && 'error' in content) throw new SedPanic(content.error)
-      reader = content === null ? null : { lines: readerLines(content.text), pos: 0 }
+      reader =
+        content === null
+          ? null
+          : 'read' in content
+            ? new AsyncLineIterator(this.fileStream(name, content))
+            : { lines: readerLines(content.text), pos: 0 }
       this.readers.set(name, reader)
     }
     if (reader === null) return null
+    if (reader instanceof AsyncLineIterator) {
+      const [raw, ended] = await reader.readUntil(10)
+      return raw.length > 0 || ended ? byteView(raw, this.opts.utf8) + (ended ? '\n' : '') : null
+    }
     const line = reader.lines[reader.pos]
     if (line === undefined) return null
     reader.pos += 1
@@ -618,13 +665,13 @@ export class SedMachine {
             throw new SedPanic('sed: INTERNAL ERROR: Bad cmd L\n')
           case 'n':
             if (!this.noDefaultOutput) this.main.line(this.pattern, this.chomped)
-            if (this.appendQueue.length > 0) this.dumpAppendQueue()
+            if (this.appendQueue.length > 0) yield* this.dumpAppendQueue()
             yield -1
             if ((await this.testEof()) || !(await this.readPatternSpace(false))) return
             break
           case 'N':
             this.pattern += '\n'
-            if (this.appendQueue.length > 0) this.dumpAppendQueue()
+            if (this.appendQueue.length > 0) yield* this.dumpAppendQueue()
             yield -1
             if ((await this.testEof()) || !(await this.readPatternSpace(true))) {
               this.pattern = this.pattern.slice(0, -1)
@@ -643,7 +690,7 @@ export class SedMachine {
           }
           case 'q':
             if (!this.noDefaultOutput) this.main.line(this.pattern, this.chomped)
-            this.dumpAppendQueue()
+            yield* this.dumpAppendQueue()
             yield cmd.intArg === undefined || cmd.intArg === -1 ? 0 : cmd.intArg
             return
           case 'Q':
@@ -653,12 +700,18 @@ export class SedMachine {
             if (cmd.fname !== undefined) {
               if (cmd.prepend === true) {
                 this.main.flushNewline()
-                this.main.raw(this.fileText(cmd.fname))
+                for await (const part of this.fileStream(
+                  cmd.fname,
+                  this.files.get(cmd.fname) ?? null,
+                )) {
+                  this.main.raw(byteView(part, this.opts.utf8))
+                  yield -1
+                }
               } else this.appendQueue.push({ rfile: cmd.fname })
             }
             break
           case 'R': {
-            const text = cmd.fname === undefined ? null : this.readLine(cmd.fname)
+            const text = cmd.fname === undefined ? null : await this.readLine(cmd.fname)
             if (text !== null) this.appendQueue.push({ text })
             break
           }

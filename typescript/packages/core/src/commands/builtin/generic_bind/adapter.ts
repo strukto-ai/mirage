@@ -516,11 +516,11 @@ const DISPATCHED_SLOTS = {
   firstLines:
     (dispatch: DispatchFn): CommandIO['firstLines'] =>
     async (_accessor, path, n) =>
-      (await dispatchedCall(dispatch, 'first_lines', path, [n])) as Uint8Array | null,
+      (await dispatchedCall(dispatch, 'first_lines', path, [n])) as ByteSource | null,
   lastLines:
     (dispatch: DispatchFn): CommandIO['lastLines'] =>
     async (_accessor, path, n) =>
-      (await dispatchedCall(dispatch, 'last_lines', path, [n])) as Uint8Array | null,
+      (await dispatchedCall(dispatch, 'last_lines', path, [n])) as ByteSource | null,
   lineCount:
     (dispatch: DispatchFn): CommandIO['lineCount'] =>
     async (_accessor, path) =>

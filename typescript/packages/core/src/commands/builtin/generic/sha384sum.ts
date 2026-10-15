@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sha384Hex } from '../../../utils/hash.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { checksumGeneric, type StoredDigest, type Stream } from './checksum.ts'
+import { checksumGeneric, hashSource, type StoredDigest, type Stream } from './checksum.ts'
 
 export async function sha384sumGeneric(
   paths: PathSpec[],
@@ -24,5 +23,13 @@ export async function sha384sumGeneric(
   stat?: (p: PathSpec) => Promise<unknown>,
   stored?: StoredDigest,
 ): Promise<CommandFnResult> {
-  return checksumGeneric(paths, opts, stream, sha384Hex, 'sha384sum', stat, stored)
+  return checksumGeneric(
+    paths,
+    opts,
+    stream,
+    (source) => hashSource(source, 'sha384'),
+    'sha384sum',
+    stat,
+    stored,
+  )
 }

@@ -475,7 +475,7 @@ export class MainLoop {
     try {
       if (this.opts.nullInput) {
         const [run, position] = await this.run('null', this.reader.position())
-        if (run.outputs.length > 0) yield formatJqOutput(run.outputs, this.opts)
+        for (const value of run.outputs) yield formatJqOutput([value], this.opts)
         this.settle(run, position)
         return
       }
@@ -488,7 +488,7 @@ export class MainLoop {
           return
         }
         const [run, position] = await this.run(item, this.reader.position())
-        if (run.outputs.length > 0) yield formatJqOutput(run.outputs, this.opts)
+        for (const value of run.outputs) yield formatJqOutput([value], this.opts)
         if (this.settle(run, position)) return
       }
     } finally {

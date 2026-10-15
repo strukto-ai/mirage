@@ -19,7 +19,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -79,18 +79,15 @@ async def cat_generic(
     opts: CommandOpts,
     stat: StatFn,
     stream: PolymorphicReadFn,
-    local: bool = True,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run cat over resolved operands, GNU semantics; mirrors catGeneric.
 
     The wiring resolves globs and binds the backend ops; everything else
     lives here so factory builders and bespoke backend commands agree:
     flag parsing, the per-operand report-and-continue split, and the stdin
-    fallback. A single operand (and every operand on a local backend)
-    streams as the consumer reads; multiple operands on a non-local
-    backend are read one by one. Either way a read that fails after its
-    stat keeps what it printed, is reported, and the next operand still
-    prints.
+    fallback. Every operand streams in order as the consumer reads.
+    A read that fails after its stat keeps what it printed, is reported,
+    and the next operand still prints.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -99,7 +96,6 @@ async def cat_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
-        local (bool): Whether backend streams are cheap to re-open.
     """
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, opts.stdin)
@@ -129,24 +125,12 @@ async def cat_generic(
                 )
             return source
 
-        if len(readable) == 1:
-            source: ByteSource = await source_for(readable[0])
-        elif local:
-            source = async_chain(
-                [
-                    reported_stream(await source_for(p), io, p, "cat")
-                    for p in readable
-                ]
-            )
-        else:
-            source = async_chain(
-                [
-                    await materialize(
-                        reported_stream(await source_for(p), io, p, "cat")
-                    )
-                    for p in readable
-                ]
-            )
+        source: ByteSource = async_chain(
+            [
+                reported_stream(await source_for(p), io, p, "cat")
+                for p in readable
+            ]
+        )
         if _wants_display(parsed):
             return display_lines(source, parsed), io
         return source, io

@@ -45,7 +45,7 @@ from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import close_quietly, ensure_stream
+from mirage.io.stream import close_quietly, collect_items, ensure_stream
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import revision_for
 from mirage.runtime.types import DispatchFn
@@ -408,10 +408,22 @@ async def search_reads(
                 for text in terms.texts
             )
         )
-        if all(answer is not None for answer in answers):
+        complete: list[list[PathSpec] | None] = []
+        consumed = 0
+        try:
+            for answer in answers:
+                consumed += 1
+                complete.append(
+                    await collect_items(answer) if answer is not None else None
+                )
+        finally:
+            for answer in answers[consumed:]:
+                if isinstance(answer, AsyncIterator):
+                    await close_quietly(answer)
+        if all(answer is not None for answer in complete):
             hits = {
                 hit.vfs_path.lower()
-                for answer in answers
+                for answer in complete
                 if answer is not None
                 for hit in answer
             }

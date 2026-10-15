@@ -254,6 +254,10 @@ class ResolveGlobOp(Protocol):
     ) -> Awaitable[list[PathSpec]]: ...
 
 
+PathSource = list[PathSpec] | AsyncIterator[PathSpec]
+TreeSource = dict[str, FileStat] | AsyncIterator[tuple[str, FileStat]]
+
+
 class FilesContainingOp(Protocol):
     """Files under ``path`` whose content may contain ``text``; None
     when the search cannot answer for every file."""
@@ -268,7 +272,7 @@ class FilesContainingOp(Protocol):
         whole_word: bool,
         ignore_case: bool,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[list[PathSpec] | None]: ...
+    ) -> Awaitable[PathSource | None]: ...
 
 
 class LinesContainingOp(Protocol):
@@ -299,7 +303,7 @@ class FirstLinesOp(Protocol):
         n: int,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[bytes | None]: ...
+    ) -> Awaitable[ByteSource | None]: ...
 
 
 class LastLinesOp(Protocol):
@@ -313,7 +317,7 @@ class LastLinesOp(Protocol):
         n: int,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[bytes | None]: ...
+    ) -> Awaitable[ByteSource | None]: ...
 
 
 class LineCountOp(Protocol):
@@ -352,7 +356,7 @@ class ReadTreeOp(Protocol):
         path: PathSpec,
         /,
         index: IndexCacheStore = ...,
-    ) -> Awaitable[dict[str, FileStat] | None]: ...
+    ) -> Awaitable[TreeSource | None]: ...
 
 
 class FollowOp(Protocol):

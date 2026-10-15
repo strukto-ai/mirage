@@ -15,6 +15,7 @@
 import asyncio
 import re
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Generator
+from contextlib import aclosing
 from typing import Any
 
 from mirage.commands.quote import quote_text
@@ -39,10 +40,12 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror
 from mirage.io import IOResult
 from mirage.io.cooperative import chunks
-from mirage.io.stream import SharedStdin, materialize, yield_bytes
+from mirage.io.stream import SharedStdin, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.console.pipe import PipeConsole
+from mirage.shell.console.types import Channel
 from mirage.shell.join import shell_join
 from mirage.utils.quote import shell_quote
 from mirage.workspace.evaluation import EvaluationContext
@@ -589,9 +592,22 @@ async def _run_lines(
     taken: set[int] = set()
     feed = SharedStdin(stdin) if stdin is not None else b""
 
-    async def run(words: list[str]) -> IOResult:
+    active: set[asyncio.Task[None]] = set()
+    pipes: set[PipeConsole] = set()
+
+    async def drain(io: IOResult, output: IOResult, pipe: PipeConsole) -> None:
+        async with aclosing(chunks(io.stdout or b"")) as source:
+            async for chunk in source:
+                await pipe.emit(Channel.STDOUT, chunk)
+        await pipe.emit(Channel.STDERR, await io.materialize_stderr())
+        output.stderr = await pipe.snapshot(Channel.STDERR)
+        output.exit_code = io.exit_code
+
+    async def run(
+        words: list[str], output: IOResult, pipe: PipeConsole
+    ) -> None:
         line = shell_join(words)
-        extra = {"stdin": feed}
+        extra = {"stdin": feed, "sink": pipe}
         io: IOResult
         # xargs execs its command, so a builtin that is also a program
         # answers as the program.
@@ -601,11 +617,10 @@ async def _run_lines(
                 io = await execute_fn(
                     line, session_id=session.session_id, **extra
                 )
+                await drain(io, output, pipe)
             finally:
                 reset_program_invocation(marked)
-            await io.materialize_stdout()
-            await io.materialize_stderr()
-            return io
+            return
         slot = next(n for n in range(len(taken) + 1) if n not in taken)
         taken.add(slot)
         child_evaluation = context.fork()
@@ -616,19 +631,19 @@ async def _run_lines(
         marked = set_program_invocation(child)
         try:
             io = await execute_fn(line, session_id=session.session_id, **extra)
-            await io.materialize_stdout()
-            await io.materialize_stderr()
-            return io
+            await drain(io, output, pipe)
         finally:
             reset_program_invocation(marked)
             reset_current_session(token)
             taken.discard(slot)
 
-    async def invoke(event: str | list[bytes]) -> list[IOResult]:
+    async def invoke(
+        event: str | list[bytes],
+    ) -> tuple[list[IOResult], asyncio.Task[None] | None, PipeConsole | None]:
         nonlocal stop
         results: list[IOResult] = []
         if isinstance(event, str):
-            return [IOResult(stderr=encode_text(event))]
+            return [IOResult(stderr=encode_text(event))], None, None
         words = [decode_text(word) for word in event]
         if trace:
             results.append(IOResult(stderr=encode_text(_trace(event))))
@@ -641,21 +656,34 @@ async def _run_lines(
             )
             stop = 127
             stopping.set()
-            return results
-        try:
-            io = await run(words)
-        except BaseException:
-            stop = 1 if stop is None else stop
-            raise
+            return results, None, None
+        pipe = PipeConsole()
+        pipes.add(pipe)
+        io = IOResult(stdout=pipe.stream())
         results.append(io)
-        if io.exit_code == 255 and stop is None:
-            aborted = f"xargs: {words[0]}: exited with status 255; aborting\n"
-            results.append(
-                IOResult(stderr=encode_text(aborted), exit_code=255)
-            )
-            stop = 124
-            stopping.set()
-        return results
+
+        async def produce() -> None:
+            nonlocal stop
+            try:
+                await run(words, io, pipe)
+                if io.exit_code == 255 and stop is None:
+                    aborted = f"xargs: {words[0]}: exited with status 255; aborting\n"
+                    combined = await io.merge(
+                        IOResult(stderr=encode_text(aborted))
+                    )
+                    io.stderr = combined.stderr
+                    stop = 124
+                    stopping.set()
+            except BaseException as exc:
+                stop = 1 if stop is None else stop
+                pipe.end(exc)
+                raise
+            finally:
+                pipe.end()
+
+        task = asyncio.create_task(produce())
+        active.add(task)
+        return results, task, pipe
 
     async def admitted() -> AsyncIterator[str | list[bytes]]:
         stopped = asyncio.create_task(stopping.wait())
@@ -684,10 +712,22 @@ async def _run_lines(
 
     mapped = bounded_map_stream(admitted(), invoke, procs)
     try:
-        async for results in mapped:
+        async for results, task, pipe in mapped:
             yield results, stop
+            if task is not None:
+                await task
+                active.remove(task)
+            if pipe is not None:
+                pipes.remove(pipe)
+            if stop is not None:
+                yield [], stop
     finally:
         await mapped.aclose()
+        for pipe in pipes:
+            pipe.close_reader()
+        for task in active:
+            task.cancel()
+        await asyncio.gather(*active, return_exceptions=True)
         await events.aclose()
 
 
@@ -919,6 +959,16 @@ async def handle_xargs(
     async def output() -> AsyncIterator[bytes]:
         stop = None
         failed = False
+        pending: IOResult | None = None
+
+        async def record(io: IOResult) -> None:
+            nonlocal failed, stop
+            failed = failed or io.exit_code != 0
+            if io.exit_code == 255 and stop is None:
+                stop = 124
+            combined = await merged.merge(IOResult(stderr=io.stderr))
+            merged.stderr = combined.stderr
+
         results = _run_lines(
             execute_fn,
             events(),
@@ -932,14 +982,16 @@ async def handle_xargs(
         try:
             async for ios, stop in results:
                 for io in ios:
-                    failed = failed or io.exit_code != 0
-                    combined = await merged.merge(IOResult(stderr=io.stderr))
-                    merged.stderr = combined.stderr
-                    raw = await materialize(io.stdout)
-                    if raw:
-                        yield raw
+                    pending = io
+                    async with aclosing(chunks(io.stdout or b"")) as source:
+                        async for chunk in source:
+                            yield chunk
+                    await record(io)
+                    pending = None
         finally:
             await results.aclose()
+            if pending is not None:
+                await record(pending)
             # A reader that stops early still sees the runs it reached.
             if stop is not None:
                 merged.exit_code = stop

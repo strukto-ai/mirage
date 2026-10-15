@@ -142,8 +142,8 @@ export class AwkStreams implements AwkHost {
     // fail it in their own words, so the stat goes first to fail it the way
     // a POSIX read does.
     if ((await dispatchStat(dispatch)(path)).type === FileType.DIRECTORY) throw eisdir(path)
-    const [data] = await dispatch('read', path)
-    yield data instanceof Uint8Array ? data : ENC.encode(String(data))
+    const [data] = await dispatch('read', path, [], { stream: true })
+    yield* chunks(data as ByteSource)
   }
 
   /** A `-f` program file: /dev/stdin reads the shared stdin cursor. */

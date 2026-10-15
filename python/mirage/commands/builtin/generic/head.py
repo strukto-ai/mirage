@@ -1,6 +1,7 @@
 import inspect
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -31,6 +32,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
+from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -243,7 +245,7 @@ async def head_generic(
     opts: CommandOpts,
     stat: StatFn,
     stream: PolymorphicReadFn,
-    first_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
+    first_lines: Callable[[PathSpec, int], Awaitable[ByteSource | None]]
     | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run head over resolved operands, GNU semantics; mirrors headGeneric.
@@ -265,7 +267,7 @@ async def head_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
-        first_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]
+        first_lines (Callable[[PathSpec, int], Awaitable[ByteSource | None]]
             | None): the mount's ``first_lines`` called as
             ``first_lines(path, n)``; None, or an answer of None, reads
             the file.
@@ -309,7 +311,11 @@ async def head_generic(
                     if pushed and first_lines is not None and not is_stdin(p):
                         lines = await first_lines(p, n)
                         if lines is not None:
-                            yield lines
+                            async with aclosing(
+                                chunks(lines)
+                            ) as pushed_stream:
+                                async for chunk in pushed_stream:
+                                    yield chunk
                             return
                     async for chunk in source:
                         yield chunk

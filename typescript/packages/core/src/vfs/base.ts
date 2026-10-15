@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSource, TreeSource } from './types.ts'
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { Command } from '../commands/config.ts'
@@ -366,9 +367,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * file read the usual way; rejects with the file's read error otherwise
    * (`EFBIG` when the answer passes a ceiling on one read, such as
    * `max_read_rows`).
+   * Return bytes or async byte chunks. The consumer closes the iterator;
+   * this partial-file answer is never installed as a full cached file.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  firstLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<Uint8Array | null> {
+  firstLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<ByteSource | null> {
     return Promise.reject(enotsup(this.name, 'firstLines', path))
   }
 
@@ -381,9 +384,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * file the read cache holds is read instead. Resolves null to have the file
    * read the usual way; rejects with the file's read error otherwise (`EFBIG`
    * when the answer passes a ceiling on one read).
+   * Return bytes or async byte chunks. The consumer closes the iterator;
+   * this partial-file answer is never installed as a full cached file.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
-  lastLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<Uint8Array | null> {
+  lastLines(path: PathSpec, _n: number, _index?: IndexCacheStore): Promise<ByteSource | null> {
     return Promise.reject(enotsup(this.name, 'lastLines', path))
   }
 
@@ -451,13 +456,15 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * recursive listing, one query over many folders) does not take a
    * `readdir` per directory. The answer stands in for the walk: every file and
    * directory below `path`, keyed by its path below `path` (`a`, `a/b.txt`),
-   * each with the stat `stat` gives for it. The walk lists each directory from it in name order.
+   * Async iterators may yield [key, stat] entries; only successful EOF certifies
+   * completeness. Consumers close failed cursors and collect before sorting.
+   * Each entry has the stat `stat` gives for it. The walk lists each directory from it in name order.
    * Resolve null to have the command walk `readdir` the usual way; reject with
    * what `readdir` of `path` rejects with otherwise. Mirrors Python's
    * `read_tree`.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
-  readTree(path: PathSpec, _index?: IndexCacheStore): Promise<Map<string, FileStat> | null> {
+  readTree(path: PathSpec, _index?: IndexCacheStore): Promise<TreeSource | null> {
     return Promise.reject(enotsup(this.name, 'readTree', path))
   }
 
@@ -636,7 +643,8 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * incomplete (an error, a truncated result, an index that lags writes), and
    * every file is read; reject to refuse the command, and the error's message
    * is what it prints. The dispatcher drops every file the session hides
-   * from the answer.
+   * from the answer. An async iterator may yield candidates; only successful
+   * EOF makes the answer complete enough to exclude files from a scan.
    *
    * @param path a directory walked: one of grep's directory operands under -r
    *   or -R, or of rg's operands or the cwd; asked once per directory.
@@ -657,7 +665,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _text: string,
     _opts: { wholeWord: boolean; ignoreCase: boolean },
     _index?: IndexCacheStore,
-  ): Promise<PathSpec[] | null> {
+  ): Promise<PathSource | null> {
     return Promise.resolve(null)
   }
 

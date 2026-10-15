@@ -26,7 +26,7 @@ import {
 import type { HostRegex } from './utils/types.ts'
 import { UsageError } from '../errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
-import { materialize } from '../../io/types.ts'
+import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { PathSpec } from '../../types.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import { type FlagValue } from '../spec/types.ts'
@@ -93,19 +93,26 @@ export async function resolvePattern(
       (first === undefined ? undefined : mountPrefixOf(first.virtual, first.vfsPath)) ??
       mountPrefix ??
       ''
+    const parts = pattern === null ? [] : pattern.split('\n')
     for (const file of patternFiles) {
       const filePath = file instanceof PathSpec ? file.virtual : file
       const patternSpec = PathSpec.fromStrPath(filePath, mountKey(filePath, prefix))
-      let fileData: Uint8Array
+      const reader = new AsyncLineIterator(stream(patternSpec))
       try {
-        fileData = await materialize(stream(patternSpec))
+        for (;;) {
+          const [line, ended] = await reader.readUntil(0x0a)
+          if (line.length === 0 && !ended) break
+          parts.push(decodeText(line))
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         const shown = file instanceof PathSpec ? file.rawPath : file
         return { pattern: null, neverMatch: false, error: `${name}: ${shown}: ${msg}\n` }
+      } finally {
+        await reader.discard()
       }
-      pattern = mergePatternList(pattern, fileData)
     }
+    pattern = parts.length === 0 ? null : parts.join('\n')
     if (pattern === null) {
       pattern = NEVER_MATCH
       neverMatch = true

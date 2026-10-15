@@ -371,7 +371,7 @@ async def grep_generic(
     # for a pattern.
     f = parse_flags(fl, never_match=False)
     pattern, never_match = await resolve_pattern(
-        texts, fl, read_bytes, GREP_NO_PATTERN
+        texts, fl, operand_stream, GREP_NO_PATTERN
     )
     if never_match:
         f = replace(f, fixed_string=False)

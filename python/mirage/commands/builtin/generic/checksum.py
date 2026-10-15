@@ -1,5 +1,7 @@
+import hashlib
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -29,8 +31,9 @@ from mirage.commands.spec.usage import usage_exit_code, usage_hint
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
+from mirage.io.cooperative import chunks
 from mirage.io.stream import ensure_stream
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
@@ -152,6 +155,20 @@ DigestFactory = Callable[..., Digest]
 StoredDigest = Callable[[PathSpec, str], Awaitable[str | None]]
 
 
+async def hash_source(source: ByteSource, algorithm: str) -> str:
+    """Hash bounded chunks without collecting the source.
+
+    Args:
+        source (ByteSource): bytes or a producer consumed through EOF.
+        algorithm (str): the hashlib algorithm name.
+    """
+    digest = hashlib.new(algorithm)
+    async with aclosing(chunks(source)) as bounded:
+        async for part in bounded:
+            digest.update(part)
+    return digest.hexdigest()
+
+
 def _hash_line(
     digest: str,
     label: str,
@@ -177,28 +194,37 @@ async def _hash_stream(
     zero: bool,
 ) -> AsyncIterator[bytes]:
     h = factory()
-    async for chunk in source:
-        h.update(chunk)
+    async with aclosing(chunks(source)) as data:
+        async for chunk in data:
+            h.update(chunk)
     yield _hash_line(h.hexdigest(), label, algorithm, binary, tag, zero)
 
 
 async def _hash_multi(
     paths: list[PathSpec],
     digests: list[str | None],
-    read_stream: Callable[..., AsyncIterator[bytes]],
+    sources: list[ByteSource],
     factory: DigestFactory,
     algorithm: str,
     binary: bool,
     tag: bool,
     zero: bool,
+    io: IOResult,
 ) -> AsyncIterator[bytes]:
-    for p, digest in zip(paths, digests):
-        if digest is None:
-            h = factory()
-            async for chunk in read_stream(p):
-                h.update(chunk)
-            digest = h.hexdigest()
-        yield _hash_line(digest, p.raw_path, algorithm, binary, tag, zero)
+    for p, digest, source in zip(paths, digests, sources):
+        try:
+            if digest is None:
+                h = factory()
+                async with aclosing(chunks(source)) as data:
+                    async for chunk in data:
+                        h.update(chunk)
+                digest = h.hexdigest()
+            yield _hash_line(digest, p.raw_path, algorithm, binary, tag, zero)
+        except FS_ERRORS as exc:
+            io.stderr = await materialize(io.stderr) + encode_text(
+                fs_error_line(f"{algorithm}sum", p, exc)
+            )
+            io.exit_code = 1
 
 
 _PLAIN_LINE = re.compile(r"^([0-9a-fA-F]+) [ *](.*)$")
@@ -534,9 +560,14 @@ async def checksum(
                 continue
             kept.append(p)
             digests.append(digest)
+        sources = [
+            read_stream(p) if digest is None else b""
+            for p, digest in zip(kept, digests)
+        ]
+        io = IOResult(exit_code=1 if err else 0, stderr=err or None)
         return _hash_multi(
-            kept, digests, read_stream, factory, algorithm, binary, tag, zero
-        ), IOResult(exit_code=1 if err else 0, stderr=err or None)
+            kept, digests, sources, factory, algorithm, binary, tag, zero, io
+        ), io
     source = resolve_source(stdin)
     return _hash_stream(
         source, "-", factory, algorithm, binary, tag, zero

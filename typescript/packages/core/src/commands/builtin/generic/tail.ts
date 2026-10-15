@@ -39,7 +39,8 @@ import { shellQuote } from '../../../utils/quote.ts'
 import { splitOpened } from '../utils/operands.ts'
 import { dispatchStat } from '../utils/paths.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { quoteText } from '../../quote.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
@@ -198,12 +199,119 @@ async function polledWindow(
 // `n` lines without the rest of the file. Mirrors Python's `_read_last`.
 function readLast(
   stream: Stream,
-  lastLines: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
+  lastLines: (p: PathSpec, n: number) => Promise<ByteSource | null>,
   n: number,
-): (p: PathSpec) => Promise<Uint8Array> {
-  return async (p) => {
-    if (isStdin(p)) return materialize(stream(p))
-    return (await lastLines(p, n)) ?? (await materialize(stream(p)))
+): Stream {
+  return (p) => {
+    const source = stream(p)
+    return (async function* (): AsyncIterable<Uint8Array> {
+      try {
+        const answer = isStdin(p) ? null : await lastLines(p, n)
+        yield* chunks(answer ?? source)
+      } finally {
+        await closeQuietly(source)
+      }
+    })()
+  }
+}
+
+async function* tailStream(source: ByteSource, counts: TailCounts): AsyncIterable<Uint8Array> {
+  if (counts.fromByte !== null || counts.fromLine !== null) {
+    let skipBytes = counts.fromByte === null ? 0 : Math.max(0, counts.fromByte - 1)
+    let skipLines = counts.fromLine === null ? 0 : Math.max(0, counts.fromLine - 1)
+    for await (const part of chunks(source)) {
+      let start = Math.min(skipBytes, part.length)
+      skipBytes -= start
+      while (skipLines > 0 && start < part.length) {
+        const next = part.indexOf(10, start)
+        if (next === -1) {
+          start = part.length
+          break
+        }
+        start = next + 1
+        skipLines--
+      }
+      if (start < part.length && skipLines === 0) yield part.subarray(start)
+    }
+    return
+  }
+  if (counts.byteCount !== null) {
+    const count = Math.abs(counts.byteCount)
+    if (count === 0) return
+    const kept: Uint8Array[] = []
+    let held = 0
+    for await (const part of chunks(source)) {
+      kept.push(part.slice(-count))
+      held += Math.min(part.length, count)
+      while (kept[0] !== undefined && held - kept[0].length >= count) {
+        held -= kept[0].length
+        kept.shift()
+      }
+    }
+    if (held > 0) yield concat(kept).slice(-count)
+    return
+  }
+  const count = Math.abs(counts.lines ?? 10)
+  if (count === 0) return
+  const reader = new AsyncLineIterator(source)
+  const kept: Uint8Array[] = []
+  let cursor = 0
+  try {
+    for (;;) {
+      const [line, ended] = await reader.readUntil(10)
+      if (line.length === 0 && !ended) break
+      const data = ended ? concat([line, Uint8Array.of(10)]) : line
+      if (kept.length < count) kept.push(data)
+      else {
+        kept[cursor] = data
+        cursor = (cursor + 1) % count
+      }
+    }
+    yield* kept.slice(cursor)
+    yield* kept.slice(0, cursor)
+  } finally {
+    await reader.discard()
+  }
+}
+
+async function* tailMulti(
+  paths: PathSpec[],
+  sources: AsyncIterable<Uint8Array>[],
+  counts: TailCounts,
+  showHeaders: boolean,
+  io: IOResult,
+): AsyncIterable<Uint8Array> {
+  let printed = 0
+  for (const [i, p] of paths.entries()) {
+    const source = sources[i]
+    if (source === undefined) throw new Error('tail: missing operand source')
+    let pending = showHeaders
+      ? encodeText(
+          (printed > 0 ? '\n' : '') + '==> ' + operandLabel(p, STDIN_HEADER_NAME) + ' <==\n',
+        )
+      : null
+    try {
+      for await (const part of tailStream(source, counts)) {
+        if (pending !== null) {
+          yield pending
+          pending = null
+        }
+        yield part
+      }
+      if (pending !== null) yield pending
+      printed++
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      const code = (err as { code?: string }).code
+      if (pending !== null && code !== undefined && READ_FAILURES.has(code)) {
+        yield pending
+        printed++
+      }
+      note(io, fsErrorLine('tail', p, err))
+      io.exitCode = 1
+    } finally {
+      await closeQuietly(source)
+    }
   }
 }
 
@@ -528,7 +636,7 @@ export async function tailGeneric(
   stream: Stream,
   stat: Stat,
   readRange: ReadRangeFn | null = null,
-  lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
+  lastLines?: (p: PathSpec, n: number) => Promise<ByteSource | null>,
   followOp?: (
     p: PathSpec,
     n: number,
@@ -544,7 +652,7 @@ export async function tailGeneric(
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
   const n = counts.lines ?? 10
   const fromEnd = counts.byteCount === null && counts.fromLine === null && counts.fromByte === null
-  const lastOf = (s: Stream): ((p: PathSpec) => Promise<Uint8Array>) | null =>
+  const lastOf = (s: Stream): Stream | null =>
     lastLines !== undefined && fromEnd && n > 0 ? readLast(s, lastLines, n) : null
   if (
     following.follow &&
@@ -618,54 +726,15 @@ export async function tailGeneric(
     ]
   }
 
+  const io = new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })
   if (paths.length > 0) {
-    const chunks: Uint8Array[] = []
-    const showHeaders = (vFlag || paths.length > 1) && !qFlag
-    const read = lastOf(stream) ?? ((p: PathSpec) => materialize(stream(p)))
-    let err = ''
-    let printed = 0
-    for (const p of paths) {
-      let raw: Uint8Array
-      try {
-        raw = await read(p)
-      } catch (e) {
-        if (!isFsError(e)) throw e
-        err += fsErrorLine('tail', p, e)
-        // A directory opens before its read fails, so GNU still heads it.
-        const code = (e as { code?: string }).code
-        if (showHeaders && code !== undefined && READ_FAILURES.has(code)) {
-          const label = operandLabel(p, STDIN_HEADER_NAME)
-          chunks.push(encodeText(`${printed > 0 ? '\n' : ''}==> ${label} <==\n`))
-          printed += 1
-        }
-        continue
-      }
-      if (showHeaders) {
-        // Separator keyed on printed blocks, not operand index: a good file
-        // after a failed operand starts without a leading blank line (GNU).
-        const header =
-          printed > 0
-            ? `\n==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`
-            : `==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`
-        chunks.push(encodeText(header))
-      }
-      printed += 1
-      chunks.push(tailBytes(raw, counts))
-    }
-    const io = new IOResult({
-      exitCode: err === '' ? 0 : 1,
-      stderr: retryWarning + err === '' ? null : encodeText(retryWarning + err),
-    })
-    if (printed === 0 && err !== '') return [null, io]
-    const out: ByteSource = concat(chunks)
-    return [out, io]
+    const read = lastOf(stream) ?? stream
+    const sources = paths.map((p) => read(p))
+    return [tailMulti(paths, sources, counts, (vFlag || paths.length > 1) && !qFlag, io), io]
   }
-  const raw = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
-  const body = tailBytes(raw, counts)
-  // -v heads a stdin nobody named with the name it gives `-`.
-  const header = encodeText(`==> ${STDIN_HEADER_NAME} <==\n`)
-  return [
-    vFlag && !qFlag ? concat([header, body]) : body,
-    new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) }),
-  ]
+  async function* output(): AsyncIterable<Uint8Array> {
+    if (vFlag && !qFlag) yield encodeText('==> ' + STDIN_HEADER_NAME + ' <==\n')
+    yield* tailStream(opts.stdin ?? new Uint8Array(), counts)
+  }
+  return [output(), io]
 }

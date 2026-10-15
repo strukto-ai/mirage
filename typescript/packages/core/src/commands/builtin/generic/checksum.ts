@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import Hash from 'sha.js'
+import { Md5, Sha1 } from '../../../utils/hash.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -27,13 +30,14 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { STDIN_HEADER_NAME, STDIN_OPERAND } from '../utils/constants.ts'
 import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
-import { operandsIo } from '../utils/operands.ts'
+import { closeQuietly } from '../../../io/stream.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
 export type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-export type Hasher = (bytes: Uint8Array) => Promise<string>
+export type Hasher = (source: ByteSource) => Promise<string>
 // The mount's stored digest of a file for an algorithm, or null to read it.
 export type StoredDigest = (p: PathSpec, algorithm: string) => Promise<string | null>
 
@@ -49,8 +53,19 @@ interface ChecksumFlags {
   readonly warn: boolean
 }
 
+export async function hashSource(source: ByteSource, algorithm: string): Promise<string> {
+  if (algorithm === 'md5' || algorithm === 'sha1') {
+    const hash = algorithm === 'md5' ? new Md5() : new Sha1()
+    for await (const part of chunks(source)) hash.update(part)
+    return hash.digest()
+  }
+  const hash = Hash(algorithm as 'sha256' | 'sha384' | 'sha512')
+  for await (const part of chunks(source)) hash.update(part)
+  return hash.digest('hex')
+}
+
 async function hashStream(source: AsyncIterable<Uint8Array>, hasher: Hasher): Promise<string> {
-  return hasher(await materialize(source))
+  return hasher(source)
 }
 
 async function* singleStream(
@@ -340,29 +355,47 @@ export async function checksumGeneric(
     ]
   }
   if (paths.length > 0) {
-    // A missing operand is reported and skipped; the good hashes still
-    // print (GNU coreutils checksum commands).
     const algorithm = name.slice(0, -3)
-    let body = ''
-    let err = ''
+    const io = new IOResult()
+    const sources: (AsyncIterable<Uint8Array> | null)[] = []
+    const digests: (string | null)[] = []
     for (const p of paths) {
+      let digest: string | null = null
       try {
-        let digest: string | null = null
         if (stat !== undefined && stored !== undefined && !isStdin(p)) {
           await stat(p)
           digest = await stored(p, algorithm)
         }
-        digest ??= await hasher(await materialize(stream(p)))
-        body += hashLine(digest, p.rawPath, name, parsed)
-      } catch (e) {
-        if (!isFsError(e)) throw e
-        err += fsErrorLine(name, p, e)
+        sources.push(digest === null ? stream(p) : null)
+        digests.push(digest)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        io.stderr = concat([await materialize(io.stderr), ENC.encode(fsErrorLine(name, p, err))])
+        io.exitCode = 1
+        sources.push(null)
+        digests.push(null)
       }
     }
-    const io = operandsIo(err)
-    if (body === '' && err !== '') return [null, io]
-    const result: ByteSource = ENC.encode(body)
-    return [result, io]
+    async function* output(): AsyncIterable<Uint8Array> {
+      for (const [i, p] of paths.entries()) {
+        const source = sources[i]
+        try {
+          let digest = digests[i] ?? null
+          if (digest === null) {
+            if (source == null) continue
+            digest = await hasher(source)
+          }
+          yield ENC.encode(hashLine(digest, p.rawPath, name, parsed))
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          io.stderr = concat([await materialize(io.stderr), ENC.encode(fsErrorLine(name, p, err))])
+          io.exitCode = 1
+        } finally {
+          if (source != null) await closeQuietly(source)
+        }
+      }
+    }
+    return [output(), io]
   }
   const source: AsyncIterable<Uint8Array> = resolveSource(opts.stdin)
   return [singleStream(source, '-', hasher, name, parsed), new IOResult()]

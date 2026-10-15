@@ -61,14 +61,14 @@ export async function drain(stream: ByteSource | null): Promise<void> {
   }
 }
 
-export async function closeQuietly(stream: ByteSource | null): Promise<void> {
+export async function closeQuietly<T>(stream: Uint8Array | AsyncIterable<T> | null): Promise<void> {
   if (stream === null || stream instanceof Uint8Array) return
   const closer = (stream as { return?: () => Promise<unknown> }).return
   if (typeof closer !== 'function') return
   try {
     await closer.call(stream)
-  } catch {
-    // best-effort
+  } catch (err) {
+    console.debug('stream closer failed:', err)
   }
 }
 
@@ -128,4 +128,20 @@ export async function* yieldBytes(data: Uint8Array): AsyncIterable<Uint8Array> {
  */
 export function ensureStream(src: ByteSource): AsyncIterable<Uint8Array> {
   return src instanceof Uint8Array ? yieldBytes(src) : src
+}
+
+/** Collect a complete typed answer; async iterator cleanup also runs on failure. */
+export async function collectItems<T>(source: Iterable<T> | AsyncIterable<T>): Promise<T[]> {
+  if (!(Symbol.asyncIterator in source)) return Array.from(source)
+  const iterator = source[Symbol.asyncIterator]()
+  const result: T[] = []
+  try {
+    for (;;) {
+      const item = await iterator.next()
+      if (item.done === true) return result
+      result.push(item.value)
+    }
+  } finally {
+    await iterator.return?.()
+  }
 }

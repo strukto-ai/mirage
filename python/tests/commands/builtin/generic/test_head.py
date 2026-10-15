@@ -222,3 +222,33 @@ async def test_head_reports_a_failed_operand_and_prints_the_next():
     assert await materialize(io.stderr) == (
         b"head: error reading '/big': File too large\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_first_lines_accepts_chunks_and_closes_on_abandon():
+    closed = []
+
+    async def source():
+        try:
+            yield b"a\n"
+            yield b"b\n"
+            raise AssertionError("unused shortcut tail was read")
+        finally:
+            closed.append(True)
+
+    async def first_lines(path, n):
+        return source()
+
+    reads = []
+    out, _ = await head_generic(
+        [PathSpec.from_str_path("/t")],
+        [],
+        CommandOpts(flags={"lines": "2"}),
+        _file_stat,
+        _counted_reads(b"unused", reads),
+        first_lines,
+    )
+    assert await anext(out) == b"a\n"
+    await out.aclose()
+    assert closed == [True]
+    assert reads == []

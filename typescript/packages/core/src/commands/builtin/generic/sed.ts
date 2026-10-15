@@ -24,7 +24,8 @@ import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readFailExitCode } from '../../spec/usage.ts'
 import { ensureStream } from '../../../io/stream.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { SED_MISSING_SCRIPT, SED_NO_INPUT_EXIT, SED_NO_INPUT_FILES } from '../constants.ts'
@@ -52,6 +53,7 @@ type Write = (p: PathSpec, data: Uint8Array) => Promise<void>
 interface ScriptFiles {
   virtual(name: string): string
   read(name: string): Promise<Uint8Array>
+  stream(name: string): AsyncIterable<Uint8Array>
   write(name: string, data: Uint8Array): Promise<void>
 }
 
@@ -79,6 +81,16 @@ function scriptFiles(opts: CommandOpts, stream: Stream, write: Write): ScriptFil
       if ((await dispatchStat(dispatch)(path)).type === FileType.DIRECTORY) throw eisdir(path)
       const [data] = await dispatch('read', path)
       return data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBufferLike)
+    },
+    async *stream(name) {
+      const path = spec(name)
+      if (dispatch === undefined) {
+        yield* stream(path)
+        return
+      }
+      if ((await dispatchStat(dispatch)(path)).type === FileType.DIRECTORY) throw eisdir(path)
+      const [data] = await dispatch('read', path, [], { stream: true })
+      yield* chunks(data as ByteSource)
     },
     async write(name, data) {
       if (dispatch === undefined) {
@@ -134,9 +146,14 @@ async function readScriptFiles(
   names: readonly string[],
   access: ScriptFiles,
   utf8: boolean,
+  streamed = false,
 ): Promise<Map<string, SedFileContent>> {
   const files = new Map<string, SedFileContent>()
   for (const name of names) {
+    if (streamed) {
+      files.set(name, { read: () => access.stream(name) })
+      continue
+    }
     try {
       files.set(name, { text: byteView(await access.read(name), utf8) })
     } catch (err) {
@@ -289,8 +306,13 @@ export async function sedGeneric(
     suppress: parsed.suppress,
     separate: inPlace || parsed.separate,
     lineLength: parsed.lineLength,
-    files: await readScriptFiles(program.rfiles, access, utf8),
-    readerFiles: await readScriptFiles(program.readerFiles, access, utf8),
+    files: await readScriptFiles(program.rfiles, access, utf8, !parsed.inPlace),
+    readerFiles: await readScriptFiles(
+      program.readerFiles,
+      access,
+      utf8,
+      !(parsed.inPlace || parsed.separate),
+    ),
     utf8,
   })
 

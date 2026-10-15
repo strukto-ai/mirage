@@ -1,9 +1,9 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
-import { resolveSource } from '../utils/stream.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { quoteText } from '../../quote.ts'
 
 const ENC = new TextEncoder()
@@ -212,15 +212,7 @@ function convertLine(line: string, toMode: string, fromMode: string, suffix: str
   return lead + convertField(field, toMode, fromMode, suffix) + rest
 }
 
-function splitLinesNoEnds(text: string): string[] {
-  const stripped = text.endsWith('\n') ? text.slice(0, -1) : text
-  return stripped === '' ? [] : stripped.split('\n')
-}
-
-export async function numfmtGeneric(
-  texts: readonly string[],
-  opts: CommandOpts,
-): Promise<CommandFnResult> {
+export function numfmtGeneric(texts: readonly string[], opts: CommandOpts): CommandFnResult {
   const fl = new FlagView(opts.flags, specOf('numfmt'))
   const toMode = fl.asStr('to') ?? 'none'
   const fromMode = fl.asStr('from') ?? 'none'
@@ -236,22 +228,24 @@ export async function numfmtGeneric(
       }),
     ]
   }
-  const [fields, convert] =
-    texts.length > 0
-      ? [texts, convertField]
-      : [splitLinesNoEnds(DEC.decode(await materialize(resolveSource(opts.stdin)))), convertLine]
-  let printed = ''
-  for (const value of fields) {
+  const io = new IOResult()
+  async function* output(): AsyncIterable<Uint8Array> {
+    const reader = new AsyncLineIterator(opts.stdin ?? new Uint8Array())
     try {
-      printed += convert(value, toMode, fromMode, suffix)
+      if (texts.length > 0) {
+        for (const value of texts)
+          yield ENC.encode(convertField(value, toMode, fromMode, suffix) + '\n')
+      } else {
+        for await (const raw of reader)
+          yield ENC.encode(convertLine(DEC.decode(raw), toMode, fromMode, suffix) + '\n')
+      }
     } catch (err) {
       if (!(err instanceof UsageError)) throw err
-      // GNU aborts at the first invalid number, after printing the ones
-      // before it.
-      const out = printed === '' ? null : ENC.encode(printed)
-      return [out, new IOResult({ exitCode: err.exitCode, stderr: ENC.encode(`${err.message}\n`) })]
+      io.exitCode = err.exitCode
+      io.stderr = ENC.encode(err.message + '\n')
+    } finally {
+      await reader.discard()
     }
-    printed += '\n'
   }
-  return [ENC.encode(printed), new IOResult()]
+  return [output(), io]
 }

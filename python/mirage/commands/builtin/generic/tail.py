@@ -3,6 +3,7 @@ import functools
 import inspect
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -33,6 +34,8 @@ from mirage.commands.spec.usage import argmatch_error
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
+from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
@@ -169,81 +172,82 @@ async def tail(
     from_line: int | None = None,
     from_byte: int | None = None,
 ) -> AsyncIterator[bytes]:
-    if from_byte is not None:
-        # GNU counts `-c +N` from byte N, 1-indexed, so +0 and +1 both mean
-        # the whole file.
-        skip = max(0, from_byte - 1)
-        skipped = 0
-        async for chunk in ensure_stream(src):
-            if skipped >= skip:
-                yield chunk
-                continue
-            remaining = skip - skipped
-            if len(chunk) <= remaining:
-                skipped += len(chunk)
-                continue
-            yield chunk[remaining:]
-            skipped = skip
-        return
-
-    if from_line is not None:
-        start = max(1, from_line)
-        skip = start - 1
-        if skip == 0:
-            async for chunk in ensure_stream(src):
-                yield chunk
+    async with aclosing(chunks(src)) as source:
+        if from_byte is not None:
+            # GNU counts `-c +N` from byte N, 1-indexed, so +0 and +1 both mean
+            # the whole file.
+            skip = max(0, from_byte - 1)
+            skipped = 0
+            async for chunk in source:
+                if skipped >= skip:
+                    yield chunk
+                    continue
+                remaining = skip - skipped
+                if len(chunk) <= remaining:
+                    skipped += len(chunk)
+                    continue
+                yield chunk[remaining:]
+                skipped = skip
             return
-        skipped = 0
-        emitting = False
-        async for chunk in ensure_stream(src):
-            if emitting:
-                yield chunk
-                continue
-            count = chunk.count(b"\n")
-            if skipped + count < skip:
-                skipped += count
-                continue
-            i = 0
-            for _ in range(skip - skipped):
-                j = chunk.find(b"\n", i)
-                i = j + 1
-            skipped = skip
-            emitting = True
-            if i < len(chunk):
-                yield chunk[i:]
-        return
 
-    if c is not None:
-        target_c = abs(c)
-        if target_c == 0:
+        if from_line is not None:
+            start = max(1, from_line)
+            skip = start - 1
+            if skip == 0:
+                async for chunk in source:
+                    yield chunk
+                return
+            skipped = 0
+            emitting = False
+            async for chunk in source:
+                if emitting:
+                    yield chunk
+                    continue
+                count = chunk.count(b"\n")
+                if skipped + count < skip:
+                    skipped += count
+                    continue
+                i = 0
+                for _ in range(skip - skipped):
+                    j = chunk.find(b"\n", i)
+                    i = j + 1
+                skipped = skip
+                emitting = True
+                if i < len(chunk):
+                    yield chunk[i:]
             return
-        kept: deque[bytes] = deque()
-        held = 0
-        async for chunk in ensure_stream(src):
-            kept.append(chunk)
-            held += len(chunk)
-            while held - len(kept[0]) >= target_c:
-                held -= len(kept.popleft())
-        if held:
-            yield b"".join(kept)[-target_c:]
-        return
 
-    target = abs(n) if n is not None else 10
-    if target == 0:
-        return
+        if c is not None:
+            target_c = abs(c)
+            if target_c == 0:
+                return
+            kept: deque[bytes] = deque()
+            held = 0
+            async for chunk in source:
+                kept.append(chunk)
+                held += len(chunk)
+                while held - len(kept[0]) >= target_c:
+                    held -= len(kept.popleft())
+            if held:
+                yield b"".join(kept)[-target_c:]
+            return
 
-    recent: deque[bytes] = deque(maxlen=target)
-    buf = b""
-    async for chunk in ensure_stream(src):
-        buf += chunk
-        while b"\n" in buf:
-            line, buf = buf.split(b"\n", 1)
-            recent.append(line + b"\n")
-    if buf:
-        recent.append(buf)
+        target = abs(n) if n is not None else 10
+        if target == 0:
+            return
 
-    for line in recent:
-        yield line
+        recent: deque[bytes] = deque(maxlen=target)
+        reader = AsyncLineIterator(source)
+        try:
+            while True:
+                line, ended = await reader.read_until(b"\n")
+                if not line and not ended:
+                    break
+                recent.append(line + (b"\n" if ended else b""))
+            for line in recent:
+                yield line
+        finally:
+            await reader.discard()
 
 
 def tail_multi(
@@ -416,7 +420,7 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
 
 def _read_last(
     read: Callable[..., Any],
-    last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]],
+    last_lines: Callable[[PathSpec, int], Awaitable[ByteSource | None]],
     n: int,
 ) -> Callable[[PathSpec], Awaitable[Any]]:
     """``read``, answered by the mount's ``last_lines(path, n)`` where it
@@ -425,7 +429,7 @@ def _read_last(
     Args:
         read (Callable[..., Any]): bound whole-file reader, for a file
             the mount does not answer and for standard input.
-        last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]):
+        last_lines (Callable[[PathSpec, int], Awaitable[ByteSource | None]]):
             the mount's ``last_lines``.
         n (int): the line count, at least 1.
     """
@@ -827,7 +831,7 @@ async def tail_generic(
     stat: StatFn,
     stream: PolymorphicReadFn,
     read_range: ReadRangeFn | None = None,
-    last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
+    last_lines: Callable[[PathSpec, int], Awaitable[ByteSource | None]]
     | None = None,
     follow: Callable[
         [PathSpec, int, float], Awaitable[AsyncIterator[bytes] | None]
@@ -854,7 +858,7 @@ async def tail_generic(
         read_range (ReadRangeFn | None): Bound byte-window reader
             called as ``read_range(path, offset, size)``, for a follow
             that only wants what the file gained; None reads whole.
-        last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]
+        last_lines (Callable[[PathSpec, int], Awaitable[ByteSource | None]]
             | None): the mount's ``last_lines`` called as
             ``last_lines(path, n)``; None, or an answer of None, reads
             the file.

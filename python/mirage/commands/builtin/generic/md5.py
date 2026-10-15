@@ -1,18 +1,16 @@
-import hashlib
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator
 
-from mirage.commands.builtin.generic.checksum import StoredDigest
+from mirage.commands.builtin.generic.checksum import StoredDigest, hash_source
 from mirage.commands.builtin.utils.operands import (
-    materialized_read,
     merge_split_errors,
+    normalized_read,
     split_readable,
 )
-from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.builtin.utils.stream import is_stdin, read_stdin_async
+from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.config import CommandOpts
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -20,7 +18,7 @@ from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 async def md5(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     stored: StoredDigest | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -28,36 +26,48 @@ async def md5(
 
     Args:
         paths (list[PathSpec]): the operands.
-        read_bytes (Callable): bound whole reader.
+        read_stream (PolymorphicReadFn): bound reader.
         stdin (ByteSource | None): the line's input.
         stored (StoredDigest | None): the mount's stored digest, asked
             before an operand is read.
     """
-    if not paths:
-        data = await read_stdin_async(stdin) or b""
-        digest = hashlib.md5(data).hexdigest()
-        return f"{digest}  -\n".encode(), IOResult()
-    outputs: list[str] = []
-    err = b""
+    io = IOResult()
+    read = normalized_read(read_stream)
+    sources: list[tuple[PathSpec, str | None, ByteSource]] = []
     for p in paths:
         try:
-            found = (
+            digest = (
                 await stored(p, "md5")
                 if stored is not None and not is_stdin(p)
                 else None
             )
+            sources.append((p, digest, read(p) if digest is None else b""))
         except FS_ERRORS as exc:
-            err += encode_text(fs_error_line("md5", p, exc))
-            continue
-        digest = (
-            found
-            if found is not None
-            else hashlib.md5(await read_bytes(p)).hexdigest()
-        )
-        outputs.append(f"{digest}  {p.raw_path}")
-    return format_records(outputs), IOResult(
-        exit_code=1 if err else 0, stderr=err or None
-    )
+            io.stderr = await materialize(io.stderr) + encode_text(
+                fs_error_line("md5", p, exc)
+            )
+            io.exit_code = 1
+
+    async def output() -> AsyncIterator[bytes]:
+        if not paths:
+            digest = await hash_source(resolve_source(stdin), "md5")
+            yield f"{digest}  -\n".encode()
+            return
+        for p, cached_digest, source in sources:
+            try:
+                digest = (
+                    cached_digest
+                    if cached_digest is not None
+                    else await hash_source(source, "md5")
+                )
+                yield f"{digest}  {p.raw_path}\n".encode()
+            except FS_ERRORS as exc:
+                io.stderr = await materialize(io.stderr) + encode_text(
+                    fs_error_line("md5", p, exc)
+                )
+                io.exit_code = 1
+
+    return output(), io
 
 
 async def md5_generic(
@@ -85,7 +95,7 @@ async def md5_generic(
     return await merge_split_errors(
         await md5(
             readable,
-            read_bytes=materialized_read(stream),
+            read_stream=stream,
             stdin=opts.stdin,
             stored=stored,
         ),

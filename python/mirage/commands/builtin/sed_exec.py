@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import re
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass, field
 
 from mirage.commands.builtin.sed_script import (
@@ -27,10 +29,11 @@ from mirage.commands.builtin.sed_script import (
 )
 from mirage.commands.builtin.utils.stream import never_opened
 from mirage.commands.spec.usage import read_fail_exit_code
-from mirage.errors.constants import FS_ERRORS
+from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
 from mirage.shell.bytes import byte_view, from_byte_view, text_view
@@ -133,9 +136,16 @@ class SedFileError:
     error: str
 
 
+@dataclass(frozen=True)
+class SedFileSource:
+    """A lazily opened auxiliary file."""
+
+    read: Callable[[], AsyncIterator[bytes]]
+
+
 # A file `r` or `R` names: None when it could not be opened (GNU reads
 # that as empty).
-SedFileContent = SedFileText | SedFileError | None
+SedFileContent = SedFileText | SedFileError | SedFileSource | None
 
 
 @dataclass(frozen=True)
@@ -315,7 +325,7 @@ class SedMachine:
         self.panic_code: int | None = None
         self.bad_code = 0
         self._compiled: dict[tuple[SedRegex, bool], re.Pattern[str]] = {}
-        self._readers: dict[str, _Reader | None] = {}
+        self._readers: dict[str, _Reader | AsyncLineIterator | None] = {}
         self._range_state = [_RANGE_INACTIVE] * len(program.commands)
         self._a2_number = [0] * len(program.commands)
         self._special_out = SedOutput(self.stdout.chunks)
@@ -374,25 +384,34 @@ class SedMachine:
         try:
             while not self.stopped():
                 if self._append_queue:
-                    self._dump_append_queue()
+                    async with aclosing(self._dump_append_queue()) as steps:
+                        async for _ in steps:
+                            if out.chunks:
+                                chunk = "".join(out.chunks)
+                                out.chunks.clear()
+                                yield chunk
                 if out.chunks:
                     chunk = "".join(out.chunks)
                     out.chunks.clear()
                     yield chunk
                 if not await self._read_pattern_space(False):
                     break
-                async for status in self._execute_program():
-                    if status != -1:
-                        self.quit_code = status
-                    if out.chunks:
-                        yield "".join(out.chunks)
-                        out.chunks.clear()
+                async with aclosing(self._execute_program()) as steps:
+                    async for status in steps:
+                        if status != -1:
+                            self.quit_code = status
+                        if out.chunks:
+                            yield "".join(out.chunks)
+                            out.chunks.clear()
         except SedPanic as exc:
             self.panic_code = exc.code
             self.stderr_lines.append(exc.message)
         finally:
             if self._reader is not None:
                 await self._reader.discard()
+            for reader in self._readers.values():
+                if isinstance(reader, AsyncLineIterator):
+                    await reader.discard()
         if out.chunks:
             yield "".join(out.chunks)
             out.chunks.clear()
@@ -476,7 +495,7 @@ class SedMachine:
                 self._hold = ""
                 self._reset_addresses()
                 for reader in self._readers.values():
-                    if reader is not None:
+                    if isinstance(reader, _Reader):
                         reader.pos = 0
                 self._reset_at_next_file = self.opts.separate
             if not self._open_next_file():
@@ -597,22 +616,42 @@ class SedMachine:
         """
         self._files = files
 
-    def _file_text(self, name: str) -> str:
-        content = self._files.get(name)
-        if content is None:
-            return ""
+    async def _file_stream(
+        self, name: str, content: SedFileContent
+    ) -> AsyncGenerator[bytes, None]:
         if isinstance(content, SedFileError):
             raise SedPanic(content.error)
-        return content.text
+        if content is None:
+            return
+        if isinstance(content, SedFileText):
+            yield from_byte_view(content.text, self.opts.utf8)
+            return
+        try:
+            async with aclosing(chunks(content.read())) as source:
+                async for part in source:
+                    yield part
+        except READ_FAILURES as exc:
+            raise SedPanic(
+                f"sed: read error on {name}: {fs_strerror(exc)}\n"
+            ) from exc
+        except FS_ERRORS as exc:
+            logging.getLogger(__name__).debug(
+                "sed auxiliary file %s: %s", name, exc
+            )
 
-    def _dump_append_queue(self) -> None:
+    async def _dump_append_queue(self) -> AsyncGenerator[int, None]:
         self._main.flush_newline()
         queue = self._append_queue
         self._append_queue = []
         for text, rfile in queue:
             self._main.raw(text)
             if rfile is not None:
-                self._main.raw(self._file_text(rfile))
+                async with aclosing(
+                    self._file_stream(rfile, self._files.get(rfile))
+                ) as source:
+                    async for part in source:
+                        self._main.raw(byte_view(part, self.opts.utf8))
+                        yield -1
 
     def _output_for(self, name: str) -> SedOutput:
         if name == SED_STDOUT:
@@ -621,17 +660,26 @@ class SedMachine:
             return self._special_err
         return self.wfiles.setdefault(name, SedOutput())
 
-    def _read_line(self, name: str) -> str | None:
+    async def _read_line(self, name: str) -> str | None:
         if name not in self._readers:
             content = self.opts.reader_files.get(name)
             if isinstance(content, SedFileError):
                 raise SedPanic(content.error)
             self._readers[name] = (
-                None
+                AsyncLineIterator(self._file_stream(name, content))
+                if isinstance(content, SedFileSource)
+                else None
                 if content is None
                 else _Reader(_reader_lines(content.text))
             )
         reader = self._readers[name]
+        if isinstance(reader, AsyncLineIterator):
+            raw, ended = await reader.read_until(b"\n")
+            return (
+                byte_view(raw, self.opts.utf8) + ("\n" if ended else "")
+                if raw or ended
+                else None
+            )
         if reader is None or reader.pos >= len(reader.lines):
             return None
         line = reader.lines[reader.pos]
@@ -675,7 +723,7 @@ class SedMachine:
         table = dict(zip(cmd.y_src, cmd.y_dst))
         self._pattern = "".join(table.get(ch, ch) for ch in self._pattern)
 
-    async def _execute_program(self) -> AsyncIterator[int]:
+    async def _execute_program(self) -> AsyncGenerator[int, None]:
         """One cycle of the script.
 
         Yields -1 wherever the output so far may go out (before each
@@ -739,7 +787,9 @@ class SedMachine:
                 if not self.no_default_output:
                     self._main.line(self._pattern, self._chomped)
                 if self._append_queue:
-                    self._dump_append_queue()
+                    async with aclosing(self._dump_append_queue()) as steps:
+                        async for status in steps:
+                            yield status
                 yield -1
                 if (
                     await self._test_eof()
@@ -749,7 +799,9 @@ class SedMachine:
             elif c == "N":
                 self._pattern += "\n"
                 if self._append_queue:
-                    self._dump_append_queue()
+                    async with aclosing(self._dump_append_queue()) as steps:
+                        async for status in steps:
+                            yield status
                 yield -1
                 if (
                     await self._test_eof()
@@ -770,7 +822,9 @@ class SedMachine:
             elif c == "q":
                 if not self.no_default_output:
                     self._main.line(self._pattern, self._chomped)
-                self._dump_append_queue()
+                async with aclosing(self._dump_append_queue()) as steps:
+                    async for status in steps:
+                        yield status
                 yield 0 if cmd.int_arg == -1 else cmd.int_arg
                 return
             elif c == "Q":
@@ -779,11 +833,18 @@ class SedMachine:
             elif c == "r":
                 if cmd.prepend:
                     self._main.flush_newline()
-                    self._main.raw(self._file_text(cmd.fname))
+                    async with aclosing(
+                        self._file_stream(
+                            cmd.fname, self._files.get(cmd.fname)
+                        )
+                    ) as source:
+                        async for part in source:
+                            self._main.raw(byte_view(part, self.opts.utf8))
+                            yield -1
                 else:
                     self._append_queue.append(("", cmd.fname))
             elif c == "R":
-                text = self._read_line(cmd.fname)
+                text = await self._read_line(cmd.fname)
                 if text is not None:
                     self._append_queue.append((text, None))
             elif c == "s":

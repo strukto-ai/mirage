@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { collectItems } from '../../../io/stream.ts'
+import type { TreeSource } from '../../../vfs/types.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { classify } from '../../../errors/classify.ts'
 import { isFsError } from '../../../errors/fs.ts'
@@ -24,7 +26,7 @@ import { UsageError } from '../../errors.ts'
 // The conditions under which a guard's path reaches no directory to scan.
 const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'ELOOP'])
 
-export type ReadTree = (path: PathSpec) => Promise<Map<string, FileStat> | null>
+export type ReadTree = (path: PathSpec) => Promise<TreeSource | null>
 
 export type WalkCall<R> = (path: PathSpec, index?: IndexCacheStore) => Promise<R>
 
@@ -132,7 +134,7 @@ export function treeWalk<D, S>(
     let hit = answerable(path) ? covering(virtual) : null
     if (hit === null && !asked.has(virtual) && path.pattern === null) {
       asked.add(virtual)
-      let found: Map<string, FileStat> | null
+      let found: TreeSource | null
       try {
         found = await readTree(path)
       } catch (err) {
@@ -140,7 +142,7 @@ export function treeWalk<D, S>(
         found = null
       }
       if (found !== null) {
-        const copy = new Map(found)
+        const copy = new Map(await collectItems(found))
         roots.set(virtual, [copy, listings(copy)])
         hit = [virtual, '']
       }

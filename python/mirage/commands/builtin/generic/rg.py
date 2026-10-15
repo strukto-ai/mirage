@@ -74,6 +74,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.concurrency.worker import Worker
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import walk_refusal
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import decode_text, encode_text
@@ -1233,7 +1234,7 @@ async def rg_generic(
         pattern, never_match = await resolve_pattern(
             texts,
             fl,
-            read_bytes,
+            operand_stream,
             RG_NO_PATTERN,
         )
         pat = rg_matcher(pattern, never_match, f)
@@ -1295,13 +1296,15 @@ async def rg_generic(
     ):
         listed = [h async for h in found]
         found = _replay(sort_haystacks(listed, f))
+    io = IOResult()
     if f.list_files:
-        out, io = await _list_files(found, f, warnings)
+        out = _list_files(found, f, warnings, io)
     else:
         assert pat is not None
-        worker = Worker()
-        try:
-            out, io = await _search_all(
+
+        async def output() -> AsyncIterator[bytes]:
+            worker = Worker()
+            source = _search_all(
                 worker,
                 found,
                 paths,
@@ -1313,10 +1316,18 @@ async def rg_generic(
                 warnings,
                 implicit,
                 cwd,
+                io,
                 opts.shell,
             )
-        finally:
-            await worker.close()
+            try:
+                async for chunk in source:
+                    yield chunk
+            finally:
+                await close_quietly(source)
+                await close_quietly(found)
+                await worker.close()
+
+        out = output()
     return await _noted((out, io), notes, f)
 
 
@@ -1656,26 +1667,26 @@ async def haystacks(
 
 
 async def _list_files(
-    found: AsyncIterator[Haystack], f: RgFlags, warnings: list[str]
-) -> tuple[bytes, IOResult]:
-    """--files: every path the search would read, and nothing searched.
-
-    Args:
-        found (AsyncIterator[Haystack]): the haystacks.
-        f (RgFlags): the parsed flags.
-        warnings (list[str]): what could not be read.
-    """
+    found: AsyncIterator[Haystack],
+    f: RgFlags,
+    warnings: list[str],
+    io: IOResult,
+) -> AsyncIterator[bytes]:
     term = b"\0" if f.null else b"\n"
-    out: list[bytes] = []
-    async for h in found:
-        out.append(encode_text(printed_path(h.shown, f)) + term)
-        if f.quiet:
-            break
-    code = exit_code_for(bool(out), bool(warnings), f.quiet)
-    stderr = None if f.no_messages else format_optional_records(warnings)
-    return b"" if f.quiet else b"".join(out), IOResult(
-        exit_code=code, stderr=stderr
-    )
+    selected = False
+    try:
+        async for h in found:
+            selected = True
+            if f.quiet:
+                break
+            yield encode_text(printed_path(h.shown, f)) + term
+        io.exit_code = exit_code_for(selected, bool(warnings), f.quiet)
+        if not f.no_messages:
+            io.stderr = await materialize(io.stderr) + (
+                format_optional_records(warnings) or b""
+            )
+    finally:
+        await close_quietly(found)
 
 
 async def preprocessed(
@@ -1721,8 +1732,9 @@ async def _search_all(
     warnings: list[str],
     implicit: bool,
     cwd: str,
+    io: IOResult,
     shell: ShellFn | None = None,
-) -> tuple[bytes, IOResult]:
+) -> AsyncIterator[bytes]:
     """Search every haystack in order and put the output together.
 
     ripgrep labels every line when the line named more than one path or
@@ -1750,7 +1762,15 @@ async def _search_all(
     lone = not multi
     pre_globs = Overrides(f.pre_globs, (), False)
     context = prints_context(f)
-    out: list[bytes] = []
+    progressive = not (
+        f.stats
+        or f.json
+        or f.search_zip
+        or f.count_only
+        or f.count_matches
+        or f.files_only
+        or f.files_without_match
+    )
     printed = False
     selected = False
     skipped = False
@@ -1772,6 +1792,7 @@ async def _search_all(
         tally = Tally()
         began = time.perf_counter()
         chunks: list[bytes] = []
+        file_printed = False
         damaged = False
         faults: list[GzipDataError] = []
         try:
@@ -1810,7 +1831,25 @@ async def _search_all(
                 h.spec is not None and is_stdin(h.spec),
                 worker,
             ):
-                chunks.append(c)
+                if progressive:
+                    if not file_printed:
+                        if label is not None and headed(f):
+                            if printed:
+                                yield b"\n"
+                            if not tally.binary:
+                                yield encode_text(label) + (
+                                    b"\0" if f.null else record_end(f)
+                                )
+                        elif (
+                            context
+                            and printed
+                            and f.context_separator is not None
+                        ):
+                            yield encode_text(f.context_separator) + b"\n"
+                        file_printed = printed = True
+                    yield c
+                else:
+                    chunks.append(c)
             if faults:
                 raise faults[0]
         except FS_ERRORS as exc:
@@ -1839,10 +1878,12 @@ async def _search_all(
                     {"type": "begin", "data": {"path": json_text(name)}}
                 )
                 sent = len(begin) + sum(len(c) for c in chunks)
-                out.extend([begin, *chunks])
+                yield begin
+                for chunk in chunks:
+                    yield chunk
                 if not damaged:
                     totals.add(tally, sent, elapsed)
-                    out.append(totals.end_record(name, tally, sent, elapsed))
+                    yield totals.end_record(name, tally, sent, elapsed)
             elif f.quiet and tally.selected and not damaged:
                 totals.add(tally, 0, elapsed)
         elif chunks:
@@ -1857,16 +1898,17 @@ async def _search_all(
             )
             if label is not None and headed(f):
                 if printed:
-                    out.append(b"\n")
+                    yield b"\n"
                 if not tally.binary:
                     heading = encode_text(label) + (
                         b"\0" if f.null else record_end(f)
                     )
-                    out.append(heading)
+                    yield heading
                     sent += len(heading)
             elif context and printed and f.context_separator is not None:
-                out.append(encode_text(f.context_separator) + b"\n")
-            out.extend(chunks)
+                yield encode_text(f.context_separator) + b"\n"
+            for chunk in chunks:
+                yield chunk
             printed = True
             if not damaged:
                 totals.add(tally, sent, elapsed)
@@ -1876,13 +1918,13 @@ async def _search_all(
         if f.quiet and tally.selected and not (f.stats or f.json):
             break
     if records:
-        out.append(totals.summary_record(time.perf_counter() - started))
+        yield totals.summary_record(time.perf_counter() - started)
     elif f.stats:
         # ripgrep's parallel searcher gives the last --heading group its
         # blank line too; one thread, as for a lone file, does not.
         if printed and headed(f) and runs_parallel(f) and not lone:
-            out.append(b"\n")
-        out.append(totals.stats_block(time.perf_counter() - started))
+            yield b"\n"
+        yield totals.stats_block(time.perf_counter() - started)
     if f.files_without_match and not f.quiet:
         # ripgrep's status under --files-without-match follows the
         # listing, not the matching: 0 when a file was listed, 1 when
@@ -1897,8 +1939,9 @@ async def _search_all(
         if not f.no_messages:
             shown.append(NOTHING_SEARCHED)
         code = 2
-    return b"".join(out), IOResult(
-        exit_code=code, stderr=format_optional_records(shown)
+    io.exit_code = code
+    io.stderr = await materialize(io.stderr) + (
+        format_optional_records(shown) or b""
     )
 
 

@@ -168,13 +168,16 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
 ) => Promise<[string, string][] | null>
 
 /** Files under `path` whose content may contain `text`; null when the search cannot answer for every file. */
+export type PathSource = PathSpec[] | AsyncIterable<PathSpec>
+export type TreeSource = Map<string, FileStat> | AsyncIterable<readonly [string, FileStat]>
+
 export type FilesContainingOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   text: string,
   opts: { wholeWord: boolean; ignoreCase: boolean },
   index?: IndexCacheStore,
-) => Promise<PathSpec[] | null>
+) => Promise<PathSource | null>
 
 /** The lines of `path` that may contain `text`, in file order, whole or streamed; null when the search cannot answer for this file. */
 export type LinesContainingOp<A extends Accessor = Accessor> = (
@@ -191,7 +194,7 @@ export type FirstLinesOp<A extends Accessor = Accessor> = (
   path: PathSpec,
   n: number,
   index?: IndexCacheStore,
-) => Promise<Uint8Array | null>
+) => Promise<ByteSource | null>
 
 /** The last `n` lines of `path`; null when the file is to be read. */
 export type LastLinesOp<A extends Accessor = Accessor> = (
@@ -199,7 +202,7 @@ export type LastLinesOp<A extends Accessor = Accessor> = (
   path: PathSpec,
   n: number,
   index?: IndexCacheStore,
-) => Promise<Uint8Array | null>
+) => Promise<ByteSource | null>
 
 /** How many lines `path` holds; null when the file is to be read. */
 export type LineCountOp<A extends Accessor = Accessor> = (
@@ -221,7 +224,7 @@ export type ReadTreeOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
   index?: IndexCacheStore,
-) => Promise<Map<string, FileStat> | null>
+) => Promise<TreeSource | null>
 
 /** The last `n` lines of `path`, then the lines added to it; null when the file is to be polled. */
 export type FollowOp<A extends Accessor = Accessor> = (

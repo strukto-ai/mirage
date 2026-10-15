@@ -178,8 +178,10 @@ class AwkStreams:
             await dispatch_stat(self.dispatch, path)
         ).type == FileType.DIRECTORY:
             raise eisdir(path)
-        data, _ = await self.dispatch("read", path)
-        yield data
+        data, _ = await self.dispatch("read", path, stream=True)
+        async with aclosing(chunks(data)) as source:
+            async for chunk in source:
+                yield chunk
 
     def open_input(self, name: str, index: int | None) -> AsyncIterator[bytes]:
         """Open an input stream by name (see ``AwkHost.open_input``).

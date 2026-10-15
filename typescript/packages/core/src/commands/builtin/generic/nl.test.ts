@@ -41,7 +41,7 @@ async function run(line: Line): Promise<{ exit: number; stdout: string; stderr: 
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and nl never answers that way, so say so rather than destructure
   // a union.
-  const result = await nlGeneric([], opts, stubStream)
+  const result = nlGeneric([], opts, stubStream)
   if (result === null) throw new Error('nl declined to handle its own operands')
   const [out, io] = result
   return {
@@ -309,7 +309,7 @@ describe('nl -b p<re> compiles a POSIX BRE, not this engine s dialect', () => {
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
-    const result = await nlGeneric([], opts, stubStream)
+    const result = nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
     const [out, io] = result
     expect(io.exitCode).toBe(0)
@@ -521,7 +521,7 @@ describe('nl pads a delimiter only when it is one byte', () => {
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
-    const result = await nlGeneric([], opts, stubStream)
+    const result = nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
     const [out] = result
     return out === null ? '' : DEC.decode(await materialize(out))
@@ -602,7 +602,7 @@ describe('nl line number overflow is deferred', () => {
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
-    const result = await nlGeneric([], opts, stubStream)
+    const result = nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
     const [out, io] = result
     const text = out === null ? '' : DEC.decode(await materialize(out))
@@ -645,7 +645,7 @@ describe('nl line number overflow is deferred', () => {
       cwd: '/',
       vfs: { kind: 'ram' } as never,
     } as CommandOpts
-    const result = await nlGeneric([], opts, stubStream)
+    const result = nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
     const [out, io] = result
     const text = out === null ? '' : DEC.decode(await materialize(out))

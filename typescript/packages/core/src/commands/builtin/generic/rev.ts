@@ -12,59 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { resolveSource, stdinStream } from '../utils/stream.ts'
-import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
+import { stdinStream } from '../utils/stream.ts'
+import { reportedStream } from '../utils/operands.ts'
+import { asyncChain } from '../../../io/stream.ts'
+import { mapStream } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
-function reverseString(s: string): string {
-  return Array.from(s).reverse().join('')
+function reversed(line: Uint8Array): Uint8Array {
+  return ENC.encode(Array.from(DEC.decode(line)).reverse().join(''))
 }
 
-// A newline is written where the input had one and nowhere else
-// (util-linux rev), so a last line with none stays without one; each file
-// is reversed on its own. Mirrors Python's rev.
-async function* revStream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
-  const iter = new AsyncLineIterator(source)
-  for (;;) {
-    const [line, found] = await iter.readUntil(0x0a)
-    if (!found && line.byteLength === 0) return
-    yield ENC.encode(reverseString(DEC.decode(line)) + (found ? '\n' : ''))
-    if (!found) return
-  }
-}
-
-async function* revMulti(buffers: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
-  for (const data of buffers) {
-    for await (const chunk of revStream(singleChunk(data))) yield chunk
-  }
-}
-
-export async function revGeneric(
+export function revGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
-  // util-linux rev opens `-` as a file; only /dev/stdin is stdin.
+): CommandFnResult {
   stream = stdinStream(stream, opts.stdin, false, false)
-  if (paths.length > 0) {
-    // Operands read eagerly so a missing one is reported up front and the
-    // remaining operands still print (GNU rev).
-    const [ok, err] = await readOperands(paths, stream, 'rev')
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    return [revMulti(ok.map((o) => o.data)), io]
-  }
-  try {
-    const source = resolveSource(opts.stdin)
-    return [revStream(source), new IOResult()]
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-  }
+  const io = new IOResult()
+  const sources = paths.map((p) => reportedStream(stream(p), io, p, 'rev'))
+  const output =
+    paths.length > 0
+      ? asyncChain(sources.map((source) => mapStream(source, reversed)))
+      : mapStream(opts.stdin ?? new Uint8Array(), reversed)
+  return [output, io]
 }

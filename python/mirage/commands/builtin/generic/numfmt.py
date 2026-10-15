@@ -1,11 +1,10 @@
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator
 from decimal import ROUND_HALF_EVEN, ROUND_UP, Context, Decimal
 
-from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 
 _SUFFIX_ORDER = ("", "K", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q")
@@ -248,25 +247,36 @@ async def numfmt_generic(
             exit_code=1,
             stderr=b"numfmt: grouping cannot be combined with --to\n",
         )
-    convert: Callable[[str, str, str, str], str]
-    if texts:
-        fields, convert = list(texts), _convert_field
-    else:
-        raw = await read_stdin_async(stdin)
-        data = raw.decode(errors="replace") if raw is not None else ""
-        fields, convert = split_lines(data), _convert_line
-    printed = ""
-    for value in fields:
-        try:
-            printed += convert(value, to_mode, from_mode, suffix)
-        except UsageError as exc:
-            # GNU aborts at the first invalid number, after printing the
-            # ones before it.
-            return printed.encode() or None, IOResult(
-                exit_code=exc.exit_code, stderr=f"{exc}\n".encode()
-            )
-        printed += "\n"
-    return printed.encode(), IOResult()
+    io = IOResult()
+    return _numfmt_stream(texts, stdin, to_mode, from_mode, suffix, io), io
+
+
+async def _numfmt_stream(
+    texts: tuple[str, ...],
+    stdin: ByteSource | None,
+    to_mode: str,
+    from_mode: str,
+    suffix: str,
+    io: IOResult,
+) -> AsyncIterator[bytes]:
+    reader = AsyncLineIterator(stdin or b"")
+    try:
+        if texts:
+            for value in texts:
+                yield (
+                    _convert_field(value, to_mode, from_mode, suffix) + "\n"
+                ).encode()
+        else:
+            async for raw in reader:
+                line = _convert_line(
+                    raw.decode(errors="replace"), to_mode, from_mode, suffix
+                )
+                yield (line + "\n").encode()
+    except UsageError as exc:
+        io.exit_code = exc.exit_code
+        io.stderr = f"{exc}\n".encode()
+    finally:
+        await reader.discard()
 
 
 __all__ = ["numfmt_generic"]

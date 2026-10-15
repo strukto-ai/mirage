@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { md5Hex } from '../../../utils/hash.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { checksumGeneric, type StoredDigest, type Stream } from './checksum.ts'
+import { checksumGeneric, hashSource, type StoredDigest, type Stream } from './checksum.ts'
 
 export async function md5sumGeneric(
   paths: PathSpec[],
@@ -28,7 +27,7 @@ export async function md5sumGeneric(
     paths,
     opts,
     stream,
-    (b) => Promise.resolve(md5Hex(b)),
+    (source) => hashSource(source, 'md5'),
     'md5sum',
     stat,
     stored,

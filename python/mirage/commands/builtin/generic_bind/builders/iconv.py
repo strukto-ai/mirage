@@ -40,7 +40,7 @@ async def iconv(
         resolved,
         list(texts),
         opts,
-        bound_op(ops.read_bytes, accessor, opts.index),
+        bound_op(ops.read_stream, accessor, opts.index),
         partial(require_op(ops, Operation.WRITE), accessor),
     )
 

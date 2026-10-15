@@ -85,7 +85,6 @@ async def test_cat_generic_without_display_flags_streams_each_chunk():
         CommandOpts(),
         stat,
         read,
-        local=False,
     )
     stream = aiter(out)
     assert await anext(stream) == b"hel"
@@ -94,8 +93,7 @@ async def test_cat_generic_without_display_flags_streams_each_chunk():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("local", [False, True])
-async def test_cat_generic_reports_a_refused_read_and_goes_on(local):
+async def test_cat_generic_reports_a_refused_read_and_goes_on():
     """A table past its read cap stats fine and refuses the rest of the
     read; GNU cat keeps what it printed, reports the operand and prints
     the next one."""
@@ -110,9 +108,7 @@ async def test_cat_generic_reports_a_refused_read_and_goes_on(local):
             raise efbig(p)
 
     paths = [PathSpec.from_str_path(p) for p in files]
-    out, io = await cat_generic(
-        paths, [], CommandOpts(), stat, read, local=local
-    )
+    out, io = await cat_generic(paths, [], CommandOpts(), stat, read)
     assert await materialize(out) == b"a1\nb1\nb2\n"
     assert io.stderr == b"cat: /a.txt: File too large\n"
     assert io.exit_code == 1

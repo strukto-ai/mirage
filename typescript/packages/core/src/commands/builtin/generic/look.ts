@@ -14,13 +14,13 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync } from '../utils/stream.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { reportedStream } from '../utils/operands.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
-import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -34,35 +34,43 @@ function parseFlags(bag: Record<string, FlagValue>): LookFlags {
   return { foldCase: fl.asBool('f') }
 }
 
-export async function lookGeneric(
+export function lookGeneric(
   paths: PathSpec[],
   texts: string[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   if (paths.length > 1) throw extraOperandError(CommandName.LOOK, paths[1]?.rawPath ?? '')
   if (texts.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('look: missing prefix\n') })]
   }
   const prefix = texts[0] ?? ''
   const caseInsensitive = parseFlags(opts.flags).foldCase
-  let raw: Uint8Array
-  if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    raw = await materialize(stream(first))
-  } else {
-    const stdinData = await readStdinAsync(opts.stdin)
-    raw = stdinData ?? new Uint8Array(0)
+  const io = new IOResult({ exitCode: 1 })
+  const path = paths[0]
+  const source = path === undefined ? (opts.stdin ?? new Uint8Array()) : stream(path)
+  const output = lookStream(source, prefix, caseInsensitive, io)
+  return [path === undefined ? output : reportedStream(output, io, path, 'look'), io]
+}
+
+async function* lookStream(
+  source: ByteSource,
+  prefix: string,
+  foldCase: boolean,
+  io: IOResult,
+): AsyncIterable<Uint8Array> {
+  const cmpPrefix = foldCase ? prefix.toLowerCase() : prefix
+  const reader = new AsyncLineIterator(source)
+  try {
+    for await (const raw of reader) {
+      const line = DEC.decode(raw)
+      const cmpLine = foldCase ? line.toLowerCase() : line
+      if (cmpLine.startsWith(cmpPrefix)) {
+        io.exitCode = 0
+        yield ENC.encode(line + '\n')
+      }
+    }
+  } finally {
+    await reader.discard()
   }
-  const lines = splitLines(DEC.decode(raw))
-  const cmpPrefix = caseInsensitive ? prefix.toLowerCase() : prefix
-  const matched: string[] = []
-  for (const line of lines) {
-    const cmpLine = caseInsensitive ? line.toLowerCase() : line
-    if (cmpLine.startsWith(cmpPrefix)) matched.push(line)
-  }
-  if (matched.length === 0) return [null, new IOResult({ exitCode: 1 })]
-  const result: ByteSource = ENC.encode(matched.join('\n') + '\n')
-  return [result, new IOResult()]
 }

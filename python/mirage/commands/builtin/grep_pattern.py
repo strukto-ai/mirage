@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.bre import (
@@ -21,6 +21,7 @@ from mirage.commands.builtin.utils.bre import (
     translate_bre,
     translate_ere,
 )
+from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.pcre import PcreError, translate_pcre
 from mirage.commands.builtin.utils.rust_regex import (
     RustRegexError,
@@ -29,12 +30,11 @@ from mirage.commands.builtin.utils.rust_regex import (
     whole_word,
 )
 from mirage.commands.builtin.utils.types import HostRegex
-from mirage.commands.builtin.utils.wrap import call_read_bytes
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.shell.bytes import decode_text
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.posix import compile_posix_regex
 
 NEVER_MATCH = r"(?!)"
@@ -70,7 +70,7 @@ def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
 async def resolve_pattern(
     texts: Sequence[str],
     flags: FlagView,
-    read_bytes: Callable[[PathSpec], Awaitable[bytes]],
+    read_bytes: PolymorphicReadFn,
     usage: str,
 ) -> tuple[str, bool]:
     """Resolve the search pattern from -e/positional/-f flag arguments.
@@ -78,8 +78,7 @@ async def resolve_pattern(
     Args:
         texts (Sequence[str]): positional TEXT operands.
         flags (FlagView): typed view over raw flag kwargs.
-        read_bytes (Callable[[PathSpec], Awaitable[bytes]]): bound
-            whole-file reader used for -f pattern files.
+        read_bytes (PolymorphicReadFn): bound reader for -f pattern files.
         usage (str): usage error message when no pattern was supplied.
 
     Returns:
@@ -94,11 +93,19 @@ async def resolve_pattern(
         raw = (
             pattern_file if isinstance(pattern_file, list) else [pattern_file]
         )
+        parts = [] if pattern is None else pattern.split("\n")
+        read = normalized_read(read_bytes)
         for pf in [item for item in raw if isinstance(item, PathSpec)]:
-            file_data = await call_read_bytes(
-                read_bytes, pf, prefix=mount_prefix_of(pf.virtual, pf.vfs_path)
-            )
-            pattern = merge_pattern_list(pattern, file_data)
+            reader = AsyncLineIterator(read(pf))
+            try:
+                while True:
+                    line, ended = await reader.read_until(b"\n")
+                    if not line and not ended:
+                        break
+                    parts.append(decode_text(line))
+            finally:
+                await reader.discard()
+        pattern = "\n".join(parts) if parts else None
         if pattern is None:
             return NEVER_MATCH, True
     if pattern is None:

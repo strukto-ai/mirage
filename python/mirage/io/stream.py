@@ -15,6 +15,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from typing import TypeVar
 
 from mirage.concurrency.limiter import settle
 from mirage.io import IOResult
@@ -23,6 +24,7 @@ from mirage.io.types import ByteSource, materialize  # noqa: F401
 from mirage.utils.context_scope import InlineAwait
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 class SharedStdin:
@@ -69,7 +71,7 @@ async def drain(stream: ByteSource | None) -> None:
         pass
 
 
-async def close_quietly(stream: ByteSource | None) -> None:
+async def close_quietly(stream: bytes | AsyncIterator[_T] | None) -> None:
     """Best-effort close on an async generator stream.
 
     Calls the underlying Python `aclose()` protocol. Ensures VFS
@@ -183,3 +185,19 @@ def ensure_stream(src: ByteSource) -> AsyncIterator[bytes]:
         AsyncIterator[bytes]: ``src`` itself, or ``yield_bytes(src)``.
     """
     return yield_bytes(src) if isinstance(src, bytes) else src
+
+
+async def collect_items(source: Iterable[_T] | AsyncIterator[_T]) -> list[_T]:
+    """Collect a complete typed answer, closing its cursor on failure.
+
+    Args:
+        source (Iterable | AsyncIterator): records whose EOF certifies completeness.
+    """
+    if not isinstance(source, AsyncIterator):
+        return list(source)
+    try:
+        return [item async for item in source]
+    finally:
+        close = getattr(source, "aclose", None)
+        if close is not None:
+            await close()

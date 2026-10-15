@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { ByteSource, IOResult } from '../../../io/types.ts'
+import { type ByteSource, type IOResult, materialize } from '../../../io/types.ts'
 import {
   DEFAULT_READ_TTL,
   FileStat,
@@ -794,7 +794,7 @@ describe('tail asks the mount for the last lines', () => {
       },
     )
     const [out] = result as [ByteSource, IOResult]
-    const data = DEC.decode(out as Uint8Array)
+    const data = DEC.decode(await materialize(out))
     expect(calls).toEqual(asked === null ? [] : [asked])
     if (asked !== null) expect(data).toBe('c\n')
   })
@@ -818,7 +818,7 @@ describe('tail asks the mount for the last lines', () => {
             : Promise.resolve(ENC.encode('ok\n')),
     )
     const [out, io] = result as [ByteSource, IOResult]
-    expect(DEC.decode(out as Uint8Array)).toBe('==> /big <==\n\n==> /small <==\nok\n')
+    expect(DEC.decode(await materialize(out))).toBe('==> /big <==\n\n==> /small <==\nok\n')
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe(
       "tail: error reading '/big': File too large\n" +

@@ -2968,3 +2968,79 @@ function aBC(): Uint8Array {
 function ab(): Uint8Array {
   return new TextEncoder().encode('a b')
 }
+
+it('streams bounded xargs child output and closes it before completion', async () => {
+  let pulled = 0
+  let closed = 0
+  async function* source(): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    try {
+      for (let i = 0; i < 1000; i++) {
+        pulled++
+        yield new Uint8Array(16384).fill(120)
+      }
+    } finally {
+      closed++
+    }
+  }
+  const execute = (): Promise<IOResult> => Promise.resolve(new IOResult({ stdout: source() }))
+  const session = new SessionState({ sessionId: 'streamed-xargs' })
+  const [out] = await streamXargs(
+    execute,
+    ['echo'],
+    new EvaluationContext(session),
+    new TextEncoder().encode('a'),
+  )
+  const iterator = (out as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+  expect((await iterator.next()).value).toEqual(new Uint8Array(16384).fill(120))
+  expect(pulled).toBeLessThanOrEqual(6)
+  await iterator.return?.()
+  expect(closed).toBe(1)
+})
+
+it('honors xargs status 255 set after child output', async () => {
+  const calls: string[] = []
+  const execute = (line: string): Promise<IOResult> => {
+    calls.push(line)
+    const io = new IOResult()
+    async function* output(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      yield new TextEncoder().encode('before\n')
+      io.exitCode = 255
+    }
+    io.stdout = output()
+    return Promise.resolve(io)
+  }
+  const session = new SessionState({ sessionId: 'streamed-xargs' })
+  const [out, io] = await handleXargs(
+    execute,
+    ['-n1', 'echo'],
+    new EvaluationContext(session),
+    new TextEncoder().encode('a b c'),
+  )
+  expect(await readBody(out)).toBe('before\n')
+  expect(calls).toEqual(['echo a'])
+  expect(io.exitCode).toBe(124)
+  expect(decode(await io.materializeStderr())).toContain('exited with status 255')
+})
+
+it.each([
+  [1, 123],
+  [255, 124],
+])('keeps xargs child status %s on early close', async (code, expected) => {
+  const bytes = new TextEncoder().encode('row\n')
+  const execute = (): Promise<IOResult> =>
+    Promise.resolve(new IOResult({ stdout: bytes, exitCode: code }))
+  const session = new SessionState({ sessionId: 'streamed-xargs' })
+  const [out, io] = await streamXargs(
+    execute,
+    ['echo'],
+    new EvaluationContext(session),
+    new TextEncoder().encode('a'),
+  )
+  if (out === null || out instanceof Uint8Array) throw new Error('expected streaming output')
+  const source = out[Symbol.asyncIterator]()
+  expect((await source.next()).value).toEqual(bytes)
+  await source.return?.()
+  expect(io.exitCode).toBe(expected)
+})

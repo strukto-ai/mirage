@@ -20,9 +20,11 @@ from typing import Any
 
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.errors.fs import eloop
+from mirage.io.stream import collect_items
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, gnu_basename, resolve_path
+from mirage.vfs.types import TreeSource
 from mirage.view.types import LinkView, MountView
 
 logger = logging.getLogger(__name__)
@@ -358,19 +360,24 @@ async def _linked_readdir(
 
 
 async def _linked_tree(
-    read_tree: Callable[..., Awaitable[dict[str, FileStat] | None]],
+    read_tree: Callable[..., Awaitable[TreeSource | None]],
     links: LinkView,
     accessor: Any,
     path: PathSpec,
     *args: Any,
     **kwargs: Any,
-) -> dict[str, FileStat] | None:
+) -> TreeSource | None:
     found = await read_tree(accessor, path, *args, **kwargs)
     base = path.virtual.rstrip("/") + "/"
     rows = links.subtree(base)
     if found is None or not rows:
         return found
-    return {**found, **{key[len(base) :]: row for key, row in rows}}
+    complete = dict(
+        await collect_items(
+            found.items() if isinstance(found, dict) else found
+        )
+    )
+    return {**complete, **{key[len(base) :]: row for key, row in rows}}
 
 
 def with_links(

@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.iconv import iconv
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 
@@ -22,14 +23,14 @@ async def test_iconv_encoding_conversion():
     _, write_bytes = _store()
     output, _ = await iconv(
         [],
-        read_bytes=_unused_read_bytes,
+        read_stream=_unused_read_bytes,
         write_bytes=write_bytes,
         stdin="café".encode(),
         from_enc="utf-8",
         to_enc="ascii",
         ignore_errors=True,
     )
-    assert output == b"caf"
+    assert await materialize(output) == b"caf"
 
 
 @pytest.mark.asyncio
@@ -37,7 +38,7 @@ async def test_iconv_writes_to_output_path():
     store, write_bytes = _store()
     output, io = await iconv(
         [],
-        read_bytes=_unused_read_bytes,
+        read_stream=_unused_read_bytes,
         write_bytes=write_bytes,
         stdin=b"hello",
         from_enc="utf-8",
@@ -68,11 +69,47 @@ async def test_iconv_closes_a_stateful_target(stdin, omit, expected, code):
     _, write_bytes = _store()
     output, io = await iconv(
         [],
-        read_bytes=_unused_read_bytes,
+        read_stream=_unused_read_bytes,
         write_bytes=write_bytes,
         stdin=stdin,
         from_enc="utf-8",
         to_enc="ISO-2022-JP",
         ignore_errors=omit,
     )
-    assert (output, io.exit_code) == (expected, code)
+    assert (await materialize(output), io.exit_code) == (expected, code)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw,source,target,expected,code",
+    [
+        ("hé😀".encode(), "UTF-8", "UTF-16LE", "hé😀".encode("utf-16-le"), 0),
+        (b"\xff\xfeh\x00\xe9\x00", "UTF-16", "UTF-8", "hé".encode(), 0),
+        (b"a\xe2\x82", "UTF-8", "UTF-8", b"a", 1),
+        (b"a\xffb", "UTF-8", "UTF-8", b"a", 1),
+    ],
+)
+async def test_iconv_preserves_decoding_state_between_single_byte_chunks(
+    raw, source, target, expected, code
+):
+    closed = []
+
+    async def input_chunks():
+        try:
+            for byte in raw:
+                yield bytes([byte])
+        finally:
+            closed.append(True)
+
+    _, write = _store()
+    out, io = await iconv(
+        [],
+        read_stream=_unused_read_bytes,
+        write_bytes=write,
+        stdin=input_chunks(),
+        from_enc=source,
+        to_enc=target,
+    )
+    assert await materialize(out) == expected
+    assert io.exit_code == code
+    assert closed == [True]

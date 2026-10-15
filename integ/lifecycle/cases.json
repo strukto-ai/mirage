@@ -5599,6 +5599,669 @@
           }
         }
       ]
+    },
+    {
+      "id": "stream_reads_rev_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "h\u00e9llo\nlast\n"
+              },
+              "chunk_size": 1,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "rev /data/log.txt | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "oll\u00e9h\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_look_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "h\u00e9llo\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "look h /data/log.txt | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "h\u00e9llo\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_numfmt_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "1000\n2000\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cat /data/log.txt | numfmt --to=si | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "1.0k\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_iconv_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "h\u00e9llo\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "iconv -f UTF-8 -t UTF-8 /data/log.txt | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "h\u00e9llo\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_fmt_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "one two\n\nthree four\n\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "fmt -w 8 /data/log.txt | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "one two\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_nl_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "nl -ba /data/log.txt | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "     1\tfirst\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_tail_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "tail -n +2 /data/log.txt | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "last\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_rg_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "rg first /data/log.txt | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_sed_r_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "printf 'x\\n' | sed -n 'r /data/log.txt' | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_sed_R_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "printf 'x\\ny\\n' | sed -n 'R /data/log.txt' | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_awk_getline_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "awk 'BEGIN {getline x < \"/data/log.txt\"; print x}' | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_xxd_reverse_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "66697273740a\n6c6173740a\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "xxd -r -p /data/log.txt | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_reads_xargs_early_close",
+      "settings": {
+        "mounts": {
+          "/data": {
+            "vfs": "tracked-stream",
+            "config": {
+              "files": {
+                "/log.txt": "first\nlast\n"
+              },
+              "chunk_size": 3,
+              "repeat": 10000
+            }
+          }
+        },
+        "mode": "read"
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "printf '/data/log.txt\\n' | xargs cat | head -n 1",
+          "cancel_after_ms": 5000,
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "drain_processes"
+        },
+        {
+          "op": "stream_stats",
+          "path": "/data",
+          "expect": {
+            "value": {
+              "closed": 1
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/log.txt",
+          "expect": {
+            "value": null
+          }
+        }
+      ]
     }
   ]
 }

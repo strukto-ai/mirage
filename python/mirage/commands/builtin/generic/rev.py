@@ -1,17 +1,16 @@
-from collections.abc import Awaitable, Callable
-
-from mirage.commands.builtin.utils.lines import map_lines
+from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
-    materialized_read,
     merge_split_errors,
+    reported_stream,
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import (
-    read_stdin_async,
+    resolve_source,
     stdin_stat,
     stdin_stream,
 )
 from mirage.commands.config import CommandOpts
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -19,28 +18,21 @@ from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 async def rev(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    if paths:
-        # Each file is reversed on its own and keeps its own line ends, so
-        # a last line with no newline stays without one (util-linux rev).
-        parts = [
-            map_lines(
-                (await read_bytes(p)).decode(errors="replace"), _reversed
-            )
-            for p in paths
-        ]
-        return "".join(parts).encode(), IOResult()
-
-    raw = await read_stdin_async(stdin) or b""
-    return map_lines(
-        raw.decode(errors="replace"), _reversed
-    ).encode(), IOResult()
+    io = IOResult()
+    read = stdin_stream(read_stream, stdin, dash=False)
+    sources = [reported_stream(read(p), io, p, "rev") for p in paths]
+    return (
+        async_chain([map_stream(source, _reversed) for source in sources])
+        if paths
+        else map_stream(resolve_source(stdin), _reversed)
+    ), io
 
 
-def _reversed(line: str) -> str:
-    return line[::-1]
+def _reversed(line: bytes) -> bytes:
+    return line.decode(errors="replace")[::-1].encode()
 
 
 async def rev_generic(
@@ -67,9 +59,7 @@ async def rev_generic(
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
     return await merge_split_errors(
-        await rev(
-            readable, read_bytes=materialized_read(stream), stdin=opts.stdin
-        ),
+        await rev(readable, read_stream=stream, stdin=opts.stdin),
         err,
     )
 

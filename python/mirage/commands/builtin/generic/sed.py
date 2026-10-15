@@ -9,6 +9,7 @@ from collections.abc import (
 )
 from contextlib import aclosing
 from dataclasses import dataclass
+from functools import partial
 
 from mirage.commands.builtin.constants import (
     SED_MISSING_SCRIPT,
@@ -19,6 +20,7 @@ from mirage.commands.builtin.sed_exec import (
     SED_LINE_LENGTH,
     SedFileContent,
     SedFileError,
+    SedFileSource,
     SedFileText,
     SedInput,
     SedMachine,
@@ -48,6 +50,7 @@ from mirage.errors.fs import eacces, eisdir, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition, StaleWriteError
+from mirage.io.cooperative import chunks
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
@@ -77,6 +80,7 @@ class _ScriptFiles:
     """
 
     read_bytes: ReadBytes
+    read_stream: PolymorphicReadFn
     write_bytes: WriteBytes | None
     dispatch: DispatchFn | None
     cwd: str
@@ -106,6 +110,21 @@ class _ScriptFiles:
             raise eisdir(path)
         data, _ = await self.dispatch("read", path)
         return await materialize(data)
+
+    async def stream(self, name: str) -> AsyncIterator[bytes]:
+        path = self.spec(name)
+        if self.dispatch is None:
+            source = normalized_read(self.read_stream)(path)
+        else:
+            if (
+                await dispatch_stat(self.dispatch, path)
+            ).type == FileType.DIRECTORY:
+                raise eisdir(path)
+            data, _ = await self.dispatch("read", path, stream=True)
+            source = ensure_stream(data)
+        async with aclosing(chunks(source)) as data:
+            async for part in data:
+                yield part
 
     async def write(self, name: str, data: bytes) -> None:
         path = self.spec(name)
@@ -166,7 +185,10 @@ async def _open_write_files(
 
 
 async def _read_script_files(
-    names: Sequence[str], access: _ScriptFiles, utf8: bool = False
+    names: Sequence[str],
+    access: _ScriptFiles,
+    utf8: bool = False,
+    streamed: bool = False,
 ) -> dict[str, SedFileContent]:
     """Read the files ``r`` or ``R`` names.
 
@@ -181,6 +203,9 @@ async def _read_script_files(
     """
     files: dict[str, SedFileContent] = {}
     for name in names:
+        if streamed:
+            files[name] = SedFileSource(partial(access.stream, name))
+            continue
         try:
             files[name] = SedFileText(byte_view(await access.read(name), utf8))
         except IsADirectoryError:
@@ -271,7 +296,9 @@ async def sed(
     pieces = (
         [SedScriptPiece("expr", script)] if isinstance(script, str) else script
     )
-    access = _ScriptFiles(read_bytes, write_bytes, dispatch, cwd, prefix)
+    access = _ScriptFiles(
+        read_bytes, read_stream, write_bytes, dispatch, cwd, prefix
+    )
     try:
         program = compile_script(pieces, extended, utf8)
     except SedError as exc:
@@ -288,9 +315,11 @@ async def sed(
             suppress=suppress,
             separate=in_place or separate,
             line_length=line_length,
-            files=await _read_script_files(program.rfiles, access, utf8),
+            files=await _read_script_files(
+                program.rfiles, access, utf8, not in_place
+            ),
             reader_files=await _read_script_files(
-                program.reader_files, access, utf8
+                program.reader_files, access, utf8, not (in_place or separate)
             ),
             utf8=utf8,
         ),

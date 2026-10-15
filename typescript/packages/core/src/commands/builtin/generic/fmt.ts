@@ -15,11 +15,13 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
+import { asyncChain } from '../../../io/stream.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync, stdinStream } from '../utils/stream.ts'
-import { operandsIo, readOperands } from '../utils/operands.ts'
+import { stdinStream } from '../utils/stream.ts'
+import { reportedStream } from '../utils/operands.ts'
 
 const ENC = new TextEncoder()
 
@@ -68,11 +70,10 @@ interface Word {
  * file, as fmt() resets `tabs` and `other_indent` for each.
  */
 class Formatter {
-  private pos = 0
   private readonly prefixLeadSpace: number
   private readonly prefixFullLength: number
   private readonly prefix: Uint8Array
-  private out: number[] = []
+  out: number[] = []
   private outColumn = 0
   private inColumn = 0
   private nextPrefixIndent = 0
@@ -89,7 +90,6 @@ class Formatter {
   private lineLength: number[] = []
 
   constructor(
-    private readonly data: Uint8Array,
     private readonly maxWidth: number,
     private readonly goalWidth: number,
     prefix: string | null,
@@ -105,21 +105,19 @@ class Formatter {
     this.prefix = ENC.encode(stripped.replace(/ +$/, ''))
   }
 
-  run(): Uint8Array {
-    this.nextChar = this.getPrefix()
-    while (this.getParagraph()) {
+  *run(): Generator<void, void, number> {
+    this.nextChar = yield* this.getPrefix()
+    while (yield* this.getParagraph()) {
       this.fmtParagraph()
       this.putParagraph(this.words.length)
     }
-    return Uint8Array.from(this.out)
   }
 
-  private getc(): number {
-    if (this.pos >= this.data.length) return EOF
-    return this.data[this.pos++] ?? EOF
+  private *getc(): Generator<void, number, number> {
+    return yield
   }
 
-  private getParagraph(): boolean {
+  private *getParagraph(): Generator<void, boolean, number> {
     this.lastLineLength = 0
     let c = this.nextChar
     while (
@@ -128,29 +126,29 @@ class Formatter {
       this.nextPrefixIndent < this.prefixLeadSpace ||
       this.inColumn < this.nextPrefixIndent + this.prefixFullLength
     ) {
-      c = this.copyRest(c)
+      c = yield* this.copyRest(c)
       if (c === EOF) {
         this.nextChar = EOF
         return false
       }
       this.out.push(0x0a)
-      c = this.getPrefix()
+      c = yield* this.getPrefix()
     }
     this.prefixIndent = this.nextPrefixIndent
     this.firstIndent = this.inColumn
     this.para = []
     this.words = []
-    c = this.getLine(c)
+    c = yield* this.getLine(c)
     this.setOtherIndent(this.samePara(c))
     if (this.split) {
       // A split paragraph is its one line.
     } else if (this.crown || this.tagged) {
       if (this.samePara(c) && (this.crown || this.inColumn !== this.firstIndent)) {
-        c = this.getLine(c)
-        while (this.samePara(c) && this.inColumn === this.otherIndent) c = this.getLine(c)
+        c = yield* this.getLine(c)
+        while (this.samePara(c) && this.inColumn === this.otherIndent) c = yield* this.getLine(c)
       }
     } else {
-      while (this.samePara(c) && this.inColumn === this.otherIndent) c = this.getLine(c)
+      while (this.samePara(c) && this.inColumn === this.otherIndent) c = yield* this.getLine(c)
     }
     const last = this.words[this.words.length - 1]
     if (last !== undefined) last.period = last.final = true
@@ -158,7 +156,7 @@ class Formatter {
     return true
   }
 
-  private copyRest(c: number): number {
+  private *copyRest(c: number): Generator<void, number, number> {
     this.outColumn = 0
     if (this.inColumn > this.nextPrefixIndent || (c !== 0x0a && c !== EOF)) {
       this.putSpace(this.nextPrefixIndent)
@@ -174,7 +172,7 @@ class Formatter {
     }
     while (c !== 0x0a && c !== EOF) {
       this.out.push(c)
-      c = this.getc()
+      c = yield* this.getc()
     }
     return c
   }
@@ -188,7 +186,7 @@ class Formatter {
     )
   }
 
-  private getLine(c: number): number {
+  private *getLine(c: number): Generator<void, number, number> {
     for (;;) {
       const word: Word = {
         start: this.para.length,
@@ -205,14 +203,14 @@ class Formatter {
           this.flushParagraph(word)
         }
         this.para.push(c)
-        c = this.getc()
+        c = yield* this.getc()
         if (c === EOF || SPACES.has(c)) break
       }
       word.length = this.para.length - word.start
       this.inColumn += word.length
       this.checkPunctuation(word)
       const start = this.inColumn
-      c = this.getSpace(c)
+      c = yield* this.getSpace(c)
       word.space = this.inColumn - start
       word.final = c === EOF || (word.period && (c === 0x0a || word.space > 1))
       if (c === 0x0a || c === EOF || this.uniform) word.space = word.final ? 2 : 1
@@ -223,12 +221,12 @@ class Formatter {
       this.words.push(word)
       if (c === 0x0a || c === EOF) break
     }
-    return this.getPrefix()
+    return yield* this.getPrefix()
   }
 
-  private getPrefix(): number {
+  private *getPrefix(): Generator<void, number, number> {
     this.inColumn = 0
-    let c = this.getSpace(this.getc())
+    let c = yield* this.getSpace(yield* this.getc())
     if (this.prefix.length === 0) {
       this.nextPrefixIndent = Math.min(this.prefixLeadSpace, this.inColumn)
       return c
@@ -237,19 +235,19 @@ class Formatter {
     for (const byte of this.prefix) {
       if (c !== byte) return c
       this.inColumn += 1
-      c = this.getc()
+      c = yield* this.getc()
     }
-    return this.getSpace(c)
+    return yield* this.getSpace(c)
   }
 
-  private getSpace(c: number): number {
+  private *getSpace(c: number): Generator<void, number, number> {
     for (;;) {
       if (c === 0x20) this.inColumn += 1
       else if (c === 0x09) {
         this.tabs = true
         this.inColumn = (Math.trunc(this.inColumn / TAB_WIDTH) + 1) * TAB_WIDTH
       } else return c
-      c = this.getc()
+      c = yield* this.getc()
     }
   }
 
@@ -442,42 +440,56 @@ function parseFlags(bag: Record<string, FlagValue>): FmtFlags {
   }
 }
 
-export async function fmtGeneric(
+export function fmtGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   const [maxWidth, goalWidth] = widths(parsed.width, parsed.goal)
-  const run = (data: Uint8Array): Uint8Array =>
-    new Formatter(
-      data,
-      maxWidth,
-      goalWidth,
-      parsed.prefix,
-      parsed.splitOnly,
-      parsed.tagged,
-      parsed.crown,
-      parsed.uniform,
-    ).run()
-  if (paths.length > 0) {
-    // A missing operand is reported and skipped; the remaining operands
-    // still format (GNU fmt). GNU formats each file on its own: a paragraph
-    // never runs from one file into the next. Mirrors Python's fmt.
-    const [ok, err] = await readOperands(paths, stream, 'fmt')
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    const parts = ok.map((o) => run(o.data))
-    const total = parts.reduce((n, part) => n + part.length, 0)
-    const result = new Uint8Array(total)
-    let offset = 0
-    for (const part of parts) {
-      result.set(part, offset)
-      offset += part.length
+  const io = new IOResult()
+  const sources =
+    paths.length > 0
+      ? paths.map((p) => reportedStream(stream(p), io, p, 'fmt'))
+      : [opts.stdin ?? new Uint8Array()]
+  return [
+    asyncChain(
+      sources.map((source) =>
+        fmtStream(
+          source,
+          new Formatter(
+            maxWidth,
+            goalWidth,
+            parsed.prefix,
+            parsed.splitOnly,
+            parsed.tagged,
+            parsed.crown,
+            parsed.uniform,
+          ),
+        ),
+      ),
+    ),
+    io,
+  ]
+}
+
+async function* fmtStream(source: ByteSource, formatter: Formatter): AsyncIterable<Uint8Array> {
+  const machine = formatter.run()
+  machine.next()
+  try {
+    for await (const part of chunks(source)) {
+      for (const byte of part) machine.next(byte)
+      if (formatter.out.length > 0) {
+        yield Uint8Array.from(formatter.out)
+        formatter.out.length = 0
+      }
     }
-    return [result as ByteSource, io]
+    while (machine.next(EOF).done !== true) {
+      // Flush the formatter's remaining paragraph at EOF.
+    }
+    if (formatter.out.length > 0) yield Uint8Array.from(formatter.out)
+  } finally {
+    machine.return()
   }
-  const stdinData = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
-  return [run(stdinData) as ByteSource, new IOResult()]
 }

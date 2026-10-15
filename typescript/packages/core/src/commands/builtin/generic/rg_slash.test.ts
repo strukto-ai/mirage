@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize, type ByteSource } from '../../../io/types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -87,10 +88,10 @@ async function run(
   flags: Record<string, string | boolean | number | string[]>,
 ): Promise<string> {
   const [out] = (await rgGeneric([spec('/')], ['hello'], opts(flags), stat, readdir, stream)) as [
-    Uint8Array,
+    ByteSource,
     unknown,
   ]
-  return DEC.decode(out)
+  return DEC.decode(await materialize(out))
 }
 
 describe('rgGeneric with trailing-slash folder entries', () => {

@@ -14,6 +14,8 @@
 
 import { mergeSignals } from '../../../../utils/abort.ts'
 import { chunks } from '../../../../io/cooperative.ts'
+import { PipeConsole } from '../../../../shell/console/pipe.ts'
+import { Channel } from '../../../../shell/console/types.ts'
 import { boundedMapStream } from '../../../../concurrency/limiter.ts'
 import type { EvaluationContext } from '../../../evaluation.ts'
 
@@ -29,7 +31,7 @@ import {
   unknownOptionError,
   usageHint,
 } from '../../../../commands/spec/usage.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { SharedStdin, yieldBytes } from '../../../../io/stream.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -559,15 +561,40 @@ async function* runLines(
   const stdin = opts.stdin == null ? new Uint8Array() : new SharedStdin(opts.stdin)
   // xargs execs its command, so a builtin that is also a program answers
   // as the program.
-  const run = async (words: string[], signal: AbortSignal): Promise<IOResult> => {
+  const active = new Set<Promise<void>>()
+  const pipes = new Set<PipeConsole>()
+  const controller = new AbortController()
+  const drain = async (
+    io: IOResult,
+    output: IOResult,
+    pipe: PipeConsole,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    for await (const chunk of chunks(io.stdout ?? new Uint8Array(), signal))
+      await pipe.emit(Channel.STDOUT, chunk)
+    await pipe.emit(Channel.STDERR, await io.materializeStderr())
+    output.stderr = await pipe.snapshot(Channel.STDERR)
+    output.exitCode = io.exitCode
+  }
+  const run = async (
+    words: string[],
+    output: IOResult,
+    pipe: PipeConsole,
+    signal: AbortSignal,
+  ): Promise<void> => {
     const line = shellJoin(words)
     if (!forked) {
-      const io = await runAsProgram(session, () =>
-        executeFn(line, { sessionId: session.sessionId, context, stdin, signal }),
-      )
-      await io.materializeStdout()
-      await io.materializeStderr()
-      return io
+      await runAsProgram(session, async () => {
+        const io = await executeFn(line, {
+          sessionId: session.sessionId,
+          context,
+          stdin,
+          signal,
+          sink: pipe,
+        })
+        await drain(io, output, pipe, signal)
+      })
+      return
     }
     let slot = 0
     while (taken.has(slot)) slot += 1
@@ -578,27 +605,33 @@ async function* runLines(
       child.vars = { ...child.vars, ...varsFromEnv({ [slotVar]: String(slot) }) }
     }
     try {
-      return await runWithEvaluation(childEvaluation, async () => {
-        const io = await runAsProgram(child, () =>
-          executeFn(line, {
+      await runWithEvaluation(childEvaluation, async () => {
+        await runAsProgram(child, async () => {
+          const io = await executeFn(line, {
             sessionId: child.sessionId,
             context: childEvaluation,
             session: child,
             stdin,
             signal,
-          }),
-        )
-        await io.materializeStdout()
-        await io.materializeStderr()
-        return io
+            sink: pipe,
+          })
+          await drain(io, output, pipe, signal)
+        })
       })
+      return
     } finally {
       taken.delete(slot)
     }
   }
-  const invoke = async (event: XargsEvent, signal: AbortSignal): Promise<IOResult[]> => {
+  interface Run {
+    results: IOResult[]
+    task?: Promise<void>
+    pipe?: PipeConsole
+  }
+  const invoke = (event: XargsEvent, signal: AbortSignal): Promise<Run> => {
     const slot: IOResult[] = []
-    if (typeof event === 'string') return [new IOResult({ stderr: encodeText(event) })]
+    if (typeof event === 'string')
+      return Promise.resolve({ results: [new IOResult({ stderr: encodeText(event) })] })
     const words = event.map(decodeText)
     const name = words[0] ?? ''
     if (opts.trace === true) slot.push(new IOResult({ stderr: encodeText(trace(event)) }))
@@ -606,28 +639,37 @@ async function* runLines(
       slot.push(new IOResult({ stderr: encodeText(xargsMissing(name)), exitCode: 127 }))
       stop = 127
       stopping.abort()
-      return slot
+      return Promise.resolve({ results: slot })
     }
-    let io: IOResult
-    try {
-      io = await run(words, signal)
-    } catch (err) {
-      stop ??= 1
-      throw err
-    }
+    const pipe = new PipeConsole()
+    pipes.add(pipe)
+    const io = new IOResult({ stdout: pipe.stream() })
     slot.push(io)
-    if (io.exitCode === 255 && !stopped()) {
-      slot.push(
-        new IOResult({
-          stderr: encodeText(`xargs: ${name}: exited with status 255; aborting\n`),
-          exitCode: 255,
-        }),
-      )
-      stop = 124
-      stopping.abort()
-    }
-    return slot
+    const task = (async (): Promise<void> => {
+      try {
+        await run(words, io, pipe, mergeSignals(signal, controller.signal) ?? signal)
+        if (io.exitCode === 255 && !stopped()) {
+          io.stderr = (
+            await io.merge(
+              new IOResult({
+                stderr: encodeText('xargs: ' + name + ': exited with status 255; aborting\n'),
+              }),
+            )
+          ).stderr
+          stop = 124
+          stopping.abort()
+        }
+      } catch (error) {
+        stop ??= 1
+        pipe.end(error)
+      } finally {
+        pipe.end()
+      }
+    })()
+    active.add(task)
+    return Promise.resolve({ results: slot, task, pipe })
   }
+
   async function* admitted(signal: AbortSignal): AsyncGenerator<XargsEvent> {
     const source = events(mergeSignals(signal, stopping.signal) ?? signal)
     try {
@@ -643,13 +685,25 @@ async function* runLines(
     }
   }
   const width = procs !== 1 && asyncContextIsolatesTasks ? procs : 1
-  for await (const results of boundedMapStream(
-    admitted,
-    invoke,
-    width,
-    context.frame.abortSignal ?? undefined,
-  )) {
-    yield [results, stop]
+  try {
+    for await (const job of boundedMapStream(
+      admitted,
+      invoke,
+      width,
+      mergeSignals(context.frame.abortSignal, controller.signal) ?? undefined,
+    )) {
+      yield [job.results, stop]
+      if (job.task !== undefined) {
+        await job.task
+        active.delete(job.task)
+      }
+      if (job.pipe !== undefined) pipes.delete(job.pipe)
+      if (stopped()) yield [[], stop]
+    }
+  } finally {
+    controller.abort()
+    for (const pipe of pipes) pipe.closeReader()
+    await Promise.all(active)
   }
 }
 
@@ -872,6 +926,12 @@ export async function handleXargs(
   async function* output(): AsyncGenerator<Uint8Array> {
     let stopped: number | null = null
     let failed = false
+    let pending: IOResult | null = null
+    async function record(io: IOResult): Promise<boolean> {
+      if (io.exitCode === 255 && stopped === null) stopped = 124
+      merged.stderr = (await merged.merge(new IOResult({ stderr: io.stderr }))).stderr
+      return io.exitCode !== 0
+    }
     try {
       for await (const [ios, stop] of runLines(executeFn, events, context, procs, {
         trace: toggles.has('t'),
@@ -881,13 +941,14 @@ export async function handleXargs(
       })) {
         stopped = stop
         for (const io of ios) {
-          failed ||= io.exitCode !== 0
-          merged.stderr = (await merged.merge(new IOResult({ stderr: io.stderr }))).stderr
-          const raw = await materialize(io.stdout)
-          if (raw.length > 0) yield raw
+          pending = io
+          yield* chunks(io.stdout ?? new Uint8Array())
+          failed = (await record(io)) || failed
+          pending = null
         }
       }
     } finally {
+      if (pending !== null) failed = (await record(pending)) || failed
       // A reader that stops early still sees the runs it reached.
       if (stopped !== null) merged.exitCode = stopped
       else if (fatal !== null) {

@@ -19,7 +19,7 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { BreError, searchBre } from '../utils/bre.ts'
 import { quoteText } from '../../quote.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
-import { operandsIo, readOperands, singleChunk } from '../utils/operands.ts'
+import { reportedStream } from '../utils/operands.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -178,23 +178,27 @@ async function* nlStream(
   io?: IOResult,
 ): AsyncIterable<Uint8Array> {
   const iter = new AsyncLineIterator(source)
-  for await (const raw of iter) {
-    const line = DEC.decode(raw)
-    const rendered = renderLine(line, config, state)
-    if (rendered === null) {
-      if (io !== undefined) {
-        io.exitCode = 1
-        io.stderr = ENC.encode('nl: line number overflow\n')
+  try {
+    for await (const raw of iter) {
+      const line = DEC.decode(raw)
+      const rendered = renderLine(line, config, state)
+      if (rendered === null) {
+        if (io !== undefined) {
+          io.exitCode = 1
+          io.stderr = ENC.encode('nl: line number overflow\n')
+        }
+        state.aborted = true
+        return
       }
-      state.aborted = true
-      return
+      yield rendered
     }
-    yield rendered
+  } finally {
+    await iter.discard()
   }
 }
 
 async function* nlMulti(
-  buffers: readonly Uint8Array[],
+  sources: readonly AsyncIterable<Uint8Array>[],
   config: NlConfig,
   io?: IOResult,
 ): AsyncIterable<Uint8Array> {
@@ -205,8 +209,8 @@ async function* nlMulti(
     overflowed: false,
     aborted: false,
   }
-  for (const data of buffers) {
-    for await (const rendered of nlStream(singleChunk(data), config, state, io)) yield rendered
+  for (const source of sources) {
+    for await (const rendered of nlStream(source, config, state, io)) yield rendered
     if (state.aborted) return
   }
 }
@@ -532,11 +536,11 @@ function buildConfig(parsed: NlFlags): NlConfig {
   }
 }
 
-export async function nlGeneric(
+export function nlGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
@@ -544,20 +548,9 @@ export async function nlGeneric(
   }
   const config = buildConfig(parsed)
   if (paths.length > 0) {
-    // Operands read eagerly so a missing one is reported up front and the
-    // remaining operands still number (GNU); the IOResult is sealed before
-    // the output stream is handed back.
-    const [ok, err] = await readOperands(paths, stream, 'nl')
-    const io = operandsIo(err)
-    if (ok.length === 0 && err !== '') return [null, io]
-    return [
-      nlMulti(
-        ok.map((o) => o.data),
-        config,
-        io,
-      ),
-      io,
-    ]
+    const io = new IOResult()
+    const sources = paths.map((p) => reportedStream(stream(p), io, p, 'nl'))
+    return [nlMulti(sources, config, io), io]
   }
   try {
     const source = resolveSource(opts.stdin)

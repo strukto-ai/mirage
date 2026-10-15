@@ -28,7 +28,7 @@ class FakeShell:
         self.exit_codes = exit_codes or []
 
     async def __call__(
-        self, line: str, session_id: str, stdin: bytes
+        self, line: str, session_id: str, stdin: bytes, sink=None
     ) -> IOResult:
         assert stdin == b""
         self.lines.append(line)
@@ -53,7 +53,7 @@ class SlowShell:
         self.exit_codes = exit_codes or {}
 
     async def __call__(
-        self, line: str, session_id: str, stdin: bytes | None = None
+        self, line: str, session_id: str, stdin: bytes | None = None, sink=None
     ) -> IOResult:
         self.lines.append(line)
         self.active += 1
@@ -417,7 +417,7 @@ async def test_show_limits_counts_the_environment():
 async def test_process_slot_var_numbers_each_command():
     seen: list[str] = []
 
-    async def execute(line, session_id, stdin=None):
+    async def execute(line, session_id, stdin=None, sink=None):
         current = get_current_session()
         assert current is not None
         seen.append(f"{line}:{current.env.get('SLOT')}")
@@ -918,7 +918,7 @@ async def test_parallel_mode_forks_even_a_single_invocation(procs, data):
     seed_var(parent, "X", "outer")
     seen = []
 
-    async def execute(line, session_id, stdin=None):
+    async def execute(line, session_id, stdin=None, sink=None):
         current = get_current_session()
         assert current is not None
         assert current is not parent
@@ -961,7 +961,7 @@ async def test_parallel_mode_restores_parent_after_single_invocation_raises():
     parent = make_session()
     seed_var(parent, "X", "outer")
 
-    async def execute(line, session_id, stdin=None):
+    async def execute(line, session_id, stdin=None, sink=None):
         current = get_current_session()
         assert current is not None
         await session_view(current).set("X", "inner")
@@ -1006,3 +1006,68 @@ async def test_parallel_abort_stops_an_open_input_and_joins_started_commands():
     assert shell.active == 0
     assert shell.lines == ["echo a", "echo b"]
     assert closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_child_output_is_bounded_and_closed_before_completion():
+    pulled = 0
+    closed = 0
+
+    async def stream():
+        nonlocal pulled, closed
+        try:
+            for _ in range(1000):
+                pulled += 1
+                yield b"x" * 16384
+        finally:
+            closed += 1
+
+    async def execute(line, **kwargs):
+        return IOResult(stdout=stream())
+
+    out, _, _ = await stream_xargs(
+        execute, ["echo"], EvaluationContext(make_session()), b"a"
+    )
+    first = await asyncio.wait_for(anext(out), 1)
+    assert first == b"x" * 16384
+    assert pulled <= 6
+    await out.aclose()
+    assert closed == 1
+
+
+@pytest.mark.asyncio
+async def test_deferred_child_status_stops_admission():
+    calls = []
+
+    async def execute(line, **kwargs):
+        calls.append(line)
+        io = IOResult()
+
+        async def output():
+            yield b"before\n"
+            io.exit_code = 255
+
+        io.stdout = output()
+        return io
+
+    out, io, _ = await handle_xargs(
+        execute, ["-n1", "echo"], EvaluationContext(make_session()), b"a b c"
+    )
+    assert out == b"before\n"
+    assert calls == ["echo a"]
+    assert io.exit_code == 124
+    assert b"exited with status 255" in await io.materialize_stderr()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code, expected", [(1, 123), (255, 124)])
+async def test_child_status_survives_early_close(code, expected):
+    async def execute(line, **kwargs):
+        return IOResult(stdout=b"row\n", exit_code=code)
+
+    out, io, _ = await stream_xargs(
+        execute, ["echo"], EvaluationContext(make_session()), b"a"
+    )
+    assert await anext(out) == b"row\n"
+    await out.aclose()
+    assert io.exit_code == expected

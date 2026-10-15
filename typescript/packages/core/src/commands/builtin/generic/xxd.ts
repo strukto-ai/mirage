@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
@@ -158,17 +159,47 @@ function reverseLine(raw: string): [number | null, Uint8Array] {
  */
 async function* reverseRuns(
   source: AsyncIterable<Uint8Array>,
+  plain = false,
 ): AsyncIterable<[number | null, Uint8Array]> {
-  const text = DEC.decode(await materialize(source))
-  const lines = text.split('\n')
-  if (text.includes(':')) {
-    for (const line of lines) {
-      if (line !== '') yield reverseLine(line)
+  const reader = new AsyncLineIterator(source)
+  let pending = ''
+  let first = true
+  try {
+    for (;;) {
+      const [raw, ended] = await reader.readUntil(0x0a)
+      if (raw.length === 0 && !ended) return
+      const line = DEC.decode(raw)
+      if (!plain) {
+        if (first && line !== '' && !line.includes(':')) {
+          const lines = [line]
+          let more = ended
+          while (more) {
+            const [rest, next] = await reader.readUntil(0x0a)
+            lines.push(DEC.decode(rest))
+            more = next
+          }
+          if (lines.some((row) => row.includes(':'))) {
+            for (const row of lines) if (row !== '') yield reverseLine(row)
+          } else {
+            const digits = lines.map((row) => /^[0-9A-Fa-f\s]*/.exec(row)?.[0] ?? '').join('')
+            yield [null, unhex(digits.replace(/\s+/g, ''))]
+          }
+          return
+        }
+        if (line !== '') {
+          first = false
+          yield reverseLine(line)
+        }
+        continue
+      }
+      const digits = pending + (/^[0-9A-Fa-f\s]*/.exec(line)?.[0] ?? '').replace(/\s+/g, '')
+      const paired = Math.floor(digits.length / 2) * 2
+      pending = digits.slice(paired)
+      if (paired > 0) yield [null, unhex(digits.slice(0, paired))]
     }
-    return
+  } finally {
+    await reader.discard()
   }
-  const digits = lines.map((line) => /^[0-9A-Fa-f\s]*/.exec(line)?.[0] ?? '').join('')
-  yield [null, unhex(digits.replace(/\s+/g, ''))]
 }
 
 /**
@@ -181,9 +212,10 @@ async function* reverseRuns(
 async function* xxdReverseStream(
   source: AsyncIterable<Uint8Array>,
   io: IOResult | null = null,
+  plain = false,
 ): AsyncIterable<Uint8Array> {
   let position = 0
-  for await (const [offset, data] of reverseRuns(source)) {
+  for await (const [offset, data] of reverseRuns(source, plain)) {
     if (data.byteLength === 0) continue
     if (offset !== null && offset < position) {
       if (io !== null) {
@@ -208,10 +240,13 @@ async function* xxdReverseStream(
  * stretch, so a whole dump is one write at 0. Mirrors Python's
  * _reverse_segments.
  */
-async function reverseSegments(source: AsyncIterable<Uint8Array>): Promise<[number, Uint8Array][]> {
+async function reverseSegments(
+  source: AsyncIterable<Uint8Array>,
+  plain: boolean,
+): Promise<[number, Uint8Array][]> {
   const segments: { start: number; end: number; parts: Uint8Array[] }[] = []
   let position = 0
-  for await (const [offset, data] of reverseRuns(source)) {
+  for await (const [offset, data] of reverseRuns(source, plain)) {
     if (data.byteLength === 0) continue
     if (offset !== null) position = offset
     const last = segments.at(-1)
@@ -333,7 +368,7 @@ async function seeked(
   limit: number | null,
 ): Promise<[AsyncIterable<Uint8Array>, number] | null> {
   const piped = path === null || isStdin(path)
-  let source = path === null ? resolveSource(stdin) : read(path)
+  const source = path === null ? resolveSource(stdin) : read(path)
   if (piped && seek.back) return null
   let start: number
   if (!seek.back) {
@@ -341,9 +376,25 @@ async function seeked(
   } else if (seek.relative) {
     start = -seek.offset
   } else {
-    const data = await materialize(source)
-    start = data.byteLength - seek.offset
-    source = singleChunk(data)
+    const kept: Uint8Array[] = []
+    let size = 0
+    let total = 0
+    for await (const chunk of chunks(source)) {
+      total += chunk.length
+      kept.push(chunk)
+      size += chunk.length
+      while (kept[0] !== undefined && size - kept[0].length >= seek.offset) {
+        size -= kept[0].length
+        kept.shift()
+      }
+      if (kept[0] !== undefined && size > seek.offset) {
+        kept[0] = kept[0].subarray(size - seek.offset)
+        size = seek.offset
+      }
+    }
+    start = total - seek.offset
+    if (start < 0) return null
+    return [limited(asyncChain(kept), limit), start]
   }
   if (start < 0) return null
   const after = await past(source, start)
@@ -362,6 +413,7 @@ async function writeOutput(
   writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
   render: () => AsyncIterable<Uint8Array> | null,
+  plain: boolean,
 ): Promise<[ByteSource | null, IOResult]> {
   const [input, target] = paths
   if (input === undefined || target === undefined) return [null, new IOResult()]
@@ -373,7 +425,7 @@ async function writeOutput(
   let segments: [number, Uint8Array][] = []
   let data: Uint8Array = new Uint8Array(0)
   try {
-    if (dump === null) segments = await reverseSegments(source)
+    if (dump === null) segments = await reverseSegments(source, plain)
     else data = await materialize(dump)
   } catch (err) {
     if (!isFsError(err)) throw err
@@ -468,7 +520,7 @@ export async function xxdGeneric(
   stream = stdinStream(stream, opts.stdin, true)
   const parsed = parseFlags(opts.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
-  const { seek, limit, uppercase } = parsed
+  const { seek, limit, uppercase, plain } = parsed
   let source: AsyncIterable<Uint8Array>
   let base = 0
   if (parsed.reverse) {
@@ -491,8 +543,8 @@ export async function xxdGeneric(
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {
-    return writeOutput(paths, source, readBytes, writeBytes, pwriteBytes, render)
+    return writeOutput(paths, source, readBytes, writeBytes, pwriteBytes, render, plain)
   }
   const io = new IOResult()
-  return [render() ?? xxdReverseStream(source, io), io]
+  return [render() ?? xxdReverseStream(source, io, plain), io]
 }

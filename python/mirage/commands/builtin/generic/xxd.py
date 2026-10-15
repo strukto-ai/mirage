@@ -1,9 +1,16 @@
 import binascii
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections import deque
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+)
+from contextlib import aclosing
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.size_suffix import parse_base0
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -17,6 +24,7 @@ from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, read_fail_exit_code
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
+from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cooperative import chunks
 from mirage.io.stream import async_chain, materialize, yield_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -132,7 +140,8 @@ def _reverse_line(line: str) -> tuple[int | None, bytes]:
 
 async def _reverse_runs(
     source: AsyncIterator[bytes],
-) -> AsyncIterator[tuple[int | None, bytes]]:
+    plain: bool = False,
+) -> AsyncGenerator[tuple[int | None, bytes], None]:
     """Decode a hexdump into runs of bytes and the offsets they go to.
 
     A plain (``-p``) dump has no offsets, so its one run continues from
@@ -142,21 +151,54 @@ async def _reverse_runs(
     Args:
         source (AsyncIterator[bytes]): The hexdump.
     """
-    text = (await materialize(source)).decode(errors="replace")
-    if ":" in text:
-        for line in split_lines(text):
-            if line:
-                yield _reverse_line(line)
-    else:
-        kept = (
-            re.match(r"[0-9A-Fa-f\s]*", line) for line in split_lines(text)
-        )
-        digits = "".join(m.group() for m in kept if m is not None)
-        yield None, _unhex(re.sub(r"\s+", "", digits))
+    reader = AsyncLineIterator(source)
+    pending = ""
+    first = True
+    try:
+        while True:
+            raw, ended = await reader.read_until(b"\n")
+            if not raw and not ended:
+                return
+            line = raw.decode(errors="replace")
+            if not plain:
+                if first and line and ":" not in line:
+                    lines = [line]
+                    while ended:
+                        rest, ended = await reader.read_until(b"\n")
+                        lines.append(rest.decode(errors="replace"))
+                    if any(":" in row for row in lines):
+                        for row in lines:
+                            if row:
+                                yield _reverse_line(row)
+                    else:
+                        digits = "".join(
+                            match.group()
+                            for row in lines
+                            if (match := re.match(r"[0-9A-Fa-f\s]*", row))
+                            is not None
+                        )
+                        yield None, _unhex(re.sub(r"\s+", "", digits))
+                    return
+                if line:
+                    first = False
+                    yield _reverse_line(line)
+                continue
+            match = re.match(r"[0-9A-Fa-f\s]*", line)
+            digits = pending + re.sub(
+                r"\s+", "", match.group() if match else ""
+            )
+            paired = len(digits) // 2 * 2
+            pending = digits[paired:]
+            if paired:
+                yield None, _unhex(digits[:paired])
+    finally:
+        await reader.discard()
 
 
 async def _xxd_reverse_stream(
-    source: AsyncIterator[bytes], io: IOResult | None = None
+    source: AsyncIterator[bytes],
+    io: IOResult | None = None,
+    plain: bool = False,
 ) -> AsyncIterator[bytes]:
     """Revert a hexdump onto a stream, which can only move forward.
 
@@ -170,24 +212,26 @@ async def _xxd_reverse_stream(
         io (IOResult | None): The result to mark on a backward seek.
     """
     position = 0
-    async for offset, data in _reverse_runs(source):
-        if not data:
-            continue
-        if offset is not None and offset < position:
-            if io is not None:
-                io.exit_code = SEEK_BACK_EXIT
-                io.stderr = b"xxd: Sorry, cannot seek backwards.\n"
-            return
-        while offset is not None and position < offset:
-            gap = min(offset - position, GAP_CHUNK)
-            yield bytes(gap)
-            position += gap
-        yield data
-        position += len(data)
+    async with aclosing(_reverse_runs(source, plain)) as runs:
+        async for offset, data in runs:
+            if not data:
+                continue
+            if offset is not None and offset < position:
+                if io is not None:
+                    io.exit_code = SEEK_BACK_EXIT
+                    io.stderr = b"xxd: Sorry, cannot seek backwards.\n"
+                return
+            while offset is not None and position < offset:
+                gap = min(offset - position, GAP_CHUNK)
+                yield bytes(gap)
+                position += gap
+            yield data
+            position += len(data)
 
 
 async def _reverse_segments(
     source: AsyncIterator[bytes],
+    plain: bool = False,
 ) -> list[tuple[int, bytes]]:
     """Revert a hexdump into the stretches xxd writes into OUTFILE.
 
@@ -199,16 +243,17 @@ async def _reverse_segments(
     """
     segments: list[tuple[int, bytearray]] = []
     position = 0
-    async for offset, data in _reverse_runs(source):
-        if not data:
-            continue
-        if offset is not None:
-            position = offset
-        if segments and segments[-1][0] + len(segments[-1][1]) == position:
-            segments[-1][1].extend(data)
-        else:
-            segments.append((position, bytearray(data)))
-        position += len(data)
+    async with aclosing(_reverse_runs(source, plain)) as runs:
+        async for offset, data in runs:
+            if not data:
+                continue
+            if offset is not None:
+                position = offset
+            if segments and segments[-1][0] + len(segments[-1][1]) == position:
+                segments[-1][1].extend(data)
+            else:
+                segments.append((position, bytearray(data)))
+            position += len(data)
     return [(start, bytes(data)) for start, data in segments]
 
 
@@ -363,9 +408,22 @@ async def _seeked(
     elif seek.relative:
         start = -seek.offset
     else:
-        data = await materialize(source)
-        start = len(data) - seek.offset
-        source = yield_bytes(data)
+        kept: deque[bytes] = deque()
+        size = total = 0
+        async with aclosing(chunks(source)) as data:
+            async for chunk in data:
+                total += len(chunk)
+                kept.append(chunk)
+                size += len(chunk)
+                while kept and size - len(kept[0]) >= seek.offset:
+                    size -= len(kept.popleft())
+                if kept and size > seek.offset:
+                    kept[0] = kept[0][size - seek.offset :]
+                    size = seek.offset
+        start = total - seek.offset
+        if start < 0:
+            return None
+        return _limited(async_chain(list(kept)), limit), start
     if start < 0:
         return None
     past = await _past(source, start)
@@ -457,7 +515,7 @@ async def xxd(
         )
     io = IOResult()
     if reverse:
-        return _xxd_reverse_stream(source, io), io
+        return _xxd_reverse_stream(source, io, plain), io
     if plain:
         return _xxd_plain_stream(source, uppercase=uppercase), io
     return _xxd_dump_stream(
@@ -501,7 +559,7 @@ async def _write_output(
     data = b""
     try:
         if reverse:
-            segments = await _reverse_segments(source)
+            segments = await _reverse_segments(source, plain)
         elif plain:
             data = await materialize(
                 _xxd_plain_stream(source, uppercase=uppercase)

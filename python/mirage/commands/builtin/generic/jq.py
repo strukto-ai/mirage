@@ -554,8 +554,8 @@ class MainLoop:
                 run, position = await self._run(
                     "null", self._reader.position()
                 )
-                if run.outputs:
-                    yield format_jq_output(run.outputs, self._opts)
+                for value in run.outputs:
+                    yield format_jq_output([value], self._opts)
                 self._settle(run, position)
                 return
             while not self._reader.failures():
@@ -568,8 +568,8 @@ class MainLoop:
                         continue
                     return
                 run, position = await self._run(item, self._reader.position())
-                if run.outputs:
-                    yield format_jq_output(run.outputs, self._opts)
+                for value in run.outputs:
+                    yield format_jq_output([value], self._opts)
                 if self._settle(run, position):
                     return
         finally:

@@ -17,13 +17,14 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { chunks } from '../../../io/cooperative.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import type { PathSpec } from '../../../types.ts'
 import { strverscmp } from '../../../utils/strverscmp.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { readStdinAsync, stdinStream } from '../utils/stream.ts'
+import { stdinStream } from '../utils/stream.ts'
 import {
   CUT,
   ILLEGAL,
@@ -289,59 +290,6 @@ interface Converted {
   error: string | null
 }
 
-/**
- * Convert one input character by character, as glibc reports it: an input
- * sequence the source does not allow, or a character the target cannot hold,
- * stops the conversion at that sequence's byte offset, and -c drops it and goes
- * on. A sequence cut off by the end of the input stops it either way.
- *
- * One character is at most four bytes out and at least one in, plus a
- * UTF-16 BOM, which sizes the buffer. Mirrors the Python `_walk`.
- */
-function walk(
-  raw: Uint8Array,
-  start: number,
-  decode: (data: Uint8Array, at: number) => Decoded,
-  encoder: Encoder,
-  omit: boolean,
-): Converted {
-  const out = new Uint8Array(raw.length * 4 + 2)
-  let n = 0
-  let dropped = false
-  let at = start
-  const stop = (error: string): Converted => ({ data: out.subarray(0, n), dropped, error })
-  while (at < raw.length) {
-    const [cp, length] = decode(raw, at)
-    if (cp === CUT) return stop(INCOMPLETE)
-    const next = cp === ILLEGAL ? -1 : encoder.put(cp, out, n)
-    if (next < 0) {
-      if (!omit) return stop(`illegal input sequence at position ${String(at)}`)
-      dropped = true
-    } else {
-      n = next
-    }
-    at += length
-  }
-  return { data: out.subarray(0, n), dropped, error: null }
-}
-
-function convert(raw: Uint8Array, charset: Charset, encoder: Encoder, omit: boolean): Converted {
-  if (typeof charset !== 'string') {
-    const table = multibyteTable(charset)
-    return walk(raw, 0, (data, at) => charset.step(data, at, table), encoder, omit)
-  }
-  let start = 0
-  let little = !charset.endsWith('be')
-  if (charset === 'utf-16' && raw.length >= 2) {
-    if (raw[0] === 0xff && raw[1] === 0xfe) start = 2
-    else if (raw[0] === 0xfe && raw[1] === 0xff) {
-      start = 2
-      little = false
-    }
-  }
-  return walk(raw, start, (data, at) => decodeAt(data, at, charset, little), encoder, omit)
-}
-
 interface IconvFlags {
   readonly fromEnc: string
   readonly toEnc: string
@@ -395,45 +343,109 @@ export async function iconvGeneric(
   }
   const encoder: Encoder =
     typeof toCharset === 'string' ? new HandEncoder(toCharset) : new MultibyteEncoder(toCharset)
-  const chunks: Uint8Array[] = []
-  const errors: string[] = []
-  let failed = false
-  for (const path of paths.length > 0 ? paths : [null]) {
-    let raw: Uint8Array
-    if (path === null) {
-      raw = (await readStdinAsync(opts.stdin)) ?? new Uint8Array(0)
-    } else {
+  const operands =
+    paths.length > 0
+      ? paths.map((path) => ({ path, source: stream(path) }))
+      : [{ path: null, source: opts.stdin ?? new Uint8Array() }]
+  const io = new IOResult()
+  const inputCharset = fromCharset
+  async function* output(): AsyncIterable<Uint8Array> {
+    for (const { path, source } of operands) {
       try {
-        raw = await materialize(stream(path))
+        for await (const result of convertStream(
+          source,
+          inputCharset,
+          encoder,
+          parsed.ignoreErrors,
+        )) {
+          if (result.dropped) io.exitCode = 1
+          if (result.error !== null) {
+            io.exitCode = 1
+            io.stderr = concat([
+              await materialize(io.stderr),
+              encodeText('iconv: ' + result.error + '\n'),
+            ])
+          }
+          if (result.data.length > 0) yield result.data
+          if (result.error !== null) return
+        }
       } catch (err) {
         if (!isFsError(err)) throw err
-        failed = true
+        io.exitCode = 1
         const code = (err as { code?: string }).code
-        if (code !== undefined && READ_FAILURES.has(code)) {
-          errors.push(`iconv: error while reading the input: ${String(fsStrerror(err))}`)
-          break
-        }
-        errors.push(`iconv: cannot open input file \`${path.rawPath}': ${String(fsStrerror(err))}`)
-        continue
+        const reading = path === null || (code !== undefined && READ_FAILURES.has(code))
+        const message = reading
+          ? 'iconv: error while reading the input: ' + String(fsStrerror(err))
+          : 'iconv: cannot open input file ' +
+            String.fromCharCode(96) +
+            path.rawPath +
+            "': " +
+            String(fsStrerror(err))
+        io.stderr = concat([await materialize(io.stderr), encodeText(message + '\n')])
+        if (reading) break
       }
     }
-    const converted = convert(raw, fromCharset, encoder, parsed.ignoreErrors)
-    chunks.push(converted.data)
-    failed = failed || converted.dropped
-    if (converted.error !== null) {
-      errors.push(`iconv: ${converted.error}`)
-      failed = true
-      break
+  }
+  const converted = output()
+  if (parsed.outputPath !== null) {
+    await write(parsed.outputPath, await materialize(converted))
+    return [null, io]
+  }
+  return [converted, io]
+}
+
+async function* convertStream(
+  source: ByteSource,
+  charset: Charset,
+  encoder: Encoder,
+  omit: boolean,
+): AsyncIterable<Converted> {
+  let pending: Uint8Array = new Uint8Array()
+  let offset = 0
+  let little = typeof charset !== 'string' || !charset.endsWith('be')
+  let first = true
+  const table = typeof charset === 'string' ? new Map<number, number>() : multibyteTable(charset)
+  for await (const part of chunks(source)) {
+    const raw = pending.length > 0 ? concat([pending, part]) : part
+    let at = 0
+    if (first && charset === 'utf-16') {
+      if (raw.length < 2) {
+        pending = raw
+        continue
+      }
+      if (raw[0] === 0xff && raw[1] === 0xfe) at = 2
+      else if (raw[0] === 0xfe && raw[1] === 0xff) {
+        at = 2
+        little = false
+      }
     }
+    first = false
+    const out = new Uint8Array(raw.length * 4 + 2)
+    let n = 0
+    let dropped = false
+    while (at < raw.length) {
+      const [cp, length] =
+        typeof charset === 'string'
+          ? decodeAt(raw, at, charset, little)
+          : charset.step(raw, at, table)
+      if (cp === CUT) break
+      const next = cp === ILLEGAL ? -1 : encoder.put(cp, out, n)
+      if (next < 0) {
+        if (!omit) {
+          yield {
+            data: out.subarray(0, n),
+            dropped,
+            error: 'illegal input sequence at position ' + String(offset + at),
+          }
+          return
+        }
+        dropped = true
+      } else n = next
+      at += length
+    }
+    pending = raw.slice(at)
+    offset += at
+    yield { data: out.subarray(0, n), dropped, error: null }
   }
-  const stderr = errors.length > 0 ? encodeText(errors.map((line) => `${line}\n`).join('')) : null
-  const encoded = concat(chunks)
-  const outPath = parsed.outputPath
-  if (outPath !== null) {
-    const spec = outPath
-    await write(spec, encoded)
-    return [null, new IOResult({ exitCode: failed ? 1 : 0, stderr })]
-  }
-  const result: ByteSource = encoded
-  return [result, new IOResult({ exitCode: failed ? 1 : 0, stderr })]
+  if (pending.length > 0) yield { data: new Uint8Array(), dropped: false, error: INCOMPLETE }
 }

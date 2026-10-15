@@ -1,6 +1,13 @@
 import codecs
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+)
+from contextlib import aclosing
 from dataclasses import dataclass
 from functools import cmp_to_key
 
@@ -13,16 +20,17 @@ from mirage.commands.builtin.generic.iconv_multibyte import (
     MultibyteSpec,
     multibyte_table,
 )
-from mirage.commands.builtin.utils.stream import read_stdin_async, stdin_bytes
+from mirage.commands.builtin.utils.stream import resolve_source, stdin_stream
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.cooperative import chunks
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
-from mirage.types import PathSpec
+from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.strverscmp import strverscmp
 
 _HINT = "Try `iconv --help' or `iconv --usage' for more information."
@@ -343,153 +351,10 @@ class _CodecEncoder:
 _Encoder = _HandEncoder | MultibyteEncoder | _CodecEncoder
 
 
-def _bulk_text(raw: bytes, charset: str | codecs.CodecInfo) -> str | None:
-    """The whole input decoded at once, None when it needs the slow walk.
-
-    Args:
-        raw (bytes): one input.
-        charset (str | codecs.CodecInfo): a hand-written source charset,
-            or a python codec.
-    """
-    if isinstance(charset, codecs.CodecInfo):
-        codec, ucs2 = charset.name, False
-    else:
-        codec, ucs2 = _BULK[charset], charset.startswith("ucs-2")
-    try:
-        text = raw.decode(codec)
-    except UnicodeDecodeError:
-        return None
-    return None if ucs2 and any(ord(c) > 0xFFFF for c in text) else text
-
-
-def _walk(
-    raw: bytes,
-    start: int,
-    decode: Callable[[bytes, int], Decoded],
-    encoder: _Encoder,
-    omit: bool,
-) -> _Converted:
-    """Convert one input character by character, as glibc reports it.
-
-    Mirrors the TypeScript ``walk``.
-
-    Args:
-        raw (bytes): one input, whole.
-        start (int): offset of the first character, past a BOM.
-        decode (Callable[[bytes, int], Decoded]): reads one character.
-        encoder (_Encoder): the target, shared by every input.
-        omit (bool): ``-c``.
-    """
-    out = bytearray()
-    dropped = False
-    at = start
-    while at < len(raw):
-        cp, length = decode(raw, at)
-        if cp == CUT:
-            return _Converted(bytes(out), dropped, _INCOMPLETE)
-        data = None if cp == ILLEGAL else encoder.encode_char(cp)
-        if data is None:
-            if not omit:
-                return _Converted(
-                    bytes(out),
-                    dropped,
-                    f"illegal input sequence at position {at}",
-                )
-            dropped = True
-        else:
-            out += data
-        at += length
-    return _Converted(bytes(out), dropped, None)
-
-
-def _walk_codec(
-    raw: bytes, charset: codecs.CodecInfo, encoder: _Encoder, omit: bool
-) -> _Converted:
-    """Convert one input of a codec charset a byte at a time.
-
-    Args:
-        raw (bytes): one input, whole.
-        charset (codecs.CodecInfo): the codec source charset.
-        encoder (_Encoder): the target, shared by every input.
-        omit (bool): ``-c``.
-    """
-    decoder = charset.incrementaldecoder("strict")
-    unit = _unit_of(charset.name)
-    out = bytearray()
-    dropped = False
-    start = 0
-    pos = 0
-    while pos < len(raw):
-        try:
-            text = decoder.decode(raw[pos : pos + 1])
-        except UnicodeDecodeError:
-            if not omit:
-                return _Converted(
-                    bytes(out),
-                    dropped,
-                    f"illegal input sequence at position {start}",
-                )
-            dropped = True
-            decoder.reset()
-            pos = start = start + unit
-            continue
-        pos += 1
-        if not text:
-            continue
-        for char in text:
-            data = encoder.encode_char(ord(char))
-            if data is None:
-                if not omit:
-                    return _Converted(
-                        bytes(out),
-                        dropped,
-                        f"illegal input sequence at position {start}",
-                    )
-                dropped = True
-            else:
-                out += data
-        start = pos
-    try:
-        decoder.decode(b"", final=True)
-    except UnicodeDecodeError:
-        return _Converted(bytes(out), dropped, _INCOMPLETE)
-    return _Converted(bytes(out), dropped, None)
-
-
-def _convert(
-    raw: bytes, charset: _Charset, encoder: _Encoder, omit: bool
-) -> _Converted:
-    if isinstance(charset, MultibyteSpec):
-        table = multibyte_table(charset)
-        step = charset.step
-
-        def decode_multibyte(data: bytes, at: int) -> Decoded:
-            return step(data, at, table)
-
-        return _walk(raw, 0, decode_multibyte, encoder, omit)
-    text = _bulk_text(raw, charset)
-    if text is not None:
-        data = encoder.encode_text(text) if text else b""
-        if data is not None:
-            return _Converted(data, False, None)
-    if isinstance(charset, codecs.CodecInfo):
-        return _walk_codec(raw, charset, encoder, omit)
-    start = 0
-    little = not charset.endswith("be")
-    if charset == "utf-16" and raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        little = raw[:2] == b"\xff\xfe"
-        start = 2
-
-    def decode_hand(data: bytes, at: int) -> Decoded:
-        return _decode_at(data, at, charset, little)
-
-    return _walk(raw, start, decode_hand, encoder, omit)
-
-
 async def iconv(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     stdin: ByteSource | None = None,
     from_enc: str = "utf-8",
@@ -513,7 +378,7 @@ async def iconv(
 
     Args:
         paths (list[PathSpec]): input operands, empty for stdin.
-        read_bytes (Callable[..., Awaitable[bytes]]): reads one operand.
+        read_stream (PolymorphicReadFn): reads one operand.
         write_bytes (Callable[..., Awaitable[None]]): writes ``-o``.
         stdin (ByteSource | None): standard input.
         from_enc (str): ``-f``.
@@ -537,45 +402,171 @@ async def iconv(
         encoder = _CodecEncoder(target)
     else:
         encoder = _HandEncoder(target)
-    read = stdin_bytes(read_bytes, stdin)
-    out = bytearray()
-    errors: list[str] = []
-    failed = False
-    operands: list[PathSpec | None] = [*paths] if paths else [None]
-    for path in operands:
-        if path is None:
-            raw = await read_stdin_async(stdin) or b""
-        else:
+    read = stdin_stream(read_stream, stdin)
+    operands = (
+        [(path, read(path)) for path in paths]
+        if paths
+        else [(None, resolve_source(stdin))]
+    )
+    io = IOResult()
+
+    async def output() -> AsyncIterator[bytes]:
+        for path, stream in operands:
             try:
-                raw = await read(path)
-            except READ_FAILURES as exc:
-                errors.append(
-                    f"iconv: error while reading the input: {fs_strerror(exc)}"
-                )
-                failed = True
-                break
+                async with aclosing(
+                    _convert_stream(stream, source, encoder, ignore_errors)
+                ) as converted:
+                    async for result in converted:
+                        if result.dropped:
+                            io.exit_code = 1
+                        if result.error is not None:
+                            io.exit_code = 1
+                            io.stderr = await materialize(
+                                io.stderr
+                            ) + encode_text(f"iconv: {result.error}\n")
+                        if result.data:
+                            yield result.data
+                        if result.error is not None:
+                            if isinstance(encoder, _CodecEncoder):
+                                yield encoder.finish()
+                            return
             except FS_ERRORS as exc:
-                errors.append(
-                    f"iconv: cannot open input file `{path.raw_path}': "
-                    f"{fs_strerror(exc)}"
+                io.exit_code = 1
+                reading = isinstance(exc, READ_FAILURES) or path is None
+                if reading:
+                    message = (
+                        "iconv: error while reading the input: "
+                        f"{fs_strerror(exc)}"
+                    )
+                else:
+                    assert path is not None
+                    message = (
+                        f"iconv: cannot open input file {chr(96)}{path.raw_path}': "
+                        f"{fs_strerror(exc)}"
+                    )
+                io.stderr = await materialize(io.stderr) + encode_text(
+                    message + "\n"
                 )
-                failed = True
-                continue
-        converted = _convert(raw, source, encoder, ignore_errors)
-        out += converted.data
-        failed = failed or converted.dropped
-        if converted.error is not None:
-            errors.append(f"iconv: {converted.error}")
-            failed = True
-            break
-    if isinstance(encoder, _CodecEncoder):
-        out += encoder.finish()
-    stderr = encode_text("".join(f"{line}\n" for line in errors)) or None
-    encoded = bytes(out)
+                if reading:
+                    break
+        if isinstance(encoder, _CodecEncoder):
+            yield encoder.finish()
+
+    converted = output()
     if output_path is not None:
-        await write_bytes(output_path, encoded)
-        return None, IOResult(exit_code=int(failed), stderr=stderr)
-    return encoded, IOResult(exit_code=int(failed), stderr=stderr)
+        await write_bytes(output_path, await materialize(converted))
+        return None, io
+    return converted, io
+
+
+async def _convert_stream(
+    source: ByteSource,
+    charset: _Charset,
+    encoder: _Encoder,
+    omit: bool,
+) -> AsyncGenerator[_Converted, None]:
+    pending = b""
+    offset = 0
+    little = not isinstance(charset, str) or not charset.endswith("be")
+    first = True
+    table = (
+        multibyte_table(charset)
+        if isinstance(charset, MultibyteSpec)
+        else None
+    )
+    codec = (
+        charset.incrementaldecoder("strict")
+        if isinstance(charset, codecs.CodecInfo)
+        else None
+    )
+    codec_at = 0
+    async with aclosing(chunks(source)) as bounded:
+        async for part in bounded:
+            raw = pending + part
+            at = 0
+            out = bytearray()
+            dropped = False
+            if first and charset == "utf-16":
+                if len(raw) < 2:
+                    pending = raw
+                    continue
+                if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+                    little = raw[:2] == b"\xff\xfe"
+                    at = 2
+            first = False
+            while at < len(raw):
+                if codec is not None:
+                    assert isinstance(charset, codecs.CodecInfo)
+                    buffered = codec.getstate()[0]
+                    try:
+                        text = codec.decode(raw[at : at + 1])
+                    except UnicodeDecodeError:
+                        if not omit:
+                            yield _Converted(
+                                bytes(out),
+                                dropped,
+                                f"illegal input sequence at position {codec_at}",
+                            )
+                            return
+                        dropped = True
+                        codec.reset()
+                        replay = (buffered + raw[at : at + 1])[
+                            _unit_of(charset.name) :
+                        ]
+                        offset += at + 1 - len(replay)
+                        raw = replay + raw[at + 1 :]
+                        at = 0
+                        codec_at = offset
+                        continue
+                    at += 1
+                    for char in text:
+                        data = encoder.encode_char(ord(char))
+                        if data is None:
+                            if not omit:
+                                yield _Converted(
+                                    bytes(out),
+                                    dropped,
+                                    f"illegal input sequence at position {codec_at}",
+                                )
+                                return
+                            dropped = True
+                        else:
+                            out += data
+                    if text:
+                        codec_at = offset + at
+                    continue
+                if isinstance(charset, MultibyteSpec):
+                    assert table is not None
+                    cp, length = charset.step(raw, at, table)
+                else:
+                    assert isinstance(charset, str)
+                    cp, length = _decode_at(raw, at, charset, little)
+                if cp == CUT:
+                    break
+                data = None if cp == ILLEGAL else encoder.encode_char(cp)
+                if data is None:
+                    if not omit:
+                        yield _Converted(
+                            bytes(out),
+                            dropped,
+                            f"illegal input sequence at position {offset + at}",
+                        )
+                        return
+                    dropped = True
+                else:
+                    out += data
+                at += length
+            pending = raw[at:]
+            offset += at
+            yield _Converted(bytes(out), dropped, None)
+    incomplete = bool(pending)
+    if codec is not None:
+        try:
+            codec.decode(b"", final=True)
+        except UnicodeDecodeError:
+            incomplete = True
+    if incomplete:
+        yield _Converted(b"", False, _INCOMPLETE)
 
 
 __all__ = ["iconv"]
@@ -605,7 +596,7 @@ async def iconv_generic(
     paths: list[PathSpec],
     texts: list[str],
     opts: CommandOpts,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_stream: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(opts.flags)
@@ -613,7 +604,7 @@ async def iconv_generic(
         return list_text(), IOResult()
     return await iconv(
         paths,
-        read_bytes=read_bytes,
+        read_stream=read_stream,
         write_bytes=write_bytes,
         stdin=opts.stdin,
         from_enc=parsed.from_enc,
