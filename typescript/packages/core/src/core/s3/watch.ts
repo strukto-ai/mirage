@@ -13,103 +13,68 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../accessor/s3.ts'
-import type { DeltaHook } from '../../watch/base.ts'
-import { ListingDeltaHook } from '../../watch/delta.ts'
-import { statFingerprint } from '../../watch/fingerprint.ts'
-import { synthDirs } from '../../watch/walk.ts'
-import type { PathSpec, WalkEntry } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { rawPathOf } from '../../utils/key_prefix.ts'
-import { loadS3Module, s3Key, stripKeyPrefix, withClient } from './client.ts'
+import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
+import { normalize } from '../../utils/key_prefix.ts'
+import { eventAt, field, textField } from '../../watch/events.ts'
 
-interface ListedObject {
-  Key?: string
-  Size?: number
-  LastModified?: Date | string
-  ETag?: string
-}
-
-function isoOf(value: Date | string | undefined): string | null {
-  if (value === undefined) return null
-  // Checkpoints persist this spelling as part of the fallback fingerprint.
-  return value instanceof Date ? value.toISOString() : value
-}
+// The eventName families a record carries: a write (Put, Post, Copy,
+// CompleteMultipartUpload) or a removal (Delete, DeleteMarkerCreated,
+// lifecycle expiry).
+const WRITTEN = 'ObjectCreated:'
+const REMOVED = ['ObjectRemoved:', 'LifecycleExpiration:']
 
 /**
- * Recursive `ListObjectsV2` feeding the generic listing differ.
+ * Map one S3 event notification record onto mount paths.
  *
- * One paginated LIST with no Delimiter covers the whole subtree, so a pull
- * costs one request per 1000 keys rather than one per directory. Reads the
- * bucket directly, never through mirage's caches, as the DeltaHook contract
- * requires.
+ * The consumer owns the transport (S3 Event Notifications delivered to an SQS
+ * queue, an SNS topic or EventBridge) and passes each record of a
+ * notification's `Records` with its `eventName`. Nothing here runs a loop. A
+ * record names the bucket and the object key, URL-encoded with `+` for a
+ * space, and says whether the object was written or removed.
  *
- * Fingerprints on the object's ETag, which for a single-part upload is the MD5
- * of the content, so an overwrite with identical bytes is correctly reported
- * as no change. Multipart ETags are a digest of the part digests, which still
- * changes with the content.
+ * S3 does not say whether a write made the object or replaced it, so a key the
+ * hook has mapped before is an UPDATE and any other is a CREATE, as the Box
+ * hook splits an upload. A key ending in `/` is a directory marker: writing
+ * one makes the directory, and removing one leaves whatever is below it, so
+ * that directory is UNKNOWN. A record for another bucket, or for a key outside
+ * the mount's `keyPrefix`, maps to nothing.
+ *
+ * Mirrors Python `S3EventHook` (`core/s3/watch.py`).
  */
-export class S3Walk {
+export class S3EventHook {
   private readonly accessor: S3Accessor
+  private readonly seen = new Set<string>()
 
   constructor(accessor: S3Accessor) {
     this.accessor = accessor
   }
 
-  async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-    const config = this.accessor.config
-    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
-    const stem = rstripSlash(s3Key(rawPathOf(root), config))
-    const base = stem !== '' ? `${stem}/` : ''
-    const files: string[] = []
-    const markers: string[] = []
-    const rows: WalkEntry[] = []
-    const { ListObjectsV2Command } = await loadS3Module(config)
-    await withClient(config, async (client) => {
-      let continuationToken: string | undefined
-      do {
-        const input: Record<string, unknown> = { Bucket: config.bucket, Prefix: stem }
-        if (continuationToken !== undefined) input.ContinuationToken = continuationToken
-        const resp = (await client.send(new ListObjectsV2Command(input))) as {
-          Contents?: ListedObject[]
-          IsTruncated?: boolean
-          NextContinuationToken?: string
-        }
-        for (const obj of resp.Contents ?? []) {
-          const key = obj.Key
-          if (key === undefined) continue
-          if (!(key === stem || key.startsWith(base))) continue
-          const relative = stripSlash(stripKeyPrefix(key, config))
-          const virtual = prefix !== '' ? `${prefix}/${relative}` : `/${relative}`
-          if (key.endsWith('/')) {
-            // A directory marker: mirage's own mkdir writes one. It
-            // carries an ETag and a size, but it is not a file, so
-            // synthDirs reports it instead.
-            markers.push(rstripSlash(virtual))
-            continue
-          }
-          files.push(virtual)
-          const modified = isoOf(obj.LastModified)
-          const size = obj.Size ?? null
-          const etag = (obj.ETag ?? '').replace(/^"|"$/g, '') || null
-          rows.push({
-            virtual,
-            isDir: false,
-            fingerprint: statFingerprint(etag, modified, size),
-            size,
-            modified,
-          })
-        }
-        continuationToken = resp.IsTruncated === true ? resp.NextContinuationToken : undefined
-      } while (continuationToken !== undefined)
-    })
-    yield* rows
-    yield* synthDirs(root.virtual, files, markers)
+  toEvents(root: PathSpec, eventName: string, payload: JsonValue): Promise<readonly FileEvent[]> {
+    return Promise.resolve(this.map(root, eventName, payload))
   }
-}
 
-// Build the delta hook shared by S3 and every S3-compatible alias.
-export function buildDeltaHook(accessor: S3Accessor): DeltaHook {
-  const walk = new S3Walk(accessor)
-  return new ListingDeltaHook(walk.walk.bind(walk))
+  private map(root: PathSpec, eventName: string, payload: JsonValue): readonly FileEvent[] {
+    const config = this.accessor.config
+    const s3 = field(payload, 's3') ?? null
+    const raw = textField(field(s3, 'object') ?? null, 'key')
+    if (textField(field(s3, 'bucket') ?? null, 'name') !== config.bucket || !raw) return []
+    const key = decodeURIComponent(raw.replace(/\+/g, ' '))
+    const prefix = normalize(config.keyPrefix)
+    if (prefix !== '' && !key.startsWith(prefix)) return []
+    const relative = key.slice(prefix.length)
+    if (relative.endsWith('/')) {
+      const place = relative.replace(/\/+$/, '')
+      if (place === '') return []
+      const kind = eventName.startsWith(WRITTEN) ? FileChangeKind.CREATE : FileChangeKind.UNKNOWN
+      return [eventAt(root, place, kind)]
+    }
+    if (REMOVED.some((family) => eventName.startsWith(family))) {
+      this.seen.delete(relative)
+      return [eventAt(root, relative, FileChangeKind.DELETE)]
+    }
+    if (!eventName.startsWith(WRITTEN)) return []
+    const kind = this.seen.has(relative) ? FileChangeKind.UPDATE : FileChangeKind.CREATE
+    this.seen.add(relative)
+    return [eventAt(root, relative, kind)]
+  }
 }

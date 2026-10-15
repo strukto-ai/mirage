@@ -18,8 +18,6 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { redactConfig, type GridFSConfig, type GridFSConfigRedacted } from './config.ts'
 import { PROMPT } from './prompt.ts'
-import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
-import { buildDeltaHook } from '../../core/gridfs/watch.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
@@ -158,10 +156,6 @@ export class GridFSVFS extends BaseVFS {
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     return gridfsTruncate(this.accessor, path, length, noCreate)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 
   override storageLocation(): string {

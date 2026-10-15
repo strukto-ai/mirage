@@ -102,30 +102,21 @@ export interface ListFolderState {
 }
 
 /**
- * List a folder and keep the cursor the last page handed back.
+ * A cursor at the folder's present state, without listing it.
+ *
+ * `/` and `''` both mean the account root. Mirrors Python `latest_cursor`.
  */
-export async function listFolderState(
+export async function latestCursor(
   tm: DropboxTokenManager,
   path: string,
-  opts: { recursive?: boolean; pageSize?: number } = {},
-): Promise<ListFolderState> {
+  opts: { recursive?: boolean } = {},
+): Promise<string> {
   const apiPath = path === '/' || path === '' ? '' : path
-  const recursive = opts.recursive === true
-  const pageSize = opts.pageSize ?? 2000
-  const out: DropboxEntry[] = []
-  let resp = (await dropboxRpc(tm, '/files/list_folder', {
+  const resp = (await dropboxRpc(tm, '/files/list_folder/get_latest_cursor', {
     path: apiPath,
-    recursive,
-    limit: pageSize,
-  })) as ListFolderResponse
-  out.push(...resp.entries)
-  while (resp.has_more) {
-    resp = (await dropboxRpc(tm, '/files/list_folder/continue', {
-      cursor: resp.cursor,
-    })) as ListFolderResponse
-    out.push(...resp.entries)
-  }
-  return { entries: out, cursor: resp.cursor }
+    recursive: opts.recursive === true,
+  })) as { cursor: string }
+  return resp.cursor
 }
 
 /**

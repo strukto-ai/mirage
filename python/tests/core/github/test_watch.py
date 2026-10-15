@@ -12,139 +12,103 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
-
 import pytest
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.tree import seed_index
-from mirage.core.github.tree_entry import TreeEntry
-from mirage.core.github.watch import GitHubWalk
-from mirage.types import PathSpec
-from mirage.watch.errors import IncompleteWalkError
+from mirage.core.github.watch import GitHubEventHook
+from mirage.types import FileChangeKind, JsonValue, PathSpec
 
 CONFIG = GitHubConfig(token="t")
+ROOT = PathSpec(virtual="/gh", directory="/gh", vfs_path="")
 
 
-def _accessor(tree: dict[str, TreeEntry]) -> GitHubAccessor:
+def _accessor(ref: str | None = "main") -> GitHubAccessor:
     return GitHubAccessor(
         config=CONFIG,
         owner="acme",
         repo="proj",
-        ref="main",
+        ref=ref,
         default_branch="main",
-        tree=tree,
+        tree={},
     )
 
 
-def _root() -> PathSpec:
-    return PathSpec(virtual="/gh", directory="/gh", vfs_path="")
-
-
-def _entry(path: str, sha: str) -> TreeEntry:
-    return TreeEntry(path=path, type="blob", sha=sha, size=3)
-
-
-async def _collect(walk, root):
-    return [entry async for entry in walk(root)]
-
-
-@pytest.mark.asyncio
-async def test_pull_refreshes_the_accessor_tree() -> None:
-    # find, du and grep's scope counter read accessor.tree directly, so a
-    # pull that fetched a newer tree and dropped it left them reporting the
-    # repository as it stood when the mount was built.
-    stale = {"a.txt": _entry("a.txt", "sha-a")}
-    fresh = {
-        "a.txt": _entry("a.txt", "sha-a"),
-        "b.txt": _entry("b.txt", "sha-b"),
+def _push(ref: str = "refs/heads/main", **extra: bool) -> dict[str, JsonValue]:
+    return {
+        "ref": ref,
+        "repository": {"full_name": "Acme/Proj", "default_branch": "main"},
+        "commits": [
+            {
+                "added": ["new.txt", "tmp.txt"],
+                "removed": [],
+                "modified": ["a.md"],
+            },
+            {
+                "added": [],
+                "removed": ["tmp.txt", "old.txt"],
+                "modified": ["new.txt"],
+            },
+        ],
+        **extra,
     }
-    accessor = _accessor(stale)
-    with patch(
-        "mirage.core.github.watch.fetch_tree",
-        return_value=(fresh, False, None),
-    ):
-        await _collect(GitHubWalk(accessor), _root())
-    assert accessor.tree == fresh
+
+
+def _pairs(events) -> list[tuple[FileChangeKind, str]]:
+    return [(event.kind, event.path.virtual) for event in events]
 
 
 @pytest.mark.asyncio
-async def test_truncated_tree_is_not_adopted() -> None:
-    # A partial tree would make find report the missing half as deleted.
-    stale = {"a.txt": _entry("a.txt", "sha-a")}
-    accessor = _accessor(stale)
-    with patch(
-        "mirage.core.github.watch.fetch_tree", return_value=({}, True, None)
-    ):
-        with pytest.raises(IncompleteWalkError):
-            await _collect(GitHubWalk(accessor), _root())
-    assert accessor.tree == stale
-
-
-@pytest.mark.asyncio
-async def test_walk_reports_blobs_with_their_sha() -> None:
-    tree = {"a.txt": _entry("a.txt", "sha-a")}
-    accessor = _accessor(tree)
-    with patch(
-        "mirage.core.github.watch.fetch_tree", return_value=(tree, False, None)
-    ):
-        entries = await _collect(GitHubWalk(accessor), _root())
-    assert [(e.virtual, e.fingerprint) for e in entries] == [
-        ("/gh/a.txt", "sha-a")
+async def test_a_push_to_the_mounted_ref_names_each_path_once():
+    # A path's change is its first and last action across the push; one
+    # added and removed within it maps to nothing.
+    events = await GitHubEventHook(_accessor()).to_events(
+        ROOT, "push", _push()
+    )
+    assert _pairs(events) == [
+        (FileChangeKind.CREATE, "/gh/new.txt"),
+        (FileChangeKind.UPDATE, "/gh/a.md"),
+        (FileChangeKind.DELETE, "/gh/old.txt"),
     ]
 
 
 @pytest.mark.asyncio
-async def test_complete_walk_clears_a_truncated_load() -> None:
-    # A mount built from a truncated tree has no listing version. A walk
-    # that fetched the whole tree replaced it but kept the truncated flag,
-    # so the next seed still stamped no version and find kept walking the
-    # per-directory fallback.
-    stale = {"a.txt": _entry("a.txt", "sha-a")}
-    fresh = {
-        "a.txt": _entry("a.txt", "sha-a"),
-        "b.txt": _entry("b.txt", "sha-b"),
-    }
-    accessor = GitHubAccessor(
-        config=CONFIG,
-        owner="acme",
-        repo="proj",
-        ref="main",
-        default_branch="main",
-        tree=stale,
-        truncated=True,
+@pytest.mark.parametrize(
+    "event, payload, ref, expected",
+    [
+        ("push", _push("refs/heads/dev"), "main", []),
+        ("issues", _push(), "main", []),
+        (
+            "push",
+            {**_push(), "repository": {"full_name": "acme/other"}},
+            "main",
+            [],
+        ),
+        (
+            "push",
+            _push(forced=True),
+            "main",
+            [(FileChangeKind.UNKNOWN, "/gh")],
+        ),
+        (
+            "push",
+            _push(deleted=True),
+            "main",
+            [(FileChangeKind.UNKNOWN, "/gh")],
+        ),
+        ("push", _push(), None, None),
+    ],
+)
+async def test_a_push_elsewhere_or_rewritten_is_skipped_or_unknown(
+    event, payload, ref, expected
+):
+    # Another ref, event or repository maps nothing; a forced push or a
+    # branch deleted cannot be described by its commits. A mount with no
+    # ref follows the default branch the payload names.
+    events = await GitHubEventHook(_accessor(ref)).to_events(
+        ROOT, event, payload
     )
-    with patch(
-        "mirage.core.github.watch.fetch_tree",
-        return_value=(fresh, False, "head-1"),
-    ):
-        await _collect(GitHubWalk(accessor), _root())
-    assert accessor.truncated is False
-    assert accessor.tree_version == "head-1"
-    snapshot = seed_index(accessor, RAMIndexCacheStore(), "/gh/")
-    assert snapshot.version == "head-1"
-
-
-@pytest.mark.asyncio
-async def test_truncated_walk_keeps_a_complete_load_and_its_version() -> None:
-    # The walk refuses a truncated tree before reseating anything, so a
-    # mount loaded complete keeps its tree, its flag and the head it was
-    # loaded at: an older head the gate catches, never a partial tree
-    # versioned as whole or a whole tree marked truncated.
-    stale = {"a.txt": _entry("a.txt", "sha-a")}
-    accessor = _accessor(stale)
-    accessor.tree_loaded = True
-    accessor.tree_version = "head-0"
-    with patch(
-        "mirage.core.github.watch.fetch_tree",
-        return_value=({}, True, "head-1"),
-    ):
-        with pytest.raises(IncompleteWalkError):
-            await _collect(GitHubWalk(accessor), _root())
-    assert accessor.truncated is False
-    assert accessor.tree_version == "head-0"
-    assert accessor.tree == stale
-    snapshot = seed_index(accessor, RAMIndexCacheStore(), "/gh/")
-    assert snapshot.version == "head-0"
+    if expected is None:
+        assert len(events) == 3
+    else:
+        assert _pairs(events) == expected

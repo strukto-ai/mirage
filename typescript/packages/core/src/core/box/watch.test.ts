@@ -17,14 +17,14 @@ import type * as ApiModule from './api.ts'
 
 vi.mock('./api.ts', async () => {
   const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, listFolderItems: vi.fn(), eventsNow: vi.fn(), eventsSince: vi.fn() }
+  return { ...actual, eventsNow: vi.fn(), eventsSince: vi.fn() }
 })
 
 import { BoxAccessor } from '../../accessor/box.ts'
 import { FileChangeKind, PathSpec, type Delta, type JsonValue } from '../../types.ts'
 import * as api from './api.ts'
 import type { BoxEvent, BoxItem } from './api.ts'
-import { BoxApiError, type BoxTokenManager } from './client.ts'
+import type { BoxTokenManager } from './client.ts'
 import { BoxDeltaHook, BoxEventHook } from './watch.ts'
 
 const STUB_TM = {} as BoxTokenManager
@@ -85,19 +85,11 @@ function event(
 }
 
 class FakeBox {
-  folders: Record<string, BoxItem[]>
-  gone = new Set<string>()
   pending: BoxEvent[] = []
   position = 100
   calls: string[] = []
 
-  constructor(folders: Record<string, BoxItem[]>) {
-    this.folders = folders
-    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) => {
-      this.calls.push(`list ${folderId}`)
-      if (this.gone.has(folderId)) return Promise.reject(new BoxApiError('not found', 404))
-      return Promise.resolve(this.folders[folderId] ?? [])
-    })
+  constructor() {
     vi.mocked(api.eventsNow).mockImplementation(() => {
       this.calls.push('now')
       return Promise.resolve(String(this.position))
@@ -112,12 +104,8 @@ class FakeBox {
   }
 }
 
-function saved(delta: Delta): Record<string, unknown> {
-  return JSON.parse(delta.checkpoint ?? '{}') as Record<string, unknown>
-}
-
-function kinds(delta: Delta): string[] {
-  return delta.changes.map((c) => `${c.kind} ${c.path.virtual}`).sort()
+function pairs(delta: Delta): string[] {
+  return delta.changes.map((c) => `${c.kind} ${c.path.virtual}`)
 }
 
 beforeEach(() => {
@@ -125,254 +113,88 @@ beforeEach(() => {
 })
 
 describe('BoxDeltaHook', () => {
-  it('reads the stream head before walking on a baseline', async () => {
-    const fake = new FakeBox({ '0': [file('1', 'a.txt', 's1')] })
+  // Twin of test_baseline_takes_the_stream_head_and_lists_nothing.
+  it('takes the stream head on a baseline and lists nothing', async () => {
+    const fake = new FakeBox()
     const delta = await new BoxDeltaHook(accessor()).pull(root(), null)
     expect(delta.changes).toEqual([])
-    expect(fake.calls).toEqual(['now', 'list 0'])
-    expect(saved(delta).p).toBe('100')
+    expect(fake.calls).toEqual(['now'])
   })
 
-  it('costs one events read and no listing when idle', async () => {
-    const fake = new FakeBox({ '0': [folder('10', 'team'), file('1', 'a.txt', 's1')] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    fake.calls = []
-    const delta = await hook.pull(root(), base.checkpoint)
-    expect(delta.changes).toEqual([])
-    expect(fake.calls).toEqual(['since 100'])
-    expect(saved(delta).w).toBe(saved(base).w)
-  })
-
-  it('classifies create, update and delete from events', async () => {
-    const fake = new FakeBox({ '0': [file('1', 'a.txt', 's1'), file('2', 'b.txt', 's2')] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    fake.pending = [
-      event('ITEM_UPLOAD', file('1', 'a.txt', 's1-v2')),
-      event('ITEM_UPLOAD', file('3', 'c.txt', 's3')),
-      event('ITEM_TRASH', trashed(file('2', 'b.txt', 's2'))),
-      event('ITEM_PREVIEW', file('1', 'a.txt', 's1-v2')),
-    ]
-    const delta = await hook.pull(root(), base.checkpoint)
-    expect(kinds(delta)).toEqual(['create /box/c.txt', 'delete /box/b.txt', 'update /box/a.txt'])
-    const created = delta.changes.find((c) => c.path.virtual === '/box/c.txt')
-    expect(created?.metadata?.fingerprint).toBe('s3|4')
-    expect(saved(delta).p).toBe('104')
-  })
-
-  it('reports nothing for the same bytes uploaded again', async () => {
-    const fake = new FakeBox({ '0': [file('1', 'a.txt', 's1')] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    fake.pending = [event('ITEM_UPLOAD', file('1', 'a.txt', 's1'))]
-    expect((await hook.pull(root(), base.checkpoint)).changes).toEqual([])
-  })
-
-  it('carries a renamed folder subtree and its ids', async () => {
-    const fake = new FakeBox({
-      '0': [folder('10', 'team')],
-      '10': [file('1', 'a.txt', 's1', TEAM)],
-    })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    fake.pending = [event('ITEM_RENAME', folder('10', 'crew'))]
-    const delta = await hook.pull(root(), base.checkpoint)
-    expect(kinds(delta)).toEqual([
-      'create /box/crew',
-      'create /box/crew/a.txt',
-      'delete /box/team',
-      'delete /box/team/a.txt',
-    ])
-    const crew = { type: 'folder' as const, id: '10', name: 'crew' }
-    fake.pending = [event('ITEM_UPLOAD', file('1', 'a.txt', 's9', crew))]
-    expect(kinds(await hook.pull(root(), delta.checkpoint))).toEqual(['update /box/crew/a.txt'])
-  })
-
-  it('takes a trashed folder subtree with it', async () => {
-    const fake = new FakeBox({
-      '0': [folder('10', 'team'), file('2', 'keep.txt', 's2')],
-      '10': [file('1', 'a.txt', 's1', TEAM)],
-    })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    fake.pending = [event('ITEM_TRASH', trashed(folder('10', 'team')))]
-    expect(kinds(await hook.pull(root(), base.checkpoint))).toEqual([
-      'delete /box/team',
-      'delete /box/team/a.txt',
-    ])
-  })
-
-  it('keeps a file and a folder with one id apart', async () => {
-    const docs = { type: 'folder' as const, id: '7', name: 'docs' }
-    const fake = new FakeBox({
-      '0': [file('7', 'a.txt', 's7'), folder('7', 'docs')],
-      '7': [file('8', 'x.txt', 's8', docs)],
-    })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    fake.pending = [event('ITEM_TRASH', trashed(file('7', 'a.txt', 's7')))]
-    expect(kinds(await hook.pull(root(), base.checkpoint))).toEqual(['delete /box/a.txt'])
-  })
-
-  it('walks a copied folder for its contents', async () => {
-    const fake = new FakeBox({ '0': [] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    const copy = { type: 'folder' as const, id: '20', name: 'copy' }
-    fake.folders['20'] = [file('21', 'x.txt', 's21', copy)]
-    fake.pending = [event('ITEM_COPY', folder('20', 'copy'))]
-    expect(kinds(await hook.pull(root(), base.checkpoint))).toEqual([
-      'create /box/copy',
-      'create /box/copy/x.txt',
-    ])
-  })
-
-  it('drops events outside the watch root', async () => {
-    const fake = new FakeBox({ '0': [folder('10', 'team'), folder('11', 'other')], '10': [] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root('team'), null)
-    const other = { type: 'folder' as const, id: '11', name: 'other' }
-    fake.pending = [
-      event('ITEM_UPLOAD', file('5', 'n.txt', 's5', other)),
-      event('ITEM_UPLOAD', file('6', 'm.txt', 's6', TEAM)),
-    ]
-    expect(kinds(await hook.pull(root('team'), base.checkpoint))).toEqual([
-      'create /box/team/m.txt',
-    ])
-  })
-
-  it('reports a move out of the mount root as a delete', async () => {
-    const fake = new FakeBox({ '10': [file('1', 'a.txt', 's1', TEAM)] })
+  // Twin of test_each_ping_maps_the_events_since_the_last_position: the
+  // places an event names are remembered in the checkpoint, so a later pull
+  // follows an item it saw: an upload of a known file is an UPDATE, its
+  // rename a MOVE, and its trash a DELETE where it was.
+  it('maps the events since the last position on each ping', async () => {
+    const fake = new FakeBox()
     const hook = new BoxDeltaHook(accessor('10'))
-    const base = await hook.pull(root(), null)
-    fake.pending = [event('ITEM_MOVE', file('1', 'a.txt', 's1'))]
-    expect(kinds(await hook.pull(root(), base.checkpoint))).toEqual(['delete /box/a.txt'])
-  })
-
-  it('walks again when the watch root is trashed', async () => {
-    const fake = new FakeBox({
-      '0': [folder('10', 'team')],
-      '10': [file('1', 'a.txt', 's1', TEAM)],
-    })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root('team'), null)
-    expect(saved(base).r).toEqual(['0', '10'])
-    fake.folders['0'] = []
-    fake.pending = [event('ITEM_TRASH', trashed(folder('10', 'team')))]
-    fake.calls = []
-    const delta = await hook.pull(root('team'), base.checkpoint)
-    expect(kinds(delta)).toEqual(['delete /box/team/a.txt'])
-    expect(fake.calls).toEqual(['since 100', 'now', 'list 0'])
-    expect(saved(delta).r).toEqual(['0'])
-  })
-
-  it('walks again when a folder above the watch root is renamed', async () => {
-    const docs = { type: 'folder' as const, id: '11', name: 'docs' }
-    const fake = new FakeBox({
-      '0': [folder('10', 'team')],
-      '10': [folder('11', 'docs', TEAM)],
-      '11': [file('1', 'a.txt', 's1', TEAM, docs)],
-    })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root('team/docs'), null)
-    fake.folders['0'] = [folder('10', 'crew')]
-    fake.pending = [event('ITEM_RENAME', folder('10', 'crew'))]
-    expect(kinds(await hook.pull(root('team/docs'), base.checkpoint))).toEqual([
-      'delete /box/team/docs/a.txt',
-    ])
-  })
-
-  it('applies an event that leaves the watch root in place', async () => {
-    const fake = new FakeBox({ '0': [folder('10', 'team')], '10': [] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root('team'), null)
-    fake.pending = [
-      event('ITEM_CREATE', folder('10', 'team')),
-      event('ITEM_UPLOAD', file('6', 'm.txt', 's6', TEAM)),
+    const a = file('1', 'a.txt', 's1', TEAM)
+    const renamed = { ...a, name: 'b.txt' } as BoxItem
+    const steps = [
+      [event('ITEM_UPLOAD', a)],
+      [event('ITEM_UPLOAD', a, { eventId: 'e2' })],
+      [event('ITEM_RENAME', renamed)],
+      [event('ITEM_TRASH', trashed(renamed))],
     ]
-    fake.calls = []
-    expect(kinds(await hook.pull(root('team'), base.checkpoint))).toEqual([
-      'create /box/team/m.txt',
-    ])
-    expect(fake.calls).toEqual(['since 100'])
-  })
-
-  it('walks a folder that lands on the watch root', async () => {
-    const fake = new FakeBox({ '0': [] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root('team'), null)
-    expect(saved(base).r).toEqual(['0'])
-    fake.folders['0'] = [folder('20', 'team')]
-    fake.folders['20'] = [file('21', 'x.txt', 's21', TEAM)]
-    fake.pending = [event('ITEM_MOVE', folder('20', 'team'))]
-    expect(kinds(await hook.pull(root('team'), base.checkpoint))).toEqual([
-      'create /box/team/x.txt',
+    let delta = await hook.pull(root(), null)
+    const got: string[][] = []
+    for (const events of steps) {
+      fake.pending = events
+      delta = await hook.pull(root(), delta.checkpoint)
+      got.push(pairs(delta))
+    }
+    expect(got).toEqual([
+      ['create /box/a.txt'],
+      ['update /box/a.txt'],
+      ['move /box/b.txt'],
+      ['delete /box/b.txt'],
     ])
   })
 
-  it('walks again when the mount root is trashed', async () => {
-    const fake = new FakeBox({ '10': [file('1', 'a.txt', 's1', TEAM)] })
+  // Twin of test_a_move_out_of_the_watch_root_is_a_delete_where_it_was.
+  it('reports a move out of the watch root as a delete where it was', async () => {
+    const fake = new FakeBox()
     const hook = new BoxDeltaHook(accessor('10'))
-    const base = await hook.pull(root(), null)
-    fake.gone.add('10')
-    fake.pending = [event('ITEM_TRASH', trashed(folder('10', 'team')))]
-    expect(kinds(await hook.pull(root(), base.checkpoint))).toEqual(['delete /box/a.txt'])
+    const sub = { type: 'folder' as const, id: '20', name: 'sub' }
+    let delta = await hook.pull(root('sub'), null)
+    fake.pending = [event('ITEM_UPLOAD', file('1', 'a.txt', 's1', TEAM, sub))]
+    delta = await hook.pull(root('sub'), delta.checkpoint)
+    fake.pending = [event('ITEM_MOVE', file('1', 'a.txt', 's1', TEAM))]
+    delta = await hook.pull(root('sub'), delta.checkpoint)
+    expect(pairs(delta)).toEqual(['delete /box/sub/a.txt'])
   })
 
-  it('applies events in the order they happened', async () => {
-    const fake = new FakeBox({ '0': [file('1', 'a.txt', 's1')] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
+  // Twin of test_events_apply_once_each_in_the_order_they_happened.
+  it('applies events once each in the order they happened', async () => {
+    const fake = new FakeBox()
+    const hook = new BoxDeltaHook(accessor('10'))
+    const a = file('1', 'a.txt', 's1', TEAM)
+    let delta = await hook.pull(root(), null)
     fake.pending = [
-      event('ITEM_RENAME', file('1', 'c.txt', 's1'), {
+      event('ITEM_RENAME', { ...a, name: 'b.txt' } as BoxItem, {
         eventId: 'e2',
-        createdAt: '2026-09-21T10:00:02-07:00',
+        createdAt: '2026-09-20T10:00:02Z',
       }),
-      event('ITEM_RENAME', file('1', 'b.txt', 's1'), {
-        eventId: 'e1',
-        createdAt: '2026-09-21T17:00:01Z',
-      }),
+      event('ITEM_UPLOAD', a, { eventId: 'e1', createdAt: '2026-09-20T10:00:01Z' }),
+      event('ITEM_UPLOAD', a, { eventId: 'e1', createdAt: '2026-09-20T10:00:01Z' }),
     ]
-    expect(kinds(await hook.pull(root(), base.checkpoint))).toEqual([
-      'create /box/c.txt',
-      'delete /box/a.txt',
-    ])
+    delta = await hook.pull(root(), delta.checkpoint)
+    expect(pairs(delta)).toEqual(['create /box/a.txt', 'move /box/b.txt'])
   })
 
-  it('applies a repeated event once', async () => {
-    const fake = new FakeBox({ '0': [file('1', 'a.txt', 's1')] })
+  // Twin of test_a_position_older_than_the_replay_window_is_unknown: Box
+  // replays whatever it still keeps from a stale position, so the root is
+  // UNKNOWN and the stream starts again at the present.
+  it('calls a position older than the replay window unknown', async () => {
+    const fake = new FakeBox()
     const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    fake.pending = [
-      event('ITEM_UPLOAD', file('1', 'a.txt', 's2'), { eventId: 'e1' }),
-      event('ITEM_UPLOAD', file('1', 'a.txt', 's3'), { eventId: 'e2' }),
-      event('ITEM_UPLOAD', file('1', 'a.txt', 's2'), { eventId: 'e1' }),
-    ]
-    const delta = await hook.pull(root(), base.checkpoint)
-    expect(kinds(delta)).toEqual(['update /box/a.txt'])
-    expect(delta.changes[0]?.metadata?.fingerprint).toBe('s3|4')
-  })
-
-  it('upgrades a listing-era checkpoint', async () => {
-    new FakeBox({ '0': [file('1', 'a.txt', 's1')] })
-    const old = JSON.stringify({ '/box/a.txt': 's0|4', '/box/gone.txt': 's2|4' })
-    const delta = await new BoxDeltaHook(accessor()).pull(root(), old)
-    expect(kinds(delta)).toEqual(['delete /box/gone.txt', 'update /box/a.txt'])
-    expect(saved(delta)._box).toBe(1)
-  })
-
-  it('walks again once the last walk is older than the replay window', async () => {
-    const fake = new FakeBox({ '0': [file('1', 'a.txt', 's1')] })
-    const hook = new BoxDeltaHook(accessor())
-    const base = await hook.pull(root(), null)
-    const stale = saved(base)
-    stale.w = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-    fake.folders['0'] = [file('1', 'a.txt', 's1-v2')]
-    fake.calls = []
-    const delta = await hook.pull(root(), JSON.stringify(stale))
-    expect(fake.calls).toEqual(['now', 'list 0'])
-    expect(kinds(delta)).toEqual(['update /box/a.txt'])
+    const delta = await hook.pull(root(), null)
+    const state = JSON.parse(delta.checkpoint ?? '{}') as { box: { read: string } }
+    state.box.read = '2020-01-01T00:00:00+00:00'
+    fake.pending = [event('ITEM_UPLOAD', file('1', 'a.txt', 's1', TEAM))]
+    const stale = await hook.pull(root(), JSON.stringify(state))
+    expect(pairs(stale)).toEqual(['unknown /box'])
+    expect(fake.calls).toEqual(['now', 'now'])
   })
 })
 

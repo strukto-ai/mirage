@@ -16,53 +16,83 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { FileChangeKind, PathSpec } from '../../types.ts'
-import { statFingerprint } from '../../watch/fingerprint.ts'
 import { buildDeltaHook } from './watch.ts'
+
+const API = 'https://graph.microsoft.com/v1.0'
+const NEW = '2026-10-01T00:00:00Z'
+const OLD = '2020-01-01T00:00:00Z'
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// One file whose row a test mutates between pulls; the listing answers
-// from it, so each pull sees the current cTag, eTag, stamp and size.
-function drive() {
-  const row = { cTag: 'c1', eTag: 'e1', lastModifiedDateTime: 'T1', size: 3 }
-  const routes: Record<string, () => unknown> = {
-    'https://graph.microsoft.com/v1.0/me/drive/root/children': () => ({
-      value: [{ id: 'i', name: 'a.txt', file: {}, ...row }],
-    }),
-  }
+// A drive whose /delta answers, after token n, the n-th page of `feeds`.
+function graph(feeds: Record<string, unknown>[][]): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: URL | RequestInfo) => {
       const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      const url = decodeURIComponent(raw.split('?')[0] ?? raw)
-      const route = routes[url]
-      if (route === undefined) throw new Error(`unrouted ${url}`)
-      return Promise.resolve(new Response(JSON.stringify(route())))
+      const url = new URL(raw)
+      const path = decodeURIComponent(url.pathname)
+      const link = (n: number): string => `${API}/me/drive/root/delta?token=${String(n)}`
+      let body: unknown
+      if (path === '/v1.0/me/drive/root') body = { id: 'me:/' }
+      else if (path === '/v1.0/me/drive/root/delta') {
+        const token = url.searchParams.get('token')
+        const n = token === 'latest' ? -1 : Number(token)
+        body = { value: n < 0 ? [] : feeds[n], '@odata.deltaLink': link(n + 1) }
+      } else throw new Error(`unrouted ${path}`)
+      return Promise.resolve(new Response(JSON.stringify(body)))
     }),
   )
-  return row
 }
 
-describe('the onedrive watch fingerprint', () => {
-  it('ignores a metadata edit and reports a content write once', async () => {
-    const row = drive()
+// Twin of test_the_feed_places_items_by_their_parents.
+describe('the onedrive delta feed', () => {
+  it('places items by their parents', async () => {
+    graph([
+      [
+        { id: 'me:/', name: 'root', root: {}, folder: {} },
+        {
+          id: 'me:sub/',
+          name: 'sub',
+          folder: {},
+          parentReference: { id: 'me:/' },
+          createdDateTime: NEW,
+          lastModifiedDateTime: NEW,
+        },
+        {
+          id: 'me:sub/b.txt',
+          name: 'b.txt',
+          file: {},
+          parentReference: { id: 'me:sub/' },
+          createdDateTime: NEW,
+          lastModifiedDateTime: NEW,
+        },
+        {
+          id: 'me:a.txt',
+          name: 'a.txt',
+          file: {},
+          parentReference: { id: 'me:/' },
+          createdDateTime: OLD,
+          lastModifiedDateTime: NEW,
+        },
+      ],
+      [{ id: 'me:a.txt', deleted: {} }],
+    ])
     const hook = buildDeltaHook(new OneDriveAccessor({ accessToken: 'token' }))
     const root = PathSpec.fromStrPath('/', '')
     const baseline = await hook.pull(root, null)
-    // The walk stats each file from the listing it just made; that row has
-    // to carry the cTag, or the fingerprint falls back to the stamp, which a
-    // rename or property edit moves.
-    Object.assign(row, { eTag: 'e2', lastModifiedDateTime: 'T2' })
-    const touched = await hook.pull(root, baseline.checkpoint)
-    Object.assign(row, { cTag: 'c3', eTag: 'e3', lastModifiedDateTime: 'T3', size: 12 })
-    const written = await hook.pull(root, touched.checkpoint)
+    const first = await hook.pull(root, baseline.checkpoint)
+    const second = await hook.pull(root, first.checkpoint)
     expect(baseline.changes).toEqual([])
-    expect(touched.changes).toEqual([])
-    expect(written.changes.map((e) => [e.kind, e.path.virtual])).toEqual([
+    expect(first.changes.map((e) => [e.kind, e.path.virtual])).toEqual([
+      [FileChangeKind.CREATE, '/sub'],
+      [FileChangeKind.CREATE, '/sub/b.txt'],
       [FileChangeKind.UPDATE, '/a.txt'],
     ])
-    expect(written.changes[0]?.metadata?.fingerprint).toBe(statFingerprint('c3', 'T3', 12))
+    expect(second.changes.map((e) => [e.kind, e.path.virtual])).toEqual([
+      [FileChangeKind.DELETE, '/a.txt'],
+    ])
   })
 })

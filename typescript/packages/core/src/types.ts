@@ -787,16 +787,6 @@ export class Delta {
   }
 }
 
-export interface WalkEntry {
-  virtual: string
-  isDir: boolean
-  fingerprint: string | null
-  size?: number | null
-  modified?: string | null
-}
-
-export type WalkFn = (root: PathSpec) => AsyncIterable<WalkEntry>
-
 export const OverflowPolicy = Object.freeze({
   COLLAPSE: 'collapse',
   DROP_OLDEST: 'drop_oldest',

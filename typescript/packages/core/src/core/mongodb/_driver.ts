@@ -69,20 +69,6 @@ export interface MongoDriver {
     collection: string,
     after?: unknown,
   ): AsyncIterableIterator<T>
-  /**
-   * The change events since `token`, and the stream position after the last
-   * one taken. A stream opened with a null token takes no events: it only
-   * marks the position a later drain starts after. One with a token is read
-   * until the server has no event ready, or `limit` of them, and resumes with
-   * `startAfter`, so a position past an invalidate (a watched database
-   * dropped) still opens a stream. `database` narrows the stream to one
-   * database, null for the whole cluster.
-   */
-  drainChanges(
-    database: string | null,
-    token: unknown,
-    limit: number,
-  ): Promise<[Record<string, unknown>[], unknown]>
   countDocuments(
     database: string,
     collection: string,

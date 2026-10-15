@@ -18,8 +18,6 @@ import { read as mongodbRead, streamAny as mongodbStream } from '../../core/mong
 import { readdir as mongodbReaddir } from '../../core/mongodb/readdir.ts'
 import { linesContaining as mongodbLinesContaining } from '../../core/mongodb/search.ts'
 import { stat as mongodbStat } from '../../core/mongodb/stat.ts'
-import { buildDeltaHook } from '../../core/mongodb/watch.ts'
-import type { DeltaHook } from '../../watch/base.ts'
 import {
   follow as mongodbFollow,
   lastLines as mongodbLastLines,
@@ -80,9 +78,5 @@ export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
     index?: IndexCacheStore,
   ): Promise<AsyncIterable<Uint8Array> | null> {
     return mongodbFollow(this.accessor, path, n, index)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 }

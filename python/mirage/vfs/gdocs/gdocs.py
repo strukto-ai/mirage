@@ -32,6 +32,7 @@ from mirage.utils.generated.google_vocabulary import DOCS_WORDS
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdocs.config import GDocsConfig
+from mirage.vfs.gdocs.doc_entry import make_filename
 from mirage.vfs.gdocs.prompt import PROMPT, WRITE_PROMPT
 from mirage.watch.base import DeltaHook
 
@@ -115,7 +116,7 @@ class GDocsVFS(BaseVFS):
         await _rename(self.accessor, src, dst, index)
 
     def delta_hook(self) -> DeltaHook:
-        return app_delta_hook(self.accessor, _readdir, _stat)
+        return app_delta_hook(self.accessor, MIME, make_filename)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

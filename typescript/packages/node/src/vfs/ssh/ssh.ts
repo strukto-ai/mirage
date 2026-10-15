@@ -17,8 +17,6 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { SSHAccessor } from '../../accessor/ssh.ts'
 import { type SSHConfig, type SSHConfigRedacted, redactSshConfig } from './config.ts'
 import { PROMPT } from './prompt.ts'
-import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
-import { buildDeltaHook } from '../../core/ssh/watch.ts'
 import type {
   CapacityResult,
   PathSpec,
@@ -197,10 +195,6 @@ export class SSHVFS extends BaseVFS {
 
   override capacity(): Promise<CapacityResult> {
     return sshCapacity(this.accessor)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

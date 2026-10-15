@@ -14,123 +14,63 @@
 
 import { describe, expect, it } from 'vitest'
 import { GitHubAccessor } from '../../accessor/github.ts'
-import { PathSpec, type WalkEntry } from '../../types.ts'
-import { IncompleteWalkError } from '../../watch/errors.ts'
+import { FileChangeKind, type JsonValue, PathSpec } from '../../types.ts'
 import type { GitHubTransport } from './client.ts'
-import type { TreeEntry } from './tree_entry.ts'
-import { GitHubWalk } from './watch.ts'
+import { GitHubEventHook } from './watch.ts'
 
-interface TreeItem {
-  path: string
-  type: string
-  sha: string
-  size?: number
-}
+const ROOT = new PathSpec({ virtual: '/gh', directory: '/gh', vfsPath: '' })
 
-function transport(tree: TreeItem[], truncated = false, sha?: string): GitHubTransport {
-  return {
-    get: () => Promise.resolve({ tree, truncated, sha }),
+function accessor(): GitHubAccessor {
+  const transport: GitHubTransport = {
+    get: () => Promise.resolve({}),
     request: () => Promise.resolve({}),
   }
-}
-
-function accessor(tree: TreeItem[], stale: Record<string, TreeEntry>, truncated = false) {
   return new GitHubAccessor({
-    transport: transport(tree, truncated),
+    transport,
     owner: 'acme',
     repo: 'proj',
     ref: 'main',
     defaultBranch: 'main',
-    tree: stale,
   })
 }
 
-function root(): PathSpec {
-  return new PathSpec({ virtual: '/gh', directory: '/gh', vfsPath: '' })
+function push(ref = 'refs/heads/main', extra: Record<string, JsonValue> = {}) {
+  return {
+    ref,
+    repository: { full_name: 'Acme/Proj', default_branch: 'main' },
+    commits: [
+      { added: ['new.txt', 'tmp.txt'], removed: [], modified: ['a.md'] },
+      { added: [], removed: ['tmp.txt', 'old.txt'], modified: ['new.txt'] },
+    ],
+    ...extra,
+  }
 }
 
-async function collect(walk: GitHubWalk, at: PathSpec): Promise<WalkEntry[]> {
-  const out: WalkEntry[] = []
-  for await (const entry of walk.walk(at)) out.push(entry)
-  return out
+async function pairs(eventName: string, payload: JsonValue): Promise<[string, string][]> {
+  const events = await new GitHubEventHook(accessor()).toEvents(ROOT, eventName, payload)
+  return events.map((event) => [event.kind, event.path.virtual])
 }
 
-const STALE: Record<string, TreeEntry> = {
-  'a.txt': { path: 'a.txt', type: 'blob', sha: 'sha-a', size: 3 },
-}
-
-describe('GitHubWalk', () => {
-  it('refreshes the accessor tree from the pull', async () => {
-    // find, du and grep's scope counter read accessor.tree directly, so a
-    // pull that fetched a newer tree and dropped it left them reporting
-    // the repository as it stood when the mount was built.
-    const acc = accessor(
-      [
-        { path: 'a.txt', type: 'blob', sha: 'sha-a', size: 3 },
-        { path: 'b.txt', type: 'blob', sha: 'sha-b', size: 3 },
-      ],
-      STALE,
-    )
-    await collect(new GitHubWalk(acc), root())
-    expect(Object.keys(acc.tree).sort()).toEqual(['a.txt', 'b.txt'])
-    expect(acc.tree['b.txt']?.sha).toBe('sha-b')
+describe('GitHubEventHook', () => {
+  // Twin of test_a_push_to_the_mounted_ref_names_each_path_once.
+  it('names each path of a push to the mounted ref once', async () => {
+    expect(await pairs('push', push())).toEqual([
+      [FileChangeKind.CREATE, '/gh/new.txt'],
+      [FileChangeKind.UPDATE, '/gh/a.md'],
+      [FileChangeKind.DELETE, '/gh/old.txt'],
+    ])
   })
 
-  it('does not adopt a truncated tree', async () => {
-    // A partial tree would make find report the missing half as deleted.
-    const acc = accessor([], STALE, true)
-    await expect(collect(new GitHubWalk(acc), root())).rejects.toThrow(IncompleteWalkError)
-    expect(Object.keys(acc.tree)).toEqual(['a.txt'])
-  })
-
-  it('keeps a complete load and its version through a truncated walk', async () => {
-    // The walk refuses a truncated tree before reseating anything, so a mount
-    // loaded complete keeps its tree, its flag and the head it was loaded at:
-    // an older head the gate catches, never a partial tree versioned as whole
-    // or a whole tree marked truncated.
-    const acc = new GitHubAccessor({
-      transport: transport([], true, 'head-1'),
-      owner: 'acme',
-      repo: 'proj',
-      ref: 'main',
-      defaultBranch: 'main',
-      tree: STALE,
-      treeVersion: 'head-0',
-    })
-    await expect(collect(new GitHubWalk(acc), root())).rejects.toThrow(IncompleteWalkError)
-    expect(acc.truncated).toBe(false)
-    expect(acc.treeVersion).toBe('head-0')
-    expect(Object.keys(acc.tree)).toEqual(['a.txt'])
-  })
-
-  it('reports blobs with their sha as the fingerprint', async () => {
-    const acc = accessor([{ path: 'a.txt', type: 'blob', sha: 'sha-a', size: 3 }], STALE)
-    const entries = await collect(new GitHubWalk(acc), root())
-    expect(entries.map((e) => [e.virtual, e.fingerprint])).toEqual([['/gh/a.txt', 'sha-a']])
-  })
-
-  it('clears a truncated load after a complete walk', async () => {
-    // A mount built from a truncated tree has no listing version. A walk
-    // that fetched the whole tree must reseat the flag with the tree, or
-    // the next seed still stamps no version.
-    const acc = new GitHubAccessor({
-      transport: transport(
-        [
-          { path: 'a.txt', type: 'blob', sha: 'sha-a', size: 3 },
-          { path: 'b.txt', type: 'blob', sha: 'sha-b', size: 3 },
-        ],
-        false,
-        'head-1',
-      ),
-      owner: 'acme',
-      repo: 'proj',
-      ref: 'main',
-      defaultBranch: 'main',
-      tree: STALE,
-      truncated: true,
-    })
-    await collect(new GitHubWalk(acc), root())
-    expect(acc.truncated).toBe(false)
-    expect(acc.treeVersion).toBe('head-1')
+  // Twin of test_a_push_elsewhere_or_rewritten_is_skipped_or_unknown.
+  it('skips a push elsewhere and calls a rewritten one unknown', async () => {
+    expect(await pairs('push', push('refs/heads/dev'))).toEqual([])
+    expect(await pairs('issues', push())).toEqual([])
+    expect(await pairs('push', { ...push(), repository: { full_name: 'acme/other' } })).toEqual([])
+    expect(await pairs('push', push(undefined, { forced: true }))).toEqual([
+      [FileChangeKind.UNKNOWN, '/gh'],
+    ])
+    expect(await pairs('push', push(undefined, { deleted: true }))).toEqual([
+      [FileChangeKind.UNKNOWN, '/gh'],
+    ])
   })
 })

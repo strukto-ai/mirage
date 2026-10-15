@@ -1,68 +1,86 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import pytest
 
-from mirage.core.nextcloud.watch import build_delta_hook
-from mirage.core.opendal.watch import OpendalWalk
-from mirage.types import FileChangeKind, PathSpec
+from mirage.accessor.nextcloud import NextcloudAccessor
+from mirage.core.nextcloud.watch import NextcloudEventHook
+from mirage.types import FileChangeKind, JsonValue, PathSpec
+from mirage.vfs.nextcloud.config import NextcloudConfig
+
+ROOT = PathSpec.from_str_path("/nc", vfs_path="")
+NODE = "OCP\\Files\\Events\\Node\\"
 
 
-def _root() -> PathSpec:
-    return PathSpec.from_str_path("/")
+def _hook(url: str, username: str | None = None) -> NextcloudEventHook:
+    return NextcloudEventHook(
+        NextcloudAccessor(NextcloudConfig(url=url, username=username))
+    )
 
 
-@pytest.mark.asyncio
-async def test_walk_yields_files_and_dirs(make_acc):
-    acc = make_acc({"data/a.txt": b"x", "data/sub/b.txt": b"yy"})
-    walk = OpendalWalk(acc)
-    entries = {e.virtual: e async for e in walk(_root())}
-    assert "/data/a.txt" in entries
-    assert "/data/sub/b.txt" in entries
-    assert entries["/data"].is_dir
-    assert not entries["/data/a.txt"].is_dir
-    assert entries["/data/a.txt"].fingerprint is not None
+def _node(path: str) -> dict[str, JsonValue]:
+    return {"event": {"node": {"path": path}}}
 
 
-@pytest.mark.asyncio
-async def test_walk_detector_carries_the_etag_in_the_composite(make_acc):
-    # The etag leads but does not stand alone. Nextcloud's own etag
-    # comes off an mtime with one-second granularity, so two writes in
-    # one second share it; the size beside it is what catches the
-    # update the etag cannot express.
-    acc = make_acc({"data/a.txt": b"x"})
-    walk = OpendalWalk(acc)
-    entries = {e.virtual: e async for e in walk(_root())}
-    assert entries["/data/a.txt"].fingerprint == "etag-data/a.txt|1"
+def _renamed(source: str, target: str) -> dict[str, JsonValue]:
+    return {"event": {"source": {"path": source}, "target": {"path": target}}}
 
 
 @pytest.mark.asyncio
-async def test_hook_baseline_then_create(make_acc):
-    acc = make_acc({"data/a.txt": b"x"})
-    hook = build_delta_hook(acc)
-    base = await hook.pull(_root(), None)
-    assert base.changes == ()
-    await acc._fake.write("data/b.txt", b"new")
-    delta = await hook.pull(_root(), base.checkpoint)
-    created = {c.path.virtual: c for c in delta.changes}
-    assert "/data/b.txt" in created
-    assert created["/data/b.txt"].kind is FileChangeKind.CREATE
-
-
-@pytest.mark.asyncio
-async def test_hook_detects_update(make_acc):
-    acc = make_acc({"data/a.txt": b"x"})
-    hook = build_delta_hook(acc)
-    base = await hook.pull(_root(), None)
-    await acc._fake.write("data/a.txt", b"changed-content")
-    delta = await hook.pull(_root(), base.checkpoint)
-    changed = {c.path.virtual: c for c in delta.changes}
-    assert changed["/data/a.txt"].kind is FileChangeKind.UPDATE
-
-
-@pytest.mark.asyncio
-async def test_hook_detects_delete(make_acc):
-    acc = make_acc({"data/a.txt": b"x", "data/b.txt": b"y"})
-    hook = build_delta_hook(acc)
-    base = await hook.pull(_root(), None)
-    await acc._fake.delete("data/b.txt")
-    delta = await hook.pull(_root(), base.checkpoint)
-    deleted = {c.path.virtual: c for c in delta.changes}
-    assert deleted["/data/b.txt"].kind is FileChangeKind.DELETE
+@pytest.mark.parametrize(
+    "url, username",
+    [
+        ("https://nc.test/remote.php/dav/files/ada/Work", None),
+        ("https://nc.test/remote.php/webdav/Work/", "ada"),
+    ],
+)
+async def test_node_events_map_below_the_mounted_folder(url, username):
+    # The mount is rooted at the folder its URL names; a node outside it
+    # maps nothing, and a rename across its edge is a create or a delete.
+    hook = _hook(url, username)
+    deliveries = [
+        ("NodeCreatedEvent", _node("/ada/files/Work/a.txt")),
+        ("NodeWrittenEvent", _node("/ada/files/Work/a.txt")),
+        ("NodeDeletedEvent", _node("/ada/files/Work/sub")),
+        ("NodeCreatedEvent", _node("/ada/files/Other/x.txt")),
+        ("NodeCreatedEvent", _node("/bob/files/Work/x.txt")),
+        (
+            "NodeRenamedEvent",
+            _renamed("/ada/files/Work/a.txt", "/ada/files/Work/b.txt"),
+        ),
+        (
+            "NodeRenamedEvent",
+            _renamed("/ada/files/Other/c.txt", "/ada/files/Work/c.txt"),
+        ),
+        (
+            "NodeRenamedEvent",
+            _renamed("/ada/files/Work/c.txt", "/ada/files/Other/c.txt"),
+        ),
+        ("NodeShareEvent", _node("/ada/files/Work/a.txt")),
+    ]
+    changes = [
+        (event.kind, event.path.virtual, event.previous_path)
+        for name, payload in deliveries
+        for event in await hook.to_events(ROOT, NODE + name, payload)
+    ]
+    assert [(kind, path) for kind, path, _ in changes] == [
+        (FileChangeKind.CREATE, "/nc/a.txt"),
+        (FileChangeKind.UPDATE, "/nc/a.txt"),
+        (FileChangeKind.DELETE, "/nc/sub"),
+        (FileChangeKind.MOVE, "/nc/b.txt"),
+        (FileChangeKind.CREATE, "/nc/c.txt"),
+        (FileChangeKind.DELETE, "/nc/c.txt"),
+    ]
+    assert changes[3][2] is not None
+    assert changes[3][2].virtual == "/nc/a.txt"

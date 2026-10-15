@@ -22,7 +22,6 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import { FakeGitHub } from '../../core/github/_test_util.ts'
 import { stat } from '../../core/github/stat.ts'
-import { GitHubWalk } from '../../core/github/watch.ts'
 import { ListingVersion, MountMode, PathSpec, ReadPolicy } from '../../types.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
@@ -336,24 +335,6 @@ describe('github versions a listing by its head commit', () => {
       expect(gh.counts()).toEqual([1, 1, 0])
     },
   )
-
-  // The watcher's walk reseats the tree, and stamps the head it answered, so
-  // a revert back to the index's head still refills the walked tree.
-  it.each([
-    [ReadPolicy.BOUNDED, [0, 1, 0]],
-    [ReadPolicy.FRESH, [1, 1, 0]],
-  ])('carries the head a watched tree was walked at (%s)', async (policy, cost) => {
-    const vfs = await vfsOf()
-    const w = await wsOf(vfs, policy)
-    await out(w, 'ls /gh')
-    gh.set('d1/new.txt', 'new\n')
-    for await (const entry of new GitHubWalk(vfs.accessor).walk(ROOT)) void entry
-    expect(vfs.accessor.treeVersion).toBe(await gh.head())
-    gh.files.delete('d1/new.txt')
-    gh.log.length = 0
-    expect(await out(w, 'find /gh -name new.txt')).toBe('')
-    expect(gh.counts()).toEqual(cost)
-  })
 
   // A backend that cannot be reached answers EXPIRED at the gate, warned,
   // and the listing stays stored for the re-list to diff.

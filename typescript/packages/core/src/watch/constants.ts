@@ -13,4 +13,3 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const DEFAULT_MAX_PENDING = 4096
-export const DIR_FINGERPRINT = 'dir'

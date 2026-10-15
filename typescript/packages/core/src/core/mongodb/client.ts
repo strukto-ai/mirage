@@ -95,16 +95,6 @@ export function findSnapshot<T = Record<string, unknown>>(
   return accessor.driver.findSnapshot<T>(database, collection, options)
 }
 
-/** The change events since `token`, and the position after them. Mirrors Python's `drain_changes`. */
-export function drainChanges(
-  accessor: MongoDBAccessor,
-  database: string | null,
-  token: unknown,
-  limit = 1000,
-): Promise<[Record<string, unknown>[], unknown]> {
-  return accessor.driver.drainChanges(database, token, limit)
-}
-
 export function iterInserts<T = Record<string, unknown>>(
   accessor: MongoDBAccessor,
   database: string,

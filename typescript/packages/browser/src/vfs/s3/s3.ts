@@ -15,13 +15,10 @@
 import { S3VFSBase } from '@struktoai/mirage-core/vfs/s3/s3'
 import { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
 
-import { buildDeltaHook } from '@struktoai/mirage-core/core/s3/watch'
-
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { s3StorageLocation } from '@struktoai/mirage-core/vfs/s3/storage_id'
 import { VFSName } from '@struktoai/mirage-core/types'
 
-import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
 import { PROMPT } from './prompt.ts'
 
@@ -66,10 +63,6 @@ export class S3VFS extends S3VFSBase {
   // the two runtimes from computing different identities for one bucket.
   override storageLocation(): string {
     return s3StorageLocation(this.config)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 
   override getState(): Promise<S3VFSState> {

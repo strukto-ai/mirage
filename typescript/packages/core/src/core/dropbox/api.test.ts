@@ -34,7 +34,6 @@ import {
   MAX_SEARCH_MATCHES,
   SEARCH_PAGE,
   continueFolder,
-  listFolderState,
   movePath,
   searchFiles,
   refused,
@@ -106,25 +105,6 @@ describe('searchFiles', () => {
     expect(out.paths).toHaveLength(MAX_SEARCH_MATCHES)
     expect(out.truncated).toBe(true)
     expect(rpc).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('listFolderState', () => {
-  it('keeps the last page cursor', async () => {
-    rpc
-      .mockResolvedValueOnce({
-        entries: [{ '.tag': 'file', name: 'a' }],
-        cursor: 'c1',
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        entries: [{ '.tag': 'file', name: 'b' }],
-        cursor: 'c2',
-        has_more: false,
-      })
-    const out = await listFolderState(TM, '/docs')
-    expect(out.entries.map((e) => e.name)).toEqual(['a', 'b'])
-    expect(out.cursor).toBe('c2')
   })
 })
 

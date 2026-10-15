@@ -39,13 +39,11 @@ from mirage.core.ssh.stat import tree as _tree
 from mirage.core.ssh.stream import read_stream as _read_stream
 from mirage.core.ssh.truncate import truncate as _truncate
 from mirage.core.ssh.unlink import unlink as _unlink
-from mirage.core.ssh.watch import build_delta_hook
 from mirage.core.ssh.write import write as _write
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ssh.config import SSHConfig
 from mirage.vfs.ssh.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class SSHVFS(BaseVFS):
@@ -194,9 +192,6 @@ class SSHVFS(BaseVFS):
 
     async def capacity(self) -> CapacityResult:
         return await _capacity(self.accessor)
-
-    def delta_hook(self) -> DeltaHook:
-        return build_delta_hook(self.accessor)
 
     def storage_location(self) -> str:
         # The host, its port and an absolute root pin the files two mounts

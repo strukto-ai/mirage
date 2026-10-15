@@ -44,7 +44,6 @@ from mirage.core.disk.utils import (
     resolve_inside_sync,
     walk_entries,
 )
-from mirage.core.disk.watch import build_delta_hook
 from mirage.core.disk.write import write as _write
 from mirage.types import (
     CapacityResult,
@@ -57,7 +56,6 @@ from mirage.types import (
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.disk.prompt import PROMPT
 from mirage.vfs.errors import VFSConfigError
-from mirage.watch.base import DeltaHook
 
 
 class DiskVFS(BaseVFS):
@@ -205,9 +203,6 @@ class DiskVFS(BaseVFS):
         # The resolved root is the storage: two DiskVFS instances built on the
         # same directory are one store, however they were spelled.
         return f"{self.name}:{self.root}"
-
-    def delta_hook(self) -> DeltaHook:
-        return build_delta_hook(self.accessor)
 
     async def capacity(self) -> CapacityResult:
         # A real filesystem reports real numbers (QUOTA). GNU df: used counts

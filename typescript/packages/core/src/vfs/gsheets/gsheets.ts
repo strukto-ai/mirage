@@ -31,6 +31,7 @@ import { readdir as gsheetsReaddir } from '../../core/gsheets/readdir.ts'
 import { read as gsheetsRead } from '../../core/gsheets/read.ts'
 import { stat as gsheetsStat } from '../../core/gsheets/stat.ts'
 import { appDeltaHook } from '../../core/google/watch.ts'
+import { makeFilename } from './sheet_entry.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { unlink as gsheetsUnlink } from '../../core/gsheets/unlink.ts'
 import { rename as gsheetsRename } from '../../core/gsheets/rename.ts'
@@ -106,7 +107,7 @@ export class GSheetsVFS extends BaseVFS {
   }
 
   override deltaHook(): DeltaHook {
-    return appDeltaHook(this.accessor, gsheetsReaddir, gsheetsStat)
+    return appDeltaHook(this.accessor, MIME, makeFilename)
   }
 
   override getState(): Promise<GSheetsVFSState> {

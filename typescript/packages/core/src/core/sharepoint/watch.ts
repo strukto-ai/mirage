@@ -13,25 +13,63 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import { enoent } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import type { DeltaHook } from '../../watch/base.ts'
-import { ListingDeltaHook } from '../../watch/delta.ts'
-import { ReaddirWalk } from '../../watch/walk.ts'
-import { readdir } from './readdir.ts'
-import { stat } from './stat.ts'
+import { graphApi } from '../msgraph/config.ts'
+import { GraphDeltaHook, type DeltaTarget } from '../msgraph/watch.ts'
+import { driveEntries, resolve, siteEntries } from './resolve.ts'
 
 /**
- * Build the SharePoint delta hook.
+ * Build the SharePoint delta hook: the `/delta` feed of each document library
+ * under the watch root (`GraphDeltaHook`).
  *
- * Same Graph drive surface as OneDrive, so the same `cTag` fingerprint and the
- * same standing offer of a native `/delta` fast path; see
- * `core/onedrive/watch.ts`.
+ * A mount scoped to one site and library reads that library's feed, placed
+ * under its `keyPrefix`. An unscoped mount reads the library the root is in, or
+ * each library of the site or tenant the root names, as the baseline finds
+ * them. Mirrors Python `build_delta_hook`.
  */
 export function buildDeltaHook(accessor: SharePointAccessor): DeltaHook {
-  const walk = new ReaddirWalk(
-    (path: PathSpec, index: IndexCacheStore): Promise<string[]> => readdir(accessor, path, index),
-    (path: PathSpec, index: IndexCacheStore): Promise<FileStat> => stat(accessor, path, index),
-  )
-  return new ListingDeltaHook(walk.walk.bind(walk))
+  const config = accessor.config
+  const drive = (driveId: string): string =>
+    `${graphApi(config)}/drives/${encodeURIComponent(driveId)}`
+  const targets = async (root: PathSpec): Promise<DeltaTarget[]> => {
+    const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
+    const resolved = await resolve(accessor, root)
+    if (config.site !== null && config.drive !== null) {
+      if (resolved.driveId === null) throw enoent(root)
+      return [
+        {
+          drive: drive(resolved.driveId),
+          folder: config.keyPrefix,
+          virtual: prefix === '' ? '/' : prefix,
+        },
+      ]
+    }
+    const parts = stripSlash(root.vfsPath).split('/')
+    if (resolved.driveId !== null) {
+      return [
+        {
+          drive: drive(resolved.driveId),
+          folder: '',
+          virtual: `${prefix}/${parts[0] ?? ''}/${parts[1] ?? ''}`,
+        },
+      ]
+    }
+    let sites: [string, string][]
+    if (resolved.level === 'root') sites = await siteEntries(accessor)
+    else if (resolved.level === 'site' && resolved.siteId !== null) {
+      sites = [[parts[0] ?? '', resolved.siteId]]
+    } else throw enoent(root)
+    const found: DeltaTarget[] = []
+    for (const [site, siteId] of sites) {
+      for (const [name, driveId] of await driveEntries(accessor, siteId)) {
+        found.push({ drive: drive(driveId), folder: '', virtual: `${prefix}/${site}/${name}` })
+      }
+    }
+    return found
+  }
+  return new GraphDeltaHook(config, targets)
 }

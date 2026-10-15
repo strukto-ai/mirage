@@ -15,7 +15,3 @@
 # Conservative cap on distinct pending paths in a coalescing queue before
 # the overflow policy fires. Not tied to any provider limit.
 DEFAULT_MAX_PENDING = 4096
-
-# Snapshot fingerprint value marking a directory entry in the listing
-# diff (directories have no content fingerprint of their own).
-DIR_FINGERPRINT = "dir"

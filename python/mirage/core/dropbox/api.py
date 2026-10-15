@@ -248,41 +248,25 @@ async def list_folder(
     return out
 
 
-async def list_folder_state(
+async def latest_cursor(
     tm: DropboxTokenManager,
     path: str,
     recursive: bool = False,
-    page_size: int = 2000,
-) -> tuple[list[dict[str, Any]], str]:
-    """List a folder and keep the cursor the last page handed back.
+) -> str:
+    """A cursor at the folder's present state, without listing it.
 
     Args:
         tm (DropboxTokenManager): Dropbox token manager.
-        path (str): folder to list; "/" and "" both mean the account root.
-        recursive (bool): list every descendant, not just the children.
-        page_size (int): entries per request.
-
-    Returns:
-        tuple[list[dict], str]: entry metadata and the opaque cursor.
+        path (str): folder; "/" and "" both mean the account root.
+        recursive (bool): whether the cursor covers every descendant.
     """
     api_path = "" if path in ("/", "") else path
-    out: list[dict[str, Any]] = []
     resp = await dropbox_rpc(
         tm,
-        "/files/list_folder",
-        {
-            "path": api_path,
-            "recursive": recursive,
-            "limit": page_size,
-        },
+        "/files/list_folder/get_latest_cursor",
+        {"path": api_path, "recursive": recursive},
     )
-    out.extend(resp["entries"])
-    while resp.get("has_more"):
-        resp = await dropbox_rpc(
-            tm, "/files/list_folder/continue", {"cursor": resp["cursor"]}
-        )
-        out.extend(resp["entries"])
-    return out, resp["cursor"]
+    return str(resp["cursor"])
 
 
 async def continue_folder(

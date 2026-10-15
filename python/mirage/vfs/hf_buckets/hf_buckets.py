@@ -27,13 +27,11 @@ from mirage.core.hf_buckets.rm import rm_r as _rm_r
 from mirage.core.hf_buckets.stat import stat as _stat
 from mirage.core.hf_buckets.stream import read_stream as _read_stream
 from mirage.core.hf_buckets.unlink import unlink as _unlink
-from mirage.core.hf_buckets.watch import build_delta_hook
 from mirage.core.hf_buckets.write import write as _write
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
 from mirage.vfs.hf_buckets.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class HfBucketsVFS(BaseVFS):
@@ -108,9 +106,6 @@ class HfBucketsVFS(BaseVFS):
 
     async def rm_r(self, path: PathSpec) -> Any:
         return await _rm_r(self.accessor, path)
-
-    def delta_hook(self) -> DeltaHook:
-        return build_delta_hook(self.accessor)
 
     def storage_location(self) -> str:
         # The endpoint, the bucket and the key prefix pin the objects two

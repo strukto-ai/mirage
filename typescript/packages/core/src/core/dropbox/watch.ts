@@ -13,256 +13,151 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { Delta, type PathSpec, type WalkEntry } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { stripSlash } from '../../utils/slash.ts'
+import { Delta, FileChangeKind, type PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../watch/base.ts'
-import { DIR_FINGERPRINT } from '../../watch/constants.ts'
-import { diffSnapshots, ListingDeltaHook } from '../../watch/delta.ts'
-import { statFingerprint } from '../../watch/fingerprint.ts'
+import { changesUnder } from '../../watch/delta.ts'
+import { virtualOf } from '../../watch/events.ts'
+import { continueFolder, latestCursor, type DropboxEntry } from './api.ts'
 import { DropboxApiError } from './client.ts'
-import {
-  continueFolder,
-  listFolder,
-  listFolderState,
-  type DropboxEntry,
-  type ListFolderState,
-} from './api.ts'
 import { dropboxPathOf } from './paths.ts'
 
-const NATIVE = 1
+function isReset(err: unknown): boolean {
+  return err instanceof DropboxApiError && err.status === 409 && err.summary.startsWith('reset')
+}
 
 /**
- * One recursive `list_folder` feeding the generic listing differ.
+ * A listing row's mount-relative path, or null for the mount root.
  *
- * Reads the account directly, never through mirage's caches, as the DeltaHook
- * contract requires.
- *
- * Fingerprints on `content_hash`, Dropbox's own content digest, so an upload of
- * identical bytes is correctly reported as no change; `rev` is the fallback,
- * and it moves on any write.
- *
- * Dropbox also offers a cursor: the same endpoint returns one, and
- * `list_folder/continue` replays only what changed since. That is a faster
- * pull, not a more correct one, and it cannot replace this walk, because the
- * server may invalidate a cursor at any time and the only answer to that is a
- * full listing. `DropboxDeltaHook` uses the cursor behind `pull` and this walk
- * as its reset path.
+ * Dropbox paths are case-insensitive: `path_display` carries the server's
+ * casing while `rootPath` carries the user's, so the root is stripped
+ * case-folded and the rest keeps the server's casing, which is safe because
+ * `path_lower` is `path_display` lowercased, same length. Mirrors Python
+ * `_relative`.
  */
-export class DropboxWalk {
-  private readonly accessor: DropboxAccessor
-
-  constructor(accessor: DropboxAccessor) {
-    this.accessor = accessor
-  }
-
-  async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-    const accessor = this.accessor
-    const apiRoot = dropboxPathOf(accessor, root)
-    let found
-    try {
-      found = await listFolder(accessor.tokenManager, apiRoot, { recursive: true })
-    } catch (error) {
-      // list_folder 409s on a missing path and on a file operand;
-      // either way there is nothing under this root to report.
-      if (error instanceof DropboxApiError && error.status === 409) return
-      throw error
-    }
-    for (const entry of found) {
-      const framed = frame(accessor, root, entry)
-      if (framed === null || entry['.tag'] === 'deleted') continue
-      yield framed.walk
-    }
-  }
-}
-
-function isReset(error: DropboxApiError): boolean {
-  return error.status === 409 && error.summary.startsWith('reset')
-}
-
-function frame(
-  accessor: DropboxAccessor,
-  root: PathSpec,
-  entry: DropboxEntry,
-): { virtual: string; walk: WalkEntry } | null {
-  // Dropbox paths are case-insensitive: `path_display` carries the
-  // server's casing while `rootPath` carries the user's, so a configured
-  // `/team` whose displayed path is `/Team` matched nothing and every
-  // event landed outside the watch scope. The comparison folds case; the
-  // slice keeps the server's casing for everything below the root, and is
-  // safe because `path_lower` is `path_display` lowercased, same length.
-  const prefix = mountPrefixOf(root.virtual, root.vfsPath)
+function relativeOf(accessor: DropboxAccessor, entry: DropboxEntry): string | null {
   const display = entry.path_display ?? entry.path_lower
   if (display === undefined || display === '') return null
   const base = accessor.rootPath
-  const folded = base.toLowerCase()
-  const trimmed =
-    base !== '' && display.toLowerCase().startsWith(folded) ? display.slice(base.length) : display
-  const relative = stripSlash(trimmed)
-  if (relative === '') return null
-  const virtual = prefix !== '' ? `${prefix}/${relative}` : `/${relative}`
-  if (entry['.tag'] === 'folder') {
-    return { virtual, walk: { virtual, isDir: true, fingerprint: null } }
-  }
-  if (entry['.tag'] === 'deleted') {
-    return { virtual, walk: { virtual, isDir: false, fingerprint: null } }
-  }
-  const modified = entry.server_modified ?? entry.client_modified ?? null
-  const size = typeof entry.size === 'number' ? entry.size : null
-  const version = entry.content_hash ?? entry.rev ?? null
-  return {
-    virtual,
-    walk: {
-      virtual,
-      isDir: false,
-      fingerprint: statFingerprint(version, modified, size),
-      size,
-      modified,
-    },
-  }
+  const relative =
+    base !== '' && display.toLowerCase().startsWith(base.toLowerCase())
+      ? display.slice(base.length)
+      : display
+  const stripped = relative.replace(/^\/+|\/+$/g, '')
+  return stripped === '' ? null : stripped
 }
 
-function encode(cursor: string, snapshot: Record<string, string>): string {
-  const ordered: Record<string, string> = {}
-  for (const key of Object.keys(snapshot).sort(compareCodePoints)) {
-    const value = snapshot[key]
-    if (value !== undefined) ordered[key] = value
-  }
-  return JSON.stringify({ _dbx: NATIVE, c: cursor, s: ordered })
+function encode(cursor: string, seen: Record<string, string>): string {
+  const sorted = Object.fromEntries(
+    Object.entries(seen).sort(([a], [b]) => compareCodePoints(a, b)),
+  )
+  return JSON.stringify({ dropbox: { cursor, seen: sorted } })
 }
 
-function decode(checkpoint: string | null): {
-  cursor: string | null
-  snapshot: Record<string, string> | null
-  native: boolean
-} {
-  if (checkpoint === null) return { cursor: null, snapshot: null, native: false }
-  const parsed: unknown = JSON.parse(checkpoint)
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { cursor: null, snapshot: null, native: false }
+/** The cursor and seen paths a checkpoint holds, null for a baseline. */
+function decode(checkpoint: string | null): [string, Record<string, string>] | null {
+  if (checkpoint === null) return null
+  const data = JSON.parse(checkpoint) as {
+    dropbox?: { cursor?: string; seen?: Record<string, string> }
   }
-  const data = parsed as Record<string, unknown>
-  if (
-    data._dbx === NATIVE &&
-    typeof data.c === 'string' &&
-    typeof data.s === 'object' &&
-    data.s !== null
-  ) {
-    return { cursor: data.c, snapshot: data.s as Record<string, string>, native: true }
-  }
-  return { cursor: null, snapshot: data as Record<string, string>, native: false }
+  const state = data.dropbox ?? {}
+  return [state.cursor ?? '', { ...(state.seen ?? {}) }]
 }
 
-function dropPrefix(snapshot: Record<string, string>, virtual: string): Record<string, string> {
-  const prefix = `${virtual.replace(/\/$/, '')}/`
-  const next: Record<string, string> = {}
-  for (const [key, value] of Object.entries(snapshot)) {
-    if (key !== virtual && !key.startsWith(prefix)) next[key] = value
+function dropBelow(seen: Record<string, string>, relative: string): void {
+  for (const key of Object.keys(seen)) {
+    if (key === relative || key.startsWith(`${relative}/`)) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete seen[key]
+    }
   }
-  return next
 }
 
 /**
- * Native Dropbox cursor pull, with the listing walk as reset.
+ * What changed under a Dropbox watch root since the last cursor, for the
+ * consumer to call when Dropbox pings.
+ *
+ * Dropbox's push (a webhook, or `list_folder/longpoll` answering `changes`)
+ * names only the account, so each ping is answered by one
+ * `list_folder/continue` from the stored cursor. A baseline takes a cursor at
+ * the present with `get_latest_cursor` and lists nothing.
+ *
+ * A row names its path, so a delete is a DELETE where it was, and a move is
+ * its old path deleted and its new rows. A row does not say whether a file was
+ * made or replaced, so the checkpoint keeps each path a pull has reported with
+ * its `content_hash`: a path seen before is an UPDATE, or nothing when its
+ * content did not change, and any other is a CREATE. A cursor Dropbox resets
+ * answers UNKNOWN on the watch root and a fresh cursor; a root Dropbox cannot
+ * find has no cursor, and the pull that finds it again reports the root
+ * UNKNOWN.
+ *
+ * Mirrors Python `DropboxDeltaHook` (`core/dropbox/watch.py`).
  */
 export class DropboxDeltaHook implements DeltaHook {
   private readonly accessor: DropboxAccessor
-  private readonly listing: ListingDeltaHook
 
   constructor(accessor: DropboxAccessor) {
     this.accessor = accessor
-    const walk = new DropboxWalk(accessor)
-    this.listing = new ListingDeltaHook(walk.walk.bind(walk))
   }
 
-  private async snapshot(root: PathSpec): Promise<{
-    snapshot: Record<string, string>
-    entries: Map<string, WalkEntry>
-    cursor: string
-  }> {
-    const accessor = this.accessor
-    const apiRoot = dropboxPathOf(accessor, root)
-    let found: DropboxEntry[]
-    let cursor: string
+  /** A cursor at the root's present, '' when Dropbox cannot find it. */
+  private async latest(root: PathSpec): Promise<string> {
     try {
-      const state = await listFolderState(accessor.tokenManager, apiRoot, { recursive: true })
-      found = state.entries
-      cursor = state.cursor
-    } catch (error) {
-      if (error instanceof DropboxApiError && error.status === 409) {
-        return { snapshot: {}, entries: new Map(), cursor: '' }
-      }
-      throw error
+      return await latestCursor(this.accessor.tokenManager, dropboxPathOf(this.accessor, root), {
+        recursive: true,
+      })
+    } catch (err) {
+      if (!(err instanceof DropboxApiError) || err.status !== 409) throw err
+      console.debug(`dropbox watch root has no cursor: ${err.message}`)
+      return ''
     }
-    const snapshot: Record<string, string> = {}
-    const entries = new Map<string, WalkEntry>()
-    for (const raw of found) {
-      const framed = frame(accessor, root, raw)
-      if (framed === null || raw['.tag'] === 'deleted') continue
-      entries.set(framed.virtual, framed.walk)
-      snapshot[framed.virtual] = framed.walk.isDir
-        ? DIR_FINGERPRINT
-        : (framed.walk.fingerprint ?? '')
-    }
-    return { snapshot, entries, cursor }
-  }
-
-  /**
-   * List `root` afresh and answer with a new native cursor.
-   *
-   * A root Dropbox refuses leaves `snapshot` with no cursor at all, and an
-   * empty one must never be encoded: the cursor `list_folder/continue` takes
-   * is at least one character, so a native checkpoint carrying '' makes every
-   * later pull fail on the refusal and the listing is never reached again,
-   * even once the root is back. The walk answers that case instead, and the
-   * listing checkpoint it hands out is upgraded by the next pull that finds a
-   * cursor.
-   */
-  private async relist(
-    root: PathSpec,
-    previous: Record<string, string> | null,
-    observed: Date,
-  ): Promise<Delta> {
-    const next = await this.snapshot(root)
-    if (next.cursor === '') {
-      return this.listing.pull(root, previous === null ? null : JSON.stringify(previous))
-    }
-    const changes =
-      previous === null ? [] : diffSnapshots(root, previous, next.snapshot, next.entries, observed)
-    return new Delta({ changes, checkpoint: encode(next.cursor, next.snapshot) })
   }
 
   async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
-    const decoded = decode(checkpoint)
+    const state = decode(checkpoint)
     const observed = new Date()
-    if (!decoded.native) return this.relist(root, decoded.snapshot, observed)
-    let state: ListFolderState
-    try {
-      state = await continueFolder(this.accessor.tokenManager, decoded.cursor ?? '')
-    } catch (error) {
-      if (error instanceof DropboxApiError && isReset(error)) {
-        return this.relist(root, decoded.snapshot, observed)
-      }
-      throw error
+    const lost: [FileChangeKind, string][] = [[FileChangeKind.UNKNOWN, root.virtual]]
+    if (state === null)
+      return new Delta({ changes: [], checkpoint: encode(await this.latest(root), {}) })
+    let [cursor] = state
+    const seen = state[1]
+    if (cursor === '') {
+      cursor = await this.latest(root)
+      const changes = cursor !== '' ? changesUnder(root, lost, observed) : []
+      return new Delta({ changes, checkpoint: encode(cursor, {}) })
     }
-    let snapshot = { ...(decoded.snapshot ?? {}) }
-    const entries = new Map<string, WalkEntry>()
-    for (const raw of state.entries) {
-      const framed = frame(this.accessor, root, raw)
-      if (framed === null) continue
-      entries.set(framed.virtual, framed.walk)
-      if (raw['.tag'] === 'deleted') {
-        snapshot = dropPrefix(snapshot, framed.virtual)
+    let rows: DropboxEntry[]
+    try {
+      ;({ entries: rows, cursor } = await continueFolder(this.accessor.tokenManager, cursor))
+    } catch (err) {
+      if (!isReset(err)) throw err
+      console.debug(`dropbox cursor reset: ${String(err)}`)
+      const fresh = await this.latest(root)
+      return new Delta({
+        changes: changesUnder(root, lost, observed),
+        checkpoint: encode(fresh, {}),
+      })
+    }
+    const found: [FileChangeKind, string][] = []
+    for (const row of rows) {
+      const relative = relativeOf(this.accessor, row)
+      if (relative === null) continue
+      const virtual = virtualOf(root, relative)
+      const tag = row['.tag']
+      if (tag === 'deleted') {
+        dropBelow(seen, relative)
+        found.push([FileChangeKind.DELETE, virtual])
         continue
       }
-      snapshot[framed.virtual] = framed.walk.isDir
-        ? DIR_FINGERPRINT
-        : (framed.walk.fingerprint ?? '')
+      const version = tag === 'folder' ? '' : (row.content_hash ?? row.rev ?? '')
+      const previous = Object.hasOwn(seen, relative) ? seen[relative] : undefined
+      seen[relative] = version
+      if (previous === undefined) found.push([FileChangeKind.CREATE, virtual])
+      else if (previous !== version) found.push([FileChangeKind.UPDATE, virtual])
     }
     return new Delta({
-      changes: diffSnapshots(root, decoded.snapshot ?? {}, snapshot, entries, observed),
-      checkpoint: encode(state.cursor, snapshot),
+      changes: changesUnder(root, found, observed),
+      checkpoint: encode(cursor, seen),
     })
   }
 }

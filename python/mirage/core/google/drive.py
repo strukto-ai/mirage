@@ -392,6 +392,61 @@ def _multipart_related(
     return body, f"multipart/related; boundary={boundary}"
 
 
+# What a change read names of each file: enough to place it on a Drive
+# or app mount and to tell a new file from an edited one.
+CHANGE_FIELDS = (
+    "nextPageToken,newStartPageToken,changes(changeType,fileId,removed,"
+    "file(id,name,mimeType,driveId,createdTime,modifiedTime,parents,"
+    "owners,trashed))"
+)
+
+
+async def start_page_token(token_manager: TokenManager) -> str:
+    """The changes page token at the present, which lists nothing.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+    """
+    url = f"{drive_base(token_manager)}/changes/startPageToken"
+    data = await google_get(
+        token_manager, url, params={"supportsAllDrives": "true"}
+    )
+    return str(data["startPageToken"])
+
+
+async def list_changes(
+    token_manager: TokenManager, page_token: str
+) -> tuple[list[dict[str, Any]], str]:
+    """Every change since ``page_token`` across the account's drives,
+    and the token the next read starts from.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        page_token (str): Where the last read ended.
+    """
+    url = f"{drive_base(token_manager)}/changes"
+    found: list[dict[str, Any]] = []
+    token = page_token
+    while True:
+        data = await google_get(
+            token_manager,
+            url,
+            params={
+                "pageToken": token,
+                "fields": CHANGE_FIELDS,
+                "pageSize": 1000,
+                "includeItemsFromAllDrives": "true",
+                "supportsAllDrives": "true",
+            },
+        )
+        rows = data.get("changes")
+        if isinstance(rows, list):
+            found.extend(r for r in rows if isinstance(r, dict))
+        if data.get("newStartPageToken"):
+            return found, str(data["newStartPageToken"])
+        token = str(data["nextPageToken"])
+
+
 async def get_file(
     token_manager: TokenManager, file_id: str
 ) -> dict[str, Any]:

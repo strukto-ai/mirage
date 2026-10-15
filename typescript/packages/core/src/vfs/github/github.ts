@@ -24,13 +24,11 @@ import {
   buildTreeMap as githubBuildTreeMap,
   fetchTree as fetchGitHubTree,
 } from '../../core/github/tree.ts'
-import { buildDeltaHook } from '../../core/github/watch.ts'
 
 import { PROMPT } from './prompt.ts'
 import { COMMIT_SHA } from '../../core/github/constants.ts'
 import { ListingVersion, VFSName } from '../../types.ts'
 
-import type { DeltaHook } from '../../watch/index.ts'
 import {
   redactGitHubConfig,
   type GitHubConfig,
@@ -171,10 +169,6 @@ export class GitHubVFS extends BaseVFS {
     index?: IndexCacheStore,
   ): Promise<void> {
     return githubBeforeFullScan(this.accessor, path, files, index)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 
   override getState(): Promise<GitHubVFSState> {

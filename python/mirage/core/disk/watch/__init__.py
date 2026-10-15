@@ -13,6 +13,5 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.disk.watch.hook import DiskEventHook
-from mirage.core.disk.watch.walk import DiskWalk, build_delta_hook
 
-__all__ = ["DiskEventHook", "DiskWalk", "build_delta_hook"]
+__all__ = ["DiskEventHook"]

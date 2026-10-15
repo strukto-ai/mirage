@@ -29,13 +29,13 @@ class Watcher:
     """Notify-driven watch runtime: invalidate, then deliver.
 
     Mirage runs no background loop. Changes enter through ``notify``,
-    from whatever detection the consumer runs: a webhook receiver, a
-    queue bridge, or their own poll loop over a VFS's
-    ``delta_hook()`` (see ``integ/watch/run.py`` for the ~10-line
-    poller). Cache invalidation for a change completes before it
-    reaches any subscriber queue. Folder removal drops descendants
-    only when a listing remains at or below the folder; cached bodies
-    without such a listing can survive until their ttl.
+    from the push the consumer receives: a webhook or queue payload
+    mapped by the backend's event hook, or a ping answered by one pull
+    of the VFS's ``delta_hook()``. Cache invalidation for a change
+    completes before it reaches any subscriber queue. Folder removal
+    drops descendants only when a listing remains at or below the
+    folder; cached bodies without such a listing can survive until
+    their ttl.
     """
 
     def __init__(

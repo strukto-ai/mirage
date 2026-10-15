@@ -1,8 +1,6 @@
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-import { buildDeltaHook } from '../../core/nextcloud/watch.ts'
 import {
   redactNextcloudConfig,
   type NextcloudConfig,
@@ -152,10 +150,6 @@ export class NextcloudVFS extends BaseVFS {
 
   override capacity(): Promise<CapacityResult> {
     return capacity(this.accessor)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 
   override storageLocation(): string {

@@ -12,32 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-import logging
-from collections.abc import Mapping
-from datetime import datetime, timezone
-from typing import Any
-
-from pymongo.errors import OperationFailure
+from collections.abc import Sequence
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.core.mongodb.client import drain_changes, list_collections
-from mirage.core.mongodb.scope import detect_scope
+from mirage.core.mongodb.client import list_collections
 from mirage.core.mongodb.types import (
-    CHANGE_STREAM_UNSUPPORTED,
-    HISTORY_LOST,
     KIND_TO_DIR,
-    NOT_A_REPLICA_SET,
     SYSTEM_DATABASES,
     EntityKind,
 )
-from mirage.errors.fs import enotsup
-from mirage.types import Delta, FileChangeKind, FileEvent, PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
-from mirage.watch.base import DeltaHook
-from mirage.watch.delta import changes_under
-
-logger = logging.getLogger(__name__)
+from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
+from mirage.watch.events import event_at, field, text_field
 
 # Change events that rewrite a collection's documents.jsonl.
 _DATA_EVENTS = frozenset({"insert", "update", "replace", "delete"})
@@ -45,56 +30,34 @@ _DATA_EVENTS = frozenset({"insert", "update", "replace", "delete"})
 # Change events that rewrite a collection's schema.json.
 _SCHEMA_EVENTS = frozenset({"createIndexes", "dropIndexes", "modify"})
 
+# Change events that change which collections and views a database
+# lists, so its views must be listed again.
+_LISTING_EVENTS = frozenset({"create", "drop", "rename", "modify"})
+
 _COLLECTIONS = KIND_TO_DIR[EntityKind.COLLECTION]
 _VIEWS = KIND_TO_DIR[EntityKind.VIEW]
 
 
-def _encode(token: Mapping[str, Any] | None) -> str:
-    return json.dumps({"mongodb": dict(token or {})}, sort_keys=True)
+class MongoDBEventHook:
+    """Map one MongoDB change stream event onto mount paths.
 
-
-def _decode(checkpoint: str | None) -> Mapping[str, Any] | None:
-    """The stream position a checkpoint holds, None for a baseline.
-
-    Args:
-        checkpoint (str | None): What the previous pull handed out.
-    """
-    if checkpoint is None:
-        return None
-    data = json.loads(checkpoint)
-    token = data.get("mongodb") if isinstance(data, dict) else None
-    return token if isinstance(token, dict) and token else None
-
-
-def _removed(changed: dict[str, FileChangeKind], place: str) -> None:
-    """Record a directory removed, and forget what changed below it.
-
-    Args:
-        changed (dict[str, FileChangeKind]): The changes so far, by path.
-        place (str): The directory removed.
-    """
-    for key in [k for k in changed if k.startswith(place + "/")]:
-        del changed[key]
-    changed[place] = FileChangeKind.DELETE
-
-
-class MongoDBDeltaHook:
-    """Checkpointed delta over a MongoDB change stream.
+    The consumer owns the stream (``watch()`` on the client or one
+    database, with ``show_expanded_events`` so collection and index
+    changes come through) and its resume token, and passes each event's
+    ``operationType`` with the event. Nothing here runs a loop.
 
     A collection is one ``documents.jsonl`` and one ``schema.json``, so
-    the stream says exactly which files moved: a document written or
+    an event says exactly which files moved: a document written or
     removed rewrites its collection's documents.jsonl and the schema.json
     sampled from it, and both files of every view in that database (a
-    view reads other collections), an index or validator change its
-    schema.json, a view's new pipeline both of its files (its ``modify``
-    names ``viewOn``), and a collection created, dropped or renamed is
-    its directory appearing or leaving, and its database's
-    database.json, which lists it. A watch below a directory removed is
-    told its root went (``changes_under``). The checkpoint is
-    the stream's resume token. A position the server's history no longer
-    holds answers UNKNOWN on the watch root, so everything below is
-    inventoried again. A server outside a replica set has no change
-    stream and refuses the watch.
+    view reads other collections); an index or validator change rewrites
+    its schema.json, and a view's new pipeline (its ``modify`` names
+    ``viewOn``) both of the view's files; a collection created, dropped
+    or renamed is its directory appearing or leaving, and its database's
+    database.json, which lists it. A dropped database leaves, and an
+    invalidated stream leaves the whole mount UNKNOWN. The views of a
+    database are listed once and listed again after any event that
+    changes what the database holds.
     """
 
     def __init__(self, accessor: MongoDBAccessor) -> None:
@@ -102,120 +65,90 @@ class MongoDBDeltaHook:
         accessor (MongoDBAccessor): Backend handle.
         """
         self._accessor = accessor
+        self._views: dict[str, list[str]] = {}
 
-    async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
-        """Return the changes under ``root`` since ``checkpoint``.
+    async def _views_of(self, db: str) -> list[str]:
+        """The views ``db`` holds, listed once until it changes.
 
         Args:
-            root (PathSpec): Watch root.
-            checkpoint (str | None): The previous pull's resume token, or
-                None for a baseline.
+            db (str): The database.
         """
-        database = detect_scope(root).slots.get("database")
-        token = _decode(checkpoint)
-        observed = datetime.now(timezone.utc)
-        client = self._accessor.client
-        try:
-            events, position = await drain_changes(client, database, token)
-        except OperationFailure as exc:
-            if exc.code in (CHANGE_STREAM_UNSUPPORTED, NOT_A_REPLICA_SET):
-                raise enotsup("mongodb", "watch", root) from exc
-            if exc.code != HISTORY_LOST or token is None:
-                raise
-            logger.debug("mongodb watch lost its position: %s", exc)
-            _, position = await drain_changes(client, database, None)
-            lost = FileEvent(
-                kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
+        if db not in self._views:
+            self._views[db] = await list_collections(
+                self._accessor.client, db, EntityKind.VIEW
             )
-            return Delta((lost,), _encode(position))
-        if token is None:
-            return Delta((), _encode(position))
-        changes = await self._changes(root, events, observed)
-        return Delta(changes, _encode(position))
+        return self._views[db]
 
-    async def _changes(
-        self,
-        root: PathSpec,
-        events: list[dict[str, Any]],
-        observed: datetime,
-    ) -> tuple[FileEvent, ...]:
-        """The files ``events`` changed under ``root``, each once.
+    async def to_events(
+        self, root: PathSpec, operation_type: str, payload: JsonValue
+    ) -> Sequence[FileEvent]:
+        """Map one change event to the changes it implies.
 
         Args:
-            root (PathSpec): Watch root.
-            events (list[dict[str, Any]]): Change events, in order.
-            observed (datetime): Timestamp every change carries.
+            root (PathSpec): Any path on this mount, read for its prefix.
+            operation_type (str): The event's ``operationType``.
+            payload (JsonValue): The change event.
         """
-        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
+        if operation_type == "invalidate":
+            return (event_at(root, "", FileChangeKind.UNKNOWN),)
+        ns = field(payload, "ns")
+        db, name = text_field(ns, "db"), text_field(ns, "coll")
         allowed = self._accessor.config.databases
+        if (
+            db is None
+            or db in SYSTEM_DATABASES
+            or (allowed and db not in allowed)
+        ):
+            return ()
+        if operation_type == "dropDatabase":
+            self._views.pop(db, None)
+            return (event_at(root, db, FileChangeKind.DELETE),)
+        if name is None:
+            return ()
+        details = field(payload, "operationDescription")
         changed: dict[str, FileChangeKind] = {}
-        written: set[str] = set()
-        for event in events:
-            ns = event.get("ns") or {}
-            db, name = ns.get("db"), ns.get("coll")
-            if (
-                not isinstance(db, str)
-                or db in SYSTEM_DATABASES
-                or (allowed and db not in allowed)
-            ):
-                continue
-            base = f"{prefix}/{db}"
-            kind = event.get("operationType")
-            if kind == "dropDatabase":
-                _removed(changed, base)
-                continue
-            if not isinstance(name, str):
-                continue
-            place = f"{base}/{_COLLECTIONS}/{name}"
-            details = event.get("operationDescription") or {}
-            if kind in _DATA_EVENTS:
-                changed[f"{place}/documents.jsonl"] = FileChangeKind.UPDATE
-                changed[f"{place}/schema.json"] = FileChangeKind.UPDATE
-                written.add(db)
-            elif kind == "modify" and "viewOn" in details:
-                view = f"{base}/{_VIEWS}/{name}"
-                changed[f"{view}/schema.json"] = FileChangeKind.UPDATE
-                changed[f"{view}/documents.jsonl"] = FileChangeKind.UPDATE
-            elif kind in _SCHEMA_EVENTS:
-                changed[f"{place}/schema.json"] = FileChangeKind.UPDATE
-            elif kind == "create":
-                dirname = _VIEWS if "viewOn" in details else _COLLECTIONS
-                changed[f"{base}/{dirname}/{name}"] = FileChangeKind.CREATE
-                changed[f"{base}/database.json"] = FileChangeKind.UPDATE
-            elif kind == "drop":
-                _removed(changed, place)
-                changed[f"{base}/{_VIEWS}"] = FileChangeKind.UNKNOWN
-                changed[f"{base}/database.json"] = FileChangeKind.UPDATE
-            elif kind == "rename":
-                to = event.get("to") or {}
-                _removed(changed, place)
-                changed[f"{base}/database.json"] = FileChangeKind.UPDATE
-                if isinstance(to.get("db"), str) and isinstance(
-                    to.get("coll"), str
-                ):
-                    target = f"{prefix}/{to['db']}"
-                    moved = f"{target}/{_COLLECTIONS}/{to['coll']}"
-                    changed[moved] = FileChangeKind.CREATE
-                    changed[f"{target}/database.json"] = FileChangeKind.UPDATE
-        for db in sorted(written):
-            client = self._accessor.client
-            for view in await list_collections(client, db, EntityKind.VIEW):
+        place = f"{db}/{_COLLECTIONS}/{name}"
+        if operation_type in _LISTING_EVENTS:
+            self._views.pop(db, None)
+        if operation_type in _DATA_EVENTS:
+            changed[f"{place}/documents.jsonl"] = FileChangeKind.UPDATE
+            changed[f"{place}/schema.json"] = FileChangeKind.UPDATE
+            for view in await self._views_of(db):
                 for file in ("documents.jsonl", "schema.json"):
-                    changed.setdefault(
-                        f"{prefix}/{db}/{_VIEWS}/{view}/{file}",
-                        FileChangeKind.UPDATE,
+                    changed[f"{db}/{_VIEWS}/{view}/{file}"] = (
+                        FileChangeKind.UPDATE
                     )
-        return tuple(
-            changes_under(
-                root, ((kind, v) for v, kind in changed.items()), observed
+        elif (
+            operation_type == "modify" and field(details, "viewOn") is not None
+        ):
+            view = f"{db}/{_VIEWS}/{name}"
+            changed[f"{view}/schema.json"] = FileChangeKind.UPDATE
+            changed[f"{view}/documents.jsonl"] = FileChangeKind.UPDATE
+        elif operation_type in _SCHEMA_EVENTS:
+            changed[f"{place}/schema.json"] = FileChangeKind.UPDATE
+        elif operation_type == "create":
+            dirname = (
+                _VIEWS
+                if field(details, "viewOn") is not None
+                else _COLLECTIONS
             )
+            changed[f"{db}/{dirname}/{name}"] = FileChangeKind.CREATE
+            changed[f"{db}/database.json"] = FileChangeKind.UPDATE
+        elif operation_type == "drop":
+            changed[place] = FileChangeKind.DELETE
+            changed[f"{db}/{_VIEWS}"] = FileChangeKind.UNKNOWN
+            changed[f"{db}/database.json"] = FileChangeKind.UPDATE
+        elif operation_type == "rename":
+            to = field(payload, "to")
+            changed[place] = FileChangeKind.DELETE
+            changed[f"{db}/database.json"] = FileChangeKind.UPDATE
+            target_db, target = text_field(to, "db"), text_field(to, "coll")
+            if target_db is not None and target is not None:
+                self._views.pop(target_db, None)
+                changed[f"{target_db}/{_COLLECTIONS}/{target}"] = (
+                    FileChangeKind.CREATE
+                )
+                changed[f"{target_db}/database.json"] = FileChangeKind.UPDATE
+        return tuple(
+            event_at(root, path, kind) for path, kind in changed.items()
         )
-
-
-def build_delta_hook(accessor: MongoDBAccessor) -> DeltaHook:
-    """Build the MongoDB delta hook (``MongoDBDeltaHook``).
-
-    Args:
-        accessor (MongoDBAccessor): Backend handle.
-    """
-    return MongoDBDeltaHook(accessor)

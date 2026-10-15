@@ -34,13 +34,11 @@ from mirage.core.gridfs.stat import stat as _stat
 from mirage.core.gridfs.stream import read_stream as _read_stream
 from mirage.core.gridfs.truncate import truncate as _truncate
 from mirage.core.gridfs.unlink import unlink as _unlink
-from mirage.core.gridfs.watch import build_delta_hook
 from mirage.core.gridfs.write import write as _write
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gridfs.config import GridFSConfig
 from mirage.vfs.gridfs.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class GridFSVFS(BaseVFS):
@@ -143,9 +141,6 @@ class GridFSVFS(BaseVFS):
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
         await _truncate(self.accessor, path, length, no_create)
-
-    def delta_hook(self) -> DeltaHook:
-        return build_delta_hook(self.accessor)
 
     def storage_location(self) -> str:
         # The hosts, the database, the bucket and the key prefix pin the

@@ -12,62 +12,120 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type PathSpec, type WalkEntry } from '@struktoai/mirage-core/types'
-import { mountPrefixOf, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
-import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
-import { type DeltaHook, ListingDeltaHook, synthDirs } from '@struktoai/mirage-core/watch/index'
+import {
+  FileChangeKind,
+  type FileEvent,
+  type JsonValue,
+  type PathSpec,
+} from '@struktoai/mirage-core/types'
+import { normalize } from '@struktoai/mirage-core/utils/key_prefix'
+import { eventAt, field, textField } from '@struktoai/mirage-core/watch/index'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
-import { gridfsPrefix, iterLatest, prefixQuery, stripKeyPrefix } from './client.ts'
+import { filesColl } from './client.ts'
+
+// Events after which the stream no longer describes the files collection
+// document by document.
+const GONE = new Set(['drop', 'dropDatabase', 'rename', 'invalidate'])
 
 /**
- * One flat `fs.files` aggregation feeding the generic differ.
+ * Map one change stream event on a bucket's files collection onto mount
+ * paths.
  *
- * GridFS stores a flat filename space, so the whole subtree comes back from a
- * single prefix query rather than one round trip per directory, and the
- * aggregation already reduces each filename to its newest revision. Reads the
- * collection directly, never through mirage's caches, as the DeltaHook contract
- * requires.
+ * The consumer owns the stream (`watch()` on `<bucket>.files`, ideally with
+ * `fullDocumentBeforeChange` so a delete names its file) and its resume token,
+ * and passes each event's `operationType` with the event. Nothing here runs a
+ * loop.
  *
- * Fingerprints on the revision's ObjectId, which is exactly what `gridfs` stat
- * reports. That is an exact version: every upload mints a new document, so a
- * rewrite always moves it and an untouched file never does.
+ * GridFS keeps every upload as its own revision and serves the newest, so
+ * after an insert, a delete or a rename the hook counts the revisions left
+ * under each name it touched: none is a DELETE, one just made is a CREATE, and
+ * any other is an UPDATE, since the file now reads another revision. A delete
+ * names its document by id only; the pre-image, or the insert the hook saw,
+ * names the file, and with neither the whole mount is UNKNOWN. A filename
+ * ending in `/` is a directory marker. A dropped or renamed collection, a
+ * dropped database and an invalidated stream leave the mount UNKNOWN.
+ *
+ * Mirrors Python `GridFSEventHook` (`core/gridfs/watch.py`).
  */
-class GridFSWalk {
+export class GridFSEventHook {
   private readonly accessor: GridFSAccessor
+  private readonly names = new Map<string, string>()
 
   constructor(accessor: GridFSAccessor) {
     this.accessor = accessor
   }
 
-  async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-    const config = this.accessor.config
-    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
-    const pfx = gridfsPrefix(rawPathOf(root), config)
-    const files: string[] = []
-    const markers: string[] = []
-    for await (const doc of iterLatest(this.accessor, prefixQuery(pfx))) {
-      const relative = stripSlash(stripKeyPrefix(doc.filename, config))
-      const virtual = prefix !== '' ? `${prefix}/${relative}` : `/${relative}`
-      if (doc.filename.endsWith('/')) {
-        // A directory marker, the same convention readdir reads as an
-        // immediate child directory.
-        markers.push(rstripSlash(virtual))
-        continue
-      }
-      files.push(virtual)
-      yield {
-        virtual,
-        isDir: false,
-        fingerprint: doc._id.toString(),
-        size: doc.length,
-        modified: doc.uploadDate.toISOString(),
-      }
-    }
-    yield* synthDirs(root.virtual, files, markers)
+  /** The mount-relative path of a filename, or null outside the key prefix. */
+  private relative(filename: string): string | null {
+    const prefix = normalize(this.accessor.config.keyPrefix)
+    if (prefix !== '' && !filename.startsWith(prefix)) return null
+    return filename.slice(prefix.length)
   }
-}
 
-export function buildDeltaHook(accessor: GridFSAccessor): DeltaHook {
-  const walk = new GridFSWalk(accessor)
-  return new ListingDeltaHook(walk.walk.bind(walk))
+  /** The change `filename` now reads as, from the revisions left. */
+  private async settled(root: PathSpec, filename: string, made: boolean): Promise<FileEvent[]> {
+    const relative = this.relative(filename)
+    if (relative === null) return []
+    if (relative.endsWith('/')) {
+      const kind = made ? FileChangeKind.CREATE : FileChangeKind.UNKNOWN
+      return [eventAt(root, relative.replace(/\/+$/, ''), kind)]
+    }
+    const files = await filesColl(this.accessor)
+    const left = await files.countDocuments({ filename }, { limit: 2 })
+    const kind =
+      left === 0
+        ? FileChangeKind.DELETE
+        : made && left === 1
+          ? FileChangeKind.CREATE
+          : FileChangeKind.UPDATE
+    return [eventAt(root, relative, kind)]
+  }
+
+  async toEvents(
+    root: PathSpec,
+    operationType: string,
+    payload: JsonValue,
+  ): Promise<readonly FileEvent[]> {
+    const config = this.accessor.config
+    const ns = field(payload, 'ns') ?? null
+    if (operationType === 'invalidate') return [eventAt(root, '', FileChangeKind.UNKNOWN)]
+    const coll = textField(ns, 'coll')
+    if (
+      textField(ns, 'db') !== config.database ||
+      (coll !== undefined && coll !== `${config.bucket ?? 'fs'}.files`)
+    ) {
+      return []
+    }
+    if (GONE.has(operationType)) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
+    const ident = JSON.stringify(field(field(payload, 'documentKey') ?? null, '_id') ?? null)
+    const before =
+      textField(field(payload, 'fullDocumentBeforeChange') ?? null, 'filename') ??
+      this.names.get(ident)
+    const after =
+      textField(field(payload, 'fullDocument') ?? null, 'filename') ??
+      textField(
+        field(field(payload, 'updateDescription') ?? null, 'updatedFields') ?? null,
+        'filename',
+      )
+    if (operationType === 'insert' && after !== undefined) {
+      this.names.set(ident, after)
+      return this.settled(root, after, true)
+    }
+    if (operationType === 'delete') {
+      this.names.delete(ident)
+      if (before === undefined) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
+      return this.settled(root, before, false)
+    }
+    if (operationType !== 'update' && operationType !== 'replace') return []
+    if (before === undefined) {
+      if (after !== undefined) this.names.set(ident, after)
+      return [eventAt(root, '', FileChangeKind.UNKNOWN)]
+    }
+    if (after === undefined || after === before) return this.settled(root, before, false)
+    this.names.set(ident, after)
+    return [
+      ...(await this.settled(root, before, false)),
+      ...(await this.settled(root, after, true)),
+    ]
+  }
 }

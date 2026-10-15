@@ -15,9 +15,7 @@
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { buildDeltaHook } from '../../core/hf_buckets/watch.ts'
 import {
   assertHfRepoId,
   HF_ENDPOINT,
@@ -132,10 +130,6 @@ export class HfBucketsVFS extends BaseVFS {
 
   override rmR(path: PathSpec): Promise<void> {
     return hfRmR(this.accessor, path)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 
   override storageLocation(): string {

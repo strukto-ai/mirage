@@ -13,31 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { PathSpec } from '../../types.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import type { DeltaHook } from '../../watch/base.ts'
-import { ListingDeltaHook } from '../../watch/delta.ts'
-import { ReaddirWalk } from '../../watch/walk.ts'
-import { readdir } from './readdir.ts'
-import { stat } from './stat.ts'
+import { GraphDeltaHook, type DeltaTarget } from '../msgraph/watch.ts'
+import { driveBase } from './client.ts'
 
 /**
- * Build the OneDrive delta hook.
- *
- * Fingerprints on the item's `cTag`, which Graph moves only when the content
- * changes (`eTag` also moves on a metadata edit), so a rename does not read as
- * a content change.
- *
- * Graph has a native `/delta` feed with a resumable token, which is cheaper
- * than this walk and reports deletes directly. It is a fast path rather than a
- * replacement: Graph can answer `resyncRequired` at any time, and the only
- * response to that is a full listing. When it is added it belongs behind
- * `pull`, with this walk as its reset.
+ * Build the OneDrive delta hook: the drive's `/delta` feed (`GraphDeltaHook`),
+ * placed under the mount's `keyPrefix`. Mirrors Python `build_delta_hook`.
  */
 export function buildDeltaHook(accessor: OneDriveAccessor): DeltaHook {
-  const walk = new ReaddirWalk(
-    (path: PathSpec, index: IndexCacheStore): Promise<string[]> => readdir(accessor, path, index),
-    (path: PathSpec, index: IndexCacheStore): Promise<FileStat> => stat(accessor, path, index),
-  )
-  return new ListingDeltaHook(walk.walk.bind(walk))
+  const config = accessor.config
+  const targets = (root: PathSpec): Promise<DeltaTarget[]> => {
+    const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
+    return Promise.resolve([
+      { drive: driveBase(config), folder: config.keyPrefix, virtual: prefix === '' ? '/' : prefix },
+    ])
+  }
+  return new GraphDeltaHook(config, targets)
 }

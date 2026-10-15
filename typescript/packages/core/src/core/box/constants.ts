@@ -23,7 +23,8 @@ export const TOKEN_BUFFER_SECONDS = 300
 export const EVENT_STREAM = 'changes'
 // Box keeps user events for between two weeks and two months, and a position
 // older than that is not refused, it just replays what is left. A checkpoint
-// this old relists instead of trusting the replay.
+// read this long ago reports the watch root as unknown and starts again at the
+// present instead of trusting the replay.
 export const EVENT_REPLAY_DAYS = 14
 // Events that put an item at the path its `source` names.
 export const PLACE_EVENTS: ReadonlySet<string> = new Set([

@@ -17,12 +17,8 @@ from mirage.types import (
     FileChangeKind,
     FileEvent,
     FileMetadata,
-    WalkEntry,
-    WalkFn,
 )
 from mirage.watch.base import DeltaHook, WatchRuntime
-from mirage.watch.delta import ListingDeltaHook
-from mirage.watch.fingerprint import stat_fingerprint
 from mirage.watch.queue import (
     OverflowPolicy,
     QueueClosed,
@@ -39,16 +35,12 @@ __all__ = [
     "FileChangeKind",
     "FileEvent",
     "FileMetadata",
-    "ListingDeltaHook",
     "OverflowPolicy",
     "QueueClosed",
     "QueueFactory",
     "QueueOverflowError",
     "RAMWatchQueue",
-    "WalkEntry",
-    "WalkFn",
     "WatchQueue",
     "WatchRuntime",
     "Watcher",
-    "stat_fingerprint",
 ]

@@ -19,18 +19,6 @@ export class QueueOverflowError extends Error {
   }
 }
 
-// A snapshot diff reads every path the walk did not report as a
-// DELETE, so a partial listing does not degrade into fewer events, it
-// invents wrong ones. A hook that knows its listing was truncated
-// raises this instead, leaving the caller's checkpoint untouched so the
-// next pull can still succeed.
-export class IncompleteWalkError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'IncompleteWalkError'
-  }
-}
-
 export class QueueClosed extends Error {
   constructor(label: string) {
     super(label)

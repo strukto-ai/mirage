@@ -22,17 +22,6 @@ class QueueOverflowError(Exception):
     """
 
 
-class IncompleteWalkError(Exception):
-    """Raised when a delta walk could not see the whole watch root.
-
-    A snapshot diff reads every path the walk did not report as a
-    DELETE, so a partial listing does not degrade into fewer events, it
-    invents wrong ones. A hook that knows its listing was truncated
-    raises this instead, leaving the caller's checkpoint untouched so
-    the next pull can still succeed.
-    """
-
-
 class QueueClosed(Exception):
     """Terminal signal from ``WatchQueue.pop`` after ``close``.
 

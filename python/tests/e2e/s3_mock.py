@@ -24,13 +24,11 @@ from unittest.mock import patch
 LAST_MODIFIED = datetime(2026, 3, 31, tzinfo=timezone.utc)
 
 # Every kit-derived op reaches the store through the driver's single
-# connect seam; read, stream, and watch keep a native session of their
-# own.
+# connect seam; read and stream keep a native session of their own.
 _CORE_MODULES = [
     "mirage.core.s3.driver",
     "mirage.core.s3.read",
     "mirage.core.s3.stream",
-    "mirage.core.s3.watch",
 ]
 
 
@@ -75,8 +73,8 @@ MUTATIONS = ("put_object", "copy_object", "delete_object", "delete_objects")
 def _content_entry(key: str, data: bytes) -> dict[str, object]:
     """One Contents row, shaped like the real list_objects_v2.
 
-    Real S3 carries an ETag on every listed object, which is what the
-    watch walk fingerprints on, so the mock has to carry one too.
+    Real S3 carries an ETag on every listed object, so the mock has to
+    carry one too.
 
     Args:
         key (str): Object key.

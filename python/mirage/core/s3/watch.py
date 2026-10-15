@@ -12,99 +12,87 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import Sequence
+from urllib.parse import unquote_plus
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.core.s3.client import (
-    _client_kwargs,
-    _key,
-    _strip_key_prefix,
-    async_session,
-)
-from mirage.types import PathSpec, WalkEntry
-from mirage.utils.dates import to_iso_z
-from mirage.utils.key_prefix import mount_prefix_of
-from mirage.watch.base import DeltaHook
-from mirage.watch.delta import ListingDeltaHook
-from mirage.watch.fingerprint import stat_fingerprint
-from mirage.watch.walk import synth_dirs
+from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
+from mirage.utils import key_prefix as kp
+from mirage.watch.events import event_at, field, text_field
+
+# The eventName families a record carries: a write (Put, Post, Copy,
+# CompleteMultipartUpload) or a removal (Delete, DeleteMarkerCreated,
+# lifecycle expiry).
+_WRITTEN = "ObjectCreated:"
+_REMOVED = ("ObjectRemoved:", "LifecycleExpiration:")
 
 
-class S3Walk:
-    """Recursive ``list_objects_v2`` feeding the generic listing differ.
+class S3EventHook:
+    """Map one S3 event notification record onto mount paths.
 
-    One paginated LIST with no Delimiter covers the whole subtree, so a
-    pull costs one request per 1000 keys rather than one per directory.
-    Reads the bucket directly, never through mirage's caches, as the
-    DeltaHook contract requires.
+    The consumer owns the transport (S3 Event Notifications delivered to
+    an SQS queue, an SNS topic or EventBridge) and passes each record of
+    a notification's ``Records`` with its ``eventName``. Nothing here
+    runs a loop. A record names the bucket and the object key,
+    URL-encoded with ``+`` for a space, and says whether the object was
+    written or removed.
 
-    Fingerprints on the object's ETag, which for a single-part upload is
-    the MD5 of the content, so an overwrite with identical bytes is
-    correctly reported as no change. Multipart ETags are a digest of the
-    part digests, which still changes with the content.
+    S3 does not say whether a write made the object or replaced it, so
+    a key the hook has mapped before is an UPDATE and any other is a
+    CREATE, as the Box hook splits an upload. A key ending in ``/`` is a
+    directory marker: writing one makes the directory, and removing one
+    leaves whatever is below it, so that directory is UNKNOWN. A record
+    for another bucket, or for a key outside the mount's ``key_prefix``,
+    maps to nothing.
     """
 
     def __init__(self, accessor: S3Accessor) -> None:
         """Args:
-        accessor (S3Accessor): Backend handle.
+        accessor (S3Accessor): Backend handle, read for its bucket and
+            key prefix.
         """
         self._accessor = accessor
+        self._seen: set[str] = set()
 
-    async def __call__(self, root: PathSpec) -> AsyncIterator[WalkEntry]:
-        """Yield every entry under ``root``.
+    async def to_events(
+        self, root: PathSpec, event_name: str, payload: JsonValue
+    ) -> Sequence[FileEvent]:
+        """Map one notification record to the change it implies.
 
         Args:
-            root (PathSpec): Watch root (mount-virtual path).
+            root (PathSpec): Any path on this mount, read for its prefix.
+            event_name (str): The record's ``eventName``.
+            payload (JsonValue): One record from ``Records``.
         """
         config = self._accessor.config
-        prefix = mount_prefix_of(root.virtual, root.vfs_path)
-        stem = _key(root.mount_path, config).rstrip("/")
-        base = (stem + "/") if stem else ""
-        files: list[str] = []
-        markers: list[str] = []
-        client = await self._accessor.cached_client(
-            lambda: async_session(config).client(**_client_kwargs(config))
+        s3 = field(payload, "s3")
+        key = text_field(field(s3, "object"), "key")
+        if text_field(field(s3, "bucket"), "name") != config.bucket or not key:
+            return ()
+        key = unquote_plus(key)
+        prefix = kp.normalize(config.key_prefix)
+        if prefix and not key.startswith(prefix):
+            return ()
+        relative = key[len(prefix) :]
+        if relative.endswith("/"):
+            place = relative.rstrip("/")
+            if not place:
+                return ()
+            kind = (
+                FileChangeKind.CREATE
+                if event_name.startswith(_WRITTEN)
+                else FileChangeKind.UNKNOWN
+            )
+            return (event_at(root, place, kind),)
+        if event_name.startswith(_REMOVED):
+            self._seen.discard(relative)
+            return (event_at(root, relative, FileChangeKind.DELETE),)
+        if not event_name.startswith(_WRITTEN):
+            return ()
+        kind = (
+            FileChangeKind.UPDATE
+            if relative in self._seen
+            else FileChangeKind.CREATE
         )
-        paginator = client.get_paginator("list_objects_v2")
-        async for page in paginator.paginate(
-            Bucket=config.bucket, Prefix=stem
-        ):
-            for obj in page.get("Contents") or []:
-                okey = obj["Key"]
-                if not (okey == stem or okey.startswith(base)):
-                    continue
-                relative = _strip_key_prefix(okey, config)
-                virtual = (
-                    prefix.rstrip("/") + "/" + relative.lstrip("/")
-                    if prefix
-                    else "/" + relative.lstrip("/")
-                )
-                if okey.endswith("/"):
-                    # A directory marker: mirage's own mkdir writes
-                    # one. It carries an ETag and a size, but it is
-                    # not a file, so synth_dirs reports it instead.
-                    markers.append(virtual.rstrip("/"))
-                    continue
-                files.append(virtual)
-                last_mod = obj.get("LastModified")
-                modified = to_iso_z(last_mod) if last_mod else None
-                size = obj.get("Size")
-                etag = (obj.get("ETag") or "").strip('"') or None
-                yield WalkEntry(
-                    virtual=virtual,
-                    is_dir=False,
-                    fingerprint=stat_fingerprint(etag, modified, size),
-                    size=size,
-                    modified=modified,
-                )
-        for entry in synth_dirs(root.virtual, files, markers):
-            yield entry
-
-
-def build_delta_hook(accessor: S3Accessor) -> DeltaHook:
-    """Build the delta hook shared by S3 and every S3-compatible alias.
-
-    Args:
-        accessor (S3Accessor): Backend handle.
-    """
-    return ListingDeltaHook(S3Walk(accessor))
+        self._seen.add(relative)
+        return (event_at(root, relative, kind),)

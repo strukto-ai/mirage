@@ -14,20 +14,24 @@
 
 import { describe, expect, it } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { FileChangeKind, PathSpec } from '../../types.ts'
+import { FileChangeKind, type JsonValue, PathSpec } from '../../types.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { stubMongoDriver } from './_test_util.ts'
-import type { MongoDriver } from './_driver.ts'
-import { CHANGE_STREAM_UNSUPPORTED, HISTORY_LOST } from './types.ts'
-import { buildDeltaHook } from './watch.ts'
+import { MongoDBEventHook } from './watch.ts'
 
 const ROOT = PathSpec.fromStrPath('/m', '')
-const TOKEN = { _data: '8201' }
-const NEXT = { _data: '8202' }
+const U = FileChangeKind.UPDATE
+const C = FileChangeKind.CREATE
+const D = FileChangeKind.DELETE
 
-function hook(overrides: Partial<MongoDriver>, databases?: string[]) {
-  const driver = stubMongoDriver(overrides)
-  return buildDeltaHook(
+function hook(listed: string[][], databases?: string[]): MongoDBEventHook {
+  const driver = stubMongoDriver({
+    listCollections: () => {
+      listed.push([])
+      return Promise.resolve(['recent'])
+    },
+  })
+  return new MongoDBEventHook(
     new MongoDBAccessor(
       driver,
       resolveMongoDBConfig({
@@ -38,105 +42,79 @@ function hook(overrides: Partial<MongoDriver>, databases?: string[]) {
   )
 }
 
-function event(kind: string, coll = 'books', db = 'lib', extra: Record<string, unknown> = {}) {
+function event(kind: string, coll = 'books', db = 'lib', extra: Record<string, JsonValue> = {}) {
   return { operationType: kind, ns: { db, coll }, ...extra }
 }
 
-function failure(code: number): Error {
-  return Object.assign(new Error('failed'), { code })
+async function pairs(
+  target: MongoDBEventHook,
+  kind: string,
+  body: JsonValue,
+): Promise<[string, string][]> {
+  return (await target.toEvents(ROOT, kind, body)).map((e) => [e.kind, e.path.virtual])
 }
 
-describe('MongoDBDeltaHook', () => {
-  // Twin of test_a_baseline_marks_the_stream_and_reports_nothing.
-  it('marks the stream on a baseline and reports nothing', async () => {
-    const calls: unknown[][] = []
-    const delta = await hook({
-      drainChanges: (...args) => {
-        calls.push(args)
-        return Promise.resolve([[], TOKEN])
-      },
-    }).pull(ROOT, null)
-    expect(delta.changes).toEqual([])
-    expect(JSON.parse(delta.checkpoint ?? '')).toEqual({ mongodb: TOKEN })
-    expect(calls[0]?.slice(0, 2)).toEqual([null, null])
-  })
-
-  // Twin of test_events_name_the_files_they_change.
-  it('names the files events change', async () => {
-    const events = [
-      event('create', 'books'),
+describe('MongoDBEventHook', () => {
+  // Twin of test_events_name_the_files_they_change: a write rewrites the
+  // documents and the schema sampled from them, and both files of each view;
+  // a collection created, renamed or dropped is its directory and its
+  // database's database.json. The views are listed once, and again after an
+  // event that changes them.
+  it('names the files each event changes', async () => {
+    const listed: string[][] = []
+    const target = hook(listed, ['lib'])
+    const steps = [
       event('insert', 'books'),
       event('update', 'books'),
       event('create', 'recent', 'lib', { operationDescription: { viewOn: 'books' } }),
-      event('createIndexes', 'books'),
       event('modify', 'recent', 'lib', { operationDescription: { viewOn: 'books', pipeline: [] } }),
-      event('insert', 'old'),
+      event('createIndexes', 'books'),
       event('rename', 'old', 'lib', { to: { db: 'lib', coll: 'new' } }),
+      event('delete', 'books'),
       event('insert', 'hidden', 'admin'),
       event('insert', 'logs', 'other'),
     ]
-    const delta = await hook(
-      {
-        drainChanges: () => Promise.resolve([events, NEXT]),
-        listCollections: () => Promise.resolve(['recent']),
-      },
-      ['lib'],
-    ).pull(ROOT, JSON.stringify({ mongodb: TOKEN }))
-    // A write also rewrites the schema.json sampled from the documents, and a
-    // collection created, dropped or renamed the database.json listing it.
-    expect(delta.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
-      [FileChangeKind.CREATE, '/m/lib/collections/books'],
-      [FileChangeKind.UPDATE, '/m/lib/database.json'],
-      [FileChangeKind.UPDATE, '/m/lib/collections/books/documents.jsonl'],
-      [FileChangeKind.UPDATE, '/m/lib/collections/books/schema.json'],
-      [FileChangeKind.CREATE, '/m/lib/views/recent'],
-      [FileChangeKind.UPDATE, '/m/lib/views/recent/schema.json'],
-      [FileChangeKind.UPDATE, '/m/lib/views/recent/documents.jsonl'],
-      [FileChangeKind.DELETE, '/m/lib/collections/old'],
-      [FileChangeKind.CREATE, '/m/lib/collections/new'],
+    const got: [string, string][][] = []
+    for (const step of steps) got.push(await pairs(target, step.operationType, step))
+    const written = [
+      [U, '/m/lib/collections/books/documents.jsonl'],
+      [U, '/m/lib/collections/books/schema.json'],
+      [U, '/m/lib/views/recent/documents.jsonl'],
+      [U, '/m/lib/views/recent/schema.json'],
+    ]
+    expect(got).toEqual([
+      written,
+      written,
+      [
+        [C, '/m/lib/views/recent'],
+        [U, '/m/lib/database.json'],
+      ],
+      [
+        [U, '/m/lib/views/recent/schema.json'],
+        [U, '/m/lib/views/recent/documents.jsonl'],
+      ],
+      [[U, '/m/lib/collections/books/schema.json']],
+      [
+        [D, '/m/lib/collections/old'],
+        [U, '/m/lib/database.json'],
+        [C, '/m/lib/collections/new'],
+      ],
+      written,
+      [],
+      [],
     ])
-    expect(JSON.parse(delta.checkpoint ?? '')).toEqual({ mongodb: NEXT })
+    expect(listed).toHaveLength(2)
   })
 
-  // Twin of test_a_watch_below_a_dropped_collection_sees_its_root_go.
-  it('tells a watch below a dropped collection its root went', async () => {
-    const root = PathSpec.fromStrPath(
-      '/m/lib/collections/books/documents.jsonl',
-      'lib/collections/books/documents.jsonl',
-    )
-    const delta = await hook({
-      drainChanges: () => Promise.resolve([[event('drop', 'books')], NEXT]),
-    }).pull(root, JSON.stringify({ mongodb: TOKEN }))
-    expect(delta.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
-      [FileChangeKind.DELETE, '/m/lib/collections/books/documents.jsonl'],
-    ])
-  })
-
-  // Twin of test_a_lost_position_reinventories_the_root.
-  it('reinventories the root when its position is lost', async () => {
-    let first = true
-    const delta = await hook({
-      drainChanges: () => {
-        if (first) {
-          first = false
-          return Promise.reject(failure(HISTORY_LOST))
-        }
-        return Promise.resolve([[], NEXT])
-      },
-    }).pull(ROOT, JSON.stringify({ mongodb: TOKEN }))
-    expect(delta.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+  // Twin of test_a_dropped_database_leaves_and_an_invalidated_stream_is_unknown.
+  it('drops a database and calls an invalidated stream unknown', async () => {
+    const target = hook([])
+    expect([
+      ...(await pairs(target, 'dropDatabase', { ns: { db: 'lib' } })),
+      ...(await pairs(target, 'invalidate', {})),
+    ]).toEqual([
+      [D, '/m/lib'],
       [FileChangeKind.UNKNOWN, '/m'],
     ])
-    expect(JSON.parse(delta.checkpoint ?? '')).toEqual({ mongodb: NEXT })
-  })
-
-  // Twin of test_a_server_outside_a_replica_set_refuses_the_watch.
-  it('refuses the watch on a server outside a replica set', async () => {
-    await expect(
-      hook({ drainChanges: () => Promise.reject(failure(CHANGE_STREAM_UNSUPPORTED)) }).pull(
-        ROOT,
-        null,
-      ),
-    ).rejects.toMatchObject({ code: 'ENOTSUP' })
   })
 })

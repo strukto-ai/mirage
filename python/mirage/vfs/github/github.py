@@ -27,12 +27,10 @@ from mirage.core.github.search import files_containing as _files_containing
 from mirage.core.github.stat import stat as _stat
 from mirage.core.github.stat import tree as _tree
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.core.github.watch import build_delta_hook
 from mirage.types import FileStat, ListingVersion, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.github.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 def _pin_of(ref: str | None) -> str | None:
@@ -201,9 +199,6 @@ class GitHubVFS(BaseVFS):
         index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         await _before_full_scan(self.accessor, index, path, files)
-
-    def delta_hook(self) -> DeltaHook:
-        return build_delta_hook(self.accessor)
 
     @property
     def is_default_branch(self) -> bool | None:

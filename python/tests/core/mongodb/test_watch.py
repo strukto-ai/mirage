@@ -12,123 +12,93 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pymongo.errors import OperationFailure
 
-from mirage.core.mongodb.types import CHANGE_STREAM_UNSUPPORTED, HISTORY_LOST
-from mirage.core.mongodb.watch import build_delta_hook
-from mirage.errors.types import OperationNotSupportedError
-from mirage.types import FileChangeKind, PathSpec
+from mirage.core.mongodb.watch import MongoDBEventHook
+from mirage.types import FileChangeKind, JsonValue, PathSpec
 
 ROOT = PathSpec.from_str_path("/m", vfs_path="")
-TOKEN = {"_data": "8201"}
-NEXT = {"_data": "8202"}
+U, C, D = FileChangeKind.UPDATE, FileChangeKind.CREATE, FileChangeKind.DELETE
 
 
-def _hook(databases=None):
+def _hook(databases: list[str] | None = None) -> MongoDBEventHook:
     accessor = MagicMock()
     accessor.config.databases = databases
-    return build_delta_hook(accessor)
+    return MongoDBEventHook(accessor)
 
 
-def _event(kind: str, coll: str = "books", db: str = "lib", **extra):
+def _event(
+    kind: str, coll: str = "books", db: str = "lib", **extra: JsonValue
+) -> dict[str, JsonValue]:
     return {"operationType": kind, "ns": {"db": db, "coll": coll}, **extra}
 
 
 @pytest.mark.asyncio
-async def test_a_baseline_marks_the_stream_and_reports_nothing():
-    drain = AsyncMock(return_value=([], TOKEN))
-    with patch("mirage.core.mongodb.watch.drain_changes", drain):
-        delta = await _hook().pull(ROOT, None)
-    assert delta.changes == ()
-    assert json.loads(delta.checkpoint) == {"mongodb": TOKEN}
-    assert drain.await_args.args[1:] == (None, None)
-
-
-@pytest.mark.asyncio
 async def test_events_name_the_files_they_change():
-    events = [
-        _event("create", "books"),
+    # A write rewrites the documents and the schema sampled from them,
+    # and both files of each view; a collection created, renamed or
+    # dropped is its directory and its database's database.json. The
+    # views are listed once, and again after an event that changes them.
+    views = AsyncMock(return_value=["recent"])
+    hook = _hook(["lib"])
+    steps = [
         _event("insert", "books"),
         _event("update", "books"),
         _event("create", "recent", operationDescription={"viewOn": "books"}),
-        _event("createIndexes", "books"),
         _event(
             "modify",
             "recent",
             operationDescription={"viewOn": "books", "pipeline": []},
         ),
-        _event("insert", "old"),
+        _event("createIndexes", "books"),
         _event("rename", "old", to={"db": "lib", "coll": "new"}),
+        _event("delete", "books"),
         _event("insert", "hidden", db="admin"),
         _event("insert", "logs", db="other"),
     ]
-    with (
-        patch(
-            "mirage.core.mongodb.watch.drain_changes",
-            AsyncMock(return_value=(events, NEXT)),
-        ),
-        patch(
-            "mirage.core.mongodb.watch.list_collections",
-            AsyncMock(return_value=["recent"]),
-        ),
-    ):
-        delta = await _hook(databases=["lib"]).pull(
-            ROOT, json.dumps({"mongodb": TOKEN})
-        )
-    # A write also rewrites the schema.json sampled from the documents, and
-    # a collection created, dropped or renamed the database.json listing it.
-    assert [(c.kind, c.path.virtual) for c in delta.changes] == [
-        (FileChangeKind.CREATE, "/m/lib/collections/books"),
-        (FileChangeKind.UPDATE, "/m/lib/database.json"),
-        (FileChangeKind.UPDATE, "/m/lib/collections/books/documents.jsonl"),
-        (FileChangeKind.UPDATE, "/m/lib/collections/books/schema.json"),
-        (FileChangeKind.CREATE, "/m/lib/views/recent"),
-        (FileChangeKind.UPDATE, "/m/lib/views/recent/schema.json"),
-        (FileChangeKind.UPDATE, "/m/lib/views/recent/documents.jsonl"),
-        (FileChangeKind.DELETE, "/m/lib/collections/old"),
-        (FileChangeKind.CREATE, "/m/lib/collections/new"),
+    with patch("mirage.core.mongodb.watch.list_collections", views):
+        got = [
+            [
+                (e.kind, e.path.virtual)
+                for e in await hook.to_events(ROOT, str(s["operationType"]), s)
+            ]
+            for s in steps
+        ]
+    written = [
+        (U, "/m/lib/collections/books/documents.jsonl"),
+        (U, "/m/lib/collections/books/schema.json"),
+        (U, "/m/lib/views/recent/documents.jsonl"),
+        (U, "/m/lib/views/recent/schema.json"),
     ]
-    assert json.loads(delta.checkpoint) == {"mongodb": NEXT}
-
-
-@pytest.mark.asyncio
-async def test_a_lost_position_reinventories_the_root():
-    drain = AsyncMock(
-        side_effect=[OperationFailure("lost", code=HISTORY_LOST), ([], NEXT)]
-    )
-    with patch("mirage.core.mongodb.watch.drain_changes", drain):
-        delta = await _hook().pull(ROOT, json.dumps({"mongodb": TOKEN}))
-    assert [(c.kind, c.path.virtual) for c in delta.changes] == [
-        (FileChangeKind.UNKNOWN, "/m")
+    assert got == [
+        written,
+        written,
+        [(C, "/m/lib/views/recent"), (U, "/m/lib/database.json")],
+        [
+            (U, "/m/lib/views/recent/schema.json"),
+            (U, "/m/lib/views/recent/documents.jsonl"),
+        ],
+        [(U, "/m/lib/collections/books/schema.json")],
+        [
+            (D, "/m/lib/collections/old"),
+            (U, "/m/lib/database.json"),
+            (C, "/m/lib/collections/new"),
+        ],
+        written,
+        [],
+        [],
     ]
-    assert json.loads(delta.checkpoint) == {"mongodb": NEXT}
+    assert views.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_a_server_outside_a_replica_set_refuses_the_watch():
-    drain = AsyncMock(
-        side_effect=OperationFailure("no", code=CHANGE_STREAM_UNSUPPORTED)
-    )
-    with patch("mirage.core.mongodb.watch.drain_changes", drain):
-        with pytest.raises(OperationNotSupportedError):
-            await _hook().pull(ROOT, None)
-
-
-@pytest.mark.asyncio
-async def test_a_watch_below_a_dropped_collection_sees_its_root_go():
-    root = PathSpec.from_str_path(
-        "/m/lib/collections/books/documents.jsonl",
-        vfs_path="lib/collections/books/documents.jsonl",
-    )
-    with patch(
-        "mirage.core.mongodb.watch.drain_changes",
-        AsyncMock(return_value=([_event("drop", "books")], NEXT)),
-    ):
-        delta = await _hook().pull(root, json.dumps({"mongodb": TOKEN}))
-    assert [(c.kind, c.path.virtual) for c in delta.changes] == [
-        (FileChangeKind.DELETE, "/m/lib/collections/books/documents.jsonl")
+async def test_a_dropped_database_leaves_and_an_invalidated_stream_is_unknown():
+    hook = _hook()
+    dropped = await hook.to_events(ROOT, "dropDatabase", {"ns": {"db": "lib"}})
+    invalid = await hook.to_events(ROOT, "invalidate", {})
+    assert [(e.kind, e.path.virtual) for e in [*dropped, *invalid]] == [
+        (D, "/m/lib"),
+        (FileChangeKind.UNKNOWN, "/m"),
     ]

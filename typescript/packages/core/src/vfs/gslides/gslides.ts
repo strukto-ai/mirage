@@ -31,6 +31,7 @@ import { readdir as gslidesReaddir } from '../../core/gslides/readdir.ts'
 import { read as gslidesRead } from '../../core/gslides/read.ts'
 import { stat as gslidesStat } from '../../core/gslides/stat.ts'
 import { appDeltaHook } from '../../core/google/watch.ts'
+import { makeFilename } from './slide_entry.ts'
 import type { DeltaHook } from '../../watch/base.ts'
 import { unlink as gslidesUnlink } from '../../core/gslides/unlink.ts'
 import { rename as gslidesRename } from '../../core/gslides/rename.ts'
@@ -106,7 +107,7 @@ export class GSlidesVFS extends BaseVFS {
   }
 
   override deltaHook(): DeltaHook {
-    return appDeltaHook(this.accessor, gslidesReaddir, gslidesStat)
+    return appDeltaHook(this.accessor, MIME, makeFilename)
   }
 
   override getState(): Promise<GSlidesVFSState> {

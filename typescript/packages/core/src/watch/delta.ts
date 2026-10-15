@@ -12,19 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  Delta,
-  FileChangeKind,
-  FileEvent,
-  FileMetadata,
-  PathSpec,
-  type WalkEntry,
-  type WalkFn,
-} from '../types.ts'
+import { FileChangeKind, FileEvent, PathSpec } from '../types.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
-import type { DeltaHook } from './base.ts'
-import { DIR_FINGERPRINT } from './constants.ts'
-import { compareCodePoints } from '../utils/sort.ts'
 
 export function specFor(root: PathSpec, virtual: string): PathSpec {
   const cut = rstripSlash(root.virtual).length - root.vfsPath.length
@@ -32,101 +21,151 @@ export function specFor(root: PathSpec, virtual: string): PathSpec {
 }
 
 /**
- * The changes a watch on `root` reports: each at or below it as itself, and
- * each at a directory above it as the root's own, since that directory removed
- * removes the root, and any other change to it may have moved the root
- * (UNKNOWN). Mirrors Python `changes_under`.
+ * The changes a watch on `root` reports (`eventsUnder`), from each change and
+ * the virtual path it is at. Mirrors Python `changes_under`.
  */
 export function changesUnder(
   root: PathSpec,
   changes: Iterable<readonly [FileChangeKind, string]>,
   observed: Date,
 ): FileEvent[] {
-  const top = rstripSlash(root.virtual)
   const events: FileEvent[] = []
   for (const [kind, virtual] of changes) {
-    if (virtual === top || virtual.startsWith(`${top}/`)) {
-      events.push(new FileEvent({ kind, path: specFor(root, virtual), timestamp: observed }))
-    } else if (top.startsWith(`${rstripSlash(virtual)}/`)) {
-      const gone = kind === FileChangeKind.DELETE
-      events.push(
+    events.push(new FileEvent({ kind, path: specFor(root, virtual), timestamp: observed }))
+  }
+  return eventsUnder(root, events)
+}
+
+/**
+ * The events a watch on `root` reports: each at or below it as itself, and
+ * each at a directory above it as the root's own, since that directory removed
+ * removes the root, and any other change to it may have moved the root
+ * (UNKNOWN). A move out of the root is a delete where it was. Mirrors Python
+ * `events_under`.
+ */
+export function eventsUnder(root: PathSpec, events: Iterable<FileEvent>): FileEvent[] {
+  const top = rstripSlash(root.virtual)
+  const inside = (virtual: string): boolean => virtual === top || virtual.startsWith(`${top}/`)
+  const kept: FileEvent[] = []
+  for (const event of events) {
+    const virtual = event.path.virtual
+    const previous = event.previousPath
+    if (inside(virtual)) {
+      kept.push(event)
+    } else if (previous !== null && inside(previous.virtual)) {
+      kept.push(
         new FileEvent({
-          kind: gone ? kind : FileChangeKind.UNKNOWN,
+          kind: FileChangeKind.DELETE,
+          path: previous,
+          timestamp: event.timestamp,
+        }),
+      )
+    } else if (top.startsWith(`${rstripSlash(virtual)}/`)) {
+      const gone = event.kind === FileChangeKind.DELETE
+      kept.push(
+        new FileEvent({
+          kind: gone ? event.kind : FileChangeKind.UNKNOWN,
           path: root,
-          timestamp: observed,
+          timestamp: event.timestamp,
         }),
       )
     }
   }
-  return events
+  return kept
 }
 
 /**
- * Classify two `{virtual: fingerprint}` snapshots as changes.
+ * Record how one item of a feed that names items by id moved from where the
+ * last read placed it to `now`, and return where it was.
  *
- * A key only in `current` is a CREATE, one only in `previous` a DELETE, and a
- * changed fingerprint an UPDATE. A file change that is not a DELETE carries
- * the metadata of its row in `entries`, when there is one.
- *
- * Mirrors Python `diff_snapshots` (`watch/delta.py`).
+ * An item seen before leaves its old path when it moved and is updated in
+ * place otherwise; one not seen before is created when it is as the service
+ * made it and updated otherwise, since where it was is not known.
+ * Mirrors Python `settle`.
  */
-export function diffSnapshots(
-  root: PathSpec,
-  previous: Record<string, string>,
-  current: Record<string, string>,
-  entries: ReadonlyMap<string, WalkEntry>,
-  observed: Date,
-): FileEvent[] {
-  const keys = [...new Set([...Object.keys(current), ...Object.keys(previous)])].sort(
-    compareCodePoints,
-  )
-  const changes: FileEvent[] = []
-  for (const virtual of keys) {
-    const old = previous[virtual]
-    const next = current[virtual]
-    if (old === next) continue
-    const kind =
-      old === undefined
-        ? FileChangeKind.CREATE
-        : next === undefined
-          ? FileChangeKind.DELETE
-          : FileChangeKind.UPDATE
-    const entry = entries.get(virtual)
-    const metadata =
-      entry !== undefined && !entry.isDir && kind !== FileChangeKind.DELETE
-        ? new FileMetadata({
-            fingerprint: entry.fingerprint,
-            size: entry.size ?? null,
-            modified: entry.modified ?? null,
-          })
-        : null
-    changes.push(
-      new FileEvent({ kind, path: specFor(root, virtual), timestamp: observed, metadata }),
-    )
+export function settle(
+  changes: [FileChangeKind, string][],
+  seen: Record<string, string>,
+  itemId: string,
+  now: string | null,
+  made: boolean,
+): string | null {
+  const was = Object.hasOwn(seen, itemId) ? (seen[itemId] ?? null) : null
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete seen[itemId]
+  if (now === null) {
+    if (was !== null) changes.push([FileChangeKind.DELETE, was])
+    return was
   }
-  return changes
+  seen[itemId] = now
+  if (was === null) {
+    changes.push([made ? FileChangeKind.CREATE : FileChangeKind.UPDATE, now])
+  } else if (was !== now) {
+    changes.push([FileChangeKind.DELETE, was])
+    changes.push([FileChangeKind.CREATE, now])
+  } else {
+    changes.push([FileChangeKind.UPDATE, now])
+  }
+  return was
 }
 
-export class ListingDeltaHook implements DeltaHook {
-  private readonly walk: WalkFn
-
-  constructor(walk: WalkFn) {
-    this.walk = walk
-  }
-
-  async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
-    const snapshot: Record<string, string> = {}
-    const entries = new Map<string, WalkEntry>()
-    for await (const entry of this.walk(root)) {
-      entries.set(entry.virtual, entry)
-      snapshot[entry.virtual] = entry.isDir ? DIR_FINGERPRINT : (entry.fingerprint ?? '')
+/**
+ * Move each placed path below the folder `was` under `now`, or forget it when
+ * `now` is null. Mirrors Python `moved_below`.
+ */
+export function movedBelow(seen: Record<string, string>, was: string, now: string | null): void {
+  for (const [itemId, path] of Object.entries(seen)) {
+    if (!path.startsWith(`${was}/`)) continue
+    if (now === null) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete seen[itemId]
+    } else {
+      seen[itemId] = now + path.slice(was.length)
     }
-    const serialized = JSON.stringify(snapshot, Object.keys(snapshot).sort(compareCodePoints))
-    if (checkpoint === null) return new Delta({ changes: [], checkpoint: serialized })
-    const previous = JSON.parse(checkpoint) as Record<string, string>
-    return new Delta({
-      changes: diffSnapshots(root, previous, snapshot, entries, new Date()),
-      checkpoint: serialized,
-    })
   }
+}
+
+/**
+ * Whether an item is as it was made: its creation and last modification
+ * times, both the service's own clock, agree. Mirrors Python `just_made`.
+ */
+export function justMade(
+  created: string | null | undefined,
+  modified: string | null | undefined,
+): boolean {
+  if (created === null || created === undefined || created === '') return false
+  if (modified === null || modified === undefined || modified === '') return false
+  return Date.parse(created) === Date.parse(modified)
+}
+
+/**
+ * The path of a folder below the folder `top` by each folder's name and
+ * parent, '' for `top` itself, null when its parents never reach `top`. Each
+ * folder looked up is added to `folders`; a parent of '' is outside. Mirrors
+ * Python `folder_path`.
+ */
+export async function folderPath(
+  folderId: string,
+  top: string,
+  folders: Record<string, [string, string]>,
+  lookUp: (folderId: string) => Promise<[string, string] | null>,
+): Promise<string | null> {
+  const names: string[] = []
+  const visited = new Set<string>()
+  let current = folderId
+  while (current !== top) {
+    if (visited.has(current)) return null
+    visited.add(current)
+    let entry = Object.hasOwn(folders, current) ? folders[current] : undefined
+    if (entry === undefined) {
+      const found = await lookUp(current)
+      if (found === null) return null
+      folders[current] = found
+      entry = found
+    }
+    if (entry[1] === '') return null
+    names.push(entry[0])
+    current = entry[1]
+  }
+  return names.reverse().join('/')
 }

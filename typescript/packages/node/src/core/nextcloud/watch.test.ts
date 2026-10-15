@@ -1,24 +1,67 @@
-import { FileChangeKind, PathSpec } from '@struktoai/mirage-core/types'
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { FileChangeKind, type JsonValue, PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-import { FakeNextcloudOperator, installFakeOperator } from './mock.ts'
-import { buildDeltaHook } from './watch.ts'
+import type { NextcloudConfig } from '../../vfs/nextcloud/config.ts'
+import { NextcloudEventHook } from './watch.ts'
 
-describe('Nextcloud delta hook', () => {
-  it('detects changes from a recursive WebDAV listing', async () => {
-    const accessor = new NextcloudAccessor({ url: 'https://cloud.example.test' })
-    const operator = new FakeNextcloudOperator({ 'Documents/a.txt': 'a' })
-    installFakeOperator(accessor, operator)
-    const hook = buildDeltaHook(accessor)
-    const root = PathSpec.fromStrPath('/nc/Documents', 'Documents')
-    const baseline = await hook.pull(root, null)
-    operator.files.set('Documents/a.txt', Buffer.from('updated'))
-    operator.files.set('Documents/b.txt', Buffer.from('b'))
-    const delta = await hook.pull(root, baseline.checkpoint)
-    expect(delta.changes.map((event) => [event.path.virtual, event.kind])).toEqual([
-      ['/nc/Documents/a.txt', FileChangeKind.UPDATE],
-      ['/nc/Documents/b.txt', FileChangeKind.CREATE],
+const ROOT = PathSpec.fromStrPath('/nc', '')
+const NODE = 'OCP\\Files\\Events\\Node\\'
+
+function node(path: string): JsonValue {
+  return { event: { node: { path } } }
+}
+
+function renamed(source: string, target: string): JsonValue {
+  return { event: { source: { path: source }, target: { path: target } } }
+}
+
+// Twin of test_node_events_map_below_the_mounted_folder: the mount is rooted
+// at the folder its URL names; a node outside it maps nothing, and a rename
+// across its edge is a create or a delete.
+describe('NextcloudEventHook', () => {
+  it.each([
+    ['https://nc.test/remote.php/dav/files/ada/Work', undefined],
+    ['https://nc.test/remote.php/webdav/Work/', 'ada'],
+  ])('maps node events below the mounted folder of %s', async (url, username) => {
+    const hook = new NextcloudEventHook(new NextcloudAccessor({ url, username } as NextcloudConfig))
+    const deliveries: [string, JsonValue][] = [
+      ['NodeCreatedEvent', node('/ada/files/Work/a.txt')],
+      ['NodeWrittenEvent', node('/ada/files/Work/a.txt')],
+      ['NodeDeletedEvent', node('/ada/files/Work/sub')],
+      ['NodeCreatedEvent', node('/ada/files/Other/x.txt')],
+      ['NodeCreatedEvent', node('/bob/files/Work/x.txt')],
+      ['NodeRenamedEvent', renamed('/ada/files/Work/a.txt', '/ada/files/Work/b.txt')],
+      ['NodeRenamedEvent', renamed('/ada/files/Other/c.txt', '/ada/files/Work/c.txt')],
+      ['NodeRenamedEvent', renamed('/ada/files/Work/c.txt', '/ada/files/Other/c.txt')],
+      ['NodeShareEvent', node('/ada/files/Work/a.txt')],
+    ]
+    const changes: [string, string, string | null][] = []
+    for (const [name, payload] of deliveries) {
+      for (const event of await hook.toEvents(ROOT, NODE + name, payload)) {
+        changes.push([event.kind, event.path.virtual, event.previousPath?.virtual ?? null])
+      }
+    }
+    expect(changes).toEqual([
+      [FileChangeKind.CREATE, '/nc/a.txt', null],
+      [FileChangeKind.UPDATE, '/nc/a.txt', null],
+      [FileChangeKind.DELETE, '/nc/sub', null],
+      [FileChangeKind.MOVE, '/nc/b.txt', '/nc/a.txt'],
+      [FileChangeKind.CREATE, '/nc/c.txt', null],
+      [FileChangeKind.DELETE, '/nc/c.txt', null],
     ])
-    expect(delta.changes[0]?.metadata?.fingerprint).toBe('etag-7|7')
   })
 })

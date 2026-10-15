@@ -1,139 +1,58 @@
-import asyncio
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import pytest
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.core.s3.watch import S3Walk, build_delta_hook
+from mirage.core.s3.watch import S3EventHook
 from mirage.types import FileChangeKind, PathSpec
-from mirage.vfs.s3 import S3Config
-from tests.e2e.s3_mock import patch_s3_multi
+from mirage.vfs.s3.config import S3Config
 
-BUCKET = "watch-bucket"
-
-
-def _accessor(key_prefix: str | None = None) -> S3Accessor:
-    return S3Accessor(
-        S3Config(
-            bucket=BUCKET,
-            region="us-east-1",
-            aws_access_key_id="fake",
-            aws_secret_access_key="fake",
-            key_prefix=key_prefix,
-        )
-    )
+ROOT = PathSpec.from_str_path("/s3", vfs_path="")
 
 
-def _root(virtual: str, vfs_path: str) -> PathSpec:
-    return PathSpec(virtual=virtual, directory=virtual, vfs_path=vfs_path)
+def _record(bucket: str, key: str) -> dict[str, dict[str, dict[str, str]]]:
+    return {"s3": {"bucket": {"name": bucket}, "object": {"key": key}}}
 
 
-async def _collect(walk, root):
-    return [entry async for entry in walk(root)]
-
-
-def test_walk_yields_files_with_etag_fingerprints():
-    store = {BUCKET: {"data/a.txt": b"alpha", "data/b.txt": b"beta"}}
-    with patch_s3_multi(store):
-        entries = asyncio.run(
-            _collect(S3Walk(_accessor()), _root("/s3/data", "data"))
-        )
-    files = {e.virtual: e for e in entries if not e.is_dir}
-    assert set(files) == {"/s3/data/a.txt", "/s3/data/b.txt"}
-    assert files["/s3/data/a.txt"].size == 5
-    # The ETag leads the composite, which is what keeps two files of
-    # equal size apart: the mock's LastModified is a constant, so the
-    # size alone would collide across them. The mock's ETag is the
-    # content md5, so both values are deterministic.
-    assert (
-        files["/s3/data/a.txt"].fingerprint
-        == "2c1743a391305fbf367df8e4f069f9f9|5"
-    )
-    assert (
-        files["/s3/data/b.txt"].fingerprint
-        == "987bcab01b929eb2c07877b224215c92|4"
-    )
-    assert (
-        files["/s3/data/a.txt"].fingerprint
-        != files["/s3/data/b.txt"].fingerprint
-    )
-
-
-def test_walk_synthesizes_intermediate_directories():
-    store = {BUCKET: {"data/sub/deep/x.txt": b"x"}}
-    with patch_s3_multi(store):
-        entries = asyncio.run(
-            _collect(S3Walk(_accessor()), _root("/s3/data", "data"))
-        )
-    dirs = {e.virtual for e in entries if e.is_dir}
-    assert dirs == {"/s3/data/sub", "/s3/data/sub/deep"}
-
-
-def test_walk_reports_an_explicit_marker_as_its_own_directory():
-    store = {BUCKET: {"data/empty/": b""}}
-    with patch_s3_multi(store):
-        entries = asyncio.run(
-            _collect(S3Walk(_accessor()), _root("/s3/data", "data"))
-        )
-    assert [e.virtual for e in entries if e.is_dir] == ["/s3/data/empty"]
-    assert not [e for e in entries if not e.is_dir]
-
-
-def test_walk_strips_the_key_prefix():
-    store = {BUCKET: {"team/x/data/a.txt": b"alpha"}}
-    with patch_s3_multi(store):
-        entries = asyncio.run(
-            _collect(S3Walk(_accessor("team/x/")), _root("/s3/data", "data"))
-        )
-    assert [e.virtual for e in entries if not e.is_dir] == ["/s3/data/a.txt"]
-
-
-def test_baseline_pull_reports_nothing_then_detects_a_write():
-    store = {BUCKET: {"data/a.txt": b"alpha"}}
-    hook = build_delta_hook(_accessor())
-    root = _root("/s3/data", "data")
-    with patch_s3_multi(store):
-        first = asyncio.run(hook.pull(root, None))
-        assert first.changes == ()
-        store[BUCKET]["data/a.txt"] = b"gamma"
-        store[BUCKET]["data/new.txt"] = b"new"
-        second = asyncio.run(hook.pull(root, first.checkpoint))
-    by_path = {c.path.virtual: c.kind for c in second.changes}
-    assert by_path == {
-        "/s3/data/a.txt": FileChangeKind.UPDATE,
-        "/s3/data/new.txt": FileChangeKind.CREATE,
-    }
-
-
-def test_delete_is_detected():
-    store = {BUCKET: {"data/a.txt": b"alpha", "data/b.txt": b"beta"}}
-    hook = build_delta_hook(_accessor())
-    root = _root("/s3/data", "data")
-    with patch_s3_multi(store):
-        first = asyncio.run(hook.pull(root, None))
-        del store[BUCKET]["data/b.txt"]
-        second = asyncio.run(hook.pull(root, first.checkpoint))
-    assert [(c.kind, c.path.virtual) for c in second.changes] == [
-        (FileChangeKind.DELETE, "/s3/data/b.txt")
+@pytest.mark.asyncio
+async def test_records_map_onto_the_mount():
+    # A key is URL-encoded with + for a space; one the hook has mapped is
+    # an UPDATE, a marker removed leaves its directory UNKNOWN, and a
+    # record for another bucket or outside the key prefix maps nothing.
+    hook = S3EventHook(S3Accessor(S3Config(bucket="b", key_prefix="data/")))
+    records = [
+        ("ObjectCreated:Put", _record("b", "data/a+b%2B.txt")),
+        (
+            "ObjectCreated:CompleteMultipartUpload",
+            _record("b", "data/a+b%2B.txt"),
+        ),
+        ("ObjectRemoved:Delete", _record("b", "data/a+b%2B.txt")),
+        ("ObjectCreated:Put", _record("other", "data/x")),
+        ("ObjectCreated:Put", _record("b", "logs/x")),
+        ("ObjectCreated:Put", _record("b", "data/dir/")),
+        ("ObjectRemoved:DeleteMarkerCreated", _record("b", "data/dir/")),
     ]
-
-
-def test_same_bytes_rewritten_is_not_a_change():
-    store = {BUCKET: {"data/a.txt": b"alpha"}}
-    hook = build_delta_hook(_accessor())
-    root = _root("/s3/data", "data")
-    with patch_s3_multi(store):
-        first = asyncio.run(hook.pull(root, None))
-        store[BUCKET]["data/a.txt"] = b"alpha"
-        second = asyncio.run(hook.pull(root, first.checkpoint))
-    assert second.changes == ()
-
-
-def test_changed_path_carries_the_mount_framing():
-    store = {BUCKET: {"data/a.txt": b"alpha"}}
-    hook = build_delta_hook(_accessor())
-    root = _root("/s3/data", "data")
-    with patch_s3_multi(store):
-        first = asyncio.run(hook.pull(root, None))
-        store[BUCKET]["data/a.txt"] = b"gamma"
-        second = asyncio.run(hook.pull(root, first.checkpoint))
-    changed = second.changes[0].path
-    assert changed.virtual == "/s3/data/a.txt"
-    assert changed.vfs_path == "data/a.txt"
+    pairs = [
+        (event.kind, event.path.virtual)
+        for name, record in records
+        for event in await hook.to_events(ROOT, name, record)
+    ]
+    assert pairs == [
+        (FileChangeKind.CREATE, "/s3/a b+.txt"),
+        (FileChangeKind.UPDATE, "/s3/a b+.txt"),
+        (FileChangeKind.DELETE, "/s3/a b+.txt"),
+        (FileChangeKind.CREATE, "/s3/dir"),
+        (FileChangeKind.UNKNOWN, "/s3/dir"),
+    ]

@@ -17,10 +17,8 @@ import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 
 import type { VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 
-import type { DeltaHook } from '@struktoai/mirage-core/watch/index'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 
-import { buildDeltaHook } from '../../core/hf_hub/watch.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { readdir as hubReaddir } from '../../core/hf_hub/readdir.ts'
@@ -94,9 +92,5 @@ export abstract class HfHubVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return hubExists(this.accessor, path)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 }

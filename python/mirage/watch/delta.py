@@ -12,21 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-from collections.abc import Iterable
-from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable, Iterable
+from datetime import datetime
 
-from mirage.runtime.python.host.host_io import with_host_io
-from mirage.types import (
-    Delta,
-    FileChangeKind,
-    FileEvent,
-    FileMetadata,
-    PathSpec,
-    WalkEntry,
-    WalkFn,
-)
-from mirage.watch.constants import DIR_FINGERPRINT
+from mirage.types import FileChangeKind, FileEvent, PathSpec
 
 
 def spec_for(root: PathSpec, virtual: str) -> PathSpec:
@@ -49,10 +38,8 @@ def changes_under(
     changes: Iterable[tuple[FileChangeKind, str]],
     observed: datetime,
 ) -> list[FileEvent]:
-    """The changes a watch on ``root`` reports: each at or below it as
-    itself, and each at a directory above it as the root's own, since
-    that directory removed removes the root, and any other change to it
-    may have moved the root (UNKNOWN).
+    """The changes a watch on ``root`` reports (``events_under``), from
+    each change and the virtual path it is at.
 
     Args:
         root (PathSpec): Watch root.
@@ -60,127 +47,165 @@ def changes_under(
             the virtual path it is at.
         observed (datetime): Timestamp every event carries.
     """
+    return events_under(
+        root,
+        (
+            FileEvent(
+                kind=kind, path=spec_for(root, virtual), timestamp=observed
+            )
+            for kind, virtual in changes
+        ),
+    )
+
+
+def events_under(
+    root: PathSpec, events: Iterable[FileEvent]
+) -> list[FileEvent]:
+    """The events a watch on ``root`` reports: each at or below it as
+    itself, and each at a directory above it as the root's own, since
+    that directory removed removes the root, and any other change to it
+    may have moved the root (UNKNOWN). A move out of the root is a
+    delete where it was.
+
+    Args:
+        root (PathSpec): Watch root.
+        events (Iterable[FileEvent]): Events framed on the root's mount.
+    """
     top = root.virtual.rstrip("/")
-    events: list[FileEvent] = []
-    for kind, virtual in changes:
-        if virtual == top or virtual.startswith(top + "/"):
-            events.append(
+
+    def inside(virtual: str) -> bool:
+        return virtual == top or virtual.startswith(top + "/")
+
+    kept: list[FileEvent] = []
+    for event in events:
+        virtual = event.path.virtual
+        previous = event.previous_path
+        if inside(virtual):
+            kept.append(event)
+        elif previous is not None and inside(previous.virtual):
+            kept.append(
                 FileEvent(
-                    kind=kind, path=spec_for(root, virtual), timestamp=observed
+                    kind=FileChangeKind.DELETE,
+                    path=previous,
+                    timestamp=event.timestamp,
                 )
             )
         elif top.startswith(virtual.rstrip("/") + "/"):
-            gone = kind is FileChangeKind.DELETE
-            events.append(
+            gone = event.kind is FileChangeKind.DELETE
+            kept.append(
                 FileEvent(
-                    kind=kind if gone else FileChangeKind.UNKNOWN,
+                    kind=event.kind if gone else FileChangeKind.UNKNOWN,
                     path=root,
-                    timestamp=observed,
+                    timestamp=event.timestamp,
                 )
             )
-    return events
+    return kept
 
 
-def diff_snapshots(
-    root: PathSpec,
-    previous: dict[str, str],
-    current: dict[str, str],
-    entries: dict[str, WalkEntry],
-    observed: datetime,
-) -> tuple[FileEvent, ...]:
-    """Classify two ``{virtual: fingerprint}`` snapshots as changes.
+def settle(
+    changes: list[tuple[FileChangeKind, str]],
+    seen: dict[str, str],
+    item_id: str,
+    now: str | None,
+    made: bool,
+) -> str | None:
+    """Record how one item of a feed that names items by id moved from
+    where the last read placed it to ``now``, and return where it was.
 
-    A key only in ``current`` is a CREATE, one only in ``previous`` a
-    DELETE, and a changed fingerprint an UPDATE. A file change that is
-    not a DELETE carries the metadata of its row in ``entries``, when
-    there is one.
+    An item seen before leaves its old path when it moved and is updated
+    in place otherwise; one not seen before is created when it is as the
+    service made it and updated otherwise, since where it was is not
+    known.
 
     Args:
-        root (PathSpec): Watch root carrying the mount prefix.
-        previous (dict[str, str]): Snapshot the last pull handed out.
-        current (dict[str, str]): Snapshot as of this pull.
-        entries (dict[str, WalkEntry]): Rows read this pull, by path.
-        observed (datetime): Timestamp every change carries.
+        changes (list[tuple[FileChangeKind, str]]): The changes so far.
+        seen (dict[str, str]): Each placed item's virtual path, by id.
+        item_id (str): The item's id.
+        now (str | None): Its virtual path now, None when it left.
+        made (bool): Whether it is as the service made it.
     """
-    changes: list[FileEvent] = []
-    for virtual in sorted(current.keys() | previous.keys()):
-        old = previous.get(virtual)
-        new = current.get(virtual)
-        if old == new:
+    was = seen.pop(item_id, None)
+    if now is None:
+        if was is not None:
+            changes.append((FileChangeKind.DELETE, was))
+        return was
+    seen[item_id] = now
+    if was is None:
+        kind = FileChangeKind.CREATE if made else FileChangeKind.UPDATE
+        changes.append((kind, now))
+    elif was != now:
+        changes.append((FileChangeKind.DELETE, was))
+        changes.append((FileChangeKind.CREATE, now))
+    else:
+        changes.append((FileChangeKind.UPDATE, now))
+    return was
+
+
+def moved_below(seen: dict[str, str], was: str, now: str | None) -> None:
+    """Move each placed path below the folder ``was`` under ``now``, or
+    forget it when ``now`` is None.
+
+    Args:
+        seen (dict[str, str]): Each placed item's virtual path, by id.
+        was (str): The folder's old path.
+        now (str | None): Its new path, None when it left.
+    """
+    for item_id, path in list(seen.items()):
+        if not path.startswith(was + "/"):
             continue
-        if old is None:
-            kind = FileChangeKind.CREATE
-        elif new is None:
-            kind = FileChangeKind.DELETE
+        if now is None:
+            del seen[item_id]
         else:
-            kind = FileChangeKind.UPDATE
-        entry = entries.get(virtual)
-        metadata = None
-        if (
-            entry is not None
-            and not entry.is_dir
-            and kind is not FileChangeKind.DELETE
-        ):
-            metadata = FileMetadata(
-                fingerprint=entry.fingerprint,
-                size=entry.size,
-                modified=entry.modified,
-            )
-        changes.append(
-            FileEvent(
-                kind=kind,
-                path=spec_for(root, virtual),
-                timestamp=observed,
-                metadata=metadata,
-            )
-        )
-    return tuple(changes)
+            seen[item_id] = now + path[len(was) :]
 
 
-class ListingDeltaHook:
-    """Generic checkpointed delta over a full backend walk.
+def just_made(created: str | None, modified: str | None) -> bool:
+    """Whether an item is as it was made: its creation and last
+    modification times, both the service's own clock, agree.
 
-    Snapshots the tree under the watch root as ``{virtual: fingerprint}``
-    and diffs consecutive snapshots: new keys are CREATE, missing keys
-    are DELETE, changed fingerprints are UPDATE. A baseline pull
-    (``checkpoint=None``) establishes the snapshot and emits nothing.
-    The walk callable reads the backend directly and must not go
-    through mirage's caches.
+    Args:
+        created (str | None): The item's creation time, ISO 8601.
+        modified (str | None): Its last modification time, ISO 8601.
     """
+    if not created or not modified:
+        return False
+    return datetime.fromisoformat(created) == datetime.fromisoformat(modified)
 
-    def __init__(self, walk: WalkFn) -> None:
-        """Args:
-        walk (WalkFn): Async generator over all entries under a
-            root, reading the backend directly.
-        """
-        self._walk = walk
 
-    async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
-        """Walk ``root`` and diff against ``checkpoint``.
+async def folder_path(
+    folder_id: str,
+    top: str,
+    folders: dict[str, list[str]],
+    look_up: Callable[[str], Awaitable[list[str] | None]],
+) -> str | None:
+    """The path of a folder below the folder ``top`` by each folder's
+    name and parent, "" for ``top`` itself, None when its parents never
+    reach ``top``.
 
-        Args:
-            root (PathSpec): Watch root.
-            checkpoint (str | None): JSON snapshot from the previous
-                pull, or None for a baseline.
-        """
-        snapshot: dict[str, str] = {}
-        entries: dict[str, WalkEntry] = {}
-        # The walk reads the backend, so its own paths are host paths:
-        # a disk mount rooted at its own prefix spells them like virtual
-        # ones, and the process patch must not answer them (host_io).
-        async for entry in with_host_io(self._walk(root)):
-            entries[entry.virtual] = entry
-            if entry.is_dir:
-                snapshot[entry.virtual] = DIR_FINGERPRINT
-            else:
-                snapshot[entry.virtual] = entry.fingerprint or ""
-        serialized = json.dumps(snapshot, sort_keys=True)
-        if checkpoint is None:
-            return Delta(changes=(), checkpoint=serialized)
-        previous: dict[str, str] = json.loads(checkpoint)
-        return Delta(
-            changes=diff_snapshots(
-                root, previous, snapshot, entries, datetime.now(timezone.utc)
-            ),
-            checkpoint=serialized,
-        )
+    Args:
+        folder_id (str): The folder's id.
+        top (str): The id of the folder paths start at.
+        folders (dict[str, list[str]]): Each known folder's name and
+            parent id, by id; a parent of "" is outside. Each folder
+            looked up is added.
+        look_up (Callable[[str], Awaitable[list[str] | None]]): Fetch a
+            folder's name and parent id, None when it is gone.
+    """
+    names: list[str] = []
+    visited: set[str] = set()
+    current = folder_id
+    while current != top:
+        if current in visited:
+            return None
+        visited.add(current)
+        entry = folders.get(current)
+        if entry is None:
+            entry = await look_up(current)
+            if entry is None:
+                return None
+            folders[current] = entry
+        if not entry[1]:
+            return None
+        names.append(entry[0])
+        current = entry[1]
+    return "/".join(reversed(names))

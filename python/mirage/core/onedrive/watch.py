@@ -12,32 +12,31 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.onedrive import OneDriveAccessor
-from mirage.core.onedrive.readdir import readdir
-from mirage.core.onedrive.stat import stat
+from mirage.core.msgraph.watch import DeltaTarget, GraphDeltaHook
+from mirage.core.onedrive.client import drive_base
+from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
-from mirage.watch.delta import ListingDeltaHook
-from mirage.watch.walk import ReaddirWalk
 
 
 def build_delta_hook(accessor: OneDriveAccessor) -> DeltaHook:
-    """Build the OneDrive delta hook.
-
-    Fingerprints on the item's ``cTag``, which Graph moves only when the
-    content changes (``eTag`` also moves on a metadata edit), so a
-    rename does not read as a content change.
-
-    Graph has a native ``/delta`` feed with a resumable token, which is
-    cheaper than this walk and reports deletes directly. It is a fast
-    path rather than a replacement: Graph can answer ``resyncRequired``
-    at any time, and the only response to that is a full listing. When
-    it is added it belongs behind ``pull``, with this walk as its reset.
+    """Build the OneDrive delta hook: the drive's ``/delta`` feed
+    (``GraphDeltaHook``), placed under the mount's ``key_prefix``.
 
     Args:
         accessor (OneDriveAccessor): Backend handle.
     """
-    return ListingDeltaHook(
-        ReaddirWalk(partial(readdir, accessor), partial(stat, accessor))
-    )
+    config = accessor.config
+
+    async def targets(root: PathSpec) -> list[DeltaTarget]:
+        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
+        return [
+            DeltaTarget(
+                drive=drive_base(config),
+                folder=config.key_prefix or "",
+                virtual=prefix or "/",
+            )
+        ]
+
+    return GraphDeltaHook(config, accessor.pool, targets)

@@ -12,50 +12,147 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-from typing import TypeVar
+import json
+from collections.abc import Callable
+from datetime import datetime, timezone
+from typing import Any
 
 from mirage.accessor.google_api import GoogleApiAccessor
-from mirage.cache.index import IndexCacheStore
-from mirage.core.hierarchy.probe import ReaddirFn
-from mirage.errors.fs import fs_error
-from mirage.errors.types import FsCondition
-from mirage.types import PathSpec, StatFn
+from mirage.core.google.drive import list_changes, start_page_token
+from mirage.types import Delta, FileChangeKind, PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
-from mirage.watch.delta import ListingDeltaHook
-from mirage.watch.walk import ReaddirWalk
+from mirage.watch.delta import changes_under, just_made, settle
 
-G = TypeVar("G", bound=GoogleApiAccessor)
+
+def feed_state(checkpoint: str | None) -> dict[str, Any] | None:
+    """What a Drive change-feed checkpoint holds, None for a baseline.
+
+    Args:
+        checkpoint (str | None): What the previous read handed out.
+    """
+    if checkpoint is None:
+        return None
+    data = json.loads(checkpoint)
+    state = data.get("drive") if isinstance(data, dict) else None
+    if not isinstance(state, dict) or not isinstance(state.get("token"), str):
+        return None
+    return state
+
+
+def feed_checkpoint(state: dict[str, Any]) -> str:
+    """Encode a Drive change-feed checkpoint.
+
+    Args:
+        state (dict[str, Any]): The page token, the paths seen by id and
+            whatever else the hook keeps.
+    """
+    return json.dumps({"drive": state}, sort_keys=True)
+
+
+class AppDeltaHook:
+    """Checkpointed delta of a Google app mount over Drive's change feed.
+
+    Drive pings a channel with no body, so a ping reads ``changes.list``
+    from the page token the last read handed out, keeping the changes to
+    the app's files. Each is placed as the app lists it: in ``owned`` or
+    ``shared`` by its first owner, named by its title, id and modified
+    day. The checkpoint keeps the path of each file a read placed, so an
+    edit on another day or a new title moves it from the name it had,
+    and a file deleted, trashed or no longer shared leaves it. A file
+    seen for the first time is created when it is as Drive made it (its
+    created and modified times agree) and updated otherwise; the name it
+    had before is left to the corpus listing the update evicts.
+    """
+
+    def __init__(
+        self,
+        accessor: GoogleApiAccessor,
+        mime: str,
+        make_filename: Callable[[str, str, str], str],
+    ) -> None:
+        """Args:
+        accessor (GoogleApiAccessor): Backend handle.
+        mime (str): The Drive MIME type the app's files carry.
+        make_filename (Callable[[str, str, str], str]): The app's file
+            name from a title, a file id and a modified time.
+        """
+        self._accessor = accessor
+        self._mime = mime
+        self._make_filename = make_filename
+
+    async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
+        """Return the changes under ``root`` since ``checkpoint``.
+
+        Args:
+            root (PathSpec): Watch root.
+            checkpoint (str | None): The previous read's state, or None
+                for a baseline.
+        """
+        tm = self._accessor.token_manager
+        observed = datetime.now(timezone.utc)
+        state = feed_state(checkpoint)
+        if state is None:
+            token = await start_page_token(tm)
+            return Delta(
+                (),
+                feed_checkpoint({"token": token, "seen": {}}),
+            )
+        found, token = await list_changes(tm, state["token"])
+        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
+        seen: dict[str, str] = dict(state.get("seen") or {})
+        changes: list[tuple[FileChangeKind, str]] = []
+        for change in found:
+            item_id = change.get("fileId")
+            if not isinstance(item_id, str):
+                continue
+            item = change.get("file")
+            if (
+                not isinstance(item, dict)
+                or item.get("mimeType") != self._mime
+            ):
+                if change.get("removed"):
+                    settle(changes, seen, item_id, None, False)
+                continue
+            path = self._path(prefix, item)
+            if change.get("removed") or item.get("trashed"):
+                seen.setdefault(item_id, path)
+                settle(changes, seen, item_id, None, False)
+                continue
+            made = just_made(item.get("createdTime"), item.get("modifiedTime"))
+            settle(changes, seen, item_id, path, made)
+        events = changes_under(root, changes, observed)
+        return Delta(
+            tuple(events),
+            feed_checkpoint({"token": token, "seen": seen}),
+        )
+
+    def _path(self, prefix: str, item: dict[str, Any]) -> str:
+        """Where the app lists ``item``.
+
+        Args:
+            prefix (str): The mount's prefix.
+            item (dict[str, Any]): The changed file.
+        """
+        owners = item.get("owners") or [{}]
+        corpus = "owned" if owners[0].get("me", False) else "shared"
+        name = self._make_filename(
+            item["name"], item["id"], item.get("modifiedTime", "")
+        )
+        return f"{prefix}/{corpus}/{name}"
 
 
 def app_delta_hook(
-    accessor: G,
-    readdir: ReaddirFn[G],
-    stat: StatFn,
+    accessor: GoogleApiAccessor,
+    mime: str,
+    make_filename: Callable[[str, str, str], str],
 ) -> DeltaHook:
-    """The delta hook of a Google app mount: its own tree, walked.
-
-    A pull lists each corpus once, one Drive query narrowed to the app's
-    MIME type, and fingerprints a file by the modified time its stat
-    reports. An edit on another day renames the file, since the date
-    leads the name, and reads as one file gone and another made. A
-    corpus Drive could not finish listing is cached as entries but not
-    as the directory, and fails the pull, so the files it left out never
-    read as deleted and the checkpoint stays where it was.
+    """The delta hook of a Google app mount (``AppDeltaHook``).
 
     Args:
-        accessor (GoogleApiAccessor): backend accessor.
-        readdir (ReaddirFn): the app's readdir.
-        stat (StatFn): the app's stat.
+        accessor (GoogleApiAccessor): Backend handle.
+        mime (str): The Drive MIME type the app's files carry.
+        make_filename (Callable[[str, str, str], str]): The app's file
+            name from a title, a file id and a modified time.
     """
-
-    async def listed(path: PathSpec, index: IndexCacheStore) -> list[str]:
-        names = await readdir(accessor, path, index)
-        corpus = path.virtual.rstrip("/")
-        if path.vfs_path.strip("/") and (
-            (await index.list_dir(corpus)).entries is None
-        ):
-            raise fs_error(path, FsCondition.EIO)
-        return names
-
-    return ListingDeltaHook(ReaddirWalk(listed, partial(stat, accessor)))
+    return AppDeltaHook(accessor, mime, make_filename)

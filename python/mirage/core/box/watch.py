@@ -14,48 +14,25 @@
 
 import json
 import logging
-from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
-from mirage.core.box.api import (
-    absent_on_404,
-    events_now,
-    events_since,
-    list_folder_items,
-)
-from mirage.core.box.client import BoxTokenManager
+from mirage.core.box.api import events_now, events_since
 from mirage.core.box.constants import (
     EVENT_REPLAY_DAYS,
     EVENT_STREAM,
     PLACE_EVENTS,
     TRASH_EVENTS,
 )
-from mirage.core.box.resolve import (
-    mount_relative_key,
-    path_parts,
-    resolve_chain,
-    root_id,
-)
-from mirage.types import (
-    Delta,
-    FileChangeKind,
-    FileEvent,
-    JsonValue,
-    PathSpec,
-    WalkEntry,
-)
+from mirage.core.box.resolve import mount_relative_key, root_id
+from mirage.types import Delta, FileChangeKind, FileEvent, JsonValue, PathSpec
 from mirage.watch.base import DeltaHook
-from mirage.watch.constants import DIR_FINGERPRINT
-from mirage.watch.delta import diff_snapshots
-from mirage.watch.events import event_at, field, virtual_of
-from mirage.watch.fingerprint import stat_fingerprint
+from mirage.watch.delta import events_under
+from mirage.watch.events import event_at, field
 
 logger = logging.getLogger(__name__)
-
-_NATIVE = 1
 
 
 def _ref(item: dict[str, Any]) -> str:
@@ -99,187 +76,6 @@ def _rebase(key: str, old: str, new: str) -> str:
         new (str): Place it arrived at.
     """
     return new + key[len(old) :] if _inside(key, old) else key
-
-
-def _entry(virtual: str, item: dict[str, Any]) -> WalkEntry:
-    """One walk row for a Box item, fingerprinted the way stat does.
-
-    The fingerprint matches what ``ReaddirWalk`` built from Box stat, so a
-    listing-era checkpoint upgrades without reporting every file.
-
-    Args:
-        virtual (str): Virtual path the item sits at.
-        item (dict[str, Any]): A folder listing row or an event source.
-    """
-    if item.get("type") == "folder":
-        return WalkEntry(virtual=virtual, is_dir=True, fingerprint=None)
-    modified = item.get("modified_at") or None
-    size = item.get("size")
-    size = size if isinstance(size, int) else None
-    return WalkEntry(
-        virtual=virtual,
-        is_dir=False,
-        fingerprint=stat_fingerprint(
-            item.get("sha1") or modified, modified, size
-        ),
-        size=size,
-        modified=modified,
-    )
-
-
-async def _walk(
-    tm: BoxTokenManager, folder_id: str, virtual: str
-) -> AsyncIterator[tuple[str, WalkEntry]]:
-    """Yield (ref, entry) for everything under one folder.
-
-    Web links are skipped, as readdir hides them. A folder removed
-    mid-walk is skipped; the next pull settles it.
-
-    Args:
-        tm (BoxTokenManager): token manager.
-        folder_id (str): Box id of the folder to walk.
-        virtual (str): Virtual path the folder sits at.
-    """
-    try:
-        items = await absent_on_404(
-            virtual, lambda: list_folder_items(tm, folder_id)
-        )
-    except FileNotFoundError:
-        return
-    for item in items:
-        if item.get("type") not in ("file", "folder"):
-            continue
-        child = f"{virtual.rstrip('/')}/{item['name']}"
-        yield _ref(item), _entry(child, item)
-        if item.get("type") == "folder":
-            async for row in _walk(tm, str(item["id"]), child):
-                yield row
-
-
-class _Tree:
-    """The last applied snapshot, plus the item behind each path.
-
-    Events name items by id, and neither a move nor a trash says where
-    the item was, so the ref map is what finds the old path. A file is
-    one key; a folder is its whole subtree, which Box sends no events for.
-    """
-
-    def __init__(self, snapshot: dict[str, str], refs: dict[str, str]) -> None:
-        """Args:
-        snapshot (dict[str, str]): ``{virtual: fingerprint}``.
-        refs (dict[str, str]): ``{ref: virtual}`` for the same
-            entries.
-        """
-        self.snapshot = dict(snapshot)
-        self.refs = dict(refs)
-        self.entries: dict[str, WalkEntry] = {}
-
-    def put(self, ref: str, entry: WalkEntry) -> None:
-        """Record an item at its path.
-
-        Args:
-            ref (str): The item's ref.
-            entry (WalkEntry): Its row.
-        """
-        self.snapshot[entry.virtual] = (
-            DIR_FINGERPRINT if entry.is_dir else entry.fingerprint or ""
-        )
-        self.refs[ref] = entry.virtual
-        self.entries[entry.virtual] = entry
-
-    def drop(self, ref: str, virtual: str) -> None:
-        """Forget an item, and a folder's subtree with it.
-
-        Args:
-            ref (str): The item's ref.
-            virtual (str): Path it was at.
-        """
-        if self.snapshot.get(virtual) != DIR_FINGERPRINT:
-            self.snapshot.pop(virtual, None)
-            self.refs.pop(ref, None)
-            return
-        self.snapshot = {
-            key: value
-            for key, value in self.snapshot.items()
-            if not _inside(key, virtual)
-        }
-        self.refs = {
-            r: key for r, key in self.refs.items() if not _inside(key, virtual)
-        }
-
-    def move(self, old: str, new: str) -> None:
-        """Carry a folder and its subtree from ``old`` to ``new``.
-
-        Args:
-            old (str): Path the folder was at.
-            new (str): Path it is at now.
-        """
-        self.snapshot = {
-            _rebase(key, old, new): value
-            for key, value in self.snapshot.items()
-        }
-        self.refs = {r: _rebase(key, old, new) for r, key in self.refs.items()}
-
-
-@dataclass(frozen=True, slots=True)
-class _Native:
-    """What a native checkpoint carries next to its snapshot.
-
-    Args:
-        position (str): Stream position the next read starts from.
-        walked (datetime): When the snapshot was last walked.
-        refs (dict[str, str]): ``{ref: virtual}`` for the snapshot.
-        chain (list[str]): Folder ids from the mount root down to the
-            watch root, as far as the last walk resolved it.
-    """
-
-    position: str
-    walked: datetime
-    refs: dict[str, str]
-    chain: list[str]
-
-
-def _encode(
-    position: str, walked: datetime, tree: _Tree, chain: Sequence[str]
-) -> str:
-    return json.dumps(
-        {
-            "_box": _NATIVE,
-            "p": position,
-            "w": walked.isoformat(),
-            "s": tree.snapshot,
-            "i": tree.refs,
-            "r": list(chain),
-        },
-        sort_keys=True,
-    )
-
-
-def _decode(
-    checkpoint: str | None,
-) -> tuple[dict[str, str] | None, _Native | None]:
-    """Return (last snapshot, native state).
-
-    A listing-era checkpoint is a bare ``{virtual: fingerprint}`` map
-    with no stream position; it is diffed against a fresh walk once and
-    upgraded.
-
-    Args:
-        checkpoint (str | None): What the previous pull handed out.
-    """
-    if checkpoint is None:
-        return None, None
-    data = json.loads(checkpoint)
-    if not isinstance(data, dict):
-        return None, None
-    if data.get("_box") != _NATIVE:
-        return data, None
-    return data["s"], _Native(
-        position=data["p"],
-        walked=datetime.fromisoformat(data["w"]),
-        refs=data["i"],
-        chain=data["r"],
-    )
 
 
 def _source(value: JsonValue) -> dict[str, Any] | None:
@@ -353,37 +149,22 @@ def _ordered(events: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class BoxDeltaHook:
-    """Box ``/events`` pull, with the per-folder walk as reset.
+    """What changed on a Box mount since the last stream position, for
+    the consumer to call when Box pings.
 
-    The user event stream is account-wide, so every event is placed
-    through its ``path_collection`` and dropped unless it lands under
-    the watch root. A move arrives as one ``ITEM_MOVE`` (or
-    ``ITEM_RENAME``) naming only the new location, and a trashed item's
-    place is the Trash, which is why the checkpoint keeps the item behind
-    each path next to the snapshot: its ref finds the old path, and a
-    moved folder carries its subtree with it. A folder that shows up
-    already populated (a copy, a restore, a move in from outside the
-    root) is walked, since Box sends one event for the folder and none
-    for what is inside.
-
-    The snapshot is keyed by path from the watch root down, so an event
-    that moves, trashes or restores the watch root or a folder above it,
-    or lands a folder on the watch root's path, changes where every entry
-    is. The checkpoint keeps the ids of that chain of folders, and such
-    an event walks again instead of being applied.
+    Box's push (``realtime_server``'s long poll answering
+    ``new_change``) carries no change, so each ping is answered by one
+    read of the user event stream from the stored position, each event
+    mapped as ``BoxEventHook`` maps it, with the places it remembers
+    kept in the checkpoint. A baseline takes the stream's present
+    position and lists nothing.
 
     Box never refuses an old ``stream_position``: user events are kept
     for two weeks to two months, and a stale position replays whatever
-    is left. It may also send an event twice or out of order; a pull
-    applies its events once each in ``created_at`` order, but one that
-    arrives a pull late can still leave a path wrong. So the walk also
-    runs once the snapshot was walked more than ``EVENT_REPLAY_DAYS``
-    ago, which bounds both. It reads the stream head before it lists, so
-    a write that lands mid-walk is replayed by the next pull rather than
-    lost; the fingerprint diff discards the repeat.
-
-    Only placements and trashes are applied, so a folder shared into or
-    out of the account through a collaboration surfaces at the next walk.
+    is left, so a checkpoint older than ``EVENT_REPLAY_DAYS`` answers
+    UNKNOWN on the watch root and starts again at the present. Box may
+    also send an event twice or out of order, so each pull maps its
+    events once each, in ``created_at`` order.
     """
 
     def __init__(self, accessor: BoxAccessor) -> None:
@@ -392,179 +173,73 @@ class BoxDeltaHook:
         """
         self._accessor = accessor
 
-    def _place(self, root: PathSpec, item: dict[str, Any]) -> str | None:
-        """Virtual path an event puts ``item`` at, or None off the mount.
-
-        Args:
-            root (PathSpec): Watch root, read for its mount prefix.
-            item (dict[str, Any]): The event's source.
-        """
-        relative = mount_relative_key(item, root_id(self._accessor))
-        return None if relative is None else virtual_of(root, relative)
-
-    async def _chain(self, root: PathSpec) -> list[str]:
-        """Folder ids from the mount root down to the watch root.
-
-        A component that is missing, or not a folder, ends the chain, so
-        it reaches the watch root only when there is a folder to walk.
+    async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
+        """Return the changes under ``root`` since ``checkpoint``.
 
         Args:
             root (PathSpec): Watch root.
-        """
-        parts = path_parts(root)
-        try:
-            found = await absent_on_404(
-                root.virtual, lambda: resolve_chain(self._accessor, parts)
-            )
-        except FileNotFoundError:
-            found = []
-        chain = [root_id(self._accessor)]
-        for item in found:
-            if item.get("type") != "folder":
-                break
-            chain.append(str(item["id"]))
-        return chain
-
-    def _moves_root(
-        self, root: PathSpec, chain: Sequence[str], event: dict[str, Any]
-    ) -> bool:
-        """Whether ``event`` moves, removes or replaces the watch root.
-
-        A folder of the chain that is trashed, or placed anywhere but its
-        own spot above the root, moves every path in the snapshot. Any
-        other folder landing on the root's path, or on a folder above it,
-        may put a tree where the snapshot has none.
-
-        Args:
-            root (PathSpec): Watch root.
-            chain (Sequence[str]): Folder ids from the last walk.
-            event (dict[str, Any]): One ``/events`` entry.
-        """
-        source = _source(event.get("source"))
-        kind = event.get("event_type")
-        if (
-            source is None
-            or source.get("type") != "folder"
-            or (kind not in PLACE_EVENTS and kind not in TRASH_EVENTS)
-        ):
-            return False
-        place = self._place(root, source)
-        folder_id = str(source["id"])
-        if folder_id in chain:
-            if kind in TRASH_EVENTS:
-                return True
-            above = path_parts(root)[: chain.index(folder_id)]
-            return place != virtual_of(root, "/".join(above))
-        if kind in TRASH_EVENTS or place is None:
-            return False
-        return _inside(virtual_of(root, root.vfs_path), place)
-
-    async def _relist(
-        self,
-        root: PathSpec,
-        previous: dict[str, str] | None,
-        observed: datetime,
-    ) -> Delta:
-        """Walk ``root`` afresh, from the current stream head.
-
-        Args:
-            root (PathSpec): Watch root.
-            previous (dict[str, str] | None): Last applied snapshot, or
-                None for a baseline.
-            observed (datetime): Timestamp carried by every event.
+            checkpoint (str | None): The previous pull's state, or None
+                for a baseline.
         """
         tm = self._accessor.token_manager
-        position = await events_now(tm, EVENT_STREAM)
-        chain = await self._chain(root)
-        tree = _Tree({}, {})
-        if len(chain) > len(path_parts(root)):
-            async for ref, entry in _walk(
-                tm, chain[-1], virtual_of(root, root.vfs_path)
-            ):
-                tree.put(ref, entry)
-        changes = (
-            ()
-            if previous is None
-            else diff_snapshots(
-                root, previous, tree.snapshot, tree.entries, observed
-            )
-        )
-        return Delta(
-            changes=changes,
-            checkpoint=_encode(position, observed, tree, chain),
-        )
-
-    async def _apply(
-        self, root: PathSpec, here: str, tree: _Tree, event: dict[str, Any]
-    ) -> None:
-        """Bring the tree up to date with one event.
-
-        Args:
-            root (PathSpec): Watch root, read for its mount prefix.
-            here (str): The watch root's virtual path.
-            tree (_Tree): Snapshot being brought up to date.
-            event (dict[str, Any]): One ``/events`` entry.
-        """
-        source = _source(event.get("source"))
-        if source is None:
-            return
-        ref = _ref(source)
-        kind = event.get("event_type")
-        old = tree.refs.get(ref)
-        if kind in TRASH_EVENTS:
-            if old is not None:
-                tree.drop(ref, old)
-            return
-        if kind not in PLACE_EVENTS:
-            return
-        place = self._place(root, source)
-        if place is not None and not _under(place, here):
-            place = None
-        is_dir = source.get("type") == "folder"
-        if old is not None and old != place:
-            if place is not None and is_dir:
-                tree.move(old, place)
-                return
-            tree.drop(ref, old)
-        if place is None:
-            return
-        tree.put(ref, _entry(place, source))
-        if is_dir and old is None:
-            async for row in _walk(
-                self._accessor.token_manager, str(source["id"]), place
-            ):
-                tree.put(*row)
-
-    async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
-        """Pull changes under ``root`` since ``checkpoint``.
-
-        Args:
-            root (PathSpec): Watch root.
-            checkpoint (str | None): Native event-stream checkpoint, a
-                listing JSON snapshot, or None for a baseline.
-        """
-        previous, native = _decode(checkpoint)
+        state = _decode(checkpoint)
         observed = datetime.now(timezone.utc)
-        if native is None or observed - native.walked > timedelta(
-            days=EVENT_REPLAY_DAYS
-        ):
-            return await self._relist(root, previous, observed)
-        found, position = await events_since(
-            self._accessor.token_manager, native.position, EVENT_STREAM
-        )
-        events = _ordered(found)
-        if any(self._moves_root(root, native.chain, e) for e in events):
-            return await self._relist(root, previous, observed)
-        here = virtual_of(root, root.vfs_path)
-        tree = _Tree(previous or {}, native.refs)
-        for event in events:
-            await self._apply(root, here, tree, event)
+        if state is None:
+            position = await events_now(tm, EVENT_STREAM)
+            return Delta((), _encode(position, observed, {}))
+        position, read, paths = state
+        if observed - read > timedelta(days=EVENT_REPLAY_DAYS):
+            fresh = await events_now(tm, EVENT_STREAM)
+            lost = FileEvent(
+                kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
+            )
+            return Delta((lost,), _encode(fresh, observed, {}))
+        found, position = await events_since(tm, position, EVENT_STREAM)
+        mapper = BoxEventHook(self._accessor, paths)
+        events: list[FileEvent] = []
+        for event in _ordered(found):
+            events.extend(
+                await mapper.to_events(
+                    root, str(event.get("event_type") or ""), event
+                )
+            )
         return Delta(
-            changes=diff_snapshots(
-                root, previous or {}, tree.snapshot, tree.entries, observed
-            ),
-            checkpoint=_encode(position, native.walked, tree, native.chain),
+            tuple(events_under(root, events)),
+            _encode(position, observed, mapper.paths),
         )
+
+
+def _encode(position: str, read: datetime, paths: dict[str, str]) -> str:
+    return json.dumps(
+        {
+            "box": {
+                "position": position,
+                "read": read.isoformat(),
+                "paths": paths,
+            }
+        },
+        sort_keys=True,
+    )
+
+
+def _decode(
+    checkpoint: str | None,
+) -> tuple[str, datetime, dict[str, str]] | None:
+    """The stream position, when it was read and the remembered places a
+    checkpoint holds, None for a baseline.
+
+    Args:
+        checkpoint (str | None): What the previous pull handed out.
+    """
+    if checkpoint is None:
+        return None
+    state = json.loads(checkpoint).get("box") or {}
+    paths = state.get("paths") or {}
+    return (
+        str(state.get("position") or "now"),
+        datetime.fromisoformat(str(state.get("read"))),
+        {str(k): str(v) for k, v in paths.items()},
+    )
 
 
 class BoxEventHook:
@@ -581,7 +256,7 @@ class BoxEventHook:
     it has never seen gets the honest answer instead: a move or rename
     of one is UNKNOWN on the directory it landed in, and a trash of one
     maps to nothing and rides the index TTL, as Slack's unmapped deletes
-    do. The pull (``BoxDeltaHook``) is the truth path for both.
+    do.
 
     A folder stands for everything below it, which Box sends no events
     for, so a place a folder leaves or lands on is UNKNOWN, which takes
@@ -594,13 +269,22 @@ class BoxEventHook:
     whether the item was seen before.
     """
 
-    def __init__(self, accessor: BoxAccessor) -> None:
+    def __init__(
+        self, accessor: BoxAccessor, paths: dict[str, str] | None = None
+    ) -> None:
         """Args:
         accessor (BoxAccessor): Backend handle, read for its root
             folder.
+        paths (dict[str, str] | None): Where each item mapped before
+            was, by ref, as ``paths`` handed it out.
         """
         self._accessor = accessor
-        self._paths: dict[str, str] = {}
+        self._paths: dict[str, str] = dict(paths or {})
+
+    @property
+    def paths(self) -> dict[str, str]:
+        """Where each item the hook has mapped is, by ref."""
+        return dict(self._paths)
 
     def _leave(
         self, root: PathSpec, ref: str, old: str | None, is_dir: bool

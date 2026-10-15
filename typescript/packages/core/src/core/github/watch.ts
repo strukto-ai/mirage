@@ -13,78 +13,85 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import type { PathSpec, WalkEntry } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import type { DeltaHook } from '../../watch/base.ts'
-import { ListingDeltaHook } from '../../watch/delta.ts'
-import { IncompleteWalkError } from '../../watch/errors.ts'
-import { fetchTree } from './tree.ts'
-import { reseatTree } from './tree.ts'
+import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
+import { eventAt, field, textField } from '../../watch/events.ts'
+
+// The most commits GitHub lists in one push delivery; a push at the cap may
+// have lost some, so its paths are not the whole change.
+const COMMIT_CAP = 2048
+
+// The lists each pushed commit carries, and the change each one is.
+const ACTIONS = ['added', 'removed', 'modified'] as const
 
 /**
- * One recursive git tree fetch feeding the generic listing differ.
+ * Map one GitHub `push` webhook delivery onto mount paths.
  *
- * `GET /git/trees/{ref}?recursive=1` returns every path in the repository with
- * its object sha, so a pull is one request whatever the repository's shape, and
- * the fingerprint is the sha itself. That is the strongest fingerprint any
- * mirage backend has: git is content-addressed, so identical bytes have an
- * identical sha and a rewrite that changes nothing correctly reports nothing.
+ * The consumer owns the receiver (a repository webhook for `push`) and passes
+ * the event name from the `X-GitHub-Event` header with the JSON body. Nothing
+ * here runs a loop. A mount reads one ref of one repository, so only a push to
+ * that ref maps to anything.
  *
- * A mount is pinned to one ref, so what this detects is that ref moving.
- * Nothing is reported while the branch sits still, however much is pushed
- * elsewhere in the repository.
+ * Each pushed commit lists the paths it added, removed and modified, so a
+ * path's change is its first and last action across the push: one added and
+ * then removed within the push never existed outside it and maps to nothing.
+ * A forced push, a branch created or deleted, and a push at GitHub's commit cap
+ * do not say what changed between the old head and the new one, so the whole
+ * mount is UNKNOWN. Each event evicts the root listing above it, so the next
+ * read fetches the new head's tree.
+ *
+ * Mirrors Python `GitHubEventHook` (`core/github/watch.py`).
  */
-export class GitHubWalk {
+export class GitHubEventHook {
   private readonly accessor: GitHubAccessor
 
   constructor(accessor: GitHubAccessor) {
     this.accessor = accessor
   }
 
-  async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-    const accessor = this.accessor
-    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
-    const { tree, truncated, sha } = await fetchTree(
-      accessor.transport,
-      accessor.owner,
-      accessor.repo,
-      accessor.ref,
-    )
-    if (truncated) {
-      throw new IncompleteWalkError(
-        `github tree for ${accessor.owner}/${accessor.repo}@${accessor.ref} was truncated; ` +
-          'cannot diff a partial tree',
-      )
-    }
-    // A complete tree for the ref is exactly what the accessor holds, and
-    // find/du/grep's scope counter read it directly. Discarding it here
-    // left them answering from the tree the mount was built with until an
-    // unrelated read happened to refill the index, so a pull that reported
-    // a CREATE was followed by a find that could not see the file. It
-    // carries the head it was walked at, so a walker can tell it from the
-    // tree the index was filled with.
-    reseatTree(accessor, tree, truncated, sha)
-    const stem = stripSlash(rstripSlash(root.vfsPath))
-    const base = stem !== '' ? `${stem}/` : ''
-    for (const item of tree) {
-      if (base !== '' && !item.path.startsWith(base)) continue
-      const virtual = prefix !== '' ? `${prefix}/${item.path}` : `/${item.path}`
-      if (item.type === 'tree') {
-        yield { virtual, isDir: true, fingerprint: null }
-        continue
-      }
-      yield {
-        virtual,
-        isDir: false,
-        fingerprint: item.sha,
-        size: item.size ?? null,
-      }
-    }
+  toEvents(root: PathSpec, eventName: string, payload: JsonValue): Promise<readonly FileEvent[]> {
+    return Promise.resolve(this.map(root, eventName, payload))
   }
-}
 
-export function buildDeltaHook(accessor: GitHubAccessor): DeltaHook {
-  const walk = new GitHubWalk(accessor)
-  return new ListingDeltaHook(walk.walk.bind(walk))
+  private map(root: PathSpec, eventName: string, payload: JsonValue): readonly FileEvent[] {
+    if (eventName !== 'push') return []
+    const { owner, repo, ref } = this.accessor
+    const repository = field(payload, 'repository') ?? null
+    const name = textField(repository, 'full_name') ?? ''
+    if (name.toLowerCase() !== `${owner}/${repo}`.toLowerCase()) return []
+    const pushed = textField(payload, 'ref')
+    if (pushed !== `refs/heads/${ref}` && pushed !== `refs/tags/${ref}`) return []
+    const commits = field(payload, 'commits')
+    if (
+      ['forced', 'created', 'deleted'].some((flag) => field(payload, flag) === true) ||
+      !Array.isArray(commits) ||
+      commits.length >= COMMIT_CAP
+    ) {
+      return [eventAt(root, '', FileChangeKind.UNKNOWN)]
+    }
+    const first = new Map<string, string>()
+    const last = new Map<string, string>()
+    for (const commit of commits) {
+      for (const action of ACTIONS) {
+        const paths = field(commit, action)
+        for (const path of Array.isArray(paths) ? paths : []) {
+          if (typeof path !== 'string') continue
+          if (!first.has(path)) first.set(path, action)
+          last.set(path, action)
+        }
+      }
+    }
+    const events: FileEvent[] = []
+    for (const [path, action] of first) {
+      const final = last.get(path)
+      if (action === 'added' && final === 'removed') continue
+      const kind =
+        action === 'added'
+          ? FileChangeKind.CREATE
+          : final === 'removed'
+            ? FileChangeKind.DELETE
+            : FileChangeKind.UPDATE
+      events.push(eventAt(root, path, kind))
+    }
+    return events
+  }
 }

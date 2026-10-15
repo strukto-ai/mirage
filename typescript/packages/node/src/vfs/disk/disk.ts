@@ -23,8 +23,6 @@ import type { CapacityResult } from '@struktoai/mirage-core/types'
 import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
 import { PROMPT } from './prompt.ts'
-import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
-import { buildDeltaHook } from '../../core/disk/watch/index.ts'
 import type { FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
@@ -217,10 +215,6 @@ export class DiskVFS extends BaseVFS {
 
   override isMounted(): boolean {
     return isMountedOp(this.accessor)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 
   override async getState(): Promise<DiskVFSState> {

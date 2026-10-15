@@ -24,8 +24,6 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
-import { buildDeltaHook } from '@struktoai/mirage-core/core/s3/watch'
-import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 
 function createProxyAgents(proxy: string): S3HttpAgents {
   return { httpAgent: new HttpProxyAgent(proxy), httpsAgent: new HttpsProxyAgent(proxy) }
@@ -99,10 +97,6 @@ export class S3VFS extends S3VFSBase {
 
   override storageLocation(): string {
     return s3StorageLocation(this.config)
-  }
-
-  override deltaHook(): DeltaHook {
-    return buildDeltaHook(this.accessor)
   }
 
   override getState(): Promise<S3VFSState> {

@@ -26,7 +26,6 @@ from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.stat import stat
-from mirage.core.github.watch import GitHubWalk
 from mirage.types import (
     MountMode,
     PathSpec,
@@ -341,31 +340,6 @@ async def test_a_tree_walk_after_an_outside_add_checks_then_walks_once(line):
             hub.log.clear()
             assert b"/gh/d1/new.txt" in await _out(ws, line)
             assert hub.counts() == (1, 1, 0)
-
-
-# The watcher's walk reseats the tree, and stamps the head it answered,
-# so a revert back to the index's head still refills the walked tree.
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "policy,cost",
-    [
-        (ReadPolicy.BOUNDED, (0, 1, 0)),
-        (ReadPolicy.FRESH, (1, 1, 0)),
-    ],
-)
-async def test_a_watched_tree_carries_the_head_it_was_walked_at(policy, cost):
-    with serve(_three()) as hub:
-        vfs = _vfs(hub)
-        async with _open(_ws(vfs, policy=policy)) as ws:
-            await _out(ws, "ls /gh")
-            hub.files["d1/new.txt"] = b"new\n"
-            async for _ in GitHubWalk(vfs.accessor)(ROOT):
-                pass
-            assert vfs.accessor.tree_version == hub.head()
-            del hub.files["d1/new.txt"]
-            hub.log.clear()
-            assert await _out(ws, "find /gh -name new.txt") == b""
-            assert hub.counts() == cost
 
 
 async def _drop_row(store, client, key: str) -> None:

@@ -33,6 +33,7 @@ from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gsheets.config import GSheetsConfig
 from mirage.vfs.gsheets.prompt import PROMPT, WRITE_PROMPT
+from mirage.vfs.gsheets.sheet_entry import make_filename
 from mirage.watch.base import DeltaHook
 
 
@@ -117,7 +118,7 @@ class GSheetsVFS(BaseVFS):
         await _rename(self.accessor, src, dst, index)
 
     def delta_hook(self) -> DeltaHook:
-        return app_delta_hook(self.accessor, _readdir, _stat)
+        return app_delta_hook(self.accessor, MIME, make_filename)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""

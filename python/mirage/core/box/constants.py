@@ -23,9 +23,8 @@ TOKEN_BUFFER_SECONDS = 300
 EVENT_STREAM = "changes"
 # Box keeps user events for between two weeks and two months, and a
 # position older than that is not refused, it just replays what is left.
-# A snapshot walked this long ago is walked again, which bounds both the
-# age of the position and how long an event Box repeated or delivered out
-# of order can leave the snapshot wrong.
+# A checkpoint read this long ago reports the watch root as unknown and
+# starts again at the present instead of trusting the replay.
 EVENT_REPLAY_DAYS = 14
 # Events that put an item at the path its ``source`` names.
 PLACE_EVENTS = frozenset(

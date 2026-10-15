@@ -28,10 +28,8 @@ from mirage.core.hf_hub.read import read as _read
 from mirage.core.hf_hub.readdir import readdir as _readdir
 from mirage.core.hf_hub.stat import stat as _stat
 from mirage.core.hf_hub.stream import read_stream as _read_stream
-from mirage.core.hf_hub.watch import build_delta_hook
 from mirage.types import FileStat, ListingVersion, PathSpec
 from mirage.vfs.base import BaseVFS
-from mirage.watch.base import DeltaHook
 
 A = TypeVar("A", bound=HfHubAccessor)
 
@@ -105,9 +103,6 @@ class HfHubVFS(BaseVFS, Generic[A]):
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
-
-    def delta_hook(self) -> DeltaHook:
-        return build_delta_hook(self.accessor)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

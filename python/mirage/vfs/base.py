@@ -865,11 +865,13 @@ class BaseVFS:
         return CapacityResult(state=CapacityState.UNKNOWN)
 
     def delta_hook(self) -> DeltaHook | None:
-        """Hook a consumer's poll loop can pull deltas from, or None.
+        """Hook a consumer calls when the backend pings it, or None.
 
-        None means this backend has no native change detection, which
-        is most of them; a subclass that has one overrides this and
-        narrows the return to ``DeltaHook``.
+        A backend whose push says only that something changed (a ping)
+        answers it with one read of its own change feed from the last
+        checkpoint. None means it has no such feed, which is most of
+        them; a subclass that has one overrides this and narrows the
+        return to ``DeltaHook``.
         """
         return None
 

@@ -37,14 +37,12 @@ from mirage.core.s3.stat import stat as _stat
 from mirage.core.s3.stream import read_stream as _read_stream
 from mirage.core.s3.truncate import truncate as _truncate
 from mirage.core.s3.unlink import unlink as _unlink
-from mirage.core.s3.watch import build_delta_hook
 from mirage.core.s3.write import write as _write
 from mirage.errors.fs import exdev
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.vfs.s3.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 def _declared_endpoint(config: S3Config) -> str | None:
@@ -220,9 +218,6 @@ class S3VFS(BaseVFS):
         prefix = (cfg.key_prefix or "").strip("/")
         base = f"{VFSName.S3}:{cfg.endpoint_url or 'aws'}:{cfg.bucket}"
         return f"{base}/{prefix}" if prefix else base
-
-    def delta_hook(self) -> DeltaHook:
-        return build_delta_hook(self.accessor)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

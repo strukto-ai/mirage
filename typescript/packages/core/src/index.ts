@@ -84,10 +84,10 @@ export {
   VFSName,
   WritePolicy,
 } from './types.ts'
-export type { ReadSpec, WalkEntry } from './types.ts'
+export type { ReadSpec } from './types.ts'
 export { eisdir, enoent, enotdir } from './errors/fs.ts'
 export { snakeToCamel } from './utils/normalize.ts'
-export { ListingDeltaHook, RAMWatchQueue, Watcher } from './watch/index.ts'
+export { RAMWatchQueue, Watcher } from './watch/index.ts'
 export { SessionStore } from './workspace/session/store.ts'
 export { ContentDriftError } from './workspace/snapshot/drift.ts'
 export { toStateDict } from './workspace/snapshot/state.ts'

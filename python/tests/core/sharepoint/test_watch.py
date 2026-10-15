@@ -17,7 +17,6 @@ import pytest
 from mirage.core.sharepoint.watch import build_delta_hook
 from mirage.types import FileChangeKind, PathSpec
 from mirage.vfs.registry import build_vfs
-from mirage.watch.fingerprint import stat_fingerprint
 from tests.fixtures.msgraph_api import (
     DRIVE_ID,
     DRIVE_NAME,
@@ -26,46 +25,22 @@ from tests.fixtures.msgraph_api import (
     serve,
 )
 
-OLD = b"one\n"
-NEW = b"two, longer\n"
-
-
-def _accessor(graph: FakeGraph):
-    return build_vfs(
-        "sharepoint",
-        {
-            "access_token": "t",
-            "graph_base_url": graph.url,
-            "site": SITE_NAME,
-            "drive": DRIVE_NAME,
-        },
-    ).accessor
-
 
 @pytest.mark.asyncio
-async def test_a_metadata_edit_reports_nothing_and_a_write_reports_one_update():
-    with serve(FakeGraph(drives={DRIVE_ID: {"a.txt": OLD}})) as graph:
-        accessor = _accessor(graph)
+async def test_an_unscoped_root_reads_every_library():
+    with serve(FakeGraph(drives={DRIVE_ID: {"a.txt": b"one\n"}})) as graph:
+        accessor = build_vfs(
+            "sharepoint", {"access_token": "t", "graph_base_url": graph.url}
+        ).accessor
         hook = build_delta_hook(accessor)
         root = PathSpec.from_str_path("/")
         try:
             baseline = await hook.pull(root, None)
-            # The walk stats each file from the listing it just made; that
-            # row has to carry the cTag, or the fingerprint falls back to
-            # the modified stamp, which a rename or property edit moves.
-            graph.touch(DRIVE_ID, "a.txt")
-            touched = await hook.pull(root, baseline.checkpoint)
-            graph.write(DRIVE_ID, "a.txt", NEW)
-            written = await hook.pull(root, touched.checkpoint)
+            graph.write(DRIVE_ID, "a.txt", b"two\n")
+            changed = await hook.pull(root, baseline.checkpoint)
         finally:
             await accessor.close()
     assert baseline.changes == ()
-    assert touched.changes == ()
-    assert [(e.kind, e.path.virtual) for e in written.changes] == [
-        (FileChangeKind.UPDATE, "/a.txt")
+    assert [(e.kind, e.path.virtual) for e in changed.changes] == [
+        (FileChangeKind.UPDATE, f"/{SITE_NAME}/{DRIVE_NAME}/a.txt")
     ]
-    metadata = written.changes[0].metadata
-    assert metadata is not None
-    assert metadata.fingerprint == stat_fingerprint(
-        graph.ctag(DRIVE_ID, "a.txt"), metadata.modified, len(NEW)
-    )

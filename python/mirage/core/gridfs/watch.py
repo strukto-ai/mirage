@@ -12,86 +12,134 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import Sequence
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.core.gridfs.client import (
-    _prefix,
-    _strip_key_prefix,
-    iter_latest,
-    prefix_query,
-)
-from mirage.types import PathSpec, WalkEntry
-from mirage.utils.dates import to_iso_z
-from mirage.utils.key_prefix import mount_prefix_of
-from mirage.watch.base import DeltaHook
-from mirage.watch.delta import ListingDeltaHook
-from mirage.watch.walk import synth_dirs
+from mirage.core.gridfs.client import files_coll
+from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
+from mirage.utils import key_prefix as kp
+from mirage.watch.events import event_at, field, text_field
+
+# Events after which the stream no longer describes the files collection
+# document by document.
+_GONE = frozenset({"drop", "dropDatabase", "rename", "invalidate"})
 
 
-class GridFSWalk:
-    """One flat ``fs.files`` aggregation feeding the generic differ.
+class GridFSEventHook:
+    """Map one change stream event on a bucket's files collection onto
+    mount paths.
 
-    GridFS stores a flat filename space, so the whole subtree comes back
-    from a single prefix query rather than one round trip per directory,
-    and the aggregation already reduces each filename to its newest
-    revision. Reads the collection directly, never through mirage's
-    caches, as the DeltaHook contract requires.
+    The consumer owns the stream (``watch()`` on ``<bucket>.files``,
+    ideally with ``full_document_before_change`` so a delete names its
+    file) and its resume token, and passes each event's
+    ``operationType`` with the event. Nothing here runs a loop.
 
-    Fingerprints on the revision's ObjectId, which is exactly what
-    ``gridfs`` stat reports. That is an exact version: every upload
-    mints a new document, so a rewrite always moves it and an untouched
-    file never does.
+    GridFS keeps every upload as its own revision and serves the newest,
+    so after an insert, a delete or a rename the hook counts the
+    revisions left under each name it touched: none is a DELETE, one
+    just made is a CREATE, and any other is an UPDATE, since the file
+    now reads another revision. A delete names its document by id only;
+    the pre-image, or the insert the hook saw, names the file, and with
+    neither the whole mount is UNKNOWN. A filename ending in ``/`` is a
+    directory marker. A dropped or renamed collection, a dropped
+    database and an invalidated stream leave the mount UNKNOWN.
     """
 
     def __init__(self, accessor: GridFSAccessor) -> None:
         """Args:
-        accessor (GridFSAccessor): Backend handle.
+        accessor (GridFSAccessor): Backend handle, read for its
+            database, bucket and key prefix.
         """
         self._accessor = accessor
+        self._names: dict[str, str] = {}
 
-    async def __call__(self, root: PathSpec) -> AsyncIterator[WalkEntry]:
-        """Yield every entry under ``root``.
+    def _relative(self, filename: str) -> str | None:
+        """The mount-relative path of a filename, or None outside the
+        mount's key prefix.
 
         Args:
-            root (PathSpec): Watch root (mount-virtual path).
+            filename (str): The ``filename`` of a files document.
+        """
+        prefix = kp.normalize(self._accessor.config.key_prefix)
+        if prefix and not filename.startswith(prefix):
+            return None
+        return filename[len(prefix) :]
+
+    async def _settled(
+        self, root: PathSpec, filename: str, made: bool
+    ) -> Sequence[FileEvent]:
+        """The change ``filename`` now reads as, from the revisions left.
+
+        Args:
+            root (PathSpec): Any path on this mount, read for its prefix.
+            filename (str): The name an event touched.
+            made (bool): Whether the event added a revision under it.
+        """
+        relative = self._relative(filename)
+        if relative is None:
+            return ()
+        if relative.endswith("/"):
+            kind = FileChangeKind.CREATE if made else FileChangeKind.UNKNOWN
+            return (event_at(root, relative.rstrip("/"), kind),)
+        left = await files_coll(self._accessor).count_documents(
+            {"filename": filename}, limit=2
+        )
+        if left == 0:
+            kind = FileChangeKind.DELETE
+        elif made and left == 1:
+            kind = FileChangeKind.CREATE
+        else:
+            kind = FileChangeKind.UPDATE
+        return (event_at(root, relative, kind),)
+
+    async def to_events(
+        self, root: PathSpec, operation_type: str, payload: JsonValue
+    ) -> Sequence[FileEvent]:
+        """Map one change event to the changes it implies.
+
+        Args:
+            root (PathSpec): Any path on this mount, read for its prefix.
+            operation_type (str): The event's ``operationType``.
+            payload (JsonValue): The change event.
         """
         config = self._accessor.config
-        prefix = mount_prefix_of(root.virtual, root.vfs_path)
-        pfx = _prefix(root.mount_path, config)
-        files: list[str] = []
-        markers: list[str] = []
-        async for doc in iter_latest(self._accessor, prefix_query(pfx)):
-            filename = doc["filename"]
-            relative = _strip_key_prefix(filename, config)
-            virtual = (
-                prefix.rstrip("/") + "/" + relative.lstrip("/")
-                if prefix
-                else "/" + relative.lstrip("/")
+        ns = field(payload, "ns")
+        if operation_type == "invalidate":
+            return (event_at(root, "", FileChangeKind.UNKNOWN),)
+        if text_field(ns, "db") != config.database or text_field(
+            ns, "coll"
+        ) not in (None, f"{config.bucket}.files"):
+            return ()
+        if operation_type in _GONE:
+            return (event_at(root, "", FileChangeKind.UNKNOWN),)
+        ident = str(field(field(payload, "documentKey"), "_id"))
+        before = text_field(
+            field(payload, "fullDocumentBeforeChange"), "filename"
+        ) or self._names.get(ident)
+        after = text_field(field(payload, "fullDocument"), "filename") or (
+            text_field(
+                field(field(payload, "updateDescription"), "updatedFields"),
+                "filename",
             )
-            if filename.endswith("/"):
-                # A directory marker, the same convention readdir reads
-                # as an immediate child directory.
-                markers.append(virtual.rstrip("/"))
-                continue
-            files.append(virtual)
-            upload = doc.get("uploadDate")
-            modified = to_iso_z(upload) if upload else None
-            yield WalkEntry(
-                virtual=virtual,
-                is_dir=False,
-                fingerprint=str(doc["_id"]),
-                size=doc["length"],
-                modified=modified,
-            )
-        for entry in synth_dirs(root.virtual, files, markers):
-            yield entry
-
-
-def build_delta_hook(accessor: GridFSAccessor) -> DeltaHook:
-    """Build the GridFS delta hook.
-
-    Args:
-        accessor (GridFSAccessor): Backend handle.
-    """
-    return ListingDeltaHook(GridFSWalk(accessor))
+        )
+        if operation_type == "insert" and after is not None:
+            self._names[ident] = after
+            return await self._settled(root, after, True)
+        if operation_type == "delete":
+            self._names.pop(ident, None)
+            if before is None:
+                return (event_at(root, "", FileChangeKind.UNKNOWN),)
+            return await self._settled(root, before, False)
+        if operation_type not in ("update", "replace"):
+            return ()
+        if before is None:
+            if after is not None:
+                self._names[ident] = after
+            return (event_at(root, "", FileChangeKind.UNKNOWN),)
+        if after is None or after == before:
+            return await self._settled(root, before, False)
+        self._names[ident] = after
+        return (
+            *await self._settled(root, before, False),
+            *await self._settled(root, after, True),
+        )

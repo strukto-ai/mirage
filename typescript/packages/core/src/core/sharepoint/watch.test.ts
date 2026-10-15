@@ -16,61 +16,64 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import { FileChangeKind, PathSpec } from '../../types.ts'
-import { statFingerprint } from '../../watch/fingerprint.ts'
 import { buildDeltaHook } from './watch.ts'
+
+const API = 'https://graph.microsoft.com/v1.0'
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// One file whose row a test mutates between pulls; the listing answers
-// from it, so each pull sees the current cTag, eTag, stamp and size.
-function drive() {
-  const row = { cTag: 'c1', eTag: 'e1', lastModifiedDateTime: 'T1', size: 3 }
-  const routes: Record<string, () => unknown> = {
-    'https://graph.microsoft.com/v1.0/sites': () => ({
-      value: [{ id: 'site', name: 'team', displayName: 'Team' }],
-    }),
-    'https://graph.microsoft.com/v1.0/sites/site/drives': () => ({
-      value: [{ id: 'b!drive', name: 'Documents' }],
-    }),
-    'https://graph.microsoft.com/v1.0/drives/b!drive/root/children': () => ({
-      value: [{ id: 'i', name: 'a.txt', file: {}, ...row }],
-    }),
-  }
+// One tenant with one site and one library, whose /delta lists `a.txt`
+// after the first token.
+function tenant(): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: URL | RequestInfo) => {
       const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      const url = decodeURIComponent(raw.split('?')[0] ?? raw)
-      const route = routes[url]
-      if (route === undefined) throw new Error(`unrouted ${url}`)
-      return Promise.resolve(new Response(JSON.stringify(route())))
+      const url = new URL(raw)
+      const path = decodeURIComponent(url.pathname)
+      const link = (n: number): string => `${API}/drives/b!drive/root/delta?token=${String(n)}`
+      let body: unknown
+      if (path === '/v1.0/sites')
+        body = { value: [{ id: 'site', name: 'main', displayName: 'Main' }] }
+      else if (path === '/v1.0/sites/site/drives')
+        body = { value: [{ id: 'b!drive', name: 'Documents' }] }
+      else if (path === '/v1.0/drives/b!drive/root') body = { id: 'b!drive:/' }
+      else if (path === '/v1.0/drives/b!drive/root/delta') {
+        const token = url.searchParams.get('token')
+        body =
+          token === 'latest'
+            ? { value: [], '@odata.deltaLink': link(0) }
+            : {
+                value: [
+                  {
+                    id: 'b!drive:a.txt',
+                    name: 'a.txt',
+                    file: {},
+                    parentReference: { id: 'b!drive:/' },
+                    createdDateTime: '2020-01-01T00:00:00Z',
+                  },
+                ],
+                '@odata.deltaLink': link(1),
+              }
+      } else throw new Error(`unrouted ${path}`)
+      return Promise.resolve(new Response(JSON.stringify(body)))
     }),
   )
-  return row
 }
 
-describe('the sharepoint watch fingerprint', () => {
-  it('ignores a metadata edit and reports a content write once', async () => {
-    const row = drive()
-    const hook = buildDeltaHook(
-      new SharePointAccessor({ accessToken: 'token', site: 'Team', drive: 'Documents' }),
-    )
+// Twin of test_an_unscoped_root_reads_every_library.
+describe('the sharepoint delta feed', () => {
+  it('reads every library under an unscoped root', async () => {
+    tenant()
+    const hook = buildDeltaHook(new SharePointAccessor({ accessToken: 'token' }))
     const root = PathSpec.fromStrPath('/', '')
     const baseline = await hook.pull(root, null)
-    // The walk stats each file from the listing it just made; that row has
-    // to carry the cTag, or the fingerprint falls back to the stamp, which a
-    // rename or property edit moves.
-    Object.assign(row, { eTag: 'e2', lastModifiedDateTime: 'T2' })
-    const touched = await hook.pull(root, baseline.checkpoint)
-    Object.assign(row, { cTag: 'c3', eTag: 'e3', lastModifiedDateTime: 'T3', size: 12 })
-    const written = await hook.pull(root, touched.checkpoint)
+    const changed = await hook.pull(root, baseline.checkpoint)
     expect(baseline.changes).toEqual([])
-    expect(touched.changes).toEqual([])
-    expect(written.changes.map((e) => [e.kind, e.path.virtual])).toEqual([
-      [FileChangeKind.UPDATE, '/a.txt'],
+    expect(changed.changes.map((e) => [e.kind, e.path.virtual])).toEqual([
+      [FileChangeKind.UPDATE, '/Main/Documents/a.txt'],
     ])
-    expect(written.changes[0]?.metadata?.fingerprint).toBe(statFingerprint('c3', 'T3', 12))
   })
 })

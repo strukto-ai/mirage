@@ -1038,8 +1038,8 @@ class FileMetadata:
     """Post-change metadata a change source can attach to an event.
 
     Every field is optional: producers fill only what their signal
-    honestly carries (a listing walk knows fingerprint/size/modified; a
-    webhook payload usually knows none). Growth point for future
+    honestly carries (a payload that describes the file knows
+    fingerprint/size/modified; a ping knows none). Growth point for future
     backend facts (owner, inode) as sources that can supply them
     appear.
 
@@ -1097,32 +1097,6 @@ class Delta:
 
     changes: tuple[FileEvent, ...]
     checkpoint: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class WalkEntry:
-    """One entry produced by a backend walk feeding change detection.
-
-    Args:
-        virtual (str): Workspace-virtual path of the entry.
-        is_dir (bool): Whether the entry is a directory.
-        fingerprint (str | None): Content fingerprint (see
-            ``mirage.watch.fingerprint.stat_fingerprint``). None means
-            only create/delete are detectable for this entry.
-        size (int | None): Content size in bytes, when the listing
-            carries it.
-        modified (str | None): Last-modified stamp, when the listing
-            carries it.
-    """
-
-    virtual: str
-    is_dir: bool
-    fingerprint: str | None
-    size: int | None = None
-    modified: str | None = None
-
-
-WalkFn: TypeAlias = Callable[[PathSpec], AsyncIterator[WalkEntry]]
 
 
 class OverflowPolicy(StrEnum):

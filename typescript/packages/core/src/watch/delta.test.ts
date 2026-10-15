@@ -1,70 +1,53 @@
 import { describe, expect, it } from 'vitest'
-import { FileChangeKind, PathSpec, type WalkEntry } from '../types.ts'
-import { changesUnder, ListingDeltaHook, specFor } from './delta.ts'
+import { FileChangeKind, PathSpec } from '../types.ts'
+import { changesUnder, folderPath, movedBelow, settle, specFor } from './delta.ts'
 
-function walkFrom(tree: Map<string, string | null>) {
-  return async function* walk(): AsyncGenerator<WalkEntry> {
-    await Promise.resolve()
-    for (const [virtual, fingerprint] of tree) {
-      yield { virtual, isDir: fingerprint === null, fingerprint }
-    }
-  }
-}
-
-describe('ListingDeltaHook', () => {
+describe('specFor', () => {
   it('frames paths from roots with trailing slashes', () => {
     const root = PathSpec.fromStrPath('/nc///', '')
     expect(specFor(root, '/nc/file.txt').vfsPath).toBe('file.txt')
   })
+})
 
-  it('uses the first pull as a baseline', async () => {
-    const hook = new ListingDeltaHook(walkFrom(new Map([['/nc/a.txt', 'e1']])))
-    const delta = await hook.pull(PathSpec.fromStrPath('/nc'), null)
-    expect(delta.changes).toEqual([])
-    expect(delta.checkpoint).not.toBeNull()
-  })
-
-  it('detects creates, updates, and deletes', async () => {
-    const tree = new Map<string, string | null>([
-      ['/nc/a.txt', 'e1'],
-      ['/nc/old.txt', 'old'],
-    ])
-    const hook = new ListingDeltaHook(walkFrom(tree))
-    const baseline = await hook.pull(PathSpec.fromStrPath('/nc'), null)
-    tree.set('/nc/a.txt', 'e2')
-    tree.set('/nc/new.txt', 'new')
-    tree.delete('/nc/old.txt')
-    const delta = await hook.pull(PathSpec.fromStrPath('/nc'), baseline.checkpoint)
-    expect(delta.changes.map((event) => [event.path.virtual, event.kind])).toEqual([
-      ['/nc/a.txt', FileChangeKind.UPDATE],
-      ['/nc/new.txt', FileChangeKind.CREATE],
-      ['/nc/old.txt', FileChangeKind.DELETE],
-    ])
-    expect(delta.changes[0]?.metadata?.fingerprint).toBe('e2')
-  })
-
-  it('carries post-change metadata', async () => {
-    const before = new ListingDeltaHook(walkFrom(new Map([['/nc/a.txt', 'e1']])))
-    const baseline = await before.pull(PathSpec.fromStrPath('/nc'), null)
-    const walk = async function* (): AsyncGenerator<WalkEntry> {
-      await Promise.resolve()
-      yield {
-        virtual: '/nc/a.txt',
-        isDir: false,
-        fingerprint: 'e2',
-        size: 2,
-        modified: '2026-01-02T00:00:00Z',
-      }
+// Twin of test_settle_names_each_move_by_where_the_item_was.
+describe('settle', () => {
+  it('names each move by where the item was', () => {
+    const changes: [FileChangeKind, string][] = []
+    const seen: Record<string, string> = {
+      dir: '/m/old',
+      f: '/m/old/f.txt',
+      g: '/m/g.txt',
     }
-    const delta = await new ListingDeltaHook(walk).pull(
-      PathSpec.fromStrPath('/nc'),
-      baseline.checkpoint,
-    )
-    expect(delta.changes[0]?.metadata).toMatchObject({
-      fingerprint: 'e2',
-      size: 2,
-      modified: '2026-01-02T00:00:00Z',
-    })
+    settle(changes, seen, 'new', '/m/new.txt', true)
+    settle(changes, seen, 'edited', '/m/e.txt', false)
+    settle(changes, seen, 'g', '/m/g.txt', false)
+    const was = settle(changes, seen, 'dir', '/m/renamed', false)
+    expect(was).not.toBeNull()
+    movedBelow(seen, was ?? '', '/m/renamed')
+    settle(changes, seen, 'unseen', null, false)
+    expect(changes).toEqual([
+      [FileChangeKind.CREATE, '/m/new.txt'],
+      [FileChangeKind.UPDATE, '/m/e.txt'],
+      [FileChangeKind.UPDATE, '/m/g.txt'],
+      [FileChangeKind.DELETE, '/m/old'],
+      [FileChangeKind.CREATE, '/m/renamed'],
+    ])
+    expect(seen.f).toBe('/m/renamed/f.txt')
+  })
+})
+
+// Twin of test_folder_path_climbs_to_the_top_and_keeps_what_it_looked_up.
+describe('folderPath', () => {
+  it('climbs to the top and keeps what it looked up', async () => {
+    const fetched: Record<string, [string, string]> = { b: ['B', 'a'], x: ['X', ''] }
+    const lookUp = (id: string): Promise<[string, string] | null> =>
+      Promise.resolve(fetched[id] ?? null)
+    const folders: Record<string, [string, string]> = { a: ['A', 'top'] }
+    expect(await folderPath('b', 'top', folders, lookUp)).toBe('A/B')
+    expect(await folderPath('top', 'top', folders, lookUp)).toBe('')
+    expect(await folderPath('x', 'top', folders, lookUp)).toBeNull()
+    expect(await folderPath('gone', 'top', folders, lookUp)).toBeNull()
+    expect(folders).toEqual({ a: ['A', 'top'], b: ['B', 'a'], x: ['X', ''] })
   })
 })
 

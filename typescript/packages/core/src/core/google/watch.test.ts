@@ -17,16 +17,17 @@ import type * as DriveModule from './drive.ts'
 
 vi.mock('./drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('./drive.ts')
-  return { ...actual, listAllFiles: vi.fn() }
+  return { ...actual, startPageToken: vi.fn(), listChanges: vi.fn() }
 })
 
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { readdir } from '../gdocs/readdir.ts'
-import { stat } from '../gdocs/stat.ts'
+import { MIME } from '../gdocs/constants.ts'
+import { makeFilename } from '../../vfs/gdocs/doc_entry.ts'
 import type { TokenManager } from './client.ts'
 import * as drive from './drive.ts'
+import type { DriveChange } from './drive.ts'
 import { appDeltaHook } from './watch.ts'
 
 const ROOT = new PathSpec({
@@ -35,37 +36,71 @@ const ROOT = new PathSpec({
   vfsPath: mountKey('/gdocs', '/gdocs'),
 })
 
-function listing(
+function doc(
+  fileId: string,
+  name: string,
   modified: string,
-  complete = true,
-): Awaited<ReturnType<typeof drive.listAllFiles>> {
+  opts: { created?: string; mime?: string; mine?: boolean; trashed?: boolean } = {},
+): DriveChange {
   return {
-    files: [{ id: 'doc1', name: 'Plan', modifiedTime: modified, owners: [{ me: true }] }],
-    complete,
+    fileId,
+    file: {
+      id: fileId,
+      name,
+      mimeType: opts.mime ?? MIME,
+      createdTime: opts.created ?? '2020-01-01T00:00:00.000Z',
+      modifiedTime: modified,
+      owners: [{ me: opts.mine ?? true }],
+      trashed: opts.trashed ?? false,
+    },
   }
 }
 
+// Twin of test_changes_place_each_doc_where_the_app_lists_it.
 describe('google app delta hook', () => {
-  it('reads an edit as an update and refuses an unfinished listing', async () => {
+  it('places each changed doc where the app lists it', async () => {
     const hook = appDeltaHook(
       new GDocsAccessor({
         tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
       }),
-      readdir,
-      stat,
+      MIME,
+      makeFilename,
     )
-    vi.mocked(drive.listAllFiles)
-      .mockResolvedValueOnce(listing('2026-10-01T09:00:00.000Z'))
-      .mockResolvedValueOnce(listing('2026-10-01T09:00:00.000Z'))
-      .mockResolvedValueOnce(listing('2026-10-01T10:00:00.000Z'))
-      .mockResolvedValueOnce(listing('2026-10-01T10:00:00.000Z'))
-      .mockResolvedValueOnce(listing('2026-10-01T11:00:00.000Z', false))
+    vi.mocked(drive.startPageToken).mockResolvedValue('1')
+    vi.mocked(drive.listChanges)
+      .mockResolvedValueOnce([
+        [
+          doc('old', 'Plan', '2026-10-01T09:00:00.000Z'),
+          doc('new', 'Notes', '2099-01-01T09:00:00.000Z', {
+            created: '2099-01-01T09:00:00.000Z',
+            mine: false,
+          }),
+          doc('sheet', 'Budget', '2026-10-01T09:00:00.000Z', {
+            mime: 'application/vnd.google-apps.spreadsheet',
+          }),
+        ],
+        '2',
+      ])
+      .mockResolvedValueOnce([
+        [
+          doc('old', 'Plan', '2026-10-02T09:00:00.000Z'),
+          doc('new', 'Notes', '2099-01-01T09:00:00.000Z', { trashed: true, mine: false }),
+          { fileId: 'gone', removed: true },
+        ],
+        '3',
+      ])
     const baseline = await hook.pull(ROOT, null)
-    const changed = await hook.pull(ROOT, baseline.checkpoint)
-    await expect(hook.pull(ROOT, changed.checkpoint)).rejects.toMatchObject({ code: 'EIO' })
+    const first = await hook.pull(ROOT, baseline.checkpoint)
+    const second = await hook.pull(ROOT, first.checkpoint)
     expect(baseline.changes).toEqual([])
-    expect(changed.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
-      ['update', '/gdocs/owned/2026-10-01_Plan__doc1.gdoc.json'],
+    expect(first.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+      ['update', '/gdocs/owned/2026-10-01_Plan__old.gdoc.json'],
+      ['create', '/gdocs/shared/2099-01-01_Notes__new.gdoc.json'],
+    ])
+    expect(second.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+      ['delete', '/gdocs/owned/2026-10-01_Plan__old.gdoc.json'],
+      ['create', '/gdocs/owned/2026-10-02_Plan__old.gdoc.json'],
+      ['delete', '/gdocs/shared/2099-01-01_Notes__new.gdoc.json'],
     ])
   })
 })

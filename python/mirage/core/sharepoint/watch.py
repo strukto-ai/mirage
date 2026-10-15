@@ -12,26 +12,72 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.core.sharepoint.readdir import readdir
-from mirage.core.sharepoint.stat import stat
+from mirage.core.msgraph.client import id_segment
+from mirage.core.msgraph.config import graph_api
+from mirage.core.msgraph.watch import DeltaTarget, GraphDeltaHook
+from mirage.core.sharepoint.resolve import drive_entries, resolve, site_entries
+from mirage.errors.fs import enoent
+from mirage.types import PathSpec
+from mirage.utils.key_prefix import mount_prefix_of
 from mirage.watch.base import DeltaHook
-from mirage.watch.delta import ListingDeltaHook
-from mirage.watch.walk import ReaddirWalk
 
 
 def build_delta_hook(accessor: SharePointAccessor) -> DeltaHook:
-    """Build the SharePoint delta hook.
+    """Build the SharePoint delta hook: the ``/delta`` feed of each
+    document library under the watch root (``GraphDeltaHook``).
 
-    Same Graph drive surface as OneDrive, so the same ``cTag``
-    fingerprint and the same standing offer of a native ``/delta`` fast
-    path; see ``mirage.core.onedrive.watch``.
+    A mount scoped to one site and library reads that library's feed,
+    placed under its ``key_prefix``. An unscoped mount reads the library
+    the root is in, or each library of the site or tenant the root
+    names, as the baseline finds them.
 
     Args:
         accessor (SharePointAccessor): Backend handle.
     """
-    return ListingDeltaHook(
-        ReaddirWalk(partial(readdir, accessor), partial(stat, accessor))
-    )
+    config = accessor.config
+
+    def drive(drive_id: str) -> str:
+        return f"{graph_api(config)}/drives/{id_segment(drive_id)}"
+
+    async def targets(root: PathSpec) -> list[DeltaTarget]:
+        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
+        resolved = await resolve(accessor, root)
+        if config.site is not None and config.drive is not None:
+            if resolved.drive_id is None:
+                raise enoent(root)
+            return [
+                DeltaTarget(
+                    drive=drive(resolved.drive_id),
+                    folder=config.key_prefix or "",
+                    virtual=prefix or "/",
+                )
+            ]
+        parts = root.vfs_path.strip("/").split("/")
+        if resolved.drive_id is not None:
+            return [
+                DeltaTarget(
+                    drive=drive(resolved.drive_id),
+                    folder="",
+                    virtual=f"{prefix}/{parts[0]}/{parts[1]}",
+                )
+            ]
+        if resolved.level == "root":
+            sites = await site_entries(accessor)
+        elif resolved.level == "site" and resolved.site_id is not None:
+            sites = [(parts[0], resolved.site_id)]
+        else:
+            raise enoent(root)
+        found: list[DeltaTarget] = []
+        for site, site_id in sites:
+            for name, drive_id in await drive_entries(accessor, site_id):
+                found.append(
+                    DeltaTarget(
+                        drive=drive(drive_id),
+                        folder="",
+                        virtual=f"{prefix}/{site}/{name}",
+                    )
+                )
+        return found
+
+    return GraphDeltaHook(config, accessor.pool, targets)

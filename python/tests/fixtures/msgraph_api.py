@@ -66,6 +66,11 @@ class FakeGraph:
       rewrite gets the old content.
     - A ``PUT`` to ``/content`` stores the body as a content write does.
       It is logged as ``upload``, never counted as a fetch.
+    - ``/root/delta`` lists, after a link's token, each path written,
+      touched or removed (a removed one with the ``deleted`` facet) with
+      its folders before it, and ``token=latest`` lists nothing. An item
+      id is its drive and path, so ``/items/{id}`` answers either. A
+      file was created at its first write; a folder is as it was made.
 
     Args:
         drives (dict): drive id (``me`` for OneDrive) to ``{path: bytes}``.
@@ -83,6 +88,8 @@ class FakeGraph:
     _rows: dict[tuple[str, str], _Row] = field(default_factory=dict)
     _seq: int = 0
     _on_bytes: Callable[[], None] | None = None
+    _changed: list[tuple[int, str, str]] = field(default_factory=list)
+    _created: dict[tuple[str, str], str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for drive, files in self.drives.items():
@@ -111,6 +118,8 @@ class FakeGraph:
         version = f"{len(versions) + 1}.0"
         versions.append({"id": version, "lastModifiedDateTime": stamp})
         history[version] = data
+        self._changed.append((n, drive, path))
+        self._created.setdefault((drive, path), stamp)
         self._rows[(drive, path)] = _Row(
             data=data,
             ctag=f"c{n}",
@@ -122,12 +131,15 @@ class FakeGraph:
 
     def remove(self, drive: str, path: str) -> None:
         self._rows.pop((drive, path))
+        self._created.pop((drive, path))
+        self._changed.append((self._mint(), drive, path))
 
     def touch(self, drive: str, path: str) -> None:
         row = self._rows[(drive, path)]
         n = self._mint()
         row.etag = f"e{n}"
         row.modified = f"2026-01-01T00:00:{n:02d}Z"
+        self._changed.append((n, drive, path))
 
     def ctag(self, drive: str, path: str) -> str:
         return self._rows[(drive, path)].ctag
@@ -147,6 +159,8 @@ class FakeGraph:
             item: dict[str, Any] = {
                 "id": f"{drive}:{path}",
                 "name": name,
+                "parentReference": _parent(drive, path),
+                "createdDateTime": self._created[(drive, path)],
                 "size": len(row.data),
                 "file": {},
                 "cTag": row.ctag,
@@ -171,7 +185,7 @@ class FakeGraph:
             for (d, p), r in self._rows.items()
             if d == drive and p.startswith(under)
         )
-        return {
+        folder: dict[str, Any] = {
             "id": f"{drive}:{path}/",
             "name": name or "root",
             "size": size,
@@ -180,6 +194,12 @@ class FakeGraph:
             "eTag": f"ef:{path}",
             "lastModifiedDateTime": "2026-01-01T00:00:00Z",
         }
+        if path:
+            folder["parentReference"] = _parent(drive, path)
+            folder["createdDateTime"] = folder["lastModifiedDateTime"]
+        else:
+            folder["root"] = {}
+        return folder
 
     def _children(self, drive: str, path: str) -> list[str]:
         under = path + "/" if path else ""
@@ -261,6 +281,17 @@ class FakeGraph:
     def _drive(
         self, request: web.Request, drive: str, rest: str, query: str
     ) -> web.StreamResponse:
+        if rest == "root/delta":
+            return self._delta(drive, request.query.get("token", ""), query)
+        if rest.startswith("items/"):
+            self.log.append(("item_by_id", rest, query))
+            found_drive, _, found = unquote(rest[len("items/") :]).partition(
+                ":"
+            )
+            item = self._item(found_drive, found.rstrip("/"), request)
+            if found_drive != drive or item is None:
+                return _error(404, "itemNotFound", "no such item")
+            return web.json_response(item)
         if rest == "root":
             path, action = "", ""
         elif rest == "root/children":
@@ -295,11 +326,31 @@ class FakeGraph:
             self.log.append(("version_content", path, query))
             version = action[len("/versions/") : -len("/content")]
             return self._bytes(request, drive, path, version)
-        if action == "/delta":
-            self.log.append(("delta", path, query))
-            self.reach.append("delta")
-            return web.json_response({"value": []})
         return self._unrouted(rest, query)
+
+    def _delta(self, drive: str, token: str, query: str) -> web.Response:
+        self.log.append(("delta", drive, query))
+        route = "me/drive" if drive == ME else f"drives/{quote(drive)}"
+        link = f"{self.url}/{route}/root/delta?token={self._seq}"
+        if token == "latest":
+            return web.json_response({"value": [], "@odata.deltaLink": link})
+        items: dict[str, dict[str, Any]] = {}
+        for n, d, path in self._changed:
+            if d != drive or n <= int(token):
+                continue
+            parts = path.split("/")
+            for depth in range(len(parts)):
+                folder = "/".join(parts[:depth])
+                item = self._item(drive, folder, None)
+                if item is not None:
+                    items.setdefault(item["id"], item)
+            row = self._item(drive, path, None)
+            gone = {"id": f"{drive}:{path}", "deleted": {}}
+            items.pop(f"{drive}:{path}", None)
+            items[f"{drive}:{path}"] = gone if row is None else row
+        return web.json_response(
+            {"value": list(items.values()), "@odata.deltaLink": link}
+        )
 
     def _bytes(
         self,
@@ -327,6 +378,11 @@ class FakeGraph:
             end = int(last) + 1 if last else len(data)
             return web.Response(status=206, body=data[int(first) : end])
         return web.Response(body=data)
+
+
+def _parent(drive: str, path: str) -> dict[str, str]:
+    folder = path.rsplit("/", 1)[0] if "/" in path else ""
+    return {"id": f"{drive}:{folder}/", "driveId": drive}
 
 
 def _error(status: int, code: str, message: str) -> web.Response:

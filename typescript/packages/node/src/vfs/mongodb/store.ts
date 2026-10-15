@@ -55,20 +55,7 @@ interface MongoCursorLike {
   [Symbol.asyncIterator]?: () => AsyncIterableIterator<Record<string, unknown>>
 }
 
-interface ChangeStreamLike {
-  tryNext: () => Promise<Record<string, unknown> | null>
-  resumeToken: unknown
-  close: () => Promise<void>
-}
-
-interface Watchable {
-  watch: (
-    pipeline: unknown[],
-    options: { showExpandedEvents: boolean; startAfter?: unknown },
-  ) => ChangeStreamLike
-}
-
-interface MongoDbLike extends Watchable {
+interface MongoDbLike {
   listCollections: (filter?: Record<string, unknown>) => {
     toArray: () => Promise<Record<string, unknown>[]>
   }
@@ -84,7 +71,7 @@ interface SnapshotCursor<T> {
   nextBatch?: T[]
 }
 
-interface MongoClientLike extends Watchable {
+interface MongoClientLike {
   connect: () => Promise<MongoClientLike>
   db: (name?: string) => MongoDbLike
   close: () => Promise<void>
@@ -230,31 +217,6 @@ export class MongoDBStore implements MongoDriver {
    * generator, so `return` closes the stream at once, ending a pull that waits
    * for the next insert, where a generator would queue behind that pull.
    */
-  async drainChanges(
-    database: string | null,
-    token: unknown,
-    limit: number,
-  ): Promise<[Record<string, unknown>[], unknown]> {
-    const c = await this._client()
-    const target: Watchable = database === null ? c : c.db(database)
-    const stream = target.watch([], {
-      showExpandedEvents: true,
-      ...(token === null ? {} : { startAfter: token }),
-    })
-    try {
-      const events: Record<string, unknown>[] = []
-      if (token === null) await stream.tryNext()
-      while (token !== null && events.length < limit) {
-        const event = await stream.tryNext()
-        if (event === null) break
-        events.push(event)
-      }
-      return [events, stream.resumeToken]
-    } finally {
-      await stream.close()
-    }
-  }
-
   iterInserts<T = Record<string, unknown>>(
     database: string,
     collection: string,

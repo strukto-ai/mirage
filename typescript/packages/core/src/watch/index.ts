@@ -13,10 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export type { DeltaHook } from './base.ts'
-export { ListingDeltaHook, specFor } from './delta.ts'
+export { specFor } from './delta.ts'
 export { eventAt, field, textField, virtualOf } from './events.ts'
-export { IncompleteWalkError } from './errors.ts'
-export { statFingerprint } from './fingerprint.ts'
 export { RAMWatchQueue } from './queue/index.ts'
 export { Watcher } from './watcher.ts'
-export { entryOf, ReaddirWalk, type WalkReaddirFn, synthDirs, type WalkStatFn } from './walk.ts'

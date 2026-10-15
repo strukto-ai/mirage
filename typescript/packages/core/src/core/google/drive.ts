@@ -324,6 +324,65 @@ function multipartRelated(
   return { body, contentType: `multipart/related; boundary=${boundary}` }
 }
 
+// What a change read names of each file: enough to place it on a Drive or app
+// mount and to tell a new file from an edited one.
+const CHANGE_FIELDS =
+  'nextPageToken,newStartPageToken,changes(changeType,fileId,removed,' +
+  'file(id,name,mimeType,driveId,createdTime,modifiedTime,parents,owners,trashed))'
+
+/** One entry of Drive's change feed. */
+export interface DriveChange {
+  changeType?: string
+  fileId?: string
+  removed?: boolean
+  file?: DriveFile
+}
+
+interface ChangesResponse {
+  changes?: DriveChange[]
+  nextPageToken?: string
+  newStartPageToken?: string
+}
+
+/**
+ * The changes page token at the present, which lists nothing. Mirrors Python
+ * `start_page_token`.
+ */
+export async function startPageToken(tm: TokenManager): Promise<string> {
+  const url = `${driveBase(tm)}/changes/startPageToken`
+  const data = (await googleGet(tm, url, { supportsAllDrives: 'true' })) as {
+    startPageToken: string
+  }
+  return data.startPageToken
+}
+
+/**
+ * Every change since `pageToken` across the account's drives, and the token
+ * the next read starts from. Mirrors Python `list_changes`.
+ */
+export async function listChanges(
+  tm: TokenManager,
+  pageToken: string,
+): Promise<[DriveChange[], string]> {
+  const url = `${driveBase(tm)}/changes`
+  const found: DriveChange[] = []
+  let token = pageToken
+  for (;;) {
+    const data = (await googleGet(tm, url, {
+      pageToken: token,
+      fields: CHANGE_FIELDS,
+      pageSize: 1000,
+      includeItemsFromAllDrives: 'true',
+      supportsAllDrives: 'true',
+    })) as ChangesResponse
+    found.push(...(data.changes ?? []))
+    if (data.newStartPageToken !== undefined && data.newStartPageToken !== '') {
+      return [found, data.newStartPageToken]
+    }
+    token = String(data.nextPageToken)
+  }
+}
+
 export async function getFile(tm: TokenManager, fileId: string): Promise<DriveFile> {
   const url = `${driveBase(tm)}/files/${fileId}`
   return (await googleGet(tm, url, {

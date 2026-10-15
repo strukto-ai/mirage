@@ -12,95 +12,98 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import Sequence
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.core.github.repo import ensure_ref
-from mirage.core.github.tree import fetch_tree, reseat_tree
-from mirage.types import PathSpec, WalkEntry
-from mirage.utils.key_prefix import mount_prefix_of
-from mirage.watch.base import DeltaHook
-from mirage.watch.delta import ListingDeltaHook
-from mirage.watch.errors import IncompleteWalkError
+from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
+from mirage.watch.events import event_at, field, text_field
+
+# The most commits GitHub lists in one push delivery; a push at the cap
+# may have lost some, so its paths are not the whole change.
+_COMMIT_CAP = 2048
+
+# The lists each pushed commit carries, and the change each one is.
+_ACTIONS = ("added", "removed", "modified")
 
 
-class GitHubWalk:
-    """One recursive git tree fetch feeding the generic listing differ.
+class GitHubEventHook:
+    """Map one GitHub ``push`` webhook delivery onto mount paths.
 
-    ``GET /git/trees/{ref}?recursive=1`` returns every path in the
-    repository with its object sha, so a pull is one request whatever
-    the repository's shape, and the fingerprint is the sha itself.
-    That is the strongest fingerprint any mirage backend has: git is
-    content-addressed, so identical bytes have an identical sha and a
-    rewrite that changes nothing correctly reports nothing.
+    The consumer owns the receiver (a repository webhook for ``push``)
+    and passes the event name from the ``X-GitHub-Event`` header with
+    the JSON body. Nothing here runs a loop. A mount reads one ref of
+    one repository, so only a push to that ref maps to anything; a mount
+    that named no ref follows the default branch the payload names.
 
-    A mount is pinned to one ref, so what this detects is that ref
-    moving. Nothing is reported while the branch sits still, however
-    much is pushed elsewhere in the repository.
+    Each pushed commit lists the paths it added, removed and modified,
+    so a path's change is its first and last action across the push: one
+    added and then removed within the push never existed outside it and
+    maps to nothing. A forced push, a branch created or deleted, and a
+    push at GitHub's commit cap do not say what changed between the old
+    head and the new one, so the whole mount is UNKNOWN. Each event
+    evicts the root listing above it, so the next read fetches the new
+    head's tree.
     """
 
     def __init__(self, accessor: GitHubAccessor) -> None:
         """Args:
-        accessor (GitHubAccessor): Backend handle.
+        accessor (GitHubAccessor): Backend handle, read for its
+            repository and ref.
         """
         self._accessor = accessor
 
-    async def __call__(self, root: PathSpec) -> AsyncIterator[WalkEntry]:
-        """Yield every entry under ``root``.
+    async def to_events(
+        self, root: PathSpec, event_name: str, payload: JsonValue
+    ) -> Sequence[FileEvent]:
+        """Map one push delivery to the changes it implies.
 
         Args:
-            root (PathSpec): Watch root (mount-virtual path).
-
-        Raises:
-            IncompleteWalkError: The repository is large enough that
-                GitHub truncated the recursive tree, so the listing is
-                not a complete picture of the ref and diffing it would
-                report every unlisted path as deleted.
+            root (PathSpec): Any path on this mount, read for its prefix.
+            event_name (str): The ``X-GitHub-Event`` header.
+            payload (JsonValue): The delivery's JSON body.
         """
+        if event_name != "push":
+            return ()
         accessor = self._accessor
-        prefix = mount_prefix_of(root.virtual, root.vfs_path)
-        ref = await ensure_ref(accessor)
-        tree, truncated, head = await fetch_tree(
-            accessor.config, accessor.owner, accessor.repo, ref, accessor.pool
-        )
-        if truncated:
-            raise IncompleteWalkError(
-                f"github tree for {accessor.owner}/{accessor.repo}"
-                f"@{ref} was truncated; cannot diff a partial tree"
+        repository = field(payload, "repository")
+        name = text_field(repository, "full_name") or ""
+        if name.lower() != f"{accessor.owner}/{accessor.repo}".lower():
+            return ()
+        ref = accessor.ref or text_field(repository, "default_branch")
+        if text_field(payload, "ref") not in (
+            f"refs/heads/{ref}",
+            f"refs/tags/{ref}",
+        ):
+            return ()
+        commits = field(payload, "commits")
+        if (
+            any(
+                field(payload, flag) is True
+                for flag in ("forced", "created", "deleted")
             )
-        # A complete tree for the ref is exactly what the accessor holds,
-        # and find/du/grep's scope counter read it directly. Discarding it
-        # here left them answering from the tree the mount was built with
-        # until an unrelated read happened to refill the index, so a pull
-        # that reported a CREATE was followed by a find that could not see
-        # the file. It carries the head it was walked at, so a walker can
-        # tell it from the tree the index was filled with.
-        reseat_tree(accessor, tree, truncated, head)
-        stem = root.mount_path.strip("/")
-        base = (stem + "/") if stem else ""
-        for entry in tree.values():
-            if base and not entry.path.startswith(base):
+            or not isinstance(commits, list)
+            or len(commits) >= _COMMIT_CAP
+        ):
+            return (event_at(root, "", FileChangeKind.UNKNOWN),)
+        first: dict[str, str] = {}
+        last: dict[str, str] = {}
+        for commit in commits:
+            for action in _ACTIONS:
+                paths = field(commit, action)
+                for path in paths if isinstance(paths, list) else ():
+                    if isinstance(path, str):
+                        first.setdefault(path, action)
+                        last[path] = action
+        events: list[FileEvent] = []
+        for path, action in first.items():
+            if action == "added" and last[path] == "removed":
                 continue
-            virtual = (
-                prefix.rstrip("/") + "/" + entry.path
-                if prefix
-                else "/" + entry.path
+            kind = (
+                FileChangeKind.CREATE
+                if action == "added"
+                else FileChangeKind.DELETE
+                if last[path] == "removed"
+                else FileChangeKind.UPDATE
             )
-            if entry.type == "tree":
-                yield WalkEntry(virtual=virtual, is_dir=True, fingerprint=None)
-                continue
-            yield WalkEntry(
-                virtual=virtual,
-                is_dir=False,
-                fingerprint=entry.sha,
-                size=entry.size,
-            )
-
-
-def build_delta_hook(accessor: GitHubAccessor) -> DeltaHook:
-    """Build the GitHub delta hook.
-
-    Args:
-        accessor (GitHubAccessor): Backend handle.
-    """
-    return ListingDeltaHook(GitHubWalk(accessor))
+            events.append(event_at(root, path, kind))
+        return tuple(events)

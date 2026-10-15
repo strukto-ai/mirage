@@ -13,175 +13,98 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.api import (
-    continue_folder,
-    list_folder,
-    list_folder_state,
-)
+from mirage.core.dropbox.api import continue_folder, latest_cursor
 from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.types import Delta, PathSpec, WalkEntry
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.types import Delta, FileChangeKind, PathSpec
 from mirage.watch.base import DeltaHook
-from mirage.watch.constants import DIR_FINGERPRINT
-from mirage.watch.delta import ListingDeltaHook, diff_snapshots
-from mirage.watch.fingerprint import stat_fingerprint
+from mirage.watch.delta import changes_under
+from mirage.watch.events import virtual_of
 
-_NATIVE = 1
-
-
-class DropboxWalk:
-    """One recursive ``list_folder`` feeding the generic listing differ.
-
-    Reads the account directly, never through mirage's caches, as the
-    DeltaHook contract requires.
-
-    Fingerprints on ``content_hash``, Dropbox's own content digest, so
-    an upload of identical bytes is correctly reported as no change;
-    ``rev`` is the fallback, and it moves on any write.
-
-    Dropbox also offers a cursor: the same endpoint returns one, and
-    ``list_folder/continue`` replays only what changed since. That is a
-    faster pull, not a more correct one, and it cannot replace this
-    walk, because the server may invalidate a cursor at any time and
-    the only answer to that is a full listing. ``DropboxDeltaHook``
-    uses the cursor behind ``pull`` and this walk as its reset path.
-    """
-
-    def __init__(self, accessor: DropboxAccessor) -> None:
-        """Args:
-        accessor (DropboxAccessor): Backend handle.
-        """
-        self._accessor = accessor
-
-    async def __call__(self, root: PathSpec) -> AsyncIterator[WalkEntry]:
-        """Yield every entry under ``root``.
-
-        Args:
-            root (PathSpec): Watch root (mount-virtual path).
-        """
-        accessor = self._accessor
-        api_root = dropbox_path_of(accessor, root)
-        try:
-            found = await list_folder(
-                accessor.token_manager, api_root, recursive=True
-            )
-        except DropboxApiError as exc:
-            # list_folder 409s on a missing path and on a file operand;
-            # either way there is nothing under this root to report.
-            if exc.status == 409:
-                return
-            raise
-        for raw in found:
-            framed = _frame(accessor, root, raw)
-            if framed is None or raw.get(".tag") == "deleted":
-                continue
-            yield framed[1]
+logger = logging.getLogger(__name__)
 
 
 def _is_reset(exc: DropboxApiError) -> bool:
     return exc.status == 409 and exc.summary.startswith("reset")
 
 
-def _frame(
-    accessor: DropboxAccessor, root: PathSpec, entry: dict[str, Any]
-) -> tuple[str, WalkEntry] | None:
-    """Map one Dropbox listing row onto a watch-root WalkEntry.
+def _relative_of(
+    accessor: DropboxAccessor, entry: dict[str, Any]
+) -> str | None:
+    """A listing row's mount-relative path, or None for the mount root.
 
     Dropbox paths are case-insensitive: ``path_display`` carries the
-    server's casing while ``root_path`` carries the user's, so a
-    configured ``/team`` whose displayed path is ``/Team`` matched
-    nothing and every event landed outside the watch scope. The
-    comparison folds case; the slice keeps the server's casing for
-    everything below the root, and is safe because ``path_lower`` is
-    ``path_display`` lowercased, same length.
+    server's casing while ``root_path`` carries the user's, so the root
+    is stripped case-folded and the rest keeps the server's casing,
+    which is safe because ``path_lower`` is ``path_display`` lowercased,
+    same length.
+
+    Args:
+        accessor (DropboxAccessor): Backend handle, read for its root.
+        entry (dict[str, Any]): One ``list_folder/continue`` row.
     """
-    prefix = mount_prefix_of(root.virtual, root.vfs_path)
     display = entry.get("path_display") or entry.get("path_lower")
     if not display:
         return None
     base = accessor.root_path
-    folded = base.lower()
     relative = (
         display[len(base) :]
-        if base and display.lower().startswith(folded)
+        if base and display.lower().startswith(base.lower())
         else display
     )
-    relative = relative.strip("/")
-    if not relative:
-        return None
-    virtual = prefix.rstrip("/") + "/" + relative if prefix else "/" + relative
-    if entry.get(".tag") == "folder":
-        return virtual, WalkEntry(
-            virtual=virtual, is_dir=True, fingerprint=None
-        )
-    if entry.get(".tag") == "deleted":
-        return virtual, WalkEntry(
-            virtual=virtual, is_dir=False, fingerprint=None
-        )
-    modified = (
-        entry.get("server_modified") or entry.get("client_modified") or None
-    )
-    size = entry.get("size")
-    size = size if isinstance(size, int) else None
-    version = entry.get("content_hash") or entry.get("rev")
-    return virtual, WalkEntry(
-        virtual=virtual,
-        is_dir=False,
-        fingerprint=stat_fingerprint(version, modified, size),
-        size=size,
-        modified=modified,
-    )
+    return relative.strip("/") or None
 
 
-def _encode(cursor: str, snapshot: dict[str, str]) -> str:
+def _encode(cursor: str, seen: dict[str, str]) -> str:
     return json.dumps(
-        {"_dbx": _NATIVE, "c": cursor, "s": snapshot}, sort_keys=True
+        {"dropbox": {"cursor": cursor, "seen": seen}}, sort_keys=True
     )
 
 
-def _decode(
-    checkpoint: str | None,
-) -> tuple[str | None, dict[str, str] | None, bool]:
-    """Return (cursor, snapshot, native).
+def _decode(checkpoint: str | None) -> tuple[str, dict[str, str]] | None:
+    """The cursor and seen paths a checkpoint holds, None for a baseline.
 
-    A listing-era JSON snapshot has no cursor. A native checkpoint
-    carries both the server cursor and the last applied snapshot so
-    continue rows can be classified as CREATE, UPDATE, or DELETE.
+    Args:
+        checkpoint (str | None): What the previous pull handed out.
     """
     if checkpoint is None:
-        return None, None, False
-    data = json.loads(checkpoint)
-    if isinstance(data, dict) and data.get("_dbx") == _NATIVE:
-        snap = data.get("s")
-        cursor = data.get("c")
-        if isinstance(snap, dict) and isinstance(cursor, str):
-            return cursor, snap, True
-    if isinstance(data, dict):
-        return None, data, False
-    return None, None, False
+        return None
+    state = json.loads(checkpoint).get("dropbox") or {}
+    seen = state.get("seen") or {}
+    return str(state.get("cursor") or ""), {
+        str(k): str(v) for k, v in seen.items()
+    }
 
 
-def _drop_prefix(snapshot: dict[str, str], virtual: str) -> None:
-    prefix = virtual.rstrip("/") + "/"
-    for key in list(snapshot):
-        if key == virtual or key.startswith(prefix):
-            del snapshot[key]
+def _drop_below(seen: dict[str, str], relative: str) -> None:
+    for key in [
+        k for k in seen if k == relative or k.startswith(relative + "/")
+    ]:
+        del seen[key]
 
 
 class DropboxDeltaHook:
-    """Native Dropbox cursor pull, with the listing walk as reset.
+    """What changed under a Dropbox watch root since the last cursor, for
+    the consumer to call when Dropbox pings.
 
-    ``checkpoint`` is opaque. A native checkpoint stores the server
-    cursor plus the last applied snapshot so continue rows classify
-    the same way a listing diff would. A listing-era snapshot is
-    accepted once, then upgraded. ``path/reset`` falls back to a
-    full listing and a new cursor.
+    Dropbox's push (a webhook, or ``list_folder/longpoll`` answering
+    ``changes``) names only the account, so each ping is answered by one
+    ``list_folder/continue`` from the stored cursor. A baseline takes a
+    cursor at the present with ``get_latest_cursor`` and lists nothing.
+
+    A row names its path, so a delete is a DELETE where it was, and a
+    move is its old path deleted and its new rows. A row does not say
+    whether a file was made or replaced, so the checkpoint keeps each
+    path a pull has reported with its ``content_hash``: a path seen
+    before is an UPDATE, or nothing when its content did not change, and
+    any other is a CREATE. A cursor Dropbox resets answers UNKNOWN on
+    the watch root and a fresh cursor; a root Dropbox cannot find has no
+    cursor, and the pull that finds it again reports the root UNKNOWN.
     """
 
     def __init__(self, accessor: DropboxAccessor) -> None:
@@ -189,111 +112,80 @@ class DropboxDeltaHook:
         accessor (DropboxAccessor): Backend handle.
         """
         self._accessor = accessor
-        self._listing = ListingDeltaHook(DropboxWalk(accessor))
 
-    async def _snapshot(
-        self, root: PathSpec
-    ) -> tuple[dict[str, str], dict[str, WalkEntry], str]:
-        accessor = self._accessor
-        api_root = dropbox_path_of(accessor, root)
-        try:
-            found, cursor = await list_folder_state(
-                accessor.token_manager, api_root, recursive=True
-            )
-        except DropboxApiError as exc:
-            if exc.status == 409:
-                return {}, {}, ""
-            raise
-        snapshot: dict[str, str] = {}
-        entries: dict[str, WalkEntry] = {}
-        for raw in found:
-            framed = _frame(accessor, root, raw)
-            if framed is None or raw.get(".tag") == "deleted":
-                continue
-            virtual, entry = framed
-            entries[virtual] = entry
-            snapshot[virtual] = (
-                DIR_FINGERPRINT if entry.is_dir else entry.fingerprint or ""
-            )
-        return snapshot, entries, cursor
-
-    async def _relist(
-        self,
-        root: PathSpec,
-        previous: dict[str, str] | None,
-        observed: datetime,
-    ) -> Delta:
-        """List ``root`` afresh and answer with a new native cursor.
-
-        A root Dropbox refuses leaves ``_snapshot`` with no cursor at
-        all, and an empty one must never be encoded: the cursor
-        ``list_folder/continue`` takes is at least one character, so a
-        native checkpoint carrying "" makes every later pull fail on the
-        refusal and the listing is never reached again, even once the
-        root is back. The walk answers that case instead, and the
-        listing checkpoint it hands out is upgraded by the next pull
-        that finds a cursor.
+    async def _latest(self, root: PathSpec) -> str:
+        """A cursor at the root's present, "" when Dropbox cannot find it.
 
         Args:
             root (PathSpec): Watch root.
-            previous (dict[str, str] | None): Last applied snapshot, or
-                None for a baseline.
-            observed (datetime): Timestamp carried by every event.
         """
-        snapshot, entries, cursor = await self._snapshot(root)
-        if not cursor:
-            return await self._listing.pull(
-                root,
-                None
-                if previous is None
-                else json.dumps(previous, sort_keys=True),
+        accessor = self._accessor
+        try:
+            return await latest_cursor(
+                accessor.token_manager,
+                dropbox_path_of(accessor, root),
+                recursive=True,
             )
-        changes = (
-            ()
-            if previous is None
-            else diff_snapshots(root, previous, snapshot, entries, observed)
-        )
-        return Delta(changes=changes, checkpoint=_encode(cursor, snapshot))
+        except DropboxApiError as exc:
+            if exc.status != 409:
+                raise
+            logger.debug("dropbox watch root has no cursor: %s", exc)
+            return ""
 
     async def pull(self, root: PathSpec, checkpoint: str | None) -> Delta:
-        """Pull changes under ``root`` since ``checkpoint``.
+        """Return the changes under ``root`` since ``checkpoint``.
 
         Args:
             root (PathSpec): Watch root.
-            checkpoint (str | None): Native cursor snapshot, a listing
-                JSON snapshot, or None for a baseline.
+            checkpoint (str | None): The previous pull's state, or None
+                for a baseline.
         """
-        cursor, previous, native = _decode(checkpoint)
+        state = _decode(checkpoint)
         observed = datetime.now(timezone.utc)
-        if not native:
-            return await self._relist(root, previous, observed)
+        lost = [(FileChangeKind.UNKNOWN, root.virtual)]
+        if state is None:
+            return Delta((), _encode(await self._latest(root), {}))
+        cursor, seen = state
+        if not cursor:
+            cursor = await self._latest(root)
+            changes = changes_under(root, lost, observed) if cursor else []
+            return Delta(tuple(changes), _encode(cursor, {}))
         try:
-            found, next_cursor = await continue_folder(
-                self._accessor.token_manager, cursor or ""
+            rows, cursor = await continue_folder(
+                self._accessor.token_manager, cursor
             )
         except DropboxApiError as exc:
-            if _is_reset(exc):
-                return await self._relist(root, previous, observed)
-            raise
-        snapshot = dict(previous or {})
-        applied: dict[str, WalkEntry] = {}
-        for raw in found:
-            framed = _frame(self._accessor, root, raw)
-            if framed is None:
-                continue
-            virtual, entry = framed
-            applied[virtual] = entry
-            if raw.get(".tag") == "deleted":
-                _drop_prefix(snapshot, virtual)
-                continue
-            snapshot[virtual] = (
-                DIR_FINGERPRINT if entry.is_dir else entry.fingerprint or ""
+            if not _is_reset(exc):
+                raise
+            logger.debug("dropbox cursor reset: %s", exc)
+            fresh = await self._latest(root)
+            return Delta(
+                tuple(changes_under(root, lost, observed)), _encode(fresh, {})
             )
+        found: list[tuple[FileChangeKind, str]] = []
+        for row in rows:
+            relative = _relative_of(self._accessor, row)
+            if relative is None:
+                continue
+            virtual = virtual_of(root, relative)
+            tag = row.get(".tag")
+            if tag == "deleted":
+                _drop_below(seen, relative)
+                found.append((FileChangeKind.DELETE, virtual))
+                continue
+            version = (
+                ""
+                if tag == "folder"
+                else str(row.get("content_hash") or row.get("rev") or "")
+            )
+            previous = seen.get(relative)
+            seen[relative] = version
+            if previous is None:
+                found.append((FileChangeKind.CREATE, virtual))
+            elif previous != version:
+                found.append((FileChangeKind.UPDATE, virtual))
         return Delta(
-            changes=diff_snapshots(
-                root, previous or {}, snapshot, applied, observed
-            ),
-            checkpoint=_encode(next_cursor, snapshot),
+            tuple(changes_under(root, found, observed)), _encode(cursor, seen)
         )
 
 

@@ -17,11 +17,7 @@ import pytest
 from mirage.core.onedrive.watch import build_delta_hook
 from mirage.types import FileChangeKind, PathSpec
 from mirage.vfs.registry import build_vfs
-from mirage.watch.fingerprint import stat_fingerprint
 from tests.fixtures.msgraph_api import ME, FakeGraph, serve
-
-OLD = b"one\n"
-NEW = b"two, longer\n"
 
 
 def _accessor(graph: FakeGraph):
@@ -31,29 +27,26 @@ def _accessor(graph: FakeGraph):
 
 
 @pytest.mark.asyncio
-async def test_a_metadata_edit_reports_nothing_and_a_write_reports_one_update():
-    with serve(FakeGraph(drives={ME: {"a.txt": OLD}})) as graph:
+async def test_the_feed_places_items_by_their_parents():
+    with serve(FakeGraph(drives={ME: {"a.txt": b"one\n"}})) as graph:
         accessor = _accessor(graph)
         hook = build_delta_hook(accessor)
         root = PathSpec.from_str_path("/")
         try:
             baseline = await hook.pull(root, None)
-            # The walk stats each file from the listing it just made; that
-            # row has to carry the cTag, or the fingerprint falls back to
-            # the modified stamp, which a rename or property edit moves.
+            graph.write(ME, "sub/b.txt", b"two\n")
             graph.touch(ME, "a.txt")
-            touched = await hook.pull(root, baseline.checkpoint)
-            graph.write(ME, "a.txt", NEW)
-            written = await hook.pull(root, touched.checkpoint)
+            first = await hook.pull(root, baseline.checkpoint)
+            graph.remove(ME, "a.txt")
+            second = await hook.pull(root, first.checkpoint)
         finally:
             await accessor.close()
     assert baseline.changes == ()
-    assert touched.changes == ()
-    assert [(e.kind, e.path.virtual) for e in written.changes] == [
-        (FileChangeKind.UPDATE, "/a.txt")
+    assert [(e.kind, e.path.virtual) for e in first.changes] == [
+        (FileChangeKind.CREATE, "/sub"),
+        (FileChangeKind.CREATE, "/sub/b.txt"),
+        (FileChangeKind.UPDATE, "/a.txt"),
     ]
-    metadata = written.changes[0].metadata
-    assert metadata is not None
-    assert metadata.fingerprint == stat_fingerprint(
-        graph.ctag(ME, "a.txt"), metadata.modified, len(NEW)
-    )
+    assert [(e.kind, e.path.virtual) for e in second.changes] == [
+        (FileChangeKind.DELETE, "/a.txt")
+    ]

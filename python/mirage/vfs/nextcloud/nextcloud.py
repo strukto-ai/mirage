@@ -23,13 +23,11 @@ from mirage.core.nextcloud.stat import tree as _tree
 from mirage.core.nextcloud.stream import read_stream as _read_stream
 from mirage.core.nextcloud.truncate import truncate as _truncate
 from mirage.core.nextcloud.unlink import unlink as _unlink
-from mirage.core.nextcloud.watch import build_delta_hook
 from mirage.core.nextcloud.write import write as _write
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.nextcloud.config import NextcloudConfig
 from mirage.vfs.nextcloud.prompt import PROMPT
-from mirage.watch.base import DeltaHook
 
 
 class NextcloudVFS(BaseVFS):
@@ -154,9 +152,6 @@ class NextcloudVFS(BaseVFS):
 
     async def capacity(self) -> CapacityResult:
         return await _capacity(self.accessor)
-
-    def delta_hook(self) -> DeltaHook:
-        return build_delta_hook(self.accessor)
 
     def storage_location(self) -> str:
         # The server and the user pin the WebDAV tree two mounts would

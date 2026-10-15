@@ -32,7 +32,6 @@ export function stubMongoDriver(overrides: Partial<MongoDriver> = {}): MongoDriv
     iterDocuments: () => emptyAsyncIter(),
     findSnapshot: () => Promise.resolve([[], null]),
     iterInserts: () => emptyAsyncIter(),
-    drainChanges: () => Promise.resolve([[], null]),
     countDocuments: () => Promise.resolve(0),
     listIndexes: () => Promise.resolve([]),
     close: () => Promise.resolve(),

@@ -61,7 +61,8 @@ class WatchRegistry(Protocol):
 
 
 class DeltaHook(Protocol):
-    """Checkpointed delta pull for one watch root.
+    """Checkpointed delta pull for one watch root, run when the backend
+    pings.
 
     Contract: ``pull`` reads the backend directly and must not read
     through mirage's caches; a hook that consults the read/index cache
