@@ -24,9 +24,9 @@ it('sends buffered subjects ahead and keeps the invocation worker between files'
 })
 
 it('answers a subject before a slow one sent behind it', async () => {
-  const pattern = new AsyncRegex(/ok|^(a+)+$/)
+  const pattern = new AsyncRegex(/ok|(a|b)*(a|b)*$/)
   try {
-    await pattern.prepare('ok', () => ['a'.repeat(40) + '!'])
+    await pattern.prepare('ok', () => ['a'.repeat(10_000) + '!'])
     expect(pattern.search('ok')).not.toBeNull()
   } finally {
     await pattern.close()

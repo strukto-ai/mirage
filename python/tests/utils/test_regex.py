@@ -34,10 +34,10 @@ async def test_buffered_subjects_go_ahead_on_the_invocation_worker(
 
 @pytest.mark.asyncio
 async def test_a_slow_subject_sent_ahead_does_not_hold_back_the_current_one():
-    pattern = AsyncRegex(re.compile("ok|^(a+)+$"))
+    pattern = AsyncRegex(re.compile("ok|(a|b)*(a|b)*$"))
     try:
         async with asyncio.timeout(10):
-            await pattern.prepare("ok", lambda: ["a" * 40 + "!"])
+            await pattern.prepare("ok", lambda: ["a" * 10_000 + "!"])
         assert pattern.search("ok") is not None
     finally:
         await pattern.close()
