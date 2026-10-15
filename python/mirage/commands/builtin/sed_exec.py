@@ -324,6 +324,7 @@ class SedMachine:
         self._inputs: list[SedInput] = []
         self._file_idx = 0
         self._next_line: _InputLine | None = None
+        self._broken: SedPanic | None = None
         self._file_name = "-"
         self._reset_at_next_file = True
         self._line_number = 0
@@ -369,6 +370,7 @@ class SedMachine:
         self._inputs = inputs
         self._file_idx = 0
         self._next_line = None
+        self._broken = None
         self._reset_at_next_file = True
         try:
             while not self.stopped():
@@ -419,33 +421,36 @@ class SedMachine:
         self._next_line = None
         return True
 
-    async def _more(self, ignore_fatal: bool = False) -> bool:
+    async def _more(self, peek: bool = False) -> bool:
         """Read this operand's next line ahead; whether there is one.
 
-        A failed operand goes GNU sed 4.9's two ways. One that never
-        opens (a missing file) is reported, exit 2, and the run reads on.
-        One that opens and then fails to read (a directory, or a read that
-        breaks off) panics, exit 4, and nothing after it is read, except
-        by the look-ahead of ``$``, ``n`` and ``N``, which finds no data
-        there and goes on.
+        A failed operand goes GNU sed 4.9's ways. One that never opens (a
+        missing file) is reported, exit 2, and the run reads on. One that
+        opens and then fails to read (a directory, or a read that breaks
+        off) panics, exit 4. The look-ahead of ``$``, ``n`` and ``N``
+        only peeks for one more byte: a read that fails before giving one
+        reads as the operand's end, and one that gave bytes first says
+        there is more and leaves the panic to the read that takes them.
 
         Args:
-            ignore_fatal (bool): looking ahead, where a read error ends
-                the operand quietly.
+            peek (bool): looking ahead rather than reading the line.
         """
         if self._next_line is not None:
             return True
+        if self._broken is not None:
+            if peek:
+                return True
+            raise self._broken
         if self._reader is None:
             return False
+        start = self._reader.loaded
         try:
             raw, chomped = await self._reader.read_until(b"\n")
         except FS_ERRORS as exc:
-            opened = self._reader.loaded > 0 or isinstance(
-                exc, IsADirectoryError
-            )
+            loaded = self._reader.loaded
             await self._reader.discard()
             self._reader = None
-            if not opened:
+            if not loaded and not isinstance(exc, IsADirectoryError):
                 self.stderr_lines.append(
                     fs_error_line(
                         "sed", PathSpec.from_str_path(self._file_name), exc
@@ -454,11 +459,16 @@ class SedMachine:
                 self.bad_code = max(
                     self.bad_code, read_fail_exit_code("sed", exc)
                 )
-            elif not ignore_fatal:
-                name = "stdin" if self._file_name == "-" else self._file_name
-                raise SedPanic(
-                    f"sed: read error on {name}: {fs_strerror(exc) or exc}\n"
-                ) from exc
+                return False
+            name = "stdin" if self._file_name == "-" else self._file_name
+            panic = SedPanic(
+                f"sed: read error on {name}: {fs_strerror(exc) or exc}\n"
+            )
+            if not peek:
+                raise panic from exc
+            if loaded > start:
+                self._broken = panic
+                return True
             return False
         if raw or chomped:
             self._next_line = _InputLine(
@@ -495,12 +505,12 @@ class SedMachine:
         neither has any later one. The later operands are opened on the
         way, so their errors are reported now.
         """
-        if await self._more():
+        if await self._more(peek=True):
             return False
         if self.opts.separate:
             return True
         while self._open_next_file():
-            if await self._more(ignore_fatal=True):
+            if await self._more(peek=True):
                 return False
         return True
 

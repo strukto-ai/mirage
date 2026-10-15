@@ -203,6 +203,7 @@ export class SedMachine {
   private inputs: SedInput[] = []
   private fileIdx = 0
   private nextLine: InputLine | undefined
+  private broken: SedPanic | undefined
   private fileName = '-'
   private resetAtNextFile = true
   private lineNumber = 0
@@ -258,6 +259,7 @@ export class SedMachine {
     this.inputs = inputs
     this.fileIdx = 0
     this.nextLine = undefined
+    this.broken = undefined
     this.resetAtNextFile = true
     try {
       while (!this.stopped()) {
@@ -311,29 +313,43 @@ export class SedMachine {
   /**
    * Read this operand's next line ahead; whether there is one.
    *
-   * A failed operand goes GNU sed 4.9's two ways. One that never opens (a
+   * A failed operand goes GNU sed 4.9's ways. One that never opens (a
    * missing file) is reported, exit 2, and the run reads on. One that opens
    * and then fails to read (a directory, or a read that breaks off) panics,
-   * exit 4, and nothing after it is read, except by the look-ahead of `$`,
-   * `n` and `N` (`ignoreFatal`), which finds no data there and goes on.
+   * exit 4. The look-ahead of `$`, `n` and `N` (`peek`) only peeks for one
+   * more byte: a read that fails before giving one reads as the operand's
+   * end, and one that gave bytes first says there is more and leaves the
+   * panic to the read that takes them.
    */
-  private async more(ignoreFatal = false): Promise<boolean> {
+  private async more(peek = false): Promise<boolean> {
     if (this.nextLine !== undefined) return true
+    if (this.broken !== undefined) {
+      if (peek) return true
+      throw this.broken
+    }
     if (this.reader === undefined) return false
+    const start = this.reader.loaded
     let raw: Uint8Array, chomped: boolean
     try {
       ;[raw, chomped] = await this.reader.readUntil(10, this.signal)
     } catch (error) {
       if (!isFsError(error)) throw error
-      const opened = this.reader.loaded > 0 || isEisdir(error)
+      const loaded = this.reader.loaded
       await this.reader.discard()
       this.reader = undefined
-      if (!opened) {
+      if (loaded === 0 && !isEisdir(error)) {
         this.stderrLines.push(fsErrorLine('sed', PathSpec.fromStrPath(this.fileName), error))
         this.badCode = Math.max(this.badCode, readFailExitCode('sed', error))
-      } else if (!ignoreFatal) {
-        const name = this.fileName === '-' ? 'stdin' : this.fileName
-        throw new SedPanic(`sed: read error on ${name}: ${fsStrerror(error) ?? String(error)}\n`)
+        return false
+      }
+      const name = this.fileName === '-' ? 'stdin' : this.fileName
+      const panic = new SedPanic(
+        `sed: read error on ${name}: ${fsStrerror(error) ?? String(error)}\n`,
+      )
+      if (!peek) throw panic
+      if (loaded > start) {
+        this.broken = panic
+        return true
       }
       return false
     }
@@ -368,7 +384,7 @@ export class SedMachine {
   // and, unless files are separate, neither has any later one. The later
   // operands are opened on the way, so their errors are reported now.
   private async testEof(): Promise<boolean> {
-    if (await this.more()) return false
+    if (await this.more(true)) return false
     if (this.opts.separate) return true
     while (this.openNextFile()) {
       if (await this.more(true)) return false

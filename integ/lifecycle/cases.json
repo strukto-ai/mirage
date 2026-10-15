@@ -5003,6 +5003,28 @@
           }
         },
         {
+          "op": "exec",
+          "command": "sed -n '$p' /data/good /data/half",
+          "expect": {
+            "value": {
+              "exit_code": 4,
+              "stdout": "",
+              "stderr": "sed: read error on /data/half: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "sed -n '$p' /data/denied",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "first,x\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
           "op": "drain_processes"
         },
         {
@@ -5010,7 +5032,7 @@
           "path": "/data",
           "expect": {
             "value": {
-              "closed": 8
+              "closed": 10
             }
           }
         },
