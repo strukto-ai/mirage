@@ -335,6 +335,14 @@
                   "python/agents/pydantic-ai",
                   "python/agents/haystack"
                 ]
+              },
+              {
+                "group": "API & Environment",
+                "icon": "cloud",
+                "pages": [
+                  "python/agents/openai-agents-api",
+                  "python/agents/claude-managed-agents"
+                ]
               }
             ]
           },
@@ -529,6 +537,14 @@
                   "typescript/agents/claude-agent-sdk",
                   "typescript/agents/openai",
                   "typescript/agents/langchain"
+                ]
+              },
+              {
+                "group": "API & Environment",
+                "icon": "cloud",
+                "pages": [
+                  "typescript/agents/openai-agents-api",
+                  "typescript/agents/claude-managed-agents"
                 ]
               }
             ]

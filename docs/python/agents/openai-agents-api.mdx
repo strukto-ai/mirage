@@ -1,0 +1,80 @@
+---
+title: OpenAI Agents API
+description: Make a Mirage workspace the self-hosted environment of an agent on OpenAI's Agents API.
+icon: /images/openai-logo.svg
+---
+
+OpenAI's [Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) runs the agent on OpenAI's servers. With a `self_hosted` environment, its shell commands, file reads and patches run in a Mirage workspace, under the workspace's profile and mount modes. No sandbox holds the files.
+
+```text
+Agents API  ->  codex exec-server forward  ->  mirage codex-exec  ->  Mirage server
+```
+
+`codex exec-server forward` keeps the encrypted connection to OpenAI and passes each call on. It runs nothing itself. `mirage codex-exec` logs it in to the server with the CLI's token.
+
+## Install
+
+```bash
+uv tool install 'mirage-ai[ssh]'
+npm install -g @openai/codex@alpha
+uv add openai
+```
+
+The server's codex-exec route needs the `ssh` extra.
+
+## Workspace
+
+OpenAI's examples work in `/workspace`:
+
+```yaml workspace.yaml
+mode: write
+mounts:
+  /workspace:
+    vfs: ram
+  /data:
+    vfs: s3
+    mode: read
+    config:
+      bucket: my-bucket
+```
+
+```bash
+mirage workspace create workspace.yaml --id demo
+```
+
+## Create a session
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+session = client.beta.agents.sessions.create(
+    agent={"model": "gpt-6-astra"},
+    environment={"type": "self_hosted", "workspace_directory": "/workspace"},
+)
+print(session.environment.id, session.environment.remote_url)
+```
+
+## Connect the workspace
+
+Serve the workspace on a local port, then point forward at it with the session's environment and an [environment key](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted#authentication):
+
+```bash
+mirage codex-exec demo --listen 127.0.0.1:8790
+```
+
+```bash
+CODEX_API_KEY="$OPENAI_EXECUTOR_API_KEY" codex exec-server forward \
+  --connect ws://127.0.0.1:8790 \
+  --remote "$REMOTE_URL" \
+  --environment-id "$ENVIRONMENT_ID"
+```
+
+Then [send input](https://developers.openai.com/api/docs/guides/agents-api/sessions#send-input) to the session. The agent's commands run in workspace `demo`, and what it writes lands in its mounts.
+
+## How it behaves
+
+- Each connection runs in a fresh session under the workspace's default profile, closed when the connection ends. A reconnect starts a new session; the files stay.
+- `mirage codex-exec` lets in any connection on its port, as you. Keep it on loopback.
+- On a hosted server, run [`mirage login`](/home/access/cli#log-in) first; the relay sends that token.
+- The Agents API is in beta, and the protocol follows Codex 0.147, as Codex over [SSH](/python/agents/codex#ssh) does.

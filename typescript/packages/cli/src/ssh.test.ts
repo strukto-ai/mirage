@@ -109,3 +109,45 @@ describe('mirage ssh-proxy', () => {
     expect(stderr).toContain('404')
   })
 })
+
+describe('mirage codex-exec', () => {
+  it('relays codex exec-server forward to the route', async () => {
+    const { app, url, home } = await serving()
+    await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { ...RAM, id: 'w' } })
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith('MIRAGE_')),
+    )
+    const child = spawn(process.execPath, [BIN, 'codex-exec', 'w', '--listen', '127.0.0.1:0'], {
+      env: { ...env, MIRAGE_HOME: home, MIRAGE_DAEMON_URL: url },
+    })
+    try {
+      const listening = await new Promise<string>((resolve) => {
+        let text = ''
+        child.stderr.on('data', (d: Buffer) => {
+          text += d.toString()
+          const line = /listening on (ws:\/\/\S+)/.exec(text)
+          if (line?.[1] !== undefined) resolve(line[1])
+        })
+      })
+      const ws = new WebSocket(listening)
+      const answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        ws.addEventListener('open', () => {
+          ws.send(
+            new TextEncoder().encode(
+              JSON.stringify({ id: 1, method: 'initialize', params: { clientName: 'f' } }),
+            ),
+          )
+        })
+        ws.addEventListener('message', (event) => {
+          resolve(JSON.parse(String(event.data)) as Record<string, unknown>)
+        })
+        ws.addEventListener('error', reject)
+      })
+      ws.close()
+      expect(listening).toMatch(/^ws:\/\/127\.0\.0\.1:\d+$/)
+      expect(answer.result).toHaveProperty('sessionId')
+    } finally {
+      child.kill()
+    }
+  })
+})

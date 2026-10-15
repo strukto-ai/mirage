@@ -16,7 +16,9 @@ import socket
 from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any, Protocol
 
-from mirage.server.registry import WorkspaceRegistry
+from fastapi import WebSocket
+
+from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.config import SSHConfig
 
 
@@ -44,4 +46,9 @@ class SSHTunnel(Protocol):
 ServeTunnel = Callable[
     [WorkspaceRegistry, SSHConfig, socket.socket, str, str | None],
     Coroutine[Any, Any, SSHTunnel],
+]
+
+ServeCodexSocket = Callable[
+    [WorkspaceRegistry, WorkspaceEntry, WebSocket],
+    Coroutine[Any, Any, None],
 ]

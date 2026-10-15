@@ -40,6 +40,7 @@ gates. ``--print`` prints the in-app answers for pinning.
 
 import argparse
 import asyncio
+import base64
 import json
 import re
 import shlex
@@ -51,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import websockets
 from adapters import (
     SSH_OPTIONS,
     Answer,
@@ -479,6 +481,75 @@ async def cross_host(
         got,
         {"text": "cross\n", "is_error": False},
     )
+
+
+async def codex_exec(server: Server, report: Report) -> None:
+    """``mirage codex-exec`` as ``codex exec-server forward`` reaches it.
+
+    The relay listens on a free local port and carries each connection
+    to the workspace's codex-exec route with the CLI's token; on ``jwt``
+    that is an OAuth access token, as for ``ssh-proxy``. A client
+    speaking Codex's exec-server protocol writes a file through it and
+    reads it back. The route is recorded once the relay answers, since
+    the request comes from the relay's process.
+
+    Args:
+        server (Server): the deployment.
+        report (Report): where the checks go.
+    """
+    d = server.d
+    token = d.issuer.oauth_token() if d.name == "jwt" else None
+    child = await asyncio.create_subprocess_exec(
+        *server.cli("codex-exec", SEED, "--listen", "127.0.0.1:0"),
+        env=server.env(token),
+        cwd=ROOT,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert child.stderr is not None
+    got: dict[str, Any] = {}
+    try:
+        line = await asyncio.wait_for(child.stderr.readline(), 30)
+        url = line.decode().strip().rsplit(" ", 1)[-1]
+        async with websockets.connect(url, max_size=None) as ws:
+
+            async def call(
+                request_id: int, method: str, params: dict[str, Any]
+            ) -> dict[str, Any]:
+                request = {
+                    "id": request_id,
+                    "method": method,
+                    "params": params,
+                }
+                await ws.send(json.dumps(request).encode())
+                while True:
+                    reply = json.loads(await asyncio.wait_for(ws.recv(), 30))
+                    if reply.get("id") == request_id and "method" not in reply:
+                        return reply
+
+            opened = await call(1, "initialize", {"clientName": "integ"})
+            got["initialize"] = "sessionId" in opened.get("result", {})
+            data = base64.b64encode(b"codex\n").decode()
+            wrote = await call(
+                2,
+                "fs/writeFile",
+                {"path": "file:///codex.txt", "dataBase64": data},
+            )
+            got["write"] = wrote.get("result")
+            read = await call(3, "fs/readFile", {"path": "file:///codex.txt"})
+            got["read"] = base64.b64decode(
+                read.get("result", {}).get("dataBase64", "")
+            ).decode()
+    finally:
+        child.terminate()
+        await child.wait()
+    if got.get("initialize"):
+        server.recorder.requests.setdefault(server.key, set()).add(
+            ("GET", f"/v1/workspaces/{SEED}/codex-exec")
+        )
+    for key, want in CASES["codex_exec"].items():
+        report.check(f"{server.key} codex_exec.{key}", got.get(key), want)
 
 
 async def server_checks(server: Server, report: Report) -> None:
@@ -1065,6 +1136,8 @@ async def main(args: argparse.Namespace) -> int:
                         await login(server, scratch / name / "login", report)
                     if name != "dev" and "cli" in wanted:
                         await cross_host(server, recorder, report)
+                    if "cli" in wanted:
+                        await codex_exec(server, report)
                     await server_checks(server, report)
             if "dev" in deployments and "cli" in wanted:
                 await lifecycle(host, scratch / "lifecycle", recorder, report)

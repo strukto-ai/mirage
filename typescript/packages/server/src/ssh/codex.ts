@@ -21,6 +21,7 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
 import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { ServerChannel } from 'ssh2'
+import type { WebSocket } from 'ws'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import {
   RPC_INTERNAL_ERROR,
@@ -44,7 +45,7 @@ import {
   CODEX_TERMINATED,
 } from './constants.ts'
 import { CodexRPCError } from './errors.ts'
-import { openLogin, type ChannelRequest } from './session.ts'
+import { newSessionId, openLogin, openSession, type ChannelRequest } from './session.ts'
 import { ChannelInput, ChannelOutput, Mark, deliver } from './stream.ts'
 
 type Message = Record<string, JsonValue>
@@ -459,11 +460,11 @@ class CodexProcess {
  * order, as the exec-server answers them by default, except `process/read`,
  * which may wait for output and so runs beside them. A process runs on in
  * the background and reports through notifications; once it has closed,
- * `process/terminate` forgets it, as Codex sends after every command.
+ * `process/terminate` forgets it, as Codex sends after every command. The
+ * transport feeds each message in through `receive`, writes each answer
+ * with `write`, and calls `shutdown` once its input ends.
  */
 class CodexChannel {
-  private readonly input: ChannelInput
-  private readonly output: ChannelOutput
   private readonly core: MountCore
   private readonly processes = new Map<string, CodexProcess>()
   private readonly handles = new Map<string, [string, number]>()
@@ -475,11 +476,9 @@ class CodexChannel {
     private readonly registry: WorkspaceRegistry,
     private readonly entry: WorkspaceEntry,
     private readonly sessionId: string,
-    private readonly channel: ServerChannel,
+    private readonly write: (text: string) => Promise<void>,
   ) {
     const ws = entry.runner.ws
-    this.input = new ChannelInput(channel, false, CODEX_MAX_MESSAGE)
-    this.output = new ChannelOutput(channel, false)
     this.core = new MountCore(ws.vfs, { session: ws.getSession(sessionId) })
     this.methods = {
       initialize: () => this.initialize(),
@@ -514,25 +513,8 @@ class CodexChannel {
     return this.registry.has(wid) && this.registry.get(wid) === this.entry
   }
 
-  /** Answer requests until the channel's input ends; the exit status to report. */
-  async serve(): Promise<number> {
-    this.input.start()
-    try {
-      for (;;) {
-        const item = await this.input.readline()
-        if (item === Mark.LIMIT) {
-          this.channel.stderr.write('mirage: codex-exec message too long\n')
-          return 1
-        }
-        if (item === Mark.EOF) return 0
-        if (typeof item !== 'string') await this.receive(decoder.decode(item))
-      }
-    } finally {
-      await this.shutdown()
-    }
-  }
-
-  private async shutdown(): Promise<void> {
+  /** Stop the channel's processes and close its session. */
+  async shutdown(): Promise<void> {
     for (const proc of this.processes.values()) proc.controller?.abort()
     await Promise.all(
       [...this.processes.values()].flatMap((p) => (p.done === null ? [] : [p.done])),
@@ -540,15 +522,15 @@ class CodexChannel {
     await Promise.all(this.reads)
     for (const [, fd] of this.handles.values()) await this.core.release(fd)
     this.handles.clear()
-    this.input.close()
     if (this.live()) await this.entry.runner.ws.closeSession(this.sessionId)
   }
 
   private async send(message: Message): Promise<void> {
-    await this.output.write(encoder.encode(JSON.stringify(message) + '\n'))
+    await this.write(JSON.stringify(message))
   }
 
-  private async receive(text: string): Promise<void> {
+  /** Answer one message from the client, one JSON-RPC object. */
+  async receive(text: string): Promise<void> {
     if (text.trim() === '') return
     let message: JsonValue
     try {
@@ -890,7 +872,86 @@ export async function serveCodex(
   const opened = await openLogin(registry, channel, request, 'codex')
   if (opened === null) return
   const [entry, sessionId] = opened
-  const status = await new CodexChannel(registry, entry, sessionId, channel).serve()
+  const output = new ChannelOutput(channel, false)
+  const codex = new CodexChannel(registry, entry, sessionId, (text) =>
+    output.write(encoder.encode(text + '\n')),
+  )
+  const input = new ChannelInput(channel, false, CODEX_MAX_MESSAGE)
+  input.start()
+  let status = 0
+  try {
+    for (;;) {
+      const item = await input.readline()
+      if (item === Mark.LIMIT) {
+        channel.stderr.write('mirage: codex-exec message too long\n')
+        status = 1
+        break
+      }
+      if (item === Mark.EOF) break
+      if (typeof item !== 'string') await codex.receive(decoder.decode(item))
+    }
+  } finally {
+    await codex.shutdown()
+    input.close()
+  }
   channel.exit(status)
   channel.end()
+}
+
+/**
+ * Serve one codex-exec connection over an open WebSocket: what `codex
+ * exec-server forward` reaches through `mirage codex-exec`, one JSON-RPC
+ * message per WebSocket message either way. The connection runs in a fresh
+ * session under the workspace's default profile, closed when it ends.
+ */
+export async function serveCodexSocket(
+  registry: WorkspaceRegistry,
+  entry: WorkspaceEntry,
+  socket: WebSocket,
+): Promise<void> {
+  // Listen before the session opens: ws hands a message to the listeners it
+  // has when the message arrives, so one sent right after the upgrade would
+  // be lost behind the await.
+  const closed = new Promise<void>((resolve) => {
+    socket.once('close', () => {
+      resolve()
+    })
+  })
+  const sessionId = newSessionId()
+  let queue: Promise<CodexChannel | null> = openSession(entry.runner.ws, sessionId).then(
+    () =>
+      new CodexChannel(
+        registry,
+        entry,
+        sessionId,
+        (text) =>
+          new Promise<void>((resolve) => {
+            socket.send(text, (err) => {
+              if (err !== undefined) console.debug('codex: socket closed before a message', err)
+              resolve()
+            })
+          }),
+      ),
+    (err: unknown) => {
+      console.warn(`codex: cannot open a session on ${entry.id}`, err)
+      const reason = err instanceof Error ? err.message : String(err)
+      socket.close(1011, `cannot open a session: ${reason}`.slice(0, 123))
+      return null
+    },
+  )
+  socket.on('message', (data: Buffer) => {
+    queue = queue.then(async (codex) => {
+      if (codex === null) return null
+      try {
+        await codex.receive(decoder.decode(data))
+      } catch (err) {
+        console.warn(`codex: a message failed on ${entry.id}`, err)
+        socket.close(1011)
+      }
+      return codex
+    })
+  })
+  await closed
+  const codex = await queue
+  if (codex !== null) await codex.shutdown()
 }

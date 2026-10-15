@@ -22,11 +22,12 @@ SSH_DIR = "ssh"
 HOST_KEY_NAME = "host_ed25519_key"
 AUTHORIZED_KEYS_NAME = "authorized_keys"
 
-# The module that serves the entry point. It imports asyncssh, which is the
-# `ssh` extra, so the daemon loads it by path only once a port is set or
-# the HTTPS route carries a connection.
+# The modules that serve the entry points. They import asyncssh, which is
+# the `ssh` extra, so the daemon loads them by path only once a port is set
+# or an HTTPS route carries a connection.
 SERVER_MODULE = "mirage.server.ssh.server:start_ssh_server"
 TUNNEL_MODULE = "mirage.server.ssh.server:serve_tunnel"
+CODEX_SOCKET_MODULE = "mirage.server.ssh.codex:serve_codex_socket"
 
 # How many bytes the HTTPS route relays at a time.
 TUNNEL_CHUNK = 64 * 1024

@@ -15,6 +15,7 @@
 import type { FastifyInstance } from 'fastify'
 import { type WebSocket, createWebSocketStream } from 'ws'
 import type { WorkspaceRegistry } from '../registry.ts'
+import { serveCodexSocket } from '../ssh/codex.ts'
 import type { SSHEndpoint } from '../ssh/types.ts'
 
 export interface SshRoutesDeps {
@@ -33,6 +34,9 @@ interface SshParams {
  * no key and may only name this workspace. `ssh -o ProxyCommand="mirage
  * ssh-proxy %r"` reaches it. The SSH server is loaded on first use, as the
  * TCP endpoint loads it, so a daemon nobody reaches over SSH never loads ssh2.
+ * `/v1/workspaces/:id/codex-exec` serves Codex's exec-server the same way,
+ * one JSON-RPC message per WebSocket message: `mirage codex-exec` relays
+ * `codex exec-server forward` there with the CLI's token.
  */
 export function registerSshRoutes(app: FastifyInstance, deps: SshRoutesDeps): void {
   // An upgrade answered over HTTP was refused, maybe by a hook that ran
@@ -79,6 +83,28 @@ export function registerSshRoutes(app: FastifyInstance, deps: SshRoutesDeps): vo
           console.warn('ssh: tunnel failed', error)
           stream.destroy()
         })
+    },
+  )
+  app.get<{ Params: SshParams }>(
+    '/v1/workspaces/:id/codex-exec',
+    {
+      websocket: true,
+      preValidation: async (req, reply) => {
+        if (deps.registry.visible(req.params.id, req.account) === null) {
+          return reply.status(404).send({ detail: 'workspace not found' })
+        }
+      },
+    },
+    (socket: WebSocket, req) => {
+      const entry = deps.registry.visible(req.params.id, req.account)
+      if (entry === null) {
+        socket.close(1011, 'workspace not found')
+        return
+      }
+      void serveCodexSocket(deps.registry, entry, socket).catch((error: unknown) => {
+        console.warn('codex: connection failed', error)
+        socket.terminate()
+      })
     },
   )
 }

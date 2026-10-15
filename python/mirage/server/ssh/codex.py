@@ -28,6 +28,8 @@ from typing import Any, TypeVar
 from urllib.parse import quote, unquote, urlsplit
 
 import asyncssh
+from fastapi import WebSocket, WebSocketDisconnect
+from starlette.status import WS_1011_INTERNAL_ERROR
 
 from mirage import Workspace
 from mirage.errors import FsCondition, classify
@@ -49,7 +51,11 @@ from mirage.server.rpc.constants import (
 )
 from mirage.server.ssh import constants
 from mirage.server.ssh.errors import CodexRPCError
-from mirage.server.ssh.session import open_login
+from mirage.server.ssh.session import (
+    new_session_id,
+    open_login,
+    open_session,
+)
 from mirage.server.ssh.stream import (
     ChannelInput,
     Mark,
@@ -560,13 +566,16 @@ class CodexChannel:
     except ``process/read``, which may wait for output and so runs
     beside them. A process runs on in the background and reports
     through notifications; once it has closed, ``process/terminate``
-    forgets it, as Codex sends after every command.
+    forgets it, as Codex sends after every command. The transport feeds
+    each message in through ``receive`` and calls ``shutdown`` once its
+    input ends.
 
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
         entry (WorkspaceEntry): the workspace this channel serves.
         session_id (str): the session the channel runs as.
-        process (asyncssh.SSHServerProcess[str]): the channel's process.
+        send (Callable[[str], Awaitable[None]]): writes one message to
+            the client.
     """
 
     def __init__(
@@ -574,16 +583,13 @@ class CodexChannel:
         registry: WorkspaceRegistry,
         entry: WorkspaceEntry,
         session_id: str,
-        process: asyncssh.SSHServerProcess[str],
+        send: Callable[[str], Awaitable[None]],
     ) -> None:
         ws = entry.runner.ws
         self._registry = registry
         self._entry = entry
         self._session_id = session_id
-        self._process = process
-        self._input = ChannelInput(
-            process, max_line=constants.CODEX_MAX_MESSAGE
-        )
+        self._write = send
         self._core = MountCore(ws.vfs, session=ws.get_session(session_id))
         self._processes: dict[str, CodexProcess] = {}
         self._handles: dict[str, tuple[str, int]] = {}
@@ -615,29 +621,8 @@ class CodexChannel:
         wid = self._entry.id
         return wid in self._registry and self._registry.get(wid) is self._entry
 
-    async def serve(self) -> int:
-        """Answer requests until the channel's input ends.
-
-        Returns:
-            int: the exit status to report to the client.
-        """
-        self._input.start()
-        try:
-            while True:
-                item = await self._input.readline()
-                if item is Mark.LIMIT:
-                    self._process.stderr.write(
-                        "mirage: codex-exec message too long\n"
-                    )
-                    return 1
-                if item is Mark.EOF:
-                    return 0
-                if isinstance(item, bytes):
-                    await self._receive(decode(item))
-        finally:
-            await self._shutdown()
-
-    async def _shutdown(self) -> None:
+    async def shutdown(self) -> None:
+        """Stop the channel's processes and close its session."""
         for read in self._reads:
             read.cancel()
         if self._reads:
@@ -651,20 +636,19 @@ class CodexChannel:
         for _, fh in self._handles.values():
             await self._release(fh)
         self._handles.clear()
-        await self._input.close()
         if self._live():
             runner = self._entry.runner
             await runner.call(runner.ws.close_session(self._session_id))
 
     async def _send(self, message: Message) -> None:
-        stdout = self._process.stdout
-        try:
-            stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
-            await stdout.drain()
-        except (asyncssh.Error, OSError) as exc:
-            logger.debug("codex: channel closed before a message: %r", exc)
+        await self._write(json.dumps(message, separators=(",", ":")))
 
-    async def _receive(self, text: str) -> None:
+    async def receive(self, text: str) -> None:
+        """Answer one message from the client.
+
+        Args:
+            text (str): the message, one JSON-RPC object.
+        """
         if not text.strip():
             return
         try:
@@ -1101,5 +1085,78 @@ async def serve_codex(
     if opened is None:
         return
     entry, session_id = opened
-    status = await CodexChannel(registry, entry, session_id, process).serve()
+    stdout = process.stdout
+
+    async def send(text: str) -> None:
+        try:
+            stdout.write(text + "\n")
+            await stdout.drain()
+        except (asyncssh.Error, OSError) as exc:
+            logger.debug("codex: channel closed before a message: %r", exc)
+
+    channel = CodexChannel(registry, entry, session_id, send)
+    lines = ChannelInput(process, max_line=constants.CODEX_MAX_MESSAGE)
+    lines.start()
+    status = 0
+    try:
+        while True:
+            item = await lines.readline()
+            if item is Mark.LIMIT:
+                process.stderr.write("mirage: codex-exec message too long\n")
+                status = 1
+                break
+            if item is Mark.EOF:
+                break
+            if isinstance(item, bytes):
+                await channel.receive(decode(item))
+    finally:
+        await channel.shutdown()
+        await lines.close()
     process.exit(status)
+
+
+async def serve_codex_socket(
+    registry: WorkspaceRegistry, entry: WorkspaceEntry, websocket: WebSocket
+) -> None:
+    """Serve one codex-exec connection over an accepted WebSocket.
+
+    What ``codex exec-server forward`` reaches through ``mirage
+    codex-exec``: one JSON-RPC message per WebSocket message, either
+    way. The connection runs in a fresh session under the workspace's
+    default profile, closed when the connection ends.
+
+    Args:
+        registry (WorkspaceRegistry): the daemon's workspaces.
+        entry (WorkspaceEntry): the workspace the route admitted.
+        websocket (WebSocket): the accepted connection.
+    """
+    session_id = new_session_id()
+    runner = entry.runner
+    try:
+        await runner.call(open_session(runner.ws, session_id))
+    except Exception as exc:
+        logger.warning("codex: cannot open a session on %s: %r", entry.id, exc)
+        await websocket.close(
+            code=WS_1011_INTERNAL_ERROR,
+            reason=f"cannot open a session: {exc}"[:123],
+        )
+        return
+
+    async def send(text: str) -> None:
+        try:
+            await websocket.send_text(text)
+        except (OSError, RuntimeError, WebSocketDisconnect) as exc:
+            logger.debug("codex: socket closed before a message: %r", exc)
+
+    channel = CodexChannel(registry, entry, session_id, send)
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+            data = message.get("bytes")
+            await channel.receive(
+                decode(data) if data is not None else message.get("text", "")
+            )
+    finally:
+        await channel.shutdown()

@@ -27,7 +27,7 @@ from mirage.policy.match import head_allowed
 from mirage.policy.match.pattern import pattern_matches
 from mirage.types import MOUNT_MODE_RANK, MountMode
 from mirage.utils.hidden import path_visible
-from mirage.utils.path import gnu_dirname
+from mirage.utils.path import gnu_dirname, resolve_path
 from mirage.workspace.files import Files
 from mirage.workspace.mount.registry import DEV_PREFIX, MountEntry
 from mirage.workspace.session.session import SessionState
@@ -335,7 +335,8 @@ class MirageToolOperations:
         """Read a file as line-numbered text.
 
         Args:
-            path (str): Virtual path.
+            path (str): Virtual path; a relative one resolves against
+                the session's cwd.
             offset (int): First line to show, zero-based.
             limit (int): Maximum number of lines to show.
 
@@ -343,6 +344,7 @@ class MirageToolOperations:
             ToolResult: The numbered lines, or the failure.
         """
         versions = await self._versions()
+        path = resolve_path(path, self._session.state.cwd)
         try:
             data = await versions.read(path)
         except (OSError, ValueError) as exc:
@@ -365,13 +367,15 @@ class MirageToolOperations:
         seen.
 
         Args:
-            path (str): Virtual path.
+            path (str): Virtual path; a relative one resolves against
+                the session's cwd.
             content (str): Text to write.
 
         Returns:
             ToolResult: The confirmation, or the failure.
         """
         versions = await self._versions()
+        path = resolve_path(path, self._session.state.cwd)
         try:
             present = await versions.vfs.exists(path)
         except OSError as exc:
@@ -400,7 +404,8 @@ class MirageToolOperations:
         """Replace a string in an existing file.
 
         Args:
-            path (str): Virtual path.
+            path (str): Virtual path; a relative one resolves against
+                the session's cwd.
             old_string (str): The text to find.
             new_string (str): The text to put in its place.
             replace_all (bool): True replaces every occurrence.
@@ -409,6 +414,7 @@ class MirageToolOperations:
             ToolResult: The confirmation, or the failure.
         """
         versions = await self._versions()
+        path = resolve_path(path, self._session.state.cwd)
         try:
             content = decode(await versions.read_for_edit(path))
         except StaleMirageFileError as exc:

@@ -24,6 +24,7 @@ export default defineConfig({
     'src/mastra/index.ts',
     'src/opencode/index.ts',
     'src/claude-agent-sdk/index.ts',
+    'src/claude-managed-agents/index.ts',
   ],
   format: ['esm'],
   dts: {

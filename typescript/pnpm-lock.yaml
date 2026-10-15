@@ -410,6 +410,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.3.233
         version: 0.3.233(@anthropic-ai/sdk@0.124.0(zod@4.3.6))(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(zod@4.3.6)
+      '@anthropic-ai/sdk':
+        specifier: ^0.124.0
+        version: 0.124.0(zod@4.3.6)
       '@earendil-works/pi-coding-agent':
         specifier: ^1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.3.6)
@@ -10848,8 +10851,6 @@ snapshots:
   follow-redirects@1.16.0(debug@4.4.3):
     optionalDependencies:
       debug: 4.4.3
-
-  follow-redirects@1.16.0: {}
 
   for-each@0.3.5:
     dependencies:

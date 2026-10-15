@@ -3949,6 +3949,7 @@ all = [
     { name = "agno" },
     { name = "aioboto3" },
     { name = "aiosmtplib" },
+    { name = "anthropic" },
     { name = "asyncpg" },
     { name = "asyncssh" },
     { name = "botocore" },
@@ -3984,6 +3985,9 @@ chroma = [
 ]
 claude-agent-sdk = [
     { name = "claude-agent-sdk" },
+]
+claude-managed-agents = [
+    { name = "anthropic" },
 ]
 databricks = [
     { name = "databricks-sdk" },
@@ -4120,6 +4124,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
     { name = "aiohttp", specifier = ">=3.14.2" },
     { name = "aiosmtplib", marker = "extra == 'email'", specifier = ">=5.1.0" },
+    { name = "anthropic", marker = "extra == 'claude-managed-agents'", specifier = ">=0.122.0" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30.0" },
     { name = "asyncssh", marker = "extra == 'ssh'", specifier = ">=2.23.0" },
     { name = "botocore", marker = "extra == 'aws-sm'", specifier = ">=1.40.61" },
@@ -4150,6 +4155,7 @@ requires-dist = [
     { name = "mirage-ai", extras = ["chroma"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["chroma"], marker = "extra == 'sandbox'" },
     { name = "mirage-ai", extras = ["claude-agent-sdk"], marker = "extra == 'all'" },
+    { name = "mirage-ai", extras = ["claude-managed-agents"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["databricks"], marker = "extra == 'all'" },
     { name = "mirage-ai", extras = ["databricks"], marker = "extra == 'sandbox'" },
     { name = "mirage-ai", extras = ["daytona"], marker = "extra == 'all'" },
@@ -4219,7 +4225,7 @@ requires-dist = [
     { name = "wasmtime", marker = "extra == 'quickjs'", specifier = ">=46" },
     { name = "wasmtime", marker = "extra == 'wasi'", specifier = ">=46" },
 ]
-provides-extras = ["monty", "wasi", "quickjs", "s3", "r2", "gcs", "oci", "databricks", "ssh", "nextcloud", "hf-buckets", "fuse", "mongodb", "gridfs", "postgres", "redis", "email", "dotenv", "aws-sm", "1password", "langfuse", "chroma", "qdrant", "openai", "pydantic-ai", "deepagents", "openhands", "agno", "claude-agent-sdk", "daytona", "all", "sandbox", "lancedb", "mem0", "e2b"]
+provides-extras = ["monty", "wasi", "quickjs", "s3", "r2", "gcs", "oci", "databricks", "ssh", "nextcloud", "hf-buckets", "fuse", "mongodb", "gridfs", "postgres", "redis", "email", "dotenv", "aws-sm", "1password", "langfuse", "chroma", "qdrant", "openai", "pydantic-ai", "deepagents", "openhands", "agno", "claude-agent-sdk", "claude-managed-agents", "daytona", "all", "sandbox", "lancedb", "mem0", "e2b"]
 
 [package.metadata.requires-dev]
 dev = [

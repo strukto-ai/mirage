@@ -144,7 +144,10 @@
     {"id": "shell_moves_a_file_underneath", "input": {"tool": "shell", "arguments": {"command": "echo moved > /src/b.txt"}}, "expect": {"text": "", "is_error": false}},
     {"id": "edit_refuses_a_stale_file", "input": {"tool": "edit", "arguments": {"path": "/src/b.txt", "old_string": "moved", "new_string": "x"}}, "expect": {"text": "Error: File changed since it was last read: /src/b.txt. Read the file again before modifying it.", "is_error": true}},
     {"id": "shell_links_a_file", "input": {"tool": "shell", "arguments": {"command": "ln -s /src/a.py /src/link.py"}}, "expect": {"text": "", "is_error": false}},
-    {"id": "glob_follows_a_link_to_a_file", "input": {"tool": "glob", "arguments": {"pattern": "*.py", "path": "/src"}}, "expect": {"text": "/src/a.py\n/src/link.py\n", "is_error": false}}
+    {"id": "glob_follows_a_link_to_a_file", "input": {"tool": "glob", "arguments": {"pattern": "*.py", "path": "/src"}}, "expect": {"text": "/src/a.py\n/src/link.py\n", "is_error": false}},
+    {"id": "shell_moves_into_a_directory", "input": {"tool": "shell", "arguments": {"command": "cd /src/deep"}}, "expect": {"text": "", "is_error": false}},
+    {"id": "read_resolves_against_the_cwd", "input": {"tool": "read", "arguments": {"path": "dots.txt"}}, "expect": {"text": "     1\ta.b\n     2\taxb\n", "is_error": false}},
+    {"id": "write_resolves_against_the_cwd", "input": {"tool": "write", "arguments": {"path": "../rel.txt", "content": "r\n"}}, "expect": {"text": "Written: /src/rel.txt", "is_error": false}}
    ]
   },
   {
@@ -426,6 +429,11 @@
    "logout": "Logged out of {url}.",
    "after_logout": "daemon error 401: Unauthorized"
   }
+ },
+ "codex_exec": {
+  "initialize": true,
+  "write": {},
+  "read": "codex\n"
  },
  "server": {
   "health_without_token": 200,

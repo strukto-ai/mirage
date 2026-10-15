@@ -172,6 +172,11 @@ claude-agent-sdk = [
     "claude-agent-sdk>=0.2.123",
 ]
 
+# --- claude-managed-agents ---
+claude-managed-agents = [
+    "anthropic>=0.122.0",
+]
+
 # --- sandboxes ---
 daytona     = [
     "daytona>=0.176.0",
@@ -206,6 +211,7 @@ all = [
     "mirage-ai[openhands]",
     "mirage-ai[agno]",
     "mirage-ai[claude-agent-sdk]",
+    "mirage-ai[claude-managed-agents]",
     "mirage-ai[daytona]",
     "mirage-ai[e2b]",
 ]

@@ -50,3 +50,38 @@ def ssh_proxy_cmd(
         asyncio.run(relay_ssh(url, headers))
     except TunnelRefused as e:
         fail(f"ssh-proxy: {e}")
+
+
+def codex_exec_cmd(
+    workspace_id: str = typer.Argument(..., help="The workspace to serve."),
+    listen: str = typer.Option(
+        "127.0.0.1:0",
+        "--listen",
+        help="HOST:PORT to accept codex exec-server forward on.",
+    ),
+) -> None:
+    """Serve a workspace to ``codex exec-server forward`` on a local port.
+
+    For ``codex exec-server forward --connect ws://HOST:PORT``: each
+    connection is relayed to the server's codex-exec route with this
+    CLI's token, which forward cannot send itself. Keep it on loopback.
+    """
+    host, sep, port = listen.rpartition(":")
+    if not sep or not host or not port.isdigit():
+        fail("codex-exec: --listen takes HOST:PORT")
+    with make_client() as client:
+        try:
+            client.ensure_running()
+        except DaemonUnreachable as e:
+            fail(str(e))
+        base = client.settings.url
+        token = client.token()
+    url = (
+        "ws"
+        + base.removeprefix("http")
+        + (f"/v1/workspaces/{quote(workspace_id, safe='')}/codex-exec")
+    )
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    from mirage.server.ssh.relay import relay_codex
+
+    asyncio.run(relay_codex(host.strip("[]"), int(port), url, headers))

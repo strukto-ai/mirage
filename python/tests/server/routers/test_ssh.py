@@ -13,19 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import base64
+import json
 import socket
 import sys
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import asyncssh
 import jwt as pyjwt
 import pytest
 import uvicorn
 from httpx import AsyncClient
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus
 
 from mirage.server import build_app
@@ -183,3 +186,125 @@ async def test_ssh_proxy_carries_ssh_for_the_cli(tmp_path, monkeypatch):
         ) as conn:
             result = await conn.run("echo through the cli")
         assert result.stdout == "through the cli\n"
+
+
+async def _codex_call(
+    ws: ClientConnection,
+    request_id: int,
+    method: str,
+    params: dict[str, Any],
+    notes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    request = {"id": request_id, "method": method, "params": params}
+    await ws.send(json.dumps(request).encode())
+    while True:
+        message = json.loads(await asyncio.wait_for(ws.recv(), 30))
+        if message.get("id") == request_id and "method" not in message:
+            return message
+        notes.append(message)
+
+
+@pytest.mark.asyncio
+async def test_codex_exec_serves_codex_tools_over_the_websocket(tmp_path):
+    async with _serving(tmp_path) as address:
+        async with AsyncClient(base_url=f"http://{address}") as client:
+            r = await client.post("/v1/workspaces", json={**RAM, "id": "w"})
+            assert r.status_code == 201, r.text
+        notes: list[dict[str, Any]] = []
+        async with connect(
+            f"ws://{address}/v1/workspaces/w/codex-exec",
+            max_size=None,
+            compression=None,
+        ) as ws:
+            init = await _codex_call(
+                ws, 1, "initialize", {"clientName": "test"}, notes
+            )
+            wrote = await _codex_call(
+                ws,
+                2,
+                "fs/writeFile",
+                {
+                    "path": "file:///a.txt",
+                    "dataBase64": base64.b64encode(b"hi\n").decode(),
+                },
+                notes,
+            )
+            started = await _codex_call(
+                ws,
+                3,
+                "process/start",
+                {
+                    "processId": "p",
+                    "argv": ["/bin/bash", "-lc", "cat /a.txt"],
+                    "cwd": "file:///",
+                    "env": {},
+                },
+                notes,
+            )
+            while not any(n.get("method") == "process/closed" for n in notes):
+                notes.append(json.loads(await asyncio.wait_for(ws.recv(), 30)))
+    assert "sessionId" in init["result"]
+    assert wrote == {"id": 2, "result": {}}
+    assert "error" not in started
+    chunks = [
+        base64.b64decode(n["params"]["chunk"])
+        for n in notes
+        if n.get("method") == "process/output"
+    ]
+    assert b"".join(chunks) == b"hi\n"
+
+
+@pytest.mark.asyncio
+async def test_codex_exec_holds_an_account_to_its_own_workspace(tmp_path):
+    async with _serving(tmp_path, jwt=True) as address:
+        async with AsyncClient(
+            base_url=f"http://{address}", headers=_token("alice")
+        ) as alice:
+            r = await alice.post("/v1/workspaces", json={**RAM, "id": "w"})
+            assert r.status_code == 201, r.text
+        url = f"ws://{address}/v1/workspaces/w/codex-exec"
+        with pytest.raises(InvalidStatus) as refused:
+            async with connect(url, additional_headers=_token("bob")):
+                pass
+        assert refused.value.response.status_code == 404
+        with pytest.raises(InvalidStatus) as anonymous:
+            async with connect(url):
+                pass
+        assert anonymous.value.response.status_code == 401
+        async with connect(url, additional_headers=_token("alice")) as ws:
+            init = await _codex_call(
+                ws, 1, "initialize", {"clientName": "test"}, []
+            )
+        assert "sessionId" in init["result"]
+
+
+@pytest.mark.asyncio
+async def test_codex_exec_relays_forward_for_the_cli(tmp_path, monkeypatch):
+    async with _serving(tmp_path) as address:
+        async with AsyncClient(base_url=f"http://{address}") as client:
+            r = await client.post("/v1/workspaces", json={**RAM, "id": "w"})
+            assert r.status_code == 201, r.text
+        monkeypatch.setenv("MIRAGE_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("MIRAGE_DAEMON_URL", f"http://{address}")
+        mirage = str(Path(sys.executable).parent / "mirage")
+        child = await asyncio.create_subprocess_exec(
+            mirage,
+            "codex-exec",
+            "w",
+            "--listen",
+            "127.0.0.1:0",
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert child.stderr is not None
+        try:
+            line = await asyncio.wait_for(child.stderr.readline(), 30)
+            listening = line.decode().strip().rsplit(" ", 1)[1]
+            async with connect(listening, max_size=None) as ws:
+                init = await _codex_call(
+                    ws, 1, "initialize", {"clientName": "forward"}, []
+                )
+        finally:
+            child.terminate()
+            await child.wait()
+    assert listening.startswith("ws://127.0.0.1:")
+    assert "sessionId" in init["result"]

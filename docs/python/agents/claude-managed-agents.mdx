@@ -1,0 +1,45 @@
+---
+title: Claude Managed Agents
+description: Make a Mirage workspace the self-hosted environment of an agent on Claude Managed Agents.
+icon: /images/claude-logo.svg
+---
+
+[Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview) runs the agent on Anthropic's servers. In a [self-hosted environment](https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes), a worker you run answers its `bash`, `read`, `write`, `edit`, `glob` and `grep` calls. `mirage_tools(ws)` gives that worker Mirage's versions, so every call runs in the workspace, under its profile, mounts and policies. The worker only connects out to Anthropic, so it can run inside your own server.
+
+## Install
+
+```bash
+uv add 'mirage-ai[claude-managed-agents]'
+```
+
+## Run a worker
+
+Create a self-hosted environment and an agent with the `agent_toolset_20260401` toolset as [Anthropic's guide](https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes) shows, then serve its sessions from the workspace:
+
+```python
+import asyncio
+import os
+
+from anthropic import AsyncAnthropic
+
+from mirage import Workspace
+from mirage.agents.claude_managed_agents import mirage_tools
+from mirage.vfs.s3 import S3Config, S3VFS
+
+ws = Workspace({"/s3": S3VFS(S3Config(bucket="my-bucket"))})
+
+worker = AsyncAnthropic().beta.environments.work.worker(
+    environment_id=os.environ["ANTHROPIC_ENVIRONMENT_ID"],
+    environment_key=os.environ["ANTHROPIC_ENVIRONMENT_KEY"],
+    tools=mirage_tools(ws),
+)
+asyncio.run(worker.run())
+```
+
+## How it behaves
+
+- The tools keep the toolset's names. One the session's [profile](/home/policy/overview) would always refuse is left out: a read-only workspace gets no `write` or `edit`.
+- `bash` runs Mirage's shell, so a line sees the workspace's mounts and commands, not the worker's machine. A relative path resolves against the session's working directory, which `cd` moves.
+- `write` and `edit` refuse a file the agent has not read in full, or one that changed since. `stale_write_protection=False` turns that off.
+- `session_id=` runs the tools as another session, with its profile.
+- `web_search` and `web_fetch` still run on Anthropic's servers. Turn them off in the agent's toolset to keep the agent to the workspace.

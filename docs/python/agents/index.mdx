@@ -41,3 +41,12 @@ uv add 'mirage-ai[agno]'
 ```
 
 Haystack installs as `mirage-haystack`, which deepset maintains.
+
+## API & Environment
+
+The provider runs the agent, and the workspace is its environment: its own shell and file tools run in Mirage.
+
+| API | Hand it | The agent gets |
+| --- | --- | --- |
+| [OpenAI Agents API](/python/agents/openai-agents-api) | `mirage codex-exec`, behind `codex exec-server forward` | its shell, file and patch tools, run in Mirage |
+| [Claude Managed Agents](/python/agents/claude-managed-agents) | `mirage_tools(ws)`, in an `EnvironmentWorker` | its `bash`, `read`, `write`, `edit`, `glob` and `grep`, run in Mirage |

@@ -22,8 +22,12 @@ from starlette.responses import PlainTextResponse
 from starlette.websockets import WebSocketState
 
 from mirage.server.registry import WorkspaceRegistry
-from mirage.server.ssh.constants import TUNNEL_CHUNK, TUNNEL_MODULE
-from mirage.server.ssh.types import ServeTunnel, SSHTunnel
+from mirage.server.ssh.constants import (
+    CODEX_SOCKET_MODULE,
+    TUNNEL_CHUNK,
+    TUNNEL_MODULE,
+)
+from mirage.server.ssh.types import ServeCodexSocket, ServeTunnel, SSHTunnel
 
 logger = logging.getLogger(__name__)
 
@@ -128,3 +132,40 @@ async def ssh_tunnel(websocket: WebSocket, workspace_id: str) -> None:
             and websocket.application_state is WebSocketState.CONNECTED
         ):
             await websocket.close()
+
+
+@router.websocket("/{workspace_id}/codex-exec")
+async def codex_exec(websocket: WebSocket, workspace_id: str) -> None:
+    """Serve Codex's exec-server for ``workspace_id`` over this WebSocket.
+
+    The codex-exec SSH subsystem's protocol, one JSON-RPC message per
+    WebSocket message. ``mirage codex-exec`` relays ``codex exec-server
+    forward`` here with the CLI's token; the account it names must be
+    allowed the workspace, else the upgrade answers 404.
+
+    Args:
+        websocket (WebSocket): the caller's connection.
+        workspace_id (str): the workspace to serve.
+    """
+    registry: WorkspaceRegistry = websocket.app.state.registry
+    entry = registry.visible(workspace_id, websocket.state.account)
+    if entry is None:
+        await websocket.send_denial_response(
+            PlainTextResponse("workspace not found", status_code=404)
+        )
+        return
+    module_path, attr = CODEX_SOCKET_MODULE.split(":")
+    try:
+        module = importlib.import_module(module_path)
+    except ModuleNotFoundError:
+        await websocket.send_denial_response(
+            PlainTextResponse(
+                "codex-exec needs asyncssh; install the ssh extra "
+                "(pip install 'mirage-ai[ssh]')",
+                status_code=501,
+            )
+        )
+        return
+    serve: ServeCodexSocket = getattr(module, attr)
+    await websocket.accept()
+    await serve(registry, entry, websocket)

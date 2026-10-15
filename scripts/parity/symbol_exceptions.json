@@ -340,14 +340,17 @@
   },
   "cli/ssh": {
    "python_only": {
+    "codex_exec_cmd": "Typer commands are module functions; commander registers the same command inline in registerCodexExecCommand.",
     "ssh_proxy_cmd": "Typer commands are module functions; commander registers the same command inline in registerSshProxyCommand."
    },
    "typescript_only": {
+    "registerCodexExecCommand": "commander registers a command through a function; Typer's is the module function codex_exec_cmd.",
     "registerSshProxyCommand": "commander registers a command through a function; Typer's is the module function ssh_proxy_cmd."
    }
   },
   "server/routers/ssh": {
    "python_only": {
+    "codex_exec": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSshRoutes.",
     "ssh_tunnel": "FastAPI routes are module functions; Fastify registers the same handler inline in registerSshRoutes."
    },
    "typescript_only": {
@@ -358,8 +361,14 @@
   },
   "server/ssh/constants": {
    "python_only": {
+    "CODEX_SOCKET_MODULE": "Python loads the codex module by path, since it imports asyncssh, so a server without the ssh extra starts; TypeScript's codex module only types ssh2 and is imported directly.",
     "TUNNEL_CHUNK": "Python's route reads the SSH server's side of a socket pair in chunks; TypeScript pipes a ws stream, which chunks for itself.",
     "TUNNEL_MODULE": "Python loads asyncssh's module by path, so a server without the ssh extra starts; TypeScript imports the module dynamically by its literal path."
+   }
+  },
+  "server/ssh/relay": {
+   "python_only": {
+    "pump": "websockets reads a connection as an async iterator, so Python carries each direction through one function; ws hands TypeScript each message to an event handler."
    }
   },
   "server/ssh/server": {
@@ -376,6 +385,7 @@
   "server/ssh/types": {
    "python_only": {
     "SSHTunnel": "Python types the connection its lazily loaded tunnel returns; TypeScript's serveTunnel resolves when the connection ends.",
+    "ServeCodexSocket": "Python types serve_codex_socket for the route that loads it by path; TypeScript imports it directly.",
     "ServeTunnel": "Python types serve_tunnel for the route that loads it by path; TypeScript imports it and keeps its own signature."
    }
   },

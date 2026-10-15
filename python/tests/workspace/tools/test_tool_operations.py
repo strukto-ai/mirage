@@ -170,6 +170,19 @@ async def test_edit_replace_all(ops, workspace):
 
 
 @pytest.mark.asyncio
+async def test_a_relative_path_resolves_against_the_cwd(ops, workspace):
+    await ops.shell("mkdir -p /w && cd /w")
+    wrote = await ops.write("a.txt", "hello\n")
+    read = await ops.read("a.txt")
+    edited = await ops.edit("../w/a.txt", "hello", "hi")
+    assert wrote.text == "Written: /w/a.txt"
+    assert read.text == "     1\thello\n"
+    assert edited.text == "Edited: /w/a.txt (1 occurrence(s))"
+    assert await workspace.vfs.read("/w/a.txt") == b"hi\n"
+    assert not await workspace.vfs.exists("/a.txt")
+
+
+@pytest.mark.asyncio
 async def test_ls(ops):
     await ops.write("/dir/a.txt", "a")
     await ops.write("/dir/b.txt", "b")

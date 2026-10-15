@@ -70,7 +70,7 @@ mirage shell -w demo -c 'ls /data' --json | jq .stdout
 
 ### `mirage mcp`
 
-`mirage mcp [CONFIG] [-w ID] [-s SESSION] [--all-calls]` serves a session's [MCP](/home/access/mcp) tools on stdio; `--all-calls` adds the [VFS calls and explain](/home/access/mcp#vfs-calls-and-explain). `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc). `mirage ssh-proxy ID` carries [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`.
+`mirage mcp [CONFIG] [-w ID] [-s SESSION] [--all-calls]` serves a session's [MCP](/home/access/mcp) tools on stdio; `--all-calls` adds the [VFS calls and explain](/home/access/mcp#vfs-calls-and-explain). `mirage rpc` takes the same arguments and serves [RPC](/home/access/rpc). `mirage ssh-proxy ID` carries [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`. `mirage codex-exec ID [--listen HOST:PORT]` serves workspace `ID` on a local port to `codex exec-server forward`, for OpenAI's [Agents API](/python/agents/openai-agents-api).
 
 With `-w`, it serves a workspace the server already holds. Otherwise it creates one from `CONFIG`, from `MIRAGE_MCP_CONFIG` (`MIRAGE_RPC_CONFIG`) or `MIRAGE_CONFIG`, or from a `workspace.yaml` found walking up from the working directory. It deletes that workspace when the client disconnects, unless the config names a `workspace_id`.
 
@@ -149,7 +149,7 @@ mirage login
 | `mirage whoami` | Show the account and the date to log in again by. |
 | `mirage logout` | Forget the login. |
 
-- Every command sends the login's token, `ssh-proxy` included, but only to the server it was made for. `MIRAGE_TOKEN` or `auth_token` wins over it.
+- Every command sends the login's token, `ssh-proxy` and `codex-exec` included, but only to the server it was made for. `MIRAGE_TOKEN` or `auth_token` wins over it.
 - The CLI refreshes the token when it ends, and asks you to log in again 30 days after you signed in. A running `mcp` or `rpc` relay asks for it on every request, so it keeps working past a refresh.
 - A server that publishes no login, such as the one the CLI starts on your machine, needs none, and `mirage login` says so.
 

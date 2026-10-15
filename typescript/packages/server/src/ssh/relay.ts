@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import WebSocket from 'ws'
+import WebSocket, { WebSocketServer } from 'ws'
 
 /** The server would not open the tunnel. */
 export class TunnelRefused extends Error {
@@ -84,4 +84,71 @@ export async function relaySsh(url: string, headers: Record<string, string>): Pr
     process.stdin.off('end', finish)
     process.stdin.pause()
   }
+}
+
+/**
+ * Serve `codex exec-server forward` on `host:port` until the process stops.
+ * Each connection forward opens is carried to the workspace's codex-exec
+ * route, one message for one message, logged in by the bearer token forward
+ * cannot send itself. `url` is the workspace's
+ * `/v1/workspaces/:id/codex-exec` URL as `ws://` or `wss://`; port 0 picks a
+ * free one.
+ */
+export async function relayCodex(
+  host: string,
+  port: number,
+  url: string,
+  headers: Record<string, string>,
+): Promise<void> {
+  const server = new WebSocketServer({ host, port, perMessageDeflate: false })
+  server.on('connection', (incoming: WebSocket) => {
+    const upstream = new WebSocket(url, { headers, perMessageDeflate: false })
+    const held: [Buffer, boolean][] = []
+    incoming.on('message', (data: Buffer, isBinary: boolean) => {
+      if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary })
+      else held.push([data, isBinary])
+    })
+    upstream.once('open', () => {
+      for (const [data, isBinary] of held.splice(0)) upstream.send(data, { binary: isBinary })
+    })
+    upstream.on('message', (data: Buffer, isBinary: boolean) => {
+      incoming.send(data, { binary: isBinary })
+    })
+    upstream.once('unexpected-response', (req, res) => {
+      let body = ''
+      res.on('data', (chunk: Buffer) => (body += chunk.toString()))
+      res.on('end', () => {
+        req.destroy()
+        const status = String(res.statusCode)
+        process.stderr.write(`mirage: codex-exec: the server refused: ${status} ${body.trim()}\n`)
+        incoming.close(1011, `the server refused: ${status}`)
+      })
+    })
+    upstream.on('error', (error: Error) => {
+      process.stderr.write(`mirage: codex-exec: ${error.message}\n`)
+      incoming.close(1011)
+    })
+    upstream.once('close', () => {
+      incoming.close()
+    })
+    incoming.once('close', () => {
+      upstream.close()
+    })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('listening', () => {
+      resolve()
+    })
+    server.once('error', reject)
+  })
+  const bound = server.address()
+  if (bound !== null && typeof bound === 'object') {
+    const address = bound.family === 'IPv6' ? `[${bound.address}]` : bound.address
+    process.stderr.write(`mirage: codex-exec: listening on ws://${address}:${String(bound.port)}\n`)
+  }
+  await new Promise<void>((resolve) => {
+    server.once('close', () => {
+      resolve()
+    })
+  })
 }

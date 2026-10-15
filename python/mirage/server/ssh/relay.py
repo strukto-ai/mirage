@@ -15,7 +15,8 @@
 import asyncio
 import sys
 
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
+from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from mirage.server.ssh.constants import TUNNEL_CHUNK
@@ -83,3 +84,84 @@ async def relay_ssh(url: str, headers: dict[str, str]) -> None:
                 continue
             except ConnectionClosed:
                 continue
+
+
+async def pump(
+    source: ClientConnection | ServerConnection,
+    sink: ClientConnection | ServerConnection,
+) -> None:
+    """Send every message ``source`` receives on to ``sink``, as it came.
+
+    Args:
+        source (ClientConnection | ServerConnection): where messages arrive.
+        sink (ClientConnection | ServerConnection): where they go.
+    """
+    async for message in source:
+        await sink.send(message)
+
+
+async def relay_codex(
+    host: str, port: int, url: str, headers: dict[str, str]
+) -> None:
+    """Serve ``codex exec-server forward`` on ``host:port``, until stopped.
+
+    Each connection forward opens is carried to the workspace's
+    codex-exec route, one message for one message, logged in by the
+    bearer token forward cannot send itself.
+
+    Args:
+        host (str): the address to listen on.
+        port (int): the port to listen on; 0 picks a free one.
+        url (str): the workspace's ``/v1/workspaces/{id}/codex-exec``
+            URL, as ``ws://`` or ``wss://``.
+        headers (dict[str, str]): request headers, the bearer token among
+            them.
+    """
+
+    async def carry(incoming: ServerConnection) -> None:
+        try:
+            upstream = await connect(
+                url,
+                additional_headers=headers,
+                max_size=None,
+                compression=None,
+            )
+        except InvalidStatus as exc:
+            status = exc.response.status_code
+            detail = exc.response.body.decode(errors="replace").strip()
+            print(
+                f"mirage: codex-exec: the server refused: {status} {detail}",
+                file=sys.stderr,
+            )
+            await incoming.close(1011, f"the server refused: {status}")
+            return
+        async with upstream:
+            tasks = [
+                asyncio.create_task(pump(incoming, upstream)),
+                asyncio.create_task(pump(upstream, incoming)),
+            ]
+            _, pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+            for task in tasks:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    continue
+                except ConnectionClosed:
+                    continue
+
+    async with serve(
+        carry, host, port, max_size=None, compression=None
+    ) as server:
+        for sock in server.sockets:
+            address, bound = sock.getsockname()[:2]
+            if ":" in address:
+                address = f"[{address}]"
+            print(
+                f"mirage: codex-exec: listening on ws://{address}:{bound}",
+                file=sys.stderr,
+            )
+        await server.serve_forever()

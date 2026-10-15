@@ -76,9 +76,10 @@ function open(
   address: string,
   workspace: string,
   headers: Record<string, string>,
+  door = 'ssh',
 ): Promise<WebSocket | number> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://${address}/v1/workspaces/${workspace}/ssh`, { headers })
+    const ws = new WebSocket(`ws://${address}/v1/workspaces/${workspace}/${door}`, { headers })
     ws.once('open', () => {
       resolve(ws)
     })
@@ -160,5 +161,89 @@ describe('the SSH route', () => {
     const ws = await open(address, 'w', alice)
     if (typeof ws === 'number') throw new Error(`refused ${String(ws)}`)
     expect(await run(await login(ws, 'w'), 'echo mine')).toBe('mine\n')
+  })
+})
+
+type Note = Record<string, unknown>
+
+/** Codex's side of one codex-exec socket: send a request, wait for its answer. */
+function codex(ws: WebSocket): {
+  call: (id: number, method: string, params: Note) => Promise<Note>
+  notes: Note[]
+  next: () => Promise<Note>
+} {
+  const queue: Note[] = []
+  const waiting: ((note: Note) => void)[] = []
+  ws.on('message', (data: Buffer) => {
+    const note = JSON.parse(data.toString()) as Note
+    const wake = waiting.shift()
+    if (wake === undefined) queue.push(note)
+    else wake(note)
+  })
+  const next = (): Promise<Note> => {
+    const note = queue.shift()
+    if (note !== undefined) return Promise.resolve(note)
+    return new Promise((resolve) => waiting.push(resolve))
+  }
+  const notes: Note[] = []
+  const call = async (id: number, method: string, params: Note): Promise<Note> => {
+    ws.send(Buffer.from(JSON.stringify({ id, method, params })))
+    for (;;) {
+      const note = await next()
+      if (note.id === id && !('method' in note)) return note
+      notes.push(note)
+    }
+  }
+  return { call, notes, next }
+}
+
+describe('the codex-exec route', () => {
+  it('serves Codex tools over a WebSocket', async () => {
+    const { app, address } = await serving()
+    await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { ...RAM, id: 'w' } })
+    const ws = await open(address, 'w', {}, 'codex-exec')
+    if (typeof ws === 'number') throw new Error(`refused ${String(ws)}`)
+    const client = codex(ws)
+    const init = await client.call(1, 'initialize', { clientName: 'test' })
+    const wrote = await client.call(2, 'fs/writeFile', {
+      path: 'file:///a.txt',
+      dataBase64: Buffer.from('hi\n').toString('base64'),
+    })
+    const started = await client.call(3, 'process/start', {
+      processId: 'p',
+      argv: ['/bin/bash', '-lc', 'cat /a.txt'],
+      cwd: 'file:///',
+      env: {},
+    })
+    while (!client.notes.some((n) => n.method === 'process/closed')) {
+      client.notes.push(await client.next())
+    }
+    ws.close()
+    expect(init.result).toHaveProperty('sessionId')
+    expect(wrote).toEqual({ id: 2, result: {} })
+    expect(started).not.toHaveProperty('error')
+    const out = client.notes
+      .filter((n) => n.method === 'process/output')
+      .map((n) => Buffer.from((n.params as { chunk: string }).chunk, 'base64').toString())
+      .join('')
+    expect(out).toBe('hi\n')
+  })
+
+  it('holds an account to its own workspace', async () => {
+    const { app, address } = await serving(true)
+    const alice = await token('alice')
+    await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      headers: alice,
+      payload: { ...RAM, id: 'w' },
+    })
+    expect(await open(address, 'w', await token('bob'), 'codex-exec')).toBe(404)
+    expect(await open(address, 'w', {}, 'codex-exec')).toBe(401)
+    const ws = await open(address, 'w', alice, 'codex-exec')
+    if (typeof ws === 'number') throw new Error(`refused ${String(ws)}`)
+    const init = await codex(ws).call(1, 'initialize', { clientName: 'test' })
+    ws.close()
+    expect(init.result).toHaveProperty('sessionId')
   })
 })

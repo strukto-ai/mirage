@@ -48,3 +48,36 @@ export function registerSshProxyCommand(program: Command): void {
       }
     })
 }
+
+/**
+ * Serve a workspace to `codex exec-server forward` on a local port: for
+ * `codex exec-server forward --connect ws://HOST:PORT`. Each connection is
+ * relayed to the server's codex-exec route with this CLI's token, which
+ * forward cannot send itself. Keep it on loopback.
+ */
+export function registerCodexExecCommand(program: Command): void {
+  program
+    .command('codex-exec')
+    .argument('<workspace>', 'The workspace to serve')
+    .option('--listen <address>', 'HOST:PORT to accept codex exec-server forward on', '127.0.0.1:0')
+    .description('Serve a workspace to `codex exec-server forward` on a local port.')
+    .action(async (workspace: string, opts: { listen: string }) => {
+      const at = opts.listen.lastIndexOf(':')
+      const host = opts.listen.slice(0, at)
+      const port = opts.listen.slice(at + 1)
+      if (at <= 0 || !/^\d+$/.test(port)) fail('codex-exec: --listen takes HOST:PORT')
+      const client = makeClient(loadDaemonSettings())
+      try {
+        await client.ensureRunning({ allowSpawn: true })
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error))
+      }
+      const base = client.settings.url
+      const token = await client.token()
+      const url = `ws${base.slice('http'.length)}/v1/workspaces/${encodeURIComponent(workspace)}/codex-exec`
+      const headers: Record<string, string> =
+        token === '' ? {} : { Authorization: `Bearer ${token}` }
+      const { relayCodex } = await import('@struktoai/mirage-server/ssh/relay')
+      await relayCodex(host.replace(/^\[|\]$/g, ''), Number(port), url, headers)
+    })
+}

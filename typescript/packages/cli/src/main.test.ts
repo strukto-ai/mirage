@@ -21,6 +21,7 @@ describe('mirage CLI program', () => {
     const names = program.commands.map((c) => c.name())
     expect(names.sort()).toEqual(
       [
+        'codex-exec',
         'config',
         'daemon',
         'glob',

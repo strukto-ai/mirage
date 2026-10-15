@@ -68,6 +68,10 @@
     "./claude-agent-sdk": {
       "types": "./dist/claude-agent-sdk/index.d.ts",
       "import": "./dist/claude-agent-sdk/index.js"
+    },
+    "./claude-managed-agents": {
+      "types": "./dist/claude-managed-agents/index.d.ts",
+      "import": "./dist/claude-managed-agents/index.js"
     }
   },
   "files": [
@@ -85,6 +89,7 @@
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.233",
+    "@anthropic-ai/sdk": "^0.124.0",
     "@earendil-works/pi-coding-agent": "^0.84.2 || ^1.0.0",
     "@mastra/core": "^1.59.0",
     "@opencode-ai/plugin": "^1.18.18",
@@ -95,6 +100,9 @@
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
       "optional": true
     },
     "@earendil-works/pi-coding-agent": {
@@ -121,6 +129,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.233",
+    "@anthropic-ai/sdk": "^0.124.0",
     "@earendil-works/pi-coding-agent": "^1.0.0",
     "@langchain/core": "^1.2.8",
     "@langchain/langgraph": "^1.4.10",
