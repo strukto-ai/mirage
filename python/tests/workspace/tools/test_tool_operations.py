@@ -194,6 +194,32 @@ async def test_a_relative_path_follows_a_link_before_its_dots(ops):
 
 
 @pytest.mark.asyncio
+async def test_another_spelling_keeps_the_read_history(ops, workspace):
+    await ops.shell(
+        "mkdir -p /w && cd /w && echo one > a.txt && echo two > b.txt"
+    )
+    await ops.read("a.txt")
+    await ops.read("b.txt")
+    await workspace.vfs.write("/w/a.txt", b"moved\n")
+    stale = await ops.edit("./a.txt", "moved", "x")
+    rewritten = await ops.write("/w/./b.txt", "three\n")
+    assert stale.is_error and "changed since it was last read" in stale.text
+    assert rewritten.is_error is False
+
+
+@pytest.mark.asyncio
+async def test_a_link_spelling_keeps_the_read_history(ops, workspace):
+    await ops.shell(
+        "mkdir -p /w /data/dir && cd /w && echo far > /data/config.txt"
+        " && ln -s /data/dir /w/link"
+    )
+    await ops.read("/data/config.txt")
+    await workspace.vfs.write("/data/config.txt", b"moved\n")
+    linked = await ops.edit("link/../config.txt", "moved", "x")
+    assert linked.is_error and "changed since it was last read" in linked.text
+
+
+@pytest.mark.asyncio
 async def test_ls(ops):
     await ops.write("/dir/a.txt", "a")
     await ops.write("/dir/b.txt", "b")

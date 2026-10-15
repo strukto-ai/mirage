@@ -15,6 +15,7 @@
 import base64
 import hashlib
 
+from mirage.utils.path import resolve_path
 from mirage.workspace.files import Files
 
 
@@ -74,16 +75,21 @@ class FileVersionTracker:
         `/alias` and `/target` are the same file. Keying by the caller's
         spelling would give each its own stamp, and an edit that arrived
         through the other name would find no prior version and skip the
-        staleness check entirely.
+        staleness check entirely. The dots go after the links they sit
+        behind, so ``/w/./a.txt`` and ``/w/a.txt`` share a stamp while
+        ``link/..`` climbs from where the link leads.
 
         Args:
             path (str): Virtual path as the agent spelled it.
 
         Returns:
-            str: The path with symlink prefixes resolved.
+            str: The path with symlink prefixes resolved and its dots
+            collapsed.
         """
         links = self.vfs.links
-        return path if links is None else links.follow(path)
+        if links is None:
+            return resolve_path(path, "/")
+        return links.follow(resolve_path(links.follow(path), "/"))
 
     async def _current_version(self, path: str) -> str | None:
         if not await self.vfs.exists(path):

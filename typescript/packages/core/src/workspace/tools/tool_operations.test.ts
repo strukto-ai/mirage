@@ -209,6 +209,29 @@ describe('a relative path', () => {
     const read = await ops.read('link/../config.txt')
     expect(read.content[0]?.text).toBe('     1\tfar\n')
   })
+
+  it('keeps the read history through another spelling', async () => {
+    await ops.shell('mkdir -p /w && cd /w && echo one > a.txt && echo two > b.txt')
+    await ops.read('a.txt')
+    await ops.read('b.txt')
+    await ws.vfs.write('/w/a.txt', 'moved\n')
+    const stale = await ops.edit('./a.txt', 'moved', 'x')
+    const rewritten = await ops.write('/w/./b.txt', 'three\n')
+    expect(stale.isError).toBe(true)
+    expect(stale.content[0]?.text).toContain('changed since it was last read')
+    expect(rewritten.isError).not.toBe(true)
+  })
+
+  it('keeps the read history through a link spelling', async () => {
+    await ops.shell(
+      'mkdir -p /w /data/dir && cd /w && echo far > /data/config.txt && ln -s /data/dir /w/link',
+    )
+    await ops.read('/data/config.txt')
+    await ws.vfs.write('/data/config.txt', 'moved\n')
+    const linked = await ops.edit('link/../config.txt', 'moved', 'x')
+    expect(linked.isError).toBe(true)
+    expect(linked.content[0]?.text).toContain('changed since it was last read')
+  })
 })
 
 async function guardedWs(): Promise<Workspace> {

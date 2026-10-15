@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Files } from '../files.ts'
+import { resolvePath } from '../../utils/path.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 
 export class StaleMirageFileError extends Error {
@@ -73,9 +74,13 @@ export class FileVersionTracker {
   // `/alias` and `/target` are the same file. Keying by the caller's
   // spelling would give each its own stamp, and an edit that arrived
   // through the other name would find no prior version and skip the
-  // staleness check entirely.
+  // staleness check entirely. The dots go after the links they sit behind,
+  // so `/w/./a.txt` and `/w/a.txt` share a stamp while `link/..` climbs from
+  // where the link leads.
   private key(path: string): string {
-    return this.vfs.links === null ? path : this.vfs.links.follow(path)
+    const links = this.vfs.links
+    if (links === null) return resolvePath(path, '/')
+    return links.follow(resolvePath(links.follow(path), '/'))
   }
 
   private async currentVersion(path: string): Promise<string | null> {
