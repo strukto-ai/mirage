@@ -19,12 +19,12 @@
   },
   "exit": 0,
   "lines": [
-    "baseline: 0 changes",
+    "read before: 'first quarter'",
     "",
-    "pull: 3 changes",
+    "watcher events:",
+    "  create /data/reports/q3.txt",
     "  update /data/reports/q1.txt",
     "  delete /data/reports/q2.txt",
-    "  create /data/reports/q3.txt",
     "",
     "read after notify: 'first quarter, revised'",
     "listing: q1.txt q3.txt"
