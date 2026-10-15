@@ -216,29 +216,31 @@ async def test_a_directory_no_file_points_at_still_gets_its_row():
 LINKED = FileStat(name="f", type=FileType.FILE, size=6)
 
 
-def _unlisted_ops() -> CommandIO:
-    # /db/private refuses its listing, though its file answers a stat by
-    # name, the way a directory without read permission does.
-    async def readdir(_accessor, path, _index=None):
-        if path.virtual == "/db/private":
-            raise PermissionError(errno.EACCES, "Permission denied")
-        return ["/db/link", "/db/private"] if path.virtual == "/db" else []
+# /db/private refuses its listing, though its file answers a stat by name,
+# the way a directory without read permission does.
+async def _unlisted_readdir(_accessor, path, _index=None):
+    if path.virtual == "/db/private":
+        raise PermissionError(errno.EACCES, "Permission denied")
+    return ["/db/link", "/db/private"] if path.virtual == "/db" else []
 
-    async def stat(_accessor, path, _index=None):
-        if path.virtual == "/db/link":
-            return FileStat(name="link", type=FileType.SYMLINK, size=9)
-        return FileStat(name=path.virtual, type=FileType.DIRECTORY)
 
-    async def read_bytes(_accessor, _path, _index=None):
-        return b""
+async def _unlisted_stat(_accessor, path, _index=None):
+    if path.virtual == "/db/link":
+        return FileStat(name="link", type=FileType.SYMLINK, size=9)
+    return FileStat(name=path.virtual, type=FileType.DIRECTORY)
 
-    return CommandIO(
-        readdir=readdir,
-        read_bytes=read_bytes,
-        read_stream=read_bytes,
-        stat=stat,
-        is_mounted=lambda _a: True,
-    )
+
+async def _no_bytes(_accessor, _path, _index=None):
+    return b""
+
+
+UNLISTED = CommandIO(
+    readdir=_unlisted_readdir,
+    read_bytes=_no_bytes,
+    read_stream=_no_bytes,
+    stat=_unlisted_stat,
+    is_mounted=lambda _a: True,
+)
 
 
 async def _target(path):
@@ -262,7 +264,7 @@ async def test_du_L_counts_a_link_whose_file_only_it_reaches():
         target_stat=_target,
     )
     stream, io = await du(
-        _unlisted_ops(),
+        UNLISTED,
         object(),
         [_spec("/db")],
         [],

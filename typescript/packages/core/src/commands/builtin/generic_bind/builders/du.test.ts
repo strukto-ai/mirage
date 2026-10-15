@@ -319,39 +319,43 @@ describe('WalkBudget', () => {
   })
 })
 
+// /db/private refuses its listing, though its file answers a stat by name, the
+// way a directory without read permission does.
+const UNLISTED: CommandIO = {
+  ...OPS,
+  readdir: (_a, p) =>
+    p.virtual === '/db/private'
+      ? Promise.reject(eacces(p.virtual))
+      : Promise.resolve(p.virtual === '/db' ? ['/db/link', '/db/private'] : []),
+  stat: (_a, p) =>
+    Promise.resolve(
+      p.virtual === '/db/link'
+        ? new FileStat({ name: 'link', type: FileType.SYMLINK, size: 9 })
+        : new FileStat({ name: p.virtual, type: FileType.DIRECTORY }),
+    ),
+}
+
+const UNLISTED_LINKS: LinkView = {
+  statAt: () => null,
+  subtree: () => [],
+  resolve: (path) => (path === '/db/link' ? '/db/private/f' : path),
+  exists: () => Promise.resolve(true),
+  targetStat: (path) =>
+    Promise.resolve(
+      path === '/db/link' ? new FileStat({ name: 'f', type: FileType.FILE, size: 6 }) : null,
+    ),
+}
+
 // A link into the operand's tree is left to the file's own name, but a
 // directory the walk may not list hides that name, and GNU then counts the
 // file under the link (coreutils 9.7).
 describe('du -L through a directory it may not list', () => {
   it('counts a link whose file only it reaches', async () => {
-    const ops: CommandIO = {
-      ...OPS,
-      readdir: (_a, p) =>
-        p.virtual === '/db/private'
-          ? Promise.reject(eacces(p.virtual))
-          : Promise.resolve(p.virtual === '/db' ? ['/db/link', '/db/private'] : []),
-      stat: (_a, p) =>
-        Promise.resolve(
-          p.virtual === '/db/link'
-            ? new FileStat({ name: 'link', type: FileType.SYMLINK, size: 9 })
-            : new FileStat({ name: p.virtual, type: FileType.DIRECTORY }),
-        ),
-    }
-    const links: LinkView = {
-      statAt: () => null,
-      subtree: () => [],
-      resolve: (path) => (path === '/db/link' ? '/db/private/f' : path),
-      exists: () => Promise.resolve(true),
-      targetStat: (path) =>
-        Promise.resolve(
-          path === '/db/link' ? new FileStat({ name: 'f', type: FileType.FILE, size: 6 }) : null,
-        ),
-    }
-    const result = await BUILDER.fn(ops, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
+    const result = await BUILDER.fn(UNLISTED, ACCESSOR, [PathSpec.fromStrPath('/db')], [], {
       stdin: null,
       flags: { a: true, L: true },
       cwd: '/',
-      ns: { links },
+      ns: { links: UNLISTED_LINKS },
     })
     const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
     expect(DEC.decode(out)).toBe('6\t/db/link\n0\t/db/private\n6\t/db\n')
