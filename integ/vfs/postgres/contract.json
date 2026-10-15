@@ -269,7 +269,7 @@
       "command": "cat /pg-limited/public/tables/books/rows.jsonl",
       "expect": {
         "exit": 1,
-        "stdout": "",
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n",
         "stderr": "cat: /pg-limited/public/tables/books/rows.jsonl: File too large\n"
       }
     },
@@ -295,7 +295,7 @@
       "command": "cat /pg-limited/public/tables/books/rows.jsonl /pg-limited/public/tables/authors/rows.jsonl",
       "expect": {
         "exit": 1,
-        "stdout": "{\"id\":1,\"name\":\"ada\",\"books\":2}\n{\"id\":2,\"name\":\"ben\",\"books\":2}\n{\"id\":3,\"name\":\"cara\",\"books\":1}\n",
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n{\"id\":2,\"title\":\"beta\",\"author\":\"ben\",\"year\":2021,\"rating\":3.2}\n{\"id\":3,\"title\":\"gamma\",\"author\":\"cara\",\"year\":2022,\"rating\":5}\n{\"id\":1,\"name\":\"ada\",\"books\":2}\n{\"id\":2,\"name\":\"ben\",\"books\":2}\n{\"id\":3,\"name\":\"cara\",\"books\":1}\n",
         "stderr": "cat: /pg-limited/public/tables/books/rows.jsonl: File too large\n"
       }
     },
@@ -321,7 +321,7 @@
       "command": "grep -F 4.5 /pg-limited/public/tables/books/rows.jsonl",
       "expect": {
         "exit": 2,
-        "stdout": "",
+        "stdout": "{\"id\":1,\"title\":\"alpha\",\"author\":\"ada\",\"year\":2020,\"rating\":4.5}\n",
         "stderr": "grep: /pg-limited/public/tables/books/rows.jsonl: File too large\n"
       }
     },
@@ -469,7 +469,7 @@
       }
     },
     {
-      "id": "postgres_tail_follow_reads_the_relation_whole",
+      "id": "postgres_tail_follow_reads_the_last_rows_by_key",
       "seq": 611014,
       "targets": [
         "postgres"
@@ -477,8 +477,8 @@
       "command": "tail -n 1 -f /pg/public/tables/books/rows.jsonl | head -n 1; tail -n 1 -f /pg-limited/public/tables/books/rows.jsonl | head -n 1; tail -n 1 /pg-limited/public/tables/books/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
-        "stderr": "tail: error reading '/pg-limited/public/tables/books/rows.jsonl': File too large\ntail: no files remaining\n"
+        "stdout": "{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
+        "stderr": ""
       }
     },
     {
@@ -600,7 +600,7 @@
       "command": "grep -nF Ada /pg-contract-limited/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 2,
-        "stdout": "",
+        "stdout": "1:{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\n",
         "stderr": "grep: /pg-contract-limited/contract/tables/probes/rows.jsonl: File too large\n"
       }
     },
@@ -613,8 +613,21 @@
       "command": "cat /pg-contract-limited/contract/tables/probes/rows.jsonl",
       "expect": {
         "exit": 1,
-        "stdout": "",
+        "stdout": "{\"id\":1,\"body\":\"Ada\\ttab\",\"active\":true}\n{\"id\":2,\"body\":\"left right\",\"active\":false}\n{\"id\":3,\"body\":\"left right\",\"active\":true}\n",
         "stderr": "cat: /pg-contract-limited/contract/tables/probes/rows.jsonl: File too large\n"
+      }
+    },
+    {
+      "id": "postgres_rows_come_in_key_order",
+      "seq": 611211,
+      "targets": [
+        "postgres"
+      ],
+      "command": "cat /pg-contract/contract/tables/shuffled/rows.jsonl; head -n 1 /pg-contract/contract/tables/shuffled/rows.jsonl; tail -n 1 /pg-contract/contract/tables/shuffled/rows.jsonl; grep -n name /pg-contract/contract/tables/shuffled/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"id\":1,\"name\":\"a\"}\n{\"id\":2,\"name\":\"b\"}\n{\"id\":3,\"name\":\"c\"}\n{\"id\":1,\"name\":\"a\"}\n{\"id\":3,\"name\":\"c\"}\n1:{\"id\":1,\"name\":\"a\"}\n2:{\"id\":2,\"name\":\"b\"}\n3:{\"id\":3,\"name\":\"c\"}\n",
+        "stderr": ""
       }
     }
   ]

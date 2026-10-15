@@ -1580,6 +1580,10 @@ async function seedPostgres(dsn: string): Promise<void> {
       await client.query('INSERT INTO contract.probes VALUES ($1, $2, $3)', [...row])
     }
     await client.query('ANALYZE contract.probes')
+    // Inserted out of key order: its heap order is not its key's.
+    await client.query('CREATE TABLE contract.shuffled (id int PRIMARY KEY, name text)')
+    await client.query("INSERT INTO contract.shuffled VALUES (3, 'c'), (1, 'a'), (2, 'b')")
+    await client.query('ANALYZE contract.shuffled')
     await client.query('DROP SCHEMA IF EXISTS byte_budget CASCADE')
     await client.query('CREATE SCHEMA byte_budget')
     await client.query(

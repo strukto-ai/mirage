@@ -26,7 +26,16 @@ import {
   type WindowedReader,
 } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { countRows, estimateSize, fetchBoundedRows, fetchRows } from './client.ts'
+import {
+  countRows,
+  estimateSize,
+  fetchBoundedRows,
+  fetchLastRows,
+  fetchPrimaryKey,
+  fetchRows,
+  fetchRowsAfter,
+} from './client.ts'
+import { abortable, sleep } from '../../utils/abort.ts'
 import { entityGuard } from './readdir.ts'
 import { buildDatabaseJson, buildEntitySchemaJson } from './_schema_json.ts'
 import { buildEntitySemanticJson } from './semantic.ts'
@@ -38,13 +47,63 @@ export interface ReadOptions {
   offset?: number | null
 }
 
+/**
+ * Stream a keyed table's rows.jsonl a page of rows at a time, in key order,
+ * the next page fetched only when the caller pulls it; any other file, a
+ * window, and a relation with no primary key comes whole, as `read` gives it.
+ * A table past `maxReadRows` rows or `maxReadBytes` bytes throws EFBIG once
+ * that much is out, rather than refusing it whole: a stream cannot know a
+ * table's size before it has paged through it, and a reader that stops first
+ * (`head -c`, `grep -l`) never reaches it. Mirrors Python's `read_stream`.
+ */
 export async function* readStream(
   accessor: PostgresAccessor,
   path: PathSpec | string,
   index?: IndexCacheStore,
   options: ReadOptions = {},
 ): AsyncIterable<Uint8Array> {
-  yield await read(accessor, path, index, options)
+  const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
+  const match = detectScope(spec)
+  const schema = match.slots.schema ?? ''
+  const entity = match.slots.entity ?? ''
+  let pk: string[] = []
+  if (match.kind === 'entity_rows' && options.limit == null && options.offset == null) {
+    await entityGuard(accessor, match, spec.virtual)
+    pk = await fetchPrimaryKey(accessor, schema, entity)
+  }
+  if (pk.length === 0) {
+    yield await read(accessor, path, index, options)
+    return
+  }
+  const cfg = accessor.config
+  const encoder = new TextEncoder()
+  let rowsOut = 0
+  let bytesOut = 0
+  let after: readonly unknown[] | null = null
+  for (;;) {
+    const [rows, last] = await fetchRowsAfter(
+      accessor,
+      schema,
+      entity,
+      pk,
+      after,
+      cfg.defaultRowLimit,
+    )
+    after = last
+    const page: string[] = []
+    for (const row of rows) {
+      const line = rowLine(row) + '\n'
+      rowsOut += 1
+      bytesOut += encoder.encode(line).byteLength
+      if (rowsOut > cfg.maxReadRows || bytesOut > cfg.maxReadBytes) {
+        if (page.length > 0) yield encoder.encode(page.join(''))
+        throw efbig(spec)
+      }
+      page.push(line)
+    }
+    if (page.length > 0) yield encoder.encode(page.join(''))
+    if (rows.length < cfg.defaultRowLimit) return
+  }
 }
 
 function entityKind(match: ScopeMatch): 'table' | 'view' {
@@ -203,6 +262,13 @@ async function lastRows(
 ): Promise<Uint8Array> {
   const schema = match.slots.schema ?? ''
   const entity = match.slots.entity ?? ''
+  const cap = accessor.config.maxReadRows
+  const pk = await fetchPrimaryKey(accessor, schema, entity)
+  if (pk.length > 0) {
+    const [rows] = await fetchLastRows(accessor, schema, entity, pk, Math.min(n, cap + 1))
+    if (rows.length > cap) throw efbig(path)
+    return lines(rows)
+  }
   const total = await countRows(accessor, schema, entity)
   const limit = Math.min(n, total)
   if (limit > accessor.config.maxReadRows) throw efbig(path)
@@ -223,9 +289,99 @@ function rowCount(
   return countRows(accessor, match.slots.schema ?? '', match.slots.entity ?? '')
 }
 
+/** Rows as their rows.jsonl lines. Mirrors Python's `_lines`. */
+function lines(rows: readonly Record<string, unknown>[]): Uint8Array {
+  return new TextEncoder().encode(rows.map((row) => rowLine(row) + '\n').join(''))
+}
+
+/**
+ * A keyed table's last `n` rows, then each row whose key sorts past them,
+ * asked for every `interval` seconds; null for a relation with no primary
+ * key, whose rows have no end a new one lands at. The file lists rows in key
+ * order, so a row lands at its end exactly when its key sorts past the last
+ * one: each ask starts at the last key seen, and none is printed twice. A row
+ * whose key sorts before it lands in the middle of the file, where `tail -f`
+ * never looks. Mirrors Python's `_follow_rows`.
+ */
+async function followRows(
+  accessor: PostgresAccessor,
+  match: ScopeMatch,
+  path: PathSpec,
+  n: number,
+  interval: number,
+  _index?: IndexCacheStore,
+): Promise<AsyncIterableIterator<Uint8Array> | null> {
+  const schema = match.slots.schema ?? ''
+  const entity = match.slots.entity ?? ''
+  const cap = accessor.config.maxReadRows
+  const pk = await fetchPrimaryKey(accessor, schema, entity)
+  if (pk.length === 0) return null
+  const [rows, after] = await fetchLastRows(
+    accessor,
+    schema,
+    entity,
+    pk,
+    Math.max(Math.min(n, cap + 1), 1),
+  )
+  if (rows.length > cap) throw efbig(path)
+  return followedRows(accessor, schema, entity, pk, after, n > 0 ? rows.slice(-n) : [], interval)
+}
+
+/**
+ * `rows`, then each row past `after` every `interval` seconds, as rows.jsonl
+ * lines. An iterator rather than a generator, so closing ends a pull waiting
+ * out its interval, as `followedDay` does. Mirrors Python's `_followed_rows`.
+ */
+function followedRows(
+  accessor: PostgresAccessor,
+  schema: string,
+  entity: string,
+  pk: readonly string[],
+  after: readonly unknown[] | null,
+  rows: readonly Record<string, unknown>[],
+  interval: number,
+): AsyncIterableIterator<Uint8Array> {
+  let pending: Uint8Array | null = rows.length > 0 ? lines(rows) : null
+  let last = after
+  const stop = new AbortController()
+  const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
+  return {
+    async next(): Promise<IteratorResult<Uint8Array>> {
+      if (pending !== null) {
+        const value = pending
+        pending = null
+        return { value, done: false }
+      }
+      try {
+        for (;;) {
+          await sleep(interval * 1000, stop.signal)
+          const [added, next] = await abortable(
+            fetchRowsAfter(accessor, schema, entity, pk, last, accessor.config.defaultRowLimit),
+            stop.signal,
+          )
+          last = next
+          if (added.length > 0) return { value: lines(added), done: false }
+        }
+      } catch (err) {
+        if (stop.signal.aborted) return done
+        throw err
+      }
+    },
+    return(): Promise<IteratorResult<Uint8Array>> {
+      stop.abort()
+      pending = null
+      return Promise.resolve(done)
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    },
+  }
+}
+
 export const firstLines = perKind(detectScope, { entity_rows: firstRows }, { guard: entityGuard })
 export const lastLines = perKind(detectScope, { entity_rows: lastRows }, { guard: entityGuard })
 export const lineCount = perKind(detectScope, { entity_rows: rowCount }, { guard: entityGuard })
+export const follow = perKind(detectScope, { entity_rows: followRows }, { guard: entityGuard })
 
 /** One row as rows.jsonl spells it. Mirrors `row_line` in `core/postgres/read.py`. */
 export function rowLine(row: Record<string, unknown>): string {

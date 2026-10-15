@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
 import asyncpg
@@ -119,6 +120,22 @@ async def table_size_bytes(
     return int(val) if val is not None else 0
 
 
+def key_order(pk: Sequence[str], descending: bool = False) -> str:
+    """A relation's rows in key order, as an ``ORDER BY`` clause.
+
+    A relation with no primary key (a view, a keyless table) gets none
+    and keeps the order its scan returns.
+
+    Args:
+        pk (Sequence[str]): the primary key's columns, in key order.
+        descending (bool): the last key first.
+    """
+    if not pk:
+        return ""
+    way = " DESC" if descending else ""
+    return " ORDER BY " + ", ".join(f"{quote_ident(c)}{way}" for c in pk)
+
+
 async def fetch_rows(
     conn: asyncpg.Connection,
     schema: str,
@@ -127,12 +144,76 @@ async def fetch_rows(
     limit: int,
     offset: int,
 ) -> list[dict[str, Any]]:
+    pk = await fetch_primary_key(conn, schema, name)
     rows = await conn.fetch(
-        f"SELECT * FROM {qualified(schema, name)} LIMIT $1 OFFSET $2",
+        f"SELECT * FROM {qualified(schema, name)}{key_order(pk)} "
+        "LIMIT $1 OFFSET $2",
         limit,
         offset,
     )
     return [canonicalize_row(dict(r)) for r in rows]
+
+
+async def fetch_last_rows(
+    conn: asyncpg.Connection,
+    schema: str,
+    name: str,
+    pk: Sequence[str],
+    limit: int,
+) -> tuple[list[dict[str, Any]], tuple[Any, ...] | None]:
+    """A keyed relation's last ``limit`` rows, in key order, read off the
+    end of its key with no count, and the key of the last one.
+
+    Args:
+        conn (asyncpg.Connection): the connection.
+        schema (str): the owning schema.
+        name (str): the table.
+        pk (Sequence[str]): its primary key's columns.
+        limit (int): how many rows.
+    """
+    rows = await conn.fetch(
+        f"SELECT * FROM (SELECT * FROM {qualified(schema, name)}"
+        f"{key_order(pk, descending=True)} LIMIT $1) last{key_order(pk)}",
+        limit,
+    )
+    last = tuple(rows[-1][c] for c in pk) if rows else None
+    return [canonicalize_row(dict(r)) for r in rows], last
+
+
+async def fetch_rows_after(
+    conn: asyncpg.Connection,
+    schema: str,
+    name: str,
+    pk: Sequence[str],
+    after: tuple[Any, ...] | None,
+    limit: int,
+) -> tuple[list[dict[str, Any]], tuple[Any, ...] | None]:
+    """A keyed relation's rows past a key, in key order, and the key of
+    the last one.
+
+    Args:
+        conn (asyncpg.Connection): the connection.
+        schema (str): the owning schema.
+        name (str): the table.
+        pk (Sequence[str]): its primary key's columns.
+        after (tuple[Any, ...] | None): the key the rows come after, None
+            for the first.
+        limit (int): the most rows.
+    """
+    where = ""
+    params: list[Any] = [limit]
+    if after is not None:
+        columns = ", ".join(quote_ident(c) for c in pk)
+        marks = ", ".join(f"${i + 2}" for i in range(len(pk)))
+        where = f" WHERE ({columns}) > ({marks})"
+        params.extend(after)
+    rows = await conn.fetch(
+        f"SELECT * FROM {qualified(schema, name)}{where}{key_order(pk)} "
+        "LIMIT $1",
+        *params,
+    )
+    last = tuple(rows[-1][c] for c in pk) if rows else after
+    return [canonicalize_row(dict(r)) for r in rows], last
 
 
 async def fetch_bounded_rows(
@@ -143,7 +224,8 @@ async def fetch_bounded_rows(
     limit: int,
     max_bytes: int,
 ) -> list[dict[str, Any]] | None:
-    """Fetch native rows only when their database JSON fits the byte budget.
+    """Fetch native rows only when their database JSON fits the byte
+    budget, in key order where the relation has a primary key.
 
     Args:
         conn (asyncpg.Connection): the connection.
@@ -155,9 +237,10 @@ async def fetch_bounded_rows(
     columns = {
         column["name"] for column in await fetch_columns(conn, schema, name)
     }
+    pk = await fetch_primary_key(conn, schema, name)
     return await fetch_bounded_query(
         conn,
-        f"SELECT * FROM {qualified(schema, name)} LIMIT $1",
+        f"SELECT * FROM {qualified(schema, name)}{key_order(pk)} LIMIT $1",
         [limit],
         columns,
         max_bytes,

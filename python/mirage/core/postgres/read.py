@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from collections.abc import AsyncIterator
 from typing import Any
 
 import orjson
@@ -219,6 +221,15 @@ async def _first_rows(
     return data
 
 
+def _lines(rows: list[dict[str, Any]]) -> bytes:
+    """Rows as their rows.jsonl lines.
+
+    Args:
+        rows (list[dict[str, Any]]): canonicalized rows.
+    """
+    return b"".join((row_line(row) + "\n").encode() for row in rows)
+
+
 async def _last_rows(
     accessor: PostgresAccessor,
     match: ScopeMatch,
@@ -226,8 +237,9 @@ async def _last_rows(
     n: int,
     index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    """The last ``n`` rows of a relation's rows.jsonl, by a ``COUNT(*)``
-    and an ``OFFSET``.
+    """The last ``n`` rows of a relation's rows.jsonl: off the end of its
+    primary key where it has one, otherwise by a ``COUNT(*)`` and an
+    ``OFFSET``.
 
     A suffix longer than ``max_read_rows`` raises EFBIG, as a whole read
     of a relation that long does.
@@ -240,8 +252,17 @@ async def _last_rows(
         index (IndexCacheStore): unused; the rows are queried by name.
     """
     schema, entity = match.slots["schema"], match.slots["entity"]
+    cap = accessor.config.max_read_rows
     pool = await accessor.pool()
     async with pool.acquire() as conn:
+        pk = await client.fetch_primary_key(conn, schema, entity)
+        if pk:
+            rows, _ = await client.fetch_last_rows(
+                conn, schema, entity, pk, min(n, cap + 1)
+            )
+            if len(rows) > cap:
+                raise efbig(path)
+            return _lines(rows)
         total = await client.count_rows(conn, schema, entity)
     limit = min(n, total)
     if limit > accessor.config.max_read_rows:
@@ -275,6 +296,149 @@ async def _row_count(
         )
 
 
+async def read_stream(
+    accessor: PostgresAccessor,
+    path: PathSpec,
+    index: IndexCacheStore = NULL_INDEX,
+) -> AsyncIterator[bytes]:
+    """Stream a keyed table's rows.jsonl a page of rows at a time, in key
+    order, the next page fetched only when the caller pulls it; any other
+    file, and a relation with no primary key, comes whole, as
+    :func:`read` gives it.
+
+    A table past ``max_read_rows`` rows or ``max_read_bytes`` bytes
+    raises EFBIG once that much is out, rather than refusing it whole: a
+    stream cannot know a table's size before it has paged through it,
+    and a reader that stops first (``head -c``, ``grep -l``) never
+    reaches it.
+
+    Args:
+        accessor (PostgresAccessor): backend handle.
+        path (PathSpec): the file.
+        index (IndexCacheStore): unused; the rows are queried by name.
+    """
+    match = detect_scope(path)
+    pk: list[str] = []
+    if match.kind == "entity_rows":
+        await entity_guard(accessor, match, path.virtual)
+        pool = await accessor.pool()
+        async with pool.acquire() as conn:
+            pk = await client.fetch_primary_key(
+                conn, match.slots["schema"], match.slots["entity"]
+            )
+    if not pk:
+        yield await read(accessor, path, index)
+        return
+    cfg = accessor.config
+    rows_out = bytes_out = 0
+    after: tuple[Any, ...] | None = None
+    while True:
+        async with pool.acquire() as conn:
+            rows, after = await client.fetch_rows_after(
+                conn,
+                match.slots["schema"],
+                match.slots["entity"],
+                pk,
+                after,
+                cfg.default_row_limit,
+            )
+        page = bytearray()
+        for row in rows:
+            line = (row_line(row) + "\n").encode()
+            rows_out += 1
+            bytes_out += len(line)
+            if rows_out > cfg.max_read_rows or bytes_out > cfg.max_read_bytes:
+                if page:
+                    yield bytes(page)
+                raise efbig(path)
+            page.extend(line)
+        if page:
+            yield bytes(page)
+        if len(rows) < cfg.default_row_limit:
+            return
+
+
+async def _follow_rows(
+    accessor: PostgresAccessor,
+    match: ScopeMatch,
+    path: PathSpec,
+    n: int,
+    interval: float,
+    index: IndexCacheStore = NULL_INDEX,
+) -> AsyncIterator[bytes] | None:
+    """A keyed table's last ``n`` rows, then each row whose key sorts
+    past them, asked for every ``interval`` seconds. None for a relation
+    with no primary key, whose rows have no end a new one lands at.
+
+    The file lists rows in key order, so a row lands at its end exactly
+    when its key sorts past the last one: each ask starts at the last
+    key seen, and none is printed twice. A row whose key sorts before it
+    lands in the middle of the file, where ``tail -f`` never looks.
+
+    Args:
+        accessor (PostgresAccessor): backend handle.
+        match (ScopeMatch): the rows file's match.
+        path (PathSpec): the file.
+        n (int): how many of its last rows come first, 0 for none.
+        interval (float): seconds between two asks.
+        index (IndexCacheStore): unused; the rows are queried by name.
+    """
+    schema, entity = match.slots["schema"], match.slots["entity"]
+    cap = accessor.config.max_read_rows
+    pool = await accessor.pool()
+    async with pool.acquire() as conn:
+        pk = await client.fetch_primary_key(conn, schema, entity)
+        if not pk:
+            return None
+        rows, after = await client.fetch_last_rows(
+            conn, schema, entity, pk, max(min(n, cap + 1), 1)
+        )
+    if len(rows) > cap:
+        raise efbig(path)
+    return _followed_rows(
+        accessor, schema, entity, pk, after, rows[-n:] if n else [], interval
+    )
+
+
+async def _followed_rows(
+    accessor: PostgresAccessor,
+    schema: str,
+    entity: str,
+    pk: list[str],
+    after: tuple[Any, ...] | None,
+    rows: list[dict[str, Any]],
+    interval: float,
+) -> AsyncIterator[bytes]:
+    """``rows``, then each row past ``after`` every ``interval`` seconds,
+    as rows.jsonl lines.
+
+    Args:
+        accessor (PostgresAccessor): backend handle.
+        schema (str): the owning schema.
+        entity (str): the table.
+        pk (list[str]): its primary key's columns.
+        after (tuple[Any, ...] | None): the last key seen.
+        rows (list[dict[str, Any]]): the last rows, printed first.
+        interval (float): seconds between two asks.
+    """
+    if rows:
+        yield _lines(rows)
+    pool = await accessor.pool()
+    while True:
+        await asyncio.sleep(interval)
+        async with pool.acquire() as conn:
+            added, after = await client.fetch_rows_after(
+                conn,
+                schema,
+                entity,
+                pk,
+                after,
+                accessor.config.default_row_limit,
+            )
+        if added:
+            yield _lines(added)
+
+
 first_lines = per_kind(
     detect_scope, {"entity_rows": _first_rows}, guard=entity_guard
 )
@@ -283,6 +447,9 @@ last_lines = per_kind(
 )
 line_count = per_kind(
     detect_scope, {"entity_rows": _row_count}, guard=entity_guard
+)
+follow = per_kind(
+    detect_scope, {"entity_rows": _follow_rows}, guard=entity_guard
 )
 
 

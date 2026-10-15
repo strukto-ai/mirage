@@ -155,12 +155,16 @@ describe('estimatedRowCount / tableSizeBytes', () => {
 })
 
 describe('fetchRows', () => {
-  it('quotes identifiers and binds limit/offset', async () => {
-    const { accessor, query } = makeAccessor([{ id: 1, name: 'a' }])
+  it('quotes identifiers, binds limit/offset and orders by the key', async () => {
+    const { accessor, query } = makeAccessor((sql) =>
+      sql.includes('PRIMARY KEY') ? [{ column_name: 'id' }] : [{ id: 1, name: 'a' }],
+    )
     const out = await client.fetchRows(accessor, 'public', 'users', { limit: 10, offset: 5 })
     expect(out).toEqual([{ id: 1, name: 'a' }])
-    expect(query.mock.calls[0]?.[0]).toBe('SELECT * FROM "public"."users" LIMIT $1 OFFSET $2')
-    expect(query.mock.calls[0]?.[1]).toEqual([10, 5])
+    expect(query.mock.calls[1]?.[0]).toBe(
+      'SELECT * FROM "public"."users" ORDER BY "id" LIMIT $1 OFFSET $2',
+    )
+    expect(query.mock.calls[1]?.[1]).toEqual([10, 5])
   })
 })
 
@@ -262,13 +266,15 @@ describe('fetchBoundedRows', () => {
     const { accessor, query } = makeAccessor((sql) =>
       sql.includes('information_schema.columns')
         ? [{ column_name: '__mirage_bytes', data_type: 'text', is_nullable: 'YES' }]
-        : [{ __mirage_bytes: null, __mirage_bytes_: size }],
+        : sql.includes('PRIMARY KEY')
+          ? []
+          : [{ __mirage_bytes: null, __mirage_bytes_: size }],
     )
     const rows = await client.fetchBoundedRows(accessor, 'public', 'users', {
       limit: 11,
       maxBytes: 100,
     })
     expect(rows).toEqual(size === 0 ? [] : size > 100 ? null : [{ __mirage_bytes: null }])
-    expect(query.mock.calls[1]?.[1]).toEqual([11, 100])
+    expect(query.mock.calls[2]?.[1]).toEqual([11, 100])
   })
 })

@@ -16,9 +16,11 @@ import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import {
   firstLines as postgresFirstLines,
+  follow as postgresFollow,
   lastLines as postgresLastLines,
   lineCount as postgresLineCount,
   read as postgresRead,
+  readStream as postgresReadStream,
 } from '../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../core/postgres/readdir.ts'
 import { linesContaining as postgresLinesContaining } from '../../core/postgres/search.ts'
@@ -45,6 +47,10 @@ export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
   ): Promise<Uint8Array> {
     const data = await postgresRead(this.accessor, path, index)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  }
+
+  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+    return postgresReadStream(this.accessor, path, index)
   }
 
   override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
@@ -78,5 +84,14 @@ export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
 
   override lineCount(path: PathSpec, index?: IndexCacheStore): Promise<number | null> {
     return postgresLineCount(this.accessor, path, index)
+  }
+
+  override follow(
+    path: PathSpec,
+    n: number,
+    interval: number,
+    index?: IndexCacheStore,
+  ): Promise<AsyncIterable<Uint8Array> | null> {
+    return postgresFollow(this.accessor, path, n, interval, index)
   }
 }

@@ -61,12 +61,18 @@ def _columns(*specs: tuple[str, ...]) -> list[dict[str, str | None]]:
 TABLE = [{"relkind": "r", "relhassubclass": False}]
 
 
-def _conn(columns, rows, size: int = 100, relation=TABLE) -> MagicMock:
-    # The relation, then its columns, then the bounded row query.
+def _conn(columns, rows, size: int = 100, relation=TABLE, key=()) -> MagicMock:
+    # The relation, then its columns, then its primary key, then the
+    # bounded row query.
     conn = MagicMock()
     bounded = [{**row, "__mirage_bytes": size} for row in rows]
     conn.fetch = AsyncMock(
-        side_effect=[relation, columns, bounded or [{"__mirage_bytes": 0}]]
+        side_effect=[
+            relation,
+            columns,
+            [{"column_name": name} for name in key],
+            bounded or [{"__mirage_bytes": 0}],
+        ]
     )
     return conn
 
@@ -103,7 +109,7 @@ async def test_keeps_unicode_separators_inside_a_line(separator):
 async def test_casts_every_column_and_takes_escaped_rows():
     conn = _conn(USERS, [])
     assert await _lines(conn, "user_id") == b""
-    sql, pattern, limit, max_bytes = conn.fetch.await_args_list[2].args
+    sql, pattern, limit, max_bytes = conn.fetch.await_args_list[3].args
     # grep is case-sensitive by default, so the query uses LIKE; an
     # integer column is searched through its cast, which spells it the
     # way the line does; a string column holding a control character is
@@ -124,10 +130,20 @@ async def test_casts_every_column_and_takes_escaped_rows():
 
 
 @pytest.mark.asyncio
+async def test_a_keyed_relation_comes_in_key_order():
+    # The plain read lists a keyed relation in key order.
+    conn = _conn(USERS, [], key=("id",))
+    await _lines(conn, "ada")
+    sql = conn.fetch.await_args_list[3].args[0]
+    assert 'ORDER BY "id" LIMIT $2' in sql
+    assert "ctid" not in sql
+
+
+@pytest.mark.asyncio
 async def test_ignore_case_uses_ilike():
     conn = _conn(USERS, [])
     await _lines(conn, "ALI", ignore_case=True)
-    assert '"name"::text ILIKE $1' in conn.fetch.await_args_list[2].args[0]
+    assert '"name"::text ILIKE $1' in conn.fetch.await_args_list[3].args[0]
 
 
 @pytest.mark.parametrize(
@@ -216,7 +232,7 @@ async def test_searches_a_column_whose_cast_holds_the_text(column, clauses):
     # cast does; a string can also hold it as an escape's letters.
     conn = _conn(_columns(column), [])
     assert await _lines(conn, "ada") == b""
-    sql = conn.fetch.await_args_list[2].args[0]
+    sql = conn.fetch.await_args_list[3].args[0]
     name = f'"{column[0]}"::text'
     assert [op for op in ("LIKE", "~") if f"{name} {op}" in sql] == clauses
 
@@ -238,7 +254,7 @@ async def test_leaves_out_a_column_that_cannot_spell_the_text():
     assert await _lines(conn, "ada") == (
         b'{"id":1,"name":"ada","rating":4.5,"price":1,"at":null}\n'
     )
-    sql = conn.fetch.await_args_list[2].args[0]
+    sql = conn.fetch.await_args_list[3].args[0]
     assert '"name"::text LIKE' in sql
     assert '"rating"' not in sql and '"price"' not in sql
     assert '"at"' not in sql
@@ -268,7 +284,7 @@ async def test_numbers_a_relation_read_in_another_order(relation):
         USERS, [{"__mirage_row": 3, "id": 1, "name": "ada"}], relation=relation
     )
     assert await _lines(conn, "ada") == b'{"id":1,"name":"ada"}\n'
-    sql = conn.fetch.await_args_list[2].args[0]
+    sql = conn.fetch.await_args_list[3].args[0]
     assert 'row_number() OVER () AS "__mirage_row", r.*' in sql
     assert 'ORDER BY "__mirage_row" LIMIT $2' in sql
     assert "ctid" not in sql

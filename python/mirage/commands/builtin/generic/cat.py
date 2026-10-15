@@ -18,8 +18,6 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.errors.constants import FS_ERRORS
-from mirage.errors.render import fs_error_line
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
@@ -91,7 +89,8 @@ async def cat_generic(
     fallback. A single operand (and every operand on a local backend)
     streams as the consumer reads; multiple operands on a non-local
     backend are read one by one. Either way a read that fails after its
-    stat is reported and the next operand still prints.
+    stat keeps what it printed, is reported, and the next operand still
+    prints.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -118,6 +117,9 @@ async def cat_generic(
         if not readable:
             return None, operands_io(err)
         io = IOResult()
+        if err:
+            io.stderr = err
+            io.exit_code = 1
 
         async def source_for(p: PathSpec) -> AsyncIterator[bytes]:
             source = read(p)
@@ -137,21 +139,14 @@ async def cat_generic(
                 ]
             )
         else:
-            parts: list[bytes] = []
-            for p in readable:
-                try:
-                    data = await materialize(await source_for(p))
-                except FS_ERRORS as exc:
-                    # A read the backend refuses once the stat passed (a
-                    # table past its read cap) is reported like a missing
-                    # operand, and the next operand still prints.
-                    err += encode_text(fs_error_line("cat", p, exc))
-                    continue
-                parts.append(data)
-            source = async_chain(parts)
-        if err:
-            io.stderr = err
-            io.exit_code = 1
+            source = async_chain(
+                [
+                    await materialize(
+                        reported_stream(await source_for(p), io, p, "cat")
+                    )
+                    for p in readable
+                ]
+            )
         if _wants_display(parsed):
             return display_lines(source, parsed), io
         return source, io

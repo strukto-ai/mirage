@@ -15,7 +15,7 @@
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import type { PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
-import { fetchBoundedQuery, qualified, quoteIdent } from './client.ts'
+import { fetchBoundedQuery, fetchPrimaryKey, keyOrder, qualified, quoteIdent } from './client.ts'
 import { rowLine } from './read.ts'
 import { detectScope } from './scope.ts'
 
@@ -157,9 +157,10 @@ function searches(
  * The lines of a relation's rows.jsonl that may hold `text`. A LIKE (ILIKE
  * under -i) over every column that can spell `text` picks the rows whose value
  * holds it, plus any row with a control character the line spells as an
- * escape; grep matches each line itself. A table's rows come in ctid order,
- * the order the plain read scans the heap in, whatever plan the filter gets (an
- * index or a parallel scan returns them otherwise); any other relation's are
+ * escape; grep matches each line itself. The rows come in the plain read's
+ * order: a keyed relation's in key order; a keyless table's in ctid order, the
+ * order the plain read scans the heap in, whatever plan the filter gets (an
+ * index or a parallel scan returns them otherwise); any other relation's
  * numbered as a plain read returns them before the filter. Null for any other
  * file, when the columns or the text keep a LIKE from seeing every match
  * (`searches`), or past `maxReadRows` rows or `maxReadBytes` bytes, where
@@ -202,11 +203,14 @@ export async function linesContaining(
   let marker = '__mirage_row'
   while (names.has(marker)) marker += '_'
   const numbered = quoteIdent(marker)
+  const pk = await fetchPrimaryKey(accessor, schema, entity)
   const sql =
-    HEAP_KINDS.has(only.relkind) && !only.relhassubclass
-      ? `SELECT * FROM ${source} WHERE ${where} ORDER BY ctid LIMIT $2`
-      : `SELECT * FROM (SELECT row_number() OVER () AS ${numbered}, r.* FROM ${source} r) s ` +
-        `WHERE ${where} ORDER BY ${numbered} LIMIT $2`
+    pk.length > 0
+      ? `SELECT * FROM ${source} WHERE ${where}${keyOrder(pk)} LIMIT $2`
+      : HEAP_KINDS.has(only.relkind) && !only.relhassubclass
+        ? `SELECT * FROM ${source} WHERE ${where} ORDER BY ctid LIMIT $2`
+        : `SELECT * FROM (SELECT row_number() OVER () AS ${numbered}, r.* FROM ${source} r) s ` +
+          `WHERE ${where} ORDER BY ${numbered} LIMIT $2`
   const rows = await fetchBoundedQuery(
     accessor,
     sql,

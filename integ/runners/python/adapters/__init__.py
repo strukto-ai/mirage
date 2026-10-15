@@ -2387,6 +2387,14 @@ class PostgresService:
                 POSTGRES_PROBES,
             )
             await conn.execute("ANALYZE contract.probes")
+            # Inserted out of key order: its heap order is not its key's.
+            await conn.execute(
+                "CREATE TABLE contract.shuffled (id int PRIMARY KEY, name text)"
+            )
+            await conn.execute(
+                "INSERT INTO contract.shuffled VALUES (3, 'c'), (1, 'a'), (2, 'b')"
+            )
+            await conn.execute("ANALYZE contract.shuffled")
             await conn.execute("DROP SCHEMA IF EXISTS byte_budget CASCADE")
             await conn.execute("CREATE SCHEMA byte_budget")
             await conn.execute(

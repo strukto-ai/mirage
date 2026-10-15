@@ -43,14 +43,16 @@ function path(p: string = ROWS): PathSpec {
 
 const TABLE: Row[] = [{ relkind: 'r', relhassubclass: false }]
 
-// A driver that answers the relation, then its columns, then the bounded row
-// query, recording the SQL and parameters it was asked.
+// A driver that answers the relation, then its columns, then its primary
+// key, then the bounded row query, recording the SQL and parameters it was
+// asked.
 function makeAccessor(
   cols: Row[],
   rows: Row[],
   config: { maxReadRows?: number; maxReadBytes?: number } = {},
   databaseBytes = 100,
   relation: Row[] = TABLE,
+  key: string[] = [],
 ): { accessor: PostgresAccessor; calls: [string, unknown[]][] } {
   const calls: [string, unknown[]][] = []
   const driver: PgDriver = {
@@ -58,6 +60,10 @@ function makeAccessor(
       calls.push([sql, params])
       if (sql.includes('relhassubclass')) {
         return Promise.resolve({ rows: relation, rowCount: relation.length })
+      }
+      if (sql.includes('PRIMARY KEY')) {
+        const named = key.map((name) => ({ column_name: name }))
+        return Promise.resolve({ rows: named, rowCount: named.length })
       }
       if (sql.includes('pg_attribute')) {
         return Promise.resolve({ rows: cols, rowCount: cols.length })
@@ -103,7 +109,7 @@ describe('linesContaining', () => {
   it('casts every column and takes escaped rows', async () => {
     const { accessor, calls } = makeAccessor(USERS, [])
     expect(await lines(accessor, 'user_id')).toBe('')
-    const [sql, params] = calls[2] ?? ['', []]
+    const [sql, params] = calls[3] ?? ['', []]
     // grep is case-sensitive by default, so the query uses LIKE; an integer
     // column is searched through its cast, which spells it the way the line
     // does; a string column holding a control character is a candidate,
@@ -124,7 +130,7 @@ describe('linesContaining', () => {
   it('uses ILIKE under ignore case', async () => {
     const { accessor, calls } = makeAccessor(USERS, [])
     await lines(accessor, 'ALI', true)
-    expect(calls[2]?.[0]).toContain('"name"::text ILIKE $1')
+    expect(calls[3]?.[0]).toContain('"name"::text ILIKE $1')
   })
 
   it.each<[Row[], string, string]>([
@@ -207,7 +213,7 @@ describe('linesContaining', () => {
   ])('searches a column whose cast holds the text: %j', async (column, clauses) => {
     const { accessor, calls } = makeAccessor(columns(column), [])
     expect(await lines(accessor, 'ada')).toBe('')
-    const sql = calls[2]?.[0] ?? ''
+    const sql = calls[3]?.[0] ?? ''
     const name = `"${column[0] ?? ''}"::text`
     expect(['LIKE', '~'].filter((op) => sql.includes(`${name} ${op}`))).toEqual(clauses)
   })
@@ -228,7 +234,7 @@ describe('linesContaining', () => {
     expect(await lines(accessor, 'ada')).toBe(
       '{"id":1,"name":"ada","rating":4.5,"price":1,"at":null}\n',
     )
-    const sql = calls[2]?.[0] ?? ''
+    const sql = calls[3]?.[0] ?? ''
     expect(sql).toContain('"name"::text LIKE')
     for (const name of ['"rating"', '"price"', '"at"']) expect(sql).not.toContain(name)
   })
@@ -255,7 +261,7 @@ describe('linesContaining', () => {
       relation,
     )
     expect(await lines(accessor, 'ada')).toBe('{"id":1,"name":"ada"}\n')
-    const sql = calls[2]?.[0] ?? ''
+    const sql = calls[3]?.[0] ?? ''
     expect(sql).toContain('row_number() OVER () AS "__mirage_row", r.*')
     expect(sql).toContain('ORDER BY "__mirage_row" LIMIT $2')
     expect(sql).not.toContain('ctid')

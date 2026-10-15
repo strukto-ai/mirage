@@ -181,15 +181,17 @@ async def test_table_size_bytes(mock_conn):
 
 @pytest.mark.asyncio
 async def test_fetch_rows(mock_conn):
-    mock_conn.fetch.return_value = [
-        {"id": 1, "name": "a"},
-        {"id": 2, "name": "b"},
+    mock_conn.fetch.side_effect = [
+        [{"column_name": "id"}],
+        [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}],
     ]
     result = await client.fetch_rows(
         mock_conn, "public", "users", limit=10, offset=0
     )
     assert len(result) == 2
     assert result[0]["name"] == "a"
+    # A keyed relation's rows come in key order.
+    assert 'ORDER BY "id" LIMIT $1' in mock_conn.fetch.call_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -385,6 +387,7 @@ async def test_bounded_rows_preserves_null_rows_and_marker_columns(
                 "is_nullable": "YES",
             }
         ],
+        [],
         [{"__mirage_bytes": None, "__mirage_bytes_": size}],
     ]
     result = await client.fetch_bounded_rows(

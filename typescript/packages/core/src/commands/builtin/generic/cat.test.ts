@@ -110,19 +110,20 @@ describe('catGeneric without display flags', () => {
 
 describe('catGeneric per-operand read failure', () => {
   it('reports a read refused past the stat and prints the next file', async () => {
-    // A table past its mount's read cap stats fine and refuses the read; GNU
-    // cat reports the operand and goes on to the next.
+    // A table past its mount's read cap stats fine and refuses the rest of
+    // the read; GNU cat keeps what it printed, reports the operand and goes
+    // on to the next.
     const result = await catGeneric([spec('/a.txt'), spec('/b.txt')], [], opts(), statFn, (p) =>
       p.virtual === '/a.txt'
         ? (async function* () {
             await Promise.resolve()
-            yield* []
+            yield ENC.encode('a1\n')
             throw efbig(p)
           })()
         : fileStream(p.virtual, []),
     )
     const [stdout, io] = result ?? [null, new IOResult()]
-    expect(DEC.decode(await materialize(stdout))).toBe('b1\nb2\n')
+    expect(DEC.decode(await materialize(stdout))).toBe('a1\nb1\nb2\n')
     expect(DEC.decode(await materialize(io.stderr))).toBe('cat: /a.txt: File too large\n')
     expect(io.exitCode).toBe(1)
   })

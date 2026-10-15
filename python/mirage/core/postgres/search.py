@@ -188,10 +188,11 @@ async def lines_containing(
     A LIKE (ILIKE under -i) over every column that can spell ``text``
     picks the rows whose value holds it, plus any row with a control
     character the line spells as an escape; grep matches each line
-    itself. A table's rows come in ctid order, the order the plain read
-    scans the heap in, whatever plan the filter gets (an index or a
-    parallel scan returns them otherwise); any other relation's are
-    numbered as a plain read returns them before the filter. None for any
+    itself. The rows come in the plain read's order: a keyed relation's
+    in key order; a keyless table's in ctid order, the order the plain
+    read scans the heap in, whatever plan the filter gets (an index or a
+    parallel scan returns them otherwise); any other relation's numbered
+    as a plain read returns them before the filter. None for any
     other file, when the columns or the text keep a LIKE from seeing every
     match (``_searches``), or past ``max_read_rows`` rows or
     ``max_read_bytes`` bytes, where reading the file refuses it as too
@@ -241,7 +242,13 @@ async def lines_containing(
         marker = "__mirage_row"
         while marker in names:
             marker += "_"
-        if (
+        pk = await client.fetch_primary_key(conn, schema, entity)
+        if pk:
+            sql = (
+                f"SELECT * FROM {source} WHERE {where}"
+                f"{client.key_order(pk)} LIMIT $2"
+            )
+        elif (
             relation[0]["relkind"] in _HEAP_KINDS
             and not relation[0]["relhassubclass"]
         ):

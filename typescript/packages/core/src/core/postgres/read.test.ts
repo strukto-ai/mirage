@@ -20,6 +20,9 @@ vi.mock('./client.ts', () => ({
   estimateSize: vi.fn(),
   fetchRows: vi.fn(),
   fetchBoundedRows: vi.fn(),
+  fetchPrimaryKey: vi.fn(),
+  fetchLastRows: vi.fn(),
+  fetchRowsAfter: vi.fn(),
   // A read proves the entity directory first, through the guards stat runs,
   // so the catalog those guards consult is faked too.
   listSchemas: vi.fn(),
@@ -39,7 +42,7 @@ import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import * as _schema from './_schema_json.ts'
-import { firstLines, lastLines, lineCount, read, rowLine } from './read.ts'
+import { firstLines, follow, lastLines, lineCount, read, readStream, rowLine } from './read.ts'
 
 const STUB_DRIVER: PgDriver = {
   query: () => Promise.resolve({ rows: [], rowCount: 0 }),
@@ -315,6 +318,7 @@ describe('read stand-ins', () => {
   beforeEach(() => {
     vi.mocked(client.countRows).mockReset()
     vi.mocked(client.fetchRows).mockReset()
+    vi.mocked(client.fetchPrimaryKey).mockResolvedValue([])
     vi.mocked(client.listSchemas).mockImplementation((_accessor, allow) =>
       Promise.resolve(['public', 'secret'].filter((s) => allow == null || allow.includes(s))),
     )
@@ -350,6 +354,60 @@ describe('read stand-ins', () => {
     table(30)
     const capped = makeAccessor({ dsn: 'postgres://h/db', maxReadRows: 20 })
     await expect(lastLines(capped, ROWS, 25)).rejects.toMatchObject({ code: 'EFBIG' })
+  })
+
+  // Twin of test_last_lines_of_a_keyed_table_come_off_its_key.
+  it("takes a keyed table's last rows off its key", async () => {
+    vi.mocked(client.fetchPrimaryKey).mockResolvedValue(['id'])
+    vi.mocked(client.fetchLastRows).mockResolvedValue([[{ id: 8 }, { id: 9 }], [9]])
+    expect(decode((await lastLines(makeAccessor(), ROWS, 2)) ?? new Uint8Array())).toBe(
+      '{"id":8}\n{"id":9}\n',
+    )
+    expect(client.countRows).not.toHaveBeenCalled()
+    expect(vi.mocked(client.fetchLastRows).mock.calls[0]?.slice(3)).toEqual([['id'], 2])
+  })
+
+  // Twin of test_a_keyed_table_streams_in_pages_up_to_its_ceiling.
+  it('streams a keyed table in pages up to its ceiling', async () => {
+    vi.mocked(client.fetchPrimaryKey).mockResolvedValue(['id'])
+    const after = vi
+      .mocked(client.fetchRowsAfter)
+      .mockResolvedValueOnce([[{ id: 1 }, { id: 2 }], [2]])
+      .mockResolvedValueOnce([[{ id: 3 }, { id: 4 }], [4]])
+    const accessor = makeAccessor({ dsn: 'postgres://h/db', maxReadRows: 3, defaultRowLimit: 2 })
+    const got: string[] = []
+    await expect(
+      (async () => {
+        for await (const chunk of readStream(accessor, ROWS)) got.push(decode(chunk))
+      })(),
+    ).rejects.toMatchObject({ code: 'EFBIG' })
+    expect(got).toEqual(['{"id":1}\n{"id":2}\n', '{"id":3}\n'])
+    expect(after.mock.calls.map((call) => call[4])).toEqual([null, [2]])
+  })
+
+  // Twin of test_a_followed_table_prints_rows_past_the_last_key.
+  it('follows a keyed table past its last key', async () => {
+    vi.mocked(client.fetchPrimaryKey).mockResolvedValue(['id'])
+    vi.mocked(client.fetchLastRows).mockResolvedValue([[{ id: 8 }, { id: 9 }], [9]])
+    const after = vi
+      .mocked(client.fetchRowsAfter)
+      .mockReset()
+      .mockResolvedValueOnce([[], [9]])
+      .mockResolvedValueOnce([[{ id: 10 }], [10]])
+    const lines = await follow(makeAccessor(), ROWS, 1, 0)
+    if (lines === null) throw new Error('a keyed table is followed')
+    const iterator = lines[Symbol.asyncIterator]()
+    const got = [await iterator.next(), await iterator.next()].map((r) =>
+      decode(r.value as Uint8Array),
+    )
+    await iterator.return?.()
+    expect(got).toEqual(['{"id":9}\n', '{"id":10}\n'])
+    expect(after.mock.calls.map((call) => call[4])).toEqual([[9], [9]])
+  })
+
+  // Twin of test_a_keyless_relation_is_not_followed.
+  it('follows no keyless relation', async () => {
+    expect(await follow(makeAccessor(), ROWS, 1, 0)).toBeNull()
   })
 
   it('counts rows past the ceiling', async () => {

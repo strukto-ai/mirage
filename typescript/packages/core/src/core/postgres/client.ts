@@ -161,20 +161,84 @@ export async function tableSizeBytes(
   return value === undefined ? 0 : Number(value)
 }
 
+/**
+ * A relation's rows in key order, as an `ORDER BY` clause. A relation with no
+ * primary key (a view, a keyless table) gets none and keeps the order its scan
+ * returns. Mirrors Python's `key_order`.
+ */
+export function keyOrder(pk: readonly string[], descending = false): string {
+  if (pk.length === 0) return ''
+  const way = descending ? ' DESC' : ''
+  return ` ORDER BY ${pk.map((column) => `${quoteIdent(column)}${way}`).join(', ')}`
+}
+
 export async function fetchRows(
   accessor: PostgresAccessor,
   schema: string,
   name: string,
   options: { limit: number; offset: number },
 ): Promise<Record<string, unknown>[]> {
+  const pk = await fetchPrimaryKey(accessor, schema, name)
   const result = await accessor.store.query(
-    `SELECT * FROM ${qualified(schema, name)} LIMIT $1 OFFSET $2`,
+    `SELECT * FROM ${qualified(schema, name)}${keyOrder(pk)} LIMIT $1 OFFSET $2`,
     [options.limit, options.offset],
   )
   return result.rows
 }
 
-/** Fetch native rows only when their database JSON fits the byte budget. */
+/**
+ * A keyed relation's last `limit` rows, in key order, read off the end of its
+ * key with no count, and the key of the last one. Mirrors Python's
+ * `fetch_last_rows`.
+ */
+export async function fetchLastRows(
+  accessor: PostgresAccessor,
+  schema: string,
+  name: string,
+  pk: readonly string[],
+  limit: number,
+): Promise<[Record<string, unknown>[], unknown[] | null]> {
+  const result = await accessor.store.query(
+    `SELECT * FROM (SELECT * FROM ${qualified(schema, name)}${keyOrder(pk, true)} ` +
+      `LIMIT $1) last${keyOrder(pk)}`,
+    [limit],
+  )
+  const last = result.rows[result.rows.length - 1]
+  return [result.rows, last === undefined ? null : pk.map((column) => last[column])]
+}
+
+/**
+ * A keyed relation's rows past a key, in key order, and the key of the last
+ * one. Mirrors Python's `fetch_rows_after`.
+ */
+export async function fetchRowsAfter(
+  accessor: PostgresAccessor,
+  schema: string,
+  name: string,
+  pk: readonly string[],
+  after: readonly unknown[] | null,
+  limit: number,
+): Promise<[Record<string, unknown>[], readonly unknown[] | null]> {
+  let where = ''
+  const params: unknown[] = [limit]
+  if (after !== null) {
+    const columns = pk.map((column) => quoteIdent(column)).join(', ')
+    const marks = pk.map((_, i) => `$${String(i + 2)}`).join(', ')
+    where = ` WHERE (${columns}) > (${marks})`
+    params.push(...after)
+  }
+  const result = await accessor.store.query(
+    `SELECT * FROM ${qualified(schema, name)}${where}${keyOrder(pk)} LIMIT $1`,
+    params,
+  )
+  const last = result.rows[result.rows.length - 1]
+  return [result.rows, last === undefined ? after : pk.map((column) => last[column])]
+}
+
+/**
+ * Fetch native rows only when their database JSON fits the byte budget, in key
+ * order where the relation has a primary key.
+ */
 export async function fetchBoundedRows(
   accessor: PostgresAccessor,
   schema: string,
@@ -182,9 +246,10 @@ export async function fetchBoundedRows(
   options: { limit: number; maxBytes: number },
 ): Promise<Record<string, unknown>[] | null> {
   const columns = new Set((await fetchColumns(accessor, schema, name)).map((column) => column.name))
+  const pk = await fetchPrimaryKey(accessor, schema, name)
   return fetchBoundedQuery(
     accessor,
-    `SELECT * FROM ${qualified(schema, name)} LIMIT $1`,
+    `SELECT * FROM ${qualified(schema, name)}${keyOrder(pk)} LIMIT $1`,
     [options.limit],
     columns,
     options.maxBytes,
