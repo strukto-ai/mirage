@@ -6,17 +6,11 @@ icon: /images/openai-logo.svg
 
 OpenAI's [Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) runs the agent on OpenAI's servers. With a `self_hosted` environment, its shell commands, file reads and patches run in a Mirage workspace, under the workspace's profile and mount modes. No sandbox holds the files.
 
-```text
-Agents API  ->  codex exec-server forward  ->  mirage codex-exec  ->  Mirage server
-```
-
-`codex exec-server forward` keeps the encrypted connection to OpenAI and passes each call on. It runs nothing itself. `mirage codex-exec` logs it in to the server with the CLI's token.
+The workspace connects through Codex's exec-server relay, set up on the [Codex page](/typescript/agents/codex#exec-server-forward).
 
 ## Install
 
 ```bash
-npm install -g @struktoai/mirage-cli
-npm install -g @openai/codex@alpha
 npm install openai
 ```
 
@@ -55,24 +49,6 @@ console.log(session.environment.id, session.environment.remote_url)
 
 ## Connect the workspace
 
-Serve the workspace on a local port, then point forward at it with the session's environment and an [environment key](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted#authentication):
+Hand the session's `environment.id` and `environment.remote_url`, with an [environment key](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted#authentication), to [`codex exec-server forward`](/typescript/agents/codex#exec-server-forward) pointed at workspace `demo`. Then [send input](https://developers.openai.com/api/docs/guides/agents-api/sessions#send-input) to the session. The agent's commands run in the workspace, and what it writes lands in its mounts.
 
-```bash
-mirage codex-exec demo --listen 127.0.0.1:8790
-```
-
-```bash
-CODEX_API_KEY="$OPENAI_EXECUTOR_API_KEY" codex exec-server forward \
-  --connect ws://127.0.0.1:8790 \
-  --remote "$REMOTE_URL" \
-  --environment-id "$ENVIRONMENT_ID"
-```
-
-Then [send input](https://developers.openai.com/api/docs/guides/agents-api/sessions#send-input) to the session. The agent's commands run in workspace `demo`, and what it writes lands in its mounts.
-
-## How it behaves
-
-- Each connection runs in a fresh session under the workspace's default profile, closed when the connection ends. A reconnect starts a new session; the files stay.
-- `mirage codex-exec` lets in any connection on its port, as you, and refuses one from a browser page. Keep it on loopback.
-- On a hosted server, run [`mirage login`](/home/access/cli#log-in) first; the relay sends that token.
-- The Agents API is in beta, and the protocol follows Codex 0.147, as Codex over [SSH](/typescript/agents/codex#ssh) does.
+The Agents API is in beta.

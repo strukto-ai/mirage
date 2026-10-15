@@ -54,5 +54,5 @@ The provider runs the agent, and the workspace is its environment: its own shell
 
 | API | Hand it | The agent gets |
 | --- | --- | --- |
-| [OpenAI Agents API](/typescript/agents/openai-agents-api) | `mirage codex-exec`, behind `codex exec-server forward` | its shell, file and patch tools, run in Mirage |
+| [OpenAI Agents API](/typescript/agents/openai-agents-api) | a `self_hosted` environment, through [exec-server forward](/typescript/agents/codex#exec-server-forward) | its shell, file and patch tools, run in Mirage |
 | [Claude Managed Agents](/typescript/agents/claude-managed-agents) | `mirageTools(ws)`, in an `EnvironmentWorker` | its `bash`, `read`, `write`, `edit`, `glob` and `grep`, run in Mirage |

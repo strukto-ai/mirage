@@ -48,5 +48,5 @@ The provider runs the agent, and the workspace is its environment: its own shell
 
 | API | Hand it | The agent gets |
 | --- | --- | --- |
-| [OpenAI Agents API](/python/agents/openai-agents-api) | `mirage codex-exec`, behind `codex exec-server forward` | its shell, file and patch tools, run in Mirage |
+| [OpenAI Agents API](/python/agents/openai-agents-api) | a `self_hosted` environment, through [exec-server forward](/python/agents/codex#exec-server-forward) | its shell, file and patch tools, run in Mirage |
 | [Claude Managed Agents](/python/agents/claude-managed-agents) | `mirage_tools(ws)`, in an `EnvironmentWorker` | its `bash`, `read`, `write`, `edit`, `glob` and `grep`, run in Mirage |

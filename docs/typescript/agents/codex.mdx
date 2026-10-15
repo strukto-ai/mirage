@@ -1,6 +1,6 @@
 ---
 title: OpenAI Codex
-description: Connect Codex to a Mirage workspace through the CLI, SSH or a FUSE mount.
+description: Connect Codex to a Mirage workspace through the CLI, SSH, exec-server forward or a FUSE mount.
 icon: /images/openai-logo.svg
 ---
 
@@ -8,6 +8,7 @@ icon: /images/openai-logo.svg
 | --- | --- | --- |
 | [CLI](#cli) | Mirage's seven tools, beside its own | the `mirage` CLI |
 | [SSH](#ssh) | its own tools, run in the workspace | the daemon's [SSH server](/home/access/ssh) |
+| [Exec-server forward](#exec-server-forward) | its own tools, run in the workspace, for a remote harness | `codex exec-server forward` |
 | [FUSE](#fuse) | its own tools, on the workspace as a folder | a [FUSE driver](/home/setup/fuse) |
 
 ## Install
@@ -72,6 +73,28 @@ codex -C /
 ```
 
 Codex's shell commands, file reads and patches run in the workspace, under the SSH key's profile. This works in the Codex CLI, not the app. The protocol is experimental and follows Codex 0.147.
+
+## Exec-server forward
+
+`codex exec-server forward` carries the tool calls of a remote harness, such as an [OpenAI Agents API](/typescript/agents/openai-agents-api) session, to an exec server. `mirage codex-exec` makes the workspace that exec server: it listens on a local port and relays each connection to the server's codex-exec route with the CLI's token, which forward cannot send itself.
+
+```bash
+npm install -g @openai/codex@alpha
+mirage codex-exec demo --listen 127.0.0.1:8790
+```
+
+```bash
+CODEX_API_KEY="$OPENAI_EXECUTOR_API_KEY" codex exec-server forward \
+  --connect ws://127.0.0.1:8790 \
+  --remote "$REMOTE_URL" \
+  --environment-id "$ENVIRONMENT_ID"
+```
+
+The remote URL and environment id come from the harness's session, and `CODEX_API_KEY` is its environment key.
+
+- Each connection runs in a fresh session under the workspace's default profile, closed when the connection ends. A reconnect starts a new session; the files stay.
+- `mirage codex-exec` lets in any connection on its port, as you, and refuses one from a browser page. Keep it on loopback.
+- On a hosted server, run [`mirage login`](/home/access/cli#log-in) first; the relay asks for its token on every connection.
 
 ## FUSE
 
