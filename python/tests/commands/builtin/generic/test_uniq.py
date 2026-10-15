@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+
 import pytest
 
 from mirage.commands.builtin.generic.uniq import (
@@ -168,6 +170,11 @@ async def test_uniq_emits_before_reading_the_tail_and_closes(
     assert closed
 
 
+async def _one_byte_chunks(data: bytes) -> AsyncIterator[bytes]:
+    for byte in data:
+        yield bytes([byte])
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "flags,expected",
@@ -188,8 +195,5 @@ async def test_uniq_emits_before_reading_the_tail_and_closes(
     ],
 )
 async def test_uniq_groups_survive_one_byte_chunks(flags, expected):
-    async def source():
-        for byte in b"A\na\nA\nb\nC\nc":
-            yield bytes([byte])
-
-    assert await _collect(source(), flags=flags) == expected
+    source = _one_byte_chunks(b"A\na\nA\nb\nC\nc")
+    assert await _collect(source, flags=flags) == expected

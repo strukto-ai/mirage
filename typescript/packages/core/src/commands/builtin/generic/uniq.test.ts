@@ -140,16 +140,17 @@ it.each<[CommandOpts['flags'], string, string]>([
   expect(closed).toBe(true)
 })
 
+async function* oneByteChunks(data: string): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  for (const byte of new TextEncoder().encode(data)) yield Uint8Array.of(byte)
+}
+
 it.each<[CommandOpts['flags'], string]>([
   [{ ignore_case: true }, 'A\nb\nC\n'],
   [{ ignore_case: true, count: true }, '      3 A\n      1 b\n      2 C\n'],
   [{ ignore_case: true, all_repeated: 'separate' }, 'A\na\nA\n\nC\nc\n'],
   [{ ignore_case: true, group: 'both' }, '\nA\na\nA\n\nb\n\nC\nc\n\n'],
 ])('uniq groups survive one-byte chunks %j', async (flags, expected) => {
-  async function* source() {
-    await Promise.resolve()
-    for (const byte of new TextEncoder().encode('A\na\nA\nb\nC\nc')) yield Uint8Array.of(byte)
-  }
-  const [out] = await run(source(), flags)
+  const [out] = await run(oneByteChunks('A\na\nA\nb\nC\nc'), flags)
   expect(DEC.decode(await materialize(out))).toBe(expected)
 })
