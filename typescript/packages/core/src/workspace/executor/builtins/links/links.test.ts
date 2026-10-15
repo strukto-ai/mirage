@@ -22,7 +22,7 @@ import { Workspace } from '../../../workspace/workspace.ts'
 import { followPaths, prepareMv } from './links.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import type { IndexCacheStore } from '../../../../cache/index/store.ts'
+import type { Handed } from '../../../../vfs/types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 
 const DEC = new TextDecoder()
@@ -41,17 +41,17 @@ class PinLinks implements Policy {
 class SealedReads extends RAMVFS {
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
     if (path.virtual.endsWith('.sealed')) return Promise.reject(eacces(path))
-    return super.read(path, index, offset, size)
+    return super.read(path, handed, offset, size)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     if (path.virtual.endsWith('.sealed')) throw eacces(path)
-    return super.readStream(path, index)
+    return super.readStream(path)
   }
 }
 

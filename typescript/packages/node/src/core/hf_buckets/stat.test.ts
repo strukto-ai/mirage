@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
@@ -20,7 +19,6 @@ import { HfHubError } from '../hf_hub/client.ts'
 import { type FakeHub, xetHash } from '../hf_hub/_test_util.ts'
 import { DRIVER, type HfConn } from './driver.ts'
 import { type FakeHfOperator, fakeHfOperator, installFakeOperator } from './mock.ts'
-import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
 interface Mounted {
@@ -82,21 +80,6 @@ describe('hf stat', () => {
   it('raises ENOENT for missing paths', async () => {
     const accessor = await accessorWith({ 'a.txt': 'x' })
     await expect(stat(accessor, PathSpec.fromStrPath('/nope'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
-
-  it('serves stats from the index cache after readdir without network calls', async () => {
-    const accessor = await accessorWith({ 'a.txt': 'abc', 'dir/b.txt': 'x' })
-    const index = new RAMIndexCacheStore()
-    await readdir(accessor, PathSpec.fromStrPath('/'), index)
-    const fake = fakeHfOperator({})
-    await installFakeOperator(accessor, fake)
-    const file = await stat(accessor, PathSpec.fromStrPath('/a.txt'), index)
-    expect(file.size).toBe(3)
-    const dir = await stat(accessor, PathSpec.fromStrPath('/dir'), index)
-    expect(dir.type).toBe(FileType.DIRECTORY)
-    await expect(stat(accessor, PathSpec.fromStrPath('/missing'), index)).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })

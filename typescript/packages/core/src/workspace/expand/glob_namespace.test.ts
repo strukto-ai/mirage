@@ -351,10 +351,10 @@ describe('trailing-slash globs on a mount that cannot stat', () => {
     const ws = await flatWs(vfs)
     if (stat !== 'missing') {
       const ramStat = vfs.stat.bind(vfs)
-      vfs.stat = (path, index) =>
+      vfs.stat = (path) =>
         stat === 'none' || path.virtual === '/m/f'
           ? Promise.resolve(undefined as unknown as FileStat)
-          : ramStat(path, index)
+          : ramStat(path)
     }
     try {
       expect(await out(ws, 'echo /m/*')).toBe('/m/a /m/b /m/f\n')

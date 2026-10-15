@@ -25,7 +25,7 @@ import {
 } from './config.ts'
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as hfReaddir } from '../../core/hf_buckets/readdir.ts'
 import { read as hfRead } from '../../core/hf_buckets/read.ts'
 import { stat as hfStat } from '../../core/hf_buckets/stat.ts'
@@ -75,37 +75,35 @@ export class HfBucketsVFS extends BaseVFS {
     this.accessor = new HfBucketsAccessor(this.config)
   }
 
+  override readonly listsStats: boolean = true
   override readonly readsRanges: boolean = true
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
-    return hfTree(this.accessor, path, index)
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return hfTree(this.accessor, path)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return hfReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return hfReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return hfRead(this.accessor, path, index)
-    return hfRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return hfRead(this.accessor, path)
+    return hfRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return hfStat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return hfStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return hfStream(this.accessor, path, index)
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    return hfStream(this.accessor, path)
   }
 
   override exists(path: PathSpec): Promise<boolean> {

@@ -51,7 +51,7 @@ const partlyMeasured: CommandFn = () => [
 ]
 
 class Unlisted extends RAMVFS {
-  override readdir(): Promise<string[]> {
+  override readdir(): Promise<FileStat[]> {
     return Promise.reject(eacces('/a'))
   }
 }

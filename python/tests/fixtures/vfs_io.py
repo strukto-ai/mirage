@@ -111,16 +111,19 @@ def override(vfs: BaseVFS, name: str, fn: Callable[..., Any]) -> BaseVFS:
     """Replace the function ``name`` of this one ``vfs``.
 
     ``fn`` takes the accessor in front, as a backend's core functions do,
-    and whatever keywords the caller passes.
+    and the keywords of the caller's that it names.
 
     Args:
         vfs (BaseVFS): the VFS to change.
         name (str): the function name.
         fn (Callable[..., Any]): the replacement.
     """
+    params = inspect.signature(fn).parameters
+    takes_any = any(p.kind is p.VAR_KEYWORD for p in params.values())
 
     def call(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
-        return fn(vfs.accessor, path, *args, **kwargs)
+        taken = {k: v for k, v in kwargs.items() if takes_any or k in params}
+        return fn(vfs.accessor, path, *args, **taken)
 
     setattr(vfs, name, call)
     return vfs

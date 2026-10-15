@@ -15,14 +15,16 @@
 import type { Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { Handed } from '../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 
 import { RAMVFS } from '../ram/ram.ts'
 import type { RAMStore } from '../ram/store.ts'
 import type { DevicePipe } from '../../core/dev/pipe.ts'
 import { activePipe } from '../../core/dev/device.ts'
-import { norm } from '../../utils/path.ts'
+import { keyStat } from '../../core/dev/stat.ts'
+import { childKeys } from '../../core/ram/readdir.ts'
+import { gnuBasename, norm } from '../../utils/path.ts'
 import { type DevFiles, DevStore } from './store.ts'
 
 /**
@@ -39,6 +41,12 @@ export class DevIndex extends RAMIndexCacheStore {
   }
   override setDir(): Promise<Evicted[]> {
     return Promise.resolve([])
+  }
+  override setPartialDir(): Promise<void> {
+    return Promise.resolve()
+  }
+  override addEntry(): Promise<void> {
+    return Promise.resolve()
   }
 }
 
@@ -69,13 +77,19 @@ export class DevVFS extends RAMVFS {
   }
 
   /**
-   * Null: the devices stat as character devices, which a RAM listing does not
-   * know, and a walk of /dev is one readdir. Mirrors Python's `read_tree`.
+   * The RAM listing, each child as `stat` answers it, so a device or a live
+   * descriptor lists as one. Mirrors Python's `readdir`.
    */
-  override readTree(
-    _path: PathSpec,
-    _index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
+  override async readdir(path: PathSpec): Promise<FileStat[]> {
+    return (await childKeys(this.accessor, path)).map(
+      (key) =>
+        keyStat(this.accessor, key) ??
+        new FileStat({ name: gnuBasename(key), type: FileType.DIRECTORY }),
+    )
+  }
+
+  /** Null: a walk of /dev is one readdir. Mirrors Python's `read_tree`. */
+  override readTree(_path: PathSpec): Promise<Map<string, FileStat> | null> {
     return Promise.resolve(null)
   }
 
@@ -86,18 +100,18 @@ export class DevVFS extends RAMVFS {
    */
   override readStream(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     signal?: AbortSignal,
   ): AsyncIterable<Uint8Array> {
     // Bound as the read opens, so a descriptor reads on after the pipe's path
     // is released.
     const pipe = activePipe(this.accessor, norm(path.mountPath))
     if (pipe !== null) return pipe.stream(path, signal)
-    return this.readWhole(path, index)
+    return this.readWhole(path)
   }
 
-  private async *readWhole(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    const data = await this.read(path, index)
+  private async *readWhole(path: PathSpec): AsyncIterable<Uint8Array> {
+    const data = await this.read(path)
     if (data.byteLength > 0) yield data
   }
 }

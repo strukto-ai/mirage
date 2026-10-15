@@ -16,11 +16,12 @@ import asyncio
 import dataclasses
 import errno
 from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
     Caller,
@@ -127,12 +128,10 @@ class _FailingRAM(RAMVFS):
 
     failing: str | None = None
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
+    async def readdir(self, path: PathSpec) -> list[str]:
         if self.failing == "readdir":
             raise RuntimeError("api exploded")
-        return await super().readdir(path, index)
+        return await super().readdir(path)
 
     async def unlink(self, path: PathSpec) -> None:
         if self.failing == "unlink":
@@ -1402,8 +1401,8 @@ class _CachingRAM(RAMVFS):
 
 
 class _UnsizedRAM(_CachingRAM):
-    async def stat(self, path, *args, **kwargs):
-        row = await super().stat(path, *args, **kwargs)
+    async def stat(self, path):
+        row = await super().stat(path)
         return row.model_copy(update={"size": None})
 
 
@@ -1547,34 +1546,19 @@ async def test_a_waiting_follow_closes_through_the_mount(after):
         await ws.close()
 
 
-class _ListedRAM(RAMVFS):
-    """A store whose stat answers from a listing row when the index has
-    one, as an object store's does."""
-
-    async def stat(self, path, index=NULL_INDEX):
-        row = (await index.get(path.virtual)).entry
-        if row is not None:
-            return FileStat(name=row.name, type=FileType.FILE, size=row.size)
-        return await super().stat(path, index)
-
-
 @pytest.mark.asyncio
 async def test_a_fresh_stat_asks_past_a_stale_listing():
     # The index holds a listing up to its TTL old: `wc -c` and `cmp -s`
     # take the size from a stat that asks the backend now.
-    vfs = _ListedRAM()
+    vfs = RAMVFS()
     vfs._store.dirs.add("/")
     vfs._store.files["/f"] = b"grown\n"
     ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
     try:
         await ws.mount("/m").index.set_dir(
             "/m",
-            [
-                (
-                    "f",
-                    IndexEntry(id="f", name="f", resource_type="file", size=3),
-                )
-            ],
+            [("f", FileStat(name="f", type=FileType.FILE, size=3))],
+            datetime.now(timezone.utc) + timedelta(hours=1),
         )
         path = PathSpec.from_str_path("/m/f")
         listed, _ = await ws.dispatch("stat", path)
@@ -1949,14 +1933,10 @@ class Tape(BaseVFS):
         self.reads = 0
         self.closed = False
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
+    async def readdir(self, path: PathSpec) -> list[str]:
         return [f"/tape/{name}" for name in self.files]
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
+    async def stat(self, path: PathSpec) -> FileStat:
         key = path.vfs_path.strip("/")
         if not key:
             return FileStat(name="/", type=FileType.DIRECTORY)
@@ -1969,7 +1949,6 @@ class Tape(BaseVFS):
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
@@ -1981,9 +1960,7 @@ class Tape(BaseVFS):
     ) -> None:
         self.files[path.vfs_path.strip("/")] = data
 
-    async def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
+    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         key = path.vfs_path.strip("/")
         if key not in self.files:
             raise FileNotFoundError(path.virtual)
@@ -2499,9 +2476,9 @@ class TreeCountingRAM(RAMVFS):
         super().__init__()
         self.trees = 0
 
-    async def read_tree(self, path, index=NULL_INDEX):
+    async def read_tree(self, path):
         self.trees += 1
-        return await super().read_tree(path, index)
+        return await super().read_tree(path)
 
 
 @pytest.mark.asyncio

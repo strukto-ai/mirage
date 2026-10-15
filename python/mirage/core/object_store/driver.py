@@ -22,7 +22,6 @@ from mirage.cache.context import (
     drop_cached,
     stale,
 )
-from mirage.cache.index import IndexCacheStore
 from mirage.cache.types import KnownVersions, OwnRead, WriteCondition
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.errors.types import StaleWriteError
@@ -36,28 +35,19 @@ A_contra = TypeVar("A_contra", bound=Accessor, contravariant=True)
 
 class ReaddirFn(Protocol[A_contra]):
     def __call__(
-        self,
-        accessor: A_contra,
-        path_spec: PathSpec,
-        index: IndexCacheStore = ...,
-    ) -> Awaitable[list[str]]: ...
+        self, accessor: A_contra, path_spec: PathSpec
+    ) -> Awaitable[list[FileStat]]: ...
 
 
 class TreeFn(Protocol[A_contra]):
     def __call__(
-        self,
-        accessor: A_contra,
-        path: PathSpec,
-        index: IndexCacheStore = ...,
+        self, accessor: A_contra, path: PathSpec
     ) -> Awaitable[dict[str, FileStat] | None]: ...
 
 
 class StatFn(Protocol[A_contra]):
     def __call__(
-        self,
-        accessor: A_contra,
-        path_spec: PathSpec,
-        index: IndexCacheStore = ...,
+        self, accessor: A_contra, path_spec: PathSpec
     ) -> Awaitable[FileStat]: ...
 
 
@@ -70,19 +60,6 @@ class ExistsFn(Protocol[A_contra]):
 class PathFn(Protocol[A_contra]):
     def __call__(
         self, accessor: A_contra, path_spec: PathSpec
-    ) -> Awaitable[None]: ...
-
-
-class RmdirFn(Protocol[A_contra]):
-    """``PathFn`` plus the rmdir slot's optional ``index``, which rides
-    the call for the command tier's hidden-remnant listing; the store
-    itself never consults it."""
-
-    def __call__(
-        self,
-        accessor: A_contra,
-        path_spec: PathSpec,
-        index: IndexCacheStore = ...,
     ) -> Awaitable[None]: ...
 
 
@@ -112,24 +89,6 @@ class TruncateFn(Protocol[A_contra]):
         length: int,
         no_create: bool = False,
     ) -> Awaitable[None]: ...
-
-
-class DuEntriesFn(Protocol[A_contra]):
-    def __call__(
-        self,
-        accessor: A_contra,
-        path_spec: PathSpec,
-        index: IndexCacheStore = ...,
-    ) -> Awaitable[tuple[list[tuple[str, int]], int]]: ...
-
-
-class DuSizeFn(Protocol[A_contra]):
-    def __call__(
-        self,
-        accessor: A_contra,
-        path_spec: PathSpec,
-        index: IndexCacheStore = ...,
-    ) -> Awaitable[int]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,7 +231,7 @@ async def keep_lost(
 class ObjectStoreDriver(Generic[A, C]):
     """The native surface of one keyed byte store.
 
-    Everything above this line — readdir with its index write-back,
+    Everything above this line — readdir,
     stat's probe ladder, find's implicit-directory synthesis, du, and
     the mutation family — derives from
     these primitives in ``mirage.core.object_store``; a backend supplies

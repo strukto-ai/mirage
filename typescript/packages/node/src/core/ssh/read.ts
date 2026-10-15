@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -34,13 +33,11 @@ export const WC = 'env LC_ALL=C wc -l'
  * Args:
  *   accessor: SSH accessor.
  *   p: the path to read.
- *   _index: unused; SFTP resolves the path itself.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
 export async function read(
   accessor: SSHAccessor,
   p: PathSpec,
-  _index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
   const start = options?.offset ?? 0

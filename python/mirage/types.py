@@ -242,12 +242,16 @@ class DirListing:
             last N days), so the entries are everything to show but
             prove nothing absent: a child that drops out of the window
             has not been deleted. Kept as listings that evict nothing.
+        version (str | None): the version the listing was read at, for
+            a backend that declares a ``listing_version``; a ``fresh``
+            mount checks it before serving the listing again.
     """
 
     entries: list[FileStat]
     seeds: Mapping[str, list[FileStat]] = field(default_factory=dict)
     partial: bool = False
     window: bool = False
+    version: str | None = None
 
 
 # Any value that survives a JSON round trip: what a decoded payload

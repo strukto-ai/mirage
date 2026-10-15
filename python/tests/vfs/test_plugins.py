@@ -27,7 +27,6 @@ from mirage import (
     Workspace,
 )
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import command_io
 from mirage.core.ram.read import read as ram_read
 from mirage.core.ram.readdir import readdir as ram_readdir
@@ -48,25 +47,20 @@ class Minimal(BaseVFS):
 
     name = "custom"
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await ram_readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await ram_readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        data = await ram_read(self.accessor, path, index)
+        data = await ram_read(self.accessor, path)
         return slice_window(data, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await ram_stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await ram_stat(self.accessor, path)
 
 
 class Writable(Minimal):
@@ -80,9 +74,7 @@ class Writable(Minimal):
 class Streaming(Minimal):
     reads_ranges = True
 
-    async def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
+    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         for chunk in (b"hel", b"lo\n"):
             yield chunk
 
@@ -92,7 +84,6 @@ class Searchable(Minimal):
         self,
         path: PathSpec,
         query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[str] | None:
         return None
 

@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ssh.append import append_bytes as _append
 from mirage.core.ssh.capacity import capacity as _capacity
 from mirage.core.ssh.constants import SCOPE_ERROR
@@ -67,41 +66,30 @@ class SSHVFS(BaseVFS):
         self.config = config
         self.accessor = SSHAccessor(self.config)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await _readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
         if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read(self.accessor, path, index, offset, size)
+            return await _read(self.accessor, path)
+        return await _read(self.accessor, path, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await _stat(self.accessor, path)
 
-    def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path)
 
-    async def read_tree(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path, index)
+    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path)
 
-    async def line_count(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int | None:
-        return await _line_count(self.accessor, path, index)
+    async def line_count(self, path: PathSpec) -> int | None:
+        return await _line_count(self.accessor, path)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
@@ -113,7 +101,6 @@ class SSHVFS(BaseVFS):
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         return await _files_containing(
             self.accessor, text, [path], ignore_case
@@ -126,7 +113,6 @@ class SSHVFS(BaseVFS):
         self,
         path: PathSpec,
         data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         await _append(self.accessor, path, data)
 
@@ -135,7 +121,6 @@ class SSHVFS(BaseVFS):
         path: PathSpec,
         data: bytes,
         offset: int,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         await _pwrite(self.accessor, path, data, offset)
 
@@ -148,10 +133,8 @@ class SSHVFS(BaseVFS):
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         await _mkdir(self.accessor, path, parents=parents)
 
-    async def rmdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
-        await _rmdir(self.accessor, path, index)
+    async def rmdir(self, path: PathSpec) -> None:
+        await _rmdir(self.accessor, path)
 
     async def rm_r(self, path: PathSpec) -> Any:
         return await _rm_r(self.accessor, path)

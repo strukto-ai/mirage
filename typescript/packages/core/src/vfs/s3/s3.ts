@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Accessor } from '../../accessor/s3.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { appendByRewrite } from '../../core/generic/rewrite.ts'
 import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
 import { MD5_ETAG_STORES, SCOPE_ERROR } from '../../core/s3/constants.ts'
@@ -33,6 +32,7 @@ import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
 import { write as s3Write } from '../../core/s3/write.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 import { exdev } from '../../errors/fs.ts'
 import { tree as s3Tree } from '../../core/s3/readdir.ts'
 
@@ -41,6 +41,7 @@ import { tree as s3Tree } from '../../core/s3/readdir.ts'
  * packages build over their own transport.
  */
 export class S3VFSBase extends BaseVFS<S3Accessor> {
+  override readonly listsStats: boolean = true
   override readonly readsRanges: boolean = true
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
@@ -58,29 +59,26 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     return this.accessor.config.presignedUrlProvider !== undefined
   }
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
-    return s3Tree(this.accessor, path, index)
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return s3Tree(this.accessor, path)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return s3Readdir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return s3Readdir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return s3Read(this.accessor, path, index)
-    return s3ReadRange(this.accessor, path, index, offset, size)
+    if (offset === 0 && size === null) return s3Read(this.accessor, path)
+    return s3ReadRange(this.accessor, path, offset, size)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return s3Stat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return s3Stat(this.accessor, path)
   }
 
   override copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {
@@ -88,17 +86,13 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     return s3CopyFrom(this.accessor, source.accessor, src, dst)
   }
 
-  override checksum(
-    path: PathSpec,
-    algorithm: string,
-    index?: IndexCacheStore,
-  ): Promise<string | null> {
+  override checksum(path: PathSpec, algorithm: string): Promise<string | null> {
     if (!MD5_ETAG_STORES.has(this.name) || this.presigned) return Promise.resolve(null)
     const aws = this.name === 's3' && this.resolvedEndpoint === undefined
-    return s3Checksum(this.accessor, path, algorithm, aws, index)
+    return s3Checksum(this.accessor, path, algorithm, aws)
   }
 
-  override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     return s3Stream(this.accessor, path)
   }
 
@@ -110,11 +104,11 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     return s3Write(this.accessor, path, data)
   }
 
-  override append(path: PathSpec, data: Uint8Array, index?: IndexCacheStore): Promise<void> {
+  override append(path: PathSpec, data: Uint8Array): Promise<void> {
     return appendByRewrite(
-      (p) => this.read(p, index),
+      (p) => this.read(p),
       (p, d) => this.write(p, d),
-      (p) => this.stat(p, index),
+      (p) => this.stat(p),
       path,
       data,
     )
@@ -132,7 +126,7 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     return s3Unlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return s3Rmdir(this.accessor, path)
   }
 

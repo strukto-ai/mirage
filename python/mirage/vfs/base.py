@@ -19,12 +19,12 @@ from typing import Any
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.errors.fs import enotsup
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
     CapacityState,
+    DirListing,
     FileStat,
     ListingVersion,
     PathSpec,
@@ -273,14 +273,12 @@ class BaseVFS:
 
     @vfs_call(effect=Effect.READ, target=Target.DIR)
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
+        self, path: PathSpec
+    ) -> list[str] | list[FileStat] | DirListing:
         """List the children of a directory.
 
         Args:
             path (PathSpec): the directory.
-            index (IndexCacheStore): the mount's index, for backends that
-                address items by id.
         """
         raise enotsup(self.name, "readdir", path)
 
@@ -288,7 +286,7 @@ class BaseVFS:
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
+        *,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
@@ -299,34 +297,27 @@ class BaseVFS:
 
         Args:
             path (PathSpec): the file.
-            index (IndexCacheStore): the mount's index.
             offset (int): the first byte of the window.
             size (int | None): the window's length, None through the end.
         """
         raise enotsup(self.name, "read", path)
 
     @vfs_call(effect=Effect.METADATA)
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
+    async def stat(self, path: PathSpec) -> FileStat:
         """Describe a path; raises FileNotFoundError when nothing is there.
 
         Args:
             path (PathSpec): the path.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "stat", path)
 
-    def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
+    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         """Stream a file's bytes as the caller pulls them.
 
         A VFS that does not define it is read whole instead.
 
         Args:
             path (PathSpec): the file.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "read_stream", path)
 
@@ -340,9 +331,7 @@ class BaseVFS:
         raise enotsup(self.name, "exists", path)
 
     @vfs_call(effect=Effect.READ, target=Target.FILE)
-    async def first_lines(
-        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
-    ) -> bytes | None:
+    async def first_lines(self, path: PathSpec, n: int) -> bytes | None:
         """The first ``n`` lines of a file, without reading the rest.
 
         ``head -n N`` asks this before it reads, so a backend that can
@@ -357,14 +346,11 @@ class BaseVFS:
         Args:
             path (PathSpec): the file.
             n (int): how many lines, at least 1.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "first_lines", path)
 
     @vfs_call(effect=Effect.READ, target=Target.FILE)
-    async def last_lines(
-        self, path: PathSpec, n: int, index: IndexCacheStore = NULL_INDEX
-    ) -> bytes | None:
+    async def last_lines(self, path: PathSpec, n: int) -> bytes | None:
         """The last ``n`` lines of a file, without reading the rest.
 
         ``tail -n N`` asks this before it reads, and ``tail -f`` for its
@@ -378,14 +364,11 @@ class BaseVFS:
         Args:
             path (PathSpec): the file.
             n (int): how many lines, at least 1.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "last_lines", path)
 
     @vfs_call(effect=Effect.READ, target=Target.FILE)
-    async def line_count(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> int | None:
+    async def line_count(self, path: PathSpec) -> int | None:
         """How many newlines a read of the file gives, without reading it.
 
         ``wc -l`` asks this before it reads (a ``COUNT(*)`` on a table),
@@ -395,7 +378,6 @@ class BaseVFS:
 
         Args:
             path (PathSpec): the file.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "line_count", path)
 
@@ -404,7 +386,6 @@ class BaseVFS:
         self,
         path: PathSpec,
         algorithm: str,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> str | None:
         """The digest the backend keeps for a file, without reading it.
 
@@ -422,7 +403,6 @@ class BaseVFS:
             path (PathSpec): the file.
             algorithm (str): the hashlib name, ``md5``, ``sha1``,
                 ``sha256``, ``sha384`` or ``sha512``.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "checksum", path)
 
@@ -432,7 +412,6 @@ class BaseVFS:
         path: PathSpec,
         n: int,
         interval: float,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> AsyncIterator[bytes] | None:
         """The last ``n`` lines of a file, then each line added to it, as
         it lands.
@@ -453,7 +432,6 @@ class BaseVFS:
             n (int): how many of its last lines come first, 0 for none.
             interval (float): ``tail -s``, the seconds between two asks
                 for what is new; a change stream has no use for it.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "follow", path)
 
@@ -461,7 +439,6 @@ class BaseVFS:
     async def read_tree(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, FileStat] | None:
         """Every entry under a directory, in one answer.
 
@@ -478,12 +455,11 @@ class BaseVFS:
 
         Args:
             path (PathSpec): the directory.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "read_tree", path)
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
-    async def write(self, path: PathSpec, data: bytes) -> None:
+    async def write(self, path: PathSpec, data: bytes) -> FileStat | None:
         """Replace a file's bytes, creating it when missing.
 
         Args:
@@ -493,12 +469,7 @@ class BaseVFS:
         raise enotsup(self.name, "write", path)
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
-    async def append(
-        self,
-        path: PathSpec,
-        data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
+    async def append(self, path: PathSpec, data: bytes) -> FileStat | None:
         """Add bytes to the end of a file, creating it when missing.
 
         A VFS that defines ``write`` and not this is appended to by
@@ -507,18 +478,13 @@ class BaseVFS:
         Args:
             path (PathSpec): the file.
             data (bytes): the bytes to add.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "append", path)
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def pwrite(
-        self,
-        path: PathSpec,
-        data: bytes,
-        offset: int,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
+        self, path: PathSpec, data: bytes, offset: int
+    ) -> FileStat | None:
         """Write bytes at an offset, keeping every byte outside them.
 
         As pwrite(2): a gap past the end reads back as zeros and a missing
@@ -529,12 +495,11 @@ class BaseVFS:
             path (PathSpec): the file.
             data (bytes): the bytes to write.
             offset (int): where they start.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "pwrite", path)
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
-    async def create(self, path: PathSpec) -> None:
+    async def create(self, path: PathSpec) -> FileStat | None:
         """Create an empty file, leaving an existing one as it is.
 
         Args:
@@ -543,7 +508,9 @@ class BaseVFS:
         raise enotsup(self.name, "create", path)
 
     @vfs_call(effect=Effect.CREATE, target=Target.DIR)
-    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
+    async def mkdir(
+        self, path: PathSpec, parents: bool = False
+    ) -> FileStat | None:
         """Make a directory.
 
         Args:
@@ -562,15 +529,11 @@ class BaseVFS:
         raise enotsup(self.name, "unlink", path)
 
     @vfs_call(effect=Effect.REMOVE, target=Target.DIR)
-    async def rmdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
+    async def rmdir(self, path: PathSpec) -> None:
         """Remove an empty directory.
 
         Args:
             path (PathSpec): the directory.
-            index (IndexCacheStore): the mount's index, which a refused
-                rmdir's hidden-remnant walk lists through.
         """
         raise enotsup(self.name, "rmdir", path)
 
@@ -584,7 +547,7 @@ class BaseVFS:
         raise enotsup(self.name, "rm_r", path)
 
     @vfs_call(effect=Effect.RENAME, subtree=True)
-    async def rename(self, src: PathSpec, dst: PathSpec) -> None:
+    async def rename(self, src: PathSpec, dst: PathSpec) -> FileStat | None:
         """Move a name within this VFS.
 
         Args:
@@ -594,7 +557,7 @@ class BaseVFS:
         raise enotsup(self.name, "rename", src)
 
     @vfs_call(effect=Effect.COPY, target=Target.FILE)
-    async def copy(self, src: PathSpec, dst: PathSpec) -> None:
+    async def copy(self, src: PathSpec, dst: PathSpec) -> FileStat | None:
         """Copy a file within this VFS without moving its bytes through
         mirage.
 
@@ -626,7 +589,7 @@ class BaseVFS:
         raise enotsup(self.name, "copy_from", dst)
 
     @vfs_call(effect=Effect.COPY, target=Target.DIR, subtree=True)
-    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
+    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> FileStat | None:
         """Copy a directory tree within this VFS in one call.
 
         Args:
@@ -681,7 +644,6 @@ class BaseVFS:
         self,
         path: PathSpec,
         query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[tuple[str, str]] | None:
         """Search the resource under ``path``; None declines, [] is none.
 
@@ -695,7 +657,6 @@ class BaseVFS:
         Args:
             path (PathSpec): the scope.
             query (SearchQuery): the query and its options.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "search", path)
 
@@ -703,14 +664,12 @@ class BaseVFS:
         self,
         paths: list[PathSpec],
         query: SearchQuery,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[tuple[str, str]] | None:
         """Search several scopes as one ranked query.
 
         Args:
             paths (list[PathSpec]): the scopes.
             query (SearchQuery): the query and its options.
-            index (IndexCacheStore): the mount's index.
         """
         raise enotsup(self.name, "search", paths[0] if paths else "")
 
@@ -743,7 +702,6 @@ class BaseVFS:
         *,
         whole_word: bool,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> list[PathSpec] | None:
         """Files under ``path`` whose content may contain ``text``.
 
@@ -772,7 +730,6 @@ class BaseVFS:
                 False otherwise, where it may sit inside a word.
             ignore_case (bool): True under -i, and under rg -S with a
                 lowercase pattern; folding case when False is fine.
-            index (IndexCacheStore): the mount's index.
         """
         return None
 
@@ -783,7 +740,6 @@ class BaseVFS:
         text: str,
         *,
         ignore_case: bool,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> ByteSource | None:
         """The lines of ``path`` that may contain ``text``, in file order.
 
@@ -804,7 +760,6 @@ class BaseVFS:
                 ``files_containing`` gets it.
             ignore_case (bool): True under -i, and under rg -S with a
                 lowercase pattern.
-            index (IndexCacheStore): the mount's index.
         """
         return None
 
@@ -814,7 +769,6 @@ class BaseVFS:
         path: PathSpec,
         *,
         files: int | None = None,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         """Called before a command reads every file under ``path``.
 
@@ -830,7 +784,6 @@ class BaseVFS:
                 ``path``, from the mount's ``read_tree`` with every
                 hidden file dropped; None when ``read_tree`` cannot
                 answer, and the guard counts them itself.
-            index (IndexCacheStore): the mount's index.
         """
         return None
 

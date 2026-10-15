@@ -19,13 +19,11 @@ from mirage.cache.context import (
     settle_after,
     stale,
 )
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.object_store.driver import (
     A,
     C,
     ObjectStoreDriver,
     PathFn,
-    RmdirFn,
     keep_walk,
     refused,
 )
@@ -51,7 +49,7 @@ def make_unlink(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
         # unlink(2) answers ENOENT for a missing name and EISDIR for a
         # directory; a store's delete is silent for both, and only the
         # command builders check first (see `make_rmdir`).
-        found = await stat(accessor, path_spec, index=NULL_INDEX)
+        found = await stat(accessor, path_spec)
         if is_dir(found):
             raise eisdir(path_spec)
         path = path_spec.mount_path
@@ -129,7 +127,7 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
     return remove_prefix
 
 
-def make_rmdir(driver: ObjectStoreDriver[A, C]) -> RmdirFn[A]:
+def make_rmdir(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
     """Build POSIX ``rmdir`` over one driver: refuse a non-empty prefix.
 
     Not ``make_remove_prefix``. On a keyed store an empty directory is
@@ -157,9 +155,7 @@ def make_rmdir(driver: ObjectStoreDriver[A, C]) -> RmdirFn[A]:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def rmdir(
-        accessor: A, path_spec: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
+    async def rmdir(accessor: A, path_spec: PathSpec) -> None:
         path = path_spec.mount_path
         pfx = kp.apply_dir(driver.key_prefix_of(accessor), path)
         is_root = not path.strip("/")

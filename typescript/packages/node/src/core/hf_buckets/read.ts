@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
@@ -54,7 +53,6 @@ export function isMissing(err: unknown): boolean {
 export async function read(
   accessor: HfBucketsAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options: HfReadOptions = {},
 ): Promise<Uint8Array> {
   const rel = path.mountPath

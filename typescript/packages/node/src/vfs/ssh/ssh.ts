@@ -23,7 +23,7 @@ import type {
   FileStat,
   SetAttrFields,
 } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import type { MkdirOp } from '@struktoai/mirage-core/vfs/types'
 import { readdir as sshReaddir } from '../../core/ssh/readdir.ts'
 import { lineCount as sshLineCount, read as sshRead } from '../../core/ssh/read.ts'
@@ -63,6 +63,7 @@ export class SSHVFS extends BaseVFS {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly maxDuEntries: number | null = null
   override readonly indexTtl: number = 60
+  override readonly listsStats: boolean = true
   override readonly prompt = PROMPT
   readonly config: SSHConfig
   override readonly accessor: SSHAccessor
@@ -92,36 +93,33 @@ export class SSHVFS extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return sshReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return sshReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return sshRead(this.accessor, path, index)
-    return sshRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return sshRead(this.accessor, path)
+    return sshRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
-  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return sshStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     return sshStream(this.accessor, path)
   }
 
-  override readTree(
-    path: PathSpec,
-    _index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     return sshTree(this.accessor, path)
   }
 
-  override lineCount(path: PathSpec, _index?: IndexCacheStore): Promise<number | null> {
+  override lineCount(path: PathSpec): Promise<number | null> {
     return sshLineCount(this.accessor, path)
   }
 
@@ -133,7 +131,6 @@ export class SSHVFS extends BaseVFS {
     path: PathSpec,
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
-    _index?: IndexCacheStore,
   ): Promise<PathSpec[] | null> {
     return sshFilesContaining(this.accessor, text, [path], opts.ignoreCase)
   }
@@ -162,7 +159,7 @@ export class SSHVFS extends BaseVFS {
     return sshUnlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return sshRmdir(this.accessor, path)
   }
 

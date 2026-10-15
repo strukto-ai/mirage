@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dev.device import active_device, active_pipe
 from mirage.core.ram.read import read as ram_read
 from mirage.errors.fs import einval
@@ -24,7 +23,6 @@ from mirage.utils.path import norm
 async def read(
     accessor: RAMAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -40,7 +38,7 @@ async def read(
         return await pipe.read(path, size)
     device = active_device(accessor, norm(path.mount_path))
     if device is None:
-        return await ram_read(accessor, path, index, offset, size)
+        return await ram_read(accessor, path, offset, size)
     if device == "null":
         return b""
     if size is None:

@@ -14,7 +14,7 @@
 
 import asyncio
 import json
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import cast
 
@@ -755,7 +755,7 @@ class RedisIndexCacheStore(IndexCacheStore):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -775,7 +775,7 @@ class RedisIndexCacheStore(IndexCacheStore):
     async def set_partial_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
     ) -> None:
         await self._set_dir(
@@ -785,7 +785,7 @@ class RedisIndexCacheStore(IndexCacheStore):
     async def _set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None,
         *,
         partial: bool,

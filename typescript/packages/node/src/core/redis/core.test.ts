@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
@@ -37,7 +35,13 @@ import { truncate } from '@struktoai/mirage-core/core/redis/truncate'
 import { unlink } from '@struktoai/mirage-core/core/redis/unlink'
 import { write } from '@struktoai/mirage-core/core/redis/write'
 
-const resolveGlob = makeResolveGlob(readdir, SCOPE_ERROR)
+async function listed(accessor: RedisAccessor, path: PathSpec): Promise<string[]> {
+  const rows = await readdir(accessor, path)
+  const base = (path.pattern !== null ? path.dir : path).virtual.replace(/\/+$/, '')
+  return rows.map((row) => `${base}/${row.name}`)
+}
+
+const resolveGlob = makeResolveGlob(listed, SCOPE_ERROR)
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
@@ -214,7 +218,7 @@ describe.skipIf(skip)('core/redis ops', () => {
     await mkdir(acc, spec('/d'))
     await write(acc, spec('/d/a'), ENC.encode('.'))
     await write(acc, spec('/d/b'), ENC.encode('.'))
-    const entries = await readdir(acc, spec('/mount/d', '/mount'))
+    const entries = await listed(acc, spec('/mount/d', '/mount'))
     expect(entries).toEqual(['/mount/d/a', '/mount/d/b'])
   })
 
@@ -237,37 +241,12 @@ describe.skipIf(skip)('core/redis ops', () => {
     if (first !== undefined) expect(DEC.decode(first)).toBe('hello')
   })
 
-  it('readdir with index populates the cache', async () => {
-    const index = new RAMIndexCacheStore({ ttl: 600 })
+  it('readdir answers each child as stat does', async () => {
     await write(acc, spec('/a.txt'), ENC.encode('.'))
-    await write(acc, spec('/b.txt'), ENC.encode('.'))
-    const entries = await readdir(acc, spec('/data', '/data'), index)
-    expect(entries.sort()).toEqual(['/data/a.txt', '/data/b.txt'])
-    // readdir stores under the canonical key: no trailing slash except root.
-    const cached = await index.listDir('/data')
-    expect(cached.status).toBeUndefined()
-    expect(cached.entries).toBeDefined()
-  })
-
-  it('readdir with index returns cached entries when present', async () => {
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await write(acc, spec('/a.txt'), ENC.encode('.'))
-    await readdir(acc, spec('/data', '/data'), index)
-    // mutate store but cached result should still return
-    await write(acc, spec('/c.txt'), ENC.encode('.'))
-    const again = await readdir(acc, spec('/data', '/data'), index)
-    expect(again).not.toContain('/data/c.txt')
-  })
-
-  it('readdir without index misses stale data (control test)', async () => {
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    await write(acc, spec('/a.txt'), ENC.encode('.'))
-    await readdir(acc, spec('/data', '/data'), index)
-    await write(acc, spec('/c.txt'), ENC.encode('.'))
-    const fresh = await readdir(acc, spec('/data', '/data'))
-    expect(fresh).toContain('/data/c.txt')
-    const evicted = await index.listDir('/data')
-    expect(evicted.status !== LookupStatus.NOT_FOUND || evicted.entries === undefined).toBe(true)
+    await mkdir(acc, spec('/d'))
+    const rows = await readdir(acc, spec('/'))
+    expect(rows.map((row) => row.name)).toEqual(['a.txt', 'd'])
+    for (const row of rows) expect(row).toEqual(await stat(acc, spec(`/${row.name}`)))
   })
 
   it('resolveGlob expands star patterns', async () => {

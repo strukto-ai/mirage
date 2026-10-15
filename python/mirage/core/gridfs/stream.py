@@ -18,7 +18,6 @@ from bson import ObjectId
 from gridfs.errors import NoFile
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gridfs.client import _key, bucket, latest_file
 from mirage.errors.fs import enoent
 from mirage.observe.context import record_stream, revision_for
@@ -28,7 +27,6 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: GridFSAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     """Async generator yielding chunks of a GridFS file.
@@ -36,7 +34,6 @@ async def read_stream(
     Args:
         accessor (GridFSAccessor): GridFS accessor.
         path_spec (PathSpec): File path.
-        index: Index cache store.
         chunk_size (int): Size of each chunk in bytes.
     """
     virtual = path_spec.virtual

@@ -21,7 +21,7 @@ import { REDACTED_SECRET } from '../secrets.ts'
 import { PROMPT } from './prompt.ts'
 import type { RedisStoreLike } from './store.ts'
 import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../types.ts'
 import { readdir as redisReaddir } from '../../core/redis/readdir.ts'
 import { read as redisRead } from '../../core/redis/read.ts'
 import { stat as redisStat } from '../../core/redis/stat.ts'
@@ -68,6 +68,7 @@ export class RedisResourceBase extends BaseVFS {
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
+  override readonly listsStats: boolean = true
   override readonly prompt: string = PROMPT
   readonly store: RedisStoreLike
   override readonly accessor: RedisAccessor
@@ -104,33 +105,30 @@ export class RedisResourceBase extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
-    return redisTree(this.accessor, path, index)
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return redisTree(this.accessor, path)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return redisReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return redisReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return redisRead(this.accessor, path, index)
-    return redisRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return redisRead(this.accessor, path)
+    return redisRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return redisStat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return redisStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return redisStream(this.accessor, path, index)
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    return redisStream(this.accessor, path)
   }
 
   override exists(path: PathSpec): Promise<boolean> {
@@ -157,7 +155,7 @@ export class RedisResourceBase extends BaseVFS {
     return redisUnlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return redisRmdir(this.accessor, path)
   }
 

@@ -12,18 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 from functools import partial
 
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
 from mirage.core.ssh.constants import SCOPE_ERROR
+from mirage.core.ssh.stat import attrs_to_file_stat
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import eacces, listing_error
-from mirage.types import PathSpec
-from mirage.utils.dates import epoch_to_iso
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)
@@ -58,11 +58,34 @@ async def _is_dir(accessor: SSHAccessor, key: str) -> bool:
     return attrs is not None and attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
 
 
+async def _row_of(
+    accessor: SSHAccessor, remote: str, name: str, attrs: asyncssh.SFTPAttrs
+) -> FileStat:
+    """A listed entry as ``stat`` answers it.
+
+    Readdir attrs are lstat-style, so a link is stat'ed once more, links
+    followed, as ``stat`` reads it. A link that resolves to nothing the
+    session may read keeps its listed name as a file.
+
+    Args:
+        accessor (SSHAccessor): the mount's connection.
+        remote (str): the entry's remote path.
+        name (str): its name.
+        attrs (asyncssh.SFTPAttrs): its listed attributes.
+    """
+    if attrs.type != asyncssh.FILEXFER_TYPE_SYMLINK:
+        return attrs_to_file_stat(name, attrs)
+    sftp = await accessor.sftp()
+    try:
+        return attrs_to_file_stat(name, await sftp.stat(remote))
+    except (*UNRESOLVED, asyncssh.SFTPPermissionDenied) as exc:
+        logger.debug("ssh readdir: %s resolves to nothing: %s", remote, exc)
+        return FileStat(name=name, type=FileType.FILE)
+
+
 async def readdir(
-    accessor: SSHAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+    accessor: SSHAccessor, path_spec: PathSpec
+) -> list[FileStat]:
     virtual = path_spec.virtual
     prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     path = path_spec.directory if path_spec.pattern else path_spec.virtual
@@ -70,19 +93,10 @@ async def readdir(
         rest = path[len(prefix) :]
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
-    config = accessor.config
-    # Canonical key: no trailing slash (except root), or the same dir
-    # indexes under two keys and cache hits return doubled-slash entries.
-    virtual_key = prefix + path if prefix else path
-    virtual_key = virtual_key.rstrip("/") or "/"
-    listing = await index.list_dir(virtual_key)
-    if listing.entries is not None:
-        return listing.entries
     sftp = await accessor.sftp()
     try:
-        remote_path = join_root(config.root, path)
+        remote_path = join_root(accessor.config.root, path)
         entries = await sftp.readdir(remote_path)
-        base = "/" + path.strip("/")
         found: list[tuple[str, asyncssh.SFTPAttrs]] = []
         for entry in entries:
             name = entry.filename
@@ -90,43 +104,24 @@ async def readdir(
                 name = name.decode()
             if name in (".", ".."):
                 continue
-            child = base.rstrip("/") + "/" + name
-            found.append((child, entry.attrs))
+            found.append((name, entry.attrs))
         found.sort(key=lambda pair: pair[0])
-        names = [child for child, _ in found]
-        if len(names) > SCOPE_ERROR:
+        if len(found) > SCOPE_ERROR:
             logger.warning(
                 "ssh readdir: %s returned %d entries (limit %d)",
-                virtual_key,
-                len(names),
+                virtual,
+                len(found),
                 SCOPE_ERROR,
             )
-        virtual_entries = sorted((prefix + e if prefix else e) for e in names)
-        # SFTP readdir already returns each entry's attrs; keep type, size
-        # and mtime in the index instead of discarding them. Readdir attrs
-        # are lstat-style, so only regular files get a size: a symlink's
-        # link-text length is not what stat (which follows) or read serve.
-        index_entries = []
-        for child, attrs in found:
-            leaf = child.rsplit("/", 1)[-1]
-            is_dir = attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
-            is_file = attrs.type == asyncssh.FILEXFER_TYPE_REGULAR
-            index_entries.append(
-                (
-                    leaf,
-                    IndexEntry(
-                        id=child,
-                        name=leaf,
-                        resource_type="folder" if is_dir else "file",
-                        size=attrs.size if is_file else None,
-                        remote_time=epoch_to_iso(attrs.mtime)
-                        if attrs.mtime is not None
-                        else "",
-                    ),
+        base = remote_path.rstrip("/")
+        return list(
+            await asyncio.gather(
+                *(
+                    _row_of(accessor, f"{base}/{name}", name, attrs)
+                    for name, attrs in found
                 )
             )
-        await index.set_dir(virtual_key, index_entries)
-        return virtual_entries
+        )
     except asyncssh.SFTPPermissionDenied as exc:
         raise eacces(virtual) from exc
     except UNRESOLVED:

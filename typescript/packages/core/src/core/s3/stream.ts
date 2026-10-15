@@ -20,7 +20,6 @@ import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './client.ts'
 import { fpRevFromS3Response, read } from './read.ts'
 import { enoent } from '../../errors/fs.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 
@@ -101,19 +100,17 @@ export async function* readStream(accessor: S3Accessor, path: PathSpec): AsyncIt
  *
  * @param accessor the S3 accessor
  * @param path the object path
- * @param index the index cache store, forwarded to the SDK read
  * @param offset first byte to read
  * @param size how many bytes, or null for the rest of the object
  */
 export async function readRange(
   accessor: S3Accessor,
   path: PathSpec,
-  index: IndexCacheStore | undefined,
   offset: number,
   size: number | null,
 ): Promise<Uint8Array> {
   if (accessor.config.presignedUrlProvider === undefined) {
-    return read(accessor, path, index, size === null ? { offset } : { offset, size })
+    return read(accessor, path, size === null ? { offset } : { offset, size })
   }
   return windowFromStream(accessor, path, offset, size)
 }

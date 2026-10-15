@@ -12,41 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IndexEntry, ResourceType } from '../../cache/index/config.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { keyStats } from './stat.ts'
 import { readdirError } from '../../errors/fs.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from '../../utils/path.ts'
 
-export async function readdir(
-  accessor: RedisAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
+export async function readdir(accessor: RedisAccessor, path: PathSpec): Promise<FileStat[]> {
   // A pattern spec addresses the directory whose entries the glob filters,
   // and the rest of this function works in mount-relative space, so the
   // directory has to be read off `dir` rather than off the virtual
   // `directory` string (python strips the prefix by hand for the same
   // reason).
   const target = path.pattern !== null ? path.dir : path
-  const virtual = target.mountPath
-  const mountPrefix = mountPrefixOf(target.virtual, target.vfsPath)
-  // Canonical key: no trailing slash (except root), or the same dir
-  // indexes under two keys and cache hits return doubled-slash entries.
-  const virtualKey = rstripSlash(mountPrefix + virtual) || '/'
-  if (index !== undefined) {
-    const cached = await index.listDir(virtualKey)
-    if (cached.entries !== undefined && cached.entries !== null) {
-      return cached.entries
-    }
-  }
   const store = accessor.store
-  const p = norm(virtual)
+  const p = norm(target.mountPath)
   if (!(await store.hasDir(p))) {
     throw await readdirError(
       path,
@@ -66,20 +48,11 @@ export async function readdir(
     const first = remainder.split('/')[0]
     if (first !== undefined && first.length > 0) seen.add(dirPrefix + first)
   }
-  const sorted = [...seen].sort(compareCodePoints)
-  const virtualEntries = sorted.map((entry) => `${mountPrefix}${entry}`)
-  if (index !== undefined) {
-    const fileSet = new Set(files)
-    // size stays null: a listing knows a key exists but not its length, and
-    // a lying 0 would be trusted by an index-first size lookup over a stat.
-    const entries: [string, IndexEntry][] = sorted.map((e) => {
-      const name = e.slice(e.lastIndexOf('/') + 1)
-      const resourceType = fileSet.has(e) ? ResourceType.FILE : ResourceType.FOLDER
-      return [name, new IndexEntry({ id: e, name, vfsName: name, resourceType })]
-    })
-    await index.setDir(virtualKey, entries)
-  }
-  return virtualEntries
+  const fileSet = new Set(files)
+  return keyStats(
+    store,
+    [...seen].sort(compareCodePoints).map((key) => [key, !fileSet.has(key)]),
+  )
 }
 
 /**
@@ -91,7 +64,6 @@ export async function readdir(
 export async function tree(
   accessor: RedisAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): Promise<Map<string, FileStat> | null> {
   const store = accessor.store
   const p = norm(path.mountPath)

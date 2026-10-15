@@ -1,7 +1,6 @@
 import asyncio
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.s3.read import read
 from mirage.core.s3.readdir import readdir, tree
 from mirage.types import PathSpec
@@ -25,10 +24,8 @@ def test_readdir_no_prefix_backward_compat():
         config = _make_config(key_prefix=None)
         accessor = S3Accessor(config)
         path = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
-        index = RAMIndexCacheStore()
-        entries = asyncio.run(readdir(accessor, path, index=index))
-    assert any(e.endswith("/a.txt") for e in entries)
-    assert any(e.endswith("/b.txt") for e in entries)
+        entries = asyncio.run(readdir(accessor, path))
+    assert [row.name for row in entries] == ["a.txt", "b.txt"]
 
 
 def test_readdir_strips_key_prefix_from_entries():
@@ -37,10 +34,8 @@ def test_readdir_strips_key_prefix_from_entries():
         config = _make_config(key_prefix="prod")
         accessor = S3Accessor(config)
         path = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
-        index = RAMIndexCacheStore()
-        entries = asyncio.run(readdir(accessor, path, index=index))
-    for e in entries:
-        assert "prod" not in e, f"key_prefix leaked into entry: {e}"
+        entries = asyncio.run(readdir(accessor, path))
+    assert [row.name for row in entries] == ["a.txt", "b.txt"]
 
 
 def test_read_bytes_with_key_prefix():
@@ -63,4 +58,4 @@ def test_tree_strips_key_prefix_from_keys():
         path = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
         found = asyncio.run(tree(accessor, path))
     assert found is not None
-    assert sorted(found) == ["a.txt", "b.txt"]
+    assert sorted(found) == ["", "a.txt", "b.txt"]

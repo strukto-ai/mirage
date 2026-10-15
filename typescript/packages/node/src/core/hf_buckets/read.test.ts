@@ -52,7 +52,7 @@ async function stamped(
   options: { offset?: number; size?: number } = {},
 ): Promise<[Uint8Array, (string | null)[]]> {
   const [data, records] = await runWithRecording(() =>
-    read(accessor, PathSpec.fromStrPath(path), undefined, options),
+    read(accessor, PathSpec.fromStrPath(path), options),
   )
   return [data, records.map((r) => r.fingerprint ?? null)]
 }
@@ -82,7 +82,7 @@ describe('hf read', () => {
 
   it('honors offset and size', async () => {
     const accessor = await accessorWith({ 'f.bin': 'abcdefgh' })
-    const data = await read(accessor, PathSpec.fromStrPath('/f.bin'), undefined, {
+    const data = await read(accessor, PathSpec.fromStrPath('/f.bin'), {
       offset: 2,
       size: 3,
     })
@@ -91,7 +91,7 @@ describe('hf read', () => {
 
   it('honors size without offset', async () => {
     const accessor = await accessorWith({ 'f.bin': 'abcdefgh' })
-    const data = await read(accessor, PathSpec.fromStrPath('/f.bin'), undefined, { size: 4 })
+    const data = await read(accessor, PathSpec.fromStrPath('/f.bin'), { size: 4 })
     expect(Buffer.from(data).toString()).toBe('abcd')
   })
 
@@ -186,20 +186,20 @@ describe('hf read', () => {
     // zero-length Range header is not one the client can build; the read still
     // has to say whether the file is there, as opendal's open did.
     const { accessor, hub } = await mounted({ 'a.txt': 'abc' })
-    const data = await read(accessor, PathSpec.fromStrPath('/a.txt'), undefined, {
+    const data = await read(accessor, PathSpec.fromStrPath('/a.txt'), {
       offset: 1,
       size: 0,
     })
     expect([data.byteLength, hub.count('bucket_resolve')]).toEqual([0, 1])
     await expect(
-      read(accessor, PathSpec.fromStrPath('/missing.txt'), undefined, { offset: 0, size: 0 }),
+      read(accessor, PathSpec.fromStrPath('/missing.txt'), { offset: 0, size: 0 }),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('serves the prefixed object under a key prefix', async () => {
     const { accessor, fake } = await mounted({ 'pfx/a.txt': SEED, 'a.txt': 'decoy' }, 'pfx/')
     expect(Buffer.from(await read(accessor, PathSpec.fromStrPath('/a.txt')))).toEqual(SEED)
-    const window = await read(accessor, PathSpec.fromStrPath('/a.txt'), undefined, {
+    const window = await read(accessor, PathSpec.fromStrPath('/a.txt'), {
       offset: 5,
       size: 3,
     })

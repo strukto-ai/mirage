@@ -17,7 +17,7 @@ import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { createShellParser } from '../../shell/parse/index.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
@@ -52,13 +52,13 @@ describe('a warm read command reads nothing from the backend', () => {
       const read = ram.read.bind(ram)
       const readStream = ram.readStream.bind(ram)
       Object.assign(ram, {
-        read: (path: PathSpec, ...rest: [IndexCacheStore?, number?, (number | null)?]) => {
+        read: (path: PathSpec, ...rest: [Handed?, number?, (number | null)?]) => {
           reads.push(path.virtual)
           return read(path, ...rest)
         },
-        readStream: (path: PathSpec, index?: IndexCacheStore) => {
+        readStream: (path: PathSpec) => {
           reads.push(path.virtual)
-          return readStream(path, index)
+          return readStream(path)
         },
       })
       const out = await ws.shell(line)

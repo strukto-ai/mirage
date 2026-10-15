@@ -14,14 +14,18 @@
 
 import { describe, expect, it } from 'vitest'
 import type { FileEntryWithStats } from 'ssh2'
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { type FakeSftp, makeFakeAccessor } from './_test_utils.ts'
 import { readdir } from './readdir.ts'
+import { stat } from './stat.ts'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
+}
+
+function paths(rows: readonly FileStat[], virtual: string): string[] {
+  return rows.map((row) => `${virtual}/${row.name}`)
 }
 
 describe('core/ssh/readdir', () => {
@@ -37,7 +41,7 @@ describe('core/ssh/readdir', () => {
       ]),
     })
     const out = await readdir(accessor, spec('/data'))
-    expect(out).toEqual(['/data/a.txt', '/data/b.txt'])
+    expect(paths(out, '/data')).toEqual(['/data/a.txt', '/data/b.txt'])
   })
 
   it('throws ENOENT for a missing directory', async () => {
@@ -78,7 +82,7 @@ describe('core/ssh/readdir', () => {
       vfsPath: mountKey('/mnt/ssh/data', '/mnt/ssh'),
     })
     const out = await readdir(accessor, p)
-    expect(out).toEqual(['/mnt/ssh/data/a.txt'])
+    expect(paths(out, '/mnt/ssh/data')).toEqual(['/mnt/ssh/data/a.txt'])
   })
 })
 
@@ -93,72 +97,27 @@ function dataState(): FakeSftp {
   }
 }
 
-describe('core/ssh/readdir listing cache', () => {
-  it('stores sftp attrs in the index', async () => {
-    const index = new RAMIndexCacheStore()
+describe('core/ssh/readdir rows', () => {
+  it('answers each row as stat does', async () => {
     const accessor = makeFakeAccessor(dataState())
-    expect(await readdir(accessor, spec('/data'), index)).toEqual(['/data/a.txt', '/data/docs'])
-    expect((await index.listDir('/data')).entries).toEqual(['/data/a.txt', '/data/docs'])
-    const file = (await index.get('/data/a.txt')).entry
-    expect(file?.resourceType).toBe('file')
-    expect(file?.size).toBe(5)
-    const folder = (await index.get('/data/docs')).entry
-    expect(folder?.resourceType).toBe('folder')
-    expect(folder?.size).toBeNull()
-    expect(folder?.remoteTime).toBe('2023-11-14T22:13:20Z')
-  })
-
-  it('answers a cached listing without asking the server', async () => {
-    const index = new RAMIndexCacheStore()
-    const state = dataState()
-    const accessor = makeFakeAccessor(state)
-    await readdir(accessor, spec('/data'), index)
-    state.files.set('/data/b.txt', { data: new Uint8Array() })
-    expect(await readdir(accessor, spec('/data'), index)).toEqual(['/data/a.txt', '/data/docs'])
-  })
-
-  it('lists the server again once the listing is dropped', async () => {
-    const index = new RAMIndexCacheStore()
-    const state = dataState()
-    const accessor = makeFakeAccessor(state)
-    await readdir(accessor, spec('/data'), index)
-    state.files.set('/data/b.txt', { data: new Uint8Array() })
-    await index.invalidateDir('/data')
-    expect(await readdir(accessor, spec('/data'), index)).toEqual([
-      '/data/a.txt',
-      '/data/b.txt',
-      '/data/docs',
+    const rows = await readdir(accessor, spec('/data'))
+    expect(rows.map((row) => [row.name, row.type, row.size])).toEqual([
+      ['a.txt', 'file', 5],
+      ['docs', 'directory', null],
     ])
+    for (const row of rows) expect(row).toEqual(await stat(accessor, spec(`/data/${row.name}`)))
   })
 
   // An SFTP server may leave the time fields out of a readdir entry; ssh2
-  // then carries no mtime, and the listing still stores the entry.
-  it('stores an entry whose attrs carry no mtime', async () => {
-    const index = new RAMIndexCacheStore()
+  // then carries no mtime, and the row still lists the entry.
+  it('lists an entry whose attrs carry no mtime', async () => {
     const accessor = makeFakeAccessor({ files: new Map(), dirs: new Map([['/', {}]]) })
     const sftp = await accessor.sftp()
     const entry = { filename: 'x.txt', longname: '', attrs: { mode: 0o100644, size: 1 } }
     sftp.readdir = ((_path: string, cb: (err: undefined, list: FileEntryWithStats[]) => void) => {
       cb(undefined, [entry as unknown as FileEntryWithStats])
     }) as typeof sftp.readdir
-    expect(await readdir(accessor, spec('/'), index)).toEqual(['/x.txt'])
-    const row = (await index.get('/x.txt')).entry
-    expect(row?.size).toBe(1)
-    expect(row?.remoteTime).toBe('')
-  })
-
-  it('keys the listing by the mount-prefixed path', async () => {
-    const index = new RAMIndexCacheStore()
-    const accessor = makeFakeAccessor(dataState())
-    const p = new PathSpec({
-      virtual: '/mnt/ssh/data',
-      directory: '/mnt/ssh/data',
-      vfsPath: mountKey('/mnt/ssh/data', '/mnt/ssh'),
-    })
-    await readdir(accessor, p, index)
-    expect((await index.listDir('/mnt/ssh/data')).entries).toEqual([
-      '/mnt/ssh/data/a.txt',
-      '/mnt/ssh/data/docs',
-    ])
+    const rows = await readdir(accessor, spec('/'))
+    expect(rows.map((row) => [row.name, row.size, row.modified])).toEqual([['x.txt', 1, null]])
   })
 })

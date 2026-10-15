@@ -21,7 +21,7 @@ import { parseSessionProfile } from '../../policy/profile.ts'
 import { Limit, MountMode, type PathSpec, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
 import { Mount } from '../mount/spec.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -37,12 +37,12 @@ class StoreRAM extends RAMVFS {
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
     this.reads.push(path.virtual)
-    return super.read(path, index, offset, size)
+    return super.read(path, handed, offset, size)
   }
 
   override async copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {

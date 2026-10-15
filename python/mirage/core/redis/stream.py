@@ -15,7 +15,6 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.errors.fs import eisdir
 from mirage.observe.context import record_stream
@@ -27,7 +26,6 @@ from mirage.utils.path import norm
 async def read_stream(
     accessor: RedisAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> AsyncIterator[bytes]:
     virtual = path.virtual
     prefix = mount_prefix_of(path.virtual, path.vfs_path)

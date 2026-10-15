@@ -49,7 +49,7 @@ async def test_readdir_op(tmp_path):
     index = RAMIndexCacheStore(ttl=0)
     scope = PathSpec(vfs_path="", virtual="/", directory="/", resolved=False)
     result = await readdir(accessor, scope, index=index)
-    assert result == ["/a.txt"]
+    assert [row.name for row in result.entries] == ["a.txt"]
 
 
 @pytest.mark.asyncio

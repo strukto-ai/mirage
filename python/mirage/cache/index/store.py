@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
 from datetime import datetime
 
 from mirage.cache.index.config import (
@@ -110,7 +111,7 @@ class IndexCacheStore:
     async def set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -128,7 +129,7 @@ class IndexCacheStore:
 
         Args:
             vfs_path (str): the listed directory's virtual path.
-            entries (list[tuple[str, IndexRow]]): every child.
+            entries (Sequence[tuple[str, IndexRow]]): every child.
             expired_at (datetime | None): optional freshness deadline.
             window (bool): the entries are a capped window, not every
                 child.
@@ -158,7 +159,7 @@ class IndexCacheStore:
     async def set_partial_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
     ) -> None:
         """Cache observed children without claiming a complete directory.
@@ -171,7 +172,7 @@ class IndexCacheStore:
 
         Args:
             vfs_path (str): the listed directory's virtual path.
-            entries (list[tuple[str, IndexRow]]): observed children.
+            entries (Sequence[tuple[str, IndexRow]]): observed children.
             expired_at (datetime | None): optional freshness deadline.
         """
         await self.invalidate_dir(vfs_path)

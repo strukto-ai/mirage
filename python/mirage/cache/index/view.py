@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import datetime, timedelta, timezone
 
@@ -205,7 +205,7 @@ class IndexView(IndexCacheStore):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -227,7 +227,7 @@ class IndexView(IndexCacheStore):
     async def set_partial_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
     ) -> None:
         await self._set_dir(
@@ -237,7 +237,7 @@ class IndexView(IndexCacheStore):
     async def _set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None,
         *,
         partial: bool,

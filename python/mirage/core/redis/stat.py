@@ -15,7 +15,6 @@
 from typing import Any
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
@@ -111,7 +110,6 @@ async def key_stats(
 async def stat(
     accessor: RedisAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     store = accessor.store
     p = norm(path_spec.mount_path)

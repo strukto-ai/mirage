@@ -13,16 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileEntryWithStats, Stats } from 'ssh2'
-import { IndexEntry, ResourceType } from '@struktoai/mirage-core/cache/index/config'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { epochToIso } from '@struktoai/mirage-core/utils/dates'
+import { FileStat, FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { eacces, listingError } from '@struktoai/mirage-core/errors/fs'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
-import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import type { SshAttrs } from './stat.ts'
+import { attrsToFileStat, type SshAttrs } from './stat.ts'
 import {
   isDirectoryAttrs,
   isFileAttrs,
@@ -61,19 +58,33 @@ async function isDir(accessor: SSHAccessor, key: string): Promise<boolean> {
   return attrs !== null && isDirectoryAttrs(attrs)
 }
 
-export async function readdir(
+/**
+ * A listed entry as `stat` answers it. Readdir attrs are lstat-style, so an
+ * entry that is neither a directory nor a regular file (a link) is stat'ed
+ * once more, links followed, as `stat` reads it. A link that resolves to
+ * nothing the session may read keeps its listed name as a file. Mirrors
+ * Python's `_row_of`.
+ */
+async function rowOf(
   accessor: SSHAccessor,
-  p: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
+  key: string,
+  entry: FileEntryWithStats,
+): Promise<FileStat> {
+  // ssh2 types every field as present, but a server may leave the times (or
+  // size) out of a readdir entry; read them as optional.
+  const attrs: SshAttrs = entry.attrs
+  if (isDirectoryAttrs(attrs) || isFileAttrs(attrs)) return attrsToFileStat(entry.filename, attrs)
+  const followed = await attrsOrNull(accessor, key).catch((err: unknown) => {
+    if (isPermissionDenied(err)) return null
+    throw err
+  })
+  if (followed === null) return new FileStat({ name: entry.filename, type: FileType.FILE })
+  return attrsToFileStat(entry.filename, followed)
+}
+
+export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<FileStat[]> {
   const mountPrefix = mountPrefixOf(p.virtual, p.vfsPath)
   const virtual = p.pattern !== null ? p.directory.slice(mountPrefix.length) || '/' : stripPrefix(p)
-  const base = `/${stripSlash(virtual)}`
-  const virtualKey = rstripSlash(`${mountPrefix}${base}`) || '/'
-  if (index !== undefined) {
-    const listing = await index.listDir(virtualKey)
-    if (listing.entries !== undefined && listing.entries !== null) return listing.entries
-  }
   const sftp = await accessor.sftp()
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   const list = await new Promise<FileEntryWithStats[] | null>((resolveFn, rejectFn) => {
@@ -94,35 +105,9 @@ export async function readdir(
       (key) => isDir(accessor, key),
     )
   }
-  const dirPrefix = base === '/' ? '/' : `${base}/`
+  const base = rstripSlash(virtual)
   const found = list
     .filter((entry) => entry.filename !== '.' && entry.filename !== '..')
     .sort((x, y) => compareCodePoints(x.filename, y.filename))
-  const names = found.map((entry) => `${mountPrefix}${dirPrefix}${entry.filename}`)
-  if (index !== undefined) {
-    // SFTP readdir already returns each entry's attrs, so the listing keeps
-    // type, size and mtime rather than discarding them. The attrs are
-    // lstat-style: only a regular file gets a size, since a symlink's
-    // link-text length is not what stat (which follows) or read serve.
-    // Mirrors the python readdir.
-    await index.setDir(
-      virtualKey,
-      found.map((entry) => {
-        // ssh2 types every field as present, but a server may leave the
-        // times (or size) out of a readdir entry; read them as optional.
-        const attrs: SshAttrs = entry.attrs
-        return [
-          entry.filename,
-          new IndexEntry({
-            id: `${dirPrefix}${entry.filename}`,
-            name: entry.filename,
-            resourceType: isDirectoryAttrs(attrs) ? ResourceType.FOLDER : ResourceType.FILE,
-            size: isFileAttrs(attrs) ? (attrs.size ?? null) : null,
-            remoteTime: attrs.mtime !== undefined ? epochToIso(attrs.mtime) : '',
-          }),
-        ]
-      }),
-    )
-  }
-  return names
+  return Promise.all(found.map((entry) => rowOf(accessor, `${base}/${entry.filename}`, entry)))
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { Handed } from '../../../vfs/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -65,17 +65,17 @@ class SearchRAM extends RAMVFS {
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset?: number,
     size?: number | null,
   ): Promise<Uint8Array> {
     this.reads.push(path.vfsPath)
-    return super.read(path, index, offset, size)
+    return super.read(path, handed, offset, size)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     this.reads.push(path.vfsPath)
-    return super.readStream(path, index)
+    return super.readStream(path)
   }
 
   override filesContaining(

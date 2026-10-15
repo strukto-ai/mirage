@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hf_buckets.hub import read_token, resolve_url
 from mirage.core.hf_hub.client import HfHubError, hub_bytes_tagged
 from mirage.core.hf_hub.constants import REFUSED_STATUSES
@@ -45,7 +44,6 @@ def is_missing(exc: HfHubError) -> bool:
 async def read(
     accessor: HfBucketsAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -58,7 +56,6 @@ async def read(
     Args:
         accessor (HfBucketsAccessor): bucket accessor.
         path (PathSpec): the file to read.
-        index (IndexCacheStore): the mount's index.
         offset (int): first byte to read.
         size (int | None): how many bytes; None reads to the end.
 

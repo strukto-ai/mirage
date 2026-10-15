@@ -28,7 +28,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { followFlags, tailGeneric } from './tail.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { Handed } from '../../../vfs/types.ts'
 import { record, startOp } from '../../../observe/context.ts'
 import { Channel } from '../../../shell/console/index.ts'
 import type { Job } from '../../../shell/job_table/types.ts'
@@ -693,8 +693,8 @@ describe('tail -s reads exactly what strtod reads', () => {
 class Stamped extends RAMVFS {
   override readonly readRevalidatable: boolean = true
 
-  override async stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    const row = await super.stat(path, index)
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const row = await super.stat(path)
     return new FileStat({
       name: row.name,
       size: row.size,
@@ -705,21 +705,21 @@ class Stamped extends RAMVFS {
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
     const timer = startOp()
-    const data = await super.read(path, index, offset, size)
-    const whole = await super.read(path, index)
+    const data = await super.read(path, handed, offset, size)
+    const whole = await super.read(path, handed)
     record('read', path.virtual, 'ram', data.byteLength, timer, {
       fingerprint: String(whole.byteLength),
     })
     return data
   }
 
-  override async *readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    yield await this.read(path, index)
+  override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    yield await this.read(path)
   }
 }
 

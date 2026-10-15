@@ -15,7 +15,6 @@
 import re
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3.client import (
     _client_kwargs,
     _key,
@@ -36,7 +35,6 @@ async def checksum(
     path_spec: PathSpec,
     algorithm: str,
     aws: bool,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> str | None:
     """An object's MD5, read off its ETag when the ETag is one.
 
@@ -54,7 +52,6 @@ async def checksum(
         path_spec (PathSpec): the object.
         algorithm (str): the hashlib name asked for.
         aws (bool): the store is AWS itself, where SSE-S3 keeps the MD5.
-        index (IndexCacheStore): unused; the object is asked by key.
     """
     if algorithm != "md5":
         return None

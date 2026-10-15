@@ -150,6 +150,5 @@ def test_readdir_lists_direct_children(memory_backend):
     asyncio.run(ops(memory_backend).mkdir(_ps("/parent")))
     asyncio.run(ops(memory_backend).mkdir(_ps("/parent/child1")))
     asyncio.run(ops(memory_backend).write(_ps("/parent/file.txt"), b""))
-    entries = asyncio.run(ops(memory_backend).readdir(_ps("/parent")))
-    assert any("child1" in e for e in entries)
-    assert any("file.txt" in e for e in entries)
+    rows = asyncio.run(ops(memory_backend).readdir(_ps("/parent")))
+    assert sorted(row.name for row in rows) == ["child1", "file.txt"]

@@ -128,7 +128,12 @@ describe('symlinks (namespace-backed)', () => {
         }),
       ),
     )
-    const readdir = vi.spyOn(ram, 'readdir').mockResolvedValue(['tables', 'views'])
+    const readdir = vi
+      .spyOn(ram, 'readdir')
+      .mockResolvedValue([
+        new FileStat({ name: 'tables', type: FileType.DIRECTORY }),
+        new FileStat({ name: 'views', type: FileType.DIRECTORY }),
+      ])
     const r = await ws.shell('ln -s /data/x /data/meta_link')
     expect(r.exitCode).toBe(0)
     expect(dec(r.stderr)).toBe('')

@@ -17,7 +17,6 @@ from dataclasses import replace
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.object_store.driver import TreeEntry
 from mirage.core.object_store.readdir import make_readdir, make_tree
 from mirage.types import FileType
@@ -28,7 +27,20 @@ def test_readdir_lists_files_and_collapsed_dirs(accessor):
     store = FakeStore({"a.txt": b"hi", "dir/f.txt": b"x", "dir/sub/g": b"y"})
     readdir = make_readdir(make_driver(store))
     out = asyncio.run(readdir(accessor, spec("/")))
-    assert out == ["/mnt/a.txt", "/mnt/dir"]
+    assert [(row.name, row.type, row.size) for row in out] == [
+        ("a.txt", FileType.FILE, 2),
+        ("dir", FileType.DIRECTORY, None),
+    ]
+
+
+def test_readdir_lists_a_name_that_is_a_key_and_a_prefix_as_a_directory(
+    accessor,
+):
+    store = FakeStore({"csv": b"file", "csv/inner.txt": b"x"})
+    out = asyncio.run(make_readdir(make_driver(store))(accessor, spec("/")))
+    assert [(row.name, row.type) for row in out] == [
+        ("csv", FileType.DIRECTORY)
+    ]
 
 
 def test_readdir_marker_only_directory_is_empty_not_missing(accessor):
@@ -56,35 +68,12 @@ def test_readdir_root_of_an_empty_store_does_not_raise(accessor):
     assert asyncio.run(readdir(accessor, spec("/"))) == []
 
 
-def test_readdir_populates_index(accessor):
-    store = FakeStore({"a.txt": b"hi", "dir/f.txt": b"x"})
-    readdir = make_readdir(make_driver(store))
-    index = RAMIndexCacheStore()
-    asyncio.run(readdir(accessor, spec("/"), index=index))
-    lookup = asyncio.run(index.get("/mnt/a.txt"))
-    assert lookup.entry is not None
-    assert lookup.entry.size == 2
-    folder = asyncio.run(index.get("/mnt/dir"))
-    assert folder.entry is not None
-    assert folder.entry.size is None
-
-
-def test_readdir_serves_a_cached_listing_without_connecting(accessor):
-    store = FakeStore({"a.txt": b"hi"})
-    readdir = make_readdir(make_driver(store))
-    index = RAMIndexCacheStore()
-    first = asyncio.run(readdir(accessor, spec("/"), index=index))
-    connects = store.connects
-    second = asyncio.run(readdir(accessor, spec("/"), index=index))
-    assert first == second
-    assert store.connects == connects
-
-
 def test_tree_answers_each_entry_and_implied_directory(accessor):
     store = FakeStore({"a.txt": b"hi", "dir/sub/f.txt": b"x", "/": b""})
     found = asyncio.run(make_tree(make_driver(store))(accessor, spec("/")))
     assert found is not None
-    assert sorted(found) == ["a.txt", "dir", "dir/sub", "dir/sub/f.txt"]
+    assert sorted(found) == ["", "a.txt", "dir", "dir/sub", "dir/sub/f.txt"]
+    assert found[""].type == FileType.DIRECTORY
     assert found["dir/sub/f.txt"].size == 1
     assert found["dir"].type == FileType.DIRECTORY
 

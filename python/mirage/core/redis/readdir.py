@@ -13,12 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    ResourceType,
-)
 from mirage.core.redis.stat import key_stats
 from mirage.errors.fs import readdir_error
 from mirage.types import FileStat, PathSpec
@@ -27,10 +21,8 @@ from mirage.utils.path import norm
 
 
 async def readdir(
-    accessor: RedisAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> list[str]:
+    accessor: RedisAccessor, path_spec: PathSpec
+) -> list[FileStat]:
     virtual = path_spec.virtual
     prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     path = path_spec.directory if path_spec.pattern else path_spec.virtual
@@ -39,13 +31,6 @@ async def readdir(
         if prefix.endswith("/") or rest == "" or rest.startswith("/"):
             path = rest or "/"
     store = accessor.store
-    # Canonical key: no trailing slash (except root), or the same dir
-    # indexes under two keys and cache hits return doubled-slash entries.
-    virtual_key = prefix + path if prefix else path
-    virtual_key = virtual_key.rstrip("/") or "/"
-    listing = await index.list_dir(virtual_key)
-    if listing.entries is not None:
-        return listing.entries
     p = norm(path)
     if not await store.has_dir(p):
         raise await readdir_error(virtual, p, store.has_file, store.has_dir)
@@ -61,31 +46,14 @@ async def readdir(
             child = remainder.split("/")[0]
             if child:
                 seen.add(dir_prefix + child)
-    entries = sorted(seen)
-    virtual_entries = sorted((prefix + e if prefix else e) for e in entries)
     file_set = set(all_files)
-    index_entries = [
-        (
-            e.rsplit("/", 1)[-1],
-            IndexEntry(
-                id=e,
-                name=e.rsplit("/", 1)[-1],
-                vfs_name=e.rsplit("/", 1)[-1],
-                resource_type=(
-                    ResourceType.FILE if e in file_set else ResourceType.FOLDER
-                ),
-            ),
-        )
-        for e in entries
-    ]
-    await index.set_dir(virtual_key, index_entries)
-    return virtual_entries
+    return await key_stats(
+        store, [(key, key not in file_set) for key in sorted(seen)]
+    )
 
 
 async def tree(
-    accessor: RedisAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: RedisAccessor, path: PathSpec
 ) -> dict[str, FileStat] | None:
     """Every key under a directory from one scan, each as ``stat``
     answers it, fetched in one pipeline; None when ``path`` is no
@@ -96,7 +64,6 @@ async def tree(
     Args:
         accessor (RedisAccessor): the mount's store.
         path (PathSpec): the directory.
-        index (IndexCacheStore): unused; the store answers directly.
     """
     store = accessor.store
     p = norm(path.mount_path)

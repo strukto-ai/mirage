@@ -21,7 +21,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.types import PathSpec
 
 
@@ -302,7 +301,11 @@ async def test_multiple_stdout_redirects_truncate_all_write_last(monkeypatch):
             assert "abc" in await _out(ws, "cat /data/m1")
             with monkeypatch.context() as patched:
                 pwrite = AsyncMock(wraps=vfs.pwrite)
-                patched.setattr(vfs, "pwrite", pwrite)
+
+                async def pwrite_at(path: PathSpec, data: bytes, offset: int):
+                    await pwrite(path, data, offset)
+
+                patched.setattr(vfs, "pwrite", pwrite_at)
                 io = await ws.shell(
                     "{ printf ab >&2; printf cd >&2; printf ef >&2;"
                     " printf X; printf Y; printf G >&2; printf H >&2;"
@@ -515,12 +518,10 @@ async def test_write_target_unwritable_keeps_rest_of_line(monkeypatch, caplog):
                     raise error
                 await original_write(path, data)
 
-            async def pwrite(
-                path: PathSpec, data: bytes, offset: int, **kwargs
-            ) -> None:
+            async def pwrite(path: PathSpec, data: bytes, offset: int) -> None:
                 if data and path.virtual in failing:
                     raise error
-                await original_pwrite(path, data, offset, **kwargs)
+                await original_pwrite(path, data, offset)
 
             with monkeypatch.context() as patched:
                 patched.setattr(vfs, "write", write)
@@ -853,9 +854,7 @@ class FailingVFS(RAMVFS):
         super().__init__()
         self._store.files["/bad"] = b"firstrest"
 
-    async def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
+    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         yield b"first"
         raise PermissionError(13, "Permission denied", path.virtual)
 

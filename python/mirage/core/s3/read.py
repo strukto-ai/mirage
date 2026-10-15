@@ -16,7 +16,6 @@ from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import publish_read
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3.client import (
     _client_kwargs,
     _key,
@@ -53,7 +52,6 @@ def _fp_rev_from_s3_response(
 async def read(
     accessor: S3Accessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -62,7 +60,6 @@ async def read(
     Args:
         accessor (S3Accessor): S3 accessor.
         path_spec (PathSpec): Object path.
-        index: Index cache store.
         offset (int): Byte offset for range reads.
         size (int | None): Number of bytes for range reads.
     """

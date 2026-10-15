@@ -44,7 +44,7 @@ describe('reading a directory (redis)', () => {
     const accessor = mkAccessor()
     const path = PathSpec.fromStrPath(key)
     await expect(read(accessor, path)).rejects.toMatchObject({ code })
-    await expect(read(accessor, path, undefined, { offset: 1, size: 2 })).rejects.toMatchObject({
+    await expect(read(accessor, path, { offset: 1, size: 2 })).rejects.toMatchObject({
       code,
     })
     await expect(drain(readStream(accessor, path))).rejects.toMatchObject({ code })

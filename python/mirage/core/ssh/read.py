@@ -17,7 +17,6 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import enoent
 from mirage.observe.context import record, start_op
@@ -32,7 +31,6 @@ WC = "env LC_ALL=C wc -l"
 async def read(
     accessor: SSHAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -57,7 +55,6 @@ async def read(
 async def line_count(
     accessor: SSHAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> int | None:
     """How many newlines a file holds, by wc on the server.
 
@@ -68,7 +65,6 @@ async def line_count(
     Args:
         accessor (SSHAccessor): the mount's connection.
         path_spec (PathSpec): the file.
-        index (IndexCacheStore): unused; wc answers directly.
     """
     remote = join_root(accessor.config.root, path_spec.mount_path)
     try:

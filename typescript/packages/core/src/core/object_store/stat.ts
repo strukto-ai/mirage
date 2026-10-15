@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../accessor/base.ts'
-import { ResourceType } from '../../cache/index/config.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
@@ -22,11 +21,10 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { gnuBasename } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import type { ObjectStoreDriver, StatFn } from './driver.ts'
-import { cachedEntry } from './readdir.ts'
 
-/** Build the index-first stat ladder over one driver. */
+/** Build the stat ladder over one driver: the object, then the prefix. */
 export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): StatFn<A> {
-  return async function stat(accessor, path, index) {
+  return async function stat(accessor, path) {
     const original = path.virtual
     const prefix = mountPrefixOf(path.virtual, path.vfsPath)
     const rawPath =
@@ -44,43 +42,6 @@ export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>)
       return new FileStat({ name: '/', type: FileType.DIRECTORY })
     }
 
-    // Fast path: check the index cache populated by readdir(), which
-    // stores entries with resource type "folder" or "file" and file
-    // sizes, so stat can return instantly for known paths.
-    if (index !== undefined) {
-      const virtualKey = prefix !== '' ? `${prefix}/${stripped}` : '/' + stripped
-      const entry = await cachedEntry(index, virtualKey)
-      if (entry !== null) {
-        // Store "folders" are synthetic prefixes with no object, so
-        // readdir() records no time or size for them.
-        if (entry.resourceType === ResourceType.FOLDER) {
-          return new FileStat({ name: entry.name, type: FileType.DIRECTORY })
-        }
-        return new FileStat({
-          name: entry.name,
-          size: entry.size ?? null,
-          modified: entry.remoteTime !== '' ? entry.remoteTime : null,
-          type: FileType.FILE,
-          content: contentTypeForPath(entry.name),
-        })
-      }
-      // If the parent directory was already listed by readdir() but this
-      // path is not among its children, it does not exist. This avoids
-      // expensive network calls for paths that shells probe speculatively
-      // (e.g. .git, HEAD, .hg during cd).
-      const parent = virtualKey.replace(/\/[^/]*$/, '') || '/'
-      const parentListing = await index.listDir(parent)
-      if (
-        parentListing.entries !== undefined &&
-        parentListing.entries !== null &&
-        !parentListing.entries.includes(virtualKey)
-      ) {
-        throw enoent(path)
-      }
-    }
-
-    // A listed child can lose its metadata to independent eviction.
-    // Missing cache information must fall back to the store.
     const kpfx = driver.keyPrefixOf(accessor)
     const key = kp.apply(kpfx, rawPath)
     const { conn, close } = await driver.connect(accessor)

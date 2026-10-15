@@ -19,7 +19,6 @@ import { norm } from '../../utils/path.ts'
 import { lookupError } from './dest.ts'
 import { eisdir } from '../../errors/fs.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 
 /**
  * Read a file, optionally only a byte range of it.
@@ -31,13 +30,11 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
  * Args:
  *   accessor: RAM accessor.
  *   path: the path to read.
- *   _index: unused; the store is the listing.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
 export function read(
   accessor: RAMAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
   const offset = options?.offset ?? 0

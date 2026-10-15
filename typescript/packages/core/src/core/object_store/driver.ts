@@ -15,29 +15,19 @@
 import type { Accessor } from '../../accessor/base.ts'
 import { dropCached, stale } from '../../cache/context.ts'
 import { type KnownVersions, OwnRead, type WriteCondition } from '../../cache/types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { ConditionLostError } from './errors.ts'
 
-export type ReaddirFn<A extends Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<string[]>
+export type ReaddirFn<A extends Accessor> = (accessor: A, path: PathSpec) => Promise<FileStat[]>
 
 export type TreeFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
-  index?: IndexCacheStore,
 ) => Promise<Map<string, FileStat> | null>
 
-export type StatFn<A extends Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<FileStat>
+export type StatFn<A extends Accessor> = (accessor: A, path: PathSpec) => Promise<FileStat>
 
 export type ExistsFn<A extends Accessor> = (accessor: A, path: PathSpec) => Promise<boolean>
 
@@ -67,18 +57,6 @@ export type TruncateFn<A extends Accessor> = (
   length: number,
   noCreate?: boolean,
 ) => Promise<void>
-
-export type DuEntriesFn<A extends Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<[[string, number][], number]>
-
-export type DuSizeFn<A extends Accessor> = (
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-) => Promise<number>
 
 /**
  * One entry a driver saw while listing the immediate children of a

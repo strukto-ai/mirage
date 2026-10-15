@@ -13,50 +13,55 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Dirent } from 'node:fs'
+import { lstat } from 'node:fs/promises'
+import nodePath from 'node:path'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { IndexEntry, ResourceType } from '@struktoai/mirage-core/cache/index/config'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import type { PathSpec } from '@struktoai/mirage-core/types'
+import { DirListing, type FileStat, type PathSpec } from '@struktoai/mirage-core/types'
 import { enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
-import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { diskError } from './errors.ts'
 import { folderVersion, wallNs } from './listing_version.ts'
-import { norm, readEntries, resolveInside } from './utils.ts'
+import { statOf } from './stat.ts'
+import { readEntries, resolveInside } from './utils.ts'
 
-export async function readdir(
-  accessor: DiskAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
+/** An entry as `stat` answers it, null for one removed during the scan. */
+async function rowOf(
+  full: string,
+  entry: Dirent,
+  nowNs: bigint,
+  versioned: boolean,
+): Promise<FileStat | null> {
+  try {
+    const st = await lstat(nodePath.join(full, entry.name), { bigint: true })
+    return statOf(entry.name, st, nowNs, versioned)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
+}
+
+export async function readdir(accessor: DiskAccessor, path: PathSpec): Promise<DirListing> {
   // A pattern spec addresses the directory whose entries the glob filters,
   // and the rest of this function works in mount-relative space, so the
   // directory has to be read off `dir` rather than off the virtual
   // `directory` string (python strips the prefix by hand for the same
   // reason).
   const target = path.pattern !== null ? path.dir : path
-  const virtual = target.mountPath
-  const mountPrefix = mountPrefixOf(target.virtual, target.vfsPath)
-  // Canonical key: no trailing slash (except root), or the same dir
-  // indexes under two keys and cache hits return doubled-slash entries.
-  const virtualKey = rstripSlash(mountPrefix + virtual) || '/'
-  if (index !== undefined) {
-    const cached = await index.listDir(virtualKey)
-    if (cached.entries !== undefined && cached.entries !== null) {
-      return cached.entries
-    }
-  }
-  const full = await resolveInside(accessor.root, path, virtual)
-  let entries: Dirent[]
-  let version: string | null = null
+  const full = await resolveInside(accessor.root, path, target.mountPath)
+  const nowNs = wallNs()
   try {
     // The version is read before the scan: a change landing during the scan
     // then leaves the stored version behind the folder's, and the next check
     // re-lists instead of serving rows that missed it.
-    if (accessor.folderVersions) version = await folderVersion(full, wallNs())
+    const version = accessor.folderVersions ? await folderVersion(full, nowNs) : null
     // A host symlink is not an entry of the mount (see resolveInside).
-    entries = await readEntries(full)
+    const entries = await readEntries(full)
+    const rows = await Promise.all(
+      entries.map((entry) => rowOf(full, entry, nowNs, accessor.folderVersions)),
+    )
+    const listed = rows.filter((row): row is FileStat => row !== null)
+    listed.sort((a, b) => compareCodePoints(a.name, b.name))
+    return new DirListing({ entries: listed, version })
   } catch (err) {
     // The kernel already separates ENOENT (a component does not exist) from
     // ENOTDIR (a component exists but is not a directory); keep that split
@@ -67,20 +72,4 @@ export async function readdir(
     if (code === 'ENOENT') throw enoent(path)
     throw diskError(err, path)
   }
-  const base = norm(virtual)
-  const dirPrefix = base === '/' ? '/' : `${base}/`
-  const sorted = [...entries].sort((a, b) => compareCodePoints(a.name, b.name))
-  const virtualEntries = sorted.map((e) => `${mountPrefix}${dirPrefix}${e.name}`)
-  if (index !== undefined) {
-    const indexEntries: [string, IndexEntry][] = sorted.map((entry) => [
-      entry.name,
-      new IndexEntry({
-        id: `${dirPrefix}${entry.name}`,
-        name: entry.name,
-        resourceType: entry.isDirectory() ? ResourceType.FOLDER : ResourceType.FILE,
-      }),
-    ])
-    await index.setDir(virtualKey, indexEntries, null, { version })
-  }
-  return virtualEntries
 }

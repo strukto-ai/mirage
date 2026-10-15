@@ -13,35 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dev.constants import DEV_RDEV
 from mirage.core.dev.device import active_device, active_pipe
-from mirage.core.ram.stat import stat as ram_stat
+from mirage.core.ram.dest import lookup_error
+from mirage.core.ram.stat import key_stat as ram_key_stat
 from mirage.types import DEVICE_NUMBERS_KEY, FileStat, FileType, PathSpec
 from mirage.utils.path import norm
 from mirage.utils.stat_view import FIFO_MODE
 
 
-async def stat(
-    accessor: RAMAccessor,
-    path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
-) -> FileStat:
-    """Stat a /dev path: a FIFO for a live descriptor, a char device for
-    an active synthetic name, otherwise the ordinary RAM stat (a
-    recreated real file, or a dir).
-
-    Neither has rendered content, so the size is None; a device's
-    identity is the [major, minor] under DEVICE_NUMBERS_KEY. Both carry
-    the stored mode, owner and times; a FIFO without a mode is rw-------.
+def key_stat(accessor: RAMAccessor, p: str) -> FileStat | None:
+    """What ``stat`` answers for the normalized key ``p``, None when
+    nothing is there.
 
     Args:
         accessor (RAMAccessor): the /dev store's accessor.
-        path_spec (PathSpec): the path to stat.
-        index (IndexCacheStore): the mount's index, for a RAM stat.
+        p (str): the normalized key.
     """
     store = accessor.store
-    p = norm(path_spec.mount_path)
     attrs = store.attrs.get(p, {})
     if active_pipe(accessor, p) is not None:
         mode = attrs.get("mode")
@@ -57,7 +46,7 @@ async def stat(
         )
     device = active_device(accessor, p)
     if device is None:
-        return await ram_stat(accessor, path_spec, index)
+        return ram_key_stat(store, p)
     major, minor = DEV_RDEV[device]
     return FileStat(
         name=p.rsplit("/", 1)[-1],
@@ -71,3 +60,23 @@ async def stat(
         atime=attrs.get("atime"),
         extra={DEVICE_NUMBERS_KEY: [major, minor]},
     )
+
+
+async def stat(accessor: RAMAccessor, path_spec: PathSpec) -> FileStat:
+    """Stat a /dev path: a FIFO for a live descriptor, a char device for
+    an active synthetic name, otherwise the ordinary RAM stat (a
+    recreated real file, or a dir).
+
+    Neither has rendered content, so the size is None; a device's
+    identity is the [major, minor] under DEVICE_NUMBERS_KEY. Both carry
+    the stored mode, owner and times; a FIFO without a mode is rw-------.
+
+    Args:
+        accessor (RAMAccessor): the /dev store's accessor.
+        path_spec (PathSpec): the path to stat.
+    """
+    p = norm(path_spec.mount_path)
+    found = key_stat(accessor, p)
+    if found is None:
+        raise lookup_error(accessor.store, path_spec, p)
+    return found

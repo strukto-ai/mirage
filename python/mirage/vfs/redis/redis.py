@@ -15,7 +15,6 @@
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.append import append_bytes as _append
 from mirage.core.redis.constants import SCOPE_ERROR
 from mirage.core.redis.copy import copy as _copy
@@ -75,31 +74,24 @@ class RedisVFS(BaseVFS):
         self._store = RedisStore(url=url, key_prefix=key_prefix)
         self.accessor = RedisAccessor(self._store)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await _readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
         if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read(self.accessor, path, index, offset, size)
+            return await _read(self.accessor, path)
+        return await _read(self.accessor, path, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await _stat(self.accessor, path)
 
-    def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
@@ -107,9 +99,8 @@ class RedisVFS(BaseVFS):
     async def read_tree(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path, index)
+        return await _tree(self.accessor, path)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)
@@ -118,7 +109,6 @@ class RedisVFS(BaseVFS):
         self,
         path: PathSpec,
         data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
     ) -> None:
         await _append(self.accessor, path, data)
 
@@ -131,10 +121,8 @@ class RedisVFS(BaseVFS):
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         await _mkdir(self.accessor, path, parents=parents)
 
-    async def rmdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
-        await _rmdir(self.accessor, path, index)
+    async def rmdir(self, path: PathSpec) -> None:
+        await _rmdir(self.accessor, path)
 
     async def rm_r(self, path: PathSpec) -> Any:
         return await _rm_r(self.accessor, path)

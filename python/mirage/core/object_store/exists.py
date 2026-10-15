@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.index import NULL_INDEX
 from mirage.core.object_store.driver import A, ExistsFn, StatFn
 from mirage.types import PathSpec
 
@@ -26,7 +25,7 @@ def make_exists(stat: StatFn[A]) -> ExistsFn[A]:
 
     async def exists(accessor: A, path: PathSpec) -> bool:
         try:
-            await stat(accessor, path, index=NULL_INDEX)
+            await stat(accessor, path)
             return True
         except (FileNotFoundError, ValueError):
             return False

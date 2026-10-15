@@ -17,7 +17,14 @@ from mirage.vfs.s3 import S3Config
 from mirage.vfs.s3.s3 import S3VFS
 from tests.e2e.s3_mock import patch_s3_multi
 
-resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
+
+async def _listed(accessor, path, index=None):
+    rows = await readdir(accessor, path)
+    base = (path.dir if path.pattern else path).virtual.rstrip("/")
+    return [f"{base}/{row.name}" for row in rows]
+
+
+resolve_glob = make_resolve_glob(_listed, SCOPE_ERROR)
 
 PREFIX = "users/abc/"
 BUCKET = "test-bucket"
@@ -78,11 +85,8 @@ def test_readdir_returns_user_facing_paths():
     store = {BUCKET: {"users/abc/a.txt": b"a", "users/abc/b.txt": b"b"}}
     with patch_s3_multi(store):
         accessor = _accessor(PREFIX)
-        index = RAMIndexCacheStore()
-        entries = asyncio.run(readdir(accessor, _path("/"), index=index))
-    for entry in entries:
-        assert "users" not in entry, f"key_prefix leaked into entry: {entry}"
-        assert "abc" not in entry, f"key_prefix leaked into entry: {entry}"
+        entries = asyncio.run(_listed(accessor, _path("/")))
+    assert entries == ["/a.txt", "/b.txt"]
 
 
 def test_resolve_glob_with_prefix():

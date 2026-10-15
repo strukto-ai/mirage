@@ -92,12 +92,23 @@ import {
   FileStat,
   WritePolicy,
   FileType,
+  ListingVersion,
   MountMode,
   PathSpec,
+  ReadPolicy,
 } from '../../types.ts'
 import { ebusy, enotdir, enotsup, isEnoent } from '../../errors/fs.ts'
-import { HANDED } from './constants.ts'
-import { entryAt, folderOf, indexKey, keepListing, storedListing, storedStat } from './listing.ts'
+import { HANDED, STORED_OPS } from './constants.ts'
+import {
+  entryAt,
+  folderOf,
+  indexKey,
+  keepListing,
+  keepTree,
+  storedListing,
+  storedStat,
+  storedTree,
+} from './listing.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -1034,8 +1045,24 @@ export class MountEntry {
   private async stored(name: string, scope: PathSpec, index: IndexCacheStore): Promise<unknown> {
     const key = indexKey(this.prefix, scope)
     if (name === 'readdir') return storedListing(index, key)
+    if (name === 'read_tree') return this.namesOnly ? null : storedTree(index, key)
     if (key === this.rootKey) return null
-    return storedStat(index, key)
+    const row = await storedStat(index, key)
+    if (row === null || !this.namesOnly) return row
+    return this.cacheManager?.listingTrusted(folderOf(key)) === true ? row : null
+  }
+
+  /**
+   * Whether a kept listing vouches for its children's names only. A folder's
+   * version moves when its names change, not when a child is edited in place,
+   * so under `fresh` a mount whose listings are checked by folder answers a
+   * child's stat from its listing only when the running command listed it.
+   * Mirrors Python's `_names_only`.
+   */
+  private get namesOnly(): boolean {
+    return (
+      this.read.policy === ReadPolicy.FRESH && this.vfs.listingVersion === ListingVersion.FOLDER
+    )
   }
 
   /** A streamed read handed what is at its path, found on the first pull. */
@@ -1073,23 +1100,38 @@ export class MountEntry {
     taken(name, kwargs)
     this.requireWritable(name, scope, [...args, ...Object.values(kwargs)], access)
     const index = kwargs.index ?? this.index
-    if (vfs.listsStats && (name === 'readdir' || name === 'stat')) {
+    if (vfs.listsStats && STORED_OPS.has(name)) {
       const stored = await this.stored(name, scope, index)
       if (stored !== null) return stored
     }
     for (const call of levels) {
       const result = await this.run(name, call, scope, args, kwargs, index)
       if (result === null || result === undefined) continue
-      if (name === 'readdir' && vfs.listsStats) {
-        return keepListing(
-          index,
-          indexKey(this.prefix, scope),
-          result as readonly FileStat[] | DirListing,
-        )
-      }
-      return result
+      return vfs.listsStats ? this.kept(name, scope, index, result) : result
     }
     return null
+  }
+
+  /**
+   * What a listing or a subtree read answered, kept as listings; a listing
+   * answers its children's paths once kept. Mirrors Python's `_kept`.
+   */
+  private async kept(
+    name: string,
+    scope: PathSpec,
+    index: IndexCacheStore,
+    result: unknown,
+  ): Promise<unknown> {
+    const key = indexKey(this.prefix, scope)
+    if (name === 'readdir') {
+      return keepListing(index, key, result as readonly FileStat[] | DirListing)
+    }
+    if (name === 'read_tree' && result instanceof Map) {
+      const tree = result as Map<string, FileStat>
+      await keepTree(index, key, tree)
+      return new Map([...tree].filter(([path]) => path !== ''))
+    }
+    return result
   }
 
   /**

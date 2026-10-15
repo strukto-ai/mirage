@@ -15,7 +15,6 @@
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record, start_op
@@ -25,7 +24,6 @@ from mirage.types import PathSpec
 async def read(
     accessor: DiskAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
     virtual = path_spec.virtual
     root = accessor.root
@@ -41,7 +39,6 @@ async def read(
 async def read_range(
     accessor: DiskAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -50,7 +47,6 @@ async def read_range(
     Args:
         accessor (DiskAccessor): the mount's disk handle.
         path_spec (PathSpec): the path to read.
-        index (IndexCacheStore): listing cache, unused here.
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
     """

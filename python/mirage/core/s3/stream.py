@@ -17,7 +17,6 @@ from contextlib import AsyncExitStack
 from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.s3.client import (
     _client_kwargs,
     _key,
@@ -33,7 +32,6 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: S3Accessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     """Async generator yielding chunks of an S3 object.
@@ -41,7 +39,6 @@ async def read_stream(
     Args:
         accessor (S3Accessor): S3 accessor.
         path_spec (PathSpec): Object path.
-        index: Index cache store.
         chunk_size (int): Size of each chunk in bytes.
     """
     virtual = path_spec.virtual

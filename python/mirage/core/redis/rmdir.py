@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.errors.fs import enotempty
 from mirage.types import PathSpec
@@ -23,7 +22,6 @@ from mirage.utils.path import norm
 async def rmdir(
     accessor: RedisAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> None:
     path = path_spec.mount_path
     store = accessor.store

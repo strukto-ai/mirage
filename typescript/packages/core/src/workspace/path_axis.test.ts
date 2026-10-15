@@ -14,8 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { MountMode, type PathSpec } from '../types.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
+import { type FileStat, MountMode, type PathSpec } from '../types.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
@@ -44,9 +43,9 @@ class DenyUnlinkAfter implements Policy {
 class FailingRAM extends RAMVFS {
   failing: 'readdir' | 'unlink' | null = null
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     if (this.failing === 'readdir') return Promise.reject(new Error('api exploded'))
-    return super.readdir(path, index)
+    return super.readdir(path)
   }
 
   override unlink(path: PathSpec): Promise<void> {

@@ -69,10 +69,11 @@ function spec(virtual: string): PathSpec {
   })
 }
 
-function run(names: string[], virtual: string, keyPrefix?: string): Promise<string[]> {
+async function run(names: string[], virtual: string, keyPrefix?: string): Promise<string[]> {
   mockBucket(names)
   const config = { uri: 'mongodb://x', database: 'db', bucket: 'data', keyPrefix } as GridFSConfig
-  return readdir(new GridFSAccessor(config), spec(virtual))
+  const rows = await readdir(new GridFSAccessor(config), spec(virtual))
+  return rows.map((row) => `${virtual.replace(/\/+$/, '')}/${row.name}`)
 }
 
 async function codeOf(promise: Promise<unknown>): Promise<string> {

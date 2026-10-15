@@ -16,7 +16,6 @@ import asyncio
 from contextlib import ExitStack
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import RAMIndexCacheStore, ResourceType
 from mirage.core.s3.readdir import readdir
 from mirage.core.s3.stat import stat
 from mirage.types import FileType, PathSpec
@@ -36,41 +35,34 @@ def _accessor():
     return S3Accessor(config)
 
 
-def test_readdir_stores_remote_time_for_files():
+def test_readdir_answers_the_modified_time_of_files():
     store = {"dir/a.txt": b"hello", "dir/sub/b.txt": b"x"}
     stack = ExitStack()
     stack.enter_context(patch_s3_multi({"test-bucket": store}))
     try:
-        accessor = _accessor()
-        cache = RAMIndexCacheStore(ttl=60)
         scope = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
-        asyncio.run(readdir(accessor, scope, cache))
-        file_lookup = asyncio.run(cache.get("/dir/a.txt"))
-        assert file_lookup.entry is not None
-        assert file_lookup.entry.resource_type == ResourceType.FILE
-        assert file_lookup.entry.remote_time == EXPECTED_MODIFIED
+        rows = {
+            row.name: row for row in asyncio.run(readdir(_accessor(), scope))
+        }
+        assert rows["a.txt"].type == FileType.FILE
+        assert rows["a.txt"].modified == EXPECTED_MODIFIED
+        assert rows["a.txt"].size == 5
         # S3 "folders" are synthetic common-prefixes: no time recorded.
-        dir_lookup = asyncio.run(cache.get("/dir/sub"))
-        assert dir_lookup.entry is not None
-        assert dir_lookup.entry.resource_type == ResourceType.FOLDER
-        assert dir_lookup.entry.remote_time == ""
+        assert rows["sub"].type == FileType.DIRECTORY
+        assert rows["sub"].modified is None
     finally:
         stack.close()
 
 
-def test_stat_returns_modified_from_index():
+def test_stat_returns_the_modified_time():
     store = {"dir/a.txt": b"hello"}
     stack = ExitStack()
     stack.enter_context(patch_s3_multi({"test-bucket": store}))
     try:
-        accessor = _accessor()
-        cache = RAMIndexCacheStore(ttl=60)
-        scope = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
-        asyncio.run(readdir(accessor, scope, cache))
         target = PathSpec(
             vfs_path="dir/a.txt", virtual="/dir/a.txt", directory="/dir"
         )
-        result = asyncio.run(stat(accessor, target, index=cache))
+        result = asyncio.run(stat(_accessor(), target))
         assert result.modified == EXPECTED_MODIFIED
         assert result.size == 5
         assert result.type != FileType.DIRECTORY

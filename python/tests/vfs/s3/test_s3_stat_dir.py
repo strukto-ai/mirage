@@ -13,14 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import IndexEntry
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.s3.readdir import readdir
 from mirage.core.s3.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -35,11 +32,6 @@ def s3_config():
 @pytest.fixture
 def s3_accessor(s3_config):
     return S3Accessor(s3_config)
-
-
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()
 
 
 def _mock_client_ctx(mock_client):
@@ -146,184 +138,3 @@ class TestStatDirectoryFallback:
         result = await stat(s3_accessor, path)
         assert result.name == "/"
         assert result.type == FileType.DIRECTORY
-
-
-class TestStatIndexCache:
-    @pytest.fixture(autouse=True)
-    def no_backend(self):
-        with patch(
-            "mirage.core.s3.driver.async_session",
-            side_effect=AssertionError("cache hit must not connect"),
-        ):
-            yield
-
-    @pytest.mark.asyncio
-    async def test_stat_uses_index_for_folder(self, s3_accessor, index):
-        await index.set_dir(
-            "/s3",
-            [
-                (
-                    "data",
-                    IndexEntry(
-                        id="/data", name="data", resource_type="folder"
-                    ),
-                )
-            ],
-        )
-
-        path = PathSpec(
-            vfs_path=mount_key("/s3/data", "/s3"),
-            virtual="/s3/data",
-            directory="/s3/",
-        )
-        result = await stat(s3_accessor, path, index)
-        assert result.name == "data"
-        assert result.type == FileType.DIRECTORY
-
-    @pytest.mark.asyncio
-    async def test_stat_uses_index_for_file(self, s3_accessor, index):
-        await index.set_dir(
-            "/s3/data",
-            [
-                (
-                    "file.txt",
-                    IndexEntry(
-                        id="/data/file.txt",
-                        name="file.txt",
-                        resource_type="file",
-                        size=2048,
-                    ),
-                )
-            ],
-        )
-
-        path = PathSpec(
-            vfs_path=mount_key("/s3/data/file.txt", "/s3"),
-            virtual="/s3/data/file.txt",
-            directory="/s3/data/",
-        )
-        result = await stat(s3_accessor, path, index)
-        assert result.name == "file.txt"
-        assert result.size == 2048
-        assert result.content == ContentType.TEXT
-
-
-class TestReaddirIndexEntries:
-    @pytest.mark.asyncio
-    async def test_readdir_stores_folder_type(self, s3_accessor, index):
-        with patch("mirage.core.s3.driver.async_session") as mock_session:
-            mock_client = AsyncMock()
-            page_data = {
-                "CommonPrefixes": [{"Prefix": "subdir/data/"}],
-                "Contents": [{"Key": "subdir/readme.txt", "Size": 100}],
-            }
-
-            async def _paginate(**kwargs):
-                yield page_data
-
-            mock_paginator = MagicMock()
-            mock_paginator.paginate = _paginate
-            mock_client.get_paginator = MagicMock(return_value=mock_paginator)
-            mock_session.return_value.client.return_value = _mock_client_ctx(
-                mock_client
-            )
-
-            path = PathSpec(
-                vfs_path=mount_key("/s3/subdir", "/s3"),
-                virtual="/s3/subdir",
-                directory="/s3/",
-            )
-            result = await readdir(s3_accessor, path, index)
-            assert "/s3/subdir/data" in result
-            assert "/s3/subdir/readme.txt" in result
-
-            lookup = await index.get("/s3/subdir/data")
-            assert lookup.entry is not None
-            assert lookup.entry.resource_type == "folder"
-            assert lookup.entry.name == "data"
-
-            lookup = await index.get("/s3/subdir/readme.txt")
-            assert lookup.entry is not None
-            assert lookup.entry.resource_type == "file"
-            assert lookup.entry.size == 100
-
-    @pytest.mark.asyncio
-    async def test_readdir_cache_hit(self, s3_accessor, index):
-        with patch("mirage.core.s3.driver.async_session") as mock_session:
-            mock_client = AsyncMock()
-            page_data = {
-                "CommonPrefixes": [{"Prefix": "subdir/nested/"}],
-                "Contents": [],
-            }
-
-            async def _paginate(**kwargs):
-                yield page_data
-
-            mock_paginator = MagicMock()
-            mock_paginator.paginate = _paginate
-            mock_client.get_paginator = MagicMock(return_value=mock_paginator)
-            mock_session.return_value.client.return_value = _mock_client_ctx(
-                mock_client
-            )
-
-            path = PathSpec(
-                vfs_path=mount_key("/s3/subdir", "/s3"),
-                virtual="/s3/subdir",
-                directory="/s3/",
-            )
-            r1 = await readdir(s3_accessor, path, index)
-            r2 = await readdir(s3_accessor, path, index)
-            assert r1 == r2
-            assert mock_client.get_paginator.call_count == 1
-
-
-class TestStatAfterReaddir:
-    @pytest.mark.asyncio
-    async def test_stat_hits_cache_after_readdir(self, s3_accessor, index):
-        with patch("mirage.core.s3.driver.async_session") as mock_session:
-            mock_client = AsyncMock()
-            page_data = {
-                "CommonPrefixes": [{"Prefix": "subdir/nested/"}],
-                "Contents": [{"Key": "subdir/readme.txt", "Size": 500}],
-            }
-
-            async def _paginate(**kwargs):
-                yield page_data
-
-            mock_paginator = MagicMock()
-            mock_paginator.paginate = _paginate
-            mock_client.get_paginator = MagicMock(return_value=mock_paginator)
-            mock_session.return_value.client.return_value = _mock_client_ctx(
-                mock_client
-            )
-
-            path = PathSpec(
-                vfs_path=mount_key("/s3/subdir", "/s3"),
-                virtual="/s3/subdir",
-                directory="/s3/",
-            )
-            await readdir(s3_accessor, path, index)
-
-        result = await stat(
-            s3_accessor,
-            PathSpec(
-                vfs_path=mount_key("/s3/subdir/nested", "/s3"),
-                virtual="/s3/subdir/nested",
-                directory="/s3/subdir/",
-            ),
-            index,
-        )
-        assert result.name == "nested"
-        assert result.type == FileType.DIRECTORY
-
-        result = await stat(
-            s3_accessor,
-            PathSpec(
-                vfs_path=mount_key("/s3/subdir/readme.txt", "/s3"),
-                virtual="/s3/subdir/readme.txt",
-                directory="/s3/subdir/",
-            ),
-            index,
-        )
-        assert result.name == "readme.txt"
-        assert result.size == 500

@@ -15,16 +15,9 @@
 from functools import partial
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    ResourceType,
-)
 from mirage.core.ram.stat import key_stat
 from mirage.errors.fs import readdir_error
-from mirage.types import FileStat, PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import norm
 from mirage.vfs.ram.store import RAMStore
 
@@ -37,18 +30,15 @@ async def _is_dir(store: RAMStore, key: str) -> bool:
     return key in store.dirs
 
 
-async def readdir(
-    accessor: RAMAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-) -> list[str]:
+async def child_keys(accessor: RAMAccessor, path: PathSpec) -> list[str]:
+    """The keys of a directory's children, sorted.
+
+    Args:
+        accessor (RAMAccessor): the mount's store.
+        path (PathSpec): the directory.
+    """
     target = path.dir if path.pattern else path
-    prefix = mount_prefix_of(target.virtual, target.vfs_path)
-    # Canonical key: no trailing slash (except root), or the same dir
-    # indexes under two keys and cache hits return doubled-slash entries.
-    virtual_key = target.virtual.rstrip("/") or "/"
     store = accessor.store
-    listing = await index.list_dir(virtual_key)
-    if listing.entries is not None:
-        return listing.entries
     p = norm(target.vfs_path)
     if p not in store.dirs:
         raise await readdir_error(
@@ -64,29 +54,20 @@ async def readdir(
             child = remainder.split("/")[0]
             if child:
                 seen.add(dir_prefix + child)
-    entries = sorted(seen)
-    virtual_entries = sorted((prefix + e if prefix else e) for e in entries)
-    index_entries = [
-        (
-            e.rsplit("/", 1)[-1],
-            IndexEntry(
-                id=e,
-                name=e.rsplit("/", 1)[-1],
-                resource_type=ResourceType.FILE
-                if e in store.files
-                else ResourceType.FOLDER,
-            ),
-        )
-        for e in entries
+    return sorted(seen)
+
+
+async def readdir(accessor: RAMAccessor, path: PathSpec) -> list[FileStat]:
+    # A key restored without its folder still lists the folder.
+    return [
+        key_stat(accessor.store, key)
+        or FileStat(name=key.rsplit("/", 1)[-1], type=FileType.DIRECTORY)
+        for key in await child_keys(accessor, path)
     ]
-    await index.set_dir(virtual_key, index_entries)
-    return virtual_entries
 
 
 async def tree(
-    accessor: RAMAccessor,
-    path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
+    accessor: RAMAccessor, path: PathSpec
 ) -> dict[str, FileStat] | None:
     """Every key under a directory, each as ``stat`` answers it; None
     when ``path`` is no directory, or when a key's parent is none (a
@@ -96,7 +77,6 @@ async def tree(
     Args:
         accessor (RAMAccessor): the mount's store.
         path (PathSpec): the directory.
-        index (IndexCacheStore): unused; the store answers directly.
     """
     store = accessor.store
     p = norm(path.mount_path)

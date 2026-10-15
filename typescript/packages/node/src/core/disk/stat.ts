@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { BigIntStats } from 'node:fs'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { stat as fsStat } from 'node:fs/promises'
 import path from 'node:path'
@@ -22,19 +23,15 @@ import { diskError } from './errors.ts'
 import { stamp, wallNs } from './listing_version.ts'
 import { resolveInside } from './utils.ts'
 
-export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileStat> {
-  const full = await resolveInside(accessor.root, p)
-  const nowNs = wallNs()
-  let st
-  try {
-    st = await fsStat(full, { bigint: true })
-  } catch (err) {
-    throw diskError(err, p)
-  }
+/**
+ * What `stat` answers for a host entry, from its host stat. `nowNs` is the
+ * wall clock read before the stat; `versioned` is whether the mount stores
+ * folder versions. Mirrors Python's `stat_of`.
+ */
+export function statOf(name: string, st: BigIntStats, nowNs: bigint, versioned: boolean): FileStat {
   const modified = st.mtime.toISOString()
   const mode = Number(st.mode & 0o7777n)
   const birthtime = st.birthtimeMs > 0n ? st.birthtime.toISOString() : null
-  const name = path.basename(full)
   // Fields setattr applies natively (mode, times) read from the real
   // inode, so external chmod/utime stays visible. Ownership can never be
   // applied natively (chown needs privileges), so it lives wholly in the
@@ -47,7 +44,7 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
       name,
       size: null,
       modified,
-      fingerprint: accessor.folderVersions ? stamp(st, nowNs) : null,
+      fingerprint: versioned ? stamp(st, nowNs) : null,
       type: FileType.DIRECTORY,
       mode,
       atime: st.atime.toISOString(),
@@ -67,4 +64,16 @@ export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileSta
     ctime: st.ctime.toISOString(),
     birthtime,
   })
+}
+
+export async function stat(accessor: DiskAccessor, p: PathSpec): Promise<FileStat> {
+  const full = await resolveInside(accessor.root, p)
+  const nowNs = wallNs()
+  let st
+  try {
+    st = await fsStat(full, { bigint: true })
+  } catch (err) {
+    throw diskError(err, p)
+  }
+  return statOf(path.basename(full), st, nowNs, accessor.folderVersions)
 }

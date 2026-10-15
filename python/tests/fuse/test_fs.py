@@ -387,15 +387,15 @@ class _UnsizedRAM(RAMVFS):
         self._store.files["/u.json"] = _PAYLOAD
         self.reads = 0
 
-    async def stat(self, path, *args, **kwargs):
-        row = await super().stat(path, *args, **kwargs)
+    async def stat(self, path):
+        row = await super().stat(path)
         if row.type == FileType.DIRECTORY:
             return row
         return row.model_copy(update={"size": None})
 
-    async def read(self, path, *args, **kwargs):
+    async def read(self, path, offset=0, size=None):
         self.reads += 1
-        return await super().read(path, *args, **kwargs)
+        return await super().read(path, offset, size)
 
 
 @pytest.mark.asyncio

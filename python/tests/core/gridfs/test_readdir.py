@@ -20,9 +20,8 @@ import pytest
 from bson import ObjectId
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.gridfs.readdir import readdir
-from mirage.types import PathSpec
+from mirage.core.gridfs.readdir import readdir as list_stats
+from mirage.types import FileType, PathSpec
 from mirage.vfs.gridfs.config import GridFSConfig
 
 _UPLOAD = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -58,6 +57,11 @@ def _path(s: str) -> PathSpec:
     return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
+async def readdir(accessor: GridFSAccessor, path: PathSpec) -> list[str]:
+    rows = await list_stats(accessor, path)
+    return [f"{path.virtual.rstrip('/')}/{row.name}" for row in rows]
+
+
 @pytest.mark.asyncio
 async def test_readdir_derives_files_dirs_and_markers(accessor):
     docs = [
@@ -85,16 +89,14 @@ async def test_readdir_skips_own_marker_and_dedupes(accessor):
 
 
 @pytest.mark.asyncio
-async def test_readdir_populates_index(accessor):
-    index = RAMIndexCacheStore()
+async def test_readdir_answers_each_files_size(accessor):
     docs = [_doc("a.txt", 3), _doc("sub/b.csv", 7)]
     with patch("mirage.core.gridfs.driver.iter_latest", new=_fake_iter(docs)):
-        await readdir(accessor, _path("/"), index)
-    lookup = await index.get("/a.txt")
-    assert lookup.entry is not None
-    assert lookup.entry.size == 3
-    folder = await index.get("/sub")
-    assert folder.entry is not None
+        rows = await list_stats(accessor, _path("/"))
+    assert [(row.name, row.type, row.size) for row in rows] == [
+        ("a.txt", FileType.FILE, 3),
+        ("sub", FileType.DIRECTORY, None),
+    ]
 
 
 class _FakeColl:

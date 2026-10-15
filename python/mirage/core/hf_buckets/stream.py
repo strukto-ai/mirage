@@ -15,7 +15,6 @@
 from collections.abc import AsyncIterator, Mapping
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hf_buckets.constants import DEFAULT_CHUNK_SIZE
 from mirage.core.hf_buckets.hub import read_token, resolve_url
 from mirage.core.hf_buckets.read import is_missing
@@ -30,7 +29,6 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: HfBucketsAccessor,
     path: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> AsyncIterator[bytes]:
     """Stream a bucket file from the Hub, stamped with its ETag.
@@ -38,7 +36,6 @@ async def read_stream(
     Args:
         accessor (HfBucketsAccessor): bucket accessor.
         path (PathSpec): the file to read.
-        index (IndexCacheStore): the mount's index.
         chunk_size (int): bytes per yielded chunk.
 
     Yields:

@@ -88,10 +88,11 @@ function spec(virtual: string): PathSpec {
   })
 }
 
-function run(keys: string[], virtual: string, keyPrefix?: string): Promise<string[]> {
+async function run(keys: string[], virtual: string, keyPrefix?: string): Promise<string[]> {
   mockBucket(keys)
   const config = { bucket: 'b', keyPrefix } as S3Config
-  return readdir(new S3Accessor(config), spec(virtual))
+  const rows = await readdir(new S3Accessor(config), spec(virtual))
+  return rows.map((row) => `${virtual.replace(/\/+$/, '')}/${row.name}`)
 }
 
 async function codeOf(promise: Promise<unknown>): Promise<string> {

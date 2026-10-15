@@ -4,7 +4,7 @@ import { command } from '../../commands/config.ts'
 import { SPECS } from '../../commands/spec/index.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -60,7 +60,7 @@ it.each([
 })
 
 class FailingListing extends RAMVFS {
-  override readdir(): Promise<string[]> {
+  override readdir(): Promise<FileStat[]> {
     return Promise.reject(new Error('remote failure'))
   }
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { Handed } from '../../../vfs/types.ts'
 import { enotsup, walkDeclined } from '../../../errors/fs.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -143,17 +143,17 @@ class GuardedRAM extends RAMVFS {
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    handed?: Handed,
     offset?: number,
     size?: number | null,
   ): Promise<Uint8Array> {
     this.reads.push(path.virtual)
-    return super.read(path, index, offset, size)
+    return super.read(path, handed, offset, size)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     this.reads.push(path.virtual)
-    return super.readStream(path, index)
+    return super.readStream(path)
   }
 
   override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {

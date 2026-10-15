@@ -81,9 +81,11 @@ from mirage.types import (
     FileStat,
     FileType,
     Limit,
+    ListingVersion,
     MountMode,
     PathSpec,
     Producer,
+    ReadPolicy,
     ReadSpec,
     WalkProbe,
     WritePolicy,
@@ -100,14 +102,16 @@ from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect, SearchQuery
 from mirage.view.types import StatPath
 from mirage.workspace.mount.activity import VFSActivity
-from mirage.workspace.mount.constants import HANDED
+from mirage.workspace.mount.constants import HANDED, STORED_OPS
 from mirage.workspace.mount.listing import (
     entry_at,
     folder_of,
     index_key,
     keep_listing,
+    keep_tree,
     stored_listing,
     stored_stat,
+    stored_tree,
 )
 from mirage.workspace.mount.read_policy import coerce_read_policy
 from mirage.workspace.mount.write_policy import (
@@ -1574,9 +1578,53 @@ class MountEntry:
         key = index_key(self.prefix, scope)
         if name == "readdir":
             return await stored_listing(index, key)
+        if name == "read_tree":
+            return None if self._names_only else await stored_tree(index, key)
         if key == self._root_key:
             return None
-        return await stored_stat(index, key)
+        row = await stored_stat(index, key)
+        if row is None or not self._names_only:
+            return row
+        manager = self.cache_manager
+        trusted = manager is not None and manager.listing_trusted(
+            folder_of(key)
+        )
+        return row if trusted else None
+
+    @property
+    def _names_only(self) -> bool:
+        """Whether a kept listing vouches for its children's names only.
+
+        A folder's version moves when its names change, not when a child
+        is edited in place, so under ``fresh`` a mount whose listings are
+        checked by folder answers a child's stat from its listing only
+        when the running command listed it.
+        """
+        return (
+            self.read.policy is ReadPolicy.FRESH
+            and self.vfs.listing_version == ListingVersion.FOLDER
+        )
+
+    async def _kept(
+        self, name: str, scope: PathSpec, index: IndexCacheStore, result: Any
+    ) -> Any:
+        """What a listing or a subtree read answered, kept as listings.
+
+        A listing answers its children's paths once kept.
+
+        Args:
+            name (str): the op that answered.
+            scope (PathSpec): its path, keyed below the mount.
+            index (IndexCacheStore): the mount's index.
+            result (Any): the answer.
+        """
+        key = index_key(self.prefix, scope)
+        if name == "readdir":
+            return await keep_listing(index, key, result)
+        if name == "read_tree" and isinstance(result, dict):
+            await keep_tree(index, key, result)
+            return {path: row for path, row in result.items() if path}
+        return result
 
     async def _run(
         self,
@@ -1722,7 +1770,7 @@ class MountEntry:
                 # spells the two the same, and routing the physical one
                 # hands the op back to the backend serving it.
                 with host_io():
-                    if name in ("readdir", "stat") and self._lists:
+                    if name in STORED_OPS and self._lists:
                         stored = await self._stored(name, scope, index)
                         if stored is not None:
                             return stored
@@ -1732,9 +1780,9 @@ class MountEntry:
                         )
                         if result is None:
                             continue
-                        if name == "readdir" and self._lists:
-                            return await keep_listing(
-                                index, index_key(self.prefix, scope), result
+                        if self._lists:
+                            result = await self._kept(
+                                name, scope, index, result
                             )
                         return _wrap_stream(
                             result, self.mount_id, self.activity

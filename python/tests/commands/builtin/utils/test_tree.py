@@ -117,7 +117,6 @@ async def test_no_answer_walks_the_usual_way_and_asks_once(mount):
 
 @pytest.mark.asyncio
 async def test_a_backends_refusal_propagates():
-
     readdir, _ = _walk(_Mount(refuse=enotsup))
     with pytest.raises(OSError):
         await readdir(PathSpec.from_str_path("/m"))
@@ -154,13 +153,13 @@ class GuardedRAM(RAMVFS):
         self.scans: list[str] = []
         self.reads: list[str] = []
 
-    async def read(self, path, index=NULL_INDEX, offset=0, size=None):
+    async def read(self, path, offset=0, size=None):
         self.reads.append(path.virtual)
-        return await super().read(path, index, offset, size)
+        return await super().read(path, offset, size)
 
-    def read_stream(self, path, index=NULL_INDEX):
+    def read_stream(self, path):
         self.reads.append(path.virtual)
-        return super().read_stream(path, index)
+        return super().read_stream(path)
 
     async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
         self.scans.append(path.virtual)

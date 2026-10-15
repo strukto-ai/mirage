@@ -12,18 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize } from '../../../io/types.ts'
-
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { requireOp } from './adapter.ts'
 import type { CommandIO } from '../../config.ts'
 import { BUILDERS } from './builders/index.ts'
 import { GENERIC_COMMANDS, generic, scanIo, withSlashGuard, withStatCache } from './factory.ts'
-import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
-import { makeTree } from '../../../core/object_store/readdir.ts'
-import { makeStat } from '../../../core/object_store/stat.ts'
-import { FakeAccessor, FakeStore, makeDriver, spec } from '../../../core/object_store/fakes.ts'
+import { FakeAccessor, spec } from '../../../core/object_store/fakes.ts'
 
 function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
   return {
@@ -39,47 +34,6 @@ function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
 }
 
 describe('GENERIC_COMMANDS', () => {
-  it.each(['find', 'cp'])(
-    '%s passes the invocation index through the guarded readTree',
-    async (name) => {
-      const accessor = new FakeAccessor()
-      const store = new FakeStore({ 'data/a.txt': 'abc' })
-      const driver = makeDriver(store)
-      const tree = makeTree(driver)
-      const stat = makeStat(driver)
-      const copied: string[] = []
-      const index = new RAMIndexCacheStore()
-      const io = makeOps({
-        readTree: (_accessor, path, idx) => tree(accessor, path, idx),
-        stat: (_accessor, path, idx) => stat(accessor, path, idx),
-        mkdir: () => Promise.resolve(),
-        copy: (_accessor, _src, dst) => {
-          copied.push(dst.virtual)
-          return Promise.resolve()
-        },
-      })
-      const command = generic(name)
-      const opts = {
-        stdin: null,
-        flags: { r: name === 'cp' },
-        cwd: '/mnt',
-        index,
-        io,
-      }
-      const paths = name === 'cp' ? [spec('/data'), spec('/copy')] : [spec('/data')]
-      const cold = await command.fn(accessor, paths, [], opts)
-      const coldOut = await materialize(cold?.[0] ?? null)
-      expect((await index.get('/mnt/data/a.txt')).entry?.size).toBe(3)
-      if (name === 'cp') expect(copied).toEqual(['/mnt/copy/a.txt'])
-      else {
-        store.connects = 0
-        const warm = await command.fn(accessor, paths, [], opts)
-        expect(await materialize(warm?.[0] ?? null)).toEqual(coldOut)
-        expect(store.connects).toBe(0)
-      }
-    },
-  )
-
   it('has every builder whatever the backend lacks', () => {
     // A backend without the write-side ops still gets the whole family:
     // `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line that

@@ -17,7 +17,6 @@ import asyncio
 import pytest
 
 from mirage import Mount, MountMode, Workspace
-from mirage.cache.index import NULL_INDEX
 from mirage.errors.fs import exdev
 from mirage.types import Limit, PathSpec, WritePolicy
 from mirage.vfs.base import BaseVFS
@@ -33,9 +32,9 @@ class StoreRAM(RAMVFS):
         self.copied: list[tuple[str, str]] = []
         self.reads: list[str] = []
 
-    async def read(self, path, index=NULL_INDEX, offset=0, size=None):
+    async def read(self, path, offset=0, size=None):
         self.reads.append(path.virtual)
-        return await super().read(path, index, offset, size)
+        return await super().read(path, offset, size)
 
     async def copy_from(
         self, source: BaseVFS, src: PathSpec, dst: PathSpec

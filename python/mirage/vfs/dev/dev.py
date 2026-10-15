@@ -16,12 +16,13 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dev.device import active_pipe
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.dev.read import read as dev_read
+from mirage.core.dev.stat import key_stat
 from mirage.core.dev.stat import stat as dev_stat
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.core.ram.readdir import child_keys
+from mirage.types import FileStat, FileType, PathSpec, VFSName
 from mirage.utils.path import norm
 from mirage.vfs.dev.store import DevStore
 from mirage.vfs.ram.ram import RAMVFS
@@ -40,7 +41,6 @@ class DevVFS(RAMVFS):
     _store: DevStore
     name: str = VFSName.RAM
     prompt: str = ""
-    index_ttl: float = 600
     # Device metadata is synthetic and needs no content fetch.
     sizes_always_known: bool = True
 
@@ -49,48 +49,45 @@ class DevVFS(RAMVFS):
         self._store = store if store is not None else DevStore()
         self.accessor = RAMAccessor(self._store)
 
-    async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
-    ) -> bytes:
-        return await dev_read(self.accessor, path, index, offset, size)
-
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await dev_stat(self.accessor, path, index)
-
-    async def read_tree(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> dict[str, FileStat] | None:
-        """None: the devices stat as character devices, which a RAM
-        listing does not know, and a walk of /dev is one readdir.
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        """The RAM listing, each child as ``stat`` answers it, so a
+        device or a live descriptor lists as one.
 
         Args:
             path (PathSpec): the directory.
-            index (IndexCacheStore): unused.
+        """
+        return [
+            key_stat(self.accessor, key)
+            or FileStat(name=key.rsplit("/", 1)[-1], type=FileType.DIRECTORY)
+            for key in await child_keys(self.accessor, path)
+        ]
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> bytes:
+        return await dev_read(self.accessor, path, offset, size)
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await dev_stat(self.accessor, path)
+
+    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+        """None: a walk of /dev is one readdir.
+
+        Args:
+            path (PathSpec): the directory.
         """
         return None
 
-    def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
+    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         # Bound as the read opens, so a descriptor reads on after the
         # pipe's path is released.
         pipe = active_pipe(self.accessor, norm(path.mount_path))
         if pipe is not None:
             return pipe.stream(path)
-        return self._read_whole(path, index)
+        return self._read_whole(path)
 
-    async def _read_whole(
-        self, path: PathSpec, index: IndexCacheStore
-    ) -> AsyncIterator[bytes]:
-        data = await self.read(path, index)
+    async def _read_whole(self, path: PathSpec) -> AsyncIterator[bytes]:
+        data = await self.read(path)
         if data:
             yield data
 

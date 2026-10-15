@@ -18,7 +18,7 @@ import { BaseVFS } from '../base.ts'
 import { PROMPT } from './prompt.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
 import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
+import type { Handed } from '../types.ts'
 import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
 import { read as devAwareRead, readRange as devAwareReadRange } from '../../core/dev/read.ts'
 import { stat as devAwareStat } from '../../core/dev/stat.ts'
@@ -53,6 +53,7 @@ export class RAMVFS extends BaseVFS {
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
+  override readonly listsStats: boolean = true
   readonly store = new RAMStore()
   override readonly accessor = new RAMAccessor(this.store)
   override readonly prompt = PROMPT
@@ -62,34 +63,31 @@ export class RAMVFS extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
-    return ramTree(this.accessor, path, index)
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return ramTree(this.accessor, path)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return ramReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return ramReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
     signal?: AbortSignal,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return devAwareRead(this.accessor, path, index, signal)
-    return devAwareReadRange(this.accessor, path, index, offset, size, signal)
+    if (offset === 0 && size === null) return devAwareRead(this.accessor, path, signal)
+    return devAwareReadRange(this.accessor, path, offset, size, signal)
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return devAwareStat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return devAwareStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    return devAwareStream(this.accessor, path, index)
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    return devAwareStream(this.accessor, path)
   }
 
   override exists(path: PathSpec): Promise<boolean> {
@@ -103,7 +101,7 @@ export class RAMVFS extends BaseVFS {
   override append(
     path: PathSpec,
     data: Uint8Array,
-    _index?: IndexCacheStore,
+    _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
     return ramAppend(this.accessor, path, data, signal)
@@ -113,7 +111,7 @@ export class RAMVFS extends BaseVFS {
     path: PathSpec,
     data: Uint8Array,
     offset: number,
-    _index?: IndexCacheStore,
+    _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
     return ramPwrite(this.accessor, path, data, offset, signal)
@@ -131,7 +129,7 @@ export class RAMVFS extends BaseVFS {
     return ramUnlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return ramRmdir(this.accessor, path)
   }
 

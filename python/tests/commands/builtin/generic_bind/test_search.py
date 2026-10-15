@@ -70,13 +70,13 @@ class SearchRAM(RAMVFS):
         if resource:
             self.search = _no_answer  # type: ignore[method-assign]
 
-    async def read(self, path, index=NULL_INDEX, offset=0, size=None):
+    async def read(self, path, offset=0, size=None):
         self.reads.append(path.vfs_path)
-        return await super().read(path, index, offset, size)
+        return await super().read(path, offset, size)
 
-    def read_stream(self, path, index=NULL_INDEX):
+    def read_stream(self, path):
         self.reads.append(path.vfs_path)
-        return super().read_stream(path, index)
+        return super().read_stream(path)
 
     async def files_containing(
         self, path, text, *, whole_word, ignore_case, index=NULL_INDEX

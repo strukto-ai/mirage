@@ -16,11 +16,11 @@ import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { type DirListing, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { readdir } from './readdir.ts'
+import { stat } from './stat.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -33,18 +33,32 @@ afterEach(() => {
   cleanup()
 })
 
+function paths(listing: DirListing, virtual: string): string[] {
+  const base = virtual.replace(/\/+$/, '')
+  return listing.entries.map((row) => `${base}/${row.name}`)
+}
+
 describe('core/disk/readdir', () => {
-  it('returns full virtual paths sorted', async () => {
+  it('lists the children sorted', async () => {
     await writeFile(join(root, 'b'), '')
     await writeFile(join(root, 'a'), '')
-    expect(await readdir(accessor, spec('/'))).toEqual(['/a', '/b'])
+    expect(paths(await readdir(accessor, spec('/')), '/')).toEqual(['/a', '/b'])
+  })
+
+  it('answers each row as stat does', async () => {
+    await mkdir(join(root, 'sub'))
+    await writeFile(join(root, 'file.txt'), 'data')
+    const listing = await readdir(accessor, spec('/'))
+    for (const row of listing.entries) {
+      expect(row).toEqual(await stat(accessor, spec(`/${row.name}`)))
+    }
   })
 
   it('leaves a host symlink out', async () => {
     await mkdir(join(root, 'lib'))
     await symlink('lib', join(root, 'lib64'))
     await symlink('/nowhere/python3', join(root, 'python'))
-    expect(await readdir(accessor, spec('/'))).toEqual(['/lib'])
+    expect(paths(await readdir(accessor, spec('/')), '/')).toEqual(['/lib'])
   })
 
   it('refuses a directory reached through a host symlink', async () => {
@@ -56,19 +70,7 @@ describe('core/disk/readdir', () => {
   it('lists nested directory', async () => {
     await mkdir(join(root, 'sub'))
     await writeFile(join(root, 'sub', 'x'), '')
-    expect(await readdir(accessor, spec('/sub'))).toEqual(['/sub/x'])
-  })
-
-  it('preserves a cached subdirectory when listing its parent', async () => {
-    await mkdir(join(root, 'sub'))
-    await writeFile(join(root, 'sub', 'child'), 'data')
-    await writeFile(join(root, 'file.txt'), 'data')
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    const children = await readdir(accessor, spec('/sub'), index)
-    await readdir(accessor, spec('/'), index)
-    expect((await index.listDir('/sub')).entries).toEqual(children)
-    expect((await index.get('/sub')).entry?.resourceType).toBe('folder')
-    expect((await index.get('/file.txt')).entry?.resourceType).toBe('file')
+    expect(paths(await readdir(accessor, spec('/sub')), '/sub')).toEqual(['/sub/x'])
   })
 
   it('throws ENOENT on a missing path', async () => {
@@ -88,23 +90,8 @@ describe('core/disk/readdir', () => {
     await expect(readdir(accessor, spec('/a.txt/x'))).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 
-  it('cache-hit entries stay clean under a prefixed mount', async () => {
+  it('lists a prefixed mount the same with or without a trailing slash', async () => {
     await writeFile(join(root, 'a.txt'), 'a')
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    const prefixed = new PathSpec({
-      virtual: '/data/',
-      directory: '/data/',
-      vfsPath: mountKey('/data/', '/data'),
-    })
-    const cold = await readdir(accessor, prefixed, index)
-    const warm = await readdir(accessor, prefixed, index)
-    expect(cold).toEqual(['/data/a.txt'])
-    expect(warm).toEqual(cold)
-  })
-
-  it('cache key ignores a trailing slash', async () => {
-    await writeFile(join(root, 'a.txt'), 'a')
-    const index = new RAMIndexCacheStore({ ttl: 600 })
     const slashed = new PathSpec({
       virtual: '/data/',
       directory: '/data/',
@@ -115,9 +102,8 @@ describe('core/disk/readdir', () => {
       directory: '/data',
       vfsPath: mountKey('/data', '/data'),
     })
-    const first = await readdir(accessor, slashed, index)
-    const second = await readdir(accessor, bare, index)
+    const first = paths(await readdir(accessor, slashed), '/data')
     expect(first).toEqual(['/data/a.txt'])
-    expect(second).toEqual(first)
+    expect(paths(await readdir(accessor, bare), '/data')).toEqual(first)
   })
 })

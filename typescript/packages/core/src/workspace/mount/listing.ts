@@ -16,7 +16,8 @@ import type { IndexRow } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { enoent } from '../../errors/fs.ts'
-import { DirListing, FileStat, type PathSpec } from '../../types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 
 /**
  * The key a mount keeps `path` under in its index: the virtual path, the
@@ -58,7 +59,7 @@ export async function keepListing(
   const listing = listed instanceof DirListing ? listed : new DirListing({ entries: listed })
   const rows: [string, IndexRow][] = listing.entries.map((row) => [row.name, row])
   if (listing.partial) await index.setPartialDir(key, rows)
-  else await index.setDir(key, rows, null, { window: listing.window })
+  else await index.setDir(key, rows, null, { window: listing.window, version: listing.version })
   const stem = key === '/' ? '' : key
   for (const [relative, children] of listing.seeds) {
     const seeded: [string, IndexRow][] = children.map((row) => [row.name, row])
@@ -73,14 +74,16 @@ export async function keepListing(
  * A stat the stored listings answer, null when none does. The row the
  * parent's listing holds answers it, so a listing costs one request and the
  * stat of each child after it none. A complete listing that does not name the
- * path rejects with ENOENT the same way. `key` is below the mount root.
+ * path rejects with ENOENT the same way. A directory whose own listing is held
+ * answers with the row a subtree read kept for it. `key` is below the mount
+ * root.
  */
 export async function storedStat(index: IndexCacheStore, key: string): Promise<FileStat | null> {
   const listing = await index.listDir(folderOf(key))
   if (listing.entries != null) {
     if (!listing.entries.includes(key)) throw enoent(key)
   } else if (listing.partialEntries?.includes(key) !== true) {
-    return null
+    if ((await storedListing(index, key)) === null) return null
   }
   const row = (await index.get(key)).entry
   return row instanceof FileStat ? row : null
@@ -98,4 +101,63 @@ export async function entryAt(
 ): Promise<FileStat | null> {
   const row = await entryOrWarm(index, key, warm)
   return row instanceof FileStat ? row : null
+}
+
+/**
+ * A subtree read the stored listings answer, null when one does not: every
+ * entry below the directory as its parent's listing holds it, keyed by its
+ * path below `key`, which is what a walk of `readdir` and `stat` over the same
+ * listings would see. Null while any directory under it has no complete, live
+ * listing. Mirrors Python's `stored_tree`.
+ */
+export async function storedTree(
+  index: IndexCacheStore,
+  key: string,
+): Promise<Map<string, FileStat> | null> {
+  const found = new Map<string, FileStat>()
+  const base = key === '/' ? '' : key
+  const pending = [key]
+  for (let folder = pending.pop(); folder !== undefined; folder = pending.pop()) {
+    const children = await storedListing(index, folder)
+    if (children === null) return null
+    for (const child of children) {
+      const row: unknown = (await index.get(child)).entry
+      if (!(row instanceof FileStat)) return null
+      found.set(child.slice(base.length + 1), row)
+      if (row.type === FileType.DIRECTORY) pending.push(child)
+    }
+  }
+  return found
+}
+
+/**
+ * Keep a subtree read as the listings it proves: it names everything below the
+ * directory, so it is a complete listing of the directory and of each
+ * directory below it. The directory's own stat, which a read may name under
+ * `''`, is kept where a stat of it finds it. Mirrors Python's `keep_tree`.
+ */
+export async function keepTree(
+  index: IndexCacheStore,
+  key: string,
+  tree: ReadonlyMap<string, FileStat>,
+): Promise<void> {
+  const base = key === '/' ? '' : key
+  const listings = new Map<string, [string, IndexRow][]>([[key, []]])
+  for (const relative of [...tree.keys()].sort(compareCodePoints)) {
+    const row = tree.get(relative)
+    if (row === undefined) continue
+    if (relative === '') {
+      await index.put(key, row)
+      continue
+    }
+    const cut = relative.lastIndexOf('/')
+    const folder = cut === -1 ? key : `${base}/${relative.slice(0, cut)}`
+    const rows = listings.get(folder) ?? []
+    rows.push([row.name, row])
+    listings.set(folder, rows)
+    if (row.type === FileType.DIRECTORY && !listings.has(`${base}/${relative}`)) {
+      listings.set(`${base}/${relative}`, [])
+    }
+  }
+  for (const [folder, rows] of listings) await index.setDir(folder, rows)
 }

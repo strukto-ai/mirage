@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ram.read import read as ram_read
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
@@ -53,25 +52,20 @@ class Minimal(BaseVFS):
 
     name = "custom"
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await ram_readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await ram_readdir(self.accessor, path)
 
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        data = await ram_read(self.accessor, path, index)
+        data = await ram_read(self.accessor, path)
         return slice_window(data, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await ram_stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await ram_stat(self.accessor, path)
 
 
 class EndForSize(Minimal):
@@ -80,21 +74,18 @@ class EndForSize(Minimal):
     async def read(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        data = await ram_read(self.accessor, path, index)
+        data = await ram_read(self.accessor, path)
         return data[offset:size]
 
 
 class LenientStat(Minimal):
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
+    async def stat(self, path: PathSpec) -> FileStat:
         if path.vfs_path == MISSING.vfs_path:
             return FileStat(name="missing", type=FileType.FILE, size=0)
-        return await super().stat(path, index)
+        return await super().stat(path)
 
 
 class RenderedOnly(BaseVFS):
@@ -103,36 +94,30 @@ class RenderedOnly(BaseVFS):
     name = "custom"
     renderers = MappingProxyType({".gdoc.json": "read_doc"})
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await ram_readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await ram_readdir(self.accessor, path)
 
     async def read_doc(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        data = await ram_read(self.accessor, path, index)
+        data = await ram_read(self.accessor, path)
         return slice_window(data, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await ram_stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await ram_stat(self.accessor, path)
 
 
 class WholeRender(RenderedOnly):
     async def read_doc(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        return await ram_read(self.accessor, path, index)
+        return await ram_read(self.accessor, path)
 
 
 class Rendering(Minimal):
@@ -142,15 +127,12 @@ class Rendering(Minimal):
         {".json": "read_json", ".gdoc.json": "read_doc"}
     )
 
-    async def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
-        yield await ram_read(self.accessor, path, index)
+    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        yield await ram_read(self.accessor, path)
 
     async def read_json(
         self,
         path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
@@ -160,11 +142,10 @@ class Rendering(Minimal):
         self,
         path: PathSpec,
         *,
-        index: IndexCacheStore = NULL_INDEX,
         offset: int = 0,
         size: int | None = None,
     ) -> bytes:
-        data = await ram_read(self.accessor, path, index)
+        data = await ram_read(self.accessor, path)
         return slice_window(data[::-1], offset, size)
 
 

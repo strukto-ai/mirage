@@ -89,7 +89,7 @@ describe('core/s3 readRange on the presigned browser path', () => {
     // asked the SDK for one got the entire object back and handed it up as if
     // it were the requested bytes.
     const served = serve(text(BODY))
-    const got = await readRange(browserAccessor(), PATH, undefined, 2, 3)
+    const got = await readRange(browserAccessor(), PATH, 2, 3)
     expect(DEC.decode(got)).toBe('234')
     // And it stays a plain GET: a Range header here would trip the CORS
     // preflight presigned deployments generally do not allow.
@@ -102,25 +102,25 @@ describe('core/s3 readRange on the presigned browser path', () => {
     // of the bytes arrive anyway. `stream()` buffers to CHUNK before it yields,
     // so the object has to span several of them for the stop to be visible.
     const served = serve(new Uint8Array(CHUNK * 4))
-    await readRange(browserAccessor(), PATH, undefined, 0, 10)
+    await readRange(browserAccessor(), PATH, 0, 10)
     expect(served.cancelled).toBe(true)
     expect(served.chunks).toBeLessThan(4)
   })
 
   it('runs to the end when no size is given', async () => {
     serve(text(BODY))
-    const got = await readRange(browserAccessor(), PATH, undefined, 7, null)
+    const got = await readRange(browserAccessor(), PATH, 7, null)
     expect(DEC.decode(got)).toBe('789')
   })
 
   it('is empty for a window that starts past the end', async () => {
     serve(text(BODY))
-    expect(await readRange(browserAccessor(), PATH, undefined, 99, 4)).toEqual(new Uint8Array(0))
+    expect(await readRange(browserAccessor(), PATH, 99, 4)).toEqual(new Uint8Array(0))
   })
 
   it('stops at the end when the window runs past it', async () => {
     serve(text(BODY))
-    const got = await readRange(browserAccessor(), PATH, undefined, 8, 99)
+    const got = await readRange(browserAccessor(), PATH, 8, 99)
     expect(DEC.decode(got)).toBe('89')
   })
 
@@ -128,7 +128,7 @@ describe('core/s3 readRange on the presigned browser path', () => {
     const whole = new Uint8Array(CHUNK * 3)
     for (let i = 0; i < whole.byteLength; i += 1) whole[i] = i % 251
     serve(whole)
-    const got = await readRange(browserAccessor(), PATH, undefined, CHUNK - 5, CHUNK + 10)
+    const got = await readRange(browserAccessor(), PATH, CHUNK - 5, CHUNK + 10)
     expect(got).toEqual(whole.subarray(CHUNK - 5, CHUNK * 2 + 5))
   })
 })

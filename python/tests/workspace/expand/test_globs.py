@@ -287,8 +287,14 @@ def test_pathspec_dir_no_pattern():
     assert d.pattern is None
 
 
+async def _ram_listed(accessor, path: PathSpec, index=None) -> list[str]:
+    rows = await ram_readdir(accessor, path)
+    base = (path.dir if path.pattern else path).virtual.rstrip("/")
+    return [f"{base}/{row.name}" for row in rows]
+
+
 def test_scope_error_truncates_instead_of_crash():
-    ram_resolve_glob = make_resolve_glob(ram_readdir, 5)
+    ram_resolve_glob = make_resolve_glob(_ram_listed, 5)
 
     vfs = RAMVFS()
     for i in range(20):
@@ -763,10 +769,10 @@ async def _answers_nothing(_accessor, _path, *args, **kwargs):
 
 
 def _unstatable(virtual: str, stat):
-    async def answer(accessor, path, *args, **kwargs):
+    async def answer(accessor, path):
         if path.virtual == virtual:
             return None
-        return await stat(accessor, path, *args, **kwargs)
+        return await stat(accessor, path)
 
     return answer
 

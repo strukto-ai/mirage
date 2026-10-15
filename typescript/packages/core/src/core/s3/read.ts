@@ -14,7 +14,6 @@
 
 import { rawPathOf } from '../../utils/key_prefix.ts'
 import { publishRead } from '../../cache/context.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
@@ -47,7 +46,6 @@ export function fpRevFromS3Response(resp: { ETag?: string | null; VersionId?: st
 export async function read(
   accessor: S3Accessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options: S3ReadOptions = {},
 ): Promise<Uint8Array> {
   const virtual = path.virtual

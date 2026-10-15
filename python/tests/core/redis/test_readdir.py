@@ -18,7 +18,6 @@ import pytest
 import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.redis.readdir import readdir, tree
 from mirage.core.redis.stat import stat
 from mirage.types import PathSpec
@@ -46,30 +45,31 @@ async def accessor(redis_prefix):
     await s.close()
 
 
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore(ttl=600)
+async def _listed(accessor: RedisAccessor, spec: PathSpec) -> list[str]:
+    rows = await readdir(accessor, spec)
+    return [f"{spec.virtual.rstrip('/')}/{row.name}" for row in rows]
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor, index):
-    entries = await readdir(
-        accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index
+async def test_readdir_root(accessor):
+    entries = await _listed(
+        accessor, PathSpec(vfs_path="", virtual="/", directory="/")
     )
     assert "/a.txt" in entries
     assert "/b.txt" in entries
     assert "/sub" in entries
     assert len(entries) == 3
-    kinds = [(await index.get(p)).entry.resource_type for p in entries]
-    assert kinds == ["file", "file", "folder"]
+    rows = await readdir(
+        accessor, PathSpec(vfs_path="", virtual="/", directory="/")
+    )
+    assert [row.type for row in rows] == ["file", "file", "directory"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_subdir(accessor, index):
-    entries = await readdir(
+async def test_readdir_subdir(accessor):
+    entries = await _listed(
         accessor,
         PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"),
-        index,
     )
     assert "/sub/c.txt" in entries
     assert "/sub/d.txt" in entries
@@ -78,16 +78,15 @@ async def test_readdir_subdir(accessor, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_empty_dir(redis_prefix, index):
+async def test_readdir_empty_dir(redis_prefix):
     s = RedisStore(url=REDIS_URL, key_prefix=f"{redis_prefix}e:")
     await s.clear()
     await s.add_dir("/")
     await s.add_dir("/empty")
     a = RedisAccessor(s)
-    entries = await readdir(
+    entries = await _listed(
         a,
         PathSpec(vfs_path="empty", virtual="/empty", directory="/empty"),
-        index,
     )
     assert entries == []
     await s.clear()
@@ -95,40 +94,38 @@ async def test_readdir_empty_dir(redis_prefix, index):
 
 
 @pytest.mark.asyncio
-async def test_readdir_not_found(redis_prefix, index):
+async def test_readdir_not_found(redis_prefix):
     s = RedisStore(url=REDIS_URL, key_prefix=f"{redis_prefix}n:")
     await s.clear()
     await s.add_dir("/")
     a = RedisAccessor(s)
     with pytest.raises(FileNotFoundError):
-        await readdir(
+        await _listed(
             a,
             PathSpec(
                 vfs_path="nonexistent",
                 virtual="/nonexistent",
                 directory="/nonexistent",
             ),
-            index,
         )
     await s.clear()
     await s.close()
 
 
 @pytest.mark.asyncio
-async def test_readdir_deep(accessor, index):
-    entries = await readdir(
+async def test_readdir_deep(accessor):
+    entries = await _listed(
         accessor,
         PathSpec(
             vfs_path="sub/deep", virtual="/sub/deep", directory="/sub/deep"
         ),
-        index,
     )
     assert "/sub/deep/e.txt" in entries
     assert len(entries) == 1
 
 
 @pytest.mark.asyncio
-async def test_readdir_file_component_is_not_a_directory(redis_prefix, index):
+async def test_readdir_file_component_is_not_a_directory(redis_prefix):
     # GNU `ls /a.txt/x` -> "Not a directory": a component exists but is a
     # file. Only a missing component is ENOENT.
     s = RedisStore(url=REDIS_URL, key_prefix=f"{redis_prefix}nd:")
@@ -138,46 +135,40 @@ async def test_readdir_file_component_is_not_a_directory(redis_prefix, index):
     a = RedisAccessor(s)
     for virtual in ("/a.txt", "/a.txt/x", "/a.txt/x/y"):
         with pytest.raises(NotADirectoryError):
-            await readdir(
+            await _listed(
                 a,
                 PathSpec(
                     vfs_path=virtual.lstrip("/"),
                     virtual=virtual,
                     directory=virtual,
                 ),
-                index,
             )
     await s.clear()
     await s.close()
 
 
 @pytest.mark.asyncio
-async def test_readdir_missing_stays_not_found_at_any_depth(
-    redis_prefix, index
-):
+async def test_readdir_missing_stays_not_found_at_any_depth(redis_prefix):
     s = RedisStore(url=REDIS_URL, key_prefix=f"{redis_prefix}nd2:")
     await s.clear()
     await s.add_dir("/")
     await s.set_file("/a.txt", b"a")
     a = RedisAccessor(s)
     with pytest.raises(FileNotFoundError):
-        await readdir(
+        await _listed(
             a,
             PathSpec(
                 vfs_path="nope/deeper",
                 virtual="/nope/deeper",
                 directory="/nope/deeper",
             ),
-            index,
         )
     await s.clear()
     await s.close()
 
 
 @pytest.mark.asyncio
-async def test_readdir_orphan_below_a_missing_dir_is_not_found(
-    redis_prefix, index
-):
+async def test_readdir_orphan_below_a_missing_dir_is_not_found(redis_prefix):
     # The store can hold a file whose parent is not in the dir set: a
     # restored snapshot or another client on the same Redis can seed one, so
     # readdir stays defensive about it even though rename and copy now refuse
@@ -190,14 +181,13 @@ async def test_readdir_orphan_below_a_missing_dir_is_not_found(
     a = RedisAccessor(s)
     for virtual in ("/missing", "/missing/a.txt/x", "/missing/a.txt/x/y"):
         with pytest.raises(FileNotFoundError):
-            await readdir(
+            await _listed(
                 a,
                 PathSpec(
                     vfs_path=virtual.lstrip("/"),
                     virtual=virtual,
                     directory=virtual,
                 ),
-                index,
             )
     await s.clear()
     await s.close()

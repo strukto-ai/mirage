@@ -12,13 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { fakeHfOperator, installFakeOperator } from './mock.ts'
-import { readdir } from './readdir.ts'
+import { readdir as listStats } from './readdir.ts'
+
+async function readdir(accessor: HfBucketsAccessor, path: PathSpec): Promise<string[]> {
+  const rows = await listStats(accessor, path)
+  return rows.map((row) => `${path.virtual.replace(/\/+$/, '')}/${row.name}`)
+}
 
 async function accessorWith(
   files: Record<string, string | Buffer>,
@@ -122,19 +126,8 @@ describe('hf readdir', () => {
       )
     }
     await installFakeOperator(accessor, fake)
-    const index = new RAMIndexCacheStore()
-    await readdir(accessor, PathSpec.fromStrPath('/'), index)
-    const lookup = await index.get('/config.json')
-    expect(lookup.entry?.size).toBe(2)
-  })
-
-  it('populates the index and serves the second call from cache', async () => {
-    const accessor = await accessorWith(FILES)
-    const index = new RAMIndexCacheStore()
-    const first = await readdir(accessor, PathSpec.fromStrPath('/'), index)
-    await installFakeOperator(accessor, fakeHfOperator({}))
-    const second = await readdir(accessor, PathSpec.fromStrPath('/'), index)
-    expect(second).toEqual(first)
+    const rows = await listStats(accessor, PathSpec.fromStrPath('/'))
+    expect(rows.find((row) => row.name === 'config.json')?.size).toBe(2)
   })
 
   it('lists mount-relative under a key prefix', async () => {
@@ -142,7 +135,7 @@ describe('hf readdir', () => {
       { 'pfx/a.txt': 'a', 'pfx/sub/b.txt': 'b', 'a.txt': 'decoy' },
       'pfx/',
     )
-    const entries = await readdir(accessor, PathSpec.fromStrPath('/'), new RAMIndexCacheStore())
+    const entries = await readdir(accessor, PathSpec.fromStrPath('/'))
     expect(entries).toEqual(['/a.txt', '/sub'])
   })
 })

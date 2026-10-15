@@ -16,7 +16,7 @@ import { expect, it } from 'vitest'
 import { command } from '../../../config.ts'
 import { SPECS } from '../../../spec/index.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { MountMode, PathSpec } from '../../../../types.ts'
+import { type FileStat, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -63,7 +63,7 @@ function refused() {
 }
 
 class Unlisted extends RAMVFS {
-  override readdir(): Promise<string[]> {
+  override readdir(): Promise<FileStat[]> {
     return Promise.reject(eacces('/a'))
   }
 }

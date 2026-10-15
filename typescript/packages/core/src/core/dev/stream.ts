@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { readStream as ramStream } from '../ram/stream.ts'
 import { norm } from '../../utils/path.ts'
 import type { PathSpec } from '../../types.ts'
@@ -23,7 +22,6 @@ import { activeDevice } from './device.ts'
 export async function* readStream(
   accessor: RAMAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
   const device = activeDevice(accessor, norm(path.mountPath))
   if (device === null) {

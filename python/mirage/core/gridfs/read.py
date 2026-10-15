@@ -16,7 +16,6 @@ from bson import ObjectId
 from gridfs.errors import NoFile
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.gridfs.client import _key, bucket, latest_file
 from mirage.errors.fs import enoent
 from mirage.observe.context import record, revision_for, start_op
@@ -26,7 +25,6 @@ from mirage.types import PathSpec
 async def read(
     accessor: GridFSAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -35,7 +33,6 @@ async def read(
     Args:
         accessor (GridFSAccessor): GridFS accessor.
         path_spec (PathSpec): File path.
-        index: Index cache store.
         offset (int): Byte offset for range reads.
         size (int | None): Number of bytes for range reads.
     """

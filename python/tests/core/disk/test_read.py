@@ -15,7 +15,6 @@
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.disk.read import read, read_range
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
@@ -26,7 +25,6 @@ from mirage.utils.key_prefix import mount_key
 async def test_read_file(tmp_path):
     (tmp_path / "hello.txt").write_bytes(b"hello world")
     accessor = DiskAccessor(tmp_path)
-    index = RAMIndexCacheStore(ttl=0)
     result = await read(
         accessor,
         PathSpec(
@@ -34,7 +32,6 @@ async def test_read_file(tmp_path):
             virtual="/hello.txt",
             directory="/hello.txt",
         ),
-        index,
     )
     assert result == b"hello world"
 
@@ -42,7 +39,6 @@ async def test_read_file(tmp_path):
 @pytest.mark.asyncio
 async def test_read_file_not_found(tmp_path):
     accessor = DiskAccessor(tmp_path)
-    index = RAMIndexCacheStore(ttl=0)
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
@@ -51,7 +47,6 @@ async def test_read_file_not_found(tmp_path):
                 virtual="/missing.txt",
                 directory="/missing.txt",
             ),
-            index,
         )
 
 
@@ -59,13 +54,12 @@ async def test_read_file_not_found(tmp_path):
 async def test_read_with_glob_scope_and_prefix(tmp_path):
     (tmp_path / "data.bin").write_bytes(b"\x00\x01\x02")
     accessor = DiskAccessor(tmp_path)
-    index = RAMIndexCacheStore(ttl=0)
     scope = PathSpec(
         vfs_path=mount_key("/disk/data.bin", "/disk"),
         virtual="/disk/data.bin",
         directory="/disk/",
     )
-    result = await read(accessor, scope, index)
+    result = await read(accessor, scope)
     assert result == b"\x00\x01\x02"
 
 
@@ -80,7 +74,6 @@ async def test_read_range_seeks_instead_of_reading_the_whole_file(tmp_path):
             virtual="/big.bin",
             directory="/big.bin",
         ),
-        RAMIndexCacheStore(ttl=0),
         10,
         5,
     )
@@ -98,7 +91,6 @@ async def test_read_range_without_a_size_runs_to_the_end(tmp_path):
             virtual="/big.bin",
             directory="/big.bin",
         ),
-        RAMIndexCacheStore(ttl=0),
         250,
     )
     assert result == bytes(range(250, 256))
@@ -115,7 +107,6 @@ async def test_read_range_past_the_end_is_empty(tmp_path):
             virtual="/small.bin",
             directory="/small.bin",
         ),
-        RAMIndexCacheStore(ttl=0),
         99,
         5,
     )
@@ -133,7 +124,6 @@ async def test_read_range_missing_file_raises(tmp_path):
                 virtual="/missing.bin",
                 directory="/missing.bin",
             ),
-            RAMIndexCacheStore(ttl=0),
             0,
             5,
         )

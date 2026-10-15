@@ -48,14 +48,12 @@ export async function read(accessor: DiskAccessor, path: PathSpec): Promise<Uint
  *
  * @param accessor the mount's disk handle
  * @param path the path to read
- * @param _index listing cache, unused here
  * @param offset first byte to read
  * @param size how many bytes, or null for the rest
  */
 export async function readRange(
   accessor: DiskAccessor,
   path: PathSpec,
-  _index: unknown,
   offset: number,
   size: number | null,
 ): Promise<Uint8Array> {

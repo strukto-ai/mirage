@@ -18,7 +18,7 @@ from mirage.cache.index.config import IndexRow
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.warm import entry_or_warm
 from mirage.errors.fs import enoent
-from mirage.types import DirListing, FileStat, PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 
 
 def index_key(prefix: str, path: PathSpec) -> str:
@@ -81,7 +81,9 @@ async def keep_listing(
     if listing.partial:
         await index.set_partial_dir(key, rows)
     else:
-        await index.set_dir(key, rows, window=listing.window)
+        await index.set_dir(
+            key, rows, window=listing.window, version=listing.version
+        )
     stem = "" if key == "/" else key
     for relative, children in listing.seeds.items():
         seeded: list[tuple[str, IndexRow]] = [
@@ -98,7 +100,9 @@ async def stored_stat(index: IndexCacheStore, key: str) -> FileStat | None:
 
     The row the parent's listing holds answers it, so a listing costs
     one request and the stat of each child after it none. A complete
-    listing that does not name the path answers ENOENT the same way.
+    listing that does not name the path answers ENOENT the same way. A
+    directory whose own listing is held answers with the row a subtree
+    read kept for it.
 
     Args:
         index (IndexCacheStore): the mount's index.
@@ -113,7 +117,8 @@ async def stored_stat(index: IndexCacheStore, key: str) -> FileStat | None:
         if key not in listing.entries:
             raise enoent(key)
     elif key not in (listing.partial_entries or []):
-        return None
+        if await stored_listing(index, key) is None:
+            return None
     row = (await index.get(key)).entry
     return row if isinstance(row, FileStat) else None
 
@@ -136,3 +141,65 @@ async def entry_at(
     """
     row = await entry_or_warm(index, key, warm)
     return row if isinstance(row, FileStat) else None
+
+
+async def stored_tree(
+    index: IndexCacheStore, key: str
+) -> dict[str, FileStat] | None:
+    """A subtree read the stored listings answer, None when one does not.
+
+    Every entry below the directory as its parent's listing holds it,
+    keyed by its path below ``key``: what a walk of ``readdir`` and
+    ``stat`` over the same listings would see. None while any directory
+    under it has no complete, live listing.
+
+    Args:
+        index (IndexCacheStore): the mount's index.
+        key (str): the directory's key.
+    """
+    found: dict[str, FileStat] = {}
+    base = "" if key == "/" else key
+    pending = [key]
+    while pending:
+        children = await stored_listing(index, pending.pop())
+        if children is None:
+            return None
+        for child in children:
+            row = (await index.get(child)).entry
+            if not isinstance(row, FileStat):
+                return None
+            found[child[len(base) + 1 :]] = row
+            if row.type is FileType.DIRECTORY:
+                pending.append(child)
+    return found
+
+
+async def keep_tree(
+    index: IndexCacheStore, key: str, tree: dict[str, FileStat]
+) -> None:
+    """Keep a subtree read as the listings it proves.
+
+    A subtree read names everything below the directory, so it is a
+    complete listing of the directory and of each directory below it.
+    The directory's own stat, which a read may name under ``""``, is
+    kept where a stat of it finds it.
+
+    Args:
+        index (IndexCacheStore): the mount's index.
+        key (str): the directory's key.
+        tree (dict[str, FileStat]): the read, keyed below ``key``.
+    """
+    base = "" if key == "/" else key
+    listings: dict[str, list[tuple[str, IndexRow]]] = {key: []}
+    for relative, row in sorted(tree.items()):
+        if not relative:
+            await index.put(key, row)
+            continue
+        folder, _, _ = relative.rpartition("/")
+        listings.setdefault(f"{base}/{folder}" if folder else key, []).append(
+            (row.name, row)
+        )
+        if row.type is FileType.DIRECTORY:
+            listings.setdefault(f"{base}/{relative}", [])
+    for folder, rows in listings.items():
+        await index.set_dir(folder, rows)

@@ -906,9 +906,9 @@ class TestRmtree:
         seen = []
 
         class Watching(RAMVFS):
-            async def readdir(self, *args, **kwargs):
+            async def readdir(self, path):
                 seen.append(shutil._use_fd_functions)
-                return await super().readdir(*args, **kwargs)
+                return await super().readdir(path)
 
         ws = Workspace({"/data/": Watching()}, mode=MountMode.WRITE)
         run(ws.vfs.mkdir("/data/t"))

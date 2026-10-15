@@ -22,7 +22,13 @@ import { SCOPE_ERROR } from '../../core/disk/constants.ts'
 import { readdir } from '../../core/disk/readdir.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 
-const resolveGlob = makeResolveGlob(readdir, SCOPE_ERROR)
+async function listed(accessor: DiskAccessor, path: PathSpec): Promise<string[]> {
+  const listing = await readdir(accessor, path)
+  const base = (path.pattern !== null ? path.dir : path).virtual.replace(/\/+$/, '')
+  return listing.entries.map((row) => `${base}/${row.name}`)
+}
+
+const resolveGlob = makeResolveGlob(listed, SCOPE_ERROR)
 
 let root: string
 let accessor: DiskAccessor

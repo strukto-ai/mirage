@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { makeStat } from '@struktoai/mirage-core/core/object_store/stat'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
@@ -28,10 +27,6 @@ const kitStat = makeStat(DRIVER)
  * one that does not exist gets 401. Answering that as "no such file" would let
  * reconcile delete what a refreshed token can see.
  */
-export async function stat(
-  accessor: HfBucketsAccessor,
-  pathSpec: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  return refusalsDenied(pathSpec, () => kitStat(accessor, pathSpec, index))
+export async function stat(accessor: HfBucketsAccessor, pathSpec: PathSpec): Promise<FileStat> {
+  return refusalsDenied(pathSpec, () => kitStat(accessor, pathSpec))
 }

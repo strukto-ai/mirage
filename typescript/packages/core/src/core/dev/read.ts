@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { read as ramRead } from '../ram/read.ts'
 import { norm } from '../../utils/path.ts'
 import type { PathSpec } from '../../types.ts'
@@ -25,13 +24,12 @@ const ENDLESS_READ = 'cannot read an endless device without a size'
 export function read(
   accessor: RAMAccessor,
   path: PathSpec,
-  index?: IndexCacheStore,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const pipe = activePipe(accessor, norm(path.mountPath))
   if (pipe !== null) return pipe.read(path, null, signal)
   const device = activeDevice(accessor, norm(path.mountPath))
-  if (device === null) return ramRead(accessor, path, index)
+  if (device === null) return ramRead(accessor, path)
   if (device === 'null') return Promise.resolve(new Uint8Array(0))
   throw einval(path, ENDLESS_READ)
 }
@@ -39,7 +37,6 @@ export function read(
 export function readRange(
   accessor: RAMAccessor,
   path: PathSpec,
-  index: IndexCacheStore | undefined,
   offset: number,
   size: number | null,
   signal?: AbortSignal,
@@ -48,7 +45,7 @@ export function readRange(
   if (pipe !== null) return pipe.read(path, size, signal)
   const device = activeDevice(accessor, norm(path.mountPath))
   if (device === null) {
-    return ramRead(accessor, path, index, { offset, ...(size !== null ? { size } : {}) })
+    return ramRead(accessor, path, { offset, ...(size !== null ? { size } : {}) })
   }
   if (device === 'null') return Promise.resolve(new Uint8Array(0))
   if (size === null) throw einval(path, ENDLESS_READ)

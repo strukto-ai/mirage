@@ -16,17 +16,19 @@ from functools import partial
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.hf_buckets.readdir import readdir
+from mirage.core.hf_buckets.readdir import readdir as list_stats
 from mirage.types import PathSpec
+
+
+async def readdir(acc, path: PathSpec) -> list[str]:
+    rows = await list_stats(acc, path)
+    return [f"{path.virtual.rstrip('/')}/{row.name}" for row in rows]
 
 
 @pytest.mark.asyncio
 async def test_readdir_root_returns_children(make_acc):
     acc = make_acc({"hello.txt": b"x", "data/file.txt": b"y"})
-    entries = await readdir(
-        acc, PathSpec.from_str_path("/"), RAMIndexCacheStore(ttl=60)
-    )
+    entries = await readdir(acc, PathSpec.from_str_path("/"))
     assert "/data" in entries
     assert "/hello.txt" in entries
 
@@ -36,9 +38,7 @@ async def test_readdir_subdir(make_acc):
     acc = make_acc(
         {"data/a.txt": b"a", "data/sub/b.txt": b"b", "other.txt": b"o"}
     )
-    entries = await readdir(
-        acc, PathSpec.from_str_path("/data"), RAMIndexCacheStore(ttl=60)
-    )
+    entries = await readdir(acc, PathSpec.from_str_path("/data"))
     assert sorted(entries) == ["/data/a.txt", "/data/sub"]
 
 
@@ -49,20 +49,14 @@ async def test_readdir_under_a_file_is_enotdir(make_acc):
     # check `ls /hf/a.txt/x` rendered an empty directory and exited 0.
     acc = make_acc({"a.txt": b"a"})
     with pytest.raises(NotADirectoryError):
-        await readdir(
-            acc, PathSpec.from_str_path("/a.txt/x"), RAMIndexCacheStore(ttl=60)
-        )
+        await readdir(acc, PathSpec.from_str_path("/a.txt/x"))
 
 
 @pytest.mark.asyncio
-async def test_readdir_populates_index_cache(make_acc):
+async def test_readdir_answers_each_files_size(make_acc):
     acc = make_acc({"f.txt": b"hello"})
-    cache = RAMIndexCacheStore(ttl=60)
-    await readdir(acc, PathSpec.from_str_path("/"), cache)
-    lookup = await cache.get("/f.txt")
-    assert lookup.entry is not None
-    assert lookup.entry.size == 5
-    assert lookup.entry.resource_type == "file"
+    (row,) = await list_stats(acc, PathSpec.from_str_path("/"))
+    assert (row.name, row.size) == ("f.txt", 5)
 
 
 async def _null_meta_iter(entries, null_key: str):
@@ -79,56 +73,35 @@ async def _stripped_list(inner, null_key: str, path, **kw):
 @pytest.mark.asyncio
 async def test_readdir_root_of_an_empty_bucket_does_not_raise(make_acc):
     acc = make_acc({})
-    assert (
-        await readdir(
-            acc, PathSpec.from_str_path("/"), RAMIndexCacheStore(ttl=60)
-        )
-        == []
-    )
+    assert await readdir(acc, PathSpec.from_str_path("/")) == []
 
 
 @pytest.mark.asyncio
 async def test_readdir_missing_path_is_enoent(make_acc):
     acc = make_acc({"data/a.txt": b"a"})
     with pytest.raises(FileNotFoundError):
-        await readdir(
-            acc,
-            PathSpec.from_str_path("/never_here"),
-            RAMIndexCacheStore(ttl=60),
-        )
+        await readdir(acc, PathSpec.from_str_path("/never_here"))
 
 
 @pytest.mark.asyncio
 async def test_readdir_missing_nested_path_is_enoent(make_acc):
     acc = make_acc({"data/a.txt": b"a"})
     with pytest.raises(FileNotFoundError):
-        await readdir(
-            acc,
-            PathSpec.from_str_path("/data/nodir/deep"),
-            RAMIndexCacheStore(ttl=60),
-        )
+        await readdir(acc, PathSpec.from_str_path("/data/nodir/deep"))
 
 
 @pytest.mark.asyncio
 async def test_readdir_on_a_file_is_enotdir(make_acc):
     acc = make_acc({"data/a.txt": b"a"})
     with pytest.raises(NotADirectoryError):
-        await readdir(
-            acc,
-            PathSpec.from_str_path("/data/a.txt"),
-            RAMIndexCacheStore(ttl=60),
-        )
+        await readdir(acc, PathSpec.from_str_path("/data/a.txt"))
 
 
 @pytest.mark.asyncio
 async def test_readdir_below_a_file_is_enotdir(make_acc):
     acc = make_acc({"data/a.txt": b"a"})
     with pytest.raises(NotADirectoryError):
-        await readdir(
-            acc,
-            PathSpec.from_str_path("/data/a.txt/x"),
-            RAMIndexCacheStore(ttl=60),
-        )
+        await readdir(acc, PathSpec.from_str_path("/data/a.txt/x"))
 
 
 @pytest.mark.asyncio
@@ -137,14 +110,12 @@ async def test_readdir_directory_exists_only_while_it_holds_a_key(make_acc):
     # there is no empty-directory trace to keep: removing the last key
     # removes the directory, which is what stat has always reported.
     acc = make_acc({"data/a.txt": b"a"})
-    assert await readdir(
-        acc, PathSpec.from_str_path("/data"), RAMIndexCacheStore(ttl=60)
-    ) == ["/data/a.txt"]
+    assert await readdir(acc, PathSpec.from_str_path("/data")) == [
+        "/data/a.txt"
+    ]
     await acc.operator().delete("data/a.txt")
     with pytest.raises(FileNotFoundError):
-        await readdir(
-            acc, PathSpec.from_str_path("/data"), RAMIndexCacheStore(ttl=60)
-        )
+        await readdir(acc, PathSpec.from_str_path("/data"))
 
 
 @pytest.mark.asyncio
@@ -154,11 +125,8 @@ async def test_readdir_backfills_lister_omitted_size(make_acc):
     acc = make_acc({"a.txt": b"hello", "b.txt": b"abc"})
     fake = acc._fake
     fake.list = partial(_stripped_list, fake.list, "a.txt")
-    cache = RAMIndexCacheStore(ttl=60)
-    await readdir(acc, PathSpec.from_str_path("/"), cache)
-    entry = (await cache.get("/a.txt")).entry
-    assert entry is not None
-    assert entry.size == 5
+    rows = await list_stats(acc, PathSpec.from_str_path("/"))
+    assert {row.name: row.size for row in rows} == {"a.txt": 5, "b.txt": 3}
 
 
 @pytest.mark.asyncio
@@ -171,7 +139,5 @@ async def test_readdir_under_a_key_prefix_lists_mount_relative(make_acc):
         },
         key_prefix="pfx/",
     )
-    entries = await readdir(
-        acc, PathSpec.from_str_path("/"), RAMIndexCacheStore(ttl=60)
-    )
+    entries = await readdir(acc, PathSpec.from_str_path("/"))
     assert sorted(entries) == ["/a.txt", "/sub"]

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { enoent } from '../../errors/fs.ts'
@@ -40,6 +40,7 @@ class Folders extends BaseVFS {
     read: ['entry'],
     write: ['entry', 'parent'],
     mkdir: ['parent'],
+    readTree: ['entry'],
     unlink: ['entry'],
     rename: ['entry', 'dstParent', 'dstEntry'],
   } as const
@@ -135,6 +136,27 @@ class Folders extends BaseVFS {
     this.calls.push(['mkdir', folder])
     const name = path.vfsPath.replace(/\/+$/, '').split('/').pop() ?? ''
     return Promise.resolve(this.statOf(this.add(name, folder)))
+  }
+
+  override readTree(
+    _path: PathSpec,
+    handed?: IndexCacheStore | Handed,
+  ): Promise<Map<string, FileStat> | null> {
+    const entry = (handed as Handed | undefined)?.entry ?? null
+    const root = entry === null ? 'root' : (entry.extra.id as string)
+    this.calls.push(['tree', root])
+    const found = new Map<string, FileStat>([['', this.statOf(root)]])
+    const pending: [string, string][] = [[root, '']]
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      const [folder, base] = next
+      for (const [id, node] of this.nodes) {
+        if (node.parent !== folder) continue
+        const relative = base === '' ? node.name : `${base}/${node.name}`
+        found.set(relative, this.statOf(id))
+        if (node.dir) pending.push([id, relative])
+      }
+    }
+    return Promise.resolve(found)
   }
 
   override unlink(path: PathSpec, handed?: IndexCacheStore | Handed): Promise<void> {
@@ -288,6 +310,55 @@ describe('a mount that keeps its VFS listings', () => {
         ['read', fresh],
       ])
     } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps a subtree read and answers the walk after it', async () => {
+    const store = new Folders()
+    const d = store.add('d')
+    const sub = store.add('sub', d)
+    store.add('f.txt', d, ENC.encode('f'))
+    store.add('g.txt', sub, ENC.encode('gg'))
+    const ws = await workspace(store)
+    try {
+      const tree = (await ws.dispatch('read_tree', '/f/d')) as Map<string, FileStat>
+      expect([...tree.keys()].sort()).toEqual(['f.txt', 'sub', 'sub/g.txt'])
+      expect(store.calls).toEqual([
+        ['list', 'root'],
+        ['tree', d],
+      ])
+      store.calls.length = 0
+      expect(((await ws.dispatch('stat', '/f/d')) as FileStat).name).toBe('d')
+      expect(((await ws.dispatch('stat', '/f/d/sub/g.txt')) as FileStat).size).toBe(2)
+      expect(await ws.dispatch('readdir', '/f/d/sub')).toEqual(['/f/d/sub/g.txt'])
+      const again = (await ws.dispatch('read_tree', '/f/d')) as Map<string, FileStat>
+      expect([...again.keys()].sort()).toEqual([...tree.keys()].sort())
+      expect(store.calls).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('asks the backend for a stat once its listing expires', async () => {
+    const store = new Folders()
+    const a = store.add('a.txt', 'root', ENC.encode('a'))
+    const ws = await workspace(store)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+      await ws.dispatch('readdir', '/f')
+      await ws.dispatch('stat', '/f/a.txt')
+      expect(store.calls).toEqual([['list', 'root']])
+      vi.setSystemTime(Date.now() + (store.indexTtl + 1) * 1000)
+      await ws.dispatch('stat', '/f/a.txt')
+      expect(store.calls).toEqual([
+        ['list', 'root'],
+        ['list', 'root'],
+        ['stat', a],
+      ])
+    } finally {
+      vi.useRealTimers()
       await ws.close()
     }
   })

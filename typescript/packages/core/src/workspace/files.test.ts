@@ -23,7 +23,6 @@ import { stat as ramStat } from '../core/ram/stat.ts'
 import { DEFAULT_READ_TTL, FileStat, FileType, Limit, MountMode, ReadPolicy } from '../types.ts'
 import { eacces, enoent, enotdir } from '../errors/fs.ts'
 import { Session, Workspace } from './workspace/workspace.ts'
-import { rstripSlash } from '../utils/slash.ts'
 
 const DEC = new TextDecoder()
 
@@ -829,9 +828,9 @@ describe('Files.readlink', () => {
     // store says a directory is not there. Two different answers with
     // stat silenced is what proves the listing is the channel read.
     vfs.stat = () => Promise.reject(enoent('/data/d'))
-    vfs.readdir = async (path, index) => {
-      const entries = await realReaddir(path, index)
-      return entries.filter((entry) => !rstripSlash(entry).endsWith('hollow'))
+    vfs.readdir = async (path) => {
+      const rows = await realReaddir(path)
+      return rows.filter((row) => row.name !== 'hollow')
     }
     expect(await codeOf(ws, '/data/d')).toBe('EINVAL')
     await ws.vfs.mkdir('/data/hollow')

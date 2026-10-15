@@ -23,8 +23,8 @@ import type { CapacityResult } from '@struktoai/mirage-core/types'
 import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
 import { PROMPT } from './prompt.ts'
-import type { FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { DirListing, FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
 import { read as diskRead, readRange as diskReadRange } from '../../core/disk/read.ts'
 import { stat as diskStat } from '../../core/disk/stat.ts'
@@ -84,6 +84,7 @@ export class DiskVFS extends BaseVFS {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly maxDuEntries: number | null = null
   override readonly indexTtl: number = 60
+  override readonly listsStats: boolean = true
   override readonly prompt = PROMPT
   // Each folder's listing is stored at the folder's own version (inode and
   // change times, core/disk/listing_version.ts), so a fresh mount re-lists
@@ -136,25 +137,25 @@ export class DiskVFS extends BaseVFS {
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return diskReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<DirListing> {
+    return diskReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
     if (offset === 0 && size === null) return diskRead(this.accessor, path)
-    return diskReadRange(this.accessor, path, index, offset, size)
+    return diskReadRange(this.accessor, path, offset, size)
   }
 
-  override stat(path: PathSpec, _index?: IndexCacheStore): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return diskStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     return diskStream(this.accessor, path)
   }
 
@@ -186,7 +187,7 @@ export class DiskVFS extends BaseVFS {
     return diskUnlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return diskRmdir(this.accessor, path)
   }
 

@@ -18,7 +18,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.index import IndexEntry, RAMIndexCacheStore, ResourceType
+from mirage.cache.index import IndexEntry, ResourceType
 from mirage.core.disk.stat import stat
 from mirage.types import FileType, PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.key_prefix import mount_key
@@ -31,7 +31,6 @@ from mirage.workspace.reconcile import Reconciler
 async def test_stat_file(tmp_path):
     (tmp_path / "hello.txt").write_text("hello")
     accessor = DiskAccessor(tmp_path)
-    index = RAMIndexCacheStore(ttl=0)
     result = await stat(
         accessor,
         PathSpec(
@@ -39,7 +38,6 @@ async def test_stat_file(tmp_path):
             virtual="/hello.txt",
             directory="/hello.txt",
         ),
-        index,
     )
     assert result.name == "hello.txt"
     assert result.size == 5
@@ -53,11 +51,9 @@ async def test_stat_file(tmp_path):
 async def test_stat_directory(tmp_path):
     (tmp_path / "sub").mkdir()
     accessor = DiskAccessor(tmp_path)
-    index = RAMIndexCacheStore(ttl=0)
     result = await stat(
         accessor,
         PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"),
-        index,
     )
     assert result.type == FileType.DIRECTORY
     assert result.size is None
@@ -66,7 +62,6 @@ async def test_stat_directory(tmp_path):
 @pytest.mark.asyncio
 async def test_stat_file_not_found(tmp_path):
     accessor = DiskAccessor(tmp_path)
-    index = RAMIndexCacheStore(ttl=0)
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
@@ -75,7 +70,6 @@ async def test_stat_file_not_found(tmp_path):
                 virtual="/missing.txt",
                 directory="/missing.txt",
             ),
-            index,
         )
 
 
@@ -83,13 +77,12 @@ async def test_stat_file_not_found(tmp_path):
 async def test_stat_with_glob_scope(tmp_path):
     (tmp_path / "a.txt").write_text("data")
     accessor = DiskAccessor(tmp_path)
-    index = RAMIndexCacheStore(ttl=0)
     scope = PathSpec(
         vfs_path=mount_key("/disk/a.txt", "/disk"),
         virtual="/disk/a.txt",
         directory="/disk/",
     )
-    result = await stat(accessor, scope, index)
+    result = await stat(accessor, scope)
     assert result.name == "a.txt"
     assert result.size == 4
 
@@ -98,7 +91,6 @@ async def test_stat_with_glob_scope(tmp_path):
 async def test_stat_with_prefix(tmp_path):
     (tmp_path / "a.txt").write_text("data")
     accessor = DiskAccessor(tmp_path)
-    index = RAMIndexCacheStore(ttl=0)
     result = await stat(
         accessor,
         PathSpec(
@@ -106,7 +98,6 @@ async def test_stat_with_prefix(tmp_path):
             virtual="/disk/a.txt",
             directory="/disk/a.txt",
         ),
-        index,
     )
     assert result.name == "a.txt"
     assert result.size == 4
@@ -121,7 +112,7 @@ async def test_stat_under_a_plain_file_is_not_a_directory(tmp_path):
         vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt/"
     )
     with pytest.raises(NotADirectoryError) as exc:
-        await stat(DiskAccessor(tmp_path), spec, RAMIndexCacheStore(ttl=0))
+        await stat(DiskAccessor(tmp_path), spec)
     assert exc.value.filename == "/a.txt/x"
     assert str(tmp_path) not in str(exc.value)
 
@@ -136,7 +127,6 @@ async def test_stat_keeps_the_fraction_of_a_second(tmp_path):
         PathSpec(
             vfs_path="half.txt", virtual="/half.txt", directory="/half.txt"
         ),
-        RAMIndexCacheStore(ttl=0),
     )
     assert result.modified == "2024-01-01T00:00:00.500Z"
     assert result.atime == "2024-01-01T00:00:00.250Z"

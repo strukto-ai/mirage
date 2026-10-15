@@ -16,7 +16,6 @@ import asyncio
 from contextlib import ExitStack
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import NULL_INDEX
 from mirage.core.s3.stat import stat
 from mirage.types import FileType, PathSpec
 from mirage.vfs.s3 import S3Config
@@ -44,7 +43,6 @@ def test_trailing_slash_prefers_directory_over_coexisting_object():
             stat(
                 accessor,
                 PathSpec(vfs_path="csv", virtual="/csv", directory="/"),
-                index=NULL_INDEX,
             )
         )
         assert file_stat.type != FileType.DIRECTORY
@@ -52,7 +50,6 @@ def test_trailing_slash_prefers_directory_over_coexisting_object():
             stat(
                 accessor,
                 PathSpec(vfs_path="csv", virtual="/csv/", directory="/csv/"),
-                index=NULL_INDEX,
             )
         )
         assert dir_stat.type == FileType.DIRECTORY

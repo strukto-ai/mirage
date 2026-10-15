@@ -113,8 +113,9 @@ async def test_op_stat_directory(accessor, index):
 @pytest.mark.asyncio
 async def test_op_readdir(accessor, index):
     result = await readdir(accessor, _scope("/"), index=index)
-    assert "/hello.txt" in result
-    assert "/sub" in result
+    names = [row.name for row in result]
+    assert "hello.txt" in names
+    assert "sub" in names
 
 
 @pytest.mark.asyncio

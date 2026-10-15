@@ -12,39 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import { IndexEntry, type IndexCacheStore } from '../../cache/index/index.ts'
-import { ResourceType } from '../../cache/index/config.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { keyStat } from './stat.ts'
 import { readdirError } from '../../errors/fs.ts'
-import { norm } from '../../utils/path.ts'
+import { gnuBasename, norm } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
-export async function readdir(
-  accessor: RAMAccessor,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
+/** The keys of a directory's children, sorted. Mirrors Python's `child_keys`. */
+export async function childKeys(accessor: RAMAccessor, path: PathSpec): Promise<string[]> {
   // A pattern spec addresses the directory whose entries the glob filters,
   // and the rest of this function works in mount-relative space, so the
   // directory has to be read off `dir` rather than off the virtual
   // `directory` string (python spells it the same way).
   const target = path.pattern !== null ? path.dir : path
-  const virtual = target.mountPath
-  const mountPrefix = mountPrefixOf(target.virtual, target.vfsPath)
-  // Canonical key: no trailing slash (except root), or the same dir
-  // indexes under two keys and cache hits return doubled-slash entries.
-  const virtualKey = rstripSlash(mountPrefix + virtual) || '/'
-  if (index !== undefined) {
-    const cached = await index.listDir(virtualKey)
-    if (cached.entries !== undefined && cached.entries !== null) {
-      return cached.entries
-    }
-  }
-  const p = norm(virtual)
+  const p = norm(target.mountPath)
   if (!accessor.store.dirs.has(p)) {
     throw await readdirError(
       path,
@@ -60,27 +43,18 @@ export async function readdir(
     if (key === p) continue
     if (!key.startsWith(dirPrefix)) continue
     const first = key.slice(dirPrefix.length).split('/')[0]
-    if (first) seen.add(first)
+    if (first) seen.add(`${dirPrefix}${first}`)
   }
-  const sorted = [...seen].sort(compareCodePoints)
-  const virtualEntries = sorted.map((name) => `${mountPrefix}${dirPrefix}${name}`)
-  if (index !== undefined) {
-    const fileSet = accessor.store.files
-    const entries: [string, IndexEntry][] = sorted.map((name) => {
-      const full = `${dirPrefix}${name}`
-      const isFile = fileSet.has(full)
-      return [
-        name,
-        new IndexEntry({
-          id: full,
-          name,
-          resourceType: isFile ? ResourceType.FILE : ResourceType.FOLDER,
-        }),
-      ]
-    })
-    await index.setDir(virtualKey, entries)
-  }
-  return virtualEntries
+  return [...seen].sort(compareCodePoints)
+}
+
+export async function readdir(accessor: RAMAccessor, path: PathSpec): Promise<FileStat[]> {
+  // A key restored without its folder still lists the folder.
+  return (await childKeys(accessor, path)).map(
+    (key) =>
+      keyStat(accessor.store, key) ??
+      new FileStat({ name: gnuBasename(key), type: FileType.DIRECTORY }),
+  )
 }
 
 /**
@@ -89,11 +63,7 @@ export async function readdir(
  * folder), so the walk's readdir and stat report what is there. Mirrors
  * Python's `tree`.
  */
-export function tree(
-  accessor: RAMAccessor,
-  path: PathSpec,
-  _index?: IndexCacheStore,
-): Promise<Map<string, FileStat> | null> {
+export function tree(accessor: RAMAccessor, path: PathSpec): Promise<Map<string, FileStat> | null> {
   const store = accessor.store
   const p = norm(path.mountPath)
   if (!store.dirs.has(p)) return Promise.resolve(null)

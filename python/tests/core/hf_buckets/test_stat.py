@@ -14,7 +14,6 @@
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.hf_buckets.read import read
 from mirage.core.hf_buckets.readdir import readdir
 from mirage.core.hf_buckets.stat import stat
@@ -73,14 +72,13 @@ async def test_stat_size_matches_read_for_every_file(make_acc):
             "data/sub/nested.txt": b"deep",
         }
     )
-    index = RAMIndexCacheStore(ttl=60)
     pending = ["/"]
     while pending:
         directory = pending.pop()
-        for child in await readdir(
-            acc, PathSpec.from_str_path(directory), index
-        ):
-            st = await stat(acc, PathSpec.from_str_path(child), index)
+        for row in await readdir(acc, PathSpec.from_str_path(directory)):
+            child = f"{directory.rstrip('/')}/{row.name}"
+            st = await stat(acc, PathSpec.from_str_path(child))
+            assert st.size == row.size
             if st.type == FileType.DIRECTORY:
                 pending.append(child)
                 continue

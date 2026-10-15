@@ -19,8 +19,15 @@ import { describe, expect, it } from 'vitest'
 import { makeFakeAccessor } from '../../core/ssh/_test_utils.ts'
 import { SCOPE_ERROR } from '../../core/ssh/constants.ts'
 import { readdir } from '../../core/ssh/readdir.ts'
+import type { SSHAccessor } from '../../accessor/ssh.ts'
 
-const resolveGlob = makeResolveGlob(readdir, SCOPE_ERROR)
+async function listed(accessor: SSHAccessor, path: PathSpec): Promise<string[]> {
+  const rows = await readdir(accessor, path)
+  const base = (path.pattern !== null ? path.dir : path).virtual.replace(/\/+$/, '')
+  return rows.map((row) => `${base}/${row.name}`)
+}
+
+const resolveGlob = makeResolveGlob(listed, SCOPE_ERROR)
 
 describe('vfs/ssh resolveGlob binding', () => {
   it('expands a glob pattern into matching paths', async () => {

@@ -19,7 +19,7 @@ import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { redactConfig, type GridFSConfig, type GridFSConfigRedacted } from './config.ts'
 import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir as gridfsReaddir } from '../../core/gridfs/readdir.ts'
 import { read as gridfsRead } from '../../core/gridfs/read.ts'
@@ -75,36 +75,34 @@ export class GridFSVFS extends BaseVFS {
     await super.close()
   }
 
+  override readonly listsStats: boolean = true
   override readonly readsRanges: boolean = true
 
   override readonly maxGlobMatches: number = SCOPE_ERROR
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
-    return gridfsTree(this.accessor, path, index)
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return gridfsTree(this.accessor, path)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
-    return gridfsReaddir(this.accessor, path, index)
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    return gridfsReaddir(this.accessor, path)
   }
 
   override read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return gridfsRead(this.accessor, path, index)
-    return gridfsRead(this.accessor, path, index, size === null ? { offset } : { offset, size })
+    if (offset === 0 && size === null) return gridfsRead(this.accessor, path)
+    return gridfsRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
-  override stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-    return gridfsStat(this.accessor, path, index)
+  override stat(path: PathSpec): Promise<FileStat> {
+    return gridfsStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, _index?: IndexCacheStore): AsyncIterable<Uint8Array> {
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     return gridfsStream(this.accessor, path)
   }
 
@@ -116,11 +114,11 @@ export class GridFSVFS extends BaseVFS {
     return gridfsWrite(this.accessor, path, data)
   }
 
-  override append(path: PathSpec, data: Uint8Array, index?: IndexCacheStore): Promise<void> {
+  override append(path: PathSpec, data: Uint8Array): Promise<void> {
     return appendByRewrite(
-      (p) => this.read(p, index),
+      (p) => this.read(p),
       (p, d) => this.write(p, d),
-      (p) => this.stat(p, index),
+      (p) => this.stat(p),
       path,
       data,
     )
@@ -138,7 +136,7 @@ export class GridFSVFS extends BaseVFS {
     return gridfsUnlink(this.accessor, path)
   }
 
-  override rmdir(path: PathSpec, _index?: IndexCacheStore): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return gridfsRmdir(this.accessor, path)
   }
 

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.cache.context import own_write_version, write_condition
-from mirage.cache.index import NULL_INDEX
 from mirage.cache.types import OwnRead, WriteCondition
 from mirage.core.object_store.driver import (
     A,
@@ -192,7 +191,7 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
     return truncate
 
 
-async def _row(
+async def _row_at(
     stat: StatFn[A], accessor: A, path_spec: PathSpec
 ) -> FileStat | None:
     """What the store holds at `path_spec`, as a key or a prefix.
@@ -203,7 +202,7 @@ async def _row(
         path_spec (PathSpec): the path asked about.
     """
     try:
-        return await stat(accessor, path_spec, index=NULL_INDEX)
+        return await stat(accessor, path_spec)
     except FileNotFoundError:
         return None
 
@@ -238,7 +237,7 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
     async def mkdir(
         accessor: A, path_spec: PathSpec, parents: bool = False
     ) -> None:
-        row = await _row(stat, accessor, path_spec)
+        row = await _row_at(stat, accessor, path_spec)
         if row is not None and not (parents and is_dir(row)):
             # mkdir(2) refuses a name that exists, file or directory, and
             # `mkdir -p` passes only a directory. Rewriting the marker
@@ -263,7 +262,9 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
                 # store without markers holds no empty directory, so a
                 # parent made a moment ago has no row to find.
                 if (
-                    await _row(stat, accessor, kp.mounted_path(path_spec, up))
+                    await _row_at(
+                        stat, accessor, kp.mounted_path(path_spec, up)
+                    )
                     is None
                 ):
                     raise enoent(path_spec)

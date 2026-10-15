@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.index import NULL_INDEX, IndexCacheStore, ResourceType
 from mirage.core.object_store.driver import A, C, ObjectStoreDriver, StatFn
-from mirage.core.object_store.readdir import cached_entry
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
@@ -23,15 +21,13 @@ from mirage.utils.key_prefix import mount_prefix_of
 
 
 def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
-    """Build the index-first stat ladder over one driver.
+    """Build the stat ladder over one driver: the object, then the prefix.
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def stat(
-        accessor: A, path_spec: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
+    async def stat(accessor: A, path_spec: PathSpec) -> FileStat:
         virtual = path_spec.virtual
         original_prefix = mount_prefix_of(
             path_spec.virtual, path_spec.vfs_path
@@ -52,43 +48,6 @@ def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
         if not stripped:
             return FileStat(name="/", type=FileType.DIRECTORY)
 
-        # Fast path: check the index cache populated by readdir().
-        # readdir() stores entries with resource_type="folder" or "file"
-        # and file sizes, so stat can return instantly for known paths.
-        virtual_key = (
-            original_prefix + "/" + stripped
-            if original_prefix
-            else "/" + stripped
-        )
-        entry = await cached_entry(index, virtual_key)
-        if entry is not None:
-            # Store "folders" are synthetic prefixes with no object,
-            # so readdir() records no time or size for them.
-            if entry.resource_type == ResourceType.FOLDER:
-                return FileStat(name=entry.name, type=FileType.DIRECTORY)
-            # TODO: propagate the fingerprint into IndexCacheEntry so this
-            # fast path can also carry it.
-            return FileStat(
-                name=entry.name,
-                size=entry.size,
-                modified=entry.remote_time or None,
-                type=FileType.FILE,
-                content=content_type_for_path(entry.name),
-            )
-        # If the parent directory was already listed by readdir() but
-        # this path is not among its children, it does not exist.
-        # This avoids expensive network calls for paths that shells
-        # probe speculatively (e.g. .git, HEAD, .hg during cd).
-        parent = virtual_key.rsplit("/", 1)[0] or "/"
-        parent_listing = await index.list_dir(parent)
-        if (
-            parent_listing.entries is not None
-            and virtual_key not in parent_listing.entries
-        ):
-            raise enoent(virtual)
-
-        # A listed child can lose its metadata to independent eviction.
-        # Missing cache information must fall back to the store.
         kpfx = driver.key_prefix_of(accessor)
         key = kp.apply(kpfx, path)
         async with driver.connect(accessor) as conn:

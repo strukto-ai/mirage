@@ -21,7 +21,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
 import { type FileStat, MountMode, type PathSpec } from '../../../types.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { Handed } from '../../../vfs/types.ts'
 import { eacces } from '../../../errors/fs.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -130,7 +130,7 @@ it('charges each mount its own cap in a du walk', async () => {
 })
 
 class RefusedListing extends RAMVFS {
-  override readdir(path: PathSpec): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     return Promise.reject(eacces(path))
   }
 }
@@ -156,17 +156,17 @@ it('du -x never lists a mount below the operand', async () => {
 class Lines extends RAMVFS {
   readonly asked: string[] = []
 
-  override firstLines(_path: PathSpec, n: number, _index?: IndexCacheStore): Promise<Uint8Array> {
+  override firstLines(_path: PathSpec, n: number, _handed?: Handed): Promise<Uint8Array> {
     this.asked.push(`firstLines ${String(n)}`)
     return Promise.resolve(new TextEncoder().encode('first\n'.repeat(n)))
   }
 
-  override lastLines(_path: PathSpec, n: number, _index?: IndexCacheStore): Promise<Uint8Array> {
+  override lastLines(_path: PathSpec, n: number, _handed?: Handed): Promise<Uint8Array> {
     this.asked.push(`lastLines ${String(n)}`)
     return Promise.resolve(new TextEncoder().encode('last\n'.repeat(n)))
   }
 
-  override lineCount(_path: PathSpec, _index?: IndexCacheStore): Promise<number> {
+  override lineCount(_path: PathSpec, _handed?: Handed): Promise<number> {
     this.asked.push('lineCount')
     return Promise.resolve(42)
   }
@@ -243,17 +243,14 @@ class Counted extends RAMVFS {
   trees = 0
   listings = 0
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     this.trees += 1
-    return super.readTree(path, index)
+    return super.readTree(path)
   }
 
-  override readdir(path: PathSpec, index?: IndexCacheStore): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     this.listings += 1
-    return super.readdir(path, index)
+    return super.readdir(path)
   }
 }
 

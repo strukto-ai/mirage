@@ -14,7 +14,6 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { RAMAccessor } from '../accessor/ram.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import { commandIo } from '../commands/builtin/generic_bind/adapter.ts'
 import { read as ramRead } from '../core/ram/read.ts'
 import { readdir as ramReaddir } from '../core/ram/readdir.ts'
@@ -27,7 +26,7 @@ import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/works
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { BaseVFS } from './base.ts'
 import { RAMStore } from './ram/store.ts'
-import type { SearchQuery } from './types.ts'
+import type { Handed, SearchQuery } from './types.ts'
 
 const ENC = new TextEncoder()
 const PATH = new PathSpec({
@@ -38,17 +37,19 @@ const PATH = new PathSpec({
 
 /** A plug-in VFS over the RAM store with only the required reads. */
 class Minimal extends BaseVFS<RAMAccessor> {
-  override readdir(path: PathSpec): Promise<string[]> {
+  override readonly listsStats: boolean = true
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     return ramReaddir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await ramRead(this.accessor, path, index)
+    const data = await ramRead(this.accessor, path)
     return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
   }
 

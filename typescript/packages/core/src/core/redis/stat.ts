@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { FileStat, FileType } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
@@ -93,11 +92,7 @@ export async function keyStats(
   })
 }
 
-export async function stat(
-  accessor: RedisAccessor,
-  path: PathSpec,
-  _index?: IndexCacheStore,
-): Promise<FileStat> {
+export async function stat(accessor: RedisAccessor, path: PathSpec): Promise<FileStat> {
   const p = norm(path.mountPath)
   const store = accessor.store
   if (await store.hasDir(p)) return keyStat(store, p, true)

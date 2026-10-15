@@ -22,7 +22,14 @@ from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.vfs.ram.store import RAMStore
 
-resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
+
+async def _listed(accessor, path, index=None):
+    rows = await readdir(accessor, path)
+    base = (path.dir if path.pattern else path).virtual.rstrip("/")
+    return [f"{base}/{row.name}" for row in rows]
+
+
+resolve_glob = make_resolve_glob(_listed, SCOPE_ERROR)
 
 
 @pytest.fixture

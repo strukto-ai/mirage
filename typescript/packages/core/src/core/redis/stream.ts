@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { recordStream } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -24,7 +23,6 @@ import { norm } from '../../utils/path.ts'
 export async function* readStream(
   accessor: RedisAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
   const p = norm(path.mountPath)
   const data = await accessor.store.getFile(p)

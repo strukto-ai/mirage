@@ -205,12 +205,14 @@ async def test_ln_backup_refuses_a_directory_destination():
 
 
 class SealedReads(RAMVFS):
-    async def read(self, path: PathSpec, *args: Any, **kwargs: Any) -> bytes:
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> bytes:
         if path.virtual.endswith(".sealed"):
             raise PermissionError(
                 errno.EACCES, "Permission denied", path.virtual
             )
-        return await super().read(path, *args, **kwargs)
+        return await super().read(path, offset, size)
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { FileType } from '../../types.ts'
 import { codeOf, FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
 import { makeReaddir, makeTree } from './readdir.ts'
@@ -24,7 +23,17 @@ describe('object_store readdir', () => {
   it('lists files and collapsed dirs', async () => {
     const store = new FakeStore({ 'a.txt': 'hi', 'dir/f.txt': 'x', 'dir/sub/g': 'y' })
     const readdir = makeReaddir(makeDriver(store))
-    await expect(readdir(accessor, spec('/'))).resolves.toEqual(['/mnt/a.txt', '/mnt/dir'])
+    const rows = await readdir(accessor, spec('/'))
+    expect(rows.map((row) => [row.name, row.type, row.size])).toEqual([
+      ['a.txt', FileType.FILE, 2],
+      ['dir', FileType.DIRECTORY, null],
+    ])
+  })
+
+  it('lists a name that is a key and a prefix as a directory', async () => {
+    const store = new FakeStore({ csv: 'file', 'csv/inner.txt': 'x' })
+    const rows = await makeReaddir(makeDriver(store))(accessor, spec('/'))
+    expect(rows.map((row) => [row.name, row.type])).toEqual([['csv', FileType.DIRECTORY]])
   })
 
   it('reads a marker-only directory as empty, not missing', async () => {
@@ -49,30 +58,6 @@ describe('object_store readdir', () => {
     const readdir = makeReaddir(makeDriver(new FakeStore()))
     await expect(readdir(accessor, spec('/'))).resolves.toEqual([])
   })
-
-  it('populates the index', async () => {
-    const store = new FakeStore({ 'a.txt': 'hi', 'dir/f.txt': 'x' })
-    const readdir = makeReaddir(makeDriver(store))
-    const index = new RAMIndexCacheStore()
-    await readdir(accessor, spec('/'), index)
-    const lookup = await index.get('/mnt/a.txt')
-    expect(lookup.entry).not.toBeNull()
-    expect(lookup.entry?.size).toBe(2)
-    const folder = await index.get('/mnt/dir')
-    expect(folder.entry).not.toBeNull()
-    expect(folder.entry?.size).toBeNull()
-  })
-
-  it('serves a cached listing without connecting', async () => {
-    const store = new FakeStore({ 'a.txt': 'hi' })
-    const readdir = makeReaddir(makeDriver(store))
-    const index = new RAMIndexCacheStore()
-    const first = await readdir(accessor, spec('/'), index)
-    const connects = store.connects
-    const second = await readdir(accessor, spec('/'), index)
-    expect(second).toEqual(first)
-    expect(store.connects).toBe(connects)
-  })
 })
 
 // Mirrors the make_tree tests in test_readdir.py.
@@ -81,6 +66,7 @@ describe('object_store makeTree', () => {
     const store = new FakeStore({ 'a.txt': 'hi', 'dir/sub/f.txt': 'x', '/': '' })
     const found = await makeTree(makeDriver(store))(accessor, spec('/'))
     expect([...(found ?? new Map()).keys()].sort()).toEqual([
+      '',
       'a.txt',
       'dir',
       'dir/sub',
@@ -88,6 +74,7 @@ describe('object_store makeTree', () => {
     ])
     expect(found?.get('dir/sub/f.txt')?.size).toBe(1)
     expect(found?.get('dir')?.type).toBe(FileType.DIRECTORY)
+    expect(found?.get('')?.type).toBe(FileType.DIRECTORY)
   })
 
   it.each([

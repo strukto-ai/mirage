@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { recordStream } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
@@ -28,7 +27,6 @@ import { isMissing } from './read.ts'
 export async function* readStream(
   accessor: HfBucketsAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
 ): AsyncIterable<Uint8Array> {
   const rel = path.mountPath
   if (stripSlash(rel) === '') throw eisdir(path)

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ram.dest import lookup_error
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
@@ -60,7 +59,6 @@ def key_stat(store: RAMStore, p: str) -> FileStat | None:
 async def stat(
     accessor: RAMAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     store = accessor.store
     p = norm(path_spec.mount_path)

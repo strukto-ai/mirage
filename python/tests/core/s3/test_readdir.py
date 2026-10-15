@@ -53,11 +53,12 @@ def _readdir(store: dict[str, bytes], virtual: str, key_prefix: str = ""):
     stack = ExitStack()
     stack.enter_context(patch_s3_multi({"test-bucket": store}))
     try:
-        return asyncio.run(
+        rows = asyncio.run(
             readdir(_accessor(key_prefix or None), _path(virtual))
         )
     finally:
         stack.close()
+    return [f"{virtual.rstrip('/')}/{row.name}" for row in rows]
 
 
 def test_readdir_lists_a_prefix():

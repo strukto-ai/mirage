@@ -14,6 +14,7 @@
 
 import bisect
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 from mirage.cache.index.config import (
@@ -134,7 +135,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     async def set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
         *,
         window: bool = False,
@@ -154,7 +155,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     async def set_partial_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None = None,
     ) -> None:
         await self._set_dir(
@@ -164,7 +165,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     async def _set_dir(
         self,
         vfs_path: str,
-        entries: list[tuple[str, IndexRow]],
+        entries: Sequence[tuple[str, IndexRow]],
         expired_at: datetime | None,
         *,
         partial: bool,

@@ -15,7 +15,6 @@
 from collections.abc import AsyncIterator
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.dev.constants import ZERO_CHUNK_SIZE
 from mirage.core.dev.device import active_device
 from mirage.core.ram.stream import read_stream as ram_read_stream
@@ -24,7 +23,7 @@ from mirage.utils.path import norm
 
 
 async def read_stream(
-    accessor: RAMAccessor, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    accessor: RAMAccessor, path: PathSpec
 ) -> AsyncIterator[bytes]:
     """Stream a /dev path.
 
@@ -34,7 +33,7 @@ async def read_stream(
     """
     device = active_device(accessor, norm(path.mount_path))
     if device is None:
-        async for chunk in ram_read_stream(accessor, path, index):
+        async for chunk in ram_read_stream(accessor, path):
             yield chunk
         return
     if device == "null":

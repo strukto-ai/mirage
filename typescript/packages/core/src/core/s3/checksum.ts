@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { rawPathOf } from '../../utils/key_prefix.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
@@ -42,7 +41,6 @@ export async function checksum(
   path: PathSpec,
   algorithm: string,
   aws: boolean,
-  _index?: IndexCacheStore,
 ): Promise<string | null> {
   if (algorithm !== 'md5') return null
   const { config } = accessor

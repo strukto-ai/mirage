@@ -16,7 +16,6 @@ import hashlib
 
 import pytest
 
-from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -347,16 +346,9 @@ async def test_a_window_past_eof_is_empty_on_every_entry_point():
             # The dispatcher folds a 416 for every backend; the VFS's own
             # ranged read has no fold, so the read must answer it itself.
             via_op = await ws.mount("/m/a.txt").call(
-                "read",
-                "/m/a.txt",
-                index=RAMIndexCacheStore(),
-                offset=99,
-                size=5,
+                "read", "/m/a.txt", offset=99, size=5
             )
             assert via_op == b""
-            assert (
-                await vfs.read(_spec("a.txt"), RAMIndexCacheStore(), 99, 5)
-                == b""
-            )
+            assert await vfs.read(_spec("a.txt"), offset=99, size=5) == b""
         finally:
             await ws.close()

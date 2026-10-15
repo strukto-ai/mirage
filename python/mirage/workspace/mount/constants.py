@@ -47,3 +47,8 @@ AWS_DOMAINS = ("amazonaws.com", "amazonaws.com.cn")
 # mount's stored listings: the stat of what is at its path and at its
 # path's parent, and the same two at a rename's or a copy's destination.
 HANDED = frozenset({"entry", "parent", "dst_entry", "dst_parent"})
+
+# The ops a VFS's stored listings answer without asking it: a listing, a
+# stat its parent's listing holds, and a subtree read every listing under
+# it holds.
+STORED_OPS = frozenset({"readdir", "stat", "read_tree"})

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.redis.dest import lookup_error
 from mirage.errors.fs import eisdir
 from mirage.observe.context import record, start_op
@@ -24,7 +23,6 @@ from mirage.utils.path import norm
 async def read(
     accessor: RedisAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -33,7 +31,6 @@ async def read(
     Args:
         accessor (RedisAccessor): Redis accessor.
         path_spec (PathSpec): the path to read.
-        index (IndexCacheStore): unused; the key space is the listing.
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
     """

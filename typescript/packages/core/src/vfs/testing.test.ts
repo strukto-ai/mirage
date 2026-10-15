@@ -14,13 +14,13 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { RAMAccessor } from '../accessor/ram.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import { read as ramRead } from '../core/ram/read.ts'
 import { readdir as ramReaddir } from '../core/ram/readdir.ts'
 import { stat as ramStat } from '../core/ram/stat.ts'
 import { write as ramWrite } from '../core/ram/write.ts'
 import { eacces } from '../errors/fs.ts'
 import { FileStat, FileType, PathSpec } from '../types.ts'
+import type { Handed } from './types.ts'
 import { sliceWindow } from '../utils/ranges.ts'
 import { BaseVFS } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
@@ -50,17 +50,19 @@ const DOC_MISSING = new PathSpec({
 
 /** The three required reads over a RAM store, whole reads sliced. */
 class Minimal extends BaseVFS<RAMAccessor> {
-  override readdir(path: PathSpec): Promise<string[]> {
+  override readonly listsStats: boolean = true
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     return ramReaddir(this.accessor, path)
   }
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    return sliceWindow(await ramRead(this.accessor, path, index), offset, size)
+    return sliceWindow(await ramRead(this.accessor, path), offset, size)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {
@@ -73,11 +75,11 @@ class EndForSize extends Minimal {
 
   override async read(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await ramRead(this.accessor, path, index)
+    const data = await ramRead(this.accessor, path)
     return data.slice(offset, size ?? undefined)
   }
 }
@@ -95,17 +97,19 @@ class LenientStat extends Minimal {
 class RenderedOnly extends BaseVFS<RAMAccessor> {
   override readonly renderers: Readonly<Record<string, string>> = { '.gdoc.json': 'readDoc' }
 
-  override readdir(path: PathSpec): Promise<string[]> {
+  override readonly listsStats: boolean = true
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
     return ramReaddir(this.accessor, path)
   }
 
   async readDoc(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    return sliceWindow(await ramRead(this.accessor, path, index), offset, size)
+    return sliceWindow(await ramRead(this.accessor, path), offset, size)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {
@@ -114,8 +118,8 @@ class RenderedOnly extends BaseVFS<RAMAccessor> {
 }
 
 class WholeRender extends RenderedOnly {
-  override readDoc(path: PathSpec, index?: IndexCacheStore): Promise<Uint8Array> {
-    return ramRead(this.accessor, path, index)
+  override readDoc(path: PathSpec): Promise<Uint8Array> {
+    return ramRead(this.accessor, path)
   }
 }
 
@@ -126,8 +130,8 @@ class Rendering extends Minimal {
     '.gdoc.json': 'readDoc',
   }
 
-  override async *readStream(path: PathSpec, index?: IndexCacheStore): AsyncIterable<Uint8Array> {
-    yield await ramRead(this.accessor, path, index)
+  override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    yield await ramRead(this.accessor, path)
   }
 
   readJson(): Promise<Uint8Array> {
@@ -136,11 +140,11 @@ class Rendering extends Minimal {
 
   async readDoc(
     path: PathSpec,
-    index?: IndexCacheStore,
+    _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<Uint8Array> {
-    const data = await ramRead(this.accessor, path, index)
+    const data = await ramRead(this.accessor, path)
     return sliceWindow(data.slice().reverse(), offset, size)
   }
 }

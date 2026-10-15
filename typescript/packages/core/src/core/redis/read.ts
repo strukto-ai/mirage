@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
@@ -27,13 +26,11 @@ import { norm } from '../../utils/path.ts'
  * Args:
  *   accessor: Redis accessor.
  *   path: the path to read.
- *   _index: unused; the key space is the listing.
  *   options: `{offset, size}`, the byte window, or absent for the whole file.
  */
 export async function read(
   accessor: RedisAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options?: { offset?: number; size?: number },
 ): Promise<Uint8Array> {
   const offset = options?.offset ?? 0

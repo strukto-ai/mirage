@@ -23,7 +23,6 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: SSHAccessor,
     path_spec: PathSpec,
-    index=None,
     chunk_size: int = 8192,
 ):
     virtual = path_spec.virtual

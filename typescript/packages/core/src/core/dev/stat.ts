@@ -13,13 +13,47 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { stat as ramStat } from '../ram/stat.ts'
+import { lookupError } from '../ram/dest.ts'
+import { keyStat as ramKeyStat } from '../ram/stat.ts'
 import { gnuBasename, norm } from '../../utils/path.ts'
 import { DEVICE_NUMBERS_KEY, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { FIFO_MODE } from '../../utils/stat_view.ts'
 import { DEV_RDEV } from './constants.ts'
 import { activeDevice, activePipe } from './device.ts'
+
+/**
+ * What `stat` answers for the normalized key `key`, null when nothing is
+ * there. Mirrors Python's `key_stat`.
+ */
+export function keyStat(accessor: RAMAccessor, key: string): FileStat | null {
+  const attrs = accessor.store.attrs.get(key) ?? {}
+  if (activePipe(accessor, key) !== null) {
+    return new FileStat({
+      name: gnuBasename(key),
+      size: null,
+      modified: accessor.store.modified.get(key) ?? null,
+      type: FileType.FIFO,
+      mode: attrs.mode ?? FIFO_MODE & 0o7777,
+      uid: attrs.uid ?? null,
+      gid: attrs.gid ?? null,
+      atime: attrs.atime ?? null,
+    })
+  }
+  const device = activeDevice(accessor, key)
+  const numbers = device === null ? undefined : DEV_RDEV[device]
+  if (numbers === undefined) return ramKeyStat(accessor.store, key)
+  return new FileStat({
+    name: gnuBasename(key),
+    size: null,
+    modified: accessor.store.modified.get(key) ?? null,
+    type: FileType.CHAR_DEVICE,
+    mode: attrs.mode ?? null,
+    uid: attrs.uid ?? null,
+    gid: attrs.gid ?? null,
+    atime: attrs.atime ?? null,
+    extra: { [DEVICE_NUMBERS_KEY]: numbers },
+  })
+}
 
 /**
  * Stat a /dev path: a FIFO for a live descriptor, a char device for an
@@ -29,41 +63,9 @@ import { activeDevice, activePipe } from './device.ts'
  * carry the stored mode, owner and times; a FIFO without a mode is
  * rw-------. Mirrors Python's dev stat.
  */
-export function stat(
-  accessor: RAMAccessor,
-  path: PathSpec,
-  _index?: IndexCacheStore,
-): Promise<FileStat> {
+export function stat(accessor: RAMAccessor, path: PathSpec): Promise<FileStat> {
   const key = norm(path.mountPath)
-  const attrs = accessor.store.attrs.get(key) ?? {}
-  if (activePipe(accessor, key) !== null)
-    return Promise.resolve(
-      new FileStat({
-        name: gnuBasename(key),
-        size: null,
-        modified: accessor.store.modified.get(key) ?? null,
-        type: FileType.FIFO,
-        mode: attrs.mode ?? FIFO_MODE & 0o7777,
-        uid: attrs.uid ?? null,
-        gid: attrs.gid ?? null,
-        atime: attrs.atime ?? null,
-      }),
-    )
-  const device = activeDevice(accessor, key)
-  if (device === null) return ramStat(accessor, path)
-  const numbers = DEV_RDEV[device]
-  if (numbers === undefined) return ramStat(accessor, path)
-  return Promise.resolve(
-    new FileStat({
-      name: gnuBasename(key),
-      size: null,
-      modified: accessor.store.modified.get(key) ?? null,
-      type: FileType.CHAR_DEVICE,
-      mode: attrs.mode ?? null,
-      uid: attrs.uid ?? null,
-      gid: attrs.gid ?? null,
-      atime: attrs.atime ?? null,
-      extra: { [DEVICE_NUMBERS_KEY]: numbers },
-    }),
-  )
+  const found = keyStat(accessor, key)
+  if (found === null) throw lookupError(accessor, path, key)
+  return Promise.resolve(found)
 }

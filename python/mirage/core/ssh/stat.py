@@ -17,7 +17,6 @@ import logging
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import eacces, enoent
 from mirage.types import FileStat, FileType, PathSpec
@@ -71,7 +70,6 @@ def attrs_to_file_stat(name: str, attrs: asyncssh.SFTPAttrs) -> FileStat:
 async def stat(
     accessor: SSHAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path_spec.virtual
     path = path_spec.mount_path
@@ -100,7 +98,6 @@ def tree_command(scope: str) -> str:
 async def tree(
     accessor: SSHAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
 ) -> dict[str, FileStat] | None:
     """Every file and directory under a directory, each as ``stat``
     answers it, from one find on the server, where a walk sends a
@@ -116,7 +113,6 @@ async def tree(
     Args:
         accessor (SSHAccessor): the mount's connection.
         path_spec (PathSpec): the directory.
-        index (IndexCacheStore): unused; the find answers directly.
     """
     scope = join_root(accessor.config.root, path_spec.mount_path)
     try:

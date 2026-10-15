@@ -17,7 +17,6 @@ from collections.abc import AsyncIterator
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record_stream
@@ -27,7 +26,6 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: DiskAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = 8192,
 ) -> AsyncIterator[bytes]:
     virtual = path_spec.virtual

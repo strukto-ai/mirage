@@ -880,8 +880,8 @@ async def test_cancelling_one_open_leaves_another_sharing_its_read():
 class _UmaskRAM(RAMVFS):
     """A store that makes entries the way a disk mount under umask 077 does."""
 
-    async def stat(self, path, *args, **kwargs):
-        row = await super().stat(path, *args, **kwargs)
+    async def stat(self, path):
+        row = await super().stat(path)
         if row.mode is not None:
             return row
         mode = 0o700 if row.type == FileType.DIRECTORY else 0o600

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.ram.dest import lookup_error
 from mirage.errors.fs import eisdir
 from mirage.observe.context import record, start_op
@@ -25,7 +24,6 @@ from mirage.utils.ranges import slice_window
 async def read(
     accessor: RAMAccessor,
     path_spec: PathSpec,
-    index: IndexCacheStore = NULL_INDEX,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
@@ -38,7 +36,6 @@ async def read(
     Args:
         accessor (RAMAccessor): RAM accessor.
         path_spec (PathSpec): the path to read.
-        index (IndexCacheStore): unused; the store is the listing.
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
     """

@@ -725,6 +725,7 @@ export interface DirListingInit {
   seeds?: ReadonlyMap<string, readonly FileStat[]>
   partial?: boolean
   window?: boolean
+  version?: string | null
 }
 
 /**
@@ -749,18 +750,23 @@ export interface DirListingInit {
  *   so the entries are everything to show but prove nothing absent: a child
  *   that drops out of the window has not been deleted. Kept as listings that
  *   evict nothing.
+ * - `version`: the version the listing was read at, for a backend that
+ *   declares a `listingVersion`; a `fresh` mount checks it before serving the
+ *   listing again.
  */
 export class DirListing {
   readonly entries: readonly FileStat[]
   readonly seeds: ReadonlyMap<string, readonly FileStat[]>
   readonly partial: boolean
   readonly window: boolean
+  readonly version: string | null
 
   constructor(init: DirListingInit) {
     this.entries = init.entries
     this.seeds = init.seeds ?? new Map()
     this.partial = init.partial ?? false
     this.window = init.window ?? false
+    this.version = init.version ?? null
     Object.freeze(this)
   }
 }

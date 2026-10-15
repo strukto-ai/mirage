@@ -216,6 +216,7 @@ describe('S3VFS (mocked integration)', () => {
           .sort(([a], [b]) => compareCodePoints(a, b))
           .map(([k, st]) => [k, st.type, st.size]),
       ).toEqual([
+        ['', 'directory', null],
         ['a', 'file', 10],
         ['sub', 'directory', null],
         ['sub/b', 'file', 20],

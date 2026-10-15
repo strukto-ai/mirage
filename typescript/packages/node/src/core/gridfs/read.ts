@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ObjectId } from 'mongodb'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, revisionFor, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -108,7 +107,6 @@ export function isNoFileError(err: unknown): boolean {
 export async function read(
   accessor: GridFSAccessor,
   path: PathSpec,
-  _index?: IndexCacheStore,
   options: GridFSReadOptions = {},
 ): Promise<Uint8Array> {
   const virtual = path.virtual

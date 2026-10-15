@@ -21,7 +21,6 @@ import { runWithSession } from '../../context/session_context.ts'
 import { record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
-import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
@@ -570,9 +569,9 @@ describe('the fenced remnant cascade rides the mount revisions', () => {
       await ws.shell('mkdir /ram/d && echo x > /ram/d/h.txt')
       const original = ram.readdir.bind(ram)
       let seen: string | null | undefined
-      ram.readdir = (path, index) => {
+      ram.readdir = (path) => {
         seen = revisionFor('/ram/d/h.txt')
-        return original(path, index)
+        return original(path)
       }
       const internals = ws as unknown as {
         registry: { mountFor(path: string): { revisions: Map<string, string> } }
@@ -1280,27 +1279,20 @@ describe('a cold read keeps its bytes for the next reader', () => {
     // The index holds a listing up to its TTL old: `wc -c` and `cmp -s` take
     // the size from a stat that asks the backend now. Mirrors python's
     // test_a_fresh_stat_asks_past_a_stale_listing.
-    class ListedRAM extends RAMVFS {
-      override async stat(path: PathSpec, index?: IndexCacheStore): Promise<FileStat> {
-        const row = index === undefined ? null : (await index.get(path.virtual)).entry
-        if (row !== null && row !== undefined) {
-          return new FileStat({ name: row.name, type: FileType.FILE, size: row.size })
-        }
-        return super.stat(path, index)
-      }
-    }
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/m': new ListedRAM() },
+      { '/m': new RAMVFS() },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
       await ws.vfs.write('/m/f', 'grown\n')
       await ws
         .mount('/m')
-        .index.setDir('/m', [
-          ['f', new IndexEntry({ id: 'f', name: 'f', resourceType: 'file', size: 3 })],
-        ])
+        .index.setDir(
+          '/m',
+          [['f', new FileStat({ name: 'f', type: FileType.FILE, size: 3 })]],
+          new Date(Date.now() + 3_600_000),
+        )
       const listed = (await ws.dispatch('stat', '/m/f')) as FileStat
       const now = (await ws.dispatch('stat', '/m/f', [], { fresh: true })) as FileStat
       expect([listed.size, now.size]).toEqual([3, 6])
@@ -2291,12 +2283,9 @@ class SearchedRAM extends RAMVFS {
 class TreeCountingRAM extends RAMVFS {
   trees = 0
 
-  override readTree(
-    path: PathSpec,
-    index?: IndexCacheStore,
-  ): Promise<Map<string, FileStat> | null> {
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     this.trees += 1
-    return super.readTree(path, index)
+    return super.readTree(path)
   }
 }
 

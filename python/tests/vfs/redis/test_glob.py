@@ -25,7 +25,14 @@ from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.vfs.redis.store import RedisStore
 
-resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
+
+async def _listed(accessor, path, index=None):
+    rows = await readdir(accessor, path)
+    base = (path.dir if path.pattern else path).virtual.rstrip("/")
+    return [f"{base}/{row.name}" for row in rows]
+
+
+resolve_glob = make_resolve_glob(_listed, SCOPE_ERROR)
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")

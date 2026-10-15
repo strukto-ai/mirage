@@ -15,12 +15,6 @@
 import logging
 from functools import partial
 
-from mirage.cache.index import (
-    NULL_INDEX,
-    IndexCacheStore,
-    IndexEntry,
-    ResourceType,
-)
 from mirage.core.object_store.driver import (
     A,
     C,
@@ -51,15 +45,13 @@ async def _probe_dir(
 
 
 def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
-    """Build a prefix listing with index write-back over one driver.
+    """Build a prefix listing over one driver.
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def readdir(
-        accessor: A, path_spec: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
+    async def readdir(accessor: A, path_spec: PathSpec) -> list[FileStat]:
         prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
         # When called from resolve_glob with a pattern (e.g. *.txt),
         # use path.directory for the listing. Direct callers (ls, ops)
@@ -70,12 +62,6 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
             if prefix.endswith("/") or rest == "" or rest.startswith("/"):
                 path = rest or "/"
         kpfx = driver.key_prefix_of(accessor)
-        raw_key = prefix + path if prefix else path
-        virtual_key = raw_key.rstrip("/") or "/"
-        listing = await index.list_dir(virtual_key)
-        if listing.entries is not None:
-            return listing.entries
-        await cached_entry(index, virtual_key)
         pfx = kp.apply_dir(kpfx, path)
         names: list[str] = []
         dir_keys: set[str] = set()
@@ -111,168 +97,43 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                     partial(_probe_file, driver, conn, kpfx),
                     partial(_probe_dir, driver, conn, kpfx),
                 )
-        names = sorted(names)
+        names = sorted(set(names))
         if len(names) > driver.scope_error:
             logger.warning(
                 "%s readdir: %s returned %d entries (limit %d)",
                 driver.vfs,
-                virtual_key,
+                path_spec.virtual,
                 len(names),
                 driver.scope_error,
             )
-        virtual_entries = sorted((prefix + e if prefix else e) for e in names)
-        index_entries = []
-        for e in names:
-            name = e.rsplit("/", 1)[-1]
-            if e in dir_keys:
+        rows = []
+        for key in names:
+            name = key.rsplit("/", 1)[-1]
+            if key in dir_keys:
                 # Store "folders" are synthetic prefixes with no object of
-                # their own, so there is no mtime or size to record.
-                entry = IndexEntry(
-                    id=e,
-                    name=name,
-                    resource_type=ResourceType.FOLDER,
-                    extra={"object_store_collision": True}
-                    if e in sizes
-                    else {},
-                )
+                # their own, so there is no mtime or size to record. A
+                # name that is a key and a prefix both lists as the
+                # directory, as a walk enters it.
+                rows.append(FileStat(name=name, type=FileType.DIRECTORY))
             else:
-                entry = IndexEntry(
-                    id=e,
-                    name=name,
-                    resource_type=ResourceType.FILE,
-                    size=sizes.get(e),
-                    remote_time=times.get(e, ""),
+                rows.append(
+                    FileStat(
+                        name=name,
+                        size=sizes.get(key),
+                        modified=times.get(key) or None,
+                        type=FileType.FILE,
+                        content=content_type_for_path(name),
+                    )
                 )
-            index_entries.append((name, entry))
-        await index.set_dir(virtual_key, index_entries)
-        return virtual_entries
+        return rows
 
     return readdir
 
 
-async def cached_entry(
-    index: IndexCacheStore, virtual: str
-) -> IndexEntry | None:
-    """Trust metadata only while a listing still proves the path exists.
-
-    Args:
-        index (IndexCacheStore): metadata and expiring directory listings.
-        virtual (str): virtual path to validate.
-    """
-    entry = (await index.get(virtual)).entry
-    if entry is None:
-        return None
-    parent = virtual.rsplit("/", 1)[0] or "/"
-    siblings = (await index.list_dir(parent)).entries
-    if siblings is not None and virtual in siblings:
-        return entry
-    if (
-        entry.resource_type == ResourceType.FOLDER
-        and (await index.list_dir(virtual)).entries is not None
-    ):
-        return entry
-    await index.invalidate_entry(virtual)
-    return None
-
-
-async def cached_tree(
-    index: IndexCacheStore, virtual: str, key: str
-) -> list[TreeEntry] | None:
-    """Read a complete subtree only while every directory listing is fresh.
-
-    Args:
-        index (IndexCacheStore): metadata from previous listings.
-        virtual (str): virtual directory root.
-        key (str): corresponding backend prefix.
-    """
-    if index is NULL_INDEX:
-        return None
-    found: list[TreeEntry] = []
-    pending = [(virtual, key)]
-    while pending:
-        directory, prefix = pending.pop()
-        listing = await index.list_dir(directory)
-        if listing.entries is None:
-            return None
-        for child in listing.entries:
-            hit = await index.get(child)
-            entry = hit.entry
-            if entry is None or entry.extra.get("object_store_collision"):
-                return None
-            child_key = prefix + child.rsplit("/", 1)[-1]
-            if entry.resource_type == ResourceType.FOLDER:
-                found.append(TreeEntry(key=child_key + "/"))
-                pending.append((child, child_key + "/"))
-            elif entry.size is None:
-                return None
-            else:
-                found.append(
-                    TreeEntry(
-                        key=child_key,
-                        size=entry.size,
-                        modified=entry.remote_time,
-                    )
-                )
-    # A cached empty listing proves that the directory exists.
-    return found or [TreeEntry(key=key)]
-
-
-async def cache_tree(
-    index: IndexCacheStore, virtual: str, key: str, entries: list[TreeEntry]
-) -> None:
-    """Publish complete directory listings after a successful recursive walk.
-
-    Args:
-        index (IndexCacheStore): metadata index to populate.
-        virtual (str): virtual directory root.
-        key (str): corresponding backend prefix.
-        entries (list[TreeEntry]): unfiltered backend rows, including markers.
-    """
-    if index is NULL_INDEX:
-        return
-    if any(row.size is None and not row.key.endswith("/") for row in entries):
-        return
-    directories: dict[str, dict[str, IndexEntry]] = {virtual: {}}
-    files: set[str] = set()
-    for row in entries:
-        if not row.key.startswith(key) or row.key == key:
-            continue
-        relative = row.key[len(key) :].rstrip("/")
-        if not relative:
-            continue
-        parts = relative.split("/")
-        parent = virtual
-        for i, name in enumerate(parts):
-            child = parent.rstrip("/") + "/" + name
-            is_dir = i < len(parts) - 1 or row.key.endswith("/")
-            if is_dir:
-                directories.setdefault(child, {})
-            else:
-                files.add(child)
-            directories[parent][name] = IndexEntry(
-                id=child,
-                name=name,
-                resource_type=ResourceType.FOLDER
-                if is_dir
-                else ResourceType.FILE,
-                size=None if is_dir else row.size,
-                remote_time="" if is_dir else row.modified,
-            )
-            parent = child
-    # A single index path cannot represent both a file and a prefix.
-    if files.intersection(directories):
-        return
-    for directory, children in directories.items():
-        await index.set_dir(directory, list(children.items()))
-
-
 async def read_tree(
-    driver: ObjectStoreDriver[A, C],
-    accessor: A,
-    path: PathSpec,
-    index: IndexCacheStore,
+    driver: ObjectStoreDriver[A, C], accessor: A, path: PathSpec
 ) -> list[TreeEntry]:
-    """Reuse a complete tree, or cache a successful backend listing.
+    """Every key at and under a path, in one recursive listing.
 
     The rows are the key at the path itself and every key under it, as
     ``list_subtree`` gives them, markers included.
@@ -281,49 +142,11 @@ async def read_tree(
         driver (ObjectStoreDriver): backend primitives.
         accessor (Accessor): backend connection configuration.
         path (PathSpec): operand root.
-        index (IndexCacheStore): invocation's metadata index.
     """
     kpfx = driver.key_prefix_of(accessor)
     stem = kp.apply(kpfx, path.mount_path).rstrip("/")
-    prefix = stem + "/" if stem else ""
-    virtual = path.virtual.rstrip("/") or "/"
-    root = await cached_entry(index, virtual)
-    collision = root is not None and root.extra.get("object_store_collision")
-    known_directory = not path.mount_path.strip("/") or (
-        root is not None and root.resource_type == ResourceType.FOLDER
-    )
-    cached = (
-        await cached_tree(index, virtual, prefix)
-        if not collision and known_directory
-        else None
-    )
-    if cached is not None:
-        return cached
-    parent = await index.list_dir(virtual.rsplit("/", 1)[0] or "/")
-    if (
-        parent.entries is not None
-        and virtual in parent.entries
-        and root is not None
-        and root.resource_type == ResourceType.FILE
-        and root.size is not None
-    ):
-        return [TreeEntry(key=stem, size=root.size)]
     async with driver.connect(accessor) as conn:
-        entries = [entry async for entry in driver.list_subtree(conn, stem)]
-    if not any(e.key == stem for e in entries) and (
-        any(e.key.startswith(prefix) for e in entries)
-        or not path.mount_path.strip("/")
-    ):
-        await cache_tree(index, virtual, prefix, entries)
-        await index.put(
-            virtual,
-            IndexEntry(
-                id=virtual,
-                name=virtual.rsplit("/", 1)[-1] or "/",
-                resource_type=ResourceType.FOLDER,
-            ),
-        )
-    return entries
+        return [entry async for entry in driver.list_subtree(conn, stem)]
 
 
 def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
@@ -333,15 +156,12 @@ def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def tree(
-        accessor: A,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> dict[str, FileStat] | None:
-        """Every key under ``path`` as the walk's readdir and stat see it.
+    async def tree(accessor: A, path: PathSpec) -> dict[str, FileStat] | None:
+        """Every key under ``path`` as the walk's readdir and stat see it,
+        and the directory itself under ``""``.
 
-        A file stats as a listing leaves it in the index (its size,
-        time and content type); a directory, a marker or a key prefix
+        A file stats as a listing gives it (its size, time and content
+        type); a directory, a marker or a key prefix
         alike, carries nothing but its name. A marker for ``path``
         itself names no entry. None, so the walk's readdir and stat
         answer instead, when nothing is under the prefix, when a row has
@@ -351,9 +171,8 @@ def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
         Args:
             accessor (Accessor): backend accessor.
             path (PathSpec): the directory.
-            index (IndexCacheStore): the invocation's index.
         """
-        rows = await read_tree(driver, accessor, path, index)
+        rows = await read_tree(driver, accessor, path)
         kpfx = driver.key_prefix_of(accessor)
         prefix = kp.apply_dir(kpfx, path.mount_path)
         if not any(row.key.startswith(prefix) for row in rows):
@@ -390,6 +209,10 @@ def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
             found[rel] = FileStat(
                 name=rel.rsplit("/", 1)[-1], type=FileType.DIRECTORY
             )
+        found[""] = FileStat(
+            name=path.mount_path.rstrip("/").rsplit("/", 1)[-1] or "/",
+            type=FileType.DIRECTORY,
+        )
         return found
 
     return tree

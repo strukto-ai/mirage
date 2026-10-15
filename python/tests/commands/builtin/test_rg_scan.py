@@ -44,6 +44,12 @@ from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
 
+async def _listed(accessor, path: PathSpec) -> list[str]:
+    rows = await readdir(accessor, path)
+    base = (path.dir if path.pattern else path).virtual.rstrip("/")
+    return [f"{base}/{row.name}" for row in rows]
+
+
 async def _write(backend, path, content):
     accessor = backend.accessor
     await _async_write_bytes(accessor, to_pathspec(path), content.encode())
@@ -103,7 +109,7 @@ async def rg(backend, path, pattern, **kwargs):
         [to_pathspec(path)],
         [pattern],
         CommandOpts(flags=flags),
-        readdir=partial(readdir, accessor),
+        readdir=partial(_listed, accessor),
         stat=partial(stat, accessor),
         read_bytes=partial(read, accessor),
         read_stream=None,

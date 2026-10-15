@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
 import os
 from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.generic.rewrite import append_by_rewrite
 from mirage.core.s3.checksum import checksum as _checksum
 from mirage.core.s3.constants import MD5_ETAG_STORES, SCOPE_ERROR
@@ -107,26 +105,18 @@ class S3VFS(BaseVFS):
             return str(client.meta.endpoint_url)
         return _declared_endpoint(self.config)
 
-    async def readdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> list[str]:
-        return await _readdir(self.accessor, path, index)
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        return await _readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
         if not offset and size is None:
-            return await _read(self.accessor, path, index)
-        return await _read(self.accessor, path, index, offset, size)
+            return await _read(self.accessor, path)
+        return await _read(self.accessor, path, offset, size)
 
-    async def stat(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> FileStat:
-        return await _stat(self.accessor, path, index)
+    async def stat(self, path: PathSpec) -> FileStat:
+        return await _stat(self.accessor, path)
 
     async def copy_from(
         self, source: BaseVFS, src: PathSpec, dst: PathSpec
@@ -135,48 +125,26 @@ class S3VFS(BaseVFS):
             raise exdev(dst)
         await _copy_from(self.accessor, source.accessor, src, dst)
 
-    async def checksum(
-        self,
-        path: PathSpec,
-        algorithm: str,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> str | None:
+    async def checksum(self, path: PathSpec, algorithm: str) -> str | None:
         if self.name not in MD5_ETAG_STORES:
             return None
         aws = self.name == VFSName.S3 and not self._endpoint
-        return await _checksum(self.accessor, path, algorithm, aws, index)
+        return await _checksum(self.accessor, path, algorithm, aws)
 
-    def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, index)
+    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        return _read_stream(self.accessor, path)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def read_tree(
-        self,
-        path: PathSpec,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path, index)
+    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)
 
-    async def append(
-        self,
-        path: PathSpec,
-        data: bytes,
-        index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await append_by_rewrite(
-            functools.partial(self.read, index=index),
-            self.write,
-            functools.partial(self.stat, index=index),
-            path,
-            data,
-        )
+    async def append(self, path: PathSpec, data: bytes) -> None:
+        await append_by_rewrite(self.read, self.write, self.stat, path, data)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)
@@ -187,10 +155,8 @@ class S3VFS(BaseVFS):
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         await _mkdir(self.accessor, path, parents=parents)
 
-    async def rmdir(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
-    ) -> None:
-        await _rmdir(self.accessor, path, index)
+    async def rmdir(self, path: PathSpec) -> None:
+        await _rmdir(self.accessor, path)
 
     async def rm_r(self, path: PathSpec) -> Any:
         return await _rm_r(self.accessor, path)

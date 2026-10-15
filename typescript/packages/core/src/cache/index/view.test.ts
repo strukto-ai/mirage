@@ -26,13 +26,19 @@ import { withCacheMutation } from '../file/io.ts'
 import { RAMFileCacheStore } from '../file/ram.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
-import type { IndexCacheStore } from './store.ts'
+import { IndexCacheStore } from './store.ts'
 import { IndexView } from './view.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { SessionState } from '../../workspace/session/session.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
+
+/** A RAM mount whose functions are handed the index, to write into it late. */
+class Indexed extends RAMVFS {
+  override readonly listsStats: boolean = false
+}
 
 const cases = ['backend', 'store'].flatMap((phase) =>
   ['put', 'setDir', 'setPartialDir'].flatMap((method) =>
@@ -56,7 +62,8 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
                 keyPrefix: `lifecycle:${crypto.randomUUID()}:`,
               }
             : { type }
-        const vfs = new RAMVFS()
+        const vfs = new Indexed()
+        const backend: BaseVFS = vfs
         const ws = new Workspace({ '/data': vfs }, { index: config, mode: MountMode.WRITE })
         ws.addMount('/alias', vfs)
         const index = ws.mount('/data').indexStore
@@ -68,8 +75,8 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const release = new Promise<void>((resolve) => {
           resume = resolve
         })
-        vfs.stat = async (_path, index) => {
-          if (index === undefined) throw new Error('missing index')
+        backend.stat = async (_path, index) => {
+          if (!(index instanceof IndexCacheStore)) throw new Error('missing index')
           enter()
           await release
           await index.put(
@@ -131,7 +138,8 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
                 keyPrefix: `lifecycle:${crypto.randomUUID()}:`,
               }
             : { type }
-        const vfs = new RAMVFS()
+        const vfs = new Indexed()
+        const backend: BaseVFS = vfs
         const prefix = shadow ? '/' : '/data'
         const ws = new Workspace({ [prefix]: vfs }, { index: config })
         ws.addMount('/alias', vfs)
@@ -170,8 +178,8 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
             })
           }
         }
-        vfs.readdir = async (_path, index) => {
-          if (index === undefined) throw new Error('missing index')
+        backend.readdir = async (_path, index) => {
+          if (!(index instanceof IndexCacheStore)) throw new Error('missing index')
           if (phase === 'backend') await pause()
           if (method === 'put') await index.put('/data/stale', entry)
           else if (method === 'setPartialDir')
