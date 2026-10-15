@@ -194,7 +194,8 @@ def _linked(links: LinkView | None, virtual: str) -> bool:
         return False
     try:
         return links.resolve(virtual) != virtual
-    except CycleError:
+    except CycleError as exc:
+        logger.debug("%s: a link loop stands in it: %s", virtual, exc)
         return True
 
 

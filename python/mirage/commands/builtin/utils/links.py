@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -23,6 +24,8 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, gnu_basename, resolve_path
 from mirage.view.types import LinkView, MountView
+
+logger = logging.getLogger(__name__)
 
 _MISSES = (FileNotFoundError, NotADirectoryError)
 
@@ -293,9 +296,10 @@ async def _linked_stat(
         return _named(found, here)
     try:
         return await stat(accessor, path, *args, **kwargs)
-    except _MISSES:
+    except _MISSES as exc:
         if not owed_names(links, here):
             raise
+        logger.debug("%s: a directory for the links below it: %s", here, exc)
         return FileStat(name=gnu_basename(here), type=FileType.DIRECTORY)
 
 
@@ -318,9 +322,10 @@ async def _linked_readdir(
     owed = owed_names(links, here)
     try:
         entries: list[str] = await readdir(accessor, path, *args, **kwargs)
-    except _MISSES:
+    except _MISSES as exc:
         if not owed:
             raise
+        logger.debug("%s: listed for the links below it: %s", here, exc)
         entries = []
     if not owed:
         return entries

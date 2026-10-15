@@ -221,6 +221,7 @@ async function linkedStat<A extends Accessor>(
     return await stat(accessor, path, index)
   } catch (err) {
     if (!missed(err) || owedNames(links, here).length === 0) throw err
+    console.debug(`${here}: a directory for the links below it: ${String(err)}`)
     return new FileStat({ name: gnuBasename(here), type: FileType.DIRECTORY })
   }
 }
@@ -247,6 +248,7 @@ async function linkedReaddir<A extends Accessor>(
     entries = await readdir(accessor, path, index)
   } catch (err) {
     if (!missed(err) || owed.length === 0) throw err
+    console.debug(`${here}: listed for the links below it: ${String(err)}`)
     entries = []
   }
   if (owed.length === 0) return entries

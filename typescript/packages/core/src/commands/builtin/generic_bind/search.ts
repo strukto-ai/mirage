@@ -246,8 +246,9 @@ function linked(links: LinkView | undefined, virtual: string): boolean {
   try {
     return links.resolve(virtual) !== virtual
   } catch (err) {
-    if (err instanceof CycleError) return true
-    throw err
+    if (!(err instanceof CycleError)) throw err
+    console.debug(`${virtual}: a link loop stands in it: ${String(err)}`)
+    return true
   }
 }
 
