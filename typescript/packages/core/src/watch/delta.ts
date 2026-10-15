@@ -110,12 +110,27 @@ export function settle(
 }
 
 /**
- * Move each placed path below the folder `was` under `now`, or forget it when
- * `now` is null. Mirrors Python `moved_below`.
+ * Carry each kept path below a folder that moved to the folder's new path, or
+ * forget it when the folder left.
+ *
+ * The moves of one read apply at once, each path by the deepest folder it was
+ * below, so a folder that takes another's old name does not pull in what the
+ * other held. Paths the read placed itself are where their items are now and
+ * stay as they are. Mirrors Python `moved_below`.
  */
-export function movedBelow(seen: Record<string, string>, was: string, now: string | null): void {
+export function movedBelow(
+  seen: Record<string, string>,
+  moves: ReadonlyMap<string, string | null>,
+  placed: ReadonlySet<string>,
+): void {
   for (const [itemId, path] of Object.entries(seen)) {
-    if (!path.startsWith(`${was}/`)) continue
+    if (placed.has(itemId)) continue
+    let was: string | null = null
+    for (const old of moves.keys()) {
+      if (path.startsWith(`${old}/`) && (was === null || old.length > was.length)) was = old
+    }
+    if (was === null) continue
+    const now = moves.get(was) ?? null
     if (now === null) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete seen[itemId]

@@ -167,6 +167,7 @@ export class GraphDeltaHook implements DeltaHook {
         folders[item.id] = [item.name ?? '', parentOf(item)]
       }
     }
+    const moves = new Map<string, string | null>()
     for (const item of placed) {
       const parent = parentOf(item)
       let now: string | null = null
@@ -179,8 +180,9 @@ export class GraphDeltaHook implements DeltaHook {
       }
       const made = justMade(item.createdDateTime, item.lastModifiedDateTime)
       const was = settle(changes, seen, item.id, now, made)
-      if (was !== null && was !== now) movedBelow(seen, was, now)
+      if (was !== null && was !== now) moves.set(was, now)
     }
+    movedBelow(seen, moves, new Set(placed.map((item) => item.id)))
   }
 
   /** Every item a feed link lists, and the link the next read starts from. */

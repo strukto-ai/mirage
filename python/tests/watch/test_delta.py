@@ -14,7 +14,7 @@ def test_settle_names_each_move_by_where_the_item_was():
     settle(changes, seen, "g", "/m/g.txt", False)
     was = settle(changes, seen, "dir", "/m/renamed", False)
     assert was is not None
-    moved_below(seen, was, "/m/renamed")
+    moved_below(seen, {was: "/m/renamed"}, {"new", "edited", "g", "dir"})
     settle(changes, seen, "unseen", None, False)
     assert changes == [
         (FileChangeKind.CREATE, "/m/new.txt"),
@@ -24,6 +24,25 @@ def test_settle_names_each_move_by_where_the_item_was():
         (FileChangeKind.CREATE, "/m/renamed"),
     ]
     assert seen["f"] == "/m/renamed/f.txt"
+
+
+def test_one_reads_folder_moves_apply_at_once():
+    # A renamed to Z and B renamed to A in one read: what A held goes to
+    # Z, what B held to A, and a path the read placed itself stays put.
+    seen = {
+        "x": "/m/A/x.txt",
+        "y": "/m/B/y.txt",
+        "z": "/m/B/sub/z.txt",
+        "c": "/m/A/c.txt",
+        "gone": "/m/G/g.txt",
+    }
+    moved_below(seen, {"/m/A": "/m/Z", "/m/B": "/m/A", "/m/G": None}, {"c"})
+    assert seen == {
+        "x": "/m/Z/x.txt",
+        "y": "/m/A/y.txt",
+        "z": "/m/A/sub/z.txt",
+        "c": "/m/A/c.txt",
+    }
 
 
 @pytest.mark.asyncio

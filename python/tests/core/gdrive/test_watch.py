@@ -131,7 +131,7 @@ async def test_changes_are_placed_by_their_parents():
     assert [(c.kind, c.path.virtual) for c in second.changes] == [
         (FileChangeKind.DELETE, "/drive/Docs"),
         (FileChangeKind.CREATE, "/drive/Papers"),
-        (FileChangeKind.DELETE, "/drive/Papers/a.txt"),
+        (FileChangeKind.DELETE, "/drive/Docs/a.txt"),
         (FileChangeKind.UNKNOWN, "/drive"),
     ]
 
@@ -219,3 +219,41 @@ async def test_a_shared_drive_is_named_as_the_root_listing_names_it_now():
         (FileChangeKind.DELETE, "/drive/Team/d.txt"),
         (FileChangeKind.CREATE, "/drive/Team [Shared Drive]/d.txt"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_folder_taking_anothers_name_keeps_its_own_children():
+    # A renamed to Z and B renamed to A in one read, B's child listed
+    # first: the child is in the new A, and stays there for the next read.
+    edited = "2026-10-01T00:00:00.000Z"
+    first, second, third = await _pulls(
+        [
+            (
+                [
+                    item("A", "A", "R", mime=FOLDER_MIME),
+                    item("B", "B", "R", mime=FOLDER_MIME),
+                    item("c", "c.txt", "B"),
+                ],
+                "2",
+            ),
+            (
+                [
+                    item("c", "c.txt", "B", modified=edited),
+                    item("A", "Z", "R", mime=FOLDER_MIME),
+                    item("B", "A", "R", mime=FOLDER_MIME),
+                ],
+                "3",
+            ),
+            ([item("c", "c.txt", "B", trashed=True)], "4"),
+        ],
+        [],
+    )
+    assert second == [
+        (FileChangeKind.DELETE, "/drive/B/c.txt"),
+        (FileChangeKind.CREATE, "/drive/A/c.txt"),
+        (FileChangeKind.DELETE, "/drive/A"),
+        (FileChangeKind.CREATE, "/drive/Z"),
+        (FileChangeKind.DELETE, "/drive/B"),
+        (FileChangeKind.CREATE, "/drive/A"),
+    ]
+    assert third == [(FileChangeKind.DELETE, "/drive/A/c.txt")]

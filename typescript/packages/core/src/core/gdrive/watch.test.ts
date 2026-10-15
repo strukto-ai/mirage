@@ -117,7 +117,7 @@ describe('GDriveDeltaHook', () => {
     expect(second.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
       ['delete', '/drive/Docs'],
       ['create', '/drive/Papers'],
-      ['delete', '/drive/Papers/a.txt'],
+      ['delete', '/drive/Docs/a.txt'],
       ['unknown', '/drive'],
     ])
   })
@@ -195,5 +195,43 @@ describe('GDriveDeltaHook', () => {
       ['delete', '/drive/Team/d.txt'],
       ['create', '/drive/Team [Shared Drive]/d.txt'],
     ])
+  })
+
+  // Twin of test_a_folder_taking_anothers_name_keeps_its_own_children: A
+  // renamed to Z and B renamed to A in one read, B's child listed first: the
+  // child is in the new A, and stays there for the next read.
+  it("keeps a child in the folder that took another folder's name", async () => {
+    const edited = '2026-10-01T00:00:00.000Z'
+    const [, second, third] = await pulls(
+      [
+        [
+          [
+            item('A', 'A', 'R', { mime: FOLDER_MIME }),
+            item('B', 'B', 'R', { mime: FOLDER_MIME }),
+            item('c', 'c.txt', 'B'),
+          ],
+          '2',
+        ],
+        [
+          [
+            item('c', 'c.txt', 'B', { modified: edited }),
+            item('A', 'Z', 'R', { mime: FOLDER_MIME }),
+            item('B', 'A', 'R', { mime: FOLDER_MIME }),
+          ],
+          '3',
+        ],
+        [[item('c', 'c.txt', 'B', { trashed: true })], '4'],
+      ],
+      [],
+    )
+    expect(second).toEqual([
+      ['delete', '/drive/B/c.txt'],
+      ['create', '/drive/A/c.txt'],
+      ['delete', '/drive/A'],
+      ['create', '/drive/Z'],
+      ['delete', '/drive/B'],
+      ['create', '/drive/A'],
+    ])
+    expect(third).toEqual([['delete', '/drive/A/c.txt']])
   })
 })

@@ -23,7 +23,7 @@ describe('settle', () => {
     settle(changes, seen, 'g', '/m/g.txt', false)
     const was = settle(changes, seen, 'dir', '/m/renamed', false)
     expect(was).not.toBeNull()
-    movedBelow(seen, was ?? '', '/m/renamed')
+    movedBelow(seen, new Map([[was ?? '', '/m/renamed']]), new Set(['new', 'edited', 'g', 'dir']))
     settle(changes, seen, 'unseen', null, false)
     expect(changes).toEqual([
       [FileChangeKind.CREATE, '/m/new.txt'],
@@ -33,6 +33,36 @@ describe('settle', () => {
       [FileChangeKind.CREATE, '/m/renamed'],
     ])
     expect(seen.f).toBe('/m/renamed/f.txt')
+  })
+})
+
+// Twin of test_one_reads_folder_moves_apply_at_once: A renamed to Z and B
+// renamed to A in one read: what A held goes to Z, what B held to A, and a
+// path the read placed itself stays put.
+describe('movedBelow', () => {
+  it("applies one read's folder moves at once", () => {
+    const seen: Record<string, string> = {
+      x: '/m/A/x.txt',
+      y: '/m/B/y.txt',
+      z: '/m/B/sub/z.txt',
+      c: '/m/A/c.txt',
+      gone: '/m/G/g.txt',
+    }
+    movedBelow(
+      seen,
+      new Map<string, string | null>([
+        ['/m/A', '/m/Z'],
+        ['/m/B', '/m/A'],
+        ['/m/G', null],
+      ]),
+      new Set(['c']),
+    )
+    expect(seen).toEqual({
+      x: '/m/Z/x.txt',
+      y: '/m/A/y.txt',
+      z: '/m/A/sub/z.txt',
+      c: '/m/A/c.txt',
+    })
   })
 })
 

@@ -260,6 +260,7 @@ class GDriveDeltaHook:
                 places.folders[item_id] = [item["name"], parents[0]]
             elif gone:
                 places.folders.pop(item_id, None)
+        moves: dict[str, str | None] = {}
         for item_id, item, gone in entries:
             where = None
             if item is not None:
@@ -277,7 +278,8 @@ class GDriveDeltaHook:
             )
             was = settle(changes, seen, item_id, now, made)
             if was is not None and was != now:
-                moved_below(seen, was, now)
+                moves[was] = now
+        moved_below(seen, moves, {item_id for item_id, _, _ in entries})
         events = changes_under(root, changes, observed)
         if unknown:
             events.append(

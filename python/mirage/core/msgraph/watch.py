@@ -193,6 +193,7 @@ class GraphDeltaHook:
                     str(item.get("name", "")),
                     _parent_of(item),
                 ]
+        moves: dict[str, str | None] = {}
         for item in placed_items:
             item_id = item["id"]
             parent = _parent_of(item)
@@ -211,7 +212,8 @@ class GraphDeltaHook:
             )
             was = settle(changes, seen, item_id, now, made)
             if was is not None and was != now:
-                moved_below(seen, was, now)
+                moves[was] = now
+        moved_below(seen, moves, {item["id"] for item in placed_items})
 
     async def _feed(self, link: str) -> tuple[list[dict[str, Any]], str]:
         """Every item a feed link lists, and the link the next read

@@ -141,18 +141,34 @@ def settle(
     return was
 
 
-def moved_below(seen: dict[str, str], was: str, now: str | None) -> None:
-    """Move each placed path below the folder ``was`` under ``now``, or
-    forget it when ``now`` is None.
+def moved_below(
+    seen: dict[str, str], moves: dict[str, str | None], placed: set[str]
+) -> None:
+    """Carry each kept path below a folder that moved to the folder's new
+    path, or forget it when the folder left.
+
+    The moves of one read apply at once, each path by the deepest folder
+    it was below, so a folder that takes another's old name does not
+    pull in what the other held. Paths the read placed itself are where
+    their items are now and stay as they are.
 
     Args:
         seen (dict[str, str]): Each placed item's virtual path, by id.
-        was (str): The folder's old path.
-        now (str | None): Its new path, None when it left.
+        moves (dict[str, str | None]): Each moved folder's old path and
+            its new one, None when it left.
+        placed (set[str]): The ids the read placed.
     """
     for item_id, path in list(seen.items()):
-        if not path.startswith(was + "/"):
+        if item_id in placed:
             continue
+        was = max(
+            (old for old in moves if path.startswith(old + "/")),
+            key=len,
+            default=None,
+        )
+        if was is None:
+            continue
+        now = moves[was]
         if now is None:
             del seen[item_id]
         else:

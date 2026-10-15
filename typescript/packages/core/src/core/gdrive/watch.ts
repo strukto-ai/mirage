@@ -219,6 +219,7 @@ export class GDriveDeltaHook implements DeltaHook {
         delete places.folders[itemId]
       }
     }
+    const moves = new Map<string, string | null>()
     for (const [itemId, item, gone] of entries) {
       let where: string | null = null
       if (item !== null) {
@@ -232,8 +233,9 @@ export class GDriveDeltaHook implements DeltaHook {
       const now = gone ? null : where
       const made = item !== null && justMade(item.createdTime, item.modifiedTime)
       const was = settle(changes, seen, itemId, now, made)
-      if (was !== null && was !== now) movedBelow(seen, was, now)
+      if (was !== null && was !== now) moves.set(was, now)
     }
+    movedBelow(seen, moves, new Set(entries.map(([itemId]) => itemId)))
     const events = changesUnder(root, changes, observed)
     if (unknown) {
       events.push(new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed }))

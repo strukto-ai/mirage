@@ -151,3 +151,33 @@ async def test_a_root_folder_replaced_or_gone_is_found_again():
     ]
     assert pairs(gone) == [(FileChangeKind.UNKNOWN, "/m")]
     assert pairs(back) == [(FileChangeKind.UNKNOWN, "/m")]
+
+
+@pytest.mark.asyncio
+async def test_a_folder_taking_anothers_name_keeps_its_own_children():
+    # A renamed to Z and B renamed to A in one read, B's child listed
+    # first: the child is in the new A, and stays there for the next read.
+    fake = FakeDrive({})
+    fake.pages = [
+        [
+            item("A", "A", "R", folder={}),
+            item("B", "B", "R", folder={}),
+            item("c", "c.txt", "B", file={}),
+        ],
+        [
+            item("c", "c.txt", "B", file={}),
+            item("A", "Z", "R", folder={}),
+            item("B", "A", "R", folder={}),
+        ],
+        [{"id": "c", "deleted": {}}],
+    ]
+    _, second, third = await pulls(fake, hook(), 3)
+    assert pairs(second) == [
+        (FileChangeKind.DELETE, "/m/B/c.txt"),
+        (FileChangeKind.CREATE, "/m/A/c.txt"),
+        (FileChangeKind.DELETE, "/m/A"),
+        (FileChangeKind.CREATE, "/m/Z"),
+        (FileChangeKind.DELETE, "/m/B"),
+        (FileChangeKind.CREATE, "/m/A"),
+    ]
+    assert pairs(third) == [(FileChangeKind.DELETE, "/m/A/c.txt")]

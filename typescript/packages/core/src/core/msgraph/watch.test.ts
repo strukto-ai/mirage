@@ -108,7 +108,16 @@ describe('GraphDeltaHook', () => {
     expect(pairs(second)).toEqual([[FileChangeKind.UNKNOWN, '/m']])
     const kept = (
       JSON.parse(second.checkpoint ?? '') as {
-        graph: { drives: Record<string, { folders: object; seen: object; link: string }> }
+        graph: {
+          drives: Record<
+            string,
+            {
+              folders: Record<string, [string, string]>
+              seen: Record<string, string>
+              link: string
+            }
+          >
+        }
       }
     ).graph.drives[DRIVE]
     expect(kept).toMatchObject({ folders: {}, seen: {}, link: 'L0' })
@@ -139,5 +148,37 @@ describe('GraphDeltaHook', () => {
     ])
     expect(pairs(gone)).toEqual([[FileChangeKind.UNKNOWN, '/m']])
     expect(pairs(back)).toEqual([[FileChangeKind.UNKNOWN, '/m']])
+  })
+
+  // Twin of test_a_folder_taking_anothers_name_keeps_its_own_children: A
+  // renamed to Z and B renamed to A in one read, B's child listed first: the
+  // child is in the new A, and stays there for the next read.
+  it("keeps a child in the folder that took another folder's name", async () => {
+    graph.folders = {}
+    graph.pages = [
+      [
+        item('A', 'A', 'R', { folder: {} }),
+        item('B', 'B', 'R', { folder: {} }),
+        item('c', 'c.txt', 'B', { file: {} }),
+      ],
+      [
+        item('c', 'c.txt', 'B', { file: {} }),
+        item('A', 'Z', 'R', { folder: {} }),
+        item('B', 'A', 'R', { folder: {} }),
+      ],
+      [{ id: 'c', deleted: {} }],
+    ]
+    const target = hook()
+    const [, second] = await twoPulls(target)
+    const third = await target.pull(ROOT, second.checkpoint)
+    expect(pairs(second)).toEqual([
+      [FileChangeKind.DELETE, '/m/B/c.txt'],
+      [FileChangeKind.CREATE, '/m/A/c.txt'],
+      [FileChangeKind.DELETE, '/m/A'],
+      [FileChangeKind.CREATE, '/m/Z'],
+      [FileChangeKind.DELETE, '/m/B'],
+      [FileChangeKind.CREATE, '/m/A'],
+    ])
+    expect(pairs(third)).toEqual([[FileChangeKind.DELETE, '/m/A/c.txt']])
   })
 })
