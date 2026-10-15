@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 
 from mirage.accessor.base import Accessor
@@ -158,25 +158,51 @@ def _account_for_walk_error(
 
 @dataclass(slots=True)
 class Dereference:
-    """What ``du -L`` follows links by, for one operand.
+    """What ``du -L`` follows links by, for one invocation.
 
-    GNU counts each file once, under the first name its walk meets. A link
-    leading back into the operand's own tree is therefore never counted,
-    since the file it reaches is counted under its own name there (where
-    GNU's readdir order may reach the link first, mirage's sorted walk
-    always prefers the file's own name), and what lies outside it is
-    counted once, under the first name the sorted walk reaches it by.
+    GNU counts each file once, under the first name its walks meet, across
+    every operand of the line (du.c's di_set, coreutils 9.7): what one
+    operand reaches is not counted again under another, and an operand
+    already counted prints nothing. A link leading back into its operand's
+    own tree is never counted, since the file it reaches is counted under
+    its own name there (where GNU's readdir order may reach the link
+    first, mirage's sorted walk always prefers the file's own name). Under
+    ``-x`` a link that leads onto another mount is left out whole, as GNU
+    leaves out what stat(2) places on another device.
 
     Args:
         links (LinkView): the namespace's symlink facts.
-        tree (str): the operand, as the path it resolves to.
-        seen (set[str]): what outside the tree is counted so far, each as
-            the path it resolves to.
+        mounts (MountView | None): the mount boundaries ``-x`` keeps the
+            walks within, None without ``-x``.
+        counted (set[str]): what the walks counted so far, each as the
+            path it resolves to.
+        tree (str): the operand being walked, as the path it resolves to.
+        home (str | None): under ``-x``, the mount that operand lies on.
     """
 
     links: LinkView
-    tree: str
-    seen: set[str] = field(default_factory=set)
+    mounts: MountView | None = None
+    counted: set[str] = field(default_factory=set)
+    tree: str = "/"
+    home: str | None = None
+
+    def operand(self, path: PathSpec) -> "Dereference":
+        """This invocation's state, walking one operand.
+
+        Args:
+            path (PathSpec): the operand.
+        """
+        tree = self.links.resolve(path.virtual)
+        home = self.mounts.root_of(tree) if self.mounts is not None else None
+        return replace(self, tree=tree, home=home)
+
+    def repeated(self, path: PathSpec) -> bool:
+        """Whether an earlier operand's walk already counted this one.
+
+        Args:
+            path (PathSpec): the operand.
+        """
+        return self.links.resolve(path.virtual) in self.counted
 
 
 async def _counted(
@@ -185,7 +211,7 @@ async def _counted(
     """What ``du -L`` counts an entry as, None when it counts nothing.
 
     Args:
-        follow (Dereference): the operand's dereference state.
+        follow (Dereference): the walk's dereference state.
         path (PathSpec): the entry.
         info (FileStat): its own stat, a link's row for a link.
         budget (WalkBudget): records a link it cannot follow.
@@ -203,11 +229,17 @@ async def _counted(
     if target is None:
         budget.inaccessible.append((path.virtual, None))
         return None
-    if under_path(real, follow.tree):
-        return None if info.type == FileType.SYMLINK else info
-    if real in follow.seen:
+    if (
+        follow.home is not None
+        and follow.mounts is not None
+        and follow.mounts.root_of(real) != follow.home
+    ):
         return None
-    follow.seen.add(real)
+    if info.type == FileType.SYMLINK and under_path(real, follow.tree):
+        return None
+    if real in follow.counted:
+        return None
+    follow.counted.add(real)
     return target
 
 
@@ -286,7 +318,7 @@ async def walk_size(
     accessor: Accessor,
     index: IndexCacheStore,
     budget: WalkBudget,
-    links: LinkView | None,
+    follow: Dereference | None,
     path: PathSpec,
 ) -> int:
     return await _du_walk(
@@ -295,9 +327,7 @@ async def walk_size(
         path,
         budget,
         None,
-        Dereference(links, links.resolve(path.virtual))
-        if links is not None
-        else None,
+        follow.operand(path) if follow is not None else None,
     )
 
 
@@ -306,7 +336,7 @@ async def walk_entries(
     accessor: Accessor,
     index: IndexCacheStore,
     budget: WalkBudget,
-    links: LinkView | None,
+    follow: Dereference | None,
     path: PathSpec,
 ) -> DuEntries:
     entries: list[tuple[str, int]] = []
@@ -316,9 +346,7 @@ async def walk_entries(
         path,
         budget,
         entries,
-        Dereference(links, links.resolve(path.virtual))
-        if links is not None
-        else None,
+        follow.operand(path) if follow is not None else None,
     )
     entries.sort()
     return entries, total
@@ -337,16 +365,21 @@ async def du(
         ops.max_du_entries, mounts=opts.ns.mounts if opts.ns else None
     )
     fl = FlagView(opts.flags, spec=SPECS["du"])
-    links = (
-        opts.ns.links
-        if opts.ns is not None and fl.typed_order("L", "P")[-1:] == ["L"]
+    follow = (
+        Dereference(
+            opts.ns.links,
+            opts.ns.mounts if fl.as_bool("one_file_system") else None,
+        )
+        if opts.ns is not None
+        and opts.ns.links is not None
+        and fl.typed_order("L", "P")[-1:] == ["L"]
         else None
     )
     compute_size: ComputeSize = partial(
-        walk_size, ops, accessor, opts.index, budget, links
+        walk_size, ops, accessor, opts.index, budget, follow
     )
     compute_entries: ComputeEntries = partial(
-        walk_entries, ops, accessor, opts.index, budget, links
+        walk_entries, ops, accessor, opts.index, budget, follow
     )
     return await du_generic(
         paths,
@@ -360,6 +393,7 @@ async def du(
         unreadable=lambda: budget.unreadable,
         directories=lambda: budget.directories,
         inaccessible=lambda: budget.inaccessible,
+        repeated=follow.repeated if follow is not None else None,
     )
 
 

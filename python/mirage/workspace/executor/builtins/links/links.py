@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import logging
 import posixpath
 from collections.abc import Sequence
 from functools import partial
@@ -41,6 +42,8 @@ from mirage.workspace.lookup.constants import (
 )
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import stat_or_none
+
+logger = logging.getLogger(__name__)
 
 
 def follow_parent(namespace: Namespace, virtual: str) -> str:
@@ -175,6 +178,14 @@ async def follow_directory_links(
                 target = await stat_or_none(dispatch, followed)
             except DotWalkLoop:
                 target = None
+            except FS_ERRORS as exc:
+                # A stat refused other than by absence is GNU's to report
+                # for that operand, and ls stats the target itself.
+                logger.debug(
+                    "ls: %s leads to a refusal: %s", item.virtual, exc
+                )
+                out.append(followed)
+                continue
             leads_to_dir = (
                 target is not None and target.type == FileType.DIRECTORY
             )

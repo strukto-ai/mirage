@@ -147,24 +147,42 @@ function treeOf<A extends Accessor>(
 }
 
 /**
- * What `du -L` follows links by, for one operand.
+ * What `du -L` follows links by, for one invocation.
  *
- * GNU counts each file once, under the first name its walk meets. A link
- * leading back into the operand's own tree is therefore never counted, since
- * the file it reaches is counted under its own name there (where GNU's readdir
- * order may reach the link first, mirage's sorted walk always prefers the
- * file's own name), and what lies outside it is counted once, under the first
- * name the sorted walk reaches it by.
+ * GNU counts each file once, under the first name its walks meet, across
+ * every operand of the line (du.c's di_set, coreutils 9.7): what one operand
+ * reaches is not counted again under another, and an operand already counted
+ * prints nothing. A link leading back into its operand's own tree is never
+ * counted, since the file it reaches is counted under its own name there
+ * (where GNU's readdir order may reach the link first, mirage's sorted walk
+ * always prefers the file's own name). Under `-x` a link that leads onto
+ * another mount is left out whole, as GNU leaves out what stat(2) places on
+ * another device.
  */
 class Dereference {
-  // What outside the tree is counted so far, each as the path it resolves to.
-  readonly seen = new Set<string>()
-
   constructor(
     readonly links: LinkView,
-    // The operand, as the path it resolves to.
-    readonly tree: string,
+    // The mount boundaries `-x` keeps the walks within, null without `-x`.
+    readonly mounts: MountView | null,
+    // What the walks counted so far, each as the path it resolves to.
+    readonly counted = new Set<string>(),
+    // The operand being walked, as the path it resolves to.
+    readonly tree = '/',
+    // Under `-x`, the mount that operand lies on.
+    readonly home: string | null = null,
   ) {}
+
+  /** This invocation's state, walking one operand. */
+  operand(path: PathSpec): Dereference {
+    const tree = this.links.resolve(path.virtual)
+    const home = this.mounts === null ? null : this.mounts.rootOf(tree)
+    return new Dereference(this.links, this.mounts, this.counted, tree, home)
+  }
+
+  /** Whether an earlier operand's walk already counted this one. */
+  repeated(path: PathSpec): boolean {
+    return this.counted.has(this.links.resolve(path.virtual))
+  }
 }
 
 /**
@@ -192,9 +210,10 @@ async function counted(
     budget.inaccessible.push([path.virtual, null])
     return null
   }
-  if (underPath(real, follow.tree)) return info.type === FileType.SYMLINK ? null : info
-  if (follow.seen.has(real)) return null
-  follow.seen.add(real)
+  if (follow.home !== null && follow.mounts?.rootOf(real) !== follow.home) return null
+  if (info.type === FileType.SYMLINK && underPath(real, follow.tree)) return null
+  if (follow.counted.has(real)) return null
+  follow.counted.add(real)
   return target
 }
 
@@ -255,7 +274,7 @@ export function walkSize<A extends Accessor>(
   accessor: A,
   index: IndexCacheStore | undefined,
   budget: WalkBudget,
-  links: LinkView | null,
+  follow: Dereference | null,
   path: PathSpec,
 ): Promise<number> {
   return duWalk(
@@ -264,7 +283,7 @@ export function walkSize<A extends Accessor>(
     path,
     budget,
     null,
-    links === null ? null : new Dereference(links, links.resolve(path.virtual)),
+    follow === null ? null : follow.operand(path),
   )
 }
 
@@ -273,7 +292,7 @@ export async function walkEntries<A extends Accessor>(
   accessor: A,
   index: IndexCacheStore | undefined,
   budget: WalkBudget,
-  links: LinkView | null,
+  follow: Dereference | null,
   path: PathSpec,
 ): Promise<DuEntries> {
   const entries: [string, number][] = []
@@ -283,7 +302,7 @@ export async function walkEntries<A extends Accessor>(
     path,
     budget,
     entries,
-    links === null ? null : new Dereference(links, links.resolve(path.virtual)),
+    follow === null ? null : follow.operand(path),
   )
   entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
@@ -295,12 +314,14 @@ const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
     opts.ns?.mounts,
   )
-  const links =
-    new FlagView(opts.flags, specOf('du')).typedOrder('L', 'P').at(-1) === 'L'
-      ? (opts.ns?.links ?? null)
+  const flags = new FlagView(opts.flags, specOf('du'))
+  const links = opts.ns?.links
+  const follow =
+    links !== undefined && flags.typedOrder('L', 'P').at(-1) === 'L'
+      ? new Dereference(links, flags.asBool('one_file_system') ? (opts.ns?.mounts ?? null) : null)
       : null
-  const computeSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, links, p)
-  const computeEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, links, p)
+  const computeSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, follow, p)
+  const computeEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, follow, p)
 
   return duGeneric(
     paths,
@@ -313,6 +334,7 @@ const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
     () => budget.unreadable,
     () => budget.directories,
     () => budget.inaccessible,
+    follow === null ? undefined : (p) => follow.repeated(p),
   )
 }
 

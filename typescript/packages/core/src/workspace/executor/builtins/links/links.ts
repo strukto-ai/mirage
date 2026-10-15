@@ -18,7 +18,7 @@ import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { Visibility, FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
-import { fsStrerror, isDotWalkError, isEnoent } from '../../../../errors/fs.ts'
+import { fsStrerror, isDotWalkError, isEnoent, isFsError } from '../../../../errors/fs.ts'
 import { CycleError, gnuBasename, posixNormpath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { sessionVisibility } from '../../../../context/session_context.ts'
@@ -293,7 +293,14 @@ export async function followDirectoryLinks(
         target = await statOrNull(dispatch, followed)
       } catch (err) {
         // A loop leads nowhere: GNU lstats it then and lists the link.
-        if (!isDotWalkError(err) || (err as { code?: string }).code !== 'ELOOP') throw err
+        if (!isDotWalkError(err) || (err as { code?: string }).code !== 'ELOOP') {
+          if (!isFsError(err)) throw err
+          // A stat refused other than by absence is GNU's to report for that
+          // operand, and ls stats the target itself.
+          console.debug(`ls: ${item.virtual} leads to a refusal: ${String(err)}`)
+          out.push(followed)
+          continue
+        }
       }
     }
     out.push(

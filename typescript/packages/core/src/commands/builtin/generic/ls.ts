@@ -44,7 +44,14 @@ import { isEntryError } from '../../../errors/classify.ts'
 import { argmatchError, argmatchLine, usageHint } from '../../spec/usage.ts'
 import { type ArgmatchKind, argmatch } from '../../spec/argmatch.ts'
 import { identityOf, type Identity } from '../utils/identity.ts'
-import { fsStrerror, isDotWalkError, isEacces, isWalkError } from '../../../errors/fs.ts'
+import {
+  fsStrerror,
+  isDotWalkError,
+  isEacces,
+  isMissError,
+  isMissingPath,
+  isWalkError,
+} from '../../../errors/fs.ts'
 import { failureText } from '../../../errors/classify.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { followedStat } from '../../../view/namespace_view.ts'
@@ -464,12 +471,14 @@ export function sortStats(
 // directories (e.g. S3) list the "<file>/" prefix and find nothing rather than
 // raising ENOTDIR. Return the stat only when it is a non-directory, so an empty
 // directory still lists as empty. Mirrors Python ls `_file_entry`.
+// The row of an operand that is no directory, null for a directory or a path
+// nothing is at; a stat that fails other than by absence throws.
 async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
   try {
     const s = await stat(path)
     return s.type !== FileType.DIRECTORY ? asOperand(s, path) : null
   } catch (err) {
-    if (!isWalkError(err)) throw err
+    if (!isMissError(err) && !isMissingPath(err)) throw err
     return null
   }
 }
@@ -656,21 +665,37 @@ async function probeOperand(
     // coreutils 9.7).
     const walkRefused = isDotWalkError(err)
     const looped = walkRefused && (err as { code?: string }).code === 'ELOOP'
-    const row = walkRefused ? null : await fileEntry(ownStat, path)
+    let row: FileStat | null = null
+    let refused: unknown = null
+    if (!walkRefused) {
+      try {
+        row = await fileEntry(ownStat, path)
+      } catch (statErr) {
+        if (!isWalkError(statErr)) throw statErr
+        refused = statErr
+      }
+    }
     if (row !== null) return { path, row, groups: [] }
     const link = looped && commandLineArg && !opts.followArgs ? linkRow(path, links) : null
     if (link !== null) return { path, row: link, groups: [] }
-    // GNU words a directory it may not read differently from one it
-    // cannot stat: the entry is there, opening it is what failed.
-    const verb = isEacces(err) ? 'cannot open directory' : 'cannot access'
+    // GNU stats an operand before it opens one (ls.c's gobble_file, coreutils
+    // 9.7): a stat that fails is what it names, and a directory it may not
+    // read is worded apart, the entry being there.
+    const verb = refused === null && isEacces(err) ? 'cannot open directory' : 'cannot access'
     warnings.push({
-      message: `ls: ${verb} '${path.rawPath}': ${errText(err)}`,
+      message: `ls: ${verb} '${path.rawPath}': ${errText(refused ?? err)}`,
       serious: commandLineArg,
     })
     return { path, row: null, groups: [] }
   }
   if (stats.length === 0 && !structureOnly) {
-    const row = await fileEntry(ownStat, path)
+    let row: FileStat | null = null
+    try {
+      row = await fileEntry(ownStat, path)
+    } catch (err) {
+      if (!isWalkError(err)) throw err
+      console.debug(`ls: ${path.virtual} listed empty, its stat refused: ${String(err)}`)
+    }
     if (row !== null) return { path, row, groups: [] }
   }
   const entries = sortStats(

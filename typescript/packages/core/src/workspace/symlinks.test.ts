@@ -1428,6 +1428,13 @@ it.each([
     '',
     'diff: /data/d/ld: Permission denied\ndiff: /data/d/lf: Permission denied\n',
   ],
+  [
+    'ls /data/e /data/d/ld',
+    2,
+    '/data/e:\na\nld\nlf\n',
+    "ls: cannot access '/data/d/ld': Permission denied\n",
+  ],
+  ['ls -L /data/d/lf', 2, '', "ls: cannot access '/data/d/lf': Permission denied\n"],
 ])('%s names a link whose target refuses stat', async (line, code, stdout, stderr) => {
   const ws = new Workspace(
     { '/data': new RAMVFS(), '/sec': [new SealedRAMVFS(), MountMode.READ] },

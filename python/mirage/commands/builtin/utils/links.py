@@ -274,6 +274,27 @@ def serves(mounts: MountView | None, prefix: str, virtual: str) -> bool:
     return mounts is None or mounts.root_of(virtual).rstrip("/") == prefix
 
 
+def landing_root(
+    mounts: MountView, links: LinkView | None, virtual: str
+) -> str:
+    """The mount a walked path lands on, every link on it followed.
+
+    A mount is mirage's filesystem, so this stands for the device stat(2)
+    reports, which ``find -xdev`` compares with the start point's: a link
+    onto another mount leaves it as a mount root does (findutils 4.10).
+
+    Args:
+        mounts (MountView): the mount boundaries.
+        links (LinkView | None): the namespace's links, None where it
+            holds none.
+        virtual (str): absolute virtual path of a directory the walk
+            reached, which resolves.
+    """
+    return mounts.root_of(
+        links.resolve(virtual) if links is not None else virtual
+    )
+
+
 async def _linked_stat(
     stat: Callable[..., Awaitable[FileStat]],
     links: LinkView,

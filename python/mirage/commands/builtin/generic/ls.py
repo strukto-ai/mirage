@@ -25,6 +25,7 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.errors.classify import failure_text, is_entry_error
+from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkError, DotWalkLoop, FsCondition
@@ -948,9 +949,15 @@ async def _file_entry(
     stat: Stat,
     index: IndexCacheStore,
 ) -> FileStat | None:
+    """The row of an operand that is no directory, None for a directory
+    or a path nothing is at.
+
+    Raises:
+        OSError: when its stat fails other than by absence.
+    """
     try:
         s = await stat(path, index)
-    except (OSError, ValueError):
+    except MISS_ERRORS:
         return None
     if s.type == FileType.DIRECTORY:
         return None
@@ -1249,21 +1256,28 @@ async def probe_operand(
                 )
             )
             return Operand(path, None, []), warnings
-        row = await _file_entry(path, own_stat, index)
+        refused: OSError | None = None
+        try:
+            row = await _file_entry(path, own_stat, index)
+        except OSError as stat_exc:
+            row, refused = None, stat_exc
         if row is not None:
             return Operand(path, row, []), warnings
         if child_mounts is None or not child_mounts(path.virtual):
-            # GNU words a directory it may not read differently from
-            # one it cannot stat: the entry is there, opening it is
-            # what failed.
+            # GNU stats an operand before it opens one (ls.c's
+            # gobble_file, coreutils 9.7): a stat that fails is what it
+            # names, and a directory it may not read is worded apart,
+            # the entry being there.
+            failed = exc if refused is None else refused
             verb = (
                 "cannot open directory"
-                if isinstance(exc, PermissionError)
+                if refused is None and isinstance(exc, PermissionError)
                 else "cannot access"
             )
             warnings.append(
                 LsWarning(
-                    f"ls: {verb} '{path.raw_path}': {fs_strerror(exc) or exc}",
+                    f"ls: {verb} '{path.raw_path}': "
+                    f"{fs_strerror(failed) or failed}",
                     command_line_arg,
                 )
             )
@@ -1276,7 +1290,15 @@ async def probe_operand(
         structure_only = True
 
     if not names and not structure_only:
-        row = await _file_entry(path, own_stat, index)
+        try:
+            row = await _file_entry(path, own_stat, index)
+        except OSError as refusal:
+            logger.debug(
+                "ls: %s listed empty, its stat refused: %s",
+                path.virtual,
+                refusal,
+            )
+            row = None
         if row is not None:
             return Operand(path, row, []), warnings
 

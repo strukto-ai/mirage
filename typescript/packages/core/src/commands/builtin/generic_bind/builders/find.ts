@@ -16,6 +16,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
+import { landingRoot } from '../../utils/links.ts'
 import { treeWalk } from '../../utils/tree.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
@@ -52,6 +53,7 @@ export function findWalk<A extends Accessor>(
   const follow = flags.typedOrder('H', 'L', 'P').at(-1) === 'L'
   const loops: [string, string][] = []
   const mounts = opts.ns?.mounts
+  const links = opts.ns?.links ?? null
   const { readTree } = ops
   // The walk classifies entries through stat (see walkFind). A directory the guarded readdir
   // refuses, and an entry whose stat fails, are collected here and
@@ -70,15 +72,16 @@ export function findWalk<A extends Accessor>(
         (spec: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, spec, i),
         (spec: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, spec, i),
       )
+      const home = bounded && mounts !== undefined ? landingRoot(mounts, links, root.virtual) : null
       return walkFind(
         root,
         {
           unreadable: closed,
           unstatted,
           readdir: async (spec, i) =>
-            bounded &&
+            home !== null &&
             mounts !== undefined &&
-            mounts.rootOf(spec.virtual) !== mounts.rootOf(root.virtual)
+            landingRoot(mounts, links, spec.virtual) !== home
               ? []
               : readdir(spec, i),
           // -mtime must see namespace times (touch results, observed
@@ -88,7 +91,7 @@ export function findWalk<A extends Accessor>(
             const overlay = opts.ns?.statOverlay
             return overlay !== undefined ? overlay(spec.virtual, st) : st
           },
-          follow: follow ? (opts.ns?.links ?? null) : null,
+          follow: follow ? links : null,
           loops,
         },
         options,

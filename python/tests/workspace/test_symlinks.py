@@ -1767,6 +1767,18 @@ class _SealedRAMVFS(RAMVFS):
             b"diff: /data/d/ld: Permission denied\n"
             b"diff: /data/d/lf: Permission denied\n",
         ),
+        (
+            "ls /data/e /data/d/ld",
+            2,
+            b"/data/e:\na\nld\nlf\n",
+            b"ls: cannot access '/data/d/ld': Permission denied\n",
+        ),
+        (
+            "ls -L /data/d/lf",
+            2,
+            b"",
+            b"ls: cannot access '/data/d/lf': Permission denied\n",
+        ),
     ],
 )
 async def test_a_link_whose_target_refuses_stat(line, code, stdout, stderr):

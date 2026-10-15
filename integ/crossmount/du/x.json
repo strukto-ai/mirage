@@ -37,6 +37,45 @@
         "x",
         "a"
       ]
+    },
+    {
+      "id": "xm_du_xL_leaves_out_a_link_onto_another_mount",
+      "seq": 15600803,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/fcX_dxl /data2/fcX_dxl/sub && echo t > /data2/fcX_dxl/sub/f && echo y > /data/fcX_dxl/own && ln -s /data2/fcX_dxl /data/fcX_dxl/link && ln -s /data2/fcX_dxl/sub/f /data/fcX_dxl/flink && du -axL /data/fcX_dxl | cut -f2; rm -r /data/fcX_dxl /data2/fcX_dxl",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fcX_dxl/own\n/data/fcX_dxl\n",
+        "stderr": ""
+      },
+      "flags": [
+        "x",
+        "a",
+        "L"
+      ]
     }
   ]
 }

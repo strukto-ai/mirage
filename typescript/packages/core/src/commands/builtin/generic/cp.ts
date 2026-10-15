@@ -765,13 +765,19 @@ async function clearForDirectory(
 // skip silently; --update=none-fail records GNU's `not replacing` error;
 // --update=older replaces only when the source is strictly newer. A source
 // or target with no usable mtime always replaces (freshness cannot be
-// proven).
+// proven). A copy that writes through a link at the target's name compares
+// the source with what the link leads to; one whose backup moves the link
+// aside compares with the link itself (GNU copy.c's stat or lstat of the
+// destination, coreutils 9.7). `copies` is given for a copy that writes
+// through such a link, and left out for one that renames onto it or copies a
+// link as a link.
 export async function overwriteGate(
   policy: TransferPolicy,
   stat: StatFn,
   src: PathSpec,
   target: PathSpec,
   errors: string[],
+  copies?: TransferLinks,
 ): Promise<boolean> {
   // No gating flag: skip the target probe entirely so API-backed mounts
   // pay no extra stat per entry.
@@ -795,6 +801,9 @@ export async function overwriteGate(
     let srcInfo: FileStat
     try {
       srcInfo = await stat(src)
+      if (copies !== undefined && policy.backup === null) {
+        targetInfo = await destStat(stat, copies)(target)
+      }
     } catch (err) {
       if (!isMissingPath(err) && !isEnotdir(err)) throw err
       return true
@@ -1259,7 +1268,14 @@ export async function copyEntries(
     }
     if (
       opts.policy !== undefined &&
-      !(await overwriteGate(opts.policy, stat, entrySpec, entryDstSpec, errors))
+      !(await overwriteGate(
+        opts.policy,
+        stat,
+        entrySpec,
+        entryDstSpec,
+        errors,
+        'unlink' in strategy ? undefined : opts.copies,
+      ))
     )
       continue
     if (
@@ -1685,7 +1701,7 @@ export async function cpGeneric(
         const dstMount = dstBase + entryMount.slice(srcBase.length)
         const entry = spelledFrom(mountedPath(src, entryMount), src)
         const entryDst = spelledFrom(mountedPath(target, dstMount), target)
-        if (!(await overwriteGate(policy, stat, entry, entryDst, errors))) continue
+        if (!(await overwriteGate(policy, stat, entry, entryDst, errors, copies))) continue
         if (
           mirrored.made !== null &&
           !mirrored.made.has(parent(dstMount)) &&
@@ -1738,7 +1754,7 @@ export async function cpGeneric(
       errors.push(`cp: will not overwrite just-created '${target.rawPath}' with '${src.rawPath}'`)
       continue
     }
-    if (!(await overwriteGate(policy, stat, src, target, errors))) continue
+    if (!(await overwriteGate(policy, stat, src, target, errors, copies))) continue
     if (targetIsDir) {
       errors.push(ontoDirectory('cp', src, target, flags.backup))
       continue

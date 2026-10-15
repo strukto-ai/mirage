@@ -137,6 +137,40 @@
       }
     },
     {
+      "id": "sym_du_L_counts_a_target_once_across_operands",
+      "seq": 17000028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/sywd/d1 /data/sywd/d2 && printf 'hello\\n' > /data/sywd/ext && cd /data/sywd && printf 'a\\n' > d1/a && printf 'b\\n' > d2/b && ln -s ../ext d1/l && ln -s ../ext d2/l && du -aLc d1 d2 | cut -f2 | sort; du -L d1 d1 | cut -f2); rm -r /data/sywd",
+      "expect": {
+        "exit": 0,
+        "stdout": "d1\nd1/a\nd1/l\nd2\nd2/b\ntotal\nd1\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "sym_ls_RL_lists_a_directory_link",
       "seq": 17000010,
       "targets": [

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage import Workspace
@@ -20,6 +22,7 @@ from mirage.utils.dates import epoch_to_iso
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
+from mirage.workspace.mount.namespace.store import NodeFields
 
 
 @pytest.fixture
@@ -272,6 +275,33 @@ async def test_mutations_write_through_to_store(registry):
     entries = await store.load()
     assert "/data/link" not in entries
     assert entries["/data/moved"]["target"] == "/t1"
+
+
+class _ReadingStore(RAMNamespaceStore):
+    # A durable store yields on every write, and a read gets in there.
+    namespace: Namespace | None = None
+
+    async def set(self, path: str, fields: NodeFields) -> None:
+        await asyncio.sleep(0)
+        if self.namespace is not None:
+            self.namespace.symlink_targets()
+        await super().set(path, fields)
+
+
+@pytest.mark.asyncio
+async def test_rename_under_moves_every_link_a_read_between_writes_sees(
+    registry,
+):
+    store = _ReadingStore()
+    namespace = Namespace(registry, store=store)
+    await namespace.symlink("/data/src/a", "/t1", 1.0)
+    await namespace.symlink("/data/src/b", "/t2", 1.0)
+    store.namespace = namespace
+    assert await namespace.rename_under("/data/src", "/data/dst") == 2
+    assert dict(namespace.symlink_targets()) == {
+        "/data/dst/a": "/t1",
+        "/data/dst/b": "/t2",
+    }
 
 
 @pytest.mark.asyncio

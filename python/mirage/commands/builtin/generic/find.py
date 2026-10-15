@@ -10,6 +10,7 @@ from mirage.commands.builtin.find_parse import (
     parse_mtime,
     parse_size,
 )
+from mirage.commands.builtin.utils.links import landing_root
 from mirage.commands.builtin.utils.paths import (
     dot_refusal,
     link_follow,
@@ -949,15 +950,19 @@ async def find_walk_generic(
                 unreadable: list[str] = []
                 unstatted: dict[str, Exception] = {}
                 loops: list[tuple[str, str]] = []
+                home = (
+                    landing_root(mounts, links, search.virtual)
+                    if bounded and mounts is not None
+                    else None
+                )
 
                 async def read_directory(
                     path: PathSpec, index: IndexCacheStore | None
                 ) -> list[str]:
                     if (
-                        bounded
+                        home is not None
                         and mounts is not None
-                        and mounts.root_of(path.virtual)
-                        != mounts.root_of(search.virtual)
+                        and landing_root(mounts, links, path.virtual) != home
                     ):
                         return []
                     return await readdir(path, index)

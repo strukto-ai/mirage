@@ -995,6 +995,7 @@ async def overwrite_gate(
     src: PathSpec,
     target: PathSpec,
     errors: list[str],
+    copies: TransferLinks | None = None,
 ) -> bool:
     """Decide whether an existing target may be replaced.
 
@@ -1004,12 +1005,20 @@ async def overwrite_gate(
     usable mtime always replaces (freshness cannot be proven). ``-i``
     asks last, once the target survived the update checks.
 
+    A copy that writes through a link at the target's name compares
+    the source with what the link leads to; one whose backup moves the
+    link aside compares with the link itself (GNU copy.c's stat or lstat
+    of the destination, coreutils 9.7).
+
     Args:
         policy (TransferPolicy): Overwrite policy for this command.
         stat (StatFn): Stats a path; raises when missing.
         src (PathSpec): Source entry.
         target (PathSpec): Destination entry.
         errors (list[str]): Collected stderr lines, appended in place.
+        copies (TransferLinks | None): Namespace facts for a copy that
+            writes through a link at the target's name; None for one
+            that renames onto it or copies a link as a link.
 
     Returns:
         bool: True when the transfer should proceed.
@@ -1034,6 +1043,8 @@ async def overwrite_gate(
     if policy.update == "older":
         try:
             src_info = await stat(src)
+            if copies is not None and policy.backup is None:
+                target_info = await dest_stat(stat, copies, target)
         except (FileNotFoundError, NotADirectoryError, ValueError):
             return True
         src_ts = iso_timestamp(src_info.modified)
@@ -1724,7 +1735,12 @@ async def copy_entries(
                 copied_all = False
             continue
         if policy is not None and not await overwrite_gate(
-            policy, stat, entry, entry_dst, errors
+            policy,
+            stat,
+            entry,
+            entry_dst,
+            errors,
+            copies if isinstance(strategy, PrimitiveCopy) else None,
         ):
             continue
         if (
@@ -2188,7 +2204,7 @@ async def cp_generic(
                     mounted_path(target, dst_mount), target
                 )
                 if not await overwrite_gate(
-                    policy, stat, entry, entry_dst, errors
+                    policy, stat, entry, entry_dst, errors, copies
                 ):
                     continue
                 if (
@@ -2245,7 +2261,7 @@ async def cp_generic(
                 f"with '{src.raw_path}'"
             )
             continue
-        if not await overwrite_gate(policy, stat, src, target, errors):
+        if not await overwrite_gate(policy, stat, src, target, errors, copies):
             continue
         if target_is_dir:
             errors.append(_onto_directory("cp", src, target, flags.backup))

@@ -598,13 +598,17 @@ class Namespace:
         if not moved:
             return 0
         landing = dst.rstrip("/")
-        self._links = None
-        for path, meta in moved:
+        landed = [
+            (f"{landing}/{path[len(base) :]}", meta) for path, meta in moved
+        ]
+        # The table moves whole before the store is awaited: a read in
+        # between rebuilds the link map, which nothing clears again.
+        for path, _meta in moved:
             del self._nodes[path]
-        for path, meta in moved:
-            target = f"{landing}/{path[len(base) :]}"
-            self._nodes[target] = meta
-            await self._store.set(target, meta.to_fields())
+        self._nodes.update(landed)
+        self._links = None
+        for path, meta in landed:
+            await self._store.set(path, meta.to_fields())
         await self._store.delete([path for path, _meta in moved])
         return len(moved)
 

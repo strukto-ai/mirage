@@ -574,11 +574,15 @@ export async function du(
   directories?: () => readonly string[],
   ns?: NamespaceView,
   inaccessible?: () => readonly (readonly [string, string | null])[],
+  // Asked before each operand's walk whether an earlier one already counted
+  // it, which GNU then skips without a row.
+  repeated?: (p: PathSpec) => boolean,
 ): Promise<DuOutput> {
   const lines: string[] = []
   let grand = 0
   let runs: SizedRun[] | null = []
   for (const root of paths) {
+    if (repeated?.(root) === true) continue
     const [block, total, run] = await duOne(
       root,
       computeSize,
@@ -647,6 +651,7 @@ export async function duGeneric(
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
   inaccessible?: () => readonly (readonly [string, string | null])[],
+  repeated?: (p: PathSpec) => boolean,
 ): Promise<[Uint8Array, IOResult]> {
   const flags = parseFlags(opts)
   const { present, missing } = await duOperands(
@@ -670,6 +675,7 @@ export async function duGeneric(
     directories,
     opts.ns,
     inaccessible,
+    repeated,
   )
   return [
     out.stdout,

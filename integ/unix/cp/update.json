@@ -458,6 +458,42 @@
         "u",
         "update"
       ]
+    },
+    {
+      "id": "cp_u_compares_with_what_a_destination_link_leads_to",
+      "seq": 15600806,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cpu_l/s /data/cpu_l/t && printf 'new\\n' > /data/cpu_l/s/a && printf 'old\\n' > /data/cpu_l/old && touch -d '2024-01-01T00:00:00' /data/cpu_l/s/a && touch -d '2020-01-01T00:00:00' /data/cpu_l/old && ln -s /data/cpu_l/old /data/cpu_l/t/a && cp -ub /data/cpu_l/s/a /data/cpu_l/t/ && cat /data/cpu_l/old && ls /data/cpu_l/t && cp -u /data/cpu_l/s/a /data/cpu_l/t/ && cat /data/cpu_l/old && ls /data/cpu_l/t; rm -r /data/cpu_l",
+      "expect": {
+        "exit": 0,
+        "stdout": "old\na\nnew\na\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "b"
+      ]
     }
   ]
 }

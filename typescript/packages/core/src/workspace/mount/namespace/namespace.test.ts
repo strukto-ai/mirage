@@ -18,6 +18,7 @@ import { CycleError } from '../../../utils/path.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { metaFromFields, metaToFields } from './namespace.ts'
 import { RAMNamespaceStore } from './ram.ts'
+import type { NodeFields } from './store.ts'
 
 describe('Namespace facade (addressing)', () => {
   it('resolve delegates to the workspace resolver', async () => {
@@ -311,6 +312,17 @@ describe('Namespace node metadata overlay', () => {
   })
 })
 
+// A durable store yields on every write, and a read gets in there.
+class ReadingStore extends RAMNamespaceStore {
+  read: (() => void) | null = null
+
+  override async set(path: string, fields: NodeFields): Promise<void> {
+    await Promise.resolve()
+    this.read?.()
+    return super.set(path, fields)
+  }
+}
+
 describe('Namespace + NamespaceStore', () => {
   it('mutations write through to the store', async () => {
     const store = new RAMNamespaceStore()
@@ -326,6 +338,22 @@ describe('Namespace + NamespaceStore', () => {
     entries = await store.load()
     expect(entries.get('/data/link')).toBeUndefined()
     expect(entries.get('/data/moved')).toEqual({ target: '/t1', mtime: 1 })
+    await ws.close()
+  })
+
+  it('renameUnder moves every link a read between its writes sees', async () => {
+    const store = new ReadingStore()
+    const ws = new Workspace({ '/data': new RAMVFS() }, { namespaceStore: store })
+    await ws.namespace.symlink('/data/src/a', '/t1', 1)
+    await ws.namespace.symlink('/data/src/b', '/t2', 1)
+    store.read = () => ws.namespace.symlinkTargets()
+    expect(await ws.namespace.renameUnder('/data/src', '/data/dst')).toBe(2)
+    expect(new Map(ws.namespace.symlinkTargets())).toEqual(
+      new Map([
+        ['/data/dst/a', '/t1'],
+        ['/data/dst/b', '/t2'],
+      ]),
+    )
     await ws.close()
   })
 

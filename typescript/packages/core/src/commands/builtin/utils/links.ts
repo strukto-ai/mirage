@@ -200,6 +200,17 @@ export function serves(mounts: MountView | undefined, prefix: string, virtual: s
   return mounts === undefined || mounts.rootOf(virtual).replace(/\/+$/, '') === prefix
 }
 
+/**
+ * The mount a walked path lands on, every link on it followed. A mount is
+ * mirage's filesystem, so this stands for the device stat(2) reports, which
+ * `find -xdev` compares with the start point's: a link onto another mount
+ * leaves it as a mount root does (findutils 4.10). `virtual` is a directory
+ * the walk reached, which resolves. Mirrors Python's landing_root.
+ */
+export function landingRoot(mounts: MountView, links: LinkView | null, virtual: string): string {
+  return mounts.rootOf(links !== null ? links.resolve(virtual) : virtual)
+}
+
 async function linkedStat<A extends Accessor>(
   stat: CommandIO<A>['stat'],
   links: LinkView,

@@ -629,6 +629,7 @@ async def du(
     directories: Callable[[], Sequence[str]] | None = None,
     ns: NamespaceView | None = None,
     inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
+    repeated: Callable[[PathSpec], bool] | None = None,
 ) -> DuOutput:
     """Render ``du`` output for a list of operands.
 
@@ -664,11 +665,16 @@ async def du(
             None): read after the walks for each link ``-L`` could not
             follow, with the strerror GNU adds for a chain that loops
             (it names a dangling one alone); exits 1.
+        repeated (Callable[[PathSpec], bool] | None): asked before each
+            operand's walk whether an earlier one already counted it,
+            which GNU then skips without a row.
     """
     lines: list[str] = []
     totals: list[int] = []
     runs: list[SizedRun] | None = []
     for path in paths:
+        if repeated is not None and repeated(path):
+            continue
         block, total, run = await _du_one(
             path,
             compute_size,
@@ -743,6 +749,7 @@ async def du_generic(
     unreadable: Callable[[], Sequence[str]] | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
     inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
+    repeated: Callable[[PathSpec], bool] | None = None,
 ) -> tuple[bytes, IOResult]:
     """Run one whole ``du`` invocation, from raw flags to rendered bytes.
 
@@ -775,6 +782,8 @@ async def du_generic(
             the walk met, read after each operand's walk.
         inaccessible (Callable[[], Sequence[tuple[str, str | None]]] |
             None): The links -L could not follow, read after the walks.
+        repeated (Callable[[PathSpec], bool] | None): Whether an earlier
+            operand's walk already counted an operand.
 
     Raises:
         UsageError: on a bad depth or a conflicting flag combination.
@@ -804,6 +813,7 @@ async def du_generic(
         mounts=opts.ns.mounts if opts.ns is not None else None,
         ns=opts.ns,
         inaccessible=inaccessible,
+        repeated=repeated,
     )
     return out.stdout, IOResult(
         stderr=out.stderr, exit_code=out.exit_code, sized_runs=out.runs

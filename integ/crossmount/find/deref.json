@@ -169,6 +169,44 @@
     "stdout": "/data2/xm_link.txt\n",
     "stderr": ""
    }
+  },
+  {
+   "id": "xm_find_L_xdev_leaves_a_link_onto_another_mount_unwalked",
+   "seq": 15600805,
+   "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+   ],
+   "command": "mkdir -p /data/fcX_fx /data2/fcX_fx/sub && echo t > /data2/fcX_fx/sub/f && echo o > /data/fcX_fx/own && ln -s /data2/fcX_fx /data/fcX_fx/link && find -L /data/fcX_fx -xdev | sort; find -L /data/fcX_fx/link -xdev | sort; rm -r /data/fcX_fx /data2/fcX_fx",
+   "expect": {
+    "exit": 0,
+    "stdout": "/data/fcX_fx\n/data/fcX_fx/link\n/data/fcX_fx/own\n/data/fcX_fx/link\n/data/fcX_fx/link/sub\n/data/fcX_fx/link/sub/f\n",
+    "stderr": ""
+   },
+   "flags": [
+    "L",
+    "xdev"
+   ]
   }
  ]
 }

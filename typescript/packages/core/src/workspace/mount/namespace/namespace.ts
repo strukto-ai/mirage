@@ -475,13 +475,16 @@ export class Namespace {
     }
     if (moved.length === 0) return 0
     const landing = rstripSlash(dst)
-    this.links = null
+    const landed = moved.map(([path, meta]): [string, NodeMeta] => [
+      `${landing}/${path.slice(base.length)}`,
+      meta,
+    ])
+    // The table moves whole before the store is awaited: a read in between
+    // rebuilds the link map, which nothing clears again.
     for (const [path] of moved) this.nodeTable.delete(path)
-    for (const [path, meta] of moved) {
-      const target = `${landing}/${path.slice(base.length)}`
-      this.nodeTable.set(target, meta)
-      await this.store.set(target, metaToFields(meta))
-    }
+    for (const [path, meta] of landed) this.nodeTable.set(path, meta)
+    this.links = null
+    for (const [path, meta] of landed) await this.store.set(path, metaToFields(meta))
     await this.store.delete(moved.map(([path]) => path))
     return moved.length
   }
