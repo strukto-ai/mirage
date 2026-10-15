@@ -1,0 +1,269 @@
+{
+  "cases": [
+    {
+      "id": "comm_default_order_check_warns_and_reads_on",
+      "seq": 13720001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qcmo && printf 'b\\na\\nc\\n' > /data/qcmo/u && printf 'a\\nb\\nc\\n' > /data/qcmo/s && comm --total /data/qcmo/u /data/qcmo/s",
+      "expect": {
+        "exit": 1,
+        "stdout": "\ta\n\t\tb\na\n\t\tc\n1\t1\t2\ttotal\n",
+        "stderr": "comm: file 1 is not in sorted order\ncomm: input is not in sorted order\n"
+      },
+      "flags": [
+        "total"
+      ],
+      "note": "GNU's default checks order once a line unique to one file has printed: it warns once per file, prints everything, and closes with 'input is not in sorted order', exit 1. Pinned in debian:stable-slim."
+    },
+    {
+      "id": "comm_check_order_stops_at_the_first_disorder",
+      "seq": 13720002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qcmo && printf 'b\\na\\nc\\n' > /data/qcmo/u && printf 'a\\nb\\nc\\n' > /data/qcmo/s && comm --check-order --total /data/qcmo/u /data/qcmo/s",
+      "expect": {
+        "exit": 1,
+        "stdout": "\ta\n\t\tb\n",
+        "stderr": "comm: file 1 is not in sorted order\n"
+      },
+      "flags": [
+        "check-order",
+        "total"
+      ],
+      "note": "--check-order makes the first disorder fatal: nothing after it prints, not even --total's line. Pinned in debian:stable-slim."
+    },
+    {
+      "id": "comm_default_warns_once_for_each_file",
+      "seq": 13720003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qcmo && printf 'b\\na\\n' > /data/qcmo/ba && printf 'd\\nc\\n' > /data/qcmo/dc && comm /data/qcmo/ba /data/qcmo/dc",
+      "expect": {
+        "exit": 1,
+        "stdout": "b\na\n\td\n\tc\n",
+        "stderr": "comm: file 1 is not in sorted order\ncomm: file 2 is not in sorted order\ncomm: input is not in sorted order\n"
+      },
+      "note": "Both files out of order: one warning for each, file 1's first. Pinned in debian:stable-slim."
+    },
+    {
+      "id": "comm_default_skips_disorder_among_pairable_lines",
+      "seq": 13720004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qcmo && printf 'b\\na\\n' > /data/qcmo/p && printf 'b\\na\\nz\\n' > /data/qcmo/pz && comm /data/qcmo/p /data/qcmo/p; echo rc=$?; comm /data/qcmo/pz /data/qcmo/p; echo rc=$?; comm --check-order /data/qcmo/p /data/qcmo/p; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "\t\tb\n\t\ta\nrc=0\n\t\tb\n\t\ta\nz\nrc=0\n\t\tb\nrc=1\n",
+        "stderr": "comm: file 1 is not in sorted order\n"
+      },
+      "flags": [
+        "check-order"
+      ],
+      "note": "The default never checks before an unpairable line, nor again for a disorder it read earlier; --check-order checks from the first line. Pinned in debian:stable-slim."
+    },
+    {
+      "id": "comm_later_order_option_wins",
+      "seq": 13720005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qcmo && printf 'b\\na\\nc\\n' > /data/qcmo/u && printf 'a\\nb\\nc\\n' > /data/qcmo/s && comm --check-order --nocheck-order /data/qcmo/u /data/qcmo/s; echo rc=$?; comm --nocheck-order --check-order /data/qcmo/u /data/qcmo/s; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "\ta\n\t\tb\na\n\t\tc\nrc=0\n\ta\n\t\tb\nrc=1\n",
+        "stderr": "comm: file 1 is not in sorted order\n"
+      },
+      "flags": [
+        "check-order",
+        "nocheck-order"
+      ],
+      "note": "Of --check-order and --nocheck-order, the later one typed wins. Pinned in debian:stable-slim."
+    },
+    {
+      "id": "comm_order_check_follows_the_file_left_over",
+      "seq": 13720006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qcmo && printf 'a\\n' > /data/qcmo/a && printf 'a\\nc\\nb\\n' > /data/qcmo/acb && comm /data/qcmo/a /data/qcmo/acb; echo rc=$?; comm --check-order /data/qcmo/a /data/qcmo/acb",
+      "expect": {
+        "exit": 1,
+        "stdout": "\t\ta\n\tc\n\tb\nrc=1\n\t\ta\n\tc\n",
+        "stderr": "comm: file 2 is not in sorted order\ncomm: input is not in sorted order\ncomm: file 2 is not in sorted order\n"
+      },
+      "flags": [
+        "check-order"
+      ],
+      "note": "Lines of the file left over after the other ends are unpairable and still checked. Pinned in debian:stable-slim."
+    },
+    {
+      "id": "comm_order_check_reads_nul_records",
+      "seq": 13720007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/qcmo && printf 'b\\0a\\0c\\0' > /data/qcmo/zu && printf 'a\\0b\\0c\\0' > /data/qcmo/zs && comm -z /data/qcmo/zu /data/qcmo/zs | tr '\\0' '|'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\ta|\t\tb|a|\t\tc|",
+        "stderr": "comm: file 1 is not in sorted order\ncomm: input is not in sorted order\n"
+      },
+      "flags": [
+        "z"
+      ],
+      "note": "-z records are checked the same way. Pinned in debian:stable-slim."
+    }
+  ]
+}

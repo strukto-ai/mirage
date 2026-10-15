@@ -23,7 +23,7 @@ async def comm(
     suppress1: bool = False,
     suppress2: bool = False,
     suppress3: bool = False,
-    check_order: bool = False,
+    check_order: bool | None = None,
     output_delimiter: str = "\t",
     total: bool = False,
     zero_terminated: bool = False,
@@ -55,37 +55,65 @@ async def _comm_stream(
     readers: list[AsyncLineIterator],
     io: IOResult,
     suppressed: tuple[bool, bool, bool],
-    check_order: bool,
+    check_order: bool | None,
     delimiter: str,
     total: bool,
     separator: bytes,
 ) -> AsyncIterator[bytes]:
-    previous: list[str | None] = [None, None]
+    """Merge the two inputs, checking each one's order as GNU comm does.
+
+    Each newly read line is checked against its file's previous one:
+    always under --check-order, where the first disorder ends the run,
+    never under --nocheck-order, and by default only once a line unique
+    to one file has printed, warning once per file and closing with
+    ``input is not in sorted order``. Both exit 1.
+
+    Args:
+        readers (list[AsyncLineIterator]): file 1 and file 2.
+        io (IOResult): where the warnings and the status land.
+        suppressed (tuple[bool, bool, bool]): -1, -2 and -3.
+        check_order (bool | None): --check-order (True),
+            --nocheck-order (False), or neither (None).
+        delimiter (str): the column separator.
+        total (bool): --total.
+        separator (bytes): the record terminator.
+    """
+    lines: list[str | None] = [None, None]
     warned = [False, False]
     counts = [0, 0, 0]
+    errors: list[str] = []
+    unpairable = False
 
-    async def read(which: int) -> str | None:
+    async def pull(which: int) -> bool:
+        """Read file WHICH's next line; whether its order ends the run.
+
+        Args:
+            which (int): 0 for file 1, 1 for file 2.
+        """
         raw = await readers[which].readline(separator)
-        line = None if raw is None else raw.decode(errors="replace")
-        before = previous[which]
+        before = lines[which]
+        line = lines[which] = (
+            None if raw is None else raw.decode(errors="replace")
+        )
         if (
-            check_order
-            and line is not None
-            and before is not None
-            and line < before
+            check_order is False
+            or not (check_order or unpairable)
+            or warned[which]
+            or line is None
+            or before is None
+            or line >= before
         ):
-            warned[which] = True
-            which_file = 1 if warned[0] else 2
-            io.stderr = (
-                f"comm: file {which_file} is not in sorted order\n".encode()
-            )
-            io.exit_code = 1
-        previous[which] = line
-        return line
+            return False
+        warned[which] = True
+        errors.append(f"comm: file {which + 1} is not in sorted order\n")
+        io.stderr, io.exit_code = "".join(errors).encode(), 1
+        return bool(check_order)
 
     try:
-        left, right = await read(0), await read(1)
-        while left is not None or right is not None:
+        await pull(0)
+        await pull(1)
+        while lines[0] is not None or lines[1] is not None:
+            left, right = lines
             column = (
                 1
                 if right is None or (left is not None and left < right)
@@ -93,6 +121,7 @@ async def _comm_stream(
                 if left is None or right < left
                 else 3
             )
+            unpairable = unpairable or column != 3
             text = left if column != 2 else right
             counts[column - 1] += 1
             if not suppressed[column - 1]:
@@ -101,10 +130,10 @@ async def _comm_stream(
                     * sum(not value for value in suppressed[: column - 1])
                     + (text or "")
                 ).encode() + separator
-            if column != 2:
-                left = await read(0)
-            if column != 1:
-                right = await read(1)
+            if column != 2 and await pull(0):
+                return
+            if column != 1 and await pull(1):
+                return
         if total:
             yield (
                 delimiter.join(
@@ -117,6 +146,9 @@ async def _comm_stream(
                 ).encode()
                 + separator
             )
+        if any(warned):
+            errors.append("comm: input is not in sorted order\n")
+            io.stderr = "".join(errors).encode()
     finally:
         for reader in readers:
             await reader.discard()
@@ -127,10 +159,13 @@ __all__ = ["comm"]
 
 @dataclass(frozen=True, slots=True)
 class CommFlags:
+    """comm's options; ``check_order`` is the later of --check-order and
+    --nocheck-order, None when neither was given."""
+
     suppress1: bool = False
     suppress2: bool = False
     suppress3: bool = False
-    check_order: bool = False
+    check_order: bool | None = None
     output_delimiter: str = "\t"
     total: bool = False
     zero_terminated: bool = False
@@ -138,11 +173,16 @@ class CommFlags:
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> CommFlags:
     fl = FlagView(flags, spec=SPECS["comm"])
+    order = [
+        name
+        for name, value in fl.occurrences("check_order", "nocheck_order")
+        if value
+    ]
     return CommFlags(
         suppress1=fl.as_bool("args_1"),
         suppress2=fl.as_bool("2"),
         suppress3=fl.as_bool("3"),
-        check_order=fl.as_bool("check_order"),
+        check_order=order[-1] == "check_order" if order else None,
         output_delimiter=fl.as_str("output_delimiter") or "\t",
         total=fl.as_bool("total"),
         zero_terminated=fl.as_bool("zero_terminated"),

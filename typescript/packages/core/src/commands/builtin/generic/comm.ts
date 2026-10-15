@@ -26,11 +26,13 @@ import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
+// comm's options; `checkOrder` is the later of --check-order and
+// --nocheck-order, null when neither was given.
 interface CommFlags {
   readonly suppress1: boolean
   readonly suppress2: boolean
   readonly suppress3: boolean
-  readonly checkOrder: boolean
+  readonly checkOrder: boolean | null
   readonly outputDelimiter: string
   readonly total: boolean
   readonly zeroTerminated: boolean
@@ -38,11 +40,15 @@ interface CommFlags {
 
 function parseFlags(bag: Record<string, FlagValue>): CommFlags {
   const fl = new FlagView(bag, specOf('comm'))
+  const order = fl
+    .occurrences('check_order', 'nocheck_order')
+    .filter(([, value]) => value === true)
+    .map(([name]) => name)
   return {
     suppress1: fl.asBool('args_1'),
     suppress2: fl.asBool('2'),
     suppress3: fl.asBool('3'),
-    checkOrder: fl.asBool('check_order'),
+    checkOrder: order.length > 0 ? order.at(-1) === 'check_order' : null,
     outputDelimiter: fl.asStr('output_delimiter') ?? '\t',
     total: fl.asBool('total'),
     zeroTerminated: fl.asBool('zero_terminated'),
@@ -66,44 +72,61 @@ export function commGeneric(
   return [commStream(readers, io, parsed), io]
 }
 
+/**
+ * Merge the two inputs, checking each one's order as GNU comm does.
+ *
+ * Each newly read line is checked against its file's previous one: always
+ * under --check-order, where the first disorder ends the run, never under
+ * --nocheck-order, and by default only once a line unique to one file has
+ * printed, warning once per file and closing with `input is not in sorted
+ * order`. Both exit 1.
+ */
 async function* commStream(
   readers: readonly [AsyncLineIterator, AsyncLineIterator],
   io: IOResult,
   flags: CommFlags,
 ): AsyncIterable<Uint8Array> {
   const separator = flags.zeroTerminated ? 0 : 10
-  const previous: (string | null)[] = [null, null]
+  const lines: [string | null, string | null] = [null, null]
   const warned = [false, false]
   const counts = [0, 0, 0]
+  const errors: string[] = []
   const suppressed = [flags.suppress1, flags.suppress2, flags.suppress3]
-  async function read(which: 0 | 1): Promise<string | null> {
+  let unpairable = false
+  // Read file WHICH's next line; whether its order ends the run.
+  async function pull(which: 0 | 1): Promise<boolean> {
     const raw = await readers[which].readline(undefined, separator)
+    const before = lines[which]
     const line = raw === null ? null : DEC.decode(raw)
-    const before = previous[which]
+    lines[which] = line
     if (
-      flags.checkOrder &&
-      line !== null &&
-      before !== null &&
-      before !== undefined &&
-      compareCodePoints(line, before) < 0
-    ) {
-      warned[which] = true
-      io.stderr = ENC.encode(`comm: file ${warned[0] ? '1' : '2'} is not in sorted order\n`)
-      io.exitCode = 1
-    }
-    previous[which] = line
-    return line
+      flags.checkOrder === false ||
+      !(flags.checkOrder === true || unpairable) ||
+      warned[which] === true ||
+      line === null ||
+      before === null ||
+      compareCodePoints(line, before) >= 0
+    )
+      return false
+    warned[which] = true
+    errors.push(`comm: file ${String(which + 1)} is not in sorted order\n`)
+    io.stderr = ENC.encode(errors.join(''))
+    io.exitCode = 1
+    return flags.checkOrder === true
   }
   try {
-    let left = await read(0),
-      right = await read(1)
-    while (left !== null || right !== null) {
+    await pull(0)
+    await pull(1)
+    for (;;) {
+      const [left, right] = lines
+      if (left === null && right === null) break
       const column =
         right === null || (left !== null && compareCodePoints(left, right) < 0)
           ? 1
           : left === null || compareCodePoints(right, left) < 0
             ? 2
             : 3
+      unpairable ||= column !== 3
       const text = column === 2 ? right : left
       counts[column - 1] = (counts[column - 1] ?? 0) + 1
       if (!suppressed[column - 1])
@@ -114,8 +137,8 @@ async function* commStream(
             (text ?? '') +
             String.fromCharCode(separator),
         )
-      if (column !== 2) left = await read(0)
-      if (column !== 1) right = await read(1)
+      if (column !== 2 && (await pull(0))) return
+      if (column !== 1 && (await pull(1))) return
     }
     if (flags.total)
       yield ENC.encode(
@@ -123,6 +146,10 @@ async function* commStream(
           flags.outputDelimiter,
         ) + String.fromCharCode(separator),
       )
+    if (warned.includes(true)) {
+      errors.push('comm: input is not in sorted order\n')
+      io.stderr = ENC.encode(errors.join(''))
+    }
   } finally {
     for (const reader of readers) await reader.discard()
   }
