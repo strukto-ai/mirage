@@ -26,10 +26,10 @@ import { argmatchError } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
+  normalizeCounts,
   numberFlagError,
   parseCounts,
   parseSeconds,
-  tailBytes,
   type TailCounts,
 } from '../tail_counts.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
@@ -215,7 +215,9 @@ function readLast(
   }
 }
 
-async function* tailStream(source: ByteSource, counts: TailCounts): AsyncIterable<Uint8Array> {
+// The tail of one source, read as it streams. Mirrors Python's `tail`.
+async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<Uint8Array> {
+  const counts = normalizeCounts(rawCounts)
   if (counts.fromByte !== null || counts.fromLine !== null) {
     let skipBytes = counts.fromByte === null ? 0 : Math.max(0, counts.fromByte - 1)
     let skipLines = counts.fromLine === null ? 0 : Math.max(0, counts.fromLine - 1)
@@ -274,24 +276,35 @@ async function* tailStream(source: ByteSource, counts: TailCounts): AsyncIterabl
   }
 }
 
+// Each opened operand's tail under its header. An unread operand (a
+// directory) prints only its header; a read that fails once the stat passed
+// is reported and the next operand still prints. Mirrors Python's
+// `tail_multi`.
 async function* tailMulti(
-  paths: PathSpec[],
-  sources: AsyncIterable<Uint8Array>[],
+  paths: readonly PathSpec[],
+  read: Stream,
   counts: TailCounts,
   showHeaders: boolean,
+  unread: ReadonlySet<string>,
   io: IOResult,
 ): AsyncIterable<Uint8Array> {
   let printed = 0
-  for (const [i, p] of paths.entries()) {
-    const source = sources[i]
-    if (source === undefined) throw new Error('tail: missing operand source')
+  for (const p of paths) {
     let pending = showHeaders
       ? encodeText(
           (printed > 0 ? '\n' : '') + '==> ' + operandLabel(p, STDIN_HEADER_NAME) + ' <==\n',
         )
       : null
+    if (unread.has(p.virtual)) {
+      if (pending !== null) {
+        yield pending
+        printed++
+      }
+      continue
+    }
+    const source = read(p)
     try {
-      for await (const part of tailStream(source, counts)) {
+      for await (const part of tail(source, counts)) {
         if (pending !== null) {
           yield pending
           pending = null
@@ -438,7 +451,7 @@ async function* follow(
       }
       last = slot
       if (raw !== null) {
-        yield tailBytes(raw, counts)
+        yield* tail(raw, counts)
         positions.set(slot, raw.byteLength)
       }
     }
@@ -669,14 +682,27 @@ export async function tailGeneric(
       : following.retry && !following.byName
         ? RETRY_INITIAL
         : ''
-  if (paths.length > 0 && following.follow) {
+  // GNU opens nothing when a tail from the end keeps no line or byte.
+  if (
+    !following.follow &&
+    counts.fromLine === null &&
+    counts.fromByte === null &&
+    (counts.byteCount ?? n) === 0
+  ) {
+    return [null, new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })]
+  }
+  if (paths.length > 0) {
     const showHeaders = (vFlag || paths.length > 1) && !qFlag
     const [opened, unread, err] = await splitOpened(paths, stat, 'tail')
-    const readable = opened.filter((p) => !unread.has(p.virtual))
     const io = new IOResult({
       exitCode: err === '' ? 0 : 1,
       stderr: retryWarning + err === '' ? null : encodeText(retryWarning + err),
     })
+    if (!following.follow) {
+      if (opened.length === 0) return [null, io]
+      return [tailMulti(opened, lastOf(stream) ?? stream, counts, showHeaders, unread, io), io]
+    }
+    const readable = opened.filter((p) => !unread.has(p.virtual))
     const pending = await unfollowable(
       paths,
       new Set(readable.map((p) => p.virtual)),
@@ -726,15 +752,9 @@ export async function tailGeneric(
     ]
   }
 
-  const io = new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })
-  if (paths.length > 0) {
-    const read = lastOf(stream) ?? stream
-    const sources = paths.map((p) => read(p))
-    return [tailMulti(paths, sources, counts, (vFlag || paths.length > 1) && !qFlag, io), io]
-  }
   async function* output(): AsyncIterable<Uint8Array> {
     if (vFlag && !qFlag) yield encodeText('==> ' + STDIN_HEADER_NAME + ' <==\n')
-    yield* tailStream(opts.stdin ?? new Uint8Array(), counts)
+    yield* tail(opts.stdin ?? new Uint8Array(), counts)
   }
-  return [output(), io]
+  return [output(), new IOResult({ stderr: retryWarning === '' ? null : encodeText(retryWarning) })]
 }

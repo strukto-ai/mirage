@@ -904,6 +904,14 @@ async def tail_generic(
         if parsed.retry and not parsed.follow_name
         else b""
     )
+    # GNU opens nothing when a tail from the end keeps no line or byte.
+    if (
+        not parsed.follow
+        and counts.from_line is None
+        and counts.from_byte is None
+        and (n if counts.byte_count is None else counts.byte_count) == 0
+    ):
+        return None, IOResult(stderr=retry_warning or None)
     if paths:
         show_headers = (parsed.verbose or len(paths) > 1) and not parsed.quiet
         opened, unread, err = await split_opened(paths, stat, "tail")

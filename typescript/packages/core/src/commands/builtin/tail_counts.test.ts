@@ -19,19 +19,11 @@ import {
   parseByteCount,
   parseCounts,
   parseSeconds,
-  tailBytes,
   type TailCounts,
 } from './tail_counts.ts'
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder()
-
-function run(data: string, n: string | null, c: string | null): string {
-  return DEC.decode(tailBytes(ENC.encode(data), parseCounts(n, c)))
-}
-
 describe('normalizeCounts', () => {
-  // A TailCounts is a plain object, so anything reaching tailBytes from
+  // A TailCounts is a plain object, so anything reaching tail from
   // outside TypeScript can leave fields undefined. `undefined !== null` is
   // true, so a bare guard used to take the count-forward branch and return
   // `slice(NaN)` -- the whole input, silently.
@@ -42,15 +34,6 @@ describe('normalizeCounts', () => {
       byteCount: null,
       fromByte: null,
     })
-  })
-
-  it.each([
-    [{ lines: 2 }, 'd\ne\n'],
-    [{}, 'a\nb\nc\nd\ne\n'],
-    [{ byteCount: 3 }, '\ne\n'],
-  ])('serves %j as its own kind of tail, not as the whole input', (partial, expected) => {
-    const data = ENC.encode('a\nb\nc\nd\ne\n')
-    expect(DEC.decode(tailBytes(data, partial as TailCounts))).toBe(expected)
   })
 })
 
@@ -84,41 +67,6 @@ describe('parseCounts', () => {
       byteCount: null,
       fromByte: null,
     })
-  })
-})
-
-describe('tailBytes', () => {
-  it('-c N and -c -N both take the last N bytes', () => {
-    expect(run('abcdefghij', null, '3')).toBe('hij')
-    expect(run('abcdefghij', null, '-3')).toBe('hij')
-  })
-
-  it('-c +N starts at byte N, 1-indexed', () => {
-    expect(run('abcdefghij', null, '+3')).toBe('cdefghij')
-    expect(run('abcdefghij', null, '+1')).toBe('abcdefghij')
-    expect(run('abcdefghij', null, '+0')).toBe('abcdefghij')
-    expect(run('abcdefghij', null, '+99')).toBe('')
-  })
-
-  it('-c 0 is empty but a count past the end is the whole file', () => {
-    expect(run('abcdefghij', null, '0')).toBe('')
-    expect(run('abcdefghij', null, '99')).toBe('abcdefghij')
-  })
-
-  it('falls back to the last 10 lines when neither flag is set', () => {
-    const body = Array.from({ length: 20 }, (_, i) => `line${String(i + 1)}`).join('\n')
-    expect(run(body, null, null).split('\n')).toHaveLength(10)
-  })
-
-  it('keeps the line behaviour it already had', () => {
-    expect(run('a\nb\nc\nd\ne\n', '3', null)).toBe('c\nd\ne\n')
-    expect(run('a\nb\nc\nd\ne\n', '-3', null)).toBe('c\nd\ne\n')
-    expect(run('a\nb\nc\nd\ne\n', '+2', null)).toBe('b\nc\nd\ne\n')
-    expect(run('a\nb\nc\n', '0', null)).toBe('')
-  })
-
-  it('lets -c win over -n, as GNU does', () => {
-    expect(run('abcdefghij', '2', '3')).toBe('hij')
   })
 })
 
