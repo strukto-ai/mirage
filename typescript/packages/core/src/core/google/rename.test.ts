@@ -30,9 +30,9 @@ import type { TokenManager } from './client.ts'
 import * as drive from './drive.ts'
 import { appTitle } from './rename.ts'
 
-const SUFFIX = '.gdoc.json'
 const MODIFIED = '2026-10-01T09:00:00.000Z'
 const OLD = '2026-10-01_Old_Plan__doc1.gdoc.json'
+const NEW = '2026-10-01_New_Plan__doc1.gdoc.json'
 
 const accessor = new GDocsAccessor({
   tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
@@ -42,75 +42,52 @@ function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/gdocs') })
 }
 
-async function seeded(): Promise<RAMIndexCacheStore> {
+async function renamed(dst: string): Promise<RAMIndexCacheStore> {
   const index = new RAMIndexCacheStore()
-  await index.setDir('/gdocs/owned', [
-    [
-      OLD,
-      new IndexEntry({
-        id: 'doc1',
-        name: 'Old Plan',
-        resourceType: 'gdocs/file',
-        remoteTime: MODIFIED,
-        vfsName: OLD,
-      }),
-    ],
-  ])
+  const entry = new IndexEntry({
+    id: 'doc1',
+    name: 'Old Plan',
+    resourceType: 'gdocs/file',
+    remoteTime: MODIFIED,
+    vfsName: OLD,
+  })
+  await index.setDir('/gdocs/owned', [[OLD, entry]])
+  vi.mocked(drive.getFile).mockResolvedValueOnce({
+    id: 'doc1',
+    name: 'Old Plan',
+    modifiedTime: MODIFIED,
+  })
+  vi.mocked(drive.patchFile).mockClear()
+  await rename(accessor, spec(`/gdocs/owned/${OLD}`), spec(dst), index)
   return index
 }
 
 describe('appTitle', () => {
-  it('gives the title of a name the listing renders back', () => {
-    expect(appTitle('2026-10-01_New_Plan__doc1.gdoc.json', 'doc1', MODIFIED, SUFFIX)).toBe(
-      'New_Plan',
-    )
-  })
-
-  it.each([
-    '2026-09-30_New__doc1.gdoc.json',
-    '2026-10-01_New__doc2.gdoc.json',
-    '2026-10-01_New Plan__doc1.gdoc.json',
-  ])('gives null for %s', (name) => {
-    expect(appTitle(name, 'doc1', MODIFIED, SUFFIX)).toBeNull()
+  it.each<[string, string | null]>([
+    [NEW, 'New_Plan'],
+    ['2026-09-30_New__doc1.gdoc.json', null],
+    ['2026-10-01_New__doc2.gdoc.json', null],
+    ['2026-10-01_New Plan__doc1.gdoc.json', null],
+  ])('gives %s the title %s', (name, title) => {
+    expect(appTitle(name, 'doc1', MODIFIED, '.gdoc.json')).toBe(title)
   })
 })
 
 describe('google app rename', () => {
   it('sets the title and keeps the modified time', async () => {
-    const index = await seeded()
-    vi.mocked(drive.getFile).mockResolvedValueOnce({
-      id: 'doc1',
-      name: 'Old Plan',
-      modifiedTime: MODIFIED,
-    })
-    vi.mocked(drive.patchFile).mockResolvedValueOnce({ id: 'doc1', name: 'New_Plan' })
-    await rename(
-      accessor,
-      spec(`/gdocs/owned/${OLD}`),
-      spec('/gdocs/owned/2026-10-01_New_Plan__doc1.gdoc.json'),
-      index,
-    )
-    expect(vi.mocked(drive.patchFile).mock.calls.at(-1)?.slice(1)).toEqual([
+    const index = await renamed(`/gdocs/owned/${NEW}`)
+    expect(vi.mocked(drive.patchFile).mock.lastCall?.slice(1)).toEqual([
       'doc1',
       { body: { name: 'New_Plan', modifiedTime: MODIFIED } },
     ])
     expect((await index.listDir('/gdocs/owned')).entries).toBeUndefined()
   })
 
-  it.each(['/gdocs/owned/New_Plan.gdoc.json', '/gdocs/shared/2026-10-01_New_Plan__doc1.gdoc.json'])(
+  it.each(['/gdocs/owned/New_Plan.gdoc.json', `/gdocs/shared/${NEW}`])(
     'refuses %s with EPERM',
     async (dst) => {
-      const index = await seeded()
-      vi.mocked(drive.getFile).mockResolvedValueOnce({
-        id: 'doc1',
-        name: 'Old Plan',
-        modifiedTime: MODIFIED,
-      })
-      const before = vi.mocked(drive.patchFile).mock.calls.length
-      await expect(
-        rename(accessor, spec(`/gdocs/owned/${OLD}`), spec(dst), index),
-      ).rejects.toMatchObject({ code: 'EPERM' })
-      expect(vi.mocked(drive.patchFile).mock.calls.length).toBe(before)
+      await expect(renamed(dst)).rejects.toMatchObject({ code: 'EPERM' })
+      expect(vi.mocked(drive.patchFile)).not.toHaveBeenCalled()
     },
   )
 })

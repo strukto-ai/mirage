@@ -20,7 +20,6 @@ import { RunAccessor } from './_test_utils.ts'
 
 function remote(answer: Error | Record<string, number | bigint>): [RunAccessor, string[]] {
   const asked: string[] = []
-  const accessor = new RunAccessor('/srv', [0, new Uint8Array(), new Uint8Array()])
   const sftp = {
     ext_openssh_statvfs: (path: string, cb: (err: Error | undefined, info: unknown) => void) => {
       asked.push(path)
@@ -28,8 +27,7 @@ function remote(answer: Error | Record<string, number | bigint>): [RunAccessor, 
       else cb(undefined, answer)
     },
   } as unknown as SFTPWrapper
-  accessor.sftp = () => Promise.resolve(sftp)
-  return [accessor, asked]
+  return [new RunAccessor('/srv', [0, new Uint8Array(), new Uint8Array()], sftp), asked]
 }
 
 describe('core/ssh/capacity', () => {

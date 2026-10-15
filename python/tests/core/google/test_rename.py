@@ -25,9 +25,9 @@ from mirage.core.google.rename import app_title
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
-SUFFIX = ".gdoc.json"
 MODIFIED = "2026-10-01T09:00:00.000Z"
 OLD = "2026-10-01_Old_Plan__doc1.gdoc.json"
+NEW = "2026-10-01_New_Plan__doc1.gdoc.json"
 
 
 def spec(virtual: str) -> PathSpec:
@@ -38,46 +38,8 @@ def spec(virtual: str) -> PathSpec:
     )
 
 
-async def seeded() -> RAMIndexCacheStore:
-    store = RAMIndexCacheStore()
-    await store.set_dir(
-        "/gdocs/owned",
-        [
-            (
-                OLD,
-                IndexEntry(
-                    id="doc1",
-                    name="Old Plan",
-                    resource_type="gdocs/file",
-                    remote_time=MODIFIED,
-                    vfs_name=OLD,
-                ),
-            )
-        ],
-    )
-    return store
-
-
-def test_a_name_the_listing_renders_back_gives_its_title():
-    name = "2026-10-01_New_Plan__doc1.gdoc.json"
-    assert app_title(name, "doc1", MODIFIED, SUFFIX) == "New_Plan"
-
-
-@pytest.mark.parametrize(
-    "name",
-    [
-        "2026-09-30_New__doc1.gdoc.json",
-        "2026-10-01_New__doc2.gdoc.json",
-        "2026-10-01_New Plan__doc1.gdoc.json",
-    ],
-)
-def test_any_other_name_gives_none(name):
-    assert app_title(name, "doc1", MODIFIED, SUFFIX) is None
-
-
-@pytest.mark.asyncio
-async def test_rename_sets_the_title_and_keeps_the_modified_time():
-    index = await seeded()
+@pytest.fixture
+def patched():
     with (
         patch(
             "mirage.core.google.rename.get_file",
@@ -88,46 +50,57 @@ async def test_rename_sets_the_title_and_keeps_the_modified_time():
             "mirage.core.google.rename.patch_file", new_callable=AsyncMock
         ) as patched,
     ):
-        await rename(
-            GDocsAccessor(config=None, token_manager=None),
-            spec(f"/gdocs/owned/{OLD}"),
-            spec("/gdocs/owned/2026-10-01_New_Plan__doc1.gdoc.json"),
-            index,
-        )
+        yield patched
+
+
+async def renamed(dst: str) -> RAMIndexCacheStore:
+    index = RAMIndexCacheStore()
+    entry = IndexEntry(
+        id="doc1",
+        name="Old Plan",
+        resource_type="gdocs/file",
+        remote_time=MODIFIED,
+        vfs_name=OLD,
+    )
+    await index.set_dir("/gdocs/owned", [(OLD, entry)])
+    await rename(
+        GDocsAccessor(config=None, token_manager=None),
+        spec(f"/gdocs/owned/{OLD}"),
+        spec(dst),
+        index,
+    )
+    return index
+
+
+@pytest.mark.parametrize(
+    ("name", "title"),
+    [
+        (NEW, "New_Plan"),
+        ("2026-09-30_New__doc1.gdoc.json", None),
+        ("2026-10-01_New__doc2.gdoc.json", None),
+        ("2026-10-01_New Plan__doc1.gdoc.json", None),
+    ],
+)
+def test_only_a_name_the_listing_renders_back_gives_a_title(name, title):
+    assert app_title(name, "doc1", MODIFIED, ".gdoc.json") == title
+
+
+@pytest.mark.asyncio
+async def test_rename_sets_the_title_and_keeps_the_modified_time(patched):
+    index = await renamed(f"/gdocs/owned/{NEW}")
     assert patched.await_args.args[1:] == (
         "doc1",
         {"name": "New_Plan", "modifiedTime": MODIFIED},
     )
-    listing = await index.list_dir("/gdocs/owned")
-    assert listing.entries is None
+    assert (await index.list_dir("/gdocs/owned")).entries is None
 
 
 @pytest.mark.parametrize(
-    "dst",
-    [
-        "/gdocs/owned/New_Plan.gdoc.json",
-        "/gdocs/shared/2026-10-01_New_Plan__doc1.gdoc.json",
-    ],
+    "dst", ["/gdocs/owned/New_Plan.gdoc.json", f"/gdocs/shared/{NEW}"]
 )
 @pytest.mark.asyncio
-async def test_a_name_the_listing_cannot_render_is_eperm(dst):
-    index = await seeded()
-    with (
-        patch(
-            "mirage.core.google.rename.get_file",
-            new_callable=AsyncMock,
-            return_value={"id": "doc1", "modifiedTime": MODIFIED},
-        ),
-        patch(
-            "mirage.core.google.rename.patch_file", new_callable=AsyncMock
-        ) as patched,
-    ):
-        with pytest.raises(OSError) as raised:
-            await rename(
-                GDocsAccessor(config=None, token_manager=None),
-                spec(f"/gdocs/owned/{OLD}"),
-                spec(dst),
-                index,
-            )
+async def test_a_name_the_listing_cannot_render_is_eperm(patched, dst):
+    with pytest.raises(OSError) as raised:
+        await renamed(dst)
     assert raised.value.errno == errno.EPERM
     assert patched.await_count == 0

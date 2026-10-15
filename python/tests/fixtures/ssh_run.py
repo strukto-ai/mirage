@@ -28,12 +28,17 @@ class RunAccessor(SSHAccessor):
         root (str): the mount's remote root.
         answer (Answer): the run's status, output and error output, or
             what it raises.
+        sftp (MagicMock | None): the SFTP client the accessor hands out.
     """
 
-    def __init__(self, root: str, answer: Answer) -> None:
+    def __init__(
+        self, root: str, answer: Answer, sftp: MagicMock | None = None
+    ) -> None:
         super().__init__(SSHConfig(host="example.test", root=root))
         self.answer = answer
         self.sent: list[str] = []
+        if sftp is not None:
+            self.sftp = AsyncMock(return_value=sftp)  # type: ignore[method-assign]
 
     async def run(self, command: str) -> tuple[int | None, bytes, bytes]:
         self.sent.append(command)

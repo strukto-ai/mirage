@@ -56,9 +56,6 @@ STATVFS = asyncssh.SFTPVFSAttrs(
 )
 @pytest.mark.asyncio
 async def test_statvfs_is_counted_as_df_counts_a_disk(statvfs, expected):
-    accessor = RunAccessor("/srv", (0, b"", b""))
-    accessor.sftp = AsyncMock(  # type: ignore[method-assign]
-        return_value=MagicMock(statvfs=statvfs)
-    )
+    accessor = RunAccessor("/srv", (0, b"", b""), MagicMock(statvfs=statvfs))
     assert await capacity(accessor) == expected
     assert statvfs.await_args.args == ("/srv",)

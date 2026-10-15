@@ -2,8 +2,7 @@ import pytest
 
 from mirage.core.nextcloud.dav import dav_url
 from mirage.types import PathSpec
-
-ROOT = "https://cloud.example.com/remote.php/dav/files/user"
+from tests.core.nextcloud.conftest import ROOT
 
 
 @pytest.mark.parametrize(

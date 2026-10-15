@@ -55,25 +55,20 @@ describe('core/ssh/copy', () => {
 
 const ENC = new TextEncoder()
 
-function remote(answer: RunAnswer, landed = false): RunAccessor {
-  const accessor = new RunAccessor('/srv', answer)
+async function copyTree(answer: RunAnswer, landed = false): Promise<RunAccessor> {
   const sftp = {
     exists: (_path: string, cb: (yes: boolean) => void) => {
       cb(landed)
     },
   } as unknown as SFTPWrapper
-  accessor.sftp = () => Promise.resolve(sftp)
+  const accessor = new RunAccessor('/srv', answer, sftp)
+  await dirCopy(accessor, spec('/a b'), spec('/c'))
   return accessor
-}
-
-function copyTree(accessor: RunAccessor): Promise<void> {
-  return dirCopy(accessor, spec('/a b'), spec('/c'))
 }
 
 describe('core/ssh/copy dirCopy', () => {
   it('copies the tree with one cp on the server', async () => {
-    const accessor = remote([0, ENC.encode('copied\n'), new Uint8Array()])
-    await copyTree(accessor)
+    const accessor = await copyTree([0, ENC.encode('copied\n'), new Uint8Array()])
     expect(accessor.sent).toEqual(["env LC_ALL=C cp -RL -- '/srv/a b' '/srv/c' && echo copied"])
   })
 
@@ -84,18 +79,13 @@ describe('core/ssh/copy dirCopy', () => {
     ],
     ['a refused exec', new Error('refused')],
   ])('leaves the walk on %s', async (_name, answer) => {
-    await expect(copyTree(remote(answer))).rejects.toMatchObject({ code: 'ENOTSUP' })
+    await expect(copyTree(answer)).rejects.toMatchObject({ code: 'ENOTSUP' })
   })
 
   it('says why a cp that failed partway failed', async () => {
-    const accessor = remote(
-      [
-        1,
-        new Uint8Array(),
-        ENC.encode("cp: cannot open '/srv/a b/x' for reading: Permission denied\n"),
-      ],
-      true,
-    )
-    await expect(copyTree(accessor)).rejects.toMatchObject({ code: 'EACCES' })
+    const err = ENC.encode("cp: cannot open '/srv/a b/x' for reading: Permission denied\n")
+    await expect(copyTree([1, new Uint8Array(), err], true)).rejects.toMatchObject({
+      code: 'EACCES',
+    })
   })
 })

@@ -16,6 +16,7 @@ import asyncio
 import errno
 import tracemalloc
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -323,10 +324,9 @@ class TestSetattr:
         assert run(ops.setattr("/data/dir/f.txt", mode=0o640)) == {}
         assert run(ops.stat("/data/dir/f.txt")).mode == 0o640
 
-        async def keeps_nothing(self, path, index=None, **fields):
-            return {k: v for k, v in fields.items() if v is not None}
-
-        monkeypatch.setattr(RAMVFS, "setattr", keeps_nothing)
+        monkeypatch.setattr(
+            RAMVFS, "setattr", AsyncMock(return_value={"uid": 7})
+        )
         assert run(ops.setattr("/data/dir/f.txt", uid=7)) == {"uid": 7}
         assert run(ops.stat("/data/dir/f.txt")).uid == 7
         with pytest.raises(FileNotFoundError):

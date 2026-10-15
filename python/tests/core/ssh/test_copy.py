@@ -24,24 +24,19 @@ from mirage.types import PathSpec
 from tests.fixtures.ssh_run import Answer, RunAccessor
 
 
-def remote(answer: Answer, landed: bool = False) -> RunAccessor:
-    accessor = RunAccessor("/srv", answer)
-    accessor.sftp = AsyncMock(  # type: ignore[method-assign]
-        return_value=MagicMock(exists=AsyncMock(return_value=landed))
+async def copy_tree(answer: Answer, landed: bool = False) -> RunAccessor:
+    accessor = RunAccessor(
+        "/srv", answer, MagicMock(exists=AsyncMock(return_value=landed))
+    )
+    await dir_copy(
+        accessor, PathSpec.from_str_path("/a b"), PathSpec.from_str_path("/c")
     )
     return accessor
 
 
-async def copy_tree(accessor: RunAccessor) -> None:
-    await dir_copy(
-        accessor, PathSpec.from_str_path("/a b"), PathSpec.from_str_path("/c")
-    )
-
-
 @pytest.mark.asyncio
 async def test_one_cp_on_the_server_copies_the_tree():
-    accessor = remote((0, b"copied\n", b""))
-    await copy_tree(accessor)
+    accessor = await copy_tree((0, b"copied\n", b""))
     assert accessor.sent == [
         "env LC_ALL=C cp -RL -- '/srv/a b' '/srv/c' && echo copied"
     ]
@@ -57,19 +52,12 @@ async def test_one_cp_on_the_server_copies_the_tree():
 @pytest.mark.asyncio
 async def test_a_server_that_runs_nothing_leaves_the_walk(answer):
     with pytest.raises(OperationNotSupportedError):
-        await copy_tree(remote(answer))
+        await copy_tree(answer)
 
 
 @pytest.mark.asyncio
 async def test_a_cp_that_failed_partway_says_why():
-    accessor = remote(
-        (
-            1,
-            b"",
-            b"cp: cannot open '/srv/a b/x' for reading: Permission denied\n",
-        ),
-        landed=True,
-    )
+    err = b"cp: cannot open '/srv/a b/x' for reading: Permission denied\n"
     with pytest.raises(PermissionError) as raised:
-        await copy_tree(accessor)
+        await copy_tree((1, b"", err), landed=True)
     assert raised.value.errno == errno.EACCES

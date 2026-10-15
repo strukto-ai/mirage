@@ -1,5 +1,5 @@
 import type { Operator } from 'opendal'
-import { vi } from 'vitest'
+import { vi, type Mock } from 'vitest'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 
@@ -135,4 +135,31 @@ export function installFakeOperator(
   fake: FakeNextcloudOperator,
 ): void {
   vi.spyOn(accessor, 'operator').mockResolvedValue(fake as unknown as Operator)
+}
+
+export const ROOT = 'https://cloud.example/remote.php/dav/files/user'
+
+/**
+ * A 207 body with one response: `status` for its property group `prop` when
+ * given, else for the member itself.
+ */
+export function multistatus(status: string, prop?: string): string {
+  let line = `<d:status>HTTP/1.1 ${status}</d:status>`
+  if (prop !== undefined) line = `<d:propstat><d:prop>${prop}</d:prop>${line}</d:propstat>`
+  return (
+    '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>' +
+    `<d:href>/remote.php/dav/files/user/</d:href>${line}</d:response></d:multistatus>`
+  )
+}
+
+/** Stub `fetch` to answer `status` and `body`; the mock holds the request. */
+export function answering(
+  status: number,
+  body: string | null = null,
+): Mock<(url: string, init: RequestInit) => Promise<Response>> {
+  const fetchMock = vi.fn((_url: string, _init: RequestInit) =>
+    Promise.resolve(new Response(body, { status })),
+  )
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }

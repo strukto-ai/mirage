@@ -4,6 +4,9 @@ import httpx
 
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.core.nextcloud.search.client import auth
+from mirage.core.nextcloud.search.response import successful_status
+from mirage.core.nextcloud.search.types import XmlElement
+from mirage.core.nextcloud.search.xml import dav
 from mirage.core.nextcloud.util import nextcloud_key
 from mirage.types import PathSpec
 
@@ -48,3 +51,20 @@ async def dav_request(
         return await client.request(
             method, url, headers=headers, content=content
         )
+
+
+def answered(root: XmlElement, name: str) -> str | None:
+    """A property's text from a group the server answered 200 for, None
+    when no such group holds it.
+
+    Args:
+        root (XmlElement): a multistatus answer.
+        name (str): the DAV property, e.g. ``lastmodified``.
+    """
+    for propstat in root.iter(dav("propstat")):
+        prop = propstat.find(f"{dav('prop')}/{dav(name)}")
+        if prop is not None and successful_status(
+            propstat.findtext(dav("status"), "")
+        ):
+            return (prop.text or "").strip()
+    return None

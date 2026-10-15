@@ -765,14 +765,7 @@ describe('Files.setattr', () => {
 
   it('refuses a missing path when the backend keeps nothing', async () => {
     const vfs = new RAMVFS()
-    vfs.setattr = (_path, { mode, uid, gid, atime, mtime }) =>
-      Promise.resolve(
-        Object.fromEntries(
-          Object.entries({ mode, uid, gid, atime, mtime }).filter(
-            ([, value]) => value !== undefined,
-          ),
-        ) as Record<string, number | string>,
-      )
+    vfs.setattr = () => Promise.resolve({ uid: 7 })
     const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
     await ws.vfs.write('/data/f.txt', 'hello')
     expect(await ws.vfs.setattr('/data/f.txt', { uid: 7 })).toEqual({ uid: 7 })

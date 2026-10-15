@@ -1,6 +1,5 @@
-from unittest.mock import AsyncMock, patch
+from contextlib import nullcontext
 
-import httpx
 import pytest
 
 from mirage.core.nextcloud.copy import copy, dir_copy
@@ -12,6 +11,7 @@ from mirage.core.nextcloud.truncate import truncate
 from mirage.core.nextcloud.unlink import unlink
 from mirage.core.nextcloud.write import write
 from mirage.types import PathSpec
+from tests.core.nextcloud.conftest import ROOT, answering, multistatus
 
 
 @pytest.mark.asyncio
@@ -54,47 +54,27 @@ async def test_copy_duplicates_file(make_acc):
     assert acc._fake.files["src.txt"] == b"payload"
 
 
-LOCKED_MEMBER = (
-    b'<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>'
-    b"<d:href>/remote.php/dav/files/user/dst/a.txt</d:href>"
-    b"<d:status>HTTP/1.1 423 Locked</d:status></d:response></d:multistatus>"
-)
-
-
 @pytest.mark.parametrize(
-    ("status", "body", "error"),
+    ("status", "body", "outcome"),
     [
-        (201, b"", None),
-        (404, b"", FileNotFoundError),
-        (207, LOCKED_MEMBER, PermissionError),
+        (201, b"", nullcontext()),
+        (404, b"", pytest.raises(FileNotFoundError)),
+        (207, multistatus("423 Locked"), pytest.raises(PermissionError)),
     ],
 )
 @pytest.mark.asyncio
 async def test_dir_copy_is_one_copy_of_the_whole_tree(
-    make_acc, status, body, error
+    make_acc, status, body, outcome
 ):
-    root = "https://cloud.example.com/remote.php/dav/files/user"
-    answer = httpx.Response(
-        status, content=body, request=httpx.Request("COPY", root)
-    )
-    with patch(
-        "mirage.core.nextcloud.copy.dav_request",
-        new_callable=AsyncMock,
-        return_value=answer,
-    ) as request:
-        copying = dir_copy(
+    with answering("copy", status, body) as request, outcome:
+        await dir_copy(
             make_acc(),
             PathSpec.from_str_path("/src"),
             PathSpec.from_str_path("/dst"),
         )
-        if error is None:
-            await copying
-        else:
-            with pytest.raises(error):
-                await copying
-    assert request.await_args.args[1:] == ("COPY", f"{root}/src/")
+    assert request.await_args.args[1:] == ("COPY", f"{ROOT}/src/")
     assert request.await_args.kwargs["headers"] == {
-        "Destination": f"{root}/dst/",
+        "Destination": f"{ROOT}/dst/",
         "Depth": "infinity",
         "Overwrite": "F",
     }

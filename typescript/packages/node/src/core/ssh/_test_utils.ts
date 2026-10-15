@@ -574,16 +574,22 @@ export function makeFakeAccessor(state: FakeSftp, root = '/'): SSHAccessor {
 
 export type RunAnswer = [number | null, Uint8Array, Uint8Array] | Error
 
-// An accessor whose server answers every command with `answer`. Twin of
-// Python's RunAccessor.
+// An accessor whose server answers every command with `answer`, and hands
+// out `fakeSftp` as its SFTP client when one is given. Twin of Python's
+// RunAccessor.
 export class RunAccessor extends SSHAccessor {
   readonly sent: string[] = []
 
   constructor(
     root: string,
     private readonly answer: RunAnswer,
+    private readonly fakeSftp?: SFTPWrapper,
   ) {
     super({ host: 'example.test', root })
+  }
+
+  override sftp(): Promise<SFTPWrapper> {
+    return this.fakeSftp === undefined ? super.sftp() : Promise.resolve(this.fakeSftp)
   }
 
   override run(command: string): Promise<[number | null, Uint8Array, Uint8Array]> {

@@ -3,8 +3,7 @@ from http import HTTPStatus
 from xml.etree import ElementTree
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.core.nextcloud.dav import dav_request, dav_url
-from mirage.core.nextcloud.search.xml import dav
+from mirage.core.nextcloud.dav import answered, dav_request, dav_url
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
 
@@ -21,20 +20,6 @@ def mtime_patch(seconds: int) -> bytes:
         f"<d:lastmodified>{seconds}</d:lastmodified>"
         "</d:prop></d:set></d:propertyupdate>"
     ).encode()
-
-
-def stored(content: bytes) -> bool:
-    """Whether a PROPPATCH answer says the modified time was set.
-
-    Args:
-        content (bytes): the 207 multistatus body.
-    """
-    root = ElementTree.fromstring(content)
-    for propstat in root.iter(dav("propstat")):
-        if propstat.find(f"{dav('prop')}/{dav('lastmodified')}") is None:
-            continue
-        return " 200 " in (propstat.findtext(dav("status")) or "")
-    return False
 
 
 async def set_attrs(
@@ -81,9 +66,9 @@ async def set_attrs(
     )
     if response.status_code == HTTPStatus.NOT_FOUND:
         raise enoent(path)
-    if response.status_code != HTTPStatus.MULTI_STATUS or not stored(
-        response.content
+    if response.status_code != HTTPStatus.MULTI_STATUS or (
+        answered(ElementTree.fromstring(response.content), "lastmodified")
+        is None
     ):
         residual["mtime"] = mtime
-        return residual
     return residual

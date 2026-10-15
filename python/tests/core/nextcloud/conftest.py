@@ -1,12 +1,17 @@
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.vfs.nextcloud import NextcloudConfig
+
+ROOT = "https://cloud.example.com/remote.php/dav/files/user"
 
 
 @dataclass
@@ -228,7 +233,7 @@ class FakeAsyncOperator:
 
 def make_accessor(files: dict[str, bytes] | None = None) -> NextcloudAccessor:
     cfg = NextcloudConfig(
-        url="https://cloud.example.com/remote.php/dav/files/user/",
+        url=f"{ROOT}/",
         username="user",
         password="pass",
     )
@@ -242,3 +247,40 @@ def make_accessor(files: dict[str, bytes] | None = None) -> NextcloudAccessor:
 @pytest.fixture
 def make_acc():
     return make_accessor
+
+
+def multistatus(status: str, prop: str | None = None) -> bytes:
+    """A 207 body with one response: ``status`` for its property group
+    ``prop`` when given, else for the member itself.
+
+    Args:
+        status (str): the status line's code and reason, e.g. ``200 OK``.
+        prop (str | None): the property group's properties.
+    """
+    line = f"<d:status>HTTP/1.1 {status}</d:status>"
+    if prop is not None:
+        line = f"<d:propstat><d:prop>{prop}</d:prop>{line}</d:propstat>"
+    return (
+        '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>'
+        f"<d:href>/remote.php/dav/files/user/</d:href>{line}"
+        "</d:response></d:multistatus>"
+    ).encode()
+
+
+def answering(
+    module: str, status: int, body: bytes = b""
+) -> AbstractContextManager[AsyncMock]:
+    """Patch a module's ``dav_request`` to answer ``status`` and ``body``.
+
+    Args:
+        module (str): the module under ``mirage.core.nextcloud``.
+        status (int): the HTTP status.
+        body (bytes): the response body.
+    """
+    return patch(
+        f"mirage.core.nextcloud.{module}.dav_request",
+        new_callable=AsyncMock,
+        return_value=httpx.Response(
+            status, content=body, request=httpx.Request("GET", ROOT)
+        ),
+    )

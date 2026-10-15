@@ -3,28 +3,21 @@ from xml.etree import ElementTree
 
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.core.nextcloud.constants import QUOTA_PROPFIND, SPACE_UNLIMITED
-from mirage.core.nextcloud.dav import dav_request
-from mirage.core.nextcloud.search.response import successful_status
+from mirage.core.nextcloud.dav import answered, dav_request
 from mirage.core.nextcloud.search.types import XmlElement
-from mirage.core.nextcloud.search.xml import dav
 from mirage.types import CapacityResult, CapacityState
 
 
 def quota_value(root: XmlElement, name: str) -> int | None:
-    """A quota property's byte count from a property group the server
-    answered, None when no such group holds a whole number.
+    """A quota property's byte count, None when the server answered no
+    whole number for it.
 
     Args:
         root (XmlElement): the PROPFIND multistatus.
         name (str): the DAV property, e.g. ``quota-used-bytes``.
     """
-    for propstat in root.iter(dav("propstat")):
-        if not successful_status(propstat.findtext(dav("status"), "")):
-            continue
-        text = (propstat.findtext(f"{dav('prop')}/{dav(name)}") or "").strip()
-        if text.removeprefix("-").isdigit():
-            return int(text)
-    return None
+    text = answered(root, name) or ""
+    return int(text) if text.removeprefix("-").isdigit() else None
 
 
 async def capacity(accessor: NextcloudAccessor) -> CapacityResult:
