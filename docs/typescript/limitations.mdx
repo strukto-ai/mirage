@@ -226,7 +226,6 @@ Cancellation itself has one seam. Python runs the whole line as one task, cancel
 
 The cancellation boundary is caller completion, not proof that every custom handler has stopped. TypeScript retains the evaluation and its owned parser programs until the command tree settles, even after the grace releases the caller. An uncooperative mount handler can keep running after that tree settles. An embedding that needs a hard stop for arbitrary handlers must provide process or worker isolation.
 
-
 ## Streaming resource bounds
 
 Named gzip/gunzip/zgrep, `iconv -o`, archive commands, deferred redirects and
@@ -257,3 +256,39 @@ Async I/O lets another request run while an operation waits. Compression and
 comparison still consume CPU; spooling adds local I/O. Reductions in peak memory
 or time to first output do not imply an equal increase in server throughput or
 lower cloud network bills.
+
+
+### Measured command-level costs
+
+The mirrored Python implementations were measured with Python 3.12.11 on macOS,
+using three isolated runs over a 128 MiB deterministic binary input. Each probe
+consumes output without collecting it. These are median tracked Python
+allocations (`tracemalloc`), not process RSS or TypeScript measurements; the
+baseline measured implementations match main at `866615ceb7`.
+
+| Operation | Peak allocations before → after | First 64 KiB before → after | Total before → after |
+| --- | --- | --- | --- |
+| Named gzip | 512.13 → 0.54 MiB | 2,016 → 1.36 ms | 2,064 → 2,225 ms |
+| Tar, known member size | 263.74 → 0.28 MiB | 160.68 → 0.31 ms | 209 → 173 ms |
+| Tar, unknown size | 263.74 → 1.21 MiB | 160.68 → 217.73 ms | 209 → 489 ms |
+| Default streamed cache fill | 256.24 → 8.13 MiB | 0.09 → 0.07 ms | 137 → 103 ms |
+
+Output SHA-256 values matched before and after. Named gzip's maximum event-loop
+lag fell from 1,877 ms to 4.88 ms in the same probe. Its total compression time
+did not improve. Unknown-size tar incurs scratch I/O and remains slower than
+collecting the input; a known size avoids that staging. The cache result also
+changes admission: the 128 MiB file is no longer cached with the default fill
+budget, so repeated reads can cost more backend I/O.
+
+Run from the repository root:
+
+```bash
+PYTHONPATH=python python/.venv/bin/python scripts/benchmark_streaming.py gzip_file
+```
+
+Other modes are `gzip_stdin`,
+`tar_current` (with `--known-size` to skip staging), `cache_default`, `cache_8mib`
+and `cache_0`. `--mib` changes the input size. For the previous reader contract,
+run the same script with the previous source tree on `PYTHONPATH` and
+`--whole-read` for named gzip and tar. Whole-result workspace APIs collect their
+output, so their final result memory is outside this streaming probe.
