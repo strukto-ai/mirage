@@ -73,6 +73,61 @@
         "stdout": "data/warmwalk/\ndata/warmwalk/open.txt\n",
         "stderr": "tar: Removing leading `/' from member names\ntar: /data/warmwalk/locked.txt: Cannot open: Permission denied\ntar: /data/warmwalk/sealed.txt: Cannot open: Permission denied\ntar: Exiting with failure status due to previous errors\n"
       }
+    },
+    {
+      "id": "warm_walk_a_hidden_warm_file_has_no_size",
+      "seq": 13740007,
+      "session": "veiled",
+      "command": "wc -c /data/warmwalk/locked.txt; wc -w /data/warmwalk/locked.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "wc: /data/warmwalk/locked.txt: No such file or directory\nwc: /data/warmwalk/locked.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "warm_walk_a_hidden_warm_file_has_no_tail",
+      "seq": 13740008,
+      "session": "veiled",
+      "command": "tail -n 1 /data/warmwalk/locked.txt; tail -c 4 /data/warmwalk/locked.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: cannot open '/data/warmwalk/locked.txt' for reading: No such file or directory\ntail: cannot open '/data/warmwalk/locked.txt' for reading: No such file or directory\n"
+      }
+    },
+    {
+      "id": "warm_walk_awk_words_a_hidden_file_as_missing",
+      "seq": 13740009,
+      "session": "veiled",
+      "command": "awk '{print}' /data/warmwalk/missing.txt; awk '{print}' /data/warmwalk/locked.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: cannot open \"/data/warmwalk/missing.txt\" (No such file or directory)\nawk: cannot open \"/data/warmwalk/locked.txt\" (No such file or directory)\n"
+      }
+    },
+    {
+      "id": "warm_walk_jq_words_a_hidden_file_as_missing",
+      "seq": 13740010,
+      "session": "veiled",
+      "command": "jq -R . /data/warmwalk/missing.txt; jq -R . /data/warmwalk/locked.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: error: Could not open file /data/warmwalk/missing.txt: No such file or directory\njq: error: Could not open file /data/warmwalk/locked.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "warm_walk_jq_input_words_a_hidden_file_as_missing",
+      "seq": 13740011,
+      "session": "veiled",
+      "command": "jq -n input /data/warmwalk/missing.txt; jq -n input /data/warmwalk/locked.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "jq: error: Could not open file /data/warmwalk/missing.txt: No such file or directory\njq: error (at /data/warmwalk/missing.txt:0): break\njq: error: Could not open file /data/warmwalk/locked.txt: No such file or directory\njq: error (at /data/warmwalk/locked.txt:0): break\n"
+      }
     }
   ]
 }

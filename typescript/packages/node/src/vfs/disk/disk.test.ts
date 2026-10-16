@@ -17,7 +17,7 @@ import { chmod, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/prom
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/commands/builtin/backends'
-import { CapacityState, FileType, PathSpec, VFSName } from '@struktoai/mirage-core/types'
+import { CapacityState, FileType, MountMode, PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { copy as copyCore } from '../../core/disk/copy.ts'
@@ -357,5 +357,32 @@ describe('DiskVFS — folder versions knob', () => {
       new VFSConfigError('disk: folder_versions: must be a boolean'),
     )
     expect(existsSync(fresh)).toBe(false)
+  })
+})
+
+describe('DiskVFS — cp -r past a folder it may not open', () => {
+  // GNU (coreutils 9.7): `cp: cannot access 'src/locked': Permission
+  // denied`, dst/locked is made, every other entry copies, exit 1.
+  it.skipIf(process.getuid?.() === 0)('names the folder and copies the rest', async () => {
+    await mkdir(join(root, 'src', 'locked'), { recursive: true })
+    await mkdir(join(root, 'src', 'open'))
+    await writeFile(join(root, 'src', 'locked', 'x.txt'), 'x\n')
+    await writeFile(join(root, 'src', 'open', 'y.txt'), 'y\n')
+    await writeFile(join(root, 'src', 'z.txt'), 'z\n')
+    await chmod(join(root, 'src', 'locked'), 0)
+    const ws = new Workspace({ '/data': [res, MountMode.WRITE] as const })
+    try {
+      const io = await ws.shell('cp -r /data/src /data/dst')
+      expect(io.exitCode).toBe(1)
+      expect(DEC.decode(io.stderr)).toBe(
+        "cp: cannot access '/data/src/locked': Permission denied\n",
+      )
+      expect(statSync(join(root, 'dst', 'locked')).isDirectory()).toBe(true)
+      expect(await readFile(join(root, 'dst', 'open', 'y.txt'), 'utf8')).toBe('y\n')
+      expect(await readFile(join(root, 'dst', 'z.txt'), 'utf8')).toBe('z\n')
+    } finally {
+      await chmod(join(root, 'src', 'locked'), 0o755)
+      await ws.close()
+    }
   })
 })

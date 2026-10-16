@@ -795,6 +795,13 @@
               }
             ]
           }
+        },
+        "veiled": {
+          "paths": {
+            "hide": [
+              "/data/warmwalk/locked.txt"
+            ]
+          }
         }
       }
     },

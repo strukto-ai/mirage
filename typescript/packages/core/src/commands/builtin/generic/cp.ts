@@ -1100,13 +1100,18 @@ async function mirrorDirs(
   intoItself: boolean,
   index?: IndexCacheStore,
   lines?: string[],
+  // Collects the source directories the walk may not open, which are still
+  // made at the destination; absent lets the refusal propagate.
+  unreadable?: string[],
 ): Promise<{ blocked: string[]; made: Set<string> | null }> {
   if (strategy.mkdir === undefined) return { blocked: [], made: null }
   // A destination inside the source leaves its own subtree out, as the
   // file pass does.
-  const mounts = [srcBase, ...(await strategy.find(src, { type: 'd' }))].filter(
-    (found) => !(intoItself && within(found, dstBase)),
-  )
+  const listed = await strategy.find(src, {
+    type: 'd',
+    ...(unreadable === undefined ? {} : { unreadable }),
+  })
+  const mounts = [srcBase, ...listed].filter((found) => !(intoItself && within(found, dstBase)))
   // Shortest first so a parent is created before its children, then by name:
   // sorting on length alone leaves equal-length siblings in whatever order
   // the Set happened to hold, which is insertion order here and hash order in
@@ -1721,6 +1726,9 @@ export async function cpGeneric(
       // tree's directories are recreated here: a files-only pass would drop
       // every directory that holds no files (GNU keeps them).
       if (wholeTree) await beforeFullScan(dispatch, src, 'cp')
+      // A directory the walk may not open is GNU's line; it is made at the
+      // destination and the rest of the tree still copies.
+      const unreadable: string[] = []
       const mirrored = await mirrorDirs(
         strategy,
         stat,
@@ -1734,8 +1742,15 @@ export async function cpGeneric(
         intoItself,
         index,
         flags.verbose ? lines : undefined,
+        unreadable,
       )
-      for (const entryMount of await strategy.find(src, { type: 'f' })) {
+      const files = await strategy.find(src, { type: 'f', unreadable })
+      for (const root of new Set(unreadable)) {
+        errors.push(
+          `cp: cannot access '${spelledFrom(mountedPath(src, root), src).rawPath}': Permission denied`,
+        )
+      }
+      for (const entryMount of files) {
         if (intoItself && within(entryMount, dstBase)) continue
         if (mirrored.blocked.some((root) => within(entryMount, root))) continue
         const dstMount = dstBase + entryMount.slice(srcBase.length)

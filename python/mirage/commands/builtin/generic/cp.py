@@ -1495,6 +1495,7 @@ async def _mirror_dirs(
     copies: TransferLinks | None,
     into_itself: bool,
     lines: list[str] | None = None,
+    unreadable: list[str] | None = None,
 ) -> tuple[list[str], set[str] | None]:
     """Recreate a source tree's directories under the destination root.
 
@@ -1525,6 +1526,9 @@ async def _mirror_dirs(
         lines (list[str] | None): Verbose sink for the directories this
             creates, which GNU also reports; one already at the
             destination is merged into silently. None keeps them silent.
+        unreadable (list[str] | None): Collects the source directories
+            the walk may not open, which are still made at the
+            destination; None lets the refusal propagate.
 
     Returns:
         tuple[list[str], set[str] | None]: the source directories whose
@@ -1536,7 +1540,10 @@ async def _mirror_dirs(
         return [], None
     mounts = [
         found
-        for found in [src_base, *await strategy.find(src, type="d")]
+        for found in [
+            src_base,
+            *await strategy.find(src, type="d", unreadable=unreadable),
+        ]
         if not (into_itself and within(found, dst_base))
     ]
     blocked: list[str] = []
@@ -2221,6 +2228,9 @@ async def cp_generic(
             # keeps them).
             if whole_tree:
                 await before_full_scan(dispatch, src, "cp")
+            # A directory the walk may not open is GNU's line; it is made at
+            # the destination and the rest of the tree still copies.
+            unreadable: list[str] = []
             blocked, made = await _mirror_dirs(
                 strategy,
                 stat,
@@ -2233,8 +2243,16 @@ async def cp_generic(
                 copies,
                 into_itself,
                 lines if flags.verbose else None,
+                unreadable,
             )
-            for entry_mount in await strategy.find(src, type="f"):
+            files = await strategy.find(src, type="f", unreadable=unreadable)
+            errors.extend(
+                "cp: cannot access "
+                f"'{spelled_from(mounted_path(src, root), src).raw_path}': "
+                "Permission denied"
+                for root in dict.fromkeys(unreadable)
+            )
+            for entry_mount in files:
                 if into_itself and within(entry_mount, dst_base):
                     continue
                 if any(within(entry_mount, root) for root in blocked):

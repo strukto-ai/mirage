@@ -1,6 +1,6 @@
 import inspect
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -29,7 +29,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.errors.constants import FS_ERRORS
+from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.render import fs_error_line
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
@@ -180,15 +180,16 @@ def head_multi(
     show_headers: bool = False,
     zero_terminated: bool = False,
     unread: frozenset[str] = frozenset(),
+    refused: Collection[str] = frozenset(),
 ) -> AsyncIterator[bytes]:
     """Run head over multiple already-resolved paths.
 
     Globs are expanded by the caller, so ``paths`` is a flat list of concrete
     entries. When ``show_headers`` is set a ``==> path <==`` banner is emitted
-    before each file (POSIX/GNU head with multiple files), separated by a blank
-    line between files. The per-file source is produced lazily by ``read`` so
-    only one file streams at a time, preserving early exit
-    (``cat big | head -5``).
+    before each file it opens (POSIX/GNU head with multiple files), separated
+    by a blank line from the one before. The per-file source is produced
+    lazily by ``read`` so only one file streams at a time, preserving early
+    exit (``cat big | head -5``).
 
     Args:
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
@@ -196,6 +197,9 @@ def head_multi(
             returns bytes, an awaitable of bytes, or an async byte iterator.
         unread (frozenset[str]): operands that opened but do not read (a
             directory): each prints its header and nothing else.
+        refused (Collection[str]): filled by ``read`` with the operands
+            whose open it refused, which print no header, as GNU opens a
+            file before it heads it.
     """
     return _head_multi(
         paths,
@@ -205,6 +209,7 @@ def head_multi(
         show_headers=show_headers,
         zero_terminated=zero_terminated,
         unread=unread,
+        refused=refused,
     )
 
 
@@ -217,24 +222,32 @@ async def _head_multi(
     show_headers: bool = False,
     zero_terminated: bool = False,
     unread: frozenset[str] = frozenset(),
+    refused: Collection[str] = frozenset(),
 ) -> AsyncIterator[bytes]:
-    for i, p in enumerate(paths):
-        if show_headers:
-            header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
-            if i > 0:
-                header = "\n" + header
-            yield encode_text(header)
-        if p.virtual in unread:
-            continue
-        source = read(p)
-        if inspect.isawaitable(source):
-            source = await source
-        body = head(source, n=n, c=c, zero_terminated=zero_terminated)
+    printed = False
+    for p in paths:
+        body: AsyncIterator[bytes] | None = None
+        first: bytes | None = None
+        if p.virtual not in unread:
+            source = read(p)
+            if inspect.isawaitable(source):
+                source = await source
+            body = head(source, n=n, c=c, zero_terminated=zero_terminated)
+            first = await anext(body, None)
         try:
+            if show_headers and p.virtual not in refused:
+                header = f"==> {operand_label(p, STDIN_HEADER_NAME)} <==\n"
+                yield encode_text("\n" + header if printed else header)
+                printed = True
+            if body is None:
+                continue
+            if first is not None:
+                yield first
             async for chunk in body:
                 yield chunk
         finally:
-            await close_quietly(body)
+            if body is not None:
+                await close_quietly(body)
 
 
 async def head_generic(
@@ -291,6 +304,8 @@ async def head_generic(
             and n > 0
         )
 
+        refused: set[str] = set()
+
         def source_for(p: PathSpec) -> AsyncIterator[bytes]:
             source = read(p)
 
@@ -318,7 +333,10 @@ async def head_generic(
                         raise
                     # A read that fails once the stat passed (a table past
                     # its read cap) is reported, and the next operand
-                    # still prints.
+                    # still prints; one whose open was refused prints no
+                    # header either.
+                    if not isinstance(exc, READ_FAILURES):
+                        refused.add(p.virtual)
                     held = io.stderr if isinstance(io.stderr, bytes) else b""
                     io.stderr = held + encode_text(
                         fs_error_line("head", p, exc)
@@ -337,6 +355,7 @@ async def head_generic(
             show_headers=show_headers,
             zero_terminated=parsed.zero_terminated,
             unread=unread,
+            refused=refused,
         ), io
     source = resolve_source(opts.stdin)
     body = head(

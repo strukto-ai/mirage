@@ -287,10 +287,19 @@ StatFn: TypeAlias = Callable[..., Awaitable["FileStat"]]
 
 
 class FindFn(Protocol):
-    """The file-or-directory enumeration native copy needs from a backend."""
+    """The file-or-directory enumeration native copy needs from a backend.
+
+    A directory the walk may not open lands in ``unreadable`` and the
+    walk goes on; without it the refusal propagates.
+    """
 
     def __call__(
-        self, path: "PathSpec", /, *, type: Literal["f", "d"]
+        self,
+        path: "PathSpec",
+        /,
+        *,
+        type: Literal["f", "d"],
+        unreadable: list[str] | None = None,
     ) -> Awaitable[list[str]]: ...
 
 

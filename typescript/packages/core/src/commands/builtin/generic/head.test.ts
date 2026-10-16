@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { efbig } from '../../../errors/fs.ts'
+import { eacces, efbig } from '../../../errors/fs.ts'
 import { materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
@@ -211,6 +211,30 @@ describe('head asks the mount for the first lines', () => {
     expect(result?.[1].exitCode).toBe(1)
     expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(
       "head: error reading '/big': File too large\n",
+    )
+  })
+
+  it.each([
+    [['/locked', '/small'], '==> /small <==\nok\n'],
+    [['/small', '/locked', '/small'], '==> /small <==\nok\n\n==> /small <==\nok\n'],
+  ])('prints no header for an operand it may not open: %j', async (names, expected) => {
+    const result = await headGeneric(
+      names.map((name) => PathSpec.fromStrPath(name)),
+      [],
+      opts({ lines: '1' }),
+      fileStat,
+      // eslint-disable-next-line require-yield
+      async function* () {
+        await Promise.resolve()
+        throw new Error('read a file')
+      },
+      (p) =>
+        p.virtual === '/locked' ? Promise.reject(eacces(p)) : Promise.resolve(ENC.encode('ok\n')),
+    )
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe(expected)
+    expect(result?.[1].exitCode).toBe(1)
+    expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(
+      "head: cannot open '/locked' for reading: Permission denied\n",
     )
   })
 })

@@ -74,7 +74,7 @@ def _make_backend(
     async def copy(src, dst) -> None:
         files[_key(dst)] = files[_key(src)]
 
-    async def find(p, type=None) -> list[str]:
+    async def find(p, type=None, unreadable=None) -> list[str]:
         base = _key(p) + "/"
         return sorted(k for k in files if k.startswith(base))
 
@@ -409,7 +409,7 @@ def _typed_backend(files: dict[str, bytes], dirs: set[str]):
     """Backend whose ``find`` honors ``type`` and whose ``mkdir`` records."""
     stat, copy, _ = _make_backend(files, dirs)
 
-    async def find(p, type=None) -> list[str]:
+    async def find(p, type=None, unreadable=None) -> list[str]:
         base = _key(p) + "/"
         if type == "d":
             return sorted(k for k in dirs if k.startswith(base))
@@ -419,6 +419,39 @@ def _typed_backend(files: dict[str, bytes], dirs: set[str]):
         dirs.add(_key(p))
 
     return stat, copy, find, mkdir
+
+
+@pytest.mark.asyncio
+async def test_a_folder_the_walk_may_not_open_is_named_and_the_rest_copies():
+    # GNU (coreutils 9.7): `cp: cannot access 'src/locked': Permission
+    # denied`, dst/locked is made, every other entry copies, exit 1.
+    files = {"/t/locked/x.txt": b"x", "/t/open/y.txt": b"y", "/t/z.txt": b"z"}
+    dirs = {"/t", "/t/locked", "/t/open"}
+    stat, copy, _, mkdir = _typed_backend(files, dirs)
+
+    async def find(p, type=None, unreadable=None) -> list[str]:
+        unreadable.append("/t/locked")
+        base = _key(p) + "/"
+        pool = dirs if type == "d" else files
+        return sorted(
+            k
+            for k in pool
+            if k.startswith(base) and not k.startswith("/t/locked/")
+        )
+
+    _, io = await cp_generic(
+        [_spec(p) for p in ["/t", "/c"]],
+        strategy=NativeCopy(copy=copy, find=find, mkdir=mkdir),
+        stat=stat,
+        flags=CpFlags(recursive=True),
+    )
+    assert io.exit_code == 1
+    assert (io.stderr or b"").decode() == (
+        "cp: cannot access '/t/locked': Permission denied\n"
+    )
+    assert {"/c", "/c/locked", "/c/open"} <= dirs
+    assert set(files) >= {"/c/open/y.txt", "/c/z.txt"}
+    assert "/c/locked/x.txt" not in files
 
 
 @pytest.mark.asyncio

@@ -122,7 +122,8 @@ CONDITION_CLASS: dict[FsCondition, type[OSError]] = {
 # The per-operand errors a catch site names by class: every one that
 # writes a command line and keeps going. ENOTEMPTY and EXDEV have no
 # class, so a plain OSError carrying them renders its phrase but is not
-# caught here. Mirrors TS isFsError.
+# caught here, and EPIPE's class is left out. TS isFsError takes every
+# OPERAND_CONDITIONS code, those three included.
 FS_ERRORS: tuple[type[OSError], ...] = (
     BadDescriptorError,
     FileNotFoundError,

@@ -362,7 +362,8 @@ export function errorVirtualPath(err: unknown): string {
 
 // True when the error carries a recognized filesystem code, i.e. it is the
 // per-operand kind a read-family command skips, going on with the remaining
-// operands. Anything else keeps propagating.
+// operands. Anything else keeps propagating. Wider than Python's FS_ERRORS,
+// which leaves out ENOTEMPTY, EXDEV and EPIPE.
 export function isFsError(err: unknown): boolean {
   return fsStrerror(err) !== null
 }

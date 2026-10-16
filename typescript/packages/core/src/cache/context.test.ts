@@ -41,10 +41,6 @@ class FakeManager {
     return null
   }
 
-  readThrough(_path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array> {
-    return fetch()
-  }
-
   cachedSize(_path: PathSpec): Promise<number | null> {
     return Promise.resolve(null)
   }

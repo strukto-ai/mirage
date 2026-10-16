@@ -4,7 +4,7 @@ import pytest
 
 from mirage.commands.builtin.generic.head import head, head_generic, head_multi
 from mirage.commands.config import CommandOpts
-from mirage.errors.fs import efbig
+from mirage.errors.fs import eacces, efbig
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -221,4 +221,38 @@ async def test_head_reports_a_failed_operand_and_prints_the_next():
     assert io.exit_code == 1
     assert await materialize(io.stderr) == (
         b"head: error reading '/big': File too large\n"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "names,expected",
+    [
+        (["/locked", "/small"], b"==> /small <==\nok\n"),
+        (
+            ["/small", "/locked", "/small"],
+            b"==> /small <==\nok\n\n==> /small <==\nok\n",
+        ),
+    ],
+)
+async def test_head_prints_no_header_for_an_operand_it_may_not_open(
+    names, expected
+):
+    async def first_lines(p: PathSpec, n: int) -> bytes:
+        if p.virtual == "/locked":
+            raise eacces(p)
+        return b"ok\n"
+
+    out, io = await head_generic(
+        [PathSpec.from_str_path(name) for name in names],
+        [],
+        CommandOpts(flags={"lines": "1"}),
+        _file_stat,
+        _counted_reads(b"", []),
+        first_lines,
+    )
+    assert await materialize(out) == expected
+    assert io.exit_code == 1
+    assert await materialize(io.stderr) == (
+        b"head: cannot open '/locked' for reading: Permission denied\n"
     )

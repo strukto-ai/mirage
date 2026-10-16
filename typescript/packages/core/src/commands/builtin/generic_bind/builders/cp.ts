@@ -17,6 +17,7 @@ import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { FileStat, NativeCopy, PathSpec, PrimitiveCopy } from '../../../../types.ts'
 import { treeWalk } from '../../utils/tree.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
+import { rekey } from '../../../../utils/key_prefix.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
 import { serves, typedLink, linksOf, mountsOf } from '../../utils/links.ts'
 import type { GenericCommand } from '../adapter.ts'
@@ -57,8 +58,19 @@ export const BUILDER: GenericCommand = {
       (spec: PathSpec, i?: IndexCacheStore) => ops.readdir(accessor, spec, i),
       (spec: PathSpec, i?: IndexCacheStore) => ops.stat(accessor, spec, i),
     )
-    const findFn: NativeCopy['find'] = (src, options) =>
-      walkFind(src, { readdir, stat }, options, idx)
+    const findFn: NativeCopy['find'] = async (src, options) => {
+      const refused: string[] = []
+      const found = await walkFind(
+        src,
+        { readdir, stat, ...(options.unreadable === undefined ? {} : { unreadable: refused }) },
+        { type: options.type },
+        idx,
+      )
+      options.unreadable?.push(
+        ...refused.map((path) => `/${rekey(src.virtual, src.vfsPath, path)}`),
+      )
+      return found
+    }
     const parsed = parseFlags(new FlagView(opts.flags, specOf('cp')))
     // A native copy moves a tree in one backend call and readTree lists
     // it, neither of which passes an entry through the guard the way a

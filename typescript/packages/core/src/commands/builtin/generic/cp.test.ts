@@ -537,6 +537,45 @@ function typedBackend(files: Map<string, Uint8Array>, dirs: Set<string>) {
 }
 
 describe('per-entry policy still materializes directories', () => {
+  // GNU (coreutils 9.7): `cp: cannot access 'src/locked': Permission
+  // denied`, dst/locked is made, every other entry copies, exit 1.
+  it('names a folder the walk may not open and copies the rest', async () => {
+    const enc = new TextEncoder()
+    const files = new Map<string, Uint8Array>([
+      ['/t/locked/x.txt', enc.encode('x')],
+      ['/t/open/y.txt', enc.encode('y')],
+      ['/t/z.txt', enc.encode('z')],
+    ])
+    const dirs = new Set(['/t', '/t/locked', '/t/open'])
+    const { stat, copy, mkdir } = typedBackend(files, dirs)
+    const find = (
+      p: PathSpec,
+      options: { type: 'f' | 'd'; unreadable?: string[] },
+    ): Promise<string[]> => {
+      options.unreadable?.push('/t/locked')
+      const base = key(p) + '/'
+      const source = options.type === 'd' ? [...dirs] : [...files.keys()]
+      return Promise.resolve(
+        source.filter((k) => k.startsWith(base) && !k.startsWith('/t/locked/')).sort(),
+      )
+    }
+    const [, io] = await cpGeneric(
+      ['/t', '/c'].map(spec),
+      stat,
+      { copy, find, mkdir },
+      cpFlags({ recursive: true }),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toBe(
+      "cp: cannot access '/t/locked': Permission denied\n",
+    )
+    expect(dirs.has('/c/locked')).toBe(true)
+    expect(dirs.has('/c/open')).toBe(true)
+    expect(files.has('/c/open/y.txt')).toBe(true)
+    expect(files.has('/c/z.txt')).toBe(true)
+    expect(files.has('/c/locked/x.txt')).toBe(false)
+  })
+
   it('creates the destination for an entirely empty tree', async () => {
     const files = new Map<string, Uint8Array>()
     const dirs = new Set(['/t', '/t/a', '/t/a/b'])

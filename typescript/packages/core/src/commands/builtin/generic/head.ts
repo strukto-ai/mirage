@@ -17,11 +17,12 @@ import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
+import { READ_FAILURES } from '../../../errors/constants.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES, STDIN_HEADER_NAME } from '../utils/constants.ts'
-import { asyncChain } from '../../../io/stream.ts'
+import { asyncChain, closeQuietly } from '../../../io/stream.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { deadlineCheck, truncateStream } from '../utils/limit.ts'
@@ -79,7 +80,7 @@ async function* headStream(
   zeroTerminated = false,
   signal?: AbortSignal,
   overdue?: () => void,
-): AsyncIterable<Uint8Array> {
+): AsyncGenerator<Uint8Array> {
   const pulls = chunks(source, signal, false, overdue)
   if (bytesMode !== null) {
     if (bytesMode === 0) return
@@ -177,20 +178,33 @@ async function* headMulti(
   showHeaders: boolean,
   zeroTerminated: boolean,
   unread: ReadonlySet<string>,
+  refused: ReadonlySet<string>,
   signal?: AbortSignal,
   overdue?: () => void,
 ): AsyncIterable<Uint8Array> {
-  for (let i = 0; i < paths.length; i++) {
-    const p = paths[i]
-    if (p === undefined) continue
-    if (showHeaders) {
-      const prefix = i > 0 ? '\n' : ''
-      yield encodeText(`${prefix}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
-    }
+  let printed = false
+  for (const p of paths) {
     // A directory opened: its header prints and its read fails.
-    if (unread.has(p.virtual)) continue
-    const source = stream(p)
-    yield* headStream(source, lines, bytesMode, zeroTerminated, signal, overdue)
+    const body = unread.has(p.virtual)
+      ? null
+      : headStream(stream(p), lines, bytesMode, zeroTerminated, signal, overdue)
+    try {
+      // The first pull opens the file, and `stream` names in `refused` one
+      // whose open it refused, which prints no header, as GNU opens a file
+      // before it heads it.
+      const first = await body?.next()
+      if (showHeaders && !refused.has(p.virtual)) {
+        yield encodeText(`${printed ? '\n' : ''}==> ${operandLabel(p, STDIN_HEADER_NAME)} <==\n`)
+        printed = true
+      }
+      if (body === null || first === undefined || first.done === true) continue
+      yield first.value
+      for (let next = await body.next(); next.done !== true; next = await body.next()) {
+        yield next.value
+      }
+    } finally {
+      await closeQuietly(body)
+    }
   }
 }
 
@@ -223,6 +237,7 @@ export async function headGeneric(
       stderr: err === '' ? null : encodeText(err),
     })
     if (opened.length === 0) return [null, io]
+    const refused = new Set<string>()
     const pushed = parsed.bytesMode === null && !parsed.zeroTerminated && parsed.lines > 0
     const sourceFor = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
       try {
@@ -242,7 +257,10 @@ export async function headGeneric(
       } catch (err) {
         if (opened.length === 1 || !isFsError(err)) throw err
         // A read that fails once the stat passed (a table past its read cap)
-        // is reported, and the next operand still prints.
+        // is reported, and the next operand still prints; one whose open was
+        // refused prints no header either.
+        const code = (err as { code?: string }).code
+        if (code === undefined || !READ_FAILURES.has(code)) refused.add(p.virtual)
         io.stderr = concat([await materialize(io.stderr), encodeText(fsErrorLine('head', p, err))])
         io.exitCode = 1
       }
@@ -256,6 +274,7 @@ export async function headGeneric(
         showHeaders,
         parsed.zeroTerminated,
         unread,
+        refused,
         opts.signal,
         deadlineCheck(opts),
       ),

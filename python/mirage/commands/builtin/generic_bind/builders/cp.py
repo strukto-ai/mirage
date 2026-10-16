@@ -52,14 +52,21 @@ async def _walk_find(
     index: IndexCacheStore,
     src: PathSpec,
     type: str | None = None,
+    unreadable: list[str] | None = None,
 ) -> list[str]:
+    refused: list[str] | None = None if unreadable is None else []
     results = await walk_find(
         src,
         readdir=readdir,
         stat=stat,
         index=index,
         args=parse_find_args((), type=type),
+        unreadable=refused,
     )
+    if unreadable is not None and refused is not None:
+        unreadable.extend(
+            "/" + rekey(src.virtual, src.vfs_path, path) for path in refused
+        )
     return ["/" + rekey(src.virtual, src.vfs_path, path) for path in results]
 
 

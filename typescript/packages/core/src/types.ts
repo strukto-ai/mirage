@@ -896,9 +896,11 @@ export type MoveFn<Args extends unknown[] = [src: PathSpec, target: PathSpec]> =
 ) => Promise<void>
 
 /** Native copy only asks for files or directories; backend ops supply their full arguments. */
-export type FindFn<Args extends unknown[] = [src: PathSpec, options: { type: 'f' | 'd' }]> = (
-  ...args: Args
-) => Promise<string[]>
+// A directory the walk may not open lands in `unreadable` and the walk goes
+// on; without it the refusal propagates.
+export type FindFn<
+  Args extends unknown[] = [src: PathSpec, options: { type: 'f' | 'd'; unreadable?: string[] }],
+> = (...args: Args) => Promise<string[]>
 
 export type ReaddirFn<Args extends unknown[] = [path: PathSpec]> = (
   ...args: Args
