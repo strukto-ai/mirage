@@ -124,18 +124,18 @@ describe('core/ssh/stream', () => {
   })
 })
 
+function file(vfsPath: string): PathSpec {
+  return new PathSpec({
+    virtual: `/s/${vfsPath}`,
+    directory: '/s',
+    vfsPath,
+    rawPath: `/s/${vfsPath}`,
+  })
+}
+
 describe('follow', () => {
   const ENC = new TextEncoder()
   const DEC = new TextDecoder()
-
-  function file(vfsPath: string): PathSpec {
-    return new PathSpec({
-      virtual: `/s/${vfsPath}`,
-      directory: '/s',
-      vfsPath,
-      rawPath: `/s/${vfsPath}`,
-    })
-  }
 
   it("streams what the server's tail prints", async () => {
     const accessor = new StreamAccessor('data', [

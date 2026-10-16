@@ -22,7 +22,17 @@ const clients: FakeClient[] = []
 // what the stream's return() must reach.
 class FakeChannel extends EventEmitter {
   readonly stderr = { resume: vi.fn() }
+  paused = false
   end = vi.fn()
+  pause = vi.fn(() => {
+    this.paused = true
+  })
+  resume = vi.fn(() => {
+    this.paused = false
+  })
+  isPaused(): boolean {
+    return this.paused
+  }
   close = vi.fn(() => {
     this.emit('close')
   })
@@ -57,6 +67,27 @@ class FakeClient extends EventEmitter {
 
 vi.mock('ssh2', () => ({ Client: FakeClient, default: { Client: FakeClient } }))
 
+function last<T>(items: T[]): T {
+  const item = items.at(-1)
+  if (item === undefined) throw new Error('nothing made yet')
+  return item
+}
+
+// The client the accessor connected, once its exec is waiting to open.
+async function execWaiting(accessor: SSHAccessor): Promise<FakeClient> {
+  await accessor.sftp()
+  const client = last(clients)
+  for (let i = 0; i < 10 && client.opens.length === 0; i++) await new Promise(setImmediate)
+  return client
+}
+
+async function opened(accessor: SSHAccessor): Promise<FakeChannel> {
+  const client = await execWaiting(accessor)
+  client.opens.shift()?.()
+  await new Promise(setImmediate)
+  return last(client.channels)
+}
+
 describe('SSHAccessor', () => {
   // The server or the network ending the connection leaves its SFTP channel
   // dead; the next call connects afresh. Mirrors test_ssh.py.
@@ -71,27 +102,6 @@ describe('SSHAccessor', () => {
     await accessor.close()
   })
 
-  function last<T>(items: T[]): T {
-    const item = items.at(-1)
-    if (item === undefined) throw new Error('nothing made yet')
-    return item
-  }
-
-  // The client the accessor connected, once its exec is waiting to open.
-  async function execWaiting(accessor: SSHAccessor): Promise<FakeClient> {
-    await accessor.sftp()
-    const client = last(clients)
-    for (let i = 0; i < 10 && client.opens.length === 0; i++) await new Promise(setImmediate)
-    return client
-  }
-
-  async function opened(accessor: SSHAccessor): Promise<FakeChannel> {
-    const client = await execWaiting(accessor)
-    client.opens.shift()?.()
-    await new Promise(setImmediate)
-    return last(client.channels)
-  }
-
   it('streams a command until its channel closes', async () => {
     const accessor = new SSHAccessor({ host: 'unused', root: '/' })
     const stream = accessor.runStream('tail -f x')
@@ -104,6 +114,24 @@ describe('SSHAccessor', () => {
     const second = stream.next()
     channel.emit('close')
     expect((await second).done).toBe(true)
+    await accessor.close()
+  })
+
+  it('pauses the channel while the reader is behind and resumes it as it reads', async () => {
+    const accessor = new SSHAccessor({ host: 'unused', root: '/' })
+    const stream = accessor.runStream('tail -f x', 4)
+    const first = stream.next()
+    const channel = await opened(accessor)
+    channel.emit('data', Buffer.from('ab'))
+    await first
+    channel.emit('data', Buffer.from('cd'))
+    channel.emit('data', Buffer.from('ef'))
+    expect(channel.pause).toHaveBeenCalledTimes(1)
+    expect(channel.paused).toBe(true)
+    await stream.next()
+    expect(channel.resume).toHaveBeenCalledTimes(1)
+    expect(channel.paused).toBe(false)
+    await stream.return?.()
     await accessor.close()
   })
 

@@ -435,15 +435,15 @@ async def test_delta_tree_leaves_a_folder_from_another_drive_to_the_walk(
     assert found is None
 
 
+async def _refused(config, url, params=None, session=None):
+    raise GraphError(400, "invalidRequest", "no delta here")
+
+
 @pytest.mark.asyncio
 async def test_delta_tree_leaves_a_refused_feed_to_the_walk(monkeypatch):
     get, _, _ = _feed({"id": "T", "folder": {}}, [])
-
-    async def refused(config, url, params=None, session=None):
-        raise GraphError(400, "invalidRequest", "no delta here")
-
     monkeypatch.setattr(drive_ops, "graph_get", get)
-    monkeypatch.setattr(drive_ops, "graph_list", refused)
+    monkeypatch.setattr(drive_ops, "graph_list", _refused)
     found = await drive_ops.delta_tree(
         MsGraphConfig(access_token="token"), _loc("d1", "f")
     )

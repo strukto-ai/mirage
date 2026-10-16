@@ -132,10 +132,14 @@ export class SSHAccessor extends Accessor {
    * discarded. An iterator rather than a generator: a generator queues
    * `return` behind a pull waiting for output, so a quiet command could never
    * be closed; `return` here closes the command's channel at once, a pull in
-   * flight or a channel still opening included. Mirrors Python's `run_stream`.
+   * flight or a channel still opening included. Once `limit` unread bytes are
+   * held the channel pauses until the reader drains them, so a slow reader
+   * holds back the server rather than filling memory. Mirrors Python's
+   * `run_stream`, where each read pulls from asyncssh's own bounded buffer.
    */
-  runStream(command: string): AsyncIterableIterator<Uint8Array> {
+  runStream(command: string, limit = 1 << 20): AsyncIterableIterator<Uint8Array> {
     const chunks: Uint8Array[] = []
+    let held = 0
     const done: IteratorResult<Uint8Array> = { value: undefined, done: true }
     let channel: ClientChannel | null = null
     let opening: Promise<void> | null = null
@@ -165,6 +169,8 @@ export class SSHAccessor extends Accessor {
       opened.stderr.resume()
       opened.on('data', (chunk: Buffer) => {
         chunks.push(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength))
+        held += chunk.byteLength
+        if (held >= limit) opened.pause()
         notify()
       })
       opened.on('error', (err: unknown) => {
@@ -188,13 +194,18 @@ export class SSHAccessor extends Accessor {
           })
         }
         const value = chunks.shift()
-        if (value !== undefined) return { value, done: false }
+        if (value !== undefined) {
+          held -= value.byteLength
+          if (held < limit && channel?.isPaused() === true) channel.resume()
+          return { value, done: false }
+        }
         if (failure !== null) throw failure
         return done
       },
       return(): Promise<IteratorResult<Uint8Array>> {
         ended = true
         chunks.length = 0
+        held = 0
         channel?.close()
         notify()
         return Promise.resolve(done)
