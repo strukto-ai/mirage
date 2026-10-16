@@ -188,25 +188,36 @@ builds the call already names the backend.
 | MongoDB | `mirage.core.mongodb.watch` | `mirage-core/core/mongodb/watch` | one change stream event, with its `operationType` |
 | GridFS | `mirage.core.gridfs.watch` | `mirage-node/core/gridfs/watch` | one change stream event on `<bucket>.files` |
 | Box | `mirage.core.box.watch` | `mirage-core/core/box/watch` | one `/events` entry |
+| Discord | `mirage.core.discord.watch` | `mirage-core/core/discord/watch` | a Gateway dispatch's `d`, with its `t` |
+| Linear | `mirage.core.linear.watch` | `mirage-core/core/linear/watch` | a webhook delivery, with its `type` |
+| Trello | `mirage.core.trello.watch` | `mirage-core/core/trello/watch` | a webhook delivery (`action` and `model`), with the action's `type` |
+| Notion | `mirage.core.notion.watch` | `mirage-core/core/notion/watch` | a webhook event, with its `type` |
+| Email | `mirage.core.email.watch` | `mirage-node/core/email/watch` | an IMAP IDLE response's name, with `{"mailbox": <name>}` |
 
 Each module exports one mapper, named after the backend: `SlackEventHook`,
 `DiskEventHook`, `RedisEventHook`, `S3EventHook`, `GitHubEventHook`,
-`NextcloudEventHook`, `MongoDBEventHook`, `GridFSEventHook`, `BoxEventHook`.
+`NextcloudEventHook`, `MongoDBEventHook`, `GridFSEventHook`, `BoxEventHook`,
+`DiscordEventHook`, `LinearEventHook`, `TrelloEventHook`, `NotionEventHook`,
+`EmailEventHook`.
 
-A mapper answers with zero or more `FileEvent`s and never invents a path it
-was not told about. When a payload names only a scope, it returns `unknown`
-on that directory, which the watcher reads as "re-inventory everything
-below": a forced GitHub push does not say which files changed, and a Slack
-`file_shared` cannot name the rendered filename.
+A mapper answers with zero or more `FileEvent`s and never invents a path it was
+not told about. When a payload names only a scope, it returns `unknown` on that
+directory, which the watcher reads as "re-inventory everything below": a forced
+GitHub push does not say which files changed, a Slack `file_shared` cannot name
+the rendered filename, and an IMAP `EXISTS` names a message by its number in
+the mailbox, never by the UID its file is named after.
 
 Slack is where the mapping earns its place. A message maps to
 `channels/<name>__<CID>/<YYYY-MM-DD>/chat.jsonl`, and the day is bucketed in
 **UTC** while Slack's client shows local time, so a hand-written mapper names
 tomorrow's directory for a fifth of every day and never errors, because
-notifying a path the mount does not serve evicts nothing. A **thread reply**
-is the other trap: `chat.jsonl` renders `conversations.history`, which returns
+notifying a path the mount does not serve evicts nothing. A **thread reply** is
+the other trap: `chat.jsonl` renders `conversations.history`, which returns
 parents only, so a reply appears in no day file at all. What changed is the
-parent's `reply_count`, in the parent's day.
+parent's `reply_count`, in the parent's day. Discord has both traps: an edit, a
+delete or a reaction names a message from any earlier day, which is its id's
+UTC date, and a thread message changes its starter message in the parent
+channel.
 
 Runnable examples:
 
@@ -246,13 +257,14 @@ await ws.notify(
 
 Many providers push only a ping: Gmail and Calendar push notifications, Drive
 `changes.watch` channels, Graph change notifications for OneDrive and
-SharePoint, Dropbox webhooks and `list_folder/longpoll`, and Box's long poll
-all say that something changed, not what. A mount on one of those backends has
-a `delta_hook()` (`deltaHook()`), and your receiver answers each ping with one
-`pull` from the checkpoint the last one handed back. Answer pings one at a
-time: two pulls from the same checkpoint would race, and the slower one would
-hand back the older cursor. Keep the checkpoint where a restart can read it (a
-file, Redis, your database), saved after the changes it covers are notified:
+SharePoint, Dropbox webhooks and `list_folder/longpoll`, Box's long poll and
+Airtable webhooks all say that something changed, not what. A mount on one of
+those backends has a `delta_hook()` (`deltaHook()`), and your receiver answers
+each ping with one `pull` from the checkpoint the last one handed back. Answer
+pings one at a time: two pulls from the same checkpoint would race, and the
+slower one would hand back the older cursor. Keep the checkpoint where a
+restart can read it (a file, Redis, your database), saved after the changes it
+covers are notified:
 
 <CodeGroup>
 
@@ -309,14 +321,15 @@ function onPing(): Promise<void> {
 
 Each pull reads the provider's own change feed from a cursor: Gmail history,
 the Calendar sync token, Drive `changes.list`, Graph `/delta`, Dropbox
-`list_folder/continue`, Box `/events`. None of them lists the tree. The
-baseline pull (no checkpoint) takes the cursor at the present and reports
-nothing. A service that comes back with its saved checkpoint catches up on
-everything it missed with its next pull; one that takes a new baseline instead
-starts at the present and never sees what changed while it was down. A cursor
-the provider no longer honors (a Dropbox reset, a Graph `resyncRequired`, a
-Gmail history id it no longer keeps) answers `unknown` on the watch root and
-starts again from the present.
+`list_folder/continue`, Box `/events`, each Airtable webhook's `payloads`. None
+of them lists the tree. The baseline pull (no checkpoint) takes the cursor at
+the present and reports nothing. A service that comes back with its saved
+checkpoint catches up on everything it missed with its next pull; one that
+takes a new baseline instead starts at the present and never sees what changed
+while it was down. A cursor the provider no longer honors (a Dropbox reset, a
+Graph `resyncRequired`, a Gmail history id it no longer keeps, an Airtable
+payload past its seven days) answers `unknown` on the watch root and starts
+again from the present.
 
 A feed that names items by id says where an item is now, not where it was, so
 the checkpoint also keeps the path of each item a pull has placed: a later

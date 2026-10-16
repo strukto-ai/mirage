@@ -28,6 +28,12 @@ Watching splits into two halves, and they have different support stories:
 | GridFS | change streams on `<bucket>.files` | mapper `GridFSEventHook` |
 | Slack | Events API | mapper `SlackEventHook` |
 | Redis | keyspace notifications | mapper `RedisEventHook` |
+| Discord | Gateway dispatches (`MESSAGE_*`, reactions, channels, members, guilds) | mapper `DiscordEventHook` |
+| Linear | webhooks (`Issue`, `Comment`) | mapper `LinearEventHook` |
+| Trello | board webhooks (actions) | mapper `TrelloEventHook` |
+| Notion | webhook events (`page.*`, `database.*`, `data_source.*`) | mapper `NotionEventHook` |
+| Email (IMAP) | IMAP IDLE (`EXISTS`, `EXPUNGE`, `FETCH`) | mapper `EmailEventHook`, `unknown` on the folder |
+| Airtable | webhook notifications (base, webhook, time) | ping: `delta_hook()` reads each webhook's `payloads` |
 | Box | `/events` long poll | ping: `delta_hook()` reads `/events`; mapper `BoxEventHook` per entry |
 | Dropbox | webhooks, `list_folder/longpoll` | ping: `delta_hook()` reads `list_folder/continue` |
 | Gmail | Pub/Sub push (`historyId`) | ping: `delta_hook()` reads `history.list` |
@@ -41,25 +47,30 @@ Where each mapper is imported from, on both hosts, is in the
 
 A mapper reads the payload and, at most, the backend for what the payload
 leaves out (GridFS counts the revisions a name has left; MongoDB lists a
-database's views). A ping handler reads the change feed from its cursor and
-never walks the tree. Calendar issues a sync token only at the end of a full
-sync, so it reads a calendar whole for its baseline and when its token
-expires.
+database's views; Discord, Linear, Trello and Notion read a name the payload
+gives only as an id, once, and remember it). A ping handler reads the change
+feed from its cursor and never walks the tree. Calendar issues a sync token
+only at the end of a full sync, so it reads a calendar whole for its baseline
+and when its token expires. Airtable reads every webhook on each base the watch
+root covers, so one webhook per base with the `tableData`, `tableFields` and
+`tableMetadata` data types covers records, fields and table names.
 
 ## What A Ping Handler Keeps
 
 The checkpoint `pull` hands back is opaque, but it is more than the feed's
-cursor. A feed that names items by id (Drive, Graph, Box) says where an item
-is now, not where it was, so the checkpoint keeps the path of each item a pull
-has placed, and a later rename, move or delete leaves that path. An item seen
-for the first time is a `create` when the provider says it is as it was made
-(its created and modified times agree, or the feed says it was added) and an
+cursor. A feed that names items by id (Drive, Graph, Box) says where an item is
+now, not where it was, so the checkpoint keeps the path of each item a pull has
+placed, and a later rename, move or delete leaves that path. Airtable names
+tables by id, so its checkpoint keeps each table's directory. An item seen for
+the first time is a `create` when the provider says it is as it was made (its
+created and modified times agree, or the feed says it was added) and an
 `update` otherwise; where it was before is left to the index's expiry.
 
 A cursor the provider no longer honors answers `unknown` on the watch root and
 a fresh cursor: a Dropbox reset, a Graph `resyncRequired`, a Gmail history id
-past what Gmail keeps, and a Box stream position older than two weeks, since
-Box replays whatever it still has rather than refusing an old position.
+past what Gmail keeps, a Box stream position older than two weeks, since Box
+replays whatever it still has rather than refusing an old position, and
+Airtable payloads past their seven days or a webhook that is gone.
 
 ## Delivery Without A Mapper
 
