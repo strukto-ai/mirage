@@ -43,7 +43,7 @@ const MAILBOX_CHANGES: ReadonlySet<string> = new Set(['EXISTS', 'EXPUNGE', 'FETC
 export class EmailEventHook {
   toEvents(root: PathSpec, eventType: string, payload: JsonValue): Promise<readonly FileEvent[]> {
     const mailbox = textField(payload, 'mailbox')
-    if (!MAILBOX_CHANGES.has(eventType.toUpperCase()) || mailbox === undefined || mailbox === '') {
+    if (!MAILBOX_CHANGES.has(eventType.toUpperCase()) || mailbox === null || mailbox === '') {
       return Promise.resolve([])
     }
     return Promise.resolve([eventAt(root, mailbox, FileChangeKind.UNKNOWN)])

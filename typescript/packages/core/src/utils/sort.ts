@@ -57,3 +57,16 @@ export function compareComponents(a: string, b: string): number {
   }
   return ca.length - cb.length
 }
+
+/**
+ * JSON with each object's keys in code-point order, the key order of
+ * Python's `json.dumps(value, sort_keys=True)`, so an encoded checkpoint does
+ * not depend on the order its maps were filled in.
+ */
+export function sortedJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item !== null && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => compareCodePoints(a, b)))
+      : item,
+  )
+}

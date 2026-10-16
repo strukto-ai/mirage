@@ -14,8 +14,9 @@
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { Delta, FileChangeKind, type PathSpec } from '../../types.ts'
+import { underPath } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import { sortedJson } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { changesUnder } from '../../events/delta.ts'
 import { virtualOf } from '../../events/payload.ts'
@@ -49,10 +50,7 @@ function relativeOf(accessor: DropboxAccessor, entry: DropboxEntry): string | nu
 }
 
 function encode(cursor: string, seen: Record<string, string>): string {
-  const sorted = Object.fromEntries(
-    Object.entries(seen).sort(([a], [b]) => compareCodePoints(a, b)),
-  )
-  return JSON.stringify({ dropbox: { cursor, seen: sorted } })
+  return sortedJson({ dropbox: { cursor, seen } })
 }
 
 /** The cursor and seen paths a checkpoint holds, null for a baseline. */
@@ -67,7 +65,7 @@ function decode(checkpoint: string | null): [string, Record<string, string>] | n
 
 function dropBelow(seen: Record<string, string>, relative: string): void {
   for (const key of Object.keys(seen)) {
-    if (key === relative || key.startsWith(`${relative}/`)) {
+    if (underPath(key, relative)) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete seen[key]
     }

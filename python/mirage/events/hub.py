@@ -17,11 +17,12 @@ from dataclasses import replace
 
 from mirage.events.base import EventMount, EventRegistry
 from mirage.events.errors import QueueClosed
-from mirage.events.queue.base import EventQueue, QueueFactory
+from mirage.events.queue.base import QueueFactory
 from mirage.events.queue.ram import RAMEventQueue
 from mirage.events.source import Subscriber
 from mirage.types import FileChangeKind, FileEvent, PathSpec
 from mirage.utils.glob_walk import has_glob
+from mirage.utils.key_prefix import mount_key, under_path
 from mirage.utils.path import glob_prefix_match
 
 
@@ -65,10 +66,9 @@ class EventHub:
             virtual (str): Workspace-virtual path.
         """
         norm = "/" + virtual.strip("/")
-        vfs_path = (
-            norm[len(entry.prefix) :] if norm.startswith(entry.prefix) else ""
+        return PathSpec.from_str_path(
+            norm, vfs_path=mount_key(norm, entry.prefix.rstrip("/"))
         )
-        return PathSpec.from_str_path(norm, vfs_path=vfs_path)
 
     def _matches(self, sub: Subscriber, change: FileEvent) -> bool:
         """Whether a change falls inside any of a subscriber's scopes.
@@ -110,8 +110,7 @@ class EventHub:
             if root.endswith("/"):
                 return path_depth > pat_depth
             return path_depth == pat_depth
-        root = root.rstrip("/")
-        return virtual == root or virtual.startswith(root + "/")
+        return under_path(virtual, root)
 
     async def _evict(
         self, entry: EventMount, path: PathSpec, kind: FileChangeKind
@@ -206,10 +205,7 @@ class EventHub:
                 await sub.queue.push(framed)
 
     async def events(
-        self,
-        path: PathSpec | Sequence[PathSpec],
-        *,
-        queue: EventQueue | None = None,
+        self, path: PathSpec | Sequence[PathSpec]
     ) -> AsyncIterator[FileEvent]:
         """Stream changes under ``path`` until the caller stops
         iterating or the hub closes.
@@ -226,10 +222,8 @@ class EventHub:
         Args:
             path (PathSpec | Sequence[PathSpec]): Event root or roots;
                 each may carry glob segments (``/nc/data/*.txt``) and
-                the mount is resolved per root.
-            queue (EventQueue | None): Delivery queue override; the
-                hub's factory builds one over all roots when
-                omitted.
+                the mount is resolved per root; the hub's factory
+                builds one delivery queue over all of them.
         """
         if self._closed:
             raise RuntimeError("event hub is closed")
@@ -249,9 +243,7 @@ class EventHub:
             + ("/" if p.virtual.endswith("/") and p.virtual.strip("/") else "")
             for p in paths
         )
-        sub = Subscriber(
-            queue=queue or self._queue_factory(roots), roots=scopes
-        )
+        sub = Subscriber(queue=self._queue_factory(roots), roots=scopes)
         self._subscribers.append(sub)
         try:
             while True:

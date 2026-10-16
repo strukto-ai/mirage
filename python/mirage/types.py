@@ -1058,9 +1058,9 @@ def word_text(word: "str | PathSpec") -> str:
 class FileChangeKind(StrEnum):
     """Kind of an externally observed file change.
 
-    Shared vocabulary of the events feature; the producer
-    (``Workspace.events``) and the event machinery both depend on it, so
-    it lives here as a leaf type next to ``PathSpec`` / ``FileStat``.
+    Shared vocabulary of the events feature; the public surface
+    (``Workspace.events`` / ``notify``) and the event machinery both
+    carry it, so it lives here as a leaf type next to ``PathSpec``.
 
     Values:
         CREATE: path appeared since the previous checkpoint.

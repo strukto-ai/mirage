@@ -14,6 +14,7 @@
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from mirage.events.constants import DEFAULT_MAX_PENDING
@@ -91,35 +92,19 @@ class RAMEventQueue:
         if old.kind is FileChangeKind.CREATE:
             if new.kind is FileChangeKind.DELETE:
                 return None
-            return FileEvent(
-                kind=FileChangeKind.CREATE,
-                path=new.path,
-                timestamp=new.timestamp,
-                previous_path=new.previous_path,
-                metadata=new.metadata,
-            )
+            return replace(new, kind=FileChangeKind.CREATE)
         if (
             old.kind is FileChangeKind.MOVE
             and new.kind is not FileChangeKind.DELETE
         ):
-            return FileEvent(
-                kind=FileChangeKind.MOVE,
-                path=new.path,
-                timestamp=new.timestamp,
-                previous_path=old.previous_path,
-                metadata=new.metadata,
+            return replace(
+                new, kind=FileChangeKind.MOVE, previous_path=old.previous_path
             )
         if (
             old.kind is FileChangeKind.DELETE
             and new.kind is FileChangeKind.CREATE
         ):
-            return FileEvent(
-                kind=FileChangeKind.UPDATE,
-                path=new.path,
-                timestamp=new.timestamp,
-                previous_path=new.previous_path,
-                metadata=new.metadata,
-            )
+            return replace(new, kind=FileChangeKind.UPDATE)
         return new
 
     def _absorb_source(self, change: FileEvent) -> FileEvent:
@@ -143,23 +128,14 @@ class RAMEventQueue:
             return change
         del self._pending[change.previous_path.virtual]
         if source.kind is FileChangeKind.CREATE:
-            return FileEvent(
-                kind=FileChangeKind.CREATE,
-                path=change.path,
-                timestamp=change.timestamp,
-                metadata=change.metadata,
+            return replace(
+                change, kind=FileChangeKind.CREATE, previous_path=None
             )
         if (
             source.kind is FileChangeKind.MOVE
             and source.previous_path is not None
         ):
-            return FileEvent(
-                kind=FileChangeKind.MOVE,
-                path=change.path,
-                timestamp=change.timestamp,
-                previous_path=source.previous_path,
-                metadata=change.metadata,
-            )
+            return replace(change, previous_path=source.previous_path)
         return change
 
     async def push(self, change: FileEvent) -> None:

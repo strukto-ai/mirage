@@ -14,9 +14,8 @@
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import type { PathSpec } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 import type { DeltaHook } from '../../events/base.ts'
+import { virtualOf } from '../../events/payload.ts'
 import { GraphDeltaHook, type DeltaTarget } from '../msgraph/events.ts'
 import { driveBase } from './client.ts'
 
@@ -26,11 +25,9 @@ import { driveBase } from './client.ts'
  */
 export function buildDeltaHook(accessor: OneDriveAccessor): DeltaHook {
   const config = accessor.config
-  const targets = (root: PathSpec): Promise<DeltaTarget[]> => {
-    const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
-    return Promise.resolve([
-      { drive: driveBase(config), folder: config.keyPrefix, virtual: prefix === '' ? '/' : prefix },
+  const targets = (root: PathSpec): Promise<DeltaTarget[]> =>
+    Promise.resolve([
+      { drive: driveBase(config), folder: config.keyPrefix, virtual: virtualOf(root, '') },
     ])
-  }
   return new GraphDeltaHook(config, targets)
 }

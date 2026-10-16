@@ -12,25 +12,60 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from datetime import datetime
 
 from mirage.types import FileChangeKind, FileEvent, PathSpec
+from mirage.utils.key_prefix import rekey, under_path
 
 
 def spec_for(root: PathSpec, virtual: str) -> PathSpec:
     """Build a PathSpec for ``virtual`` using ``root``'s mount framing.
 
-    The mount prefix length is recovered from the (virtual,
-    vfs_path) pair of the root, the same arithmetic as
-    ``PathSpec.dir``.
-
     Args:
         root (PathSpec): Event root carrying the mount prefix.
         virtual (str): Workspace-virtual path under the same mount.
     """
-    cut = len(root.virtual.rstrip("/")) - len(root.vfs_path)
-    return PathSpec.from_str_path(virtual, vfs_path=virtual[cut:].strip("/"))
+    return PathSpec.from_str_path(
+        virtual, vfs_path=rekey(root.virtual, root.vfs_path, virtual)
+    )
+
+
+def lost_at(root: PathSpec, observed: datetime) -> FileEvent:
+    """The event saying what changed under ``root`` is not known:
+    UNKNOWN on the root, which the hub reads as "re-inventory
+    everything below".
+
+    Args:
+        root (PathSpec): Event root.
+        observed (datetime): When the loss was seen.
+    """
+    return FileEvent(
+        kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
+    )
+
+
+def changes_between(
+    before: Sequence[str], after: Sequence[str], updated: Callable[[str], bool]
+) -> list[tuple[FileChangeKind, str]]:
+    """How one item's paths moved: each path it left, each it reached,
+    and each it kept that ``updated`` says changed.
+
+    Args:
+        before (Sequence[str]): The paths it was.
+        after (Sequence[str]): The paths it is now.
+        updated (Callable[[str], bool]): Whether a kept path changed.
+    """
+    kept = set(before) & set(after)
+    return (
+        [(FileChangeKind.DELETE, v) for v in before if v not in kept]
+        + [(FileChangeKind.CREATE, v) for v in after if v not in kept]
+        + [
+            (FileChangeKind.UPDATE, v)
+            for v in after
+            if v in kept and updated(v)
+        ]
+    )
 
 
 def changes_under(
@@ -72,17 +107,13 @@ def events_under(
         events (Iterable[FileEvent]): Events framed on the root's mount.
     """
     top = root.virtual.rstrip("/")
-
-    def inside(virtual: str) -> bool:
-        return virtual == top or virtual.startswith(top + "/")
-
     kept: list[FileEvent] = []
     for event in events:
         virtual = event.path.virtual
         previous = event.previous_path
-        if inside(virtual):
+        if under_path(virtual, top):
             kept.append(event)
-        elif previous is not None and inside(previous.virtual):
+        elif previous is not None and under_path(previous.virtual, top):
             kept.append(
                 FileEvent(
                     kind=FileChangeKind.DELETE,

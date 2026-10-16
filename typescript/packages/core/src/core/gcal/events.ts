@@ -15,10 +15,11 @@
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import { Delta, FileChangeKind, type JsonValue, type PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import { compareCodePoints, sortedJson } from '../../utils/sort.ts'
 import { CALENDAR_FILE, eventTitle, makeEventFilename } from '../../vfs/gcal/event_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
-import { changesUnder } from '../../events/delta.ts'
+import { changesBetween, changesUnder } from '../../events/delta.ts'
+import { textField } from '../../events/payload.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { listed, syncEvents } from './client.ts'
 import { bucketName, bucketStart, clampedHhmm, dayBounds, daysCovered, eventSpan } from './day.ts'
@@ -51,13 +52,12 @@ export function eventPaths(
   tz: string,
   freeBusy: boolean,
 ): string[] {
-  const eventId = event.id
+  const eventId = textField(event, 'id')
   const span = eventSpan(event, tz)
-  if (typeof eventId !== 'string' || eventId === '' || span === null) return []
+  if (eventId === null || eventId === '' || span === null) return []
   const size = accessor.config.bucketDays
   const scope = accessor.timeRange
-  const summary = event.summary
-  const title = eventTitle(typeof summary === 'string' ? summary : null, freeBusy)
+  const title = eventTitle(textField(event, 'summary'), freeBusy)
   const paths: string[] = []
   for (const day of daysCovered(span, tz)) {
     const bucket = bucketName(bucketStart(day, size), size)
@@ -86,19 +86,6 @@ export function eventPaths(
   return paths
 }
 
-/** Record how one event's files moved. Mirrors Python's `_changed`. */
-function changed(
-  changes: [FileChangeKind, string][],
-  before: readonly string[],
-  after: readonly string[],
-  same: boolean,
-): void {
-  const kept = new Set(before.filter((v) => after.includes(v)))
-  for (const v of before) if (!kept.has(v)) changes.push([FileChangeKind.DELETE, v])
-  for (const v of after) if (!kept.has(v)) changes.push([FileChangeKind.CREATE, v])
-  if (!same) for (const v of after) if (kept.has(v)) changes.push([FileChangeKind.UPDATE, v])
-}
-
 /**
  * Checkpointed delta over Calendar's incremental sync. Each calendar's
  * checkpoint holds its sync token and, by event id, the files the event is and
@@ -121,7 +108,7 @@ export class GCalDeltaHook implements DeltaHook {
   async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
     const calendars = await calendarIndex(this.accessor)
     const tz = bucketZone(this.accessor, calendars)
-    const prefix = mountPrefixOf(root.virtual, root.vfsPath).replace(/\/+$/, '')
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const match = detectScope(root)
     const wanted = match.kind === ROOT ? null : (match.slots.calendar ?? null)
     const decoded = decode(checkpoint)
@@ -189,21 +176,22 @@ export class GCalDeltaHook implements DeltaHook {
     }
     const seen = new Set<string>()
     for (const event of events) {
-      const eventId = event.id
-      if (typeof eventId !== 'string') continue
+      const eventId = textField(event, 'id')
+      if (eventId === null) continue
       seen.add(eventId)
       const [before, stamp] = known.get(eventId) ?? [[], null]
       const after =
         event.status === 'cancelled' ? [] : eventPaths(this.accessor, base, event, tz, freeBusy)
-      const updated = typeof event.updated === 'string' ? event.updated : null
-      changed(changes, before, after, known.has(eventId) && stamp === updated)
+      const updated = textField(event, 'updated')
+      const same = known.has(eventId) && stamp === updated
+      changes.push(...changesBetween(before, after, () => !same))
       if (after.length > 0) known.set(eventId, [after, updated])
       else known.delete(eventId)
     }
     if (whole) {
       for (const eventId of [...known.keys()].sort(compareCodePoints)) {
         if (seen.has(eventId)) continue
-        changed(changes, known.get(eventId)?.[0] ?? [], [], true)
+        changes.push(...changesBetween(known.get(eventId)?.[0] ?? [], [], () => false))
         known.delete(eventId)
       }
     }
@@ -216,17 +204,13 @@ function encode(
   states: ReadonlyMap<string, CalendarState>,
   details: ReadonlyMap<string, string>,
 ): string {
-  const calendars: Record<string, unknown> = {}
-  for (const [name, [token, known]] of [...states].sort(([a], [b]) => compareCodePoints(a, b))) {
-    const events: Record<string, unknown> = {}
-    for (const [eventId, [paths, updated]] of [...known].sort(([a], [b]) =>
-      compareCodePoints(a, b),
-    )) {
-      events[eventId] = { paths, updated }
-    }
+  const calendars: Record<string, JsonValue> = {}
+  for (const [name, [token, known]] of states) {
+    const events: Record<string, JsonValue> = {}
+    for (const [eventId, [paths, updated]] of known) events[eventId] = { paths, updated }
     calendars[name] = { details: details.get(name) ?? '', events, token }
   }
-  return JSON.stringify({ gcal: { calendars, zone } })
+  return sortedJson({ gcal: { calendars, zone } })
 }
 
 /**

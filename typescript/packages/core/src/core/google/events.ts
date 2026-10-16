@@ -15,8 +15,7 @@
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
 import { Delta, type FileChangeKind, type PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import { sortedJson } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { changesUnder, justMade, settle } from '../../events/delta.ts'
 import { listChanges, startPageToken, type DriveFile } from './drive.ts'
@@ -40,11 +39,7 @@ export function feedState(checkpoint: string | null): FeedState | null {
 
 /** Encode a Drive change-feed checkpoint. Mirrors Python `feed_checkpoint`. */
 export function feedCheckpoint(state: FeedState): string {
-  return JSON.stringify({ drive: state }, (_key, value: unknown) =>
-    value !== null && typeof value === 'object' && !Array.isArray(value)
-      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => compareCodePoints(a, b)))
-      : value,
-  )
+  return sortedJson({ drive: state })
 }
 
 /**
@@ -89,7 +84,7 @@ export class AppDeltaHook implements DeltaHook {
       })
     }
     const [found, token] = await listChanges(tm, state.token)
-    const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const seen: Record<string, string> = { ...(state.seen ?? {}) }
     const changes: [FileChangeKind, string][] = []
     for (const change of found) {

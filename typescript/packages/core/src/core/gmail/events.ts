@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GmailAccessor } from '../../accessor/gmail.ts'
-import { Delta, FileChangeKind, FileEvent, type PathSpec } from '../../types.ts'
+import { Delta, FileChangeKind, type PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import { sortedJson } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../events/base.ts'
-import { changesUnder } from '../../events/delta.ts'
+import { changesBetween, changesUnder, lostAt } from '../../events/delta.ts'
 import { type TokenManager } from '../google/client.ts'
 import { currentHistoryId, listHistory } from './history.ts'
 import { type GmailLabel, listLabels } from './labels.ts'
@@ -114,23 +114,6 @@ function moved(paths: readonly string[], moves: ReadonlyMap<string, string | nul
 }
 
 /**
- * Record how one message's paths moved: a path it left, one it reached, and
- * each message file it kept, whose labels changed. Mirrors Python's `_changed`.
- */
-function changed(
-  changes: [FileChangeKind, string][],
-  before: readonly string[],
-  after: readonly string[],
-): void {
-  const kept = new Set(before.filter((v) => after.includes(v)))
-  for (const v of before) if (!kept.has(v)) changes.push([FileChangeKind.DELETE, v])
-  for (const v of after) if (!kept.has(v)) changes.push([FileChangeKind.CREATE, v])
-  for (const v of after) {
-    if (kept.has(v) && v.endsWith(MSG_SUFFIX)) changes.push([FileChangeKind.UPDATE, v])
-  }
-}
-
-/**
  * Checkpointed delta over Gmail's history. The checkpoint holds the history id
  * the next pull starts after, each label's folder name and, by message id, the
  * paths of each message a pull has seen. History records no label created,
@@ -160,10 +143,9 @@ export class GmailDeltaHook implements DeltaHook {
     } catch (err) {
       if ((err as { status?: unknown }).status !== 404) throw err
       console.debug(`gmail history ${start} is gone: ${String(err)}`)
-      const lost = new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed })
-      return new Delta({ changes: [lost], checkpoint: await baseline(tm) })
+      return new Delta({ changes: [lostAt(root, observed)], checkpoint: await baseline(tm) })
     }
-    const prefix = mountPrefixOf(root.virtual, root.vfsPath).replace(/\/+$/, '')
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const listed = await listLabels(tm)
     const labels = new Map(listed.map((label) => [label.id, label]))
     const nowFolders = labelFolders(listed)
@@ -228,20 +210,18 @@ export class GmailDeltaHook implements DeltaHook {
         ]
         before = added.has(mid) ? [] : messagePaths(prefix, raw, labels, held)
       }
-      changed(changes, before, after)
+      changes.push(...changesBetween(before, after, (v) => v.endsWith(MSG_SUFFIX)))
       known.set(mid, after)
     }
     let unknown = false
     for (const mid of new Set(gone)) {
       const was = known.get(mid)
       known.delete(mid)
-      if (was !== undefined) changed(changes, was, [])
+      if (was !== undefined) changes.push(...changesBetween(was, [], () => false))
       else if (!added.has(mid)) unknown = true
     }
     const events = changesUnder(root, changes, observed)
-    if (unknown) {
-      events.push(new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed }))
-    }
+    if (unknown) events.push(lostAt(root, observed))
     return new Delta({ changes: events, checkpoint: encode(latest, nowFolders, known) })
   }
 }
@@ -260,11 +240,8 @@ function encode(
   folders: ReadonlyMap<string, string>,
   known: ReadonlyMap<string, readonly string[]>,
 ): string {
-  const labels: Record<string, string> = {}
-  for (const id of [...folders.keys()].sort(compareCodePoints)) labels[id] = folders.get(id) ?? id
-  const messages: Record<string, readonly string[]> = {}
-  for (const mid of [...known.keys()].sort(compareCodePoints)) messages[mid] = known.get(mid) ?? []
-  return JSON.stringify({ gmail: { history: historyId, labels, messages } })
+  const labels = Object.fromEntries(folders)
+  return sortedJson({ gmail: { history: historyId, labels, messages: Object.fromEntries(known) } })
 }
 
 /**

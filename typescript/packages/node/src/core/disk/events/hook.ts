@@ -82,11 +82,11 @@ export class DiskEventHook {
    */
   private moved(
     root: PathSpec,
-    source: string | undefined,
-    target: string | undefined,
+    source: string | null,
+    target: string | null,
   ): readonly FileEvent[] {
-    const movedFrom = source === undefined ? null : this.relative(source)
-    const movedTo = target === undefined ? null : this.relative(target)
+    const movedFrom = source === null ? null : this.relative(source)
+    const movedTo = target === null ? null : this.relative(target)
     if (movedTo === null) {
       if (movedFrom === null) return []
       return [eventAt(root, movedFrom, FileChangeKind.DELETE)]
@@ -108,7 +108,7 @@ export class DiskEventHook {
     if (eventType === 'moved') {
       return Promise.resolve(this.moved(root, source, textField(payload, 'dest_path')))
     }
-    if (source === undefined) return Promise.resolve([])
+    if (source === null) return Promise.resolve([])
     const relative = this.relative(source)
     if (relative === null) return Promise.resolve([])
     const kind = DISK_KINDS[eventType]

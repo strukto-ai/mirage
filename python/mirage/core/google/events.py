@@ -21,6 +21,7 @@ from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.core.google.drive import list_changes, start_page_token
 from mirage.events.base import DeltaHook
 from mirage.events.delta import changes_under, just_made, settle
+from mirage.events.payload import text_field
 from mirage.types import Delta, FileChangeKind, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
@@ -99,12 +100,12 @@ class AppDeltaHook:
                 feed_checkpoint({"token": token, "seen": {}}),
             )
         found, token = await list_changes(tm, state["token"])
-        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         seen: dict[str, str] = dict(state.get("seen") or {})
         changes: list[tuple[FileChangeKind, str]] = []
         for change in found:
-            item_id = change.get("fileId")
-            if not isinstance(item_id, str):
+            item_id = text_field(change, "fileId")
+            if item_id is None:
                 continue
             item = change.get("file")
             if (

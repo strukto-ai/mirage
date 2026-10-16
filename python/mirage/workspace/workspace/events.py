@@ -13,26 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Sequence
-from typing import Protocol
 
-from mirage.events import EventHub
+from mirage.events import EventHub, EventRuntime
 from mirage.types import FileEvent, PathSpec
 from mirage.workspace.mount import MountRegistry
-
-
-class EventDelegate(Protocol):
-    """What ``Workspace.events`` needs from an attached event runtime.
-
-    ``mirage.events.EventHub`` satisfies this structurally.
-    """
-
-    def events(
-        self, path: PathSpec | Sequence[PathSpec]
-    ) -> AsyncIterator[FileEvent]: ...
-
-    async def notify(self, change: FileEvent) -> None: ...
-
-    async def close(self) -> None: ...
 
 
 class EventManager:
@@ -49,17 +33,17 @@ class EventManager:
 
     def __init__(self, registry: MountRegistry) -> None:
         self._registry = registry
-        self._runtime: EventDelegate | None = None
+        self._runtime: EventRuntime | None = None
 
     @property
-    def runtime(self) -> EventDelegate | None:
+    def runtime(self) -> EventRuntime | None:
         return self._runtime
 
-    def attach(self, runtime: EventDelegate) -> None:
+    def attach(self, runtime: EventRuntime) -> None:
         """Install the runtime ``events`` delegates to.
 
         Args:
-            runtime (EventDelegate): Runtime to attach.
+            runtime (EventRuntime): Runtime to attach.
 
         Raises:
             RuntimeError: A runtime is already attached.
@@ -81,7 +65,7 @@ class EventManager:
             await self._runtime.close()
             self._runtime = None
 
-    def delegate(self) -> EventDelegate:
+    def delegate(self) -> EventRuntime:
         """The attached runtime, lazily creating the default one."""
         if self._runtime is None:
             self._runtime = EventHub(self._registry)
@@ -93,7 +77,7 @@ class EventManager:
         Args:
             specs (Sequence[PathSpec]): Event roots, already coerced.
         """
-        return self.delegate().events(list(specs))
+        return self.delegate().events(specs)
 
     async def notify(self, change: FileEvent) -> None:
         """Deliver one observed change to the runtime.

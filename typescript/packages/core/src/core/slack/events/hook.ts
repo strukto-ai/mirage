@@ -159,7 +159,7 @@ export class SlackEventHook {
   private async fileShared(root: PathSpec, payload: JsonValue): Promise<readonly FileEvent[]> {
     const channelId = textField(payload, 'channel_id')
     const ts = textField(payload, 'event_ts')
-    if (channelId === undefined || ts === undefined) return []
+    if (channelId === null || ts === null) return []
     const dayDir = await this.dayDir(channelId, ts)
     if (dayDir === null) return []
     return [eventAt(root, `${dayDir}/${FILES_DIR}`, FileChangeKind.UNKNOWN)]
@@ -171,7 +171,7 @@ export class SlackEventHook {
     payload: JsonValue,
   ): Promise<readonly FileEvent[]> {
     if (eventType === 'message') {
-      return this.transcripts(root, textField(payload, 'channel') ?? null, affectedTs(payload))
+      return this.transcripts(root, textField(payload, 'channel'), affectedTs(payload))
     }
     if (ITEM_EVENTS.has(eventType)) {
       const [channelId, ts] = itemChannel(payload)

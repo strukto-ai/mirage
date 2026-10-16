@@ -15,6 +15,7 @@
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
 import { eventAt, field, textField } from '../../events/payload.ts'
+import { underPath } from '../../utils/key_prefix.ts'
 import { NotionAPIError, type NotionTransport } from './client.ts'
 import { dataSourceSegmentName, databaseSegmentName, pageSegmentName } from './normalize.ts'
 import { getDataSource, getDatabase, getPage } from './pages.ts'
@@ -132,8 +133,8 @@ export class NotionEventHook {
       }
     } else if (kind === 'data_source') {
       const source = await this.read(getDataSource, objectId)
-      const owner = textField(field(source, 'parent') ?? null, 'database_id')
-      const above = owner !== undefined && owner !== '' ? await this.place('database', owner) : null
+      const owner = textField(field(source, 'parent'), 'database_id')
+      const above = owner !== null && owner !== '' ? await this.place('database', owner) : null
       if (
         source !== null &&
         typeof source === 'object' &&
@@ -154,23 +155,23 @@ export class NotionEventHook {
   }
 
   private async pageParent(page: JsonValue): Promise<string | null> {
-    const from = field(page, 'parent') ?? null
+    const from = field(page, 'parent')
     const kind = textField(from, 'type')
     if (kind === 'workspace') return 'pages'
     if (kind === 'page_id') {
       const above = textField(from, 'page_id')
-      return above !== undefined && above !== '' ? this.place('page', above) : null
+      return above !== null && above !== '' ? this.place('page', above) : null
     }
     if (kind === 'data_source_id') {
       const above = textField(from, 'data_source_id')
-      return above !== undefined && above !== '' ? this.place('data_source', above) : null
+      return above !== null && above !== '' ? this.place('data_source', above) : null
     }
     return null
   }
 
   private forget(place: string): void {
     for (const [objectId, known] of [...this.places]) {
-      if (known !== null && (known === place || known.startsWith(`${place}/`))) {
+      if (known !== null && underPath(known, place)) {
         this.places.delete(objectId)
       }
     }
@@ -203,11 +204,8 @@ export class NotionEventHook {
     const dot = eventType.indexOf('.')
     const kind = dot < 0 ? eventType : eventType.slice(0, dot)
     const change = dot < 0 ? '' : eventType.slice(dot + 1)
-    const objectId = textField(field(payload, 'entity') ?? null, 'id')
-    if (
-      objectId === undefined ||
-      !(kind === 'page' || kind === 'database' || kind === 'data_source')
-    ) {
+    const objectId = textField(field(payload, 'entity'), 'id')
+    if (objectId === null || !(kind === 'page' || kind === 'database' || kind === 'data_source')) {
       return []
     }
     const own = OWN_FILES[kind] ?? []
@@ -238,7 +236,7 @@ export class NotionEventHook {
         if (now !== null) this.places.set(objectId, now)
       }
       if (now === null) return [...events, ...this.companions(root, kind, [was])]
-      const properties = field(field(payload, 'data') ?? null, 'updated_properties')
+      const properties = field(field(payload, 'data'), 'updated_properties')
       const retitled = Array.isArray(properties) && properties.includes('title')
       if (
         (was !== null && was !== now) ||

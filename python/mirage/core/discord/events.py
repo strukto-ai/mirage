@@ -170,18 +170,16 @@ class DiscordEventHook:
         channel = await self._channel(channel_id)
         thread = False
         if channel is not None and channel.get("type") in THREAD_TYPES:
-            parent_id = channel.get("parent_id")
-            if not isinstance(parent_id, str):
+            parent_id = text_field(channel, "parent_id")
+            if parent_id is None:
                 return ()
             thread = True
             message_ids = [channel_id]
             channel = await self._channel(parent_id)
         if channel is None:
             return await self._listing(root, payload, "channels")
-        guild_id = channel.get("guild_id")
-        if channel.get("type") not in TEXT_CHANNEL_TYPES or not isinstance(
-            guild_id, str
-        ):
+        guild_id = text_field(channel, "guild_id")
+        if channel.get("type") not in TEXT_CHANNEL_TYPES or guild_id is None:
             return ()
         guild = await self._guild_dir(guild_id)
         if guild is None:

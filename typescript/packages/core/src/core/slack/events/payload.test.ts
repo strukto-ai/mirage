@@ -26,8 +26,10 @@ describe('dayOf', () => {
     expect(dayOf(LATE)).toBe('2025-08-16')
   })
 
-  it('rejects a non-numeric ts', () => {
+  it('rejects a non-numeric or overflowing ts', () => {
     expect(dayOf('not-a-ts')).toBeNull()
+    expect(dayOf('1e300')).toBeNull()
+    expect(dayOf('1e400')).toBeNull()
   })
 
   it('rejects an empty ts rather than bucketing it into 1970', () => {

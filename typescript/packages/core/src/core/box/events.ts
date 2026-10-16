@@ -13,11 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { Delta, FileChangeKind, FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import {
+  Delta,
+  FileChangeKind,
+  type FileEvent,
+  type JsonValue,
+  type PathSpec,
+} from '../../types.ts'
+import { underPath } from '../../utils/key_prefix.ts'
+import { sortedJson } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../events/base.ts'
-import { eventsUnder } from '../../events/delta.ts'
+import { eventsUnder, lostAt } from '../../events/delta.ts'
 import { eventAt, field } from '../../events/payload.ts'
 import { eventsNow, eventsSince, type BoxEvent, type BoxItem, type BoxSearchItem } from './api.ts'
 import { EVENT_REPLAY_DAYS, EVENT_STREAM, PLACE_EVENTS, TRASH_EVENTS } from './constants.ts'
@@ -37,19 +43,9 @@ function refOf(item: { type: string; id: string }): string {
   return `${item.type}:${item.id}`
 }
 
-/** Whether `key` lies strictly below `place`. */
-function under(key: string, place: string): boolean {
-  return key.startsWith(`${rstripSlash(place)}/`)
-}
-
-/** Whether `key` is `place` or lies below it. */
-function inside(key: string, place: string): boolean {
-  return key === place || under(key, place)
-}
-
 /** `key` moved from under `old` to under `next`, if it was there. */
 function rebase(key: string, old: string, next: string): string {
-  return inside(key, old) ? next + key.slice(old.length) : key
+  return underPath(key, old) ? next + key.slice(old.length) : key
 }
 
 /**
@@ -127,8 +123,10 @@ export class BoxDeltaHook implements DeltaHook {
     }
     if (observed.getTime() - state.read.getTime() > EVENT_REPLAY_DAYS * DAY_MS) {
       const fresh = await eventsNow(tm, EVENT_STREAM)
-      const lost = new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed })
-      return new Delta({ changes: [lost], checkpoint: encode(fresh, observed, {}) })
+      return new Delta({
+        changes: [lostAt(root, observed)],
+        checkpoint: encode(fresh, observed, {}),
+      })
     }
     const { entries, position } = await eventsSince(tm, state.position, EVENT_STREAM)
     const mapper = new BoxEventHook(this.accessor, state.paths)
@@ -144,10 +142,7 @@ export class BoxDeltaHook implements DeltaHook {
 }
 
 function encode(position: string, read: Date, paths: Readonly<Record<string, string>>): string {
-  const sorted = Object.fromEntries(
-    Object.entries(paths).sort(([a], [b]) => compareCodePoints(a, b)),
-  )
-  return JSON.stringify({ box: { paths: sorted, position, read: read.toISOString() } })
+  return sortedJson({ box: { paths, position, read: read.toISOString() } })
 }
 
 /**
@@ -220,7 +215,7 @@ export class BoxEventHook {
   ): readonly FileEvent[] {
     if (old === undefined) return []
     if (isDir) {
-      this.places = new Map([...this.places].filter(([, path]) => !inside(path, old)))
+      this.places = new Map([...this.places].filter(([, path]) => !underPath(path, old)))
       return [eventAt(root, old, FileChangeKind.UNKNOWN)]
     }
     this.places.delete(ref)

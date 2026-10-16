@@ -79,12 +79,12 @@ export class MongoDBEventHook {
     payload: JsonValue,
   ): Promise<readonly FileEvent[]> {
     if (operationType === 'invalidate') return [eventAt(root, '', FileChangeKind.UNKNOWN)]
-    const ns = field(payload, 'ns') ?? null
+    const ns = field(payload, 'ns')
     const db = textField(ns, 'db')
     const name = textField(ns, 'coll')
     const allowed = this.accessor.config.databases
     if (
-      db === undefined ||
+      db === null ||
       SYSTEM_DATABASES.has(db) ||
       (allowed !== null && allowed.length > 0 && !allowed.includes(db))
     ) {
@@ -94,8 +94,8 @@ export class MongoDBEventHook {
       this.views.delete(db)
       return [eventAt(root, db, FileChangeKind.DELETE)]
     }
-    if (name === undefined) return []
-    const details = field(payload, 'operationDescription') ?? null
+    if (name === null) return []
+    const details = field(payload, 'operationDescription')
     const changed = new Map<string, FileChangeKind>()
     const place = `${db}/${COLLECTIONS}/${name}`
     if (LISTING_EVENTS.has(operationType)) this.views.delete(db)
@@ -107,14 +107,14 @@ export class MongoDBEventHook {
           changed.set(`${db}/${VIEWS}/${view}/${file}`, FileChangeKind.UPDATE)
         }
       }
-    } else if (operationType === 'modify' && field(details, 'viewOn') !== undefined) {
+    } else if (operationType === 'modify' && field(details, 'viewOn') !== null) {
       const view = `${db}/${VIEWS}/${name}`
       changed.set(`${view}/schema.json`, FileChangeKind.UPDATE)
       changed.set(`${view}/documents.jsonl`, FileChangeKind.UPDATE)
     } else if (SCHEMA_EVENTS.has(operationType)) {
       changed.set(`${place}/schema.json`, FileChangeKind.UPDATE)
     } else if (operationType === 'create') {
-      const dirname = field(details, 'viewOn') !== undefined ? VIEWS : COLLECTIONS
+      const dirname = field(details, 'viewOn') !== null ? VIEWS : COLLECTIONS
       changed.set(`${db}/${dirname}/${name}`, FileChangeKind.CREATE)
       changed.set(`${db}/database.json`, FileChangeKind.UPDATE)
     } else if (operationType === 'drop') {
@@ -122,12 +122,12 @@ export class MongoDBEventHook {
       changed.set(`${db}/${VIEWS}`, FileChangeKind.UNKNOWN)
       changed.set(`${db}/database.json`, FileChangeKind.UPDATE)
     } else if (operationType === 'rename') {
-      const to = field(payload, 'to') ?? null
+      const to = field(payload, 'to')
       changed.set(place, FileChangeKind.DELETE)
       changed.set(`${db}/database.json`, FileChangeKind.UPDATE)
       const targetDb = textField(to, 'db')
       const target = textField(to, 'coll')
-      if (targetDb !== undefined && target !== undefined) {
+      if (targetDb !== null && target !== null) {
         this.views.delete(targetDb)
         changed.set(`${targetDb}/${COLLECTIONS}/${target}`, FileChangeKind.CREATE)
         changed.set(`${targetDb}/database.json`, FileChangeKind.UPDATE)

@@ -41,7 +41,7 @@ def build_delta_hook(accessor: SharePointAccessor) -> DeltaHook:
         return f"{graph_api(config)}/drives/{id_segment(drive_id)}"
 
     async def targets(root: PathSpec) -> list[DeltaTarget]:
-        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         resolved = await resolve(accessor, root)
         if config.site is not None and config.drive is not None:
             if resolved.drive_id is None:

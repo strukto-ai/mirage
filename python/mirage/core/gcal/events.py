@@ -40,7 +40,8 @@ from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.time_range import parse_time
 from mirage.events.base import DeltaHook
-from mirage.events.delta import changes_under
+from mirage.events.delta import changes_between, changes_under
+from mirage.events.payload import text_field
 from mirage.types import Delta, FileChangeKind, JsonValue, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.vfs.gcal.event_entry import (
@@ -77,16 +78,13 @@ def event_paths(
         tz (str): the zone the mount buckets days in.
         free_busy (bool): whether the calendar hides event details.
     """
-    event_id = event.get("id")
+    event_id = text_field(event, "id")
     span = event_span(event, tz)
-    if not isinstance(event_id, str) or not event_id or span is None:
+    if not event_id or span is None:
         return []
     size = accessor.config.bucket_days
     scope = accessor.time_range
-    summary = event.get("summary")
-    title = event_title(
-        summary if isinstance(summary, str) else None, free_busy=free_busy
-    )
+    title = event_title(text_field(event, "summary"), free_busy=free_busy)
     paths: list[str] = []
     for day in days_covered(span, tz):
         bucket = bucket_name(bucket_start(date.fromisoformat(day), size), size)
@@ -108,27 +106,6 @@ def event_paths(
             )
             paths.append(f"{base}/{bucket}/{name}")
     return paths
-
-
-def _changed(
-    changes: list[tuple[FileChangeKind, str]],
-    before: list[str],
-    after: list[str],
-    same: bool,
-) -> None:
-    """Record how one event's files moved.
-
-    Args:
-        changes (list[tuple[FileChangeKind, str]]): The changes so far.
-        before (list[str]): The files it was.
-        after (list[str]): The files it is now.
-        same (bool): Whether its content is unchanged.
-    """
-    kept = set(before) & set(after)
-    changes.extend((FileChangeKind.DELETE, v) for v in before if v not in kept)
-    changes.extend((FileChangeKind.CREATE, v) for v in after if v not in kept)
-    if not same:
-        changes.extend((FileChangeKind.UPDATE, v) for v in after if v in kept)
 
 
 class GCalDeltaHook:
@@ -167,7 +144,7 @@ class GCalDeltaHook:
         accessor = self._accessor
         calendars = await calendar_index(accessor)
         tz = bucket_zone(accessor, calendars)
-        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         match = detect_scope(root)
         wanted = None if match.kind == ROOT else match.slots.get("calendar")
         decoded = _decode(checkpoint)
@@ -252,8 +229,8 @@ class GCalDeltaHook:
             events, nxt = await sync_events(tm, cal_id, None, tz)
         seen: set[str] = set()
         for event in events:
-            event_id = event.get("id")
-            if not isinstance(event_id, str):
+            event_id = text_field(event, "id")
+            if event_id is None:
                 continue
             seen.add(event_id)
             before, stamp = known.get(event_id, ([], None))
@@ -262,18 +239,17 @@ class GCalDeltaHook:
                 if event.get("status") == "cancelled"
                 else event_paths(self._accessor, base, event, tz, free_busy)
             )
-            updated = event.get("updated")
-            updated = updated if isinstance(updated, str) else None
-            _changed(
-                changes, before, after, event_id in known and stamp == updated
-            )
+            updated = text_field(event, "updated")
+            same = event_id in known and stamp == updated
+            changes.extend(changes_between(before, after, lambda _: not same))
             if after:
                 known[event_id] = (after, updated)
             else:
                 known.pop(event_id, None)
         if whole:
             for event_id in sorted(set(known) - seen):
-                _changed(changes, known.pop(event_id)[0], [], True)
+                gone = known.pop(event_id)[0]
+                changes.extend(changes_between(gone, [], lambda _: False))
         return nxt, known
 
 

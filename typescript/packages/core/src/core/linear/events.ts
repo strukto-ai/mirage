@@ -63,11 +63,11 @@ export class LinearEventHook {
     this.accessor = accessor
   }
 
-  private async teamDir(teamId: string | undefined, team: JsonValue): Promise<string | null> {
-    if (teamId === undefined) return null
+  private async teamDir(teamId: string | null, team: JsonValue): Promise<string | null> {
+    if (teamId === null) return null
     const wanted = this.accessor.teamIds
     if (wanted !== null && wanted.length > 0 && !wanted.includes(teamId)) return null
-    if (team !== null && typeof team === 'object' && textField(team, 'key') !== undefined) {
+    if (textField(team, 'key') !== null) {
       this.teams.set(teamId, { ...(team as Record<string, unknown>) })
     }
     if (!this.teams.has(teamId)) {
@@ -81,11 +81,11 @@ export class LinearEventHook {
 
   private async issueDir(issue: JsonValue): Promise<string | null> {
     const issueId = textField(issue, 'id')
-    const team = field(issue, 'team') ?? null
+    const team = field(issue, 'team')
     const teamId = textField(issue, 'teamId') ?? textField(team, 'id')
     const teamDir = await this.teamDir(teamId, team)
-    if (issueId === undefined) return null
-    if (teamDir === null || teamId === undefined) {
+    if (issueId === null) return null
+    if (teamDir === null || teamId === null) {
       this.issues.delete(issueId)
       return null
     }
@@ -93,31 +93,31 @@ export class LinearEventHook {
     const number = field(issue, 'number')
     const prefix = this.teams.get(teamId)?.key
     if (
-      key === undefined &&
+      key === null &&
       typeof prefix === 'string' &&
       typeof number === 'number' &&
       Number.isInteger(number)
     ) {
       key = `${prefix}-${String(number)}`
     }
-    const place = `${teamDir}/issues/` + issueDirname({ id: issueId, identifier: key ?? null })
+    const place = `${teamDir}/issues/` + issueDirname({ id: issueId, identifier: key })
     this.issues.set(issueId, place)
     return place
   }
 
   private async issue(
     root: PathSpec,
-    action: string | undefined,
+    action: string | null,
     payload: JsonValue,
   ): Promise<readonly FileEvent[]> {
-    const data = field(payload, 'data') ?? null
-    const before = field(payload, 'updatedFrom') ?? null
+    const data = field(payload, 'data')
+    const before = field(payload, 'updatedFrom')
     const changed = new Set(
       before !== null && typeof before === 'object' && !Array.isArray(before)
         ? Object.keys(before)
         : [],
     )
-    const inProject = textField(data, 'projectId') !== undefined || changed.has('projectId')
+    const inProject = textField(data, 'projectId') !== null || changed.has('projectId')
     const listed =
       inProject && (action !== 'update' || [...changed].some((k) => PROJECT_ROW_FIELDS.has(k)))
     const events: FileEvent[] = []
@@ -131,14 +131,10 @@ export class LinearEventHook {
     const place = await this.issueDir(data)
     if (place !== null) {
       teams.push(place.slice(0, place.lastIndexOf('/issues/')))
-      const archived = (field(data, 'archivedAt') ?? null) !== null
+      const archived = field(data, 'archivedAt') !== null
       if (action === 'remove' || (archived && changed.has('archivedAt'))) {
         events.push(eventAt(root, place, FileChangeKind.DELETE))
-      } else if (
-        action === 'create' ||
-        oldTeam !== undefined ||
-        (field(before, 'archivedAt') ?? null) !== null
-      ) {
+      } else if (action === 'create' || oldTeam !== null || field(before, 'archivedAt') !== null) {
         for (const name of ISSUE_FILES) {
           events.push(eventAt(root, `${place}/${name}`, FileChangeKind.CREATE))
         }
@@ -154,9 +150,9 @@ export class LinearEventHook {
   }
 
   private async comment(root: PathSpec, payload: JsonValue): Promise<readonly FileEvent[]> {
-    const data = field(payload, 'data') ?? null
-    const issueId = textField(data, 'issueId') ?? textField(field(data, 'issue') ?? null, 'id')
-    if (issueId === undefined) return []
+    const data = field(payload, 'data')
+    const issueId = textField(data, 'issueId') ?? textField(field(data, 'issue'), 'id')
+    if (issueId === null) return []
     let place = this.issues.get(issueId) ?? null
     if (place === null) {
       const issue = await getIssue(this.accessor.transport, issueId)

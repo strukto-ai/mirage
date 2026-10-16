@@ -38,11 +38,12 @@ from mirage.events.delta import (
     changes_under,
     folder_path,
     just_made,
+    lost_at,
     moved_below,
     settle,
 )
-from mirage.types import Delta, FileChangeKind, FileEvent, PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
+from mirage.events.payload import text_field, virtual_of
+from mirage.types import Delta, FileChangeKind, PathSpec
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,6 @@ class GDriveDeltaHook:
                 _encode(token, top, {}, {}),
             )
         found, token = await list_changes(tm, state["token"])
-        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
         top = str(state["root"])
         places = _Places(
             tm,
@@ -236,8 +236,8 @@ class GDriveDeltaHook:
             if change.get("changeType") == "drive":
                 unknown = unknown or not scoped
                 continue
-            item_id = change.get("fileId")
-            if not isinstance(item_id, str):
+            item_id = text_field(change, "fileId")
+            if item_id is None:
                 continue
             item = change.get("file")
             if not isinstance(item, dict):
@@ -247,7 +247,9 @@ class GDriveDeltaHook:
             )
             if item_id == top:
                 if gone:
-                    changes.append((FileChangeKind.DELETE, prefix or "/"))
+                    changes.append(
+                        (FileChangeKind.DELETE, virtual_of(root, ""))
+                    )
                 continue
             latest.pop(item_id, None)
             latest[item_id] = (item_id, item, gone)
@@ -256,7 +258,7 @@ class GDriveDeltaHook:
             if item_id not in seen and item_id in places.folders:
                 placed = await places.folder(item_id)
                 if placed is not None:
-                    seen[item_id] = _virtual_at(prefix, placed)
+                    seen[item_id] = virtual_of(root, placed)
         for item_id, item, gone in entries:
             if item is not None and _is_folder(item):
                 parents = item.get("parents") or [""]
@@ -269,10 +271,7 @@ class GDriveDeltaHook:
             if item is not None:
                 base = await places.under(item.get("parents") or [])
                 if base is not None:
-                    name = _filename_of(item)
-                    where = _virtual_at(
-                        prefix, f"{base}/{name}" if base else name
-                    )
+                    where = virtual_of(root, f"{base}/{_filename_of(item)}")
             if gone and where is not None:
                 seen.setdefault(item_id, where)
             now = None if gone else where
@@ -285,11 +284,7 @@ class GDriveDeltaHook:
         moved_below(seen, moves, {item_id for item_id, _, _ in entries})
         events = changes_under(root, changes, observed)
         if unknown:
-            events.append(
-                FileEvent(
-                    kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
-                )
-            )
+            events.append(lost_at(root, observed))
         return Delta(
             tuple(events),
             _encode(token, top, places.kept(), seen),
@@ -319,16 +314,6 @@ def _encode(
             "seen": seen,
         }
     )
-
-
-def _virtual_at(prefix: str, relative: str) -> str:
-    """The virtual path of a mount-relative path.
-
-    Args:
-        prefix (str): The mount's prefix.
-        relative (str): The path below it, "" for the root.
-    """
-    return f"{prefix}/{relative}" if relative else prefix or "/"
 
 
 def build_delta_hook(accessor: GDriveAccessor) -> DeltaHook:

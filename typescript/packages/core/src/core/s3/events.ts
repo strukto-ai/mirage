@@ -59,9 +59,9 @@ export class S3EventHook {
 
   private map(root: PathSpec, eventName: string, payload: JsonValue): readonly FileEvent[] {
     const config = this.accessor.config
-    const s3 = field(payload, 's3') ?? null
-    const raw = textField(field(s3, 'object') ?? null, 'key')
-    if (textField(field(s3, 'bucket') ?? null, 'name') !== config.bucket || !raw) return []
+    const s3 = field(payload, 's3')
+    const raw = textField(field(s3, 'object'), 'key')
+    if (textField(field(s3, 'bucket'), 'name') !== config.bucket || !raw) return []
     const key = decodeURIComponent(raw.replace(/\+/g, ' '))
     const prefix = normalize(config.keyPrefix)
     if (prefix !== '' && !key.startsWith(prefix)) return []
@@ -73,8 +73,8 @@ export class S3EventHook {
       return [eventAt(root, place, kind)]
     }
     if (REMOVED.some((family) => eventName.startsWith(family))) {
-      const version = textField(field(s3, 'object') ?? null, 'versionId')
-      if (eventName.endsWith(':Delete') && version !== undefined) {
+      const version = textField(field(s3, 'object'), 'versionId')
+      if (eventName.endsWith(':Delete') && version !== null) {
         return [eventAt(root, relative, FileChangeKind.UNKNOWN)]
       }
       this.seen.delete(relative)

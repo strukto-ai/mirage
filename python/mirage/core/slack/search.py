@@ -15,7 +15,6 @@
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
@@ -28,6 +27,7 @@ from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.channels import list_channels
 from mirage.core.slack.client import slack_get, slack_search_available
 from mirage.core.slack.config import SlackConfig
+from mirage.core.slack.events.payload import day_of
 from mirage.core.slack.paginate import cursor_pages
 from mirage.core.slack.readdir import readdir
 from mirage.core.slack.scope import detect_scope
@@ -521,14 +521,6 @@ async def _search_facts(
             accessor.search_facts = None
 
 
-def _day_of(ts: Any) -> str | None:
-    try:
-        moment = datetime.fromtimestamp(float(ts), tz=timezone.utc)
-    except (TypeError, ValueError, OverflowError, OSError):
-        return None
-    return moment.date().isoformat()
-
-
 async def _matches(
     accessor: SlackAccessor, method: str, key: str, query: str
 ) -> list[dict[str, Any]] | None:
@@ -575,7 +567,7 @@ def _shares_of(value: Any) -> list[tuple[str, str]] | None:
             if not isinstance(rows, list):
                 return None
             for row in rows:
-                day = _day_of(row.get("ts") if isinstance(row, dict) else None)
+                day = day_of(row.get("ts") if isinstance(row, dict) else None)
                 if day is None:
                     return None
                 found.append((cid, day))
@@ -605,7 +597,7 @@ async def _hits_of(
                     return None
                 hits.extend(shared)
                 continue
-            day = _day_of(item.get("ts"))
+            day = day_of(item.get("ts"))
             if day is None:
                 return None
             hits.append(((item.get("channel") or {}).get("id", ""), day))

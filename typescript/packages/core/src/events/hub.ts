@@ -15,8 +15,9 @@
 import { FileChangeKind, FileEvent, PathSpec } from '../types.ts'
 import { hasGlob } from '../utils/glob_walk.ts'
 import { globPrefixMatch } from '../utils/path.ts'
+import { mountKey, underPath } from '../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
-import type { EventMount, EventsOptions, EventRegistry, EventRuntime } from './base.ts'
+import type { EventMount, EventRegistry, EventRuntime } from './base.ts'
 import { QueueClosed } from './errors.ts'
 import type { QueueFactory } from './queue/base.ts'
 import { RAMEventQueue } from './queue/ram.ts'
@@ -39,8 +40,7 @@ export class EventHub implements EventRuntime {
 
   private frame(mount: EventMount, virtual: string): PathSpec {
     const normalized = `/${stripSlash(virtual)}`
-    const vfsPath = normalized.startsWith(mount.prefix) ? normalized.slice(mount.prefix.length) : ''
-    return PathSpec.fromStrPath(normalized, vfsPath)
+    return PathSpec.fromStrPath(normalized, mountKey(normalized, rstripSlash(mount.prefix)))
   }
 
   private inScope(root: string, virtual: string): boolean {
@@ -51,8 +51,7 @@ export class EventHub implements EventRuntime {
       const patternDepth = stripSlash(pattern).split('/').length
       return root.endsWith('/') ? pathDepth > patternDepth : pathDepth === patternDepth
     }
-    const literal = rstripSlash(root)
-    return virtual === literal || virtual.startsWith(`${literal}/`)
+    return underPath(virtual, root)
   }
 
   private matches(subscriber: Subscriber, change: FileEvent): boolean {
@@ -125,10 +124,7 @@ export class EventHub implements EventRuntime {
     }
   }
 
-  async *events(
-    path: PathSpec | readonly PathSpec[],
-    options: EventsOptions = {},
-  ): AsyncGenerator<FileEvent> {
+  async *events(path: PathSpec | readonly PathSpec[]): AsyncGenerator<FileEvent> {
     if (this.closed) throw new Error('event hub is closed')
     const paths = path instanceof PathSpec ? [path] : [...path]
     if (paths.length === 0) throw new Error('events requires at least one path')
@@ -140,10 +136,7 @@ export class EventHub implements EventRuntime {
       const trailing = item.virtual.endsWith('/') && stripped !== '' ? '/' : ''
       return `/${stripped}${trailing}`
     })
-    const subscriber: Subscriber = {
-      queue: options.queue ?? this.queueFactory(roots),
-      roots: scopes,
-    }
+    const subscriber: Subscriber = { queue: this.queueFactory(roots), roots: scopes }
     this.subscribers.push(subscriber)
     try {
       for (;;) {

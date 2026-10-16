@@ -22,7 +22,7 @@ import type { MountRegistry } from '../mount/registry.ts'
  * The workspace's event surface: which runtime serves `events`/`notify`
  * and when it attaches. The default runtime attaches lazily on first
  * use; `attach` beforehand only to customize it. Mirrors the Python
- * `EventManager` in `workspace/events.py`.
+ * `EventManager` in `workspace/workspace/events.py`.
  */
 export class EventManager {
   private readonly registry: MountRegistry

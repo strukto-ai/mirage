@@ -21,6 +21,7 @@ import { ROOT } from '../hierarchy/scope.ts'
 import { compactJsonBytes } from '../render/json.ts'
 import { listChannels } from './channels.ts'
 import { SlackApiError, type SlackResponse } from './client.ts'
+import { dayOf } from './events/payload.ts'
 import { cursorPages } from './paginate.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -459,13 +460,6 @@ async function fetchSearchFacts(
 ): Promise<[ReadonlySet<string>, ReadonlySet<string> | null]> {
   const words = await fetchNameWords(accessor)
   return [words, await searchedChannels(accessor)]
-}
-
-function dayOf(ts: unknown): string | null {
-  const seconds = Number(ts)
-  if (ts === undefined || ts === null || ts === '' || !Number.isFinite(seconds)) return null
-  const moment = new Date(seconds * 1000)
-  return Number.isNaN(moment.getTime()) ? null : moment.toISOString().slice(0, 10)
 }
 
 async function matches(

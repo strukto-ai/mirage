@@ -19,7 +19,7 @@ from mirage.types import FileEvent, PathSpec
 
 
 class EventQueue(Protocol):
-    """Delivery queue between the poller and one event consumer.
+    """Delivery queue between the hub and one event consumer.
 
     Implementations own coalescing and overflow policy. The default
     ``RAMEventQueue`` merges changes per path (level-triggered, latest
@@ -27,7 +27,7 @@ class EventQueue(Protocol):
     overflow; a
     journal-style implementation that keeps every event is equally
     valid. ``push`` may perform I/O but must never wait on consumer
-    progress: the poller's checkpoint has to keep advancing regardless
+    progress: a delta hook's checkpoint has to keep advancing regardless
     of consumer speed.
     """
 

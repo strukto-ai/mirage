@@ -13,11 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { Delta, FileChangeKind, FileEvent, type PathSpec } from '../../types.ts'
-import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { Delta, FileChangeKind, type PathSpec } from '../../types.ts'
 import type { DeltaHook } from '../../events/base.ts'
-import { changesUnder, folderPath, justMade, movedBelow, settle } from '../../events/delta.ts'
+import {
+  changesUnder,
+  folderPath,
+  justMade,
+  lostAt,
+  movedBelow,
+  settle,
+} from '../../events/delta.ts'
+import { virtualOf } from '../../events/payload.ts'
 import { GoogleApiError, type TokenManager } from '../google/client.ts'
 import {
   FOLDER_MIME,
@@ -135,12 +141,6 @@ class Places {
   }
 }
 
-/** The virtual path of a mount-relative path. */
-function virtualAt(prefix: string, relative: string): string {
-  if (relative !== '') return `${prefix}/${relative}`
-  return prefix === '' ? '/' : prefix
-}
-
 /**
  * Checkpointed delta over Drive's change feed.
  *
@@ -184,7 +184,6 @@ export class GDriveDeltaHook implements DeltaHook {
       return new Delta({ changes: [], checkpoint: encode(token, top, {}, {}) })
     }
     const [found, token] = await listChanges(tm, state.token)
-    const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
     const top = String(state.root)
     const places = new Places(tm, top, scoped, { ...(state.folders ?? {}) })
     const seen: Record<string, string> = { ...(state.seen ?? {}) }
@@ -201,7 +200,7 @@ export class GDriveDeltaHook implements DeltaHook {
       const item = change.file ?? null
       const gone = change.removed === true || item === null || item.trashed === true
       if (itemId === top) {
-        if (gone) changes.push([FileChangeKind.DELETE, prefix === '' ? '/' : prefix])
+        if (gone) changes.push([FileChangeKind.DELETE, virtualOf(root, '')])
         continue
       }
       latest.delete(itemId)
@@ -211,7 +210,7 @@ export class GDriveDeltaHook implements DeltaHook {
     for (const [itemId] of entries) {
       if (!Object.hasOwn(seen, itemId) && Object.hasOwn(places.folders, itemId)) {
         const placed = await places.folder(itemId)
-        if (placed !== null) seen[itemId] = virtualAt(prefix, placed)
+        if (placed !== null) seen[itemId] = virtualOf(root, placed)
       }
     }
     for (const [itemId, item, gone] of entries) {
@@ -227,10 +226,7 @@ export class GDriveDeltaHook implements DeltaHook {
       let where: string | null = null
       if (item !== null) {
         const base = await places.under(item.parents ?? [])
-        if (base !== null) {
-          const name = filenameOf(item)
-          where = virtualAt(prefix, base !== '' ? `${base}/${name}` : name)
-        }
+        if (base !== null) where = virtualOf(root, `${base}/${filenameOf(item)}`)
       }
       if (gone && where !== null && !Object.hasOwn(seen, itemId)) seen[itemId] = where
       const now = gone ? null : where
@@ -240,9 +236,7 @@ export class GDriveDeltaHook implements DeltaHook {
     }
     movedBelow(seen, moves, new Set(entries.map(([itemId]) => itemId)))
     const events = changesUnder(root, changes, observed)
-    if (unknown) {
-      events.push(new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed }))
-    }
+    if (unknown) events.push(lostAt(root, observed))
     return new Delta({
       changes: events,
       checkpoint: encode(token, top, places.kept(), seen),

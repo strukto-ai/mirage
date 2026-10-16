@@ -16,8 +16,8 @@ from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.core.msgraph.events import DeltaTarget, GraphDeltaHook
 from mirage.core.onedrive.client import drive_base
 from mirage.events.base import DeltaHook
+from mirage.events.payload import virtual_of
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_prefix_of
 
 
 def build_delta_hook(accessor: OneDriveAccessor) -> DeltaHook:
@@ -30,12 +30,11 @@ def build_delta_hook(accessor: OneDriveAccessor) -> DeltaHook:
     config = accessor.config
 
     async def targets(root: PathSpec) -> list[DeltaTarget]:
-        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
         return [
             DeltaTarget(
                 drive=drive_base(config),
                 folder=config.key_prefix or "",
-                virtual=prefix or "/",
+                virtual=virtual_of(root, ""),
             )
         ]
 

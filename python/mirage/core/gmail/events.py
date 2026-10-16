@@ -36,8 +36,8 @@ from mirage.core.gmail.readdir import (
 )
 from mirage.core.google.client import TokenManager
 from mirage.events.base import DeltaHook
-from mirage.events.delta import changes_under
-from mirage.types import Delta, FileChangeKind, FileEvent, PathSpec
+from mirage.events.delta import changes_between, changes_under, lost_at
+from mirage.types import Delta, FileChangeKind, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 logger = logging.getLogger(__name__)
@@ -150,29 +150,6 @@ def _moved(paths: list[str], moves: dict[str, str | None]) -> list[str]:
     return moved
 
 
-def _changed(
-    changes: list[tuple[FileChangeKind, str]],
-    before: list[str],
-    after: list[str],
-) -> None:
-    """Record how one message's paths moved: a path it left, one it
-    reached, and each message file it kept, whose labels changed.
-
-    Args:
-        changes (list[tuple[FileChangeKind, str]]): The changes so far.
-        before (list[str]): The paths it was.
-        after (list[str]): The paths it is now.
-    """
-    kept = set(before) & set(after)
-    changes.extend((FileChangeKind.DELETE, v) for v in before if v not in kept)
-    changes.extend((FileChangeKind.CREATE, v) for v in after if v not in kept)
-    changes.extend(
-        (FileChangeKind.UPDATE, v)
-        for v in after
-        if v in kept and v.endswith(MSG_SUFFIX)
-    )
-
-
 class GmailDeltaHook:
     """Checkpointed delta over Gmail's history.
 
@@ -217,11 +194,8 @@ class GmailDeltaHook:
             if exc.status != HTTPStatus.NOT_FOUND:
                 raise
             logger.debug("gmail history %s is gone: %s", start, exc)
-            lost = FileEvent(
-                kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
-            )
-            return Delta((lost,), await _baseline(tm))
-        prefix = mount_prefix_of(root.virtual, root.vfs_path).rstrip("/")
+            return Delta((lost_at(root, observed),), await _baseline(tm))
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         listed = await list_labels(tm)
         labels = {lb["id"]: lb for lb in listed}
         now_folders = label_folders(listed)
@@ -267,22 +241,22 @@ class GmailDeltaHook:
                     if mid in added
                     else message_paths(prefix, raw, labels, held)
                 )
-            _changed(changes, before, after)
+            changes.extend(
+                changes_between(
+                    before, after, lambda v: v.endswith(MSG_SUFFIX)
+                )
+            )
             known[mid] = after
         unknown = False
         for mid in dict.fromkeys(gone):
             was = known.pop(mid, None)
             if was is not None:
-                _changed(changes, was, [])
+                changes.extend(changes_between(was, [], lambda _: False))
             elif mid not in added:
                 unknown = True
         events = changes_under(root, changes, observed)
         if unknown:
-            events.append(
-                FileEvent(
-                    kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
-                )
-            )
+            events.append(lost_at(root, observed))
         return Delta(tuple(events), _encode(latest, now_folders, known))
 
 

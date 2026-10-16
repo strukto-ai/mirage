@@ -88,41 +88,39 @@ export class GridFSEventHook {
     payload: JsonValue,
   ): Promise<readonly FileEvent[]> {
     const config = this.accessor.config
-    const ns = field(payload, 'ns') ?? null
+    const ns = field(payload, 'ns')
     if (operationType === 'invalidate') return [eventAt(root, '', FileChangeKind.UNKNOWN)]
     const coll = textField(ns, 'coll')
     if (
       textField(ns, 'db') !== config.database ||
-      (coll !== undefined && coll !== `${config.bucket ?? 'fs'}.files`)
+      (coll !== null && coll !== `${config.bucket ?? 'fs'}.files`)
     ) {
       return []
     }
     if (GONE.has(operationType)) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
-    const ident = JSON.stringify(field(field(payload, 'documentKey') ?? null, '_id') ?? null)
+    const ident = JSON.stringify(field(field(payload, 'documentKey'), '_id'))
     const before =
-      textField(field(payload, 'fullDocumentBeforeChange') ?? null, 'filename') ??
-      this.names.get(ident)
+      textField(field(payload, 'fullDocumentBeforeChange'), 'filename') ??
+      this.names.get(ident) ??
+      null
     const after =
-      textField(field(payload, 'fullDocument') ?? null, 'filename') ??
-      textField(
-        field(field(payload, 'updateDescription') ?? null, 'updatedFields') ?? null,
-        'filename',
-      )
-    if (operationType === 'insert' && after !== undefined) {
+      textField(field(payload, 'fullDocument'), 'filename') ??
+      textField(field(field(payload, 'updateDescription'), 'updatedFields'), 'filename')
+    if (operationType === 'insert' && after !== null) {
       this.names.set(ident, after)
       return this.settled(root, after, true)
     }
     if (operationType === 'delete') {
       this.names.delete(ident)
-      if (before === undefined) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
+      if (before === null) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
       return this.settled(root, before, false)
     }
     if (operationType !== 'update' && operationType !== 'replace') return []
-    if (before === undefined) {
-      if (after !== undefined) this.names.set(ident, after)
+    if (before === null) {
+      if (after !== null) this.names.set(ident, after)
       return [eventAt(root, '', FileChangeKind.UNKNOWN)]
     }
-    if (after === undefined || after === before) return this.settled(root, before, false)
+    if (after === null || after === before) return this.settled(root, before, false)
     this.names.set(ident, after)
     return [
       ...(await this.settled(root, before, false)),

@@ -26,6 +26,7 @@ from mirage.core.notion.normalize import (
 from mirage.core.notion.pages import get_data_source, get_database, get_page
 from mirage.events.payload import event_at, field, text_field
 from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
+from mirage.utils.key_prefix import under_path
 
 logger = logging.getLogger(__name__)
 
@@ -205,9 +206,7 @@ class NotionEventHook:
             place (str): The old place.
         """
         for object_id, known in list(self._places.items()):
-            if known is not None and (
-                known == place or known.startswith(place + "/")
-            ):
+            if known is not None and under_path(known, place):
                 del self._places[object_id]
 
     def _companions(

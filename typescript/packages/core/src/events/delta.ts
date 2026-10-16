@@ -13,11 +13,38 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileChangeKind, FileEvent, PathSpec } from '../types.ts'
-import { rstripSlash, stripSlash } from '../utils/slash.ts'
+import { rekey, underPath } from '../utils/key_prefix.ts'
+import { rstripSlash } from '../utils/slash.ts'
 
 export function specFor(root: PathSpec, virtual: string): PathSpec {
-  const cut = rstripSlash(root.virtual).length - root.vfsPath.length
-  return PathSpec.fromStrPath(virtual, stripSlash(virtual.slice(cut)))
+  return PathSpec.fromStrPath(virtual, rekey(root.virtual, root.vfsPath, virtual))
+}
+
+/**
+ * The event saying what changed under `root` is not known: UNKNOWN on the
+ * root, which the hub reads as "re-inventory everything below". Mirrors
+ * Python `lost_at`.
+ */
+export function lostAt(root: PathSpec, observed: Date): FileEvent {
+  return new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed })
+}
+
+/**
+ * How one item's paths moved: each path it left, each it reached, and each it
+ * kept that `updated` says changed. Mirrors Python `changes_between`.
+ */
+export function changesBetween(
+  before: readonly string[],
+  after: readonly string[],
+  updated: (path: string) => boolean,
+): [FileChangeKind, string][] {
+  const kept = new Set(before.filter((path) => after.includes(path)))
+  const changes: [FileChangeKind, string][] = []
+  for (const path of before) if (!kept.has(path)) changes.push([FileChangeKind.DELETE, path])
+  for (const path of after) if (!kept.has(path)) changes.push([FileChangeKind.CREATE, path])
+  for (const path of after)
+    if (kept.has(path) && updated(path)) changes.push([FileChangeKind.UPDATE, path])
+  return changes
 }
 
 /**
@@ -45,14 +72,13 @@ export function changesUnder(
  */
 export function eventsUnder(root: PathSpec, events: Iterable<FileEvent>): FileEvent[] {
   const top = rstripSlash(root.virtual)
-  const inside = (virtual: string): boolean => virtual === top || virtual.startsWith(`${top}/`)
   const kept: FileEvent[] = []
   for (const event of events) {
     const virtual = event.path.virtual
     const previous = event.previousPath
-    if (inside(virtual)) {
+    if (underPath(virtual, top)) {
       kept.push(event)
-    } else if (previous !== null && inside(previous.virtual)) {
+    } else if (previous !== null && underPath(previous.virtual, top)) {
       kept.push(
         new FileEvent({
           kind: FileChangeKind.DELETE,

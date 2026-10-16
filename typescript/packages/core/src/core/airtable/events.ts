@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
-import { Delta, FileChangeKind, FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import { Delta, FileChangeKind, type JsonValue, type PathSpec } from '../../types.ts'
+import { sortedJson } from '../../utils/sort.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { DeltaHook } from '../../events/base.ts'
-import { eventsUnder } from '../../events/delta.ts'
+import { eventsUnder, lostAt } from '../../events/delta.ts'
 import { eventAt, textField } from '../../events/payload.ts'
 import { listBases, listTables, listWebhooks, webhookPayloads } from './client.ts'
 import { AirtableApiError } from './errors.ts'
@@ -57,19 +57,7 @@ interface BaseFeed {
 }
 
 function encode(feeds: Readonly<Record<string, BaseFeed>>): string {
-  const airtable: Record<string, BaseFeed> = {}
-  for (const [baseId, feed] of Object.entries(feeds).sort(([a], [b]) => compareCodePoints(a, b))) {
-    airtable[baseId] = {
-      dir: feed.dir,
-      hooks: Object.fromEntries(
-        Object.entries(feed.hooks).sort(([a], [b]) => compareCodePoints(a, b)),
-      ),
-      tables: Object.fromEntries(
-        Object.entries(feed.tables).sort(([a], [b]) => compareCodePoints(a, b)),
-      ),
-    }
-  }
-  return JSON.stringify({ airtable })
+  return sortedJson({ airtable: feeds })
 }
 
 /**
@@ -214,7 +202,7 @@ export class AirtableDeltaHook implements DeltaHook {
     const base = `bases/${feed.dir}`
     for (const [tableId, made] of Object.entries(asRow(payload.createdTablesById))) {
       const name = textField(asRow(asRow(made).metadata) as JsonValue, 'name')
-      const madeDir = `${base}/` + tableDirname({ id: tableId, name: name ?? null })
+      const madeDir = `${base}/` + tableDirname({ id: tableId, name })
       feed.tables[tableId] = madeDir.slice(madeDir.lastIndexOf('/') + 1)
       changes.add(FileChangeKind.CREATE, `${madeDir}/table.json`)
       changes.add(FileChangeKind.CREATE, `${madeDir}/records.jsonl`)
@@ -238,7 +226,7 @@ export class AirtableDeltaHook implements DeltaHook {
         table = feed.tables[tableId]
       }
       const renamed = textField(asRow(asRow(body.changedMetadata).current) as JsonValue, 'name')
-      if (renamed !== undefined) {
+      if (renamed !== null) {
         const now = tableDirname({ id: tableId, name: renamed })
         if (table !== undefined && table !== now) {
           changes.add(FileChangeKind.UNKNOWN, `${base}/${table}`)
@@ -327,11 +315,7 @@ export class AirtableDeltaHook implements DeltaHook {
       root,
       [...changes.found.values()].map(([kind, path]) => eventAt(root, path, kind)),
     )
-    if (changes.lost) {
-      events.unshift(
-        new FileEvent({ kind: FileChangeKind.UNKNOWN, path: root, timestamp: observed }),
-      )
-    }
+    if (changes.lost) events.unshift(lostAt(root, observed))
     return new Delta({ changes: events, checkpoint: encode(feeds) })
   }
 }

@@ -15,7 +15,6 @@
 from collections.abc import AsyncIterator, Sequence
 from typing import Protocol
 
-from mirage.events.queue.base import EventQueue
 from mirage.types import Delta, FileEvent, PathSpec
 
 
@@ -85,14 +84,11 @@ class EventRuntime(Protocol):
     """What ``Workspace.events`` delegates to.
 
     Implemented by ``mirage.events.EventHub``; the workspace only holds
-    this protocol so the dependency arrow stays events -> workspace.
+    this protocol so the dependency arrow stays workspace -> events.
     """
 
     def events(
-        self,
-        path: PathSpec | Sequence[PathSpec],
-        *,
-        queue: EventQueue | None = None,
+        self, path: PathSpec | Sequence[PathSpec]
     ) -> AsyncIterator[FileEvent]:
         """Stream changes under ``path``; see ``EventHub.events``."""
         ...

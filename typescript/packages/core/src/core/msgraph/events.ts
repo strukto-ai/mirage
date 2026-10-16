@@ -14,7 +14,7 @@
 
 import { Delta, FileChangeKind, type PathSpec } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
+import { sortedJson } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { changesUnder, folderPath, justMade, movedBelow, settle } from '../../events/delta.ts'
 import { encodedPath, GraphError, graphGet } from './client.ts'
@@ -243,7 +243,6 @@ export class GraphDeltaHook implements DeltaHook {
     return String(data['@odata.deltaLink'])
   }
 
-  /** The id of the folder the mount root is. */
   /** The id of the folder the mount root is, null when no folder is at its path. */
   private async top(drive: string, folder: string): Promise<string | null> {
     const path = stripSlash(folder)
@@ -274,7 +273,7 @@ export class GraphDeltaHook implements DeltaHook {
       return null
     }
     if (item.root !== undefined) return ['', '']
-    return [item.name ?? '', item.parentReference?.id ?? '']
+    return [item.name ?? '', parentId(item)]
   }
 }
 
@@ -285,11 +284,7 @@ function join(virtual: string, relative: string): string {
 }
 
 function encode(drives: Record<string, DriveState>): string {
-  return JSON.stringify({ graph: { drives } }, (_key, value: unknown) =>
-    value !== null && typeof value === 'object' && !Array.isArray(value)
-      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => compareCodePoints(a, b)))
-      : value,
-  )
+  return sortedJson({ graph: { drives } })
 }
 
 /** What a checkpoint holds, null for a baseline. Mirrors Python's `_decode`. */

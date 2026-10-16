@@ -30,9 +30,9 @@ from mirage.core.airtable.normalize import as_row, as_rows
 from mirage.core.airtable.pathing import base_dirname, table_dirname
 from mirage.core.airtable.scope import detect_scope
 from mirage.events.base import DeltaHook
-from mirage.events.delta import events_under
+from mirage.events.delta import events_under, lost_at
 from mirage.events.payload import event_at, text_field
-from mirage.types import Delta, FileChangeKind, FileEvent, PathSpec
+from mirage.types import Delta, FileChangeKind, PathSpec
 
 logger = logging.getLogger(__name__)
 
@@ -370,12 +370,7 @@ class AirtableDeltaHook:
             (event_at(root, path, kind) for kind, path in changes.found),
         )
         if changes.lost:
-            events.insert(
-                0,
-                FileEvent(
-                    kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
-                ),
-            )
+            events.insert(0, lost_at(root, observed))
         return Delta(tuple(events), _encode(feeds))
 
 

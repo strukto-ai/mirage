@@ -14,7 +14,7 @@
 
 import { FileEvent, type FileChangeKind, type JsonValue, type PathSpec } from '../types.ts'
 import { mountPrefixOf } from '../utils/key_prefix.ts'
-import { rstripSlash, stripSlash } from '../utils/slash.ts'
+import { stripSlash } from '../utils/slash.ts'
 import { specFor } from './delta.ts'
 
 /**
@@ -23,7 +23,7 @@ import { specFor } from './delta.ts'
  * Mirrors Python `virtual_of` (`events/payload.py`).
  */
 export function virtualOf(root: PathSpec, relative: string): string {
-  const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
+  const prefix = mountPrefixOf(root.virtual, root.vfsPath)
   const stem = stripSlash(relative)
   if (stem === '') return prefix === '' ? '/' : prefix
   return prefix === '' ? `/${stem}` : `${prefix}/${stem}`
@@ -53,7 +53,7 @@ export function eventAt(
 }
 
 /**
- * Read one field from a notification body, or undefined.
+ * Read one field from a notification body, or null.
  *
  * A payload arrives as whatever the service sent, so it may not be an object
  * at all; a reader that assumed one would throw on a malformed delivery
@@ -61,17 +61,17 @@ export function eventAt(
  *
  * Mirrors Python `field` (`events/payload.py`).
  */
-export function field(payload: JsonValue, name: string): JsonValue | undefined {
-  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return undefined
-  return payload[name]
+export function field(payload: JsonValue, name: string): JsonValue {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null
+  return payload[name] ?? null
 }
 
 /**
- * Read one string field from a notification body, or undefined.
+ * Read one string field from a notification body, or null.
  *
  * Mirrors Python `text_field` (`events/payload.py`).
  */
-export function textField(payload: JsonValue, name: string): string | undefined {
+export function textField(payload: JsonValue, name: string): string | null {
   const value = field(payload, name)
-  return typeof value === 'string' ? value : undefined
+  return typeof value === 'string' ? value : null
 }

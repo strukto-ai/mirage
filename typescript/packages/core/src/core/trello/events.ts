@@ -14,6 +14,7 @@
 
 import type { TrelloAccessor } from '../../accessor/trello.ts'
 import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
+import { movedBelow } from '../../events/delta.ts'
 import { eventAt, field, textField } from '../../events/payload.ts'
 import { TrelloApiError, getBoard, getCard, getList, listWorkspaces } from './client.ts'
 import { boardDirname, cardDirname, listDirname, workspaceDirname } from './pathing.ts'
@@ -46,7 +47,7 @@ const MEMBER_EDITS: ReadonlySet<string> = new Set(['addMemberToBoard', 'removeMe
  *
  * Mirrors Python `_named` (`core/trello/events.py`).
  */
-function named(entity: JsonValue, name?: string): Record<string, string> {
+function named(entity: JsonValue, name: string | null = null): Record<string, string> {
   return {
     id: textField(entity, 'id') ?? '',
     name: (name ?? '') || (textField(entity, 'name') ?? ''),
@@ -89,8 +90,8 @@ function named(entity: JsonValue, name?: string): Record<string, string> {
 export class TrelloEventHook {
   private readonly accessor: TrelloAccessor
   private readonly workspaces = new Map<string, string>()
-  private readonly orgs = new Map<string, string | undefined>()
-  private readonly cards = new Map<string, string>()
+  private readonly orgs = new Map<string, string | null>()
+  private readonly cards = Object.create(null) as Record<string, string>
 
   constructor(accessor: TrelloAccessor) {
     this.accessor = accessor
@@ -105,7 +106,7 @@ export class TrelloEventHook {
     return this.workspaces.get(workspaceId)
   }
 
-  private async org(boardId: string, model: JsonValue): Promise<string | undefined> {
+  private async org(boardId: string, model: JsonValue): Promise<string | null> {
     if (textField(model, 'id') === boardId) {
       this.orgs.set(boardId, textField(model, 'idOrganization'))
     }
@@ -113,21 +114,21 @@ export class TrelloEventHook {
       const board = await getBoard(this.accessor.transport, boardId)
       this.orgs.set(boardId, textField(board as JsonValue, 'idOrganization'))
     }
-    return this.orgs.get(boardId)
+    return this.orgs.get(boardId) ?? null
   }
 
   private async boardDir(
     board: JsonValue,
     model: JsonValue,
-    name?: string,
-    org?: string,
+    name: string | null = null,
+    org: string | null = null,
   ): Promise<string | null> {
     const boardId = textField(board, 'id')
-    if (boardId === undefined) return null
+    if (boardId === null) return null
     const { boardIds, workspaceId: only } = this.accessor
     if (boardIds !== null && boardIds.length > 0 && !boardIds.includes(boardId)) return null
     const workspaceId = org ?? (await this.org(boardId, model))
-    if (workspaceId === undefined || (only !== null && only !== '' && workspaceId !== only)) {
+    if (workspaceId === null || (only !== null && only !== '' && workspaceId !== only)) {
       return null
     }
     const workspace = await this.workspaceDir(workspaceId)
@@ -135,15 +136,20 @@ export class TrelloEventHook {
     return `workspaces/${workspace}/boards/${boardDirname(named(board, name))}`
   }
 
-  private cardDir(boardDir: string, card: JsonValue, lst: JsonValue, name?: string): string | null {
+  private cardDir(
+    boardDir: string,
+    card: JsonValue,
+    lst: JsonValue,
+    name: string | null = null,
+  ): string | null {
     const cardId = textField(card, 'id')
-    if (cardId === undefined) return null
-    if (textField(lst, 'id') === undefined || !((name ?? '') || textField(card, 'name'))) {
-      return this.cards.get(cardId) ?? null
+    if (cardId === null) return null
+    if (textField(lst, 'id') === null || !((name ?? '') || textField(card, 'name'))) {
+      return this.cards[cardId] ?? null
     }
     const place =
       `${boardDir}/lists/${listDirname(named(lst))}/cards/` + cardDirname(named(card, name))
-    this.cards.set(cardId, place)
+    this.cards[cardId] = place
     return place
   }
 
@@ -154,23 +160,13 @@ export class TrelloEventHook {
     try {
       const found = (await getCard(this.accessor.transport, cardId)) as JsonValue
       const listId = textField(found, 'idList')
-      if (listId === undefined) return null
+      if (listId === null) return null
       const lst = (await getList(this.accessor.transport, listId)) as JsonValue
       return this.cardDir(boardDir, found, lst)
     } catch (err) {
       if (!(err instanceof TrelloApiError) || err.status !== 404) throw err
       console.debug(`trello events: card ${cardId} is gone: ${err.message}`)
       return null
-    }
-  }
-
-  // Carry each remembered card below a list or board that moved to its new
-  // place, or forget it when the place left the mount.
-  private rebase(old: string, now: string | null): void {
-    for (const [cardId, place] of [...this.cards]) {
-      if (!place.startsWith(`${old}/`)) continue
-      if (now === null) this.cards.delete(cardId)
-      else this.cards.set(cardId, now + place.slice(old.length))
     }
   }
 
@@ -183,9 +179,9 @@ export class TrelloEventHook {
     boardDir: string,
     data: JsonValue,
   ): Promise<readonly FileEvent[]> {
-    const card = field(data, 'card') ?? null
-    const old = field(data, 'old') ?? null
-    const lst = field(data, 'list') ?? null
+    const card = field(data, 'card')
+    const old = field(data, 'old')
+    const lst = field(data, 'list')
     const was = this.cardDir(
       boardDir,
       card,
@@ -194,14 +190,14 @@ export class TrelloEventHook {
     )
     let now = this.cardDir(boardDir, card, field(data, 'listAfter') ?? lst)
     const cardId = textField(card, 'id')
-    if (now === null && cardId !== undefined) {
+    if (now === null && cardId !== null) {
       now = await this.located(boardDir, cardId)
       if (now === null) return [eventAt(root, boardDir, FileChangeKind.UNKNOWN)]
     }
     if (now === null) return []
-    if (field(old, 'closed') !== undefined && field(old, 'closed') !== null) {
+    if (field(old, 'closed') !== null) {
       if (field(card, 'closed') === true) {
-        this.cards.delete(textField(card, 'id') ?? '')
+        Reflect.deleteProperty(this.cards, textField(card, 'id') ?? '')
         return [eventAt(root, now, FileChangeKind.DELETE)]
       }
       return this.files(root, now, FileChangeKind.CREATE)
@@ -221,18 +217,18 @@ export class TrelloEventHook {
     data: JsonValue,
   ): Promise<readonly FileEvent[]> {
     if (kind === 'updateCard') return this.updateCard(root, boardDir, data)
-    const card = field(data, 'card') ?? null
-    const lst = field(data, 'list') ?? null
+    const card = field(data, 'card')
+    const lst = field(data, 'list')
     let place = this.cardDir(boardDir, card, lst)
     if (CARD_GONE.has(kind)) {
-      this.cards.delete(textField(card, 'id') ?? '')
+      Reflect.deleteProperty(this.cards, textField(card, 'id') ?? '')
       if (place !== null) return [eventAt(root, place, FileChangeKind.DELETE)]
-      if (textField(lst, 'id') === undefined) return []
+      if (textField(lst, 'id') === null) return []
       const cards = `${boardDir}/lists/${listDirname(named(lst))}/cards`
       return [eventAt(root, cards, FileChangeKind.UNKNOWN)]
     }
     const cardId = textField(card, 'id')
-    if (place === null && cardId !== undefined) {
+    if (place === null && cardId !== null) {
       place = await this.located(boardDir, cardId)
       if (place === null) return [eventAt(root, boardDir, FileChangeKind.UNKNOWN)]
     }
@@ -248,21 +244,21 @@ export class TrelloEventHook {
     boardDir: string,
     data: JsonValue,
   ): readonly FileEvent[] {
-    const lst = field(data, 'list') ?? null
-    if (textField(lst, 'id') === undefined) return []
+    const lst = field(data, 'list')
+    if (textField(lst, 'id') === null) return []
     const lists = `${boardDir}/lists`
     const now = `${lists}/${listDirname(named(lst))}`
-    const old = field(data, 'old') ?? null
-    const closedChanged = field(old, 'closed') !== undefined && field(old, 'closed') !== null
+    const old = field(data, 'old')
+    const closedChanged = field(old, 'closed') !== null
     if (kind === 'createList') return [eventAt(root, `${now}/list.json`, FileChangeKind.CREATE)]
     if (kind === 'moveListFromBoard' || (closedChanged && field(lst, 'closed') === true)) {
-      this.rebase(now, null)
+      movedBelow(this.cards, new Map([[now, null]]), new Set())
       return [eventAt(root, now, FileChangeKind.DELETE)]
     }
     const oldName = textField(old, 'name')
-    if (oldName !== undefined) {
+    if (oldName !== null) {
       const was = `${lists}/${listDirname(named(lst, oldName))}`
-      this.rebase(was, now)
+      movedBelow(this.cards, new Map([[was, now]]), new Set())
       return [
         eventAt(root, was, FileChangeKind.UNKNOWN),
         eventAt(root, now, FileChangeKind.UNKNOWN),
@@ -280,22 +276,22 @@ export class TrelloEventHook {
     data: JsonValue,
     model: JsonValue,
   ): Promise<readonly FileEvent[]> {
-    const board = field(data, 'board') ?? null
-    const old = field(data, 'old') ?? null
-    if (field(old, 'closed') !== undefined && field(old, 'closed') !== null) {
+    const board = field(data, 'board')
+    const old = field(data, 'old')
+    if (field(old, 'closed') !== null) {
       if (field(board, 'closed') !== true) return [eventAt(root, boardDir, FileChangeKind.UNKNOWN)]
-      this.rebase(boardDir, null)
+      movedBelow(this.cards, new Map([[boardDir, null]]), new Set())
       return [eventAt(root, boardDir, FileChangeKind.DELETE)]
     }
     const oldName = textField(old, 'name')
     const oldOrg = textField(old, 'idOrganization')
-    if (oldName === undefined && oldOrg === undefined) {
+    if (oldName === null && oldOrg === null) {
       return [eventAt(root, `${boardDir}/board.json`, FileChangeKind.UPDATE)]
     }
     const events = [eventAt(root, boardDir, FileChangeKind.UNKNOWN)]
     const was = await this.boardDir(board, model, oldName, oldOrg)
     if (was !== null && was !== boardDir) {
-      this.rebase(was, boardDir)
+      movedBelow(this.cards, new Map([[was, boardDir]]), new Set())
       events.unshift(eventAt(root, was, FileChangeKind.UNKNOWN))
     }
     return events
@@ -308,17 +304,12 @@ export class TrelloEventHook {
     data: JsonValue,
     model: JsonValue,
   ): Promise<readonly FileEvent[]> {
-    const old = field(data, 'old') ?? null
+    const old = field(data, 'old')
     const oldOrg = textField(old, 'idOrganization')
-    if (oldOrg === undefined) return []
-    const was = await this.boardDir(
-      field(data, 'board') ?? null,
-      model,
-      textField(old, 'name'),
-      oldOrg,
-    )
+    if (oldOrg === null) return []
+    const was = await this.boardDir(field(data, 'board'), model, textField(old, 'name'), oldOrg)
     if (was === null) return []
-    this.rebase(was, null)
+    movedBelow(this.cards, new Map([[was, null]]), new Set())
     return [eventAt(root, was, FileChangeKind.DELETE)]
   }
 
@@ -327,9 +318,9 @@ export class TrelloEventHook {
     eventType: string,
     payload: JsonValue,
   ): Promise<readonly FileEvent[]> {
-    const data = field(field(payload, 'action') ?? null, 'data') ?? null
-    const model = field(payload, 'model') ?? null
-    const boardDir = await this.boardDir(field(data, 'board') ?? null, model)
+    const data = field(field(payload, 'action'), 'data')
+    const model = field(payload, 'model')
+    const boardDir = await this.boardDir(field(data, 'board'), model)
     if (boardDir === null) {
       return eventType === 'updateBoard' ? this.left(root, data, model) : []
     }

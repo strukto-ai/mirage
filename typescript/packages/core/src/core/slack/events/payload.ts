@@ -16,20 +16,19 @@ import type { JsonValue } from '../../../types.ts'
 import { field, textField } from '../../../events/index.ts'
 
 /**
- * UTC day directory for a Slack timestamp.
+ * UTC day directory for a Slack timestamp, or null for one that names no day.
  *
  * Bucketing is UTC because `dateRange` in `readdir` is, so a 6pm PDT message
  * belongs to the *next* day's directory. Reading the consumer's local clock
  * here would name a directory the mount does not serve, and a notify on a path
  * that does not exist is silent.
  */
-export function dayOf(ts: string): string | null {
+export function dayOf(ts: unknown): string | null {
   // `Number('')` and `Number(' ')` are 0, where python's `float` raises, so an
   // empty ts would silently bucket into 1970 rather than being skipped.
-  if (ts.trim() === '') return null
-  const seconds = Number(ts)
-  if (!Number.isFinite(seconds)) return null
-  return new Date(seconds * 1000).toISOString().slice(0, 10)
+  if (ts === undefined || ts === null || (typeof ts === 'string' && ts.trim() === '')) return null
+  const moment = new Date(Number(ts) * 1000)
+  return Number.isNaN(moment.getTime()) ? null : moment.toISOString().slice(0, 10)
 }
 
 /**
@@ -41,8 +40,7 @@ export function dayOf(ts: string): string | null {
  */
 export function itemChannel(payload: JsonValue): [string | null, string | null] {
   const item = field(payload, 'item')
-  if (item === undefined) return [null, null]
-  return [textField(item, 'channel') ?? null, textField(item, 'ts') ?? null]
+  return [textField(item, 'channel'), textField(item, 'ts')]
 }
 
 /**
@@ -69,9 +67,9 @@ export function subject(payload: JsonValue): JsonValue {
 export function messageTs(payload: JsonValue): string | null {
   if (textField(payload, 'subtype') === 'message_deleted') {
     const deleted = textField(payload, 'deleted_ts')
-    if (deleted !== undefined) return deleted
+    if (deleted !== null) return deleted
   }
-  return textField(subject(payload), 'ts') ?? null
+  return textField(subject(payload), 'ts')
 }
 
 /** Whether a thread reply was also sent to the channel. */
@@ -98,7 +96,7 @@ export function affectedTs(payload: JsonValue): readonly string[] {
   const own = messageTs(payload)
   if (own === null) return []
   const thread = textField(subject(payload), 'thread_ts')
-  if (thread === undefined || thread === own) return [own]
+  if (thread === null || thread === own) return [own]
   return isBroadcast(payload) ? [thread, own] : [thread]
 }
 
@@ -110,7 +108,6 @@ export function affectedTs(payload: JsonValue): readonly string[] {
  */
 export function channelIdOf(payload: JsonValue): string | null {
   const direct = textField(payload, 'channel')
-  if (direct !== undefined) return direct
-  const channel = field(payload, 'channel')
-  return channel === undefined ? null : (textField(channel, 'id') ?? null)
+  if (direct !== null) return direct
+  return textField(field(payload, 'channel'), 'id')
 }

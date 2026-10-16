@@ -25,6 +25,7 @@ from mirage.events.base import DeltaHook
 from mirage.events.delta import changes_under
 from mirage.events.payload import virtual_of
 from mirage.types import Delta, FileChangeKind, PathSpec
+from mirage.utils.key_prefix import under_path
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +83,7 @@ def _decode(checkpoint: str | None) -> tuple[str, dict[str, str]] | None:
 
 
 def _drop_below(seen: dict[str, str], relative: str) -> None:
-    for key in [
-        k for k in seen if k == relative or k.startswith(relative + "/")
-    ]:
+    for key in [k for k in seen if under_path(k, relative)]:
         del seen[key]
 
 

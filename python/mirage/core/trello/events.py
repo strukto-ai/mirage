@@ -29,6 +29,7 @@ from mirage.core.trello.pathing import (
     list_dirname,
     workspace_dirname,
 )
+from mirage.events.delta import moved_below
 from mirage.events.payload import event_at, field, text_field
 from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
 
@@ -234,22 +235,6 @@ class TrelloEventHook:
             return None
         return self._card_dir(board_dir, found, lst)
 
-    def _rebase(self, old: str, new: str | None) -> None:
-        """Carry each remembered card below a list or board that moved to
-        its new place, or forget it when the place left the mount.
-
-        Args:
-            old (str): Where the list or board was.
-            new (str | None): Where it is now, None when it left.
-        """
-        for card_id, place in list(self._cards.items()):
-            if not place.startswith(old + "/"):
-                continue
-            if new is None:
-                del self._cards[card_id]
-            else:
-                self._cards[card_id] = new + place[len(old) :]
-
     def _files(
         self, root: PathSpec, place: str, kind: FileChangeKind
     ) -> list[FileEvent]:
@@ -369,12 +354,12 @@ class TrelloEventHook:
         if kind == "moveListFromBoard" or (
             field(old, "closed") is not None and field(lst, "closed") is True
         ):
-            self._rebase(now, None)
+            moved_below(self._cards, {now: None}, set())
             return (event_at(root, now, FileChangeKind.DELETE),)
         old_name = text_field(old, "name")
         if old_name is not None:
             was = f"{lists}/{list_dirname(_named(lst, old_name))}"
-            self._rebase(was, now)
+            moved_below(self._cards, {was: now}, set())
             return (
                 event_at(root, was, FileChangeKind.UNKNOWN),
                 event_at(root, now, FileChangeKind.UNKNOWN),
@@ -403,7 +388,7 @@ class TrelloEventHook:
         if field(old, "closed") is not None:
             if field(board, "closed") is not True:
                 return (event_at(root, board_dir, FileChangeKind.UNKNOWN),)
-            self._rebase(board_dir, None)
+            moved_below(self._cards, {board_dir: None}, set())
             return (event_at(root, board_dir, FileChangeKind.DELETE),)
         old_name = text_field(old, "name")
         old_org = text_field(old, "idOrganization")
@@ -416,7 +401,7 @@ class TrelloEventHook:
         events = [event_at(root, board_dir, FileChangeKind.UNKNOWN)]
         was = await self._board_dir(board, model, old_name, old_org)
         if was is not None and was != board_dir:
-            self._rebase(was, board_dir)
+            moved_below(self._cards, {was: board_dir}, set())
             events.insert(0, event_at(root, was, FileChangeKind.UNKNOWN))
         return tuple(events)
 
@@ -440,7 +425,7 @@ class TrelloEventHook:
         )
         if was is None:
             return ()
-        self._rebase(was, None)
+        moved_below(self._cards, {was: None}, set())
         return (event_at(root, was, FileChangeKind.DELETE),)
 
     async def to_events(

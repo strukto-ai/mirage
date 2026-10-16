@@ -62,27 +62,27 @@ export class NextcloudEventHook {
   }
 
   /** The mount-relative path of an instance path, or null outside the mount. */
-  private relative(node: string | undefined): string | null {
+  private relative(node: string | null): string | null {
     const root = this.root
-    if (node === undefined || root === null) return null
+    if (node === null || root === null) return null
     const path = rstripSlash(node)
     if (path === root) return ''
     return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : null
   }
 
   /** Whether an instance path is a folder the mount root sits below. */
-  private above(node: string | undefined): boolean {
+  private above(node: string | null): boolean {
     const root = this.root
-    if (node === undefined || root === null) return false
+    if (node === null || root === null) return false
     return root.startsWith(`${rstripSlash(node)}/`)
   }
 
   private map(root: PathSpec, eventClass: string, payload: JsonValue): readonly FileEvent[] {
     const kind = Object.hasOwn(KIND_BY_CLASS, eventClass) ? KIND_BY_CLASS[eventClass] : undefined
-    const event = field(payload, 'event') ?? null
+    const event = field(payload, 'event')
     if (kind === undefined) return []
     if (kind !== FileChangeKind.MOVE) {
-      const node = textField(field(event, 'node') ?? null, 'path')
+      const node = textField(field(event, 'node'), 'path')
       const place = this.relative(node)
       if (place !== null) return [eventAt(root, place, kind)]
       if (this.above(node) && kind !== FileChangeKind.UPDATE) {
@@ -91,8 +91,8 @@ export class NextcloudEventHook {
       }
       return []
     }
-    const sourcePath = textField(field(event, 'source') ?? null, 'path')
-    const targetPath = textField(field(event, 'target') ?? null, 'path')
+    const sourcePath = textField(field(event, 'source'), 'path')
+    const targetPath = textField(field(event, 'target'), 'path')
     if (this.above(sourcePath)) return [eventAt(root, '', FileChangeKind.DELETE)]
     if (this.above(targetPath)) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
     const source = this.relative(sourcePath)

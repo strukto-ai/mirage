@@ -60,6 +60,7 @@ from mirage.context import (
     set_refusal_sink,
 )
 from mirage.errors.fs import enoent
+from mirage.events.base import EventRuntime
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
@@ -194,7 +195,7 @@ from mirage.workspace.workspace.build import (
     wire_runtime_world,
 )
 from mirage.workspace.workspace.cache import build_file_cache
-from mirage.workspace.workspace.events import EventDelegate, EventManager
+from mirage.workspace.workspace.events import EventManager
 from mirage.workspace.workspace.execute import (
     ExecuteEnv,
     LineFrame,
@@ -1378,7 +1379,7 @@ class Workspace:
         """Mount table; consumed by the event runtime."""
         return self._registry
 
-    def attach_event_runtime(self, runtime: EventDelegate) -> None:
+    def attach_event_runtime(self, runtime: EventRuntime) -> None:
         """Install the event runtime that ``events`` delegates to.
 
         Only needed to customize the runtime; the default attaches
@@ -1386,7 +1387,7 @@ class Workspace:
         on ``close``.
 
         Args:
-            runtime (EventDelegate): Runtime to attach.
+            runtime (EventRuntime): Runtime to attach.
 
         Raises:
             RuntimeError: The workspace is closed, or a runtime is

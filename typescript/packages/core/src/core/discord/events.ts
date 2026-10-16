@@ -126,7 +126,7 @@ export class DiscordEventHook {
     messageIds: readonly string[],
   ): Promise<readonly FileEvent[]> {
     const channelId = textField(payload, 'channel_id')
-    if (channelId === undefined) return []
+    if (channelId === null) return []
     let channel = await this.channel(channelId)
     let ids = messageIds
     let thread = false
@@ -182,7 +182,7 @@ export class DiscordEventHook {
     name: string,
   ): Promise<readonly FileEvent[]> {
     const guildId = textField(payload, 'guild_id')
-    if (guildId === undefined) return []
+    if (guildId === null) return []
     const guild = await this.guildDir(guildId)
     if (guild === null) return [eventAt(root, '', FileChangeKind.UNKNOWN)]
     return [eventAt(root, `${guild}/${name}`, FileChangeKind.UNKNOWN)]
@@ -195,7 +195,7 @@ export class DiscordEventHook {
   ): Promise<readonly FileEvent[]> {
     if (MESSAGE_EVENTS.has(eventType) || REACTION_EVENTS.has(eventType)) {
       const own = textField(payload, MESSAGE_EVENTS.has(eventType) ? 'id' : 'message_id')
-      return this.messages(root, eventType, payload, own !== undefined ? [own] : [])
+      return this.messages(root, eventType, payload, own !== null ? [own] : [])
     }
     if (eventType === 'MESSAGE_DELETE_BULK') {
       const listed = field(payload, 'ids')
@@ -206,7 +206,7 @@ export class DiscordEventHook {
     }
     const own = textField(payload, 'id')
     if (CHANNEL_EVENTS.has(eventType)) {
-      if (own !== undefined && payload !== null && typeof payload === 'object') {
+      if (own !== null && payload !== null && typeof payload === 'object') {
         this.channels.delete(own)
         if (eventType !== 'CHANNEL_DELETE') {
           this.channels.set(own, { ...(payload as Record<string, unknown>), id: own })
@@ -216,13 +216,13 @@ export class DiscordEventHook {
     }
     if (MEMBER_EVENTS.has(eventType)) return this.listing(root, payload, 'members')
     if (GUILD_EVENTS.has(eventType)) {
-      if (own !== undefined) {
+      if (own !== null) {
         this.guilds.delete(own)
         for (const [channelId, channel] of [...this.channels]) {
           if (channel.guild_id === own) this.channels.delete(channelId)
         }
         const name = textField(payload, 'name')
-        if (name !== undefined) this.guilds.set(own, guildDirname({ id: own, name }))
+        if (name !== null) this.guilds.set(own, guildDirname({ id: own, name }))
       }
       return [eventAt(root, '', FileChangeKind.UNKNOWN)]
     }

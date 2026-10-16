@@ -13,13 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import datetime, timezone
+from typing import Any
 
 from mirage.events.payload import field, text_field
 from mirage.types import JsonValue
 
 
-def day_of(ts: str) -> str | None:
-    """UTC day directory for a Slack timestamp.
+def day_of(ts: Any) -> str | None:
+    """UTC day directory for a Slack timestamp, or None for one that
+    names no day.
 
     Bucketing is UTC because ``_date_range`` in ``readdir`` is, so a
     6pm PDT message belongs to the *next* day's directory. Reading the
@@ -27,13 +29,13 @@ def day_of(ts: str) -> str | None:
     not serve, and a notify on a path that does not exist is silent.
 
     Args:
-        ts (str): A Slack ts (``"1755290000.001"``) or event_ts.
+        ts (Any): A Slack ts (``"1755290000.001"``) or event_ts.
     """
     try:
-        seconds = float(ts)
-    except ValueError:
+        moment = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
         return None
-    return datetime.fromtimestamp(seconds, tz=timezone.utc).date().isoformat()
+    return moment.date().isoformat()
 
 
 def item_channel(payload: JsonValue) -> tuple[str | None, str | None]:

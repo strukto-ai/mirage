@@ -28,9 +28,10 @@ from mirage.core.box.constants import (
 )
 from mirage.core.box.resolve import mount_relative_key, root_id
 from mirage.events.base import DeltaHook
-from mirage.events.delta import events_under
-from mirage.events.payload import event_at, field
+from mirage.events.delta import events_under, lost_at
+from mirage.events.payload import event_at, field, text_field
 from mirage.types import Delta, FileChangeKind, FileEvent, JsonValue, PathSpec
+from mirage.utils.key_prefix import under_path
 
 logger = logging.getLogger(__name__)
 
@@ -47,26 +48,6 @@ def _ref(item: dict[str, Any]) -> str:
     return f"{item.get('type')}:{item['id']}"
 
 
-def _under(key: str, place: str) -> bool:
-    """Whether ``key`` lies strictly below ``place``.
-
-    Args:
-        key (str): Path to test.
-        place (str): Directory path, spelled the way ``key`` is.
-    """
-    return key.startswith(place.rstrip("/") + "/")
-
-
-def _inside(key: str, place: str) -> bool:
-    """Whether ``key`` is ``place`` or lies below it.
-
-    Args:
-        key (str): Path to test.
-        place (str): Directory path, spelled the way ``key`` is.
-    """
-    return key == place or _under(key, place)
-
-
 def _rebase(key: str, old: str, new: str) -> str:
     """``key`` moved from under ``old`` to under ``new``, if it was there.
 
@@ -75,7 +56,7 @@ def _rebase(key: str, old: str, new: str) -> str:
         old (str): Place a folder left.
         new (str): Place it arrived at.
     """
-    return new + key[len(old) :] if _inside(key, old) else key
+    return new + key[len(old) :] if under_path(key, old) else key
 
 
 def _source(value: JsonValue) -> dict[str, Any] | None:
@@ -104,8 +85,8 @@ def _created(event: dict[str, Any]) -> datetime | None:
     Args:
         event (dict[str, Any]): One ``/events`` entry.
     """
-    value = event.get("created_at")
-    if not isinstance(value, str):
+    value = text_field(event, "created_at")
+    if value is None:
         return None
     try:
         stamp = datetime.fromisoformat(value)
@@ -190,10 +171,9 @@ class BoxDeltaHook:
         position, read, paths = state
         if observed - read > timedelta(days=EVENT_REPLAY_DAYS):
             fresh = await events_now(tm, EVENT_STREAM)
-            lost = FileEvent(
-                kind=FileChangeKind.UNKNOWN, path=root, timestamp=observed
+            return Delta(
+                (lost_at(root, observed),), _encode(fresh, observed, {})
             )
-            return Delta((lost,), _encode(fresh, observed, {}))
         found, position = await events_since(tm, position, EVENT_STREAM)
         mapper = BoxEventHook(self._accessor, paths)
         events: list[FileEvent] = []
@@ -303,7 +283,7 @@ class BoxEventHook:
             self._paths = {
                 r: path
                 for r, path in self._paths.items()
-                if not _inside(path, old)
+                if not under_path(path, old)
             }
             return (event_at(root, old, FileChangeKind.UNKNOWN),)
         self._paths.pop(ref, None)

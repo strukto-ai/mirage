@@ -15,7 +15,7 @@
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { graphApi } from '../msgraph/config.ts'
 import { GraphDeltaHook, type DeltaTarget } from '../msgraph/events.ts'
@@ -36,7 +36,7 @@ export function buildDeltaHook(accessor: SharePointAccessor): DeltaHook {
   const drive = (driveId: string): string =>
     `${graphApi(config)}/drives/${encodeURIComponent(driveId)}`
   const targets = async (root: PathSpec): Promise<DeltaTarget[]> => {
-    const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const resolved = await resolve(accessor, root)
     if (config.site !== null && config.drive !== null) {
       if (resolved.driveId === null) return []

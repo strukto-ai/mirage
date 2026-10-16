@@ -16,8 +16,10 @@ def test_day_of_buckets_in_utc():
     assert day_of(LATE) == "2025-08-16"
 
 
-def test_day_of_rejects_a_non_numeric_ts():
+def test_day_of_rejects_a_non_numeric_or_overflowing_ts():
     assert day_of("not-a-ts") is None
+    assert day_of("1e300") is None
+    assert day_of("1e400") is None
 
 
 def test_day_of_rejects_an_empty_ts():

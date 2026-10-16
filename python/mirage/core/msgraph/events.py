@@ -330,8 +330,7 @@ class GraphDeltaHook:
             return None
         if "root" in item:
             return ["", ""]
-        parent = (item.get("parentReference") or {}).get("id") or ""
-        return [str(item.get("name", "")), parent]
+        return [str(item.get("name", "")), parent_id(item)]
 
 
 def _join(virtual: str, relative: str) -> str:
