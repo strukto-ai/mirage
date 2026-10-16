@@ -20,15 +20,21 @@ mode: "frame"
   <p className="my-0">
     <img noZoom src="/images/mirage-icon-light.svg" alt="Mirage" className="inline-block h-4 w-auto align-middle mr-1 dark:hidden" /><img noZoom src="/images/mirage-icon-dark.svg" alt="Mirage" className="hidden h-4 w-auto align-middle mr-1 dark:inline-block" /><b>Mirage frees the terminal interface from the local kernel.</b> It connects AI agents to remote data and storage through one familiar shell, dynamically routes commands across runtimes, and controls what agents can access and execute.
   </p>
-  <p className="mt-3 mb-0">
-    The virtual filesystem delivers broad data context, virtualized CLIs give an agent more flexibility on tool use, dynamic runtimes save underlying infrastructure cost, and fine-grained control over what an agent runs and even what it can see gives the best security. Together these parts form one virtual terminal.
-  </p>
 </div>
 
 <div className="my-6">
   <img noZoom src="/images/mirage-overview-light.svg" alt="Mirage architecture: agents and harness reach profiles and the Mirage shell, which resolve Unix-like commands, virtual CLIs and programming languages onto runtimes and the virtual filesystem, with authentication, the policy engine and notifications alongside" className="block dark:hidden w-full" />
   <img noZoom src="/images/mirage-overview-dark.svg" alt="Mirage architecture: agents and harness reach profiles and the Mirage shell, which resolve Unix-like commands, virtual CLIs and programming languages onto runtimes and the virtual filesystem, with authentication, the policy engine and notifications alongside" className="hidden dark:block w-full" />
 </div>
+
+- **[Virtual filesystem](/home/setup/vfs).** Virtualize S3, Drive, Slack, databases and more under one root, accessible with `ls`, `cat`, `grep` and `find`.
+- **[Virtual CLIs](/home/setup/clis).** Give agents commands such as `git`, `slack` and `ntn`, with credentials configured per tool.
+- **[Dynamic runtimes](/home/setup/runtime/overview).** Route commands to in-process, sandboxed or remote runtimes, independently of where the data lives.
+- **[Virtual shell](/home/core/shell).** Compose files, CLIs and runtimes with pipes, redirects, variables and jobs.
+- **[Agent profiles](/home/policy/overview).** Choose what each agent can run and which files and folders it can see.
+- **[Policy engine](/home/policy/policies).** Apply rules to commands, file operations and session changes before they run.
+- **Authentication.** Connect credentials from environment variables, dotenv, AWS Secrets Manager or a custom source.
+- **[Notifications](/home/events).** Turn changes in connected services into events agents can react to.
 
 <h2 className="text-2xl font-bold mt-16 mb-6">Try Mirage</h2>
 
