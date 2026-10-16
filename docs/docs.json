@@ -60,7 +60,6 @@
         "groups": [
           {
             "group": "Getting Started",
-            "icon": "rocket",
             "pages": [
               "home/introduction",
               "home/install"
@@ -68,14 +67,12 @@
           },
           {
             "group": "Agents",
-            "icon": "robot",
             "pages": [
               "home/agents"
             ]
           },
           {
             "group": "VFS",
-            "icon": "grid-2",
             "pages": [
               "home/setup/vfs",
               {
@@ -157,7 +154,6 @@
           },
           {
             "group": "Integration",
-            "icon": "plug",
             "pages": [
               "home/integration/overview",
               "home/integration/search",
@@ -168,7 +164,6 @@
           },
           {
             "group": "CLIs",
-            "icon": "wrench",
             "pages": [
               "home/setup/clis",
               {
@@ -191,7 +186,6 @@
           },
           {
             "group": "Mirage Shell",
-            "icon": "square-terminal",
             "pages": [
               "home/core/shell",
               "home/core/tools",
@@ -200,14 +194,12 @@
           },
           {
             "group": "Agent Profiles",
-            "icon": "robot",
             "pages": [
               "home/profiles"
             ]
           },
           {
             "group": "Policy",
-            "icon": "scale-balanced",
             "pages": [
               "home/policy/overview",
               "home/policy/policies",
@@ -218,7 +210,6 @@
           },
           {
             "group": "Runtimes",
-            "icon": "microchip",
             "pages": [
               "home/setup/runtime/overview",
               {
@@ -256,14 +247,12 @@
           },
           {
             "group": "Authentications",
-            "icon": "key",
             "pages": [
               "home/authentication"
             ]
           },
           {
             "group": "Notifications",
-            "icon": "bell",
             "pages": [
               "home/events",
               "home/events-matrix"
@@ -271,7 +260,6 @@
           },
           {
             "group": "Access",
-            "icon": "cube",
             "pages": [
               "home/access/overview",
               {
@@ -300,7 +288,6 @@
           },
           {
             "group": "Help",
-            "icon": "life-ring",
             "pages": [
               "home/troubleshooting"
             ]
