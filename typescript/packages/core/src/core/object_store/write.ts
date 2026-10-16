@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
+import { closeQuietly } from '../../io/stream.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { runWithOwnVersion, writeCondition } from '../../cache/context.ts'
 import { OwnRead, type WriteCondition } from '../../cache/types.ts'
@@ -29,6 +31,7 @@ import {
   type StatFn,
   type TruncateFn,
   type WriteFn,
+  type WriteStreamFn,
   refused,
   requireHook,
 } from './driver.ts'
@@ -241,5 +244,36 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
     } finally {
       await close()
     }
+  }
+}
+
+/** Build one streamed object replacement with the normal write condition. */
+export function makeWriteStream<A extends Accessor, C>(
+  driver: ObjectStoreDriver<A, C>,
+): WriteStreamFn<A> {
+  return async function writeStream(accessor, path, data, signal) {
+    const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
+    const cond = await writeCondition(path, 'put')
+    const timer = startOp()
+    const source = chunks(data, signal)
+    let meta: ObjectMeta
+    try {
+      const { conn, close } = await driver.connect(accessor)
+      try {
+        meta = await requireHook(driver.putStream)(conn, key, source, cond ?? {})
+      } finally {
+        await close()
+      }
+    } catch (error) {
+      if (error instanceof ConditionLostError) throw await refused(path, error, cond)
+      if (driver.isNotFound(error)) throw enoent(path)
+      throw error
+    } finally {
+      await closeQuietly(source)
+      await closeQuietly(data)
+    }
+    record('write', path.virtual, driver.vfs, meta.size ?? 0, timer, {
+      fingerprint: meta.fingerprint ?? null,
+    })
   }
 }

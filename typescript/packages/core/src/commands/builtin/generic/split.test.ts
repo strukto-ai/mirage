@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { materialize } from '../../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 
 import type { PathSpec } from '../../../types.ts'
@@ -40,8 +42,8 @@ async function runSplit(
     () => {
       throw new Error('paths are empty; the source is stdin')
     },
-    (p, data) => {
-      written[p.mountPath.replace(/^\//, '')] = DEC.decode(data)
+    async (p, data) => {
+      written[p.mountPath.replace(/^\//, '')] = DEC.decode(await materialize(data))
       return Promise.resolve()
     },
   )

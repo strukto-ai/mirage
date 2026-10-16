@@ -25,6 +25,7 @@ from mirage.cache.context import (
 from mirage.cache.types import KnownVersions, OwnRead, WriteCondition
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.errors.types import StaleWriteError
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec
 from mirage.utils import key_prefix as kp
 
@@ -72,6 +73,12 @@ class PairFn(Protocol[A_contra]):
 class WriteFn(Protocol[A_contra]):
     def __call__(
         self, accessor: A_contra, path_spec: PathSpec, data: bytes
+    ) -> Awaitable[None]: ...
+
+
+class WriteStreamFn(Protocol[A_contra]):
+    def __call__(
+        self, accessor: A_contra, path_spec: PathSpec, data: ByteSource
     ) -> Awaitable[None]: ...
 
 
@@ -342,6 +349,10 @@ class ObjectStoreDriver(Generic[A, C]):
     markers_supported: bool = True
     put_if: (
         Callable[[C, str, bytes, WriteCondition], Awaitable[ObjectMeta | None]]
+        | None
+    ) = None
+    put_stream: (
+        Callable[[C, str, ByteSource, WriteCondition], Awaitable[ObjectMeta]]
         | None
     ) = None
     get_versioned: (

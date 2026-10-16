@@ -248,7 +248,7 @@ class CachedRAM extends RAMVFS {
 }
 
 describe('the cross-mount entry point', () => {
-  it('keeps both edited files cached', async () => {
+  it('invalidates then refills both edited files', async () => {
     // The sed relay is its own write path, apart from runDispatch: it claims
     // each -i file, and the line keeps the edited bytes on both mounts, which
     // then serve a cat after the backend changes.
@@ -264,8 +264,10 @@ describe('the cross-mount entry point', () => {
     try {
       const result = await ws.shell('sed -i s/a/b/ /a/f /b/g')
       expect(result.exitCode).toBe(0)
-      expect(await ws.cache.get('/a/f')).toEqual(enc.encode('b1\n'))
-      expect(await ws.cache.get('/b/g')).toEqual(enc.encode('b2\n'))
+      expect(await ws.cache.get('/a/f')).toBeNull()
+      expect(await ws.cache.get('/b/g')).toBeNull()
+      expect(await ws.vfs.read('/a/f')).toEqual(enc.encode('b1\n'))
+      expect(await ws.vfs.read('/b/g')).toEqual(enc.encode('b2\n'))
       left.loadState({ type: 'ram', files: { '/f': enc.encode('changed\n') } })
       const again = await ws.shell('cat /a/f')
       expect(again.stdout).toEqual(enc.encode('b1\n'))

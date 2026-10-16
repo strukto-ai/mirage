@@ -5879,6 +5879,150 @@
           }
         }
       ]
+    },
+    {
+      "id": "streamed_writes_preserve_outputs_and_flush_order",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/a": {
+            "vfs": "ram",
+            "config": {}
+          },
+          "/b": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "/a/input",
+          "data": "a\nb\nc"
+        },
+        {
+          "op": "exec",
+          "command": "cat /a/input > /b/out; cat /a/input >> /b/out; cat /b/out",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "a\nb\nca\nb\nc",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "split -l 2 /a/input /b/part; cat /b/partaa /b/partab",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "a\nb\nc",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "printf x | tee /b/tee /b/tee > /dev/null; printf y | tee -a /b/tee /b/tee > /dev/null; cat /b/tee",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "xyy",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "sed -n 'w /b/sed' /a/input; cat /b/sed",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "a\nb\nc",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "sed -n -e 'w /b/buffered' -e 'r /b/buffered' /a/input",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /b/buffered",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "a\nb\nc",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cp /a/input /b/edit; sed -i s/a/A/ /b/edit; cat /b/edit",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "A\nb\nc",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "awk '{ print > \"/b/awk\" }' /a/input; cat /b/awk",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "a\nb\nc\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "sort -o /b/sorted /a/input; cat /b/sorted",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "a\nb\nc\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "xxd -p /a/input /b/hex; cat /b/hex",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "610a620a63\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "mv /b/edit /a/moved; cat /a/moved",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "A\nb\nc",
+              "stderr": ""
+            }
+          }
+        }
+      ]
     }
   ]
 }

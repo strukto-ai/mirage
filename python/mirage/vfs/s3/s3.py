@@ -36,7 +36,9 @@ from mirage.core.s3.stream import read_stream as _read_stream
 from mirage.core.s3.truncate import truncate as _truncate
 from mirage.core.s3.unlink import unlink as _unlink
 from mirage.core.s3.write import write as _write
+from mirage.core.s3.write import write_stream as _write_stream
 from mirage.errors.fs import exdev
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.s3.config import S3Config
@@ -142,6 +144,11 @@ class S3VFS(BaseVFS):
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)
+
+    async def write_stream(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        await _write_stream(self.accessor, path, data)
 
     async def append(self, path: PathSpec, data: bytes) -> None:
         await append_by_rewrite(self.read, self.write, self.stat, path, data)

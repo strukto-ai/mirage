@@ -95,10 +95,8 @@ async def test_dispatch_options_route_nothing(line, out):
 
 
 @pytest.mark.asyncio
-async def test_a_cross_mount_sed_in_place_keeps_both_edited_files_cached():
-    # The run_sed relay is its own write path, apart from run_dispatch: it
-    # claims each -i file, and the line keeps the edited bytes on both
-    # mounts, which then serve a cat after the backend changes.
+async def test_a_cross_mount_sed_in_place_invalidates_then_refills_both_files():
+    # Streamed replacements invalidate old content; a complete read refills it.
     left, right = RAMVFS(), RAMVFS()
     left.caches_reads = right.caches_reads = True
     left.load_state({"files": {"/f": b"a1\n"}})
@@ -107,8 +105,10 @@ async def test_a_cross_mount_sed_in_place_keeps_both_edited_files_cached():
     try:
         result = await ws.shell("sed -i s/a/b/ /a/f /b/g")
         assert result.exit_code == 0
-        assert await ws.cache.get("/a/f") == b"b1\n"
-        assert await ws.cache.get("/b/g") == b"b2\n"
+        assert await ws.cache.get("/a/f") is None
+        assert await ws.cache.get("/b/g") is None
+        assert await ws.vfs.read("/a/f") == b"b1\n"
+        assert await ws.vfs.read("/b/g") == b"b2\n"
         left.load_state({"files": {"/f": b"changed\n"}})
         again = await ws.shell("cat /a/f")
         assert await again.materialize_stdout() == b"b1\n"

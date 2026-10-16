@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { closeQuietly, primeStream } from '../../../io/stream.ts'
+
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -21,7 +23,7 @@ import { chunks } from '../../../io/cooperative.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { parseBase0 } from '../utils/size_suffix.ts'
 import { singleChunk } from '../utils/operands.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
@@ -437,7 +439,7 @@ async function writeOutput(
   paths: PathSpec[],
   source: AsyncIterable<Uint8Array>,
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null,
-  writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null,
+  writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
   render: () => AsyncIterable<Uint8Array> | null,
   plain: boolean,
@@ -450,17 +452,22 @@ async function writeOutput(
   ]
   const dump = render()
   let segments: [number, Uint8Array][] = []
-  let data: Uint8Array = new Uint8Array(0)
+  let data: ByteSource = new Uint8Array(0)
+  const reading = { failed: false }
   try {
     if (dump === null) segments = await reverseSegments(source, plain)
-    else data = await materialize(dump)
+    else
+      data = await primeStream(dump, () => {
+        reading.failed = true
+      })
   } catch (err) {
     if (!isFsError(err)) throw err
     return failed(input, err, readFailExitCode('xxd', err))
   }
   if (dump === null && pwriteBytes !== null) {
     try {
-      const stretches: [number, Uint8Array][] = segments.length > 0 ? segments : [[0, data]]
+      const stretches: [number, Uint8Array][] =
+        segments.length > 0 ? segments : [[0, new Uint8Array()]]
       for (const [start, chunk] of stretches) {
         await pwriteBytes(target, chunk, start)
       }
@@ -481,6 +488,7 @@ async function writeOutput(
     data = patched(existing, segments)
   }
   if (writeBytes === null) {
+    await closeQuietly(data)
     return [
       null,
       new IOResult({
@@ -493,7 +501,13 @@ async function writeOutput(
     await writeBytes(target, data)
   } catch (err) {
     if (!isFsError(err)) throw err
-    return failed(target, err, OPEN_OUTPUT_EXIT)
+    return failed(
+      reading.failed ? input : target,
+      err,
+      reading.failed ? readFailExitCode('xxd', err) : OPEN_OUTPUT_EXIT,
+    )
+  } finally {
+    await closeQuietly(data)
   }
   return [null, new IOResult()]
 }
@@ -541,7 +555,7 @@ export async function xxdGeneric(
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
-  writeBytes: ((p: PathSpec, data: Uint8Array) => Promise<void>) | null = null,
+  writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null = null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
   stream = stdinStream(stream, opts.stdin, true)

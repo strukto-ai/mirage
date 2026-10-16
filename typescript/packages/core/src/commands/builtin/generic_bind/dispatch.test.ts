@@ -74,7 +74,10 @@ it.each([false, true])(
       const result = await ws.shell(command + (overwrite ? ' -o /a/input' : ''))
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toEqual(enc.encode(overwrite ? '' : 'a\nm\nz\n'))
-      expect(await ws.cache.get('/a/input')).toEqual(enc.encode(overwrite ? 'a\nm\nz\n' : 'z\na\n'))
+      if (overwrite) {
+        expect(await ws.cache.get('/a/input')).toBeNull()
+        expect(await ws.vfs.cat('/a/input')).toBe('a\nm\nz\n')
+      } else expect(await ws.cache.get('/a/input')).toEqual(enc.encode('z\na\n'))
       expect(await ws.cache.get('/b/input')).toEqual(enc.encode('m\n'))
       left.loadState({ type: 'ram', files: { '/input': enc.encode('changed\n') } })
       const again = await ws.shell(overwrite ? 'cat /a/input' : command)

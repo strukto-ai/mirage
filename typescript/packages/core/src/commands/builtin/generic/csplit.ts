@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { asyncChain } from '../../../io/stream.ts'
+
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { CommandName } from '../../spec/types.ts'
@@ -141,7 +143,7 @@ export async function csplitGeneric(
   texts: string[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
   unlink: (p: PathSpec) => Promise<void>,
 ): Promise<CommandFnResult> {
   // GNU wants FILE and a PATTERN before it opens anything.
@@ -188,7 +190,16 @@ export async function csplitGeneric(
     if (elideEmpty && part.length === 0) continue
     const suffix = formatSuffix(sizes.length, digits, suffixFormat)
     const name = typedPrefix + suffix
-    const data = part.length > 0 ? ENC.encode(part.join('\n') + '\n') : new Uint8Array(0)
+    let size = 0
+    const data = asyncChain(
+      (function* records() {
+        for (const line of part) {
+          const bytes = ENC.encode(line + '\n')
+          size += bytes.byteLength
+          yield bytes
+        }
+      })(),
+    )
     const scope = PathSpec.fromStrPath(name, undefined, opts.cwd)
     const spec = new PathSpec({
       virtual: scope.virtual,
@@ -206,7 +217,7 @@ export async function csplitGeneric(
       break
     }
     created.push([name, spec])
-    sizes.push(String(data.byteLength))
+    sizes.push(String(size))
   }
   if (error !== null) diagnostics += error
   if (error !== null && !keep) {

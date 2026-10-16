@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+
 import { type ClosedPipe, IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { ByteWriter } from '../../../io/writer.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -73,11 +77,47 @@ export async function teeGeneric(
   texts: string[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
-  append?: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
+  append?: (p: PathSpec, data: ByteSource) => Promise<void>,
   stat?: StatFn,
+  outputKey?: (path: PathSpec) => string,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(opts.flags)
+  if (opts.stdin != null && !(opts.stdin instanceof Uint8Array)) {
+    const opened: PathSpec[] = []
+    const [, io] = await writeOutput(
+      paths,
+      new Uint8Array(),
+      parsed,
+      stream,
+      write,
+      append,
+      stat,
+      opened,
+    )
+    io.closedStdout = closedStdout(parsed)
+    if (io.exitCode !== 0 && parsed.stopOnError) {
+      await closeQuietly(opts.stdin)
+      return [null, io]
+    }
+    const source = opts.stdin
+    return [
+      new OutputStream(
+        teeStream(
+          source,
+          opened,
+          parsed,
+          stream,
+          write,
+          append,
+          io,
+          outputKey ?? ((p) => opts.ns?.links?.resolve(p.virtual) ?? p.virtual),
+        )[Symbol.asyncIterator](),
+        () => closeQuietly(source),
+      ),
+      io,
+    ]
+  }
   const stdinData = await readStdinAsync(opts.stdin)
   const raw: Uint8Array = stdinData ?? encodeText(texts.join(' '))
   const [stdout, io] =
@@ -187,6 +227,7 @@ export async function writeOutput(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
   append?: (p: PathSpec, data: Uint8Array) => Promise<void>,
   stat?: StatFn,
+  openedPaths?: PathSpec[],
 ): Promise<[ByteSource | null, IOResult]> {
   const errors: string[] = []
   // GNU opens every output before it reads a byte: under exit the first open
@@ -254,6 +295,7 @@ export async function writeOutput(
     }
     try {
       await writeOne(path, raw, parsed, stream, write, append)
+      openedPaths?.push(path)
     } catch (err) {
       if (err instanceof PipeClosed) {
         // A pipe operand whose reader has gone: SIGPIPE ends tee with what it
@@ -272,4 +314,99 @@ export async function writeOutput(
     return [raw, new IOResult({ exitCode: 1, stderr: encodeText(errors.join('')) })]
   }
   return [raw, new IOResult()]
+}
+
+async function consumeOutput(
+  path: PathSpec,
+  parsed: TeeFlags,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
+  append: ((p: PathSpec, data: ByteSource) => Promise<void>) | undefined,
+  source: ByteSource,
+): Promise<void> {
+  if (!parsed.append) await write(path, source)
+  else if (append !== undefined) await append(path, source)
+  else {
+    let existing: Uint8Array = new Uint8Array()
+    try {
+      existing = await materialize(stream(path))
+    } catch (error) {
+      if (!isEnoent(error)) throw error
+    }
+    async function* joined(): AsyncIterable<Uint8Array> {
+      yield existing
+      yield* chunks(source)
+    }
+    await write(path, joined())
+  }
+}
+
+async function* teeStream(
+  source: ByteSource,
+  paths: PathSpec[],
+  parsed: TeeFlags,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
+  append: ((p: PathSpec, data: ByteSource) => Promise<void>) | undefined,
+  io: IOResult,
+  outputKey: (path: PathSpec) => string,
+): AsyncIterable<Uint8Array> {
+  const writers = new Map<string, { path: PathSpec; writer: ByteWriter; copies: number }>()
+  const errors = [await io.stderrStr()]
+  const failed = (path: PathSpec, error: unknown): boolean => {
+    if (error instanceof PipeClosed) {
+      if (parsed.pipeErrors === PipeErrors.SIGNAL) {
+        io.exitCode = 141
+        return true
+      }
+      if (parsed.pipeErrors === PipeErrors.IGNORE) return false
+      error = fsError(path, 'EPIPE')
+    }
+    errors.push(errorLine(path, error))
+    io.exitCode = 1
+    return parsed.stopOnError
+  }
+  for (const path of paths) {
+    const key = outputKey(path)
+    const prior = writers.get(key)
+    if (prior !== undefined) {
+      if (parsed.append) prior.copies++
+    } else
+      writers.set(key, {
+        path,
+        copies: 1,
+        writer: new ByteWriter((input) =>
+          consumeOutput(path, parsed, stream, write, append, input),
+        ),
+      })
+  }
+  let interrupted = false
+  try {
+    for await (const chunk of chunks(source)) {
+      for (const [key, { path, writer, copies }] of writers) {
+        try {
+          for (let n = 0; n < copies; n++) await writer.write(chunk)
+        } catch (error) {
+          await writer.abort()
+          writers.delete(key)
+          if (failed(path, error)) return
+        }
+      }
+      yield chunk
+    }
+  } catch (error) {
+    interrupted = true
+    throw error
+  } finally {
+    for (const { path, writer } of writers.values()) {
+      try {
+        if (interrupted) await writer.abort()
+        else await writer.finish()
+      } catch (error) {
+        failed(path, error)
+      }
+    }
+    const stderr = errors.join('')
+    io.stderr = stderr.length > 0 ? encodeText(stderr) : null
+  }
 }

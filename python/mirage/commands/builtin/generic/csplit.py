@@ -8,6 +8,7 @@ from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -169,7 +170,7 @@ async def csplit_generic(
             continue
         suffix = suffix_fmt % len(sizes)
         name = typed_prefix + suffix
-        data = ("\n".join(part) + "\n").encode() if part else b""
+        data = async_chain((line + "\n").encode() for line in part)
         spec = PathSpec.from_str_path(name, cwd=cwd)
         spec = replace(spec, vfs_path=mount_key(spec.virtual, mount_prefix))
         try:
@@ -178,7 +179,7 @@ async def csplit_generic(
             error = f"csplit: {name}: {fs_strerror(exc)}\n"
             break
         created.append((name, spec))
-        sizes.append(str(len(data)))
+        sizes.append(str(sum(len((line + "\n").encode()) for line in part)))
     if error is not None:
         diagnostics += error
     if error is not None and not keep_on_error:

@@ -259,6 +259,7 @@ export class SedMachine {
     inputs: SedInput[],
     toStdout: boolean,
     signal?: AbortSignal,
+    flush?: () => Promise<void>,
   ): AsyncGenerator<string> {
     this.budget = new YieldBudget(signal)
     this.signal = signal
@@ -270,6 +271,7 @@ export class SedMachine {
     this.resetAtNextFile = true
     try {
       while (!this.stopped()) {
+        await flush?.()
         if (this.appendQueue.length > 0) {
           for await (const _ of this.dumpAppendQueue()) {
             void _
@@ -287,6 +289,7 @@ export class SedMachine {
         }
         if (!(await this.readPatternSpace(false))) break
         for await (const status of this.executeProgram()) {
+          await flush?.()
           if (status !== -1) this.quitCode = status
           if (out.chunks.length > 0) {
             yield out.chunks.join('')

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fileStreamOp } from '../utils.ts'
+
 import type { NamespaceView } from '../../../../../view/types.ts'
 import { transferLinksOf } from '../utils.ts'
 import type { ByteSource } from '../../../../../io/types.ts'
@@ -45,7 +47,7 @@ export async function runMv(
   const stat = statOp(dispatch)
   const readBytes = readBytesOp(dispatch)
   const readdir = readdirOp(dispatch)
-  const write = async (p: PathSpec, data: Uint8Array): Promise<void> => {
+  const write = async (p: PathSpec, data: ByteSource): Promise<void> => {
     await dispatch('write', p, [data])
   }
   const mkdir = async (p: PathSpec): Promise<void> => {
@@ -63,6 +65,7 @@ export async function runMv(
     stat,
     {
       readBytes,
+      readStream: fileStreamOp(dispatch),
       write,
       mkdir,
       readdir,

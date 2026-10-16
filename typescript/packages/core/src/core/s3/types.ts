@@ -12,6 +12,10 @@ export interface S3Module {
   HeadObjectCommand: new (input: Record<string, unknown>) => unknown
   ListObjectsV2Command: new (input: Record<string, unknown>) => unknown
   PutObjectCommand: new (input: Record<string, unknown>) => unknown
+  CreateMultipartUploadCommand: new (input: Record<string, unknown>) => unknown
+  UploadPartCommand: new (input: Record<string, unknown>) => unknown
+  CompleteMultipartUploadCommand: new (input: Record<string, unknown>) => unknown
+  AbortMultipartUploadCommand: new (input: Record<string, unknown>) => unknown
   DeleteObjectCommand: new (input: Record<string, unknown>) => unknown
   DeleteObjectsCommand: new (input: Record<string, unknown>) => unknown
   CopyObjectCommand: new (input: Record<string, unknown>) => unknown

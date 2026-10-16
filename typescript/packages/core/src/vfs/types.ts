@@ -109,7 +109,7 @@ export type StatOp<A extends Accessor = Accessor> = StatFn<
 export type WriteOp<A extends Accessor = Accessor> = (
   accessor: A,
   path: PathSpec,
-  data: Uint8Array,
+  data: ByteSource,
 ) => Promise<void>
 
 /**

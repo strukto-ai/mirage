@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { writeFile } from 'node:fs/promises'
-
+import { chmod, mkdtemp, open, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { chunks } from '@struktoai/mirage-core/io/cooperative'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -33,4 +35,60 @@ export async function write(accessor: DiskAccessor, p: PathSpec, data: Uint8Arra
     throw diskError(err, p)
   }
   record('write', p.virtual, VFSName.DISK, data.byteLength, timer)
+}
+
+export async function writeStream(
+  accessor: DiskAccessor,
+  p: PathSpec,
+  data: ByteSource,
+  append = false,
+  signal?: AbortSignal,
+  atomic = false,
+): Promise<void> {
+  const timer = startOp()
+  const full = await resolveInside(accessor.root, p)
+  let size = 0
+  let staged: string | null = null
+  let reading = false
+  try {
+    signal?.throwIfAborted()
+    let mode: number | undefined
+    if (atomic) {
+      try {
+        mode = (await stat(full)).mode & 0o7777
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ENOENT') throw error
+      }
+      staged = await mkdtemp(join(dirname(full), '.mirage-'))
+    }
+    const target = staged === null ? full : join(staged, 'content')
+    const file = await open(target, append ? 'a' : 'w')
+    try {
+      const source = chunks(data, signal)
+      try {
+        for (;;) {
+          reading = true
+          const next = await source.next()
+          reading = false
+          if (next.done) break
+          await file.writeFile(next.value)
+          size += next.value.byteLength
+        }
+      } finally {
+        await source.return?.()
+      }
+    } finally {
+      await file.close()
+    }
+    if (staged !== null) {
+      if (mode !== undefined) await chmod(target, mode)
+      await rename(target, full)
+    }
+  } catch (err) {
+    if (reading) throw err
+    throw diskError(err, p)
+  } finally {
+    if (staged !== null) await rm(staged, { recursive: true, force: true })
+  }
+  record(append ? 'append' : 'write', p.virtual, VFSName.DISK, size, timer)
 }

@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { closeQuietly } from '../../io/stream.ts'
+import type { ByteSource } from '../../io/types.ts'
+
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
@@ -739,25 +742,39 @@ export class Dispatcher {
     return null
   }
 
-  dispatch: CallerDispatchFn = (name, path, args, kwargs, report, caller) => {
-    if (caller !== undefined && caller !== this.caller) {
-      const view = this.forCaller(caller)
-      const run = (): ReturnType<DispatchFn> => view.dispatch(name, path, args, kwargs, report)
-      // What runs below the dispatcher (a policy, a backend's record)
-      // reads the caller the dispatcher judges by, all but its rule gate:
-      // a policy's own read below is no call of the command's. Without
-      // task isolation that binding would reach other tasks' ops, so there
-      // only the dispatcher's own checks read it.
-      return asyncContextIsolatesTasks ? runWithCaller({ ...caller, ruleGate: null }, run) : run()
+  dispatch: CallerDispatchFn = async (name, path, args, kwargs, report, caller) => {
+    try {
+      if (caller !== undefined && caller !== this.caller) {
+        const view = this.forCaller(caller)
+        const run = (): ReturnType<DispatchFn> => view.dispatch(name, path, args, kwargs, report)
+        // What runs below the dispatcher (a policy, a backend's record)
+        // reads the caller the dispatcher judges by, all but its rule gate:
+        // a policy's own read below is no call of the command's. Without
+        // task isolation that binding would reach other tasks' ops, so there
+        // only the dispatcher's own checks read it.
+        return await (asyncContextIsolatesTasks
+          ? runWithCaller({ ...caller, ruleGate: null }, run)
+          : run())
+      }
+      // Only forSession and forCaller know the owner. An unbound browser
+      // call must keep the conservative live-session checks rather than
+      // borrow the newest binding, which can belong to a wider concurrent
+      // session.
+      const run = (): ReturnType<DispatchFn> =>
+        this.dispatchAdmitted(name, path, args, kwargs, report)
+      if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()
+      return await this.admitWrite(run)
+    } finally {
+      const data = args?.[0] ?? kwargs?.data
+      if (
+        (name === 'write' || name === 'append') &&
+        data !== null &&
+        typeof data === 'object' &&
+        Symbol.asyncIterator in data
+      ) {
+        await closeQuietly(data as ByteSource)
+      }
     }
-    // Only forSession and forCaller know the owner. An unbound browser
-    // call must keep the conservative live-session checks rather than
-    // borrow the newest binding, which can belong to a wider concurrent
-    // session.
-    const run = (): ReturnType<DispatchFn> =>
-      this.dispatchAdmitted(name, path, args, kwargs, report)
-    if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return run()
-    return this.admitWrite(run)
   }
 
   private dispatchAdmitted: DispatchFn = async (name, path, args, kwargs, report) => {
@@ -1826,10 +1843,17 @@ export class Dispatcher {
         const own = async (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> => {
           line = activeRecords()
           before = await this.cachedBefore(call, mount)
-          return commandRecords((records) => {
-            mine = records
-            return run(fullKwargs, onCall)
-          })
+          const streaming =
+            (name === 'write' || name === 'append') && !(fullArgs[0] instanceof Uint8Array)
+          if (streaming) await this.invalidateStream(mount, p)
+          try {
+            return await commandRecords((records) => {
+              mine = records
+              return run(fullKwargs, onCall)
+            })
+          } finally {
+            if (streaming) await this.invalidateStream(mount, p)
+          }
         }
         try {
           result = await this.holdWrite(
@@ -1907,6 +1931,14 @@ export class Dispatcher {
     return [kept, await this.cache.fingerprint(call.path.virtual)]
   }
 
+  /** Drop content without losing the conditional-write baseline. */
+  private async invalidateStream(mount: MountEntry, path: PathSpec): Promise<void> {
+    const manager = this.managerFor(mount)
+    const version = await manager.readVersion(path)
+    await this.invalidateAfterWriteByPath(path.virtual, null, false)
+    if (version !== null) await manager.keepVersion(path, version)
+  }
+
   /**
    * Keep a write's bytes for the next read, under its name's hold. The
    * write's own record labels them with the token the backend answered, so
@@ -1928,16 +1960,16 @@ export class Dispatcher {
     before: [Uint8Array, string | null] | null,
   ): Promise<void> {
     const sent = args[0]
-    if (
-      (call.name !== 'write' && call.name !== 'append') ||
-      !(sent instanceof Uint8Array) ||
-      !factsOf(mount).cacheable
-    ) {
+    if ((call.name !== 'write' && call.name !== 'append') || !factsOf(mount).cacheable) {
       return
     }
     const record = recordOf(records, WRITE_FINGERPRINT_OPS, call.path.virtual)
-    let data: Uint8Array = sent.slice()
     let fingerprint = record?.fingerprint ?? null
+    if (!(sent instanceof Uint8Array)) {
+      if (fingerprint !== null) await this.managerFor(mount).keepVersion(call.path, fingerprint)
+      return
+    }
+    let data: Uint8Array = sent.slice()
     if (call.name === 'append') {
       if (before === null) return
       const [kept, token] = before

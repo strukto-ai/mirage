@@ -23,6 +23,7 @@ from mirage.commands.spec.usage import argmatch_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
+from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.types import PathSpec
@@ -494,9 +495,6 @@ async def sort_generic(
 
     ordered = await _ordered_records(runs, cfg, parsed.merge)
     separator = b"\x00" if parsed.zero_terminated else b"\n"
-    output = separator.join(record.encode() for record in ordered)
-    if ordered:
-        output += separator
     if parsed.output is not None:
         if write_bytes is None:
             return b"", IOResult(
@@ -504,7 +502,10 @@ async def sort_generic(
                 exit_code=2,
             )
         try:
-            await write_bytes(parsed.output, output)
+            await write_bytes(
+                parsed.output,
+                async_chain(record.encode() + separator for record in ordered),
+            )
         except FS_ERRORS as exc:
             strerror = fs_strerror(exc) or str(exc)
             return b"", IOResult(
@@ -512,6 +513,9 @@ async def sort_generic(
                 exit_code=2,
             )
         return b"", IOResult()
+    output = separator.join(record.encode() for record in ordered)
+    if ordered:
+        output += separator
     return output, IOResult()
 
 

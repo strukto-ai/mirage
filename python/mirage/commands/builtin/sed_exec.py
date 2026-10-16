@@ -14,7 +14,13 @@
 
 import logging
 import re
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+)
 from contextlib import aclosing
 from dataclasses import dataclass, field
 
@@ -365,7 +371,10 @@ class SedMachine:
         return self.quit_code is not None or self.panic_code is not None
 
     async def process(
-        self, inputs: list[SedInput], to_stdout: bool
+        self,
+        inputs: list[SedInput],
+        to_stdout: bool,
+        flush: Callable[[], Awaitable[None]] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Run the program over ``inputs`` as one stream.
 
@@ -385,6 +394,8 @@ class SedMachine:
         self._reset_at_next_file = True
         try:
             while not self.stopped():
+                if flush is not None:
+                    await flush()
                 if self._append_queue:
                     async with aclosing(self._dump_append_queue()) as steps:
                         async for _ in steps:
@@ -400,6 +411,8 @@ class SedMachine:
                     break
                 async with aclosing(self._execute_program()) as steps:
                     async for status in steps:
+                        if flush is not None:
+                            await flush()
                         if status != -1:
                             self.quit_code = status
                         if out.chunks:

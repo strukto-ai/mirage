@@ -38,6 +38,7 @@ from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
+from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import (
     byte_view,
@@ -164,6 +165,7 @@ class AwkStreams:
         self.cwd = cwd
         self.shell = shell
         self.caller = current_caller()
+        self.outputs: dict[str, ByteWriter] = {}
 
     async def stdin_view(self) -> AsyncIterator[bytes]:
         async for chunk in self.stdin:
@@ -173,6 +175,7 @@ class AwkStreams:
         if self.dispatch is None:
             raise AwkIOError(posix_phrase(FsCondition.ENOENT))
         path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
+        await self.flush_output()
         stream = caller_stream(self.dispatch, self.caller, path)
         async with aclosing(chunks(stream)) as source:
             async for chunk in source:
@@ -210,15 +213,44 @@ class AwkStreams:
             raise AwkRuntimeError("awk: file output requires a workspace")
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
         try:
-            await self.dispatch(
-                "append" if append else "write",
-                path,
-                data=from_byte_view(body),
-            )
+            if not append:
+                await self.flush_output()
+                await self.dispatch("write", path, data=b"")
+            if body:
+                writer = self.outputs.get(name)
+                if writer is None:
+                    await self.flush_output()
+                    writer = self.outputs[name] = ByteWriter(
+                        partial(self._append, path)
+                    )
+                await writer.write(from_byte_view(body))
         except WALK_ERRORS as exc:
             raise AwkIOError(
                 fs_strerror(exc) or "Cannot write output file"
             ) from exc
+
+    async def _append(self, path: PathSpec, source: ByteSource) -> None:
+        assert self.dispatch is not None
+        await self.dispatch("append", path, data=source)
+
+    async def flush_output(self, name: str | None = None) -> None:
+        names = list(self.outputs) if name is None else [name]
+        for key in names:
+            writer = self.outputs.pop(key, None)
+            if writer is not None:
+                try:
+                    await writer.finish()
+                except WALK_ERRORS as exc:
+                    raise AwkRuntimeError(
+                        f'awk: cannot open "{key}" for output '
+                        f"({fs_strerror(exc) or 'Cannot write output file'})"
+                    ) from exc
+
+    async def abort_output(self) -> None:
+        writers = list(self.outputs.values())
+        self.outputs.clear()
+        for writer in writers:
+            await writer.abort()
 
     async def run(self, command: str, stdin: bytes | None) -> CommandRun:
         """Run a command line in a subshell of the session, as sh -c would.
@@ -234,6 +266,7 @@ class AwkStreams:
             raise AwkRuntimeError(
                 "awk: running a command requires a workspace"
             )
+        await self.flush_output()
         source: ByteSource = self.stdin_view() if stdin is None else stdin
         io = await self.shell(
             f"( {shell_join(['eval', text_view(command)])} )", source
@@ -271,7 +304,7 @@ async def _drained(interp: Interpreter, io: IOResult) -> bytes:
 
 
 async def _awk_stream(
-    interp: Interpreter, io: IOResult
+    interp: Interpreter, io: IOResult, host: AwkStreams
 ) -> AsyncIterator[bytes]:
     """Run the program, yielding standard output as each record settles.
 
@@ -302,6 +335,7 @@ async def _awk_stream(
         _add_stderr(io, err)
         yield out
     finally:
+        await host.abort_output()
         await interp.close_inputs()
 
 
@@ -404,7 +438,7 @@ async def awk_generic(
         )
 
     io = IOResult()
-    return _awk_stream(interp, io), io
+    return _awk_stream(interp, io, streams), io
 
 
 __all__ = ["awk_generic"]

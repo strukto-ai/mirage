@@ -19,7 +19,9 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { IOResult } from '../../../io/types.ts'
+import { ByteWriter } from '../../../io/writer.ts'
+import { closeQuietly } from '../../../io/stream.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -369,63 +371,6 @@ function suffixNamer(
   }
 }
 
-function joinLines(lines: readonly Uint8Array[]): Uint8Array {
-  let total = 0
-  for (const l of lines) total += l.byteLength + 1
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const l of lines) {
-    out.set(l, offset)
-    offset += l.byteLength
-    out[offset] = 0x0a
-    offset += 1
-  }
-  return out
-}
-
-async function* recordIterator(
-  source: AsyncIterable<Uint8Array>,
-  separator: number,
-): AsyncIterable<Uint8Array> {
-  let pending = new Uint8Array(0)
-  for await (const chunk of source) {
-    const merged = new Uint8Array(pending.byteLength + chunk.byteLength)
-    merged.set(pending)
-    merged.set(chunk, pending.byteLength)
-    let start = 0
-    for (let index = 0; index < merged.byteLength; index++) {
-      if (merged[index] === separator) {
-        yield merged.slice(start, index)
-        start = index + 1
-      }
-    }
-    pending = merged.slice(start)
-  }
-  if (pending.byteLength > 0) yield pending
-}
-
-function joinRecords(records: readonly Uint8Array[], separator: number): Uint8Array {
-  if (separator === 0x0a) return joinLines(records)
-  let total = records.length
-  for (const record of records) total += record.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const record of records) {
-    out.set(record, offset)
-    offset += record.byteLength
-    out[offset] = separator
-    offset += 1
-  }
-  return out
-}
-
-// Where a PREFIX operand's pieces go, as the string they extend. The prefix
-// is glued to each suffix, not walked: an empty one, or one ending in a
-// slash, names the directory whose files are the bare suffixes (GNU's
-// `split f ''` writes `aa` to the cwd, and `split f out/` writes `out/aa`).
-// `virtual` says neither, having normalized the slash away and read the
-// empty name as the directory itself, so the separator is put back.
-// Mirrors Python's _prefix_virtual.
 function prefixVirtualOf(prefix: PathSpec): string {
   if (prefix.rawPath === '' || prefix.rawPath.endsWith('/')) {
     return `${rstripSlash(prefix.virtual)}/`
@@ -437,7 +382,7 @@ export async function splitGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write: (p: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('split'))
   if (paths.length > 2) throw extraOperandError(CommandName.SPLIT, paths[2]?.rawPath ?? '')
@@ -501,7 +446,7 @@ export async function splitGeneric(
   }
 
   let fileIdx = 0
-  const emit = async (name: string, data: Uint8Array): Promise<void> => {
+  const emit = async (name: string, data: ByteSource): Promise<void> => {
     const virtual = prefixVirtual + name
     const spec = PathSpec.fromStrPath(virtual, mountKey(virtual, mountPrefix))
     try {
@@ -528,43 +473,58 @@ export async function splitGeneric(
       i += 1
       await emit(name, part)
     }
-  } else if (byteLimit > 0) {
-    let buf = new Uint8Array(0)
-    for await (const c of source) {
-      const merged = new Uint8Array(buf.byteLength + c.byteLength)
-      merged.set(buf, 0)
-      merged.set(c, buf.byteLength)
-      buf = merged
-      while (buf.byteLength >= byteLimit) {
-        const name = suffixFn(fileIdx) + additionalSuffix
-        const data = buf.slice(0, byteLimit)
-        await emit(name, data)
-        buf = buf.slice(byteLimit)
-        fileIdx += 1
-      }
-    }
-    if (buf.byteLength > 0) {
-      const name = suffixFn(fileIdx) + additionalSuffix
-      await emit(name, buf)
-    }
   } else {
-    const lineBuf: Uint8Array[] = []
-    const iter =
-      separator === 0x0a ? new AsyncLineIterator(source) : recordIterator(source, separator)
-    for await (const line of iter) {
-      lineBuf.push(line)
-      if (lineBuf.length >= linesPerFile) {
-        const name = suffixFn(fileIdx) + additionalSuffix
-        const data = joinRecords(lineBuf, separator)
-        await emit(name, data)
-        lineBuf.length = 0
-        fileIdx += 1
-      }
-    }
-    if (lineBuf.length > 0) {
+    let writer: ByteWriter | null = null
+    let used = 0
+    const open = (): ByteWriter => {
       const name = suffixFn(fileIdx) + additionalSuffix
-      const data = joinRecords(lineBuf, separator)
-      await emit(name, data)
+      return new ByteWriter((data) => emit(name, data))
+    }
+    try {
+      if (byteLimit > 0) {
+        for await (const chunk of source) {
+          let offset = 0
+          while (offset < chunk.byteLength) {
+            writer ??= open()
+            const count = Math.min(byteLimit - used, chunk.byteLength - offset)
+            await writer.write(chunk.subarray(offset, offset + count))
+            offset += count
+            used += count
+            if (used === byteLimit) {
+              await writer.finish()
+              writer = null
+              used = 0
+              fileIdx++
+            }
+          }
+        }
+      } else {
+        const reader = new AsyncLineIterator(source)
+        try {
+          for (;;) {
+            const [line, terminated] = await reader.readUntil(separator, opts.signal)
+            if (line.byteLength === 0 && !terminated) break
+            writer ??= open()
+            await writer.write(line)
+            if (terminated) await writer.write(new Uint8Array([separator]))
+            if (++used === linesPerFile) {
+              await writer.finish()
+              writer = null
+              used = 0
+              fileIdx++
+            }
+          }
+        } finally {
+          await reader.discard()
+        }
+      }
+      if (writer !== null) {
+        await writer.finish()
+        writer = null
+      }
+    } finally {
+      if (writer !== null) await writer.abort()
+      await closeQuietly(source)
     }
   }
   return [null, new IOResult()]

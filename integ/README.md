@@ -53,6 +53,13 @@ implementations cannot drift apart.
 - `prisma/`: one schema per kit fake.
 - `fixtures/`: the seed data cases assume.
 
+Streaming writes are covered by the shared lifecycle corpus and mirrored
+writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate
+tee destinations, split's unterminated final record, sed's buffered
+read/write ordering, backpressure, failed uploads and cache invalidation.
+The new `io/writer` modules run through the existing whole-host core and
+TypeScript filters.
+
 The streamed read probes in `vfs/ranges/stream.json` accept
 `max_chunk_size` to bound every returned chunk and `take_bytes` to close
 after a prefix. The lifecycle corpus also uses a tracked source that fails

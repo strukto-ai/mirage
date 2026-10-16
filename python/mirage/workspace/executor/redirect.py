@@ -28,6 +28,7 @@ from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, DeviceInput, PipeStream
+from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -80,6 +81,43 @@ from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
+
+# These producers do not write named files while their output is consumed.
+# Other commands retain descriptor replay, avoiding a writer holding a
+# destination lock while a nested command tries to write the same path.
+STREAM_OUTPUT_BUILTINS = frozenset(
+    {
+        "cat",
+        "head",
+        "tail",
+        "wc",
+        "grep",
+        "rg",
+        "cut",
+        "tr",
+        "uniq",
+        "nl",
+        "paste",
+        "comm",
+        "join",
+        "base64",
+        "base32",
+        "expand",
+        "unexpand",
+        "fold",
+        "fmt",
+        "od",
+        "strings",
+        "rev",
+        "tac",
+        "ls",
+        "find",
+        "du",
+        "stat",
+        "readlink",
+        "realpath",
+    }
+)
 
 
 class _Fd(Enum):
@@ -137,8 +175,43 @@ class PipeRecorder(Recorder):
         self.forward = forward
         self.sink = sink
         self.live = live
+        self.writer: ByteWriter | None = None
+        self.file: FileDescription | None = None
+        self.failure: OSError | None = None
+
+    async def consume(self, source: ByteSource) -> None:
+        assert self.file is not None
+        await self.dispatch(
+            "append" if self.file.append else "write",
+            self.file.scope,
+            data=source,
+        )
+
+    def stream_to(self, file: FileDescription) -> None:
+        self.file = file
+        self.writer = ByteWriter(self.consume)
+
+    async def finish_writer(self) -> None:
+        if self.writer is not None:
+            try:
+                await self.writer.finish()
+            except OSError as exc:
+                self.failure = exc
+
+    async def abort(self) -> None:
+        if self.writer is not None:
+            await self.writer.abort()
 
     async def emit(self, channel: Channel, data: bytes) -> None:
+        if channel is Channel.STDOUT and self.writer is not None:
+            if self.failure is None:
+                try:
+                    await self.writer.write(data)
+                    assert self.file is not None
+                    self.file.offset += len(data)
+                except OSError as exc:
+                    self.failure = exc
+            return
         scope = self.streams.get(channel)
         if scope is None:
             if self.sink is not None and channel in self.forward:
@@ -682,19 +755,30 @@ async def handle_redirect(
             io = IOResult()
         else:
             try:
-                _, io, exec_node = await drained(
-                    recorder,
-                    *await execute_node(
-                        command,
-                        context,
-                        unreadable_stdin()
-                        if isinstance(inputs[0], _Unreadable)
-                        else inputs[0],
-                        call_stack,
-                        sink=recorder,
-                    ),
+                result = await execute_node(
+                    command,
+                    context,
+                    unreadable_stdin()
+                    if isinstance(inputs[0], _Unreadable)
+                    else inputs[0],
+                    call_stack,
+                    sink=recorder,
                 )
-                refused = exec_node.refused
+                refused = result[2].refused
+                target = outputs[1]
+                if (
+                    not refused
+                    and name in STREAM_OUTPUT_BUILTINS
+                    and not recorder.chunks
+                    and isinstance(target, FileDescription)
+                    and target in files
+                    and target.source is None
+                    and not target.pipe
+                ):
+                    recorder.stream_to(target)
+                _, io, exec_node = await drained(recorder, *result)
+                await recorder.finish_writer()
+
             except PipeClosed:
                 # SIGPIPE ends a forked writer alone; a builtin's write,
                 # in a function or a group too, is the shell's, which dies.
@@ -715,6 +799,7 @@ async def handle_redirect(
             if diagnostic:
                 await recorder.emit(Channel.STDERR, diagnostic)
     finally:
+        await recorder.abort()
         for field, value in held.items():
             setattr(session, field, value)
         ENCLOSING.reset(enclosing)
@@ -732,6 +817,17 @@ async def handle_redirect(
                 session.descriptors.pop(fd, None)
     stdout: bytes | None = None
     route.recorder = Recorder()
+    if recorder.failure is not None and recorder.file is not None:
+        out, error, _ = await failed(
+            _redirect_failure(recorder.file.scope, recorder.failure),
+            failed_file=recorder.file,
+        )
+        if out:
+            recorder.chunks.append((Channel.STDOUT, await materialize(out)))
+        diagnostic = await error.materialize_stderr()
+        if diagnostic:
+            recorder.chunks.append((Channel.STDERR, diagnostic))
+        io.exit_code = 1
     try:
         chunks = recorder.chunks
         if refused:

@@ -127,7 +127,7 @@ async def run_relay(
             scopes, text_args, flag_kwargs, dispatch, ns, stdin
         )
     if cmd_name == Cmd.TEE:
-        return await run_tee(scopes, flag_kwargs, dispatch, stdin)
+        return await run_tee(scopes, flag_kwargs, dispatch, stdin, storage_key)
     if cmd_name == Cmd.UNZIP:
         return await run_unzip(scopes, text_args, flag_kwargs, dispatch)
     if cmd_name == Cmd.ZIP:

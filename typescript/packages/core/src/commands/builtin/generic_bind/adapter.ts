@@ -195,15 +195,15 @@ export function commandIo(vfs: BaseVFS): CommandIO {
       : (_a: Accessor, path: PathSpec) => existsByStat(vfs, path),
     ...(has('write')
       ? {
-          write: withoutAccessor(async (p: PathSpec, d: Uint8Array) => {
-            await vfs.write(p, d)
+          write: withoutAccessor(async (p: PathSpec, d: ByteSource) => {
+            await vfs.write(p, await materialize(d))
           }),
         }
       : {}),
     ...(has('append')
       ? {
-          append: withoutAccessor(async (p: PathSpec, d: Uint8Array) => {
-            await vfs.append(p, d)
+          append: withoutAccessor(async (p: PathSpec, d: ByteSource) => {
+            await vfs.append(p, await materialize(d))
           }),
         }
       : {}),

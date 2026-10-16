@@ -99,6 +99,35 @@ async def test_sed_inplace_transliterate_writes_file():
 
 
 @pytest.mark.asyncio
+async def test_inplace_closes_primed_input_when_write_is_refused():
+    closed = []
+    error = PermissionError("write refused")
+    _, write, _ = _make_backend({})
+    path = _spec("/a.txt")
+
+    async def read(spec):
+        try:
+            yield b"one\n"
+            pytest.fail("refused write must not pull more input")
+        finally:
+            closed.append(spec)
+
+    async def refuse(*args, **kwargs):
+        raise error
+
+    with pytest.raises(PermissionError, match="write refused"):
+        await sed(
+            [path],
+            "s/one/two/",
+            read_stream=read,
+            write_bytes=write,
+            in_place=True,
+            dispatch=refuse,
+        )
+    assert closed == [path]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "script,separate,out",
     [

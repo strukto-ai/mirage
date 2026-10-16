@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.object_store.write import make_write
+from mirage.core.object_store.write import make_write, make_write_stream
 from mirage.core.s3.driver import DRIVER
 
 write = make_write(DRIVER)
+write_stream = make_write_stream(DRIVER)

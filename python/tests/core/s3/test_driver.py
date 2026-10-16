@@ -1,3 +1,4 @@
+import asyncio
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -156,3 +157,110 @@ def test_every_s3_extra_admits_no_botocore_below_the_floor(extra):
         spec.contains(Version("1.40.60")) for spec in floors
     ), extras[extra]
     assert all(spec.contains(_BOTOCORE_FLOOR) for spec in floors)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "size", [0, 13, 8 * 1024 * 1024, 8 * 1024 * 1024 + 37]
+)
+async def test_streamed_upload_uses_bounded_parts_and_conditions(size):
+    client = Mock()
+    client.put_object = AsyncMock(return_value={"ETag": '"small"'})
+    client.create_multipart_upload = AsyncMock(
+        return_value={"UploadId": "upload"}
+    )
+    client.upload_part = AsyncMock(return_value={"ETag": '"part"'})
+    client.complete_multipart_upload = AsyncMock(
+        return_value={"ETag": '"large"'}
+    )
+    client.abort_multipart_upload = AsyncMock()
+    conn = S3Conn(client, S3Config(bucket="b"))
+    closed = []
+
+    async def source():
+        try:
+            for offset in range(0, size, 65536):
+                yield b"x" * min(65536, size - offset)
+        finally:
+            closed.append(True)
+
+    result = await DRIVER.put_stream(
+        conn, "k", source(), WriteCondition(if_match="old")
+    )
+    assert result.size == size
+    assert closed == [True]
+    if size < 8 * 1024 * 1024:
+        client.create_multipart_upload.assert_not_called()
+        assert client.put_object.call_args.kwargs["IfMatch"] == '"old"'
+        assert len(client.put_object.call_args.kwargs["Body"]) == size
+    else:
+        assert [
+            len(c.kwargs["Body"]) for c in client.upload_part.call_args_list
+        ] == ([8 * 1024 * 1024] + ([37] if size % (8 * 1024 * 1024) else []))
+        assert (
+            client.complete_multipart_upload.call_args.kwargs["IfMatch"]
+            == '"old"'
+        )
+    client.abort_multipart_upload.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["source", "part", "condition", "cancel"])
+async def test_failed_multipart_upload_is_aborted(failure):
+    client = Mock()
+    client.create_multipart_upload = AsyncMock(
+        return_value={"UploadId": "upload"}
+    )
+    client.upload_part = AsyncMock(return_value={"ETag": '"part"'})
+    client.complete_multipart_upload = AsyncMock(return_value={})
+    client.abort_multipart_upload = AsyncMock()
+    conn = S3Conn(client, S3Config(bucket="b"))
+    closed = []
+    if failure == "part":
+        client.upload_part.side_effect = OSError("upload failed")
+    if failure == "condition":
+        client.complete_multipart_upload.side_effect = client_error(
+            "PreconditionFailed", 412, "CompleteMultipartUpload"
+        )
+
+    async def source():
+        try:
+            yield b"x" * (8 * 1024 * 1024)
+            if failure == "source":
+                raise OSError("read failed")
+            if failure == "cancel":
+                raise asyncio.CancelledError()
+        finally:
+            closed.append(True)
+
+    expected = (
+        asyncio.CancelledError
+        if failure == "cancel"
+        else ConditionLostError
+        if failure == "condition"
+        else OSError
+    )
+    with pytest.raises(expected):
+        await DRIVER.put_stream(
+            conn, "k", source(), WriteCondition(if_match="old")
+        )
+    client.abort_multipart_upload.assert_awaited_once_with(
+        Bucket="b", Key="k", UploadId="upload"
+    )
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_custom_endpoint_keeps_conditional_single_put():
+    client = Mock()
+    client.put_object = AsyncMock(return_value={"ETag": '"new"'})
+    conn = S3Conn(
+        client, S3Config(bucket="b", endpoint_url="https://store.invalid")
+    )
+    data = b"x" * (8 * 1024 * 1024)
+    result = await DRIVER.put_stream(
+        conn, "k", data, WriteCondition(if_match="old")
+    )
+    assert result.size == len(data)
+    client.create_multipart_upload.assert_not_called()
+    assert client.put_object.call_args.kwargs["IfMatch"] == '"old"'

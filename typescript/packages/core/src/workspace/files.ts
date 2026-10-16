@@ -399,18 +399,17 @@ export class Files {
     return ensureStream((await this.through('read', path, [], kwargs, sessionId)) as ByteSource)
   }
 
-  async write(path: string, data: Uint8Array | string, sessionId?: string): Promise<void> {
+  async write(path: string, data: ByteSource | string, sessionId?: string): Promise<void> {
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
     await this.through('write', path, [bytes], {}, sessionId)
   }
 
   /**
-   * Append bytes to a file through the mount's append op (the python
-   * facade's `append`). No whole-file fallback here: that is
-   * RuntimeFiles's business, where a guest holds the full buffer; an
-   * embedder calling the facade gets the mount's real answer.
+   * Append bytes or an async byte source through the dispatcher. A native
+   * appendStream consumes incrementally; other mounts collect once before
+   * their existing append or read-and-rewrite fallback.
    */
-  async append(path: string, data: Uint8Array, sessionId?: string): Promise<void> {
+  async append(path: string, data: ByteSource, sessionId?: string): Promise<void> {
     await this.through('append', path, [data], {}, sessionId)
   }
 

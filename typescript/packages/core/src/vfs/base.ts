@@ -465,6 +465,21 @@ export class BaseVFS<A extends Accessor = Accessor> {
     return Promise.reject(enotsup(this.name, 'readTree', path))
   }
 
+  /** Consume a replacement incrementally; atomic requires staging until successful EOF. */
+  writeStream(
+    path: PathSpec,
+    _data: ByteSource,
+    _signal?: AbortSignal,
+    _atomic = false,
+  ): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'writeStream', path))
+  }
+
+  /** Consume an append incrementally, through the append dispatcher. */
+  appendStream(path: PathSpec, _data: ByteSource, _signal?: AbortSignal): Promise<void> {
+    return Promise.reject(enotsup(this.name, 'appendStream', path))
+  }
+
   /** Replace a file's bytes, creating it when missing. */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
   write(

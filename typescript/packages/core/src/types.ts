@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from './io/types.ts'
+
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 import { dottedSpelling, resolvePath } from './utils/path.ts'
 
@@ -935,7 +937,8 @@ export interface NativeCopy {
 
 export interface PrimitiveCopy {
   readBytes: ReadBytesFn
-  write: CopyFn<[target: PathSpec, data: Uint8Array]>
+  readStream?: ReadStreamFn
+  write: CopyFn<[target: PathSpec, data: ByteSource]>
   mkdir: CopyFn<[path: PathSpec]>
   readdir: ReaddirFn
   /** A store-to-store copy between two mounts, tried before the bytes move;
@@ -951,7 +954,8 @@ export interface NativeMove {
 
 export interface PrimitiveMove {
   readBytes: ReadBytesFn
-  write: MoveFn<[target: PathSpec, data: Uint8Array]>
+  readStream?: ReadStreamFn
+  write: MoveFn<[target: PathSpec, data: ByteSource]>
   mkdir: MoveFn<[path: PathSpec]>
   readdir: ReaddirFn
   unlink: MoveFn<[path: PathSpec]>

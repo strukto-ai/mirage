@@ -14,7 +14,7 @@
 
 import logging
 from collections.abc import AsyncIterator, Awaitable
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from typing import Any, NoReturn, TypeVar
 
 from mirage.accessor.s3 import S3Accessor
@@ -37,11 +37,15 @@ from mirage.core.s3.client import (
 from mirage.core.s3.constants import CONDITION_LOST_CODES, SCOPE_ERROR
 from mirage.core.s3.types import S3Conn
 from mirage.errors.fs import enoent
+from mirage.io.cooperative import chunks
+from mirage.io.types import ByteSource, materialize
 from mirage.utils.dates import to_iso_z
 
 logger = logging.getLogger(__name__)
 
 DELETE_BATCH = 1000
+PART_SIZE = 8 * 1024 * 1024
+MAX_PARTS = 10000
 
 
 def _key_prefix_of(accessor: S3Accessor) -> str:
@@ -269,6 +273,82 @@ async def _put_if(
         fingerprint=_etag_of(resp) or None,
         revision=_version_of(resp),
     )
+
+
+async def _put_stream(
+    conn: S3Conn, key: str, data: ByteSource, cond: WriteCondition
+) -> ObjectMeta:
+    # Custom endpoints retain their established conditional PUT protocol.
+    if cond.if_match is not None and conn.config.endpoint_url:
+        meta = await _put_if(conn, key, await materialize(data), cond)
+        assert meta is not None
+        return meta
+    upload: str | None = None
+    parts: list[dict[str, Any]] = []
+    buffer = bytearray()
+    size = 0
+    args = {"Bucket": conn.config.bucket, "Key": key}
+
+    async def send_part(body: bytes) -> None:
+        if len(parts) >= MAX_PARTS:
+            raise ValueError("s3: streamed upload exceeds 10000 parts")
+        number = len(parts) + 1
+        response = await conn.client.upload_part(
+            **args, UploadId=upload, PartNumber=number, Body=body
+        )
+        parts.append({"PartNumber": number, "ETag": response["ETag"]})
+
+    try:
+        async with aclosing(chunks(data)) as source:
+            async for chunk in source:
+                buffer.extend(chunk)
+                size += len(chunk)
+                if len(buffer) >= PART_SIZE:
+                    if upload is None:
+                        content_type = conn.config.default_content_type
+                        opened = await conn.client.create_multipart_upload(
+                            **args,
+                            **(
+                                {"ContentType": content_type}
+                                if content_type
+                                else {}
+                            ),
+                        )
+                        upload = opened["UploadId"]
+                    await send_part(bytes(buffer[:PART_SIZE]))
+                    del buffer[:PART_SIZE]
+        if upload is None:
+            meta = await _put_if(conn, key, bytes(buffer), cond)
+            assert meta is not None
+            return meta
+        if buffer:
+            await send_part(bytes(buffer))
+        response = await _guarded(
+            key,
+            conn.client.complete_multipart_upload(
+                **args,
+                UploadId=upload,
+                MultipartUpload={"Parts": parts},
+                **_condition(cond),
+            ),
+            matched=cond.if_match is not None,
+        )
+        upload = None
+        return ObjectMeta(
+            size=size,
+            fingerprint=_etag_of(response) or None,
+            revision=_version_of(response),
+        )
+    finally:
+        if upload is not None:
+            try:
+                await conn.client.abort_multipart_upload(
+                    **args, UploadId=upload
+                )
+            except Exception as exc:
+                logger.debug(
+                    "aborting multipart upload %s failed: %s", key, exc
+                )
 
 
 async def _get_versioned(
@@ -758,6 +838,7 @@ DRIVER: ObjectStoreDriver[S3Accessor, S3Conn] = ObjectStoreDriver(
     probe_prefix=_probe_prefix,
     is_not_found=is_not_found,
     put_if=_put_if,
+    put_stream=_put_stream,
     get_versioned=_get_versioned,
     copy_if=_copy_if,
     delete_if=_delete_if,

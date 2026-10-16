@@ -1,7 +1,10 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from enum import Enum, auto
+from functools import partial
 
 from mirage.commands.builtin.utils.paths import (
     absent_dest_error,
@@ -15,8 +18,11 @@ from mirage.errors.fs import eisdir, enotdir, fs_error, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
+from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, ClosedPipe, IOResult, materialize
+from mirage.io.writer import ByteWriter
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
 
@@ -154,6 +160,7 @@ async def write_output(
     write_bytes: Callable[..., Awaitable[None]],
     append_bytes: Callable[..., Awaitable[None]] | None = None,
     stat: StatFn | None = None,
+    opened_paths: list[PathSpec] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Copy ``raw`` to every operand, GNU-style.
 
@@ -256,6 +263,8 @@ async def write_output(
             await write_one(
                 path, raw, parsed, read_stream, write_bytes, append_bytes
             )
+            if opened_paths is not None:
+                opened_paths.append(path)
         except PipeClosed:
             # A pipe operand whose reader has gone: SIGPIPE ends tee with
             # what it reported, unless -p or --output-error say otherwise.
@@ -288,8 +297,38 @@ async def tee_generic(
     stdin: ByteSource | None = None,
     flags: Mapping[str, FlagValue] | None = None,
     stat: StatFn | None = None,
+    output_key: Callable[[PathSpec], str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(flags or {})
+    if stdin is not None and not isinstance(stdin, bytes):
+        opened: list[PathSpec] = []
+        _, io = await write_output(
+            paths,
+            b"",
+            parsed,
+            read_stream,
+            write_bytes,
+            append_bytes,
+            stat,
+            opened,
+        )
+        io.closed_stdout = _closed_stdout(parsed)
+        if io.exit_code and parsed.stop_on_error:
+            await close_quietly(stdin)
+            return None, io
+        return OutputStream(
+            _tee_stream(
+                stdin,
+                opened,
+                parsed,
+                read_stream,
+                write_bytes,
+                append_bytes,
+                io,
+                output_key,
+            ),
+            partial(close_quietly, stdin),
+        ), io
     raw = await read_stdin_async(stdin)
     if raw is None:
         raw = encode_text(" ".join(texts)) if texts else b""
@@ -301,6 +340,108 @@ async def tee_generic(
         )
     io.closed_stdout = _closed_stdout(parsed)
     return stdout, io
+
+
+async def _consume_output(
+    path: PathSpec,
+    parsed: TeeFlags,
+    read_stream: Callable[..., AsyncIterator[bytes]],
+    write_bytes: Callable[..., Awaitable[None]],
+    append_bytes: Callable[..., Awaitable[None]] | None,
+    source: ByteSource,
+) -> None:
+    if not parsed.append:
+        await write_bytes(path, source)
+    elif append_bytes is not None:
+        await append_bytes(path, source)
+    else:
+        existing = b""
+        try:
+            existing = await materialize(read_stream(path))
+        except FileNotFoundError:
+            pass
+
+        async def joined() -> AsyncIterator[bytes]:
+            yield existing
+            async with aclosing(chunks(source)) as stream:
+                async for chunk in stream:
+                    yield chunk
+
+        await write_bytes(path, joined())
+
+
+async def _tee_stream(
+    source: ByteSource,
+    paths: list[PathSpec],
+    parsed: TeeFlags,
+    read_stream: Callable[..., AsyncIterator[bytes]],
+    write_bytes: Callable[..., Awaitable[None]],
+    append_bytes: Callable[..., Awaitable[None]] | None,
+    io: IOResult,
+    output_key: Callable[[PathSpec], str] | None,
+) -> AsyncIterator[bytes]:
+    writers: dict[str, tuple[PathSpec, ByteWriter, int]] = {}
+    errors = [await io.materialize_stderr()]
+
+    def failed(path: PathSpec, exc: Exception) -> bool:
+        if isinstance(exc, PipeClosed):
+            if parsed.pipe_errors is PipeErrors.SIGNAL:
+                io.exit_code = 141
+                return True
+            if parsed.pipe_errors is PipeErrors.IGNORE:
+                return False
+            exc = fs_error(path, FsCondition.EPIPE)
+        errors.append(error_line(path, exc))
+        io.exit_code = 1
+        return parsed.stop_on_error
+
+    for path in paths:
+        key = output_key(path) if output_key is not None else path.virtual
+        prior = writers.get(key)
+        if prior is not None:
+            writers[key] = (path, prior[1], prior[2] + int(parsed.append))
+        else:
+            writers[key] = (
+                path,
+                ByteWriter(
+                    partial(
+                        _consume_output,
+                        path,
+                        parsed,
+                        read_stream,
+                        write_bytes,
+                        append_bytes,
+                    )
+                ),
+                1,
+            )
+    cancelled = False
+    try:
+        async with aclosing(chunks(source)) as stream:
+            async for chunk in stream:
+                for key, (path, writer, copies) in list(writers.items()):
+                    try:
+                        for _ in range(copies):
+                            await writer.write(chunk)
+                    except Exception as exc:
+                        await writer.abort()
+                        del writers[key]
+                        if failed(path, exc):
+                            return
+                yield chunk
+    except (Exception, asyncio.CancelledError):
+        cancelled = True
+        raise
+    finally:
+        for path, writer, _ in writers.values():
+            if cancelled:
+                await writer.abort()
+                continue
+            try:
+                await writer.finish()
+            except Exception as exc:
+                failed(path, exc)
+        io.stderr = b"".join(errors) or None
 
 
 def _closed_stdout(parsed: TeeFlags) -> ClosedPipe | None:

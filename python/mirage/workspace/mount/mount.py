@@ -1291,6 +1291,12 @@ class MountEntry:
             return levels
         if name == "glob":
             return [self._glob] if vfs.supports("readdir") else []
+        if name == "write" and vfs.supports("write"):
+            return [self._write_op]
+        if name == "append" and (
+            vfs.supports("append") or vfs.supports("write")
+        ):
+            return [self._append_op]
         if name in ("append", "pwrite", "truncate") and not vfs.supports(name):
             return (
                 [getattr(self, f"_{name}_by_rewrite")]
@@ -1304,6 +1310,82 @@ class MountEntry:
         if declared(type(vfs), name) is None or not vfs.supports(name):
             return []
         return [getattr(vfs, name)]
+
+    async def _write_op(
+        self,
+        path: PathSpec,
+        data: ByteSource,
+        atomic: bool = False,
+        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
+    ) -> Any:
+        """A write of bytes or a stream: a stream goes to the VFS's
+        ``write_stream`` where it has one, and is collected for its
+        ``write`` otherwise.
+
+        Args:
+            path (PathSpec): the file, keyed below the mount.
+            data (ByteSource): its whole content, consumed once.
+            atomic (bool): stage a streamed replacement until it ends.
+            index (IndexCacheStore): the mount's index.
+            entry (FileStat | None): what is at the path, if handed.
+            parent (FileStat | None): its directory, if handed.
+        """
+        try:
+            if not isinstance(data, bytes) and self.vfs.supports(
+                "write_stream"
+            ):
+                await self.vfs.write_stream(
+                    path, data, **({"atomic": True} if atomic else {})
+                )
+                return None
+            write: Callable[..., Awaitable[Any]] = self.vfs.write
+            return await write(
+                path,
+                await materialize(data),
+                **_handed_on(write, index, entry=entry, parent=parent),
+            )
+        finally:
+            await close_quietly(data)
+
+    async def _append_op(
+        self,
+        path: PathSpec,
+        data: ByteSource,
+        index: IndexCacheStore = NULL_INDEX,
+        entry: FileStat | None = None,
+        parent: FileStat | None = None,
+    ) -> Any:
+        """An append of bytes or a stream, as ``_write_op`` writes, by
+        rewrite where the VFS has no append.
+
+        Args:
+            path (PathSpec): the file, keyed below the mount.
+            data (ByteSource): the bytes to add, consumed once.
+            index (IndexCacheStore): the mount's index.
+            entry (FileStat | None): what is at the path, if handed.
+            parent (FileStat | None): its directory, if handed.
+        """
+        try:
+            if not isinstance(data, bytes) and self.vfs.supports(
+                "append_stream"
+            ):
+                await self.vfs.append_stream(path, data)
+                return None
+            if not self.vfs.supports("append"):
+                await self._append_by_rewrite(
+                    path, await materialize(data), index
+                )
+                return None
+            append: Callable[..., Awaitable[Any]] = self.vfs.append
+            return await append(
+                path,
+                await materialize(data),
+                **_handed_on(append, index, entry=entry, parent=parent),
+            )
+        finally:
+            await close_quietly(data)
 
     async def _append_by_rewrite(
         self,
@@ -1537,6 +1619,14 @@ class MountEntry:
             return self.vfs.mkdir
         if fn == self._pwrite:
             return self.vfs.pwrite
+        if fn == self._write_op:
+            return self.vfs.write
+        if fn == self._append_op:
+            return (
+                self.vfs.append
+                if self.vfs.supports("append")
+                else self._append_by_rewrite
+            )
         return fn
 
     async def _entry(

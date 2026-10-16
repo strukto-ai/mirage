@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { dropCached, stale } from '../../cache/context.ts'
 import { type KnownVersions, OwnRead, type WriteCondition } from '../../cache/types.ts'
@@ -43,6 +44,13 @@ export type WriteFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
   data: Uint8Array,
+) => Promise<void>
+
+export type WriteStreamFn<A extends Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  data: ByteSource,
+  signal?: AbortSignal,
 ) => Promise<void>
 
 export type MkdirFn<A extends Accessor> = (
@@ -216,6 +224,7 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
    * `put` carrying a write condition; a lost one throws `ConditionLostError`.
    * Absent when the store cannot condition a write.
    */
+  putStream?: (conn: C, key: string, data: ByteSource, cond: WriteCondition) => Promise<ObjectMeta>
   putIf?: (
     conn: C,
     key: string,

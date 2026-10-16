@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.write import write
+from mirage.core.disk.write import write, write_stream
 from mirage.types import PathSpec
 
 
@@ -129,3 +129,50 @@ async def test_never_writes_through_a_host_symlink_out_of_the_root(tmp_path):
             b"pwned",
         )
     assert target.read_bytes() == b"original"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("atomic", [False, True])
+async def test_stream_failure_closes_source_and_preserves_staged_target(
+    tmp_path, atomic
+):
+    from_path = tmp_path / "file"
+    from_path.write_bytes(b"original")
+    closed = []
+
+    async def source():
+        try:
+            yield b"partial"
+            raise OSError("read failed")
+        finally:
+            closed.append(True)
+
+    with pytest.raises(OSError, match="read failed"):
+        await write_stream(
+            DiskAccessor(tmp_path),
+            PathSpec.from_str_path("/file", vfs_path="file"),
+            source(),
+            atomic=atomic,
+        )
+    assert closed == [True]
+    assert from_path.read_bytes() == (b"original" if atomic else b"partial")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["file"]
+
+
+@pytest.mark.asyncio
+async def test_stream_append_and_atomic_mode(tmp_path):
+    target = tmp_path / "file"
+    target.write_bytes(b"old")
+    target.chmod(0o640)
+    accessor = DiskAccessor(tmp_path)
+    path = PathSpec.from_str_path("/file", vfs_path="file")
+
+    async def source():
+        yield target.read_bytes()
+        yield b"new"
+
+    await write_stream(accessor, path, source(), atomic=True)
+    assert target.read_bytes() == b"oldnew"
+    assert target.stat().st_mode & 0o777 == 0o640
+    await write_stream(accessor, path, b"!", append=True)
+    assert target.read_bytes() == b"oldnew!"

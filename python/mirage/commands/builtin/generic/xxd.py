@@ -26,7 +26,12 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cooperative import chunks
-from mirage.io.stream import async_chain, materialize, yield_bytes
+from mirage.io.stream import (
+    async_chain,
+    close_quietly,
+    prime_stream,
+    yield_bytes,
+)
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, ReadBytesFn, ReadStreamFn
 
@@ -584,23 +589,30 @@ async def _write_output(
     """
     target = paths[1]
     segments: list[tuple[int, bytes]] = []
-    data = b""
+    data: ByteSource = b""
+    read_failed = False
+
+    def failed(exc: Exception) -> None:
+        nonlocal read_failed
+        read_failed = True
+
     try:
         if reverse:
             segments = await _reverse_segments(source, plain)
         elif plain:
-            data = await materialize(
-                _xxd_plain_stream(source, uppercase=uppercase)
+            data = await prime_stream(
+                _xxd_plain_stream(source, uppercase=uppercase), failed
             )
         else:
-            data = await materialize(
+            data = await prime_stream(
                 _xxd_dump_stream(
                     source,
                     cols=cols,
                     group=group,
                     uppercase=uppercase,
                     base=base,
-                )
+                ),
+                failed,
             )
     except FS_ERRORS as exc:
         return None, IOResult(
@@ -629,6 +641,7 @@ async def _write_output(
             )
         data = _patched(existing, segments)
     if write_bytes is None:
+        await close_quietly(data)
         return None, IOResult(
             stderr=b"xxd: output is not writable on this backend\n",
             exit_code=OPEN_OUTPUT_EXIT,
@@ -637,9 +650,15 @@ async def _write_output(
         await write_bytes(target, data)
     except FS_ERRORS as exc:
         return None, IOResult(
-            stderr=fs_error_line("xxd", target, exc).encode(),
-            exit_code=OPEN_OUTPUT_EXIT,
+            stderr=fs_error_line(
+                "xxd", paths[0] if read_failed else target, exc
+            ).encode(),
+            exit_code=read_fail_exit_code("xxd", exc)
+            if read_failed
+            else OPEN_OUTPUT_EXIT,
         )
+    finally:
+        await close_quietly(data)
     return None, IOResult()
 
 

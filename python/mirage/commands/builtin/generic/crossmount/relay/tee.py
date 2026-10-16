@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
@@ -24,7 +24,7 @@ from mirage.commands.builtin.generic.tee import tee_generic
 from mirage.commands.builtin.generic_bind.adapter import dispatched_call
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import ensure_stream
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
@@ -34,6 +34,7 @@ async def run_tee(
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
     stdin: ByteSource | None = None,
+    storage_key: Callable[[PathSpec], str] | None = None,
 ) -> CrossResult:
     """Copy stdin to outputs on several mounts with one tee.
 
@@ -55,7 +56,7 @@ async def run_tee(
         async for chunk in ensure_stream(data):
             yield chunk
 
-    async def append_bytes(path: PathSpec, data: bytes) -> None:
+    async def append_bytes(path: PathSpec, data: ByteSource) -> None:
         await dispatch("append", path, data=data)
 
     p = functools.partial
@@ -68,7 +69,8 @@ async def run_tee(
         stdin=stdin,
         flags=flag_kwargs,
         stat=p(dispatched_call, dispatch, "stat"),
+        output_key=storage_key,
     )
     # Relay writes are keyed by the dispatcher; keyed here they would be
     # prefixed onto one mount.
-    return out, IOResult(exit_code=io.exit_code, stderr=io.stderr)
+    return out, io

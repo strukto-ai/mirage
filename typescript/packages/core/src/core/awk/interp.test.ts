@@ -61,6 +61,10 @@ class FakeHost implements AwkHost {
     yield ENC.encode(body)
   }
 
+  flushOutput(): Promise<void> {
+    return Promise.resolve()
+  }
+
   writeFile(name: string, body: string, append: boolean): Promise<void> {
     if (name.startsWith('/ro/')) return Promise.reject(new AwkIOError('Read-only file system'))
     this.files.set(name, (append ? (this.files.get(name) ?? '') : '') + body)

@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
+
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import type { ByteSource, IOResult } from '../../../io/types.ts'
 import {
   ContentType,
   FileStat,
@@ -206,10 +207,10 @@ function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails:
     if (data === undefined) return Promise.reject(enoent(key(p)))
     return Promise.resolve(data)
   }
-  const write = (p: PathSpec, data: Uint8Array): Promise<void> => {
+  const write = async (p: PathSpec, data: ByteSource): Promise<void> => {
     const err = writeErr.get(key(p))
     if (err !== undefined) return Promise.reject(err)
-    files.set(key(p), data)
+    files.set(key(p), await materialize(data))
     return Promise.resolve()
   }
   const mkdir = (p: PathSpec): Promise<void> => {

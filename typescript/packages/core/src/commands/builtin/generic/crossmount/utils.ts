@@ -210,7 +210,8 @@ export function transferLinksOf(
     ...(owns !== undefined ? { owns } : {}),
     relay: {
       readBytes: readBytesOp(dispatch),
-      write: async (p: PathSpec, data: Uint8Array) => {
+      readStream: fileStreamOp(dispatch),
+      write: async (p: PathSpec, data: ByteSource) => {
         await dispatch('write', p, [data])
       },
       mkdir: async (p: PathSpec) => {

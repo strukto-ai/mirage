@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteWriter } from '../../../io/writer.ts'
+
 import { byteView, decodeText, fromByteView, textView } from '../../../shell/bytes.ts'
 import { isStdin, resolveSource } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -113,6 +115,7 @@ export class AwkStreams implements AwkHost {
   private readonly stdin: AsyncIterator<Uint8Array>
   private readonly opts: CommandOpts
   private readonly caller = currentCaller()
+  private readonly outputs = new Map<string, ByteWriter>()
 
   constructor(operands: readonly PathSpec[], stream: Stream, opts: CommandOpts) {
     this.operands = operands
@@ -132,6 +135,7 @@ export class AwkStreams implements AwkHost {
   private async *readPath(name: string | PathSpec): AsyncIterable<Uint8Array> {
     const dispatch = this.opts.dispatch
     if (dispatch === undefined) throw new AwkIOError(posixPhrase('ENOENT'))
+    await this.flushOutput()
     yield* callerStream(dispatch, this.caller, PathSpec.fromStrPath(name, undefined, this.opts.cwd))
   }
 
@@ -159,7 +163,21 @@ export class AwkStreams implements AwkHost {
     if (dispatch === undefined) throw new AwkRuntimeError('awk: file output requires a workspace')
     const path = PathSpec.fromStrPath(textView(name), undefined, this.opts.cwd)
     try {
-      await dispatch(append ? 'append' : 'write', path, [fromByteView(body)])
+      if (!append) {
+        await this.flushOutput()
+        await dispatch('write', path, [new Uint8Array()])
+      }
+      if (body !== '') {
+        let writer = this.outputs.get(name)
+        if (writer === undefined) {
+          await this.flushOutput()
+          writer = new ByteWriter(async (source) => {
+            await dispatch('append', path, [source])
+          })
+          this.outputs.set(name, writer)
+        }
+        await writer.write(fromByteView(body))
+      }
     } catch (error) {
       if (!isWalkError(error)) throw error
       throw new AwkIOError(fsStrerror(error) ?? 'Cannot write output file')
@@ -171,11 +189,36 @@ export class AwkStreams implements AwkHost {
    * `eval` takes the line whole, so an empty one, a comment or a line
    * ending in a backslash runs as `sh -c` would run it.
    */
+  async flushOutput(name?: string): Promise<void> {
+    const names = name === undefined ? [...this.outputs.keys()] : [name]
+    for (const key of names) {
+      const writer = this.outputs.get(key)
+      this.outputs.delete(key)
+      if (writer !== undefined) {
+        try {
+          await writer.finish()
+        } catch (error) {
+          if (!isWalkError(error)) throw error
+          throw new AwkRuntimeError(
+            `awk: cannot open "${key}" for output (${fsStrerror(error) ?? 'Cannot write output file'})`,
+          )
+        }
+      }
+    }
+  }
+
+  async abortOutput(): Promise<void> {
+    const writers = [...this.outputs.values()]
+    this.outputs.clear()
+    for (const writer of writers) await writer.abort()
+  }
+
   async run(command: string, stdin: Uint8Array | null): Promise<CommandRun> {
     const shell = this.opts.shell
     if (shell === undefined) {
       throw new AwkRuntimeError('awk: running a command requires a workspace')
     }
+    await this.flushOutput()
     const source: ByteSource = stdin ?? this.stdinView()
     const io = await shell(`( ${shellJoin(['eval', textView(command)])} )`, source)
     const stdout = await materialize(io.stdout)
@@ -217,7 +260,11 @@ async function drained(interp: Interpreter, io: IOResult): Promise<Uint8Array> {
  * runs after either; every awk treats a runtime error as fatal at exit 2
  * and keeps what it had already written.
  */
-async function* awkStream(interp: Interpreter, io: IOResult): AsyncIterable<Uint8Array> {
+async function* awkStream(
+  interp: Interpreter,
+  io: IOResult,
+  host: AwkStreams,
+): AsyncIterable<Uint8Array> {
   try {
     const exited = await stage(interp.runBegin(), io)
     yield await drained(interp, io)
@@ -240,6 +287,7 @@ async function* awkStream(interp: Interpreter, io: IOResult): AsyncIterable<Uint
     addStderr(io, stderr)
     yield out
   } finally {
+    await host.abortOutput()
     await interp.closeInputs()
   }
 }
@@ -296,5 +344,5 @@ export async function awkGeneric(
   if (f.fieldSeparator !== null) interp.setVar('FS', text(unescape(byteView(f.fieldSeparator))))
 
   const io = new IOResult()
-  return [awkStream(interp, io), io]
+  return [awkStream(interp, io, streams), io]
 }

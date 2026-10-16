@@ -38,6 +38,7 @@ from mirage.errors.types import (
     WalkDeclinedError,
 )
 from mirage.io import OpReport
+from mirage.io.stream import yield_bytes
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
     Action,
@@ -2564,5 +2565,148 @@ async def test_path_admission_checks_aliases_without_backend_io(monkeypatch):
         assert result is None
         assert gate.asked == ["/data/alias/new", "/data/real/new"]
         call.assert_not_awaited()
+    finally:
+        await ws.close()
+
+
+class StreamWritingRAM(RAMVFS):
+    def __init__(self):
+        super().__init__()
+        self.streamed = []
+        self.chunk_sizes = []
+        self.fail = False
+        self.caches_reads = True
+
+    async def write_stream(self, path, data, *, atomic=False):
+        self.streamed.append(("write", path.virtual))
+        content = []
+        async for chunk in data:
+            self.chunk_sizes.append(len(chunk))
+            if self.fail:
+                await super().write(path, chunk)
+                raise OSError("write failed after a prefix")
+            content.append(chunk)
+        await super().write(path, b"".join(content))
+
+    async def append_stream(self, path, data):
+        self.streamed.append(("append", path.virtual))
+        content = []
+        async for chunk in data:
+            self.chunk_sizes.append(len(chunk))
+            content.append(chunk)
+        await super().append(path, b"".join(content))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,target,expected",
+    [
+        ("cat /src/f > /dst/out", "/dst/out", b"a\nb\nc"),
+        ("cat /src/f >> /dst/out", "/dst/out", b"a\nb\nc"),
+        ("cat /src/f | tee /dst/out", "/dst/out", b"a\nb\nc"),
+        ("cp /src/f /dst/out", "/dst/out", b"a\nb\nc"),
+        ("split -l 2 /src/f /dst/part", "/dst/partab", b"c"),
+        ("sed -n 'w /dst/out' /src/f", "/dst/out", b"a\nb\nc"),
+        ("""awk '{ print > "/dst/out" }' /src/f""", "/dst/out", b"a\nb\nc\n"),
+        ("sort -o /dst/out /src/f", "/dst/out", b"a\nb\nc\n"),
+        ("xxd -p /src/f /dst/out", "/dst/out", b"610a620a63\n"),
+        ("sed -i s/a/A/ /dst/edit", "/dst/edit", b"A\nb\nc"),
+    ],
+)
+async def test_named_outputs_reach_native_stream_writers(
+    line, target, expected
+):
+    destination = StreamWritingRAM()
+    ws = Workspace(
+        {"/src": RAMVFS(), "/dst": destination}, mode=MountMode.WRITE
+    )
+    try:
+        await ws.vfs.write("/src/f", b"a\nb\nc")
+        await ws.vfs.write("/dst/edit", b"a\nb\nc")
+        result = await asyncio.wait_for(ws.shell(line), 5)
+        await result.materialize_stdout()
+        assert result.exit_code == 0, await result.stderr_str()
+        assert any(path == target for _, path in destination.streamed)
+        assert await ws.vfs.read(target) == expected
+        assert max(destination.chunk_sizes) <= 16384
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_streamed_write_invalidates_old_content_and_closes_input():
+    destination = StreamWritingRAM()
+    ws = Workspace({"/dst": destination}, mode=MountMode.WRITE)
+    closed = []
+    try:
+        await ws.vfs.write("/dst/f", b"old")
+        assert await ws.vfs.read("/dst/f") == b"old"
+        destination.fail = True
+
+        async def source():
+            try:
+                yield b"new"
+                yield b"tail"
+            finally:
+                closed.append(True)
+
+        with pytest.raises(OSError, match="write failed"):
+            await ws.vfs.write("/dst/f", source())
+        assert closed == [True]
+        assert not await ws.cache.exists("/dst/f")
+        assert await ws.vfs.read("/dst/f") == b"new"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_stream_invalidation_keeps_versions_without_keeping_upload_bytes(
+    monkeypatch,
+):
+    destination = StreamWritingRAM()
+    ws = Workspace({"/dst": destination}, mode=MountMode.WRITE)
+    tokens = []
+    original = destination.write_stream
+
+    async def write(path, data, *, atomic=False):
+        tokens.append(await ws.cache.fingerprint(path.virtual))
+        assert not await ws.cache.exists(path.virtual)
+        await original(path, data, atomic=atomic)
+        record("write", path.virtual, "ram", 3, start_op(), fingerprint="v2")
+
+    monkeypatch.setattr(destination, "write_stream", write)
+    try:
+        await ws.vfs.write("/dst/f", b"old")
+        await ws.cache.set("/dst/f", b"old", fingerprint="v1")
+        await ws.vfs.write("/dst/f", yield_bytes(b"new"))
+        assert tokens == ["v1"]
+        assert not await ws.cache.exists("/dst/f")
+        assert await ws.cache.fingerprint("/dst/f") == "v2"
+    finally:
+        await ws.close()
+
+
+class UnreadWriteSource:
+    def __init__(self):
+        self.closed = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise AssertionError("a refused write pulled its input")
+
+    async def aclose(self):
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_refused_write_closes_input_without_pulling_it():
+    ws = Workspace({"/dst": RAMVFS()}, mode=MountMode.READ)
+    source = UnreadWriteSource()
+    try:
+        with pytest.raises(PermissionError):
+            await ws.vfs.write("/dst/f", source)
+        assert source.closed
     finally:
         await ws.close()

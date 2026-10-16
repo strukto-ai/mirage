@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { closeQuietly, primeStream } from '../../../io/stream.ts'
+
 import { pathVisible } from '../../../utils/hidden.ts'
 import { mountedPath, rekey, respelled } from '../../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
@@ -848,8 +850,15 @@ async function duplicateForBackup(
   const targetIsDir = await isDirectory(stat, target, index)
   if ('readBytes' in strategy) {
     if (!targetIsDir) {
-      const data = await strategy.readBytes(target)
-      await strategy.write(backup, data)
+      const data =
+        strategy.readStream === undefined
+          ? await strategy.readBytes(target)
+          : await primeStream(strategy.readStream(target))
+      try {
+        await strategy.write(backup, data)
+      } finally {
+        await closeQuietly(data)
+      }
       return true
     }
     const entries = await cpWalk(strategy.readdir, stat, target, index)
@@ -1052,7 +1061,15 @@ async function copyEntry(
     await strategy.copy(src, dst)
   } catch (err) {
     if ((err as { code?: string }).code !== 'EXDEV' || copies === undefined) throw err
-    await copies.relay.write(dst, await copies.relay.readBytes(src))
+    const data =
+      copies.relay.readStream === undefined
+        ? await copies.relay.readBytes(src)
+        : await primeStream(copies.relay.readStream(src))
+    try {
+      await copies.relay.write(dst, data)
+    } finally {
+      await closeQuietly(data)
+    }
   }
 }
 
@@ -1365,9 +1382,15 @@ export async function transferFile(
       }
     }
   }
-  let data: Uint8Array
+  let data: ByteSource
+  const reading = { failed: false }
   try {
-    data = await strategy.readBytes(src)
+    data =
+      strategy.readStream === undefined
+        ? await strategy.readBytes(src)
+        : await primeStream(strategy.readStream(src), () => {
+            reading.failed = true
+          })
   } catch (err) {
     if (!isFsError(err)) throw err
     errors.push(`${cmdName}: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`)
@@ -1378,9 +1401,13 @@ export async function transferFile(
   } catch (err) {
     if (!isFsError(err)) throw err
     errors.push(
-      `${cmdName}: cannot create regular file '${dst.rawPath}': ${String(fsStrerror(err))}`,
+      reading.failed
+        ? `${cmdName}: error reading '${src.rawPath}': ${String(fsStrerror(err))}`
+        : `${cmdName}: cannot create regular file '${dst.rawPath}': ${String(fsStrerror(err))}`,
     )
     return false
+  } finally {
+    await closeQuietly(data)
   }
   return true
 }

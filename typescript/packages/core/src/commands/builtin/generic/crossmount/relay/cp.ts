@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fileStreamOp } from '../utils.ts'
+
 import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { cpGeneric, parseFlags } from '../../cp.ts'
@@ -84,14 +86,14 @@ export async function runCp(
     mounts === undefined || nsLinks === undefined
       ? nsLinks
       : { ...nsLinks, subtree: (d) => ownLinks(nsLinks, mounts, starts, d) }
-  const write = async (p: PathSpec, data: Uint8Array): Promise<void> => {
+  const write = async (p: PathSpec, data: ByteSource): Promise<void> => {
     await dispatch('write', p, [data])
   }
   const mkdir = async (p: PathSpec): Promise<void> => {
     await dispatch('mkdir', p)
   }
   const copy = (src: PathSpec, dst: PathSpec): Promise<void> => relayCopy(dispatch, src, dst)
-  const strategy = { readBytes, write, mkdir, readdir, copy }
+  const strategy = { readStream: fileStreamOp(dispatch), readBytes, write, mkdir, readdir, copy }
   return cpGeneric(
     flat,
     stat,

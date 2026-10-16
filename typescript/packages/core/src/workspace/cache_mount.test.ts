@@ -317,7 +317,7 @@ describe('a renderer registered beside the VFS', () => {
       await ops(ram).write(PathSpec.fromStrPath('/books.tally'), ENC.encode('STORED\n'))
       const result = await ws.shell(line)
       expect(result.exitCode).toBe(0)
-      expect(await ws.cache.exists('/data/books.tally')).toBe(true)
+      expect(await ws.cache.exists('/data/books.tally')).toBe(line.startsWith('cat '))
       expect(await ws.vfs.cat('/data/books.tally')).toBe('RENDERED')
     } finally {
       await ws.close()
@@ -361,8 +361,8 @@ describe('a line touching a file twice', () => {
     ["sort -o /d/f /d/f; printf 'z\\n' >> /d/f", null, 'a\nb\nz\n'],
     ["printf 'q\\n' | tee /d/f >> /d/f", null, 'q\nq\n'],
     ["printf 'q\\n' | tee /d/f >> /d/f 2>> /d/f", null, 'q\nq\n'],
-    ['cat /d/f; sort -o /d/f /d/f', 'a\nb\n', 'a\nb\n'],
-    ['cat /d/f | sort -o /d/f', 'a\nb\n', 'a\nb\n'],
+    ['cat /d/f; sort -o /d/f /d/f', null, 'a\nb\n'],
+    ['cat /d/f | sort -o /d/f', null, 'a\nb\n'],
   ])('%s caches %j', async (line, cached, stored) => {
     // An append, or a read before a write, leaves no entry; a whole write
     // after a read is kept. Mirrors Python's

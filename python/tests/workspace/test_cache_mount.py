@@ -220,8 +220,8 @@ async def test_a_guarded_cp_copies_what_cat_serves(tmp_path):
         ("sort -o /d/f /d/f; printf 'z\\n' >> /d/f", None, b"a\nb\nz\n"),
         ("printf 'q\\n' | tee /d/f >> /d/f", None, b"q\nq\n"),
         ("printf 'q\\n' | tee /d/f >> /d/f 2>> /d/f", None, b"q\nq\n"),
-        ("cat /d/f; sort -o /d/f /d/f", b"a\nb\n", b"a\nb\n"),
-        ("cat /d/f | sort -o /d/f", b"a\nb\n", b"a\nb\n"),
+        ("cat /d/f; sort -o /d/f /d/f", None, b"a\nb\n"),
+        ("cat /d/f | sort -o /d/f", None, b"a\nb\n"),
     ],
 )
 async def test_a_line_touching_a_file_twice_caches_only_a_whole_file(

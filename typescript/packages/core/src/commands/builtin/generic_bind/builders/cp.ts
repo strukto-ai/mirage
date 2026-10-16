@@ -89,7 +89,8 @@ export const BUILDER: GenericCommand = {
       primitive && write !== undefined
         ? {
             readBytes: (p: PathSpec) => ops.readBytes(accessor, p, idx),
-            write: (p: PathSpec, data: Uint8Array) => write(accessor, p, data),
+            readStream: (p: PathSpec) => ops.readStream(accessor, p, idx),
+            write: (p, data) => write(accessor, p, data),
             mkdir: (p: PathSpec) => requireOp(ops.mkdir, 'mkdir')(accessor, p),
             readdir: (p: PathSpec) => ops.readdir(accessor, p, idx),
           }

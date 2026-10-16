@@ -129,3 +129,36 @@ export async function* yieldBytes(data: Uint8Array): AsyncIterable<Uint8Array> {
 export function ensureStream(src: ByteSource): AsyncIterable<Uint8Array> {
   return src instanceof Uint8Array ? yieldBytes(src) : src
 }
+
+/** Open a reader before creating its destination; retain ownership before the first pull. */
+export async function primeStream(
+  source: AsyncIterable<Uint8Array>,
+  failed?: (error: unknown) => void,
+): Promise<ByteSource> {
+  const cursor = source[Symbol.asyncIterator]()
+  let first: IteratorResult<Uint8Array>
+  try {
+    first = await cursor.next()
+  } catch (error) {
+    await cursor.return?.()
+    throw error
+  }
+  async function* rest(): AsyncGenerator<Uint8Array> {
+    try {
+      if (first.done !== true) yield first.value
+      for (;;) {
+        const step = await cursor.next()
+        if (step.done === true) return
+        yield step.value
+      }
+    } catch (error) {
+      failed?.(error)
+      throw error
+    } finally {
+      await cursor.return?.()
+    }
+  }
+  return new OutputStream(rest(), async () => {
+    await cursor.return?.()
+  })
+}

@@ -926,12 +926,16 @@ class Dispatcher:
             report (OpReport | None): the caller's report.
             **kwargs (Any): the op's own arguments.
         """
-        if caller is None:
-            caller = current_caller()
-        if self._admit_write is None or name not in POLICY_WRITE_OPS:
-            return await self._bound(name, path, caller, report, kwargs)
-        async with self._admit_write(caller) as held:
-            return await self._bound(name, path, held, report, kwargs)
+        try:
+            if caller is None:
+                caller = current_caller()
+            if self._admit_write is None or name not in POLICY_WRITE_OPS:
+                return await self._bound(name, path, caller, report, kwargs)
+            async with self._admit_write(caller) as held:
+                return await self._bound(name, path, held, report, kwargs)
+        finally:
+            if name in ("write", "append"):
+                await close_quietly(kwargs.get("data"))
 
     async def _bound(
         self,
@@ -2074,6 +2078,11 @@ class Dispatcher:
             for key in sorted(keys):
                 await held.enter_async_context(self._writers.with_lock(key))
             before = await self._cached_before(call, mount)
+            streaming = call.name in ("write", "append") and not isinstance(
+                kwargs.get("data"), bytes
+            )
+            if streaming:
+                await self._invalidate_stream(mount, call.path)
             scope = RecordingScope(active=active_recorder() is None)
             try:
                 with command_records() as mine:
@@ -2087,12 +2096,29 @@ class Dispatcher:
                 raise
             finally:
                 scope.close()
+                if streaming:
+                    await self._invalidate_stream(mount, call.path)
             _served(call.report, result)
             await self._settle_write(
                 mount, call.name, call.path, kwargs, call.vis, created=result
             )
             await self._keep_written(call, mount, mine, before)
         return result
+
+    async def _invalidate_stream(
+        self, mount: MountEntry, path: PathSpec
+    ) -> None:
+        """Drop content without losing the conditional-write baseline.
+
+        Args:
+            mount (MountEntry): destination mount.
+            path (PathSpec): destination.
+        """
+        manager = self._manager_for(mount)
+        version = await manager.read_version(path)
+        await self.invalidate_after_write(mount, path, times=False)
+        if version is not None:
+            await manager.keep_version(path, version)
 
     async def _cached_before(
         self, call: _Call, mount: MountEntry
@@ -2143,7 +2169,6 @@ class Dispatcher:
         data = call.kwargs.get("data")
         if (
             call.name not in ("write", "append")
-            or not isinstance(data, bytes)
             or not _facts_of(mount).cacheable
         ):
             return
@@ -2151,6 +2176,12 @@ class Dispatcher:
         fingerprint = (
             record.fingerprint or None if record is not None else None
         )
+        if not isinstance(data, bytes):
+            if fingerprint is not None:
+                await self._manager_for(mount).keep_version(
+                    call.path, fingerprint
+                )
+            return
         if call.name == "append":
             if before is None:
                 return

@@ -376,6 +376,7 @@ class PrimitiveCopy:
     # A store-to-store copy between two mounts, tried before the bytes
     # move; EXDEV from it says the stores cannot.
     copy: CopyFn | None = None
+    read_stream: ReadStreamFn | None = None
 
 
 CopyStrategy: TypeAlias = NativeCopy | PrimitiveCopy
@@ -396,6 +397,7 @@ class PrimitiveMove:
     rmdir: MoveFn
     check_unlink: "CheckFn | None" = None
     copy: CopyFn | None = None
+    read_stream: ReadStreamFn | None = None
 
 
 MoveStrategy: TypeAlias = NativeMove | PrimitiveMove

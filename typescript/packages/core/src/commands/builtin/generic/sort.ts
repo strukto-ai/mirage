@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { asyncChain } from '../../../io/stream.ts'
+
 import { stdinStream } from '../utils/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
@@ -372,7 +374,7 @@ export async function sortGeneric(
   paths: PathSpec[],
   opts: CommandOpts,
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
-  write?: (path: PathSpec, data: Uint8Array) => Promise<void>,
+  write?: (path: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, opts.stdin)
   let parsed: SortFlags
@@ -405,8 +407,6 @@ export async function sortGeneric(
   }
   const ordered = await orderedRecords(runs, cfg, parsed.merge, opts.signal)
   const separator = parsed.zeroTerminated ? '\0' : '\n'
-  const output: Uint8Array =
-    ordered.length === 0 ? new Uint8Array() : ENC.encode(ordered.join(separator) + separator)
   if (parsed.output !== null) {
     if (write === undefined) {
       return [
@@ -426,7 +426,14 @@ export async function sortGeneric(
       walkError: parsed.output.walkError,
     })
     try {
-      await write(outputPath, output)
+      await write(
+        outputPath,
+        asyncChain(
+          (function* records() {
+            for (const record of ordered) yield ENC.encode(record + separator)
+          })(),
+        ),
+      )
     } catch (error) {
       if (!isFsError(error)) throw error
       const strerror = fsStrerror(error) ?? String(error)
@@ -440,6 +447,8 @@ export async function sortGeneric(
     }
     return [new Uint8Array(), new IOResult()]
   }
+  const output: Uint8Array =
+    ordered.length === 0 ? new Uint8Array() : ENC.encode(ordered.join(separator) + separator)
   const out: ByteSource = output
   return [out, new IOResult()]
 }

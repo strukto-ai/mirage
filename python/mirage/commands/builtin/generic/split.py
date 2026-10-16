@@ -22,6 +22,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
+from mirage.io.writer import ByteWriter
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import resolve_path
@@ -520,7 +521,7 @@ async def split_generic(
 
     file_idx = 0
 
-    async def emit(name: str, data: bytes) -> None:
+    async def emit(name: str, data: ByteSource) -> None:
         virtual = prefix_virtual + name
         spec = PathSpec.from_str_path(
             virtual, mount_key(virtual, mount_prefix)
@@ -547,58 +548,52 @@ async def split_generic(
             for i, part in enumerate(chunk_parts(all_data, chunks, separator)):
                 name = suffix_fn(i) + additional_suffix
                 await emit(name, part)
-        elif byte_limit > 0:
-            buf = bytearray()
-            async for chunk in source:
-                buf.extend(chunk)
-                while len(buf) >= byte_limit:
-                    name = suffix_fn(file_idx) + additional_suffix
-                    data = bytes(buf[:byte_limit])
-                    await emit(name, data)
-                    buf = buf[byte_limit:]
-                    file_idx += 1
-            if buf:
-                name = suffix_fn(file_idx) + additional_suffix
-                data = bytes(buf)
-                await emit(name, data)
         else:
-            line_buf: list[bytes] = []
-            if separator == b"\n":
-                records: AsyncIterator[bytes] = AsyncLineIterator(source)
-            else:
-                raw = b"".join([chunk async for chunk in source])
-                records = _record_iterator(raw, separator)
-            async for line in records:
-                line_buf.append(line)
-                if len(line_buf) >= lines_per_file:
-                    name = suffix_fn(file_idx) + additional_suffix
-                    data = separator.join(line_buf) + separator
-                    await emit(name, data)
-                    line_buf = []
-                    file_idx += 1
-            if line_buf:
-                name = suffix_fn(file_idx) + additional_suffix
-                data = separator.join(line_buf) + separator
-                await emit(name, data)
+            writer: ByteWriter | None = None
+            used = 0
+            try:
+                if byte_limit > 0:
+                    async for chunk in source:
+                        offset = 0
+                        while offset < len(chunk):
+                            if writer is None:
+                                name = suffix_fn(file_idx) + additional_suffix
+                                writer = ByteWriter(partial(emit, name))
+                            count = min(byte_limit - used, len(chunk) - offset)
+                            await writer.write(chunk[offset : offset + count])
+                            offset += count
+                            used += count
+                            if used == byte_limit:
+                                await writer.finish()
+                                writer, used = None, 0
+                                file_idx += 1
+                else:
+                    reader = AsyncLineIterator(source)
+                    while True:
+                        line, terminated = await reader.read_until(separator)
+                        if not line and not terminated:
+                            break
+                        if writer is None:
+                            name = suffix_fn(file_idx) + additional_suffix
+                            writer = ByteWriter(partial(emit, name))
+                        await writer.write(line)
+                        if terminated:
+                            await writer.write(separator)
+                        used += 1
+                        if used == lines_per_file:
+                            await writer.finish()
+                            writer, used = None, 0
+                            file_idx += 1
+                    await reader.discard()
+                if writer is not None:
+                    await writer.finish()
+                    writer = None
+            finally:
+                if writer is not None:
+                    await writer.abort()
     finally:
         close = getattr(source, "aclose", None)
         if close is not None:
             await close()
 
     return None, IOResult()
-
-
-async def _record_iterator(
-    data: bytes, separator: bytes
-) -> AsyncIterator[bytes]:
-    # Every separator terminates a record, so only the final unterminated
-    # remainder is dropped when empty; a second trailing separator still
-    # yields the empty record it terminates (GNU).
-    records = data.split(separator)
-    if records and not records[-1]:
-        records.pop()
-    for record in records:
-        yield record
-
-
-__all__ = ["ChunkKind", "ChunkSpec", "chunk_parts", "split_generic"]

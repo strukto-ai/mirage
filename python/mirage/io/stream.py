@@ -185,3 +185,35 @@ def ensure_stream(src: ByteSource) -> AsyncIterator[bytes]:
         AsyncIterator[bytes]: ``src`` itself, or ``yield_bytes(src)``.
     """
     return yield_bytes(src) if isinstance(src, bytes) else src
+
+
+async def prime_stream(
+    source: AsyncIterator[bytes],
+    failed: Callable[[Exception], None] | None = None,
+) -> ByteSource:
+    """Open a reader before creating its destination.
+
+    Args:
+        source (AsyncIterator[bytes]): the owned reader.
+        failed (Callable | None): observes a failure after the first pull.
+    """
+    try:
+        first = await anext(source, b"")
+    except BaseException:
+        await close_quietly(source)
+        raise
+
+    async def rest() -> AsyncIterator[bytes]:
+        try:
+            if first:
+                yield first
+            async for chunk in source:
+                yield chunk
+        except Exception as exc:
+            if failed is not None:
+                failed(exc)
+            raise
+        finally:
+            await close_quietly(source)
+
+    return OutputStream(rest(), lambda: close_quietly(source))

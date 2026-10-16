@@ -45,6 +45,11 @@ class StoreRAM extends RAMVFS {
     return super.read(path, handed, offset, size)
   }
 
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    this.reads.push(path.virtual)
+    return super.readStream(path)
+  }
+
   override async copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {
     if (this.refuse || !(source instanceof StoreRAM)) throw exdev(dst)
     this.copied.push([src.vfsPath, dst.vfsPath])

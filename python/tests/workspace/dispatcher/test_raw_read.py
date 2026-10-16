@@ -119,7 +119,9 @@ async def test_a_user_renderer_renders_after_a_shell_command(line):
     result = await ws.shell(line)
     await result.materialize_stdout()
     assert result.exit_code == 0
-    assert await ws.cache.exists("/data/books.tally")
+    assert await ws.cache.exists("/data/books.tally") == line.startswith(
+        "cat "
+    )
     assert await ws.vfs.read("/data/books.tally") == b"RENDERED"
 
 

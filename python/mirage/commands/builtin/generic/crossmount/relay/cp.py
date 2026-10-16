@@ -122,6 +122,7 @@ async def run_cp(
             )
     strategy = PrimitiveCopy(
         read_bytes=primitives["read_bytes"],
+        read_stream=primitives["read_stream"],
         write=primitives["write"],
         mkdir=primitives["mkdir"],
         readdir=primitives["readdir"],

@@ -140,6 +140,7 @@ async def cp(
         # per-entry refusals are worded.
         strategy = PrimitiveCopy(
             read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
+            read_stream=bound_op(ops.read_stream, accessor, opts.index),
             write=partial(_write, ops.write, accessor),
             mkdir=partial(require_op(ops, Operation.MKDIR), accessor),
             readdir=bound_op(ops.readdir, accessor, opts.index),

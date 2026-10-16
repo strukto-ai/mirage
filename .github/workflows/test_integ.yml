@@ -62,6 +62,7 @@ jobs:
             # filters, so their disk/RAM CLI corpus runs with either twin.
             # LanceDB's shared core/lancedb/types modules select the embedded
             # LanceDB corpus through these same whole-host filters.
+            # The io/writer modules and streamed disk/S3 writes use these filters.
             # Shared S3 types and VFS find options use these filters too;
             # the extracted Pyodide config also remains in runtime's TS glob.
             # Shared utils/abort primitives stay in both whole-host filters

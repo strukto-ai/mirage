@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFile, symlink, writeFile } from 'node:fs/promises'
+import { readFile, symlink, writeFile, readdir, chmod, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
-import { write } from './write.ts'
+import { write, writeStream } from './write.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -63,5 +63,48 @@ describe('core/disk/write', () => {
     await expect(
       write(accessor, spec('/plain/c.txt'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
+})
+
+describe('streamed disk output', () => {
+  it.each([false, true])(
+    'preserves input failures and cleans staged output (atomic=%s)',
+    async (atomic) => {
+      const target = join(root, 'file')
+      await writeFile(target, 'original')
+      const error = new Error('read failed')
+      let closed = false
+      async function* source(): AsyncGenerator<Uint8Array> {
+        await Promise.resolve()
+        try {
+          yield new TextEncoder().encode('partial')
+          throw error
+        } finally {
+          closed = true
+        }
+      }
+      await expect(
+        writeStream(accessor, spec('/file'), source(), false, undefined, atomic),
+      ).rejects.toBe(error)
+      expect(closed).toBe(true)
+      expect(await readFile(target, 'utf8')).toBe(atomic ? 'original' : 'partial')
+      expect(await readdir(root)).toEqual(['file'])
+    },
+  )
+
+  it('stages a replacement before overwriting its input and keeps mode', async () => {
+    const target = join(root, 'file')
+    await writeFile(target, 'old')
+    await chmod(target, 0o640)
+    async function* source(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      yield await readFile(target)
+      yield new TextEncoder().encode('new')
+    }
+    await writeStream(accessor, spec('/file'), source(), false, undefined, true)
+    expect(await readFile(target, 'utf8')).toBe('oldnew')
+    expect((await stat(target)).mode & 0o777).toBe(0o640)
+    await writeStream(accessor, spec('/file'), new TextEncoder().encode('!'), true)
+    expect(await readFile(target, 'utf8')).toBe('oldnew!')
   })
 })

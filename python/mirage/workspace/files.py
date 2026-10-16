@@ -20,6 +20,7 @@ from mirage.context import get_current_session
 from mirage.errors.types import NoMountError
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
+from mirage.io.types import ByteSource
 from mirage.observe import OpRecord
 from mirage.observe.context import OpTimer, finish_record, start_op
 from mirage.runtime.types import DispatchFn
@@ -495,25 +496,25 @@ class Files:
         return ensure_stream(result)
 
     async def write(
-        self, path: str, data: bytes, *, session_id: str | None = None
+        self, path: str, data: ByteSource, *, session_id: str | None = None
     ) -> None:
         """Write file content.
 
         Args:
             path (str): Virtual path.
-            data (bytes): Content to write.
+            data (ByteSource): Bytes or a single-consumer async byte source.
             session_id (str | None): Session to run as outside a line.
         """
         await self._call("write", path, session_id, data=data)
 
     async def append(
-        self, path: str, data: bytes, *, session_id: str | None = None
+        self, path: str, data: ByteSource, *, session_id: str | None = None
     ) -> None:
         """Append data to a file.
 
         Args:
             path (str): Virtual path.
-            data (bytes): Content to append.
+            data (ByteSource): Bytes or a single-consumer async byte source.
             session_id (str | None): Session to run as outside a line.
         """
         await self._call("append", path, session_id, data=data)

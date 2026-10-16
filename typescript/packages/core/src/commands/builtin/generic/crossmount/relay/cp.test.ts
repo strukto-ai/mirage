@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { IOResult } from '../../../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../../../types.ts'
 import { enoent, exdev } from '../../../../../errors/fs.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'
@@ -31,7 +31,7 @@ function spec(path: string): PathSpec {
 }
 
 function makeDispatch(files: Map<string, Uint8Array>, dirs: Set<string>): DispatchFn {
-  return (op: string, path: PathSpec, args?: readonly unknown[]) => {
+  return async (op: string, path: PathSpec, args?: readonly unknown[]) => {
     const k = rstripSlash(path.virtual)
     const name = k.split('/').pop() ?? ''
     if (op === 'copy') return Promise.reject(exdev(path))
@@ -56,7 +56,7 @@ function makeDispatch(files: Map<string, Uint8Array>, dirs: Set<string>): Dispat
       ])
     }
     if (op === 'write') {
-      files.set(k, args?.[0] as Uint8Array)
+      files.set(k, await materialize(args?.[0] as ByteSource))
       return Promise.resolve([null, new IOResult()])
     }
     if (op === 'mkdir') {

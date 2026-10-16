@@ -54,6 +54,7 @@ from mirage.errors.types import (
     WalkDeclinedError,
 )
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.stream import close_quietly, prime_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import (
@@ -1103,8 +1104,15 @@ async def _duplicate_for_backup(
     target_is_dir = await is_directory(stat, target)
     if isinstance(strategy, (PrimitiveCopy, PrimitiveMove)):
         if not target_is_dir:
-            data = await strategy.read_bytes(target)
-            await strategy.write(backup, data=data)
+            data = (
+                await prime_stream(strategy.read_stream(target))
+                if strategy.read_stream is not None
+                else await strategy.read_bytes(target)
+            )
+            try:
+                await strategy.write(backup, data=data)
+            finally:
+                await close_quietly(data)
             return True
         entries = await walk(strategy.readdir, stat, target)
         copied_all = await copy_entries(
@@ -1386,8 +1394,15 @@ async def _copy_entry(
     except OSError as exc:
         if exc.errno != errno.EXDEV or copies is None:
             raise
-        data = await copies.relay.read_bytes(src)
-        await copies.relay.write(dst, data=data)
+        data = (
+            await prime_stream(copies.relay.read_stream(src))
+            if copies.relay.read_stream is not None
+            else await copies.relay.read_bytes(src)
+        )
+        try:
+            await copies.relay.write(dst, data=data)
+        finally:
+            await close_quietly(data)
 
 
 async def transfer_file(
@@ -1433,8 +1448,18 @@ async def transfer_file(
                     f"'{dst.raw_path}': {fs_strerror(exc)}"
                 )
                 return False
+    read_failed = False
+
+    def failed(exc: Exception) -> None:
+        nonlocal read_failed
+        read_failed = True
+
     try:
-        data = await strategy.read_bytes(src)
+        data = (
+            await prime_stream(strategy.read_stream(src), failed)
+            if strategy.read_stream is not None
+            else await strategy.read_bytes(src)
+        )
     except FS_ERRORS as exc:
         errors.append(
             f"{cmd_name}: cannot open '{src.raw_path}' "
@@ -1445,10 +1470,16 @@ async def transfer_file(
         await strategy.write(dst, data=data)
     except FS_ERRORS as exc:
         errors.append(
-            f"{cmd_name}: cannot create regular file "
-            f"'{dst.raw_path}': {fs_strerror(exc)}"
+            f"{cmd_name}: error reading '{src.raw_path}': {fs_strerror(exc)}"
+            if read_failed
+            else (
+                f"{cmd_name}: cannot create regular file "
+                f"'{dst.raw_path}': {fs_strerror(exc)}"
+            )
         )
         return False
+    finally:
+        await close_quietly(data)
     return True
 
 

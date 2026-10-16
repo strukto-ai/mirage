@@ -38,6 +38,9 @@ class FakeHost:
             raise AwkIOError("No such file or directory")
         yield self.files[name].encode()
 
+    async def flush_output(self, name: str | None = None) -> None:
+        pass
+
     async def write_file(self, name: str, body: str, append: bool) -> None:
         if name.startswith("/ro/"):
             raise AwkIOError("Read-only file system")

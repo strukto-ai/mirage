@@ -1,4 +1,5 @@
 import errno
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -205,6 +206,14 @@ async def test_ln_backup_refuses_a_directory_destination():
 
 
 class SealedReads(RAMVFS):
+    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        if path.virtual.endswith(".sealed"):
+            raise PermissionError(
+                errno.EACCES, "Permission denied", path.virtual
+            )
+        async for chunk in super().read_stream(path):
+            yield chunk
+
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:

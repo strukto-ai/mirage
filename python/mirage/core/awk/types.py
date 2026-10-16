@@ -61,6 +61,10 @@ class AwkHost(Protocol):
         """
         ...
 
+    async def flush_output(self, name: str | None = None) -> None:
+        """Commit a named output, or all outputs before a visible barrier."""
+        ...
+
     async def run(self, command: str, stdin: bytes | None) -> CommandRun:
         """Run one shell command line to completion.
 

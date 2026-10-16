@@ -34,6 +34,7 @@ export interface AwkHost {
   openInput(name: string, index: number | null): AsyncIterable<Uint8Array>
   /** Write output text to a named file, appending or replacing it. */
   writeFile(name: string, body: string, append: boolean): Promise<void>
+  flushOutput(name?: string): Promise<void>
   /**
    * Run one shell command line to completion, as `sh -c` would take it;
    * a null `stdin` hands it awk's own, still unread.

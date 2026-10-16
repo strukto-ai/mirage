@@ -206,6 +206,7 @@ class Interpreter:
         self.held: list[bytes] = []
         self.err: list[bytes] = []
         self.out_files: dict[str, list[str]] = {}
+        self.out_file_sizes: dict[str, int] = {}
         self.out_pipes: dict[str, list[str]] = {}
         self.in_files: dict[str, RecordReader] = {}
         self.in_pipes: dict[str, InputPipe] = {}
@@ -940,6 +941,7 @@ class Interpreter:
         if pending:
             body = "".join(pending)
             pending.clear()
+            self.out_file_sizes[name] = 0
             await self.write_file(name, body, True)
 
     async def flush_files(self) -> None:
@@ -954,6 +956,7 @@ class Interpreter:
         the files awk wrote and prints after awk's standard output.
         """
         await self.flush_files()
+        await self.host.flush_output()
         self.release()
 
     async def write(self, body: str, node: Print | Printf) -> None:
@@ -992,6 +995,10 @@ class Interpreter:
                 await self.write_file(name, "", False)
             pending = self.out_files[name] = []
         pending.append(body)
+        size = self.out_file_sizes.get(name, 0) + len(body)
+        self.out_file_sizes[name] = size
+        if size >= 65536:
+            await self.flush_file(name)
 
     async def close_out_pipe(self, command: str) -> int:
         """Run an output pipe's command on everything printed to it.
@@ -1024,7 +1031,9 @@ class Interpreter:
             status = pipe.status
         if name in self.out_files:
             await self.flush_file(name)
+            await self.host.flush_output(name)
             del self.out_files[name]
+            self.out_file_sizes.pop(name, None)
             status = 0
         reader = self.in_files.pop(name, None)
         if reader is not None:
@@ -1049,6 +1058,7 @@ class Interpreter:
             return 0
         if name in self.out_files:
             await self.flush_file(name)
+            await self.host.flush_output(name)
             return 0
         return 0 if name in self.out_pipes else -1
 
@@ -1279,6 +1289,7 @@ class Interpreter:
         for command in reversed(list(self.out_pipes)):
             await self.close_out_pipe(command)
         await self.flush_files()
+        await self.host.flush_output()
         self.release()
         await self.close_inputs()
 
@@ -1321,6 +1332,7 @@ class Interpreter:
         self.err.append(from_byte_view(f"{failure}\n"))
         try:
             await self.flush_files()
+            await self.host.flush_output()
         except AwkRuntimeError as exc:
             self.err.append(from_byte_view(f"{exc}\n"))
         self.release()

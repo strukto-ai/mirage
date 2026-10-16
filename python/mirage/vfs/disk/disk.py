@@ -44,6 +44,8 @@ from mirage.core.disk.utils import (
     walk_entries,
 )
 from mirage.core.disk.write import write as _write
+from mirage.core.disk.write import write_stream as _write_stream
+from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
     CapacityState,
@@ -120,6 +122,14 @@ class DiskVFS(BaseVFS):
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)
+
+    async def write_stream(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        await _write_stream(self.accessor, path, data, atomic=atomic)
+
+    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
+        await _write_stream(self.accessor, path, data, append=True)
 
     async def append(self, path: PathSpec, data: bytes) -> None:
         await _append(self.accessor, path, data)

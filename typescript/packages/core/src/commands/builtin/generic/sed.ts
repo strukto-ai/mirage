@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteWriter } from '../../../io/writer.ts'
+
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -24,8 +26,8 @@ import { currentCaller } from '../../../context/session_context.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { readFailExitCode } from '../../spec/usage.ts'
-import { ensureStream } from '../../../io/stream.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { closeQuietly, ensureStream, primeStream } from '../../../io/stream.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { SED_MISSING_SCRIPT, SED_NO_INPUT_EXIT, SED_NO_INPUT_FILES } from '../constants.ts'
@@ -54,7 +56,7 @@ interface ScriptFiles {
   virtual(name: string): string
   read(name: string): Promise<Uint8Array>
   stream(name: string): AsyncIterable<Uint8Array>
-  write(name: string, data: Uint8Array): Promise<void>
+  write(name: string, data: ByteSource, atomic?: boolean, append?: boolean): Promise<void>
 }
 
 function scriptFiles(opts: CommandOpts, stream: Stream, write: Write): ScriptFiles {
@@ -74,18 +76,24 @@ function scriptFiles(opts: CommandOpts, stream: Stream, write: Write): ScriptFil
   const caller = currentCaller()
   const open = (name: string): AsyncIterable<Uint8Array> =>
     dispatch === undefined ? stream(spec(name)) : callerStream(dispatch, caller, spec(name))
-  return {
+  const access: ScriptFiles = {
     virtual: (name) => resolvePath(name, opts.cwd),
     read: (name) => materialize(open(name)),
     stream: open,
-    async write(name, data) {
+    async write(name, data, atomic = false, append = false) {
       if (dispatch === undefined) {
-        await write(spec(name), data)
+        const previous = append ? await materialize(open(name)) : new Uint8Array()
+        const next = await materialize(data)
+        const combined = new Uint8Array(previous.length + next.length)
+        combined.set(previous)
+        combined.set(next, previous.length)
+        await write(spec(name), combined)
         return
       }
-      await dispatch('write', spec(name), [data])
+      await dispatch(append ? 'append' : 'write', spec(name), [data], atomic ? { atomic } : {})
     },
   }
+  return access
 }
 
 // GNU's atoi over -l: leading blanks, a sign, digits; a negative length
@@ -156,23 +164,60 @@ async function readScriptFiles(
 
 // Write out what the `w` files collected. A `w` file that -i then edited
 // keeps the edit: GNU's stream still points at the file -i renamed over.
-async function flushWriteFiles(
-  machine: SedMachine,
-  access: ScriptFiles,
-  utf8: boolean,
-  edited: ReadonlySet<string> = new Set(),
-): Promise<string> {
-  let err = ''
-  for (const [name, out] of machine.wfiles) {
-    if (out.chunks.length === 0 || edited.has(access.virtual(name))) continue
-    try {
-      await access.write(name, fromByteView(out.chunks.join(''), utf8))
-    } catch (e) {
-      if (!isFsError(e)) throw e
-      err += openFailure(name, e)
+class ScriptWrites {
+  private name: string | null = null
+  private writer: ByteWriter | null = null
+  readonly edited = new Set<string>()
+  errors = ''
+
+  constructor(
+    private readonly machine: SedMachine,
+    private readonly access: ScriptFiles,
+    private readonly utf8: boolean,
+    private readonly defer: boolean,
+  ) {}
+
+  async flush(final = false): Promise<void> {
+    if (this.defer && !final) return
+    for (const [name, out] of this.machine.wfiles) {
+      if (out.chunks.length === 0) continue
+      const data = fromByteView(out.chunks.join(''), this.utf8)
+      out.chunks.length = 0
+      if (this.edited.has(this.access.virtual(name))) continue
+      try {
+        if (name !== this.name) {
+          await this.finish()
+          this.name = name
+          this.writer = new ByteWriter((source) => this.access.write(name, source, false, true))
+        }
+        await this.writer?.write(data)
+      } catch (error) {
+        if (!isFsError(error)) throw error
+        this.errors += openFailure(name, error)
+        await this.abort()
+      }
     }
   }
-  return err
+
+  async finish(): Promise<void> {
+    const writer = this.writer,
+      name = this.name
+    this.writer = null
+    this.name = null
+    try {
+      await writer?.finish()
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      this.errors += openFailure(name ?? '', error)
+    }
+  }
+
+  async abort(): Promise<void> {
+    const writer = this.writer
+    this.writer = null
+    this.name = null
+    await writer?.abort()
+  }
 }
 
 function failed(stderr: string, exitCode: number): CommandFnResult {
@@ -302,7 +347,19 @@ export async function sedGeneric(
     utf8,
   })
 
-  if (inPlace) return runInPlace(paths, program, machine, access, stream, write, utf8, opts.signal)
+  const writes = new ScriptWrites(
+    machine,
+    access,
+    utf8,
+    inPlace || program.rfiles.length > 0 || program.readerFiles.length > 0,
+  )
+  if (inPlace) {
+    try {
+      return await runInPlace(paths, program, machine, access, stream, utf8, writes, opts.signal)
+    } finally {
+      await writes.abort()
+    }
+  }
 
   const stdinSource = ensureStream(opts.stdin ?? new Uint8Array())
   const inputs: SedInput[] = paths.map((p) =>
@@ -312,10 +369,16 @@ export async function sedGeneric(
   const io = new IOResult()
   async function* output(): AsyncGenerator<Uint8Array> {
     try {
-      for await (const chunk of machine.process(inputs, true, opts.signal))
+      for await (const chunk of machine.process(inputs, true, opts.signal, () => writes.flush()))
         yield fromByteView(chunk, utf8)
     } finally {
-      const writeErr = await flushWriteFiles(machine, access, utf8)
+      try {
+        await writes.flush(true)
+        await writes.finish()
+      } finally {
+        await writes.abort()
+      }
+      const writeErr = writes.errors
       const stderr = machine.stderr() + writeErr
       io.exitCode = writeErr === '' ? machine.exitCode() : 4
       io.stderr = stderr === '' ? null : encodeText(stderr)
@@ -335,8 +398,8 @@ async function runInPlace(
   machine: SedMachine,
   access: ScriptFiles,
   stream: Stream,
-  write: Write,
   utf8: boolean,
+  writes: ScriptWrites,
   signal?: AbortSignal,
 ): Promise<CommandFnResult> {
   if (paths.length === 0) return failed(`${SED_NO_INPUT_FILES}\n`, SED_NO_INPUT_EXIT)
@@ -345,9 +408,9 @@ async function runInPlace(
   let code = 0
   for (const p of paths) {
     if (machine.stopped()) break
-    let data: Uint8Array
+    let data: ByteSource
     try {
-      data = await materialize(stream(p))
+      data = await primeStream(stream(p))
     } catch (e) {
       if (!isFsError(e)) throw e
       err += fsErrorLine('sed', p, e)
@@ -355,29 +418,28 @@ async function runInPlace(
       if ((e as { code?: string }).code === 'EISDIR') break
       continue
     }
-    // An `r` file edited by an earlier file of this command reads new.
-    if (editedVirtual.size > 0)
-      machine.setFiles(await readScriptFiles(program.rfiles, access, utf8))
-    let out = ''
-    for await (const chunk of machine.process(
-      [{ name: p.rawPath, text: byteView(data, utf8) }],
-      false,
-      signal,
-    ))
-      out += chunk
-    if (machine.panicCode !== null) break
-    const newData = fromByteView(out, utf8)
     try {
-      await write(p, newData)
-    } catch (e) {
-      if (!isStaleWrite(e)) throw e
-      err += editFailure(p.rawPath, e)
-      code = 4
-      break
+      // An `r` file edited by an earlier file of this command reads new.
+      if (editedVirtual.size > 0)
+        machine.setFiles(await readScriptFiles(program.rfiles, access, utf8))
+      try {
+        writes.edited.add(access.virtual(p.virtual))
+        await access.write(p.virtual, editOutput(machine, p, data, utf8, writes, signal), true)
+      } catch (e) {
+        if (e instanceof EditAborted) break
+        if (!isStaleWrite(e)) throw e
+        err += editFailure(p.rawPath, e)
+        code = 4
+        break
+      }
+    } finally {
+      await closeQuietly(data)
     }
     editedVirtual.add(p.virtual)
   }
-  const writeErr = await flushWriteFiles(machine, access, utf8, editedVirtual)
+  await writes.flush(true)
+  await writes.finish()
+  const writeErr = writes.errors
   const stderr = err + machine.stderr() + writeErr
   const exitCode =
     machine.panicCode ?? (writeErr !== '' ? 4 : code === 4 ? 4 : code || machine.exitCode())
@@ -405,4 +467,22 @@ export function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[
       vfsPath: mountKey(resolved, prefix),
     })
   })
+}
+
+class EditAborted extends Error {}
+
+async function* editOutput(
+  machine: SedMachine,
+  path: PathSpec,
+  source: ByteSource,
+  utf8: boolean,
+  writes: ScriptWrites,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array> {
+  for await (const chunk of machine.process([{ name: path.rawPath, source }], false, signal, () =>
+    writes.flush(),
+  )) {
+    yield fromByteView(chunk, utf8)
+  }
+  if (machine.panicCode !== null) throw new EditAborted()
 }

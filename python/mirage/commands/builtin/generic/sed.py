@@ -52,8 +52,9 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.cooperative import chunks
-from mirage.io.stream import ensure_stream
+from mirage.io.stream import close_quietly, ensure_stream, prime_stream
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import (
     byte_view,
@@ -70,7 +71,7 @@ ReadBytes = Callable[..., Awaitable[bytes]]
 WriteBytes = Callable[..., Awaitable[None]]
 
 
-@dataclass(frozen=True)
+@dataclass
 class _ScriptFiles:
     """How sed reaches the files its script names.
 
@@ -113,14 +114,29 @@ class _ScriptFiles:
             async for part in data:
                 yield part
 
-    async def write(self, name: str, data: bytes) -> None:
+    async def write(
+        self,
+        name: str,
+        data: ByteSource,
+        *,
+        atomic: bool = False,
+        append: bool = False,
+    ) -> None:
         path = self.spec(name)
         if self.dispatch is not None:
-            await self.dispatch("write", path, data=data)
+            if append:
+                await self.dispatch("append", path, data=data)
+            else:
+                await self.dispatch("write", path, data=data, atomic=atomic)
             return
         if self.write_bytes is None:
             raise eacces(name)
-        await self.write_bytes(path, data)
+        previous = (
+            await materialize(normalized_read(self.read_stream)(path))
+            if append
+            else b""
+        )
+        await self.write_bytes(path, previous + await materialize(data))
 
 
 def _line_length(raw: str | None) -> int:
@@ -204,32 +220,57 @@ async def _read_script_files(
     return files
 
 
-async def _flush_write_files(
-    machine: SedMachine,
-    access: _ScriptFiles,
-    edited: frozenset[str] = frozenset(),
-) -> str:
-    """Write out what the ``w`` files collected.
+class _ScriptWrites:
+    """Drain sed's named output while retaining one bounded writer."""
 
-    A ``w`` file that -i then edited keeps the edit: GNU's stream still
-    points at the file -i renamed over.
+    def __init__(
+        self, machine: SedMachine, access: _ScriptFiles, defer: bool
+    ) -> None:
+        self.machine = machine
+        self.defer = defer
+        self.access = access
+        self.name: str | None = None
+        self.writer: ByteWriter | None = None
+        self.edited: set[str] = set()
+        self.errors = ""
 
-    Args:
-        machine (SedMachine): the finished machine.
-        access (_ScriptFiles): how sed reaches the files its script names.
-        edited (frozenset[str]): virtual paths -i rewrote.
-    """
-    err = ""
-    for name, out in machine.wfiles.items():
-        if not out.chunks or access.spec(name).virtual in edited:
-            continue
-        try:
-            await access.write(
-                name, from_byte_view("".join(out.chunks), machine.opts.utf8)
-            )
-        except FS_ERRORS as exc:
-            err += _open_failure(name, exc)
-    return err
+    async def flush(self, final: bool = False) -> None:
+        if self.defer and not final:
+            return
+        for name, out in self.machine.wfiles.items():
+            if not out.chunks:
+                continue
+            data = from_byte_view("".join(out.chunks), self.machine.opts.utf8)
+            out.chunks.clear()
+            if self.access.spec(name).virtual in self.edited:
+                continue
+            try:
+                if name != self.name:
+                    await self.finish()
+                    self.name = name
+                    self.writer = ByteWriter(
+                        partial(self.access.write, name, append=True)
+                    )
+                assert self.writer is not None
+                await self.writer.write(data)
+            except FS_ERRORS as exc:
+                self.errors += _open_failure(name, exc)
+                await self.abort()
+
+    async def finish(self) -> None:
+        writer, name = self.writer, self.name
+        self.writer = self.name = None
+        if writer is not None:
+            try:
+                await writer.finish()
+            except FS_ERRORS as exc:
+                self.errors += _open_failure(name or "", exc)
+
+    async def abort(self) -> None:
+        writer = self.writer
+        self.writer = self.name = None
+        if writer is not None:
+            await writer.abort()
 
 
 def _failed(stderr: str, exit_code: int) -> tuple[None, IOResult]:
@@ -313,15 +354,24 @@ async def sed(
             utf8=utf8,
         ),
     )
+    writes = _ScriptWrites(
+        machine,
+        access,
+        in_place or bool(program.rfiles or program.reader_files),
+    )
     if in_place:
-        return await _run_in_place(
-            paths,
-            program,
-            machine,
-            access,
-            materialized_read(read_stream),
-            write_bytes,
-        )
+        try:
+            return await _run_in_place(
+                paths,
+                program,
+                machine,
+                access,
+                read,
+                write_bytes,
+                writes,
+            )
+        finally:
+            await writes.abort()
 
     stdin_source = ensure_stream(stdin or b"")
     inputs = [
@@ -334,11 +384,18 @@ async def sed(
 
     async def output() -> AsyncIterator[bytes]:
         try:
-            async with aclosing(machine.process(inputs, True)) as chunks:
+            async with aclosing(
+                machine.process(inputs, True, writes.flush)
+            ) as chunks:
                 async for chunk in chunks:
                     yield from_byte_view(chunk, utf8)
         finally:
-            write_err = await _flush_write_files(machine, access)
+            try:
+                await writes.flush(final=True)
+                await writes.finish()
+            finally:
+                await writes.abort()
+            write_err = writes.errors
             stderr = machine.stderr() + write_err
             io.exit_code = machine.exit_code() if not write_err else 4
             io.stderr = encode_text(stderr) if stderr else None
@@ -346,13 +403,36 @@ async def sed(
     return output(), io
 
 
+class _EditAborted(Exception):
+    pass
+
+
+async def _edit_output(
+    machine: SedMachine,
+    path: PathSpec,
+    source: ByteSource,
+    utf8: bool,
+    writes: _ScriptWrites,
+) -> AsyncIterator[bytes]:
+    async with aclosing(
+        machine.process(
+            [SedInput(path.raw_path, source=source)], False, writes.flush
+        )
+    ) as output:
+        async for chunk in output:
+            yield from_byte_view(chunk, utf8)
+    if machine.panic_code is not None:
+        raise _EditAborted()
+
+
 async def _run_in_place(
     paths: list[PathSpec],
     program: SedProgram,
     machine: SedMachine,
     access: _ScriptFiles,
-    read_bytes: ReadBytes,
+    read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: WriteBytes | None,
+    writes: _ScriptWrites,
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU -i: each file is its own run.
 
@@ -367,8 +447,9 @@ async def _run_in_place(
         program (SedProgram): the compiled script.
         machine (SedMachine): the compiled script's machine.
         access (_ScriptFiles): how sed reaches the files its script names.
-        read_bytes (ReadBytes): bound whole-file reader.
+        read_stream (Callable): bound streaming reader.
         write_bytes (WriteBytes | None): bound writer.
+        writes (_ScriptWrites): the script output writers.
     """
     utf8 = machine.opts.utf8
     if not paths:
@@ -384,40 +465,39 @@ async def _run_in_place(
         if machine.stopped():
             break
         try:
-            data = await read_bytes(p)
+            data = await prime_stream(read_stream(p))
         except FS_ERRORS as exc:
             err += fs_error_line("sed", p, exc)
             code = max(code, read_fail_exit_code("sed", exc))
             if isinstance(exc, IsADirectoryError):
                 break
             continue
-        if edited:
-            # An `r` file edited by an earlier file of this command reads
-            # with its new content.
-            machine.set_files(
-                await _read_script_files(program.rfiles, access, utf8)
-            )
-        out = "".join(
-            [
-                chunk
-                async for chunk in machine.process(
-                    [SedInput(p.raw_path, byte_view(data, utf8))], False
-                )
-            ]
-        )
-        if machine.panic_code is not None:
-            break
-        new_data = from_byte_view(out, utf8)
         try:
-            await write_bytes(p, new_data)
-        except StaleWriteError as exc:
-            err += _edit_failure(p.raw_path, exc)
-            code = 4
-            break
+            if edited:
+                # An `r` file edited by an earlier file of this command reads
+                # with its new content.
+                machine.set_files(
+                    await _read_script_files(program.rfiles, access, utf8)
+                )
+            try:
+                writes.edited.add(p.virtual)
+                await access.write(
+                    p.virtual,
+                    _edit_output(machine, p, data, utf8, writes),
+                    atomic=True,
+                )
+            except _EditAborted:
+                break
+            except StaleWriteError as exc:
+                err += _edit_failure(p.raw_path, exc)
+                code = 4
+                break
+        finally:
+            await close_quietly(data)
         edited.append(p)
-    write_err = await _flush_write_files(
-        machine, access, frozenset(p.virtual for p in edited)
-    )
+    await writes.flush(final=True)
+    await writes.finish()
+    write_err = writes.errors
     stderr = err + machine.stderr() + write_err
     if machine.panic_code is not None:
         exit_code = machine.panic_code

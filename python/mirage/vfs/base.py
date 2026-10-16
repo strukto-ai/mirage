@@ -319,6 +319,27 @@ class BaseVFS:
         """
         raise enotsup(self.name, "read_stream", path)
 
+    async def write_stream(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        """Consume a replacement incrementally, through the write dispatcher.
+
+        Args:
+            path (PathSpec): the destination.
+            data (ByteSource): the replacement bytes, consumed once.
+            atomic (bool): stage the replacement until successful EOF.
+        """
+        raise enotsup(self.name, "write_stream", path)
+
+    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
+        """Consume an append incrementally, through the append dispatcher.
+
+        Args:
+            path (PathSpec): the destination.
+            data (ByteSource): the additional bytes, consumed once.
+        """
+        raise enotsup(self.name, "append_stream", path)
+
     async def exists(self, path: PathSpec) -> bool:
         """Whether anything is at ``path``; derived from ``stat`` when
         not defined.

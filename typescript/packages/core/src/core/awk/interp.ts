@@ -158,6 +158,7 @@ export class Interpreter {
   private readonly held: Uint8Array[] = []
   private readonly err: Uint8Array[] = []
   private readonly outFiles = new Map<string, string[]>()
+  private readonly outFileSizes = new Map<string, number>()
   private readonly outPipes = new Map<string, string[]>()
   private readonly inFiles = new Map<string, RecordReader>()
   private readonly inPipes = new Map<string, InputPipe>()
@@ -810,6 +811,7 @@ export class Interpreter {
     if (pending === undefined || pending.length === 0) return
     const body = pending.join('')
     pending.length = 0
+    this.outFileSizes.set(name, 0)
     await this.writeFile(name, body, true)
   }
 
@@ -824,6 +826,7 @@ export class Interpreter {
    */
   private async beforeCommand(): Promise<void> {
     await this.flushFiles()
+    await this.host.flushOutput()
     this.release()
   }
 
@@ -865,6 +868,9 @@ export class Interpreter {
       this.outFiles.set(name, pending)
     }
     pending.push(body)
+    const size = (this.outFileSizes.get(name) ?? 0) + body.length
+    this.outFileSizes.set(name, size)
+    if (size >= 65536) await this.flushFile(name)
   }
 
   /** Run an output pipe's command on everything printed to it. */
@@ -893,7 +899,9 @@ export class Interpreter {
     }
     if (this.outFiles.has(name)) {
       await this.flushFile(name)
+      await this.host.flushOutput(name)
       this.outFiles.delete(name)
+      this.outFileSizes.delete(name)
       status = 0
     }
     const reader = this.inFiles.get(name)
@@ -920,6 +928,7 @@ export class Interpreter {
     }
     if (this.outFiles.has(name)) {
       await this.flushFile(name)
+      await this.host.flushOutput(name)
       return 0
     }
     return this.outPipes.has(name) ? 0 : -1
@@ -1124,6 +1133,7 @@ export class Interpreter {
   async finish(): Promise<void> {
     for (const command of [...this.outPipes.keys()].reverse()) await this.closeOutPipe(command)
     await this.flushFiles()
+    await this.host.flushOutput()
     this.release()
     await this.closeInputs()
   }
@@ -1161,6 +1171,7 @@ export class Interpreter {
     this.err.push(fromByteView(`${failure.message}\n`))
     try {
       await this.flushFiles()
+      await this.host.flushOutput()
     } catch (err) {
       if (!(err instanceof AwkRuntimeError)) throw err
       this.err.push(fromByteView(`${err.message}\n`))

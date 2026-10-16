@@ -30,11 +30,12 @@ export async function runTee(
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   stdin: ByteSource | null,
+  storageKey?: (path: PathSpec) => string,
 ): Promise<CrossResult> {
-  const write = async (path: PathSpec, data: Uint8Array): Promise<void> => {
+  const write = async (path: PathSpec, data: ByteSource): Promise<void> => {
     await dispatch('write', path, [data])
   }
-  const append = async (path: PathSpec, data: Uint8Array): Promise<void> => {
+  const append = async (path: PathSpec, data: ByteSource): Promise<void> => {
     await dispatch('append', path, [data])
   }
   const [out, io] = (await teeGeneric(
@@ -45,8 +46,9 @@ export async function runTee(
     write,
     append,
     statOp(dispatch),
+    storageKey,
   )) ?? [null, new IOResult()]
   // Relay writes are keyed by the dispatcher; keyed here they would be
   // prefixed onto one mount.
-  return [out, new IOResult({ exitCode: io.exitCode, stderr: io.stderr })]
+  return [out, io]
 }

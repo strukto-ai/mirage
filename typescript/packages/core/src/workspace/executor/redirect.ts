@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ByteWriter } from '../../io/writer.ts'
+
 import type { EvaluationContext } from '../evaluation.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { type RedirectGuard, runWithRedirectPaths } from '../../context/session_context.ts'
@@ -77,7 +79,63 @@ import { posixPhrase } from '../../errors/posix.ts'
  * pipe whose reader has gone throws `PipeClosed`. Mirrors Python's
  * PipeRecorder.
  */
+const STREAM_OUTPUT_BUILTINS = new Set([
+  'cat',
+  'head',
+  'tail',
+  'wc',
+  'grep',
+  'rg',
+  'cut',
+  'tr',
+  'uniq',
+  'nl',
+  'paste',
+  'comm',
+  'join',
+  'base64',
+  'base32',
+  'expand',
+  'unexpand',
+  'fold',
+  'fmt',
+  'od',
+  'strings',
+  'rev',
+  'tac',
+  'ls',
+  'find',
+  'du',
+  'stat',
+  'readlink',
+  'realpath',
+])
+
 class PipeRecorder extends Recorder {
+  writer: ByteWriter | null = null
+  file: FileDescription | null = null
+  failure: unknown = null
+
+  streamTo(file: FileDescription): void {
+    this.file = file
+    this.writer = new ByteWriter(async (source) => {
+      await this.dispatch(file.append ? 'append' : 'write', file.scope, [source])
+    })
+  }
+
+  async finishWriter(): Promise<void> {
+    try {
+      await this.writer?.finish()
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      this.failure = error
+    }
+  }
+
+  async abort(): Promise<void> {
+    await this.writer?.abort()
+  }
+
   constructor(
     private readonly dispatch: DispatchFn,
     private readonly streams: Map<Channel, PathSpec>,
@@ -88,6 +146,18 @@ class PipeRecorder extends Recorder {
     super()
   }
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    if (channel === Channel.STDOUT && this.writer !== null) {
+      if (this.failure === null) {
+        try {
+          await this.writer.write(data)
+          if (this.file !== null) this.file.offset += data.length
+        } catch (error) {
+          if (!isFsError(error)) throw error
+          this.failure = error
+        }
+      }
+      return
+    }
     const scope = this.streams.get(channel)
     if (scope === undefined) {
       const channelTo = this.forward.get(channel)
@@ -528,22 +598,34 @@ export async function handleRedirect(
       if (captureInput && given !== UNREADABLE) await pump(recorder, Channel.STDOUT, given)
     } else {
       try {
-        const [, execIo, execNode] = await drained(
-          recorder,
-          ...(await ENCLOSING.run(recorder, () =>
-            runWithRedirectPaths(command, targets, () =>
-              executeNode(
-                command,
-                context,
-                given === UNREADABLE ? unreadableStdin() : given,
-                callStack,
-                { sink: recorder },
-              ),
+        const result = await ENCLOSING.run(recorder, () =>
+          runWithRedirectPaths(command, targets, () =>
+            executeNode(
+              command,
+              context,
+              given === UNREADABLE ? unreadableStdin() : given,
+              callStack,
+              { sink: recorder },
             ),
-          )),
+          ),
         )
-        io = execIo
-        refused = execNode.refused
+        refused = result[2].refused
+        await runWithRedirectPaths(command, targets, async () => {
+          const target = outputs.get(1)
+          if (
+            !refused &&
+            STREAM_OUTPUT_BUILTINS.has(name) &&
+            recorder.chunks.length === 0 &&
+            target instanceof FileDescription &&
+            files.includes(target) &&
+            target.source === null &&
+            !target.pipe
+          )
+            recorder.streamTo(target)
+          const [, execIo] = await drained(recorder, ...result)
+          io = execIo
+          await recorder.finishWriter()
+        })
       } catch (error) {
         if (!(error instanceof PipeClosed)) throw error
         // SIGPIPE ends a forked writer alone; a builtin's write, in a
@@ -564,6 +646,7 @@ export async function handleRedirect(
       if (diagnostic.byteLength > 0) await recorder.emit(Channel.STDERR, diagnostic)
     }
   } finally {
+    await recorder.abort()
     Object.assign(session, held)
     leave()
     session.jobOutput = jobOutput
@@ -577,6 +660,17 @@ export async function handleRedirect(
   }
   let stdout: Uint8Array | null = null
   route.recorder = new Recorder()
+  if (recorder.failure !== null && recorder.file !== null) {
+    const [out, error] = await failed(
+      redirectFailure(recorder.file.scope, recorder.failure),
+      recorder.file,
+    )
+    if (out !== null) recorder.chunks.push([Channel.STDOUT, await materialize(out)])
+    const diagnostic = await error.materializeStderr()
+    if (diagnostic.length > 0) recorder.chunks.push([Channel.STDERR, diagnostic])
+    io.exitCode = 1
+  }
+
   try {
     const chunks = recorder.chunks
     if (refused) {

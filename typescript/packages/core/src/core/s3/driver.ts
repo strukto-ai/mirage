@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
 import { toIsoZ } from '../../utils/dates.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { VFSName } from '../../types.ts'
@@ -42,6 +44,8 @@ import type { S3Conn, S3SendClient } from './types.ts'
 import { CONDITION_LOST_CODES, SCOPE_ERROR } from './constants.ts'
 
 const DELETE_BATCH = 1000
+const PART_SIZE = 8 * 1024 * 1024
+const MAX_PARTS = 10000
 
 interface Listing {
   CommonPrefixes?: { Prefix?: string }[]
@@ -260,6 +264,102 @@ async function putIf(
     size: data.byteLength,
     fingerprint: etag !== '' ? etag : null,
     revision: versionOf(resp),
+  }
+}
+
+async function putStream(
+  conn: S3Conn,
+  key: string,
+  data: ByteSource,
+  cond: WriteCondition,
+): Promise<ObjectMeta> {
+  // Presigned fetch has no multipart API; custom endpoints keep conditional PUT.
+  if (
+    conn.config.presignedUrlProvider !== undefined ||
+    (cond.ifMatch !== undefined &&
+      conn.config.endpoint !== undefined &&
+      conn.config.endpoint !== '')
+  ) {
+    const meta = await putIf(conn, key, await materialize(data), cond)
+    if (meta === null) throw new Error('s3: write returned no metadata')
+    return meta
+  }
+  let upload: string | null = null
+  const parts: { PartNumber: number; ETag: string }[] = []
+  const buffer = new Uint8Array(PART_SIZE)
+  let used = 0
+  let size = 0
+  const args = { Bucket: conn.config.bucket, Key: key }
+  const sendPart = async (body: Uint8Array): Promise<void> => {
+    if (parts.length >= MAX_PARTS) throw new Error('s3: streamed upload exceeds 10000 parts')
+    const number = parts.length + 1
+    const response = await conn.send(
+      new conn.mod.UploadPartCommand({
+        ...args,
+        UploadId: upload,
+        PartNumber: number,
+        Body: body,
+      }),
+    )
+    if (typeof response.ETag !== 'string') throw new Error('s3: upload part returned no ETag')
+    parts.push({ PartNumber: number, ETag: response.ETag })
+  }
+  try {
+    for await (const chunk of chunks(data)) {
+      size += chunk.byteLength
+      let offset = 0
+      while (offset < chunk.byteLength) {
+        const count = Math.min(PART_SIZE - used, chunk.byteLength - offset)
+        buffer.set(chunk.subarray(offset, offset + count), used)
+        offset += count
+        used += count
+        if (used === PART_SIZE) {
+          if (upload === null) {
+            const contentType = conn.config.defaultContentType
+            const opened = await conn.send(
+              new conn.mod.CreateMultipartUploadCommand({
+                ...args,
+                ...(contentType !== undefined && contentType !== ''
+                  ? { ContentType: contentType }
+                  : {}),
+              }),
+            )
+            if (typeof opened.UploadId !== 'string') throw new Error('s3: upload returned no id')
+            upload = opened.UploadId
+          }
+          await sendPart(buffer.slice(0, used))
+          used = 0
+        }
+      }
+    }
+    if (upload === null) {
+      const meta = await putIf(conn, key, buffer.slice(0, used), cond)
+      if (meta === null) throw new Error('s3: write returned no metadata')
+      return meta
+    }
+    if (used > 0) await sendPart(buffer.slice(0, used))
+    const response = (await guarded(
+      key,
+      conn.send(
+        new conn.mod.CompleteMultipartUploadCommand({
+          ...args,
+          UploadId: upload,
+          MultipartUpload: { Parts: parts },
+          ...condition(cond),
+        }),
+      ),
+      cond.ifMatch !== undefined,
+    )) as { ETag?: string; VersionId?: string }
+    upload = null
+    return { size, fingerprint: etagOf(response) || null, revision: versionOf(response) }
+  } finally {
+    if (upload !== null) {
+      try {
+        await conn.send(new conn.mod.AbortMultipartUploadCommand({ ...args, UploadId: upload }))
+      } catch (error) {
+        console.debug('aborting multipart upload failed:', key, error)
+      }
+    }
   }
 }
 
@@ -715,6 +815,7 @@ export const DRIVER: ObjectStoreDriver<S3Accessor, S3Conn> = {
   copyFile,
   probePrefix,
   putIf,
+  putStream,
   getVersioned,
   copyIf,
   deleteIf,

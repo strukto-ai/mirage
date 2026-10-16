@@ -30,7 +30,8 @@ import { read as diskRead, readRange as diskReadRange } from '../../core/disk/re
 import { stat as diskStat } from '../../core/disk/stat.ts'
 import { readStream as diskStream } from '../../core/disk/stream.ts'
 import { exists as diskExists } from '../../core/disk/exists.ts'
-import { write as diskWrite } from '../../core/disk/write.ts'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import { write as diskWrite, writeStream as diskWriteStream } from '../../core/disk/write.ts'
 import { appendBytes as diskAppend } from '../../core/disk/append.ts'
 import { pwrite as diskPwrite } from '../../core/disk/pwrite.ts'
 import { create as diskCreate } from '../../core/disk/create.ts'
@@ -164,6 +165,19 @@ export class DiskVFS extends BaseVFS {
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {
     return diskWrite(this.accessor, path, data)
+  }
+
+  override writeStream(
+    path: PathSpec,
+    data: ByteSource,
+    signal?: AbortSignal,
+    atomic = false,
+  ): Promise<void> {
+    return diskWriteStream(this.accessor, path, data, false, signal, atomic)
+  }
+
+  override appendStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    return diskWriteStream(this.accessor, path, data, true, signal)
   }
 
   override append(path: PathSpec, data: Uint8Array): Promise<void> {

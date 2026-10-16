@@ -145,6 +145,19 @@ function writeData(args: readonly unknown[]): Uint8Array {
   throw new TypeError('write op requires a Uint8Array as the first arg')
 }
 
+function writeSource(args: readonly unknown[]): ByteSource {
+  const first = args[0]
+  if (first instanceof Uint8Array) return first
+  if (
+    first !== null &&
+    typeof first === 'object' &&
+    Symbol.asyncIterator in first &&
+    typeof first[Symbol.asyncIterator] === 'function'
+  )
+    return first as AsyncIterable<Uint8Array>
+  throw new TypeError('write op requires bytes or an async byte source as the first arg')
+}
+
 function lengthArg(value: unknown): number {
   if (typeof value !== 'number') {
     throw new TypeError('truncate op requires a number length as the first arg')
@@ -181,6 +194,7 @@ function handedOf(kw: OpKwargs): Handed | undefined {
 function taken(name: string, kwargs: OpKwargs): void {
   const keywords: Readonly<Record<string, readonly string[]>> = {
     read: ['offset', 'size'],
+    write: ['atomic'],
     mkdir: ['parents'],
     truncate: ['no_create'],
     files_containing: ['whole_word', 'ignore_case'],
@@ -719,6 +733,12 @@ export class MountEntry {
     if (name === 'glob') {
       return vfs.supports('readdir') ? [(scope, _args, kw) => this.glob(scope, kw.index)] : []
     }
+    if (name === 'write' && vfs.supports('write')) {
+      return [(scope, args, kw) => this.writeSource(vfs, scope, writeSource(args), false, kw)]
+    }
+    if (name === 'append' && (vfs.supports('append') || vfs.supports('write'))) {
+      return [(scope, args, kw) => this.writeSource(vfs, scope, writeSource(args), true, kw)]
+    }
     if (name === 'truncate' && !vfs.supports(name)) {
       if (!vfs.supports('write')) return []
       return [
@@ -832,6 +852,35 @@ export class MountEntry {
         const method = (vfs as unknown as Record<string, (...args: unknown[]) => unknown>)[name]
         return method === undefined ? [] : [(scope, args) => method.call(vfs, scope, ...args)]
       }
+    }
+  }
+
+  /**
+   * A write or append of bytes or a stream: a stream goes to the VFS's
+   * `writeStream` / `appendStream` where it has one, and is collected for its
+   * `write` / `append` otherwise, an append by rewrite where it has none.
+   * Mirrors Python's `MountEntry._write_op` / `_append_op`.
+   */
+  private async writeSource(
+    vfs: BaseVFS,
+    path: PathSpec,
+    data: ByteSource,
+    append: boolean,
+    kw: OpKwargs,
+  ): Promise<unknown> {
+    try {
+      if (!(data instanceof Uint8Array) && vfs.supports(append ? 'appendStream' : 'writeStream')) {
+        if (append) await vfs.appendStream(path, data, callerSignal())
+        else await vfs.writeStream(path, data, callerSignal(), kw.atomic === true)
+        return null
+      }
+      const raw = await materialize(data)
+      if (!append) return await vfs.write(path, raw, callerSignal(), handedOf(kw))
+      if (vfs.supports('append')) return await vfs.append(path, raw, handedOf(kw), callerSignal())
+      await this.appendByRewrite(path, raw, kw.index)
+      return null
+    } finally {
+      await closeQuietly(data)
     }
   }
 

@@ -40,6 +40,7 @@ async def tee(
     # A backend that can append natively does; the rest fall back to the
     # read-modify-write inside the generic.
     append = ops.append
+    links = opts.ns.links if opts.ns is not None else None
     return await generic_tee(
         paths,
         texts,
@@ -49,6 +50,9 @@ async def tee(
         stdin=opts.stdin,
         flags=opts.flags,
         stat=bound_op(ops.stat, accessor, opts.index),
+        output_key=(lambda p: links.resolve(p.virtual))
+        if links is not None
+        else None,
     )
 
 

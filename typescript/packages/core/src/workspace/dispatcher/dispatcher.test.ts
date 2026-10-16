@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { yieldBytes } from '../../io/stream.ts'
+
 import { type CallerDispatchFn, currentCaller } from '../../context/session_context.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { materialize, OpReport } from '../../io/types.ts'
+import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { markLost, record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
@@ -211,6 +213,145 @@ it('names the path the op ran on in its report', async () => {
   } finally {
     await ws.close()
   }
+})
+
+it('retains versions across stream invalidation without retaining upload bytes', async () => {
+  const destination = new StreamWritingRAM()
+  const ws = new Workspace({ '/dst': destination }, { mode: MountMode.WRITE })
+  const tokens: (string | null)[] = []
+  const original = destination.writeStream.bind(destination)
+  vi.spyOn(destination, 'writeStream').mockImplementation(async (path, data) => {
+    tokens.push(await ws.cache.fingerprint(path.virtual))
+    expect(await ws.cache.exists(path.virtual)).toBe(false)
+    await original(path, data)
+    record('write', path.virtual, destination.name, 3, startOp(), { fingerprint: 'v2' })
+  })
+  try {
+    await ws.vfs.write('/dst/f', 'old')
+    await ws.cache.set('/dst/f', new TextEncoder().encode('old'), { fingerprint: 'v1' })
+    await ws.vfs.write('/dst/f', yieldBytes(new TextEncoder().encode('new')))
+    expect(tokens).toEqual(['v1'])
+    expect(await ws.cache.exists('/dst/f')).toBe(false)
+    expect(await ws.cache.fingerprint('/dst/f')).toBe('v2')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('closes a refused upload without pulling it', async () => {
+  const ws = new Workspace({ '/dst': new RAMVFS() }, { mode: MountMode.READ })
+  let closed = false
+  const source: AsyncIterableIterator<Uint8Array> = {
+    [Symbol.asyncIterator]() {
+      return this
+    },
+    next() {
+      return Promise.reject(new Error('a refused write pulled its input'))
+    },
+    return() {
+      closed = true
+      return Promise.resolve({ done: true, value: undefined })
+    },
+  }
+  try {
+    await expect(ws.vfs.write('/dst/f', source)).rejects.toMatchObject({ code: 'EROFS' })
+    expect(closed).toBe(true)
+  } finally {
+    await ws.close()
+  }
+})
+
+class StreamWritingRAM extends RAMVFS {
+  override readonly cachesReads = true
+  readonly streamed: [string, string][] = []
+  readonly chunkSizes: number[] = []
+  fail = false
+
+  override async writeStream(path: PathSpec, data: ByteSource): Promise<void> {
+    this.streamed.push(['write', path.virtual])
+    const content: Uint8Array[] = []
+    for await (const chunk of data as AsyncIterable<Uint8Array>) {
+      this.chunkSizes.push(chunk.length)
+      if (this.fail) {
+        await super.write(path, chunk)
+        throw Object.assign(new Error('write failed after a prefix'), { code: 'EIO' })
+      }
+      content.push(chunk)
+    }
+    const combined = new Uint8Array(content.reduce((size, chunk) => size + chunk.length, 0))
+    let offset = 0
+    for (const chunk of content) {
+      combined.set(chunk, offset)
+      offset += chunk.length
+    }
+    await super.write(path, combined)
+  }
+
+  override async appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+    this.streamed.push(['append', path.virtual])
+    await super.append(path, await materialize(data))
+  }
+}
+
+describe('native streamed writes', () => {
+  it.each([
+    ['cat /src/f > /dst/out', '/dst/out', 'a\nb\nc'],
+    ['cat /src/f >> /dst/out', '/dst/out', 'a\nb\nc'],
+    ['cat /src/f | tee /dst/out', '/dst/out', 'a\nb\nc'],
+    ['cp /src/f /dst/out', '/dst/out', 'a\nb\nc'],
+    ['split -l 2 /src/f /dst/part', '/dst/partab', 'c'],
+    ["sed -n 'w /dst/out' /src/f", '/dst/out', 'a\nb\nc'],
+    [`awk '{ print > "/dst/out" }' /src/f`, '/dst/out', 'a\nb\nc\n'],
+    ['sort -o /dst/out /src/f', '/dst/out', 'a\nb\nc\n'],
+    ['xxd -p /src/f /dst/out', '/dst/out', '610a620a63\n'],
+    ['sed -i s/a/A/ /dst/edit', '/dst/edit', 'A\nb\nc'],
+  ])('streams %s', async (line, target, expected) => {
+    const destination = new StreamWritingRAM()
+    const ws = new Workspace(
+      { '/src': new RAMVFS(), '/dst': destination },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.vfs.write('/src/f', 'a\nb\nc')
+      await ws.vfs.write('/dst/edit', 'a\nb\nc')
+      const result = await ws.shell(line)
+      expect(result.exitCode, DEC.decode(await materialize(result.stderr))).toBe(0)
+      expect(destination.streamed.some(([, path]) => path === target)).toBe(true)
+      expect(await ws.vfs.cat(target)).toBe(expected)
+      expect(Math.max(0, ...destination.chunkSizes)).toBeLessThanOrEqual(16384)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('invalidates a failed write and closes its input', async () => {
+    const destination = new StreamWritingRAM()
+    const ws = new Workspace(
+      { '/dst': destination },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    let closed = false
+    try {
+      await ws.vfs.write('/dst/f', 'old')
+      expect(await ws.vfs.cat('/dst/f')).toBe('old')
+      destination.fail = true
+      async function* source(): AsyncGenerator<Uint8Array> {
+        await Promise.resolve()
+        try {
+          yield new TextEncoder().encode('new')
+          yield new TextEncoder().encode('tail')
+        } finally {
+          closed = true
+        }
+      }
+      await expect(ws.vfs.write('/dst/f', source())).rejects.toThrow('write failed')
+      expect(closed).toBe(true)
+      expect(await ws.cache.exists('/dst/f')).toBe(false)
+      expect(await ws.vfs.cat('/dst/f')).toBe('new')
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 describe('unlink of a namespace link', () => {

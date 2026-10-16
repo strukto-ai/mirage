@@ -56,6 +56,34 @@ describe('sed usage reporting', () => {
   })
 })
 
+it('closes primed input when an in-place write is refused', async () => {
+  let closed = false
+  const error = new Error('write refused')
+  await expect(
+    sedGeneric(
+      [PathSpec.fromStrPath('/a.txt')],
+      ['s/one/two/'],
+      {
+        stdin: null,
+        flags: { i: true },
+        cwd: '/',
+        dispatch: () => Promise.reject(error),
+      } as CommandOpts,
+      async function* () {
+        try {
+          await Promise.resolve()
+          yield new TextEncoder().encode('one\n')
+          throw new Error('refused write must not pull more input')
+        } finally {
+          closed = true
+        }
+      },
+      () => Promise.resolve(),
+    ),
+  ).rejects.toBe(error)
+  expect(closed).toBe(true)
+})
+
 describe('sed operands after a directory (GNU sed 4.9)', () => {
   const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
 

@@ -87,7 +87,7 @@ def file_stream_op(
 
 
 async def _relay_write(
-    dispatch: DispatchFn, path: PathSpec, data: bytes
+    dispatch: DispatchFn, path: PathSpec, data: ByteSource
 ) -> None:
     """Write one whole file on the mount that owns it.
 
@@ -230,6 +230,7 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
     return dict(
         stat=p(dispatched_call, dispatch, "stat"),
         read_bytes=p(dispatched_call, dispatch, "read"),
+        read_stream=file_stream_op(dispatch),
         write=p(_relay_write, dispatch),
         copy=p(_relay_copy, dispatch),
         mkdir=p(dispatched_call, dispatch, "mkdir"),
@@ -261,6 +262,7 @@ def transfer_links_of(
         cwd=cwd,
         relay=PrimitiveCopy(
             read_bytes=prim["read_bytes"],
+            read_stream=prim["read_stream"],
             write=prim["write"],
             mkdir=prim["mkdir"],
             readdir=prim["readdir"],
