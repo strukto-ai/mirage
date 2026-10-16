@@ -1,13 +1,16 @@
 ---
-title: Route Policy
-description: A program, or a function in code, that picks which runtime serves each command line.
+title: Route Runtime
+description: Route commands across runtimes, free from the limits of a local terminal or a single kernel.
 icon: route
 ---
 
-When several runtimes can run the same command, the **route policy**
-picks one per line. Here `monty` runs `python3` in-process (fast,
-stdlib-only) and `docker` runs it in your container (your packages, an
-exec round-trip):
+Mirage’s virtual terminal is not tied to a local terminal or a single kernel.
+Your agent uses one shell while Mirage routes commands to in-process,
+containerized or remote runtimes.
+
+Use `route_policy` to choose a runtime for each command line with a script
+or a function. Here, `monty` runs `python3` in-process, while `docker` runs
+it in a container with your packages:
 
 ```yaml
 mode: exec
