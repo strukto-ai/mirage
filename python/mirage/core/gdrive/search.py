@@ -18,14 +18,12 @@ import aiohttp
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import root_context
-from mirage.core.gdrive.tree import iter_tree
+from mirage.core.gdrive.tree import PARENTS_PER_QUERY, iter_tree
 from mirage.core.google.drive import search_files
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mounted_path
 
 logger = logging.getLogger(__name__)
-
-PARENTS_PER_QUERY = 40
 
 
 async def files_containing(

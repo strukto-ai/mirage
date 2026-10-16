@@ -29,8 +29,10 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { windowFor } from '../../utils/ranges.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import type { MsGraphConfigResolved } from './config.ts'
+import { BATCH_LIMIT } from './constants.ts'
 import {
   GraphError,
+  graphBatch,
   graphDelete,
   graphGet,
   graphGetBytes,
@@ -587,6 +589,103 @@ export async function deltaTree(
     if (base !== null) found.set(base === '' ? name : `${base}/${name}`, entryStat(item))
   }
   return found
+}
+
+/**
+ * Every item under a folder, each as its folder's listing renders it, from the
+ * folders' listings sent `BATCH_LIMIT` to a request through Graph's JSON
+ * batching, where a walk sends a request per folder.
+ *
+ * The folder's own children are its listing (`readdirItems`), so a folder that
+ * is not there raises what a listing raises. A listing the batch does not
+ * answer with its first page (Graph throttled or failed that one) is asked on
+ * its own, and a listing's later pages are read as a listing reads them. Null
+ * when Graph refuses a batch, or when a folder below is gone by the time its
+ * listing is asked, so the walk lists what is there. Mirrors Python's
+ * `batch_tree`.
+ */
+export async function batchTree(
+  config: MsGraphConfigResolved,
+  loc: DriveLoc,
+  path: PathSpec,
+): Promise<Map<string, FileStat> | null> {
+  const found = new Map<string, FileStat>()
+  let level = filed(found, '', loc, await readdirItems(config, loc, path))
+  while (level.length > 0) {
+    const below: [string, DriveLoc][] = []
+    for (let start = 0; start < level.length; start += BATCH_LIMIT) {
+      const chunk = level.slice(start, start + BATCH_LIMIT)
+      const urls = chunk.map(([, folder]) => folder.item('/children'))
+      let answers: [number, Record<string, unknown>][]
+      try {
+        answers = await graphBatch(config, urls)
+      } catch (err) {
+        if (!(err instanceof GraphError)) throw err
+        console.debug(`graph batch of ${loc.path} refused: ${err.message}`)
+        return null
+      }
+      for (const [i, [rel, folder]] of chunk.entries()) {
+        let items: Record<string, unknown>[]
+        try {
+          items = await batchPage(config, urls[i] ?? '', answers[i] ?? [0, {}])
+        } catch (err) {
+          if (!(err instanceof GraphError) || err.status !== 404) throw err
+          console.debug(`graph folder ${folder.path} gone: ${err.message}`)
+          return null
+        }
+        const rows = items
+          .map((item) => entryStat(item))
+          .sort((a, b) => compareCodePoints(a.name, b.name))
+        below.push(...filed(found, rel, folder, rows))
+      }
+    }
+    level = below
+  }
+  return found
+}
+
+/**
+ * A folder's whole listing from its answer in a batch: the page the batch held
+ * and the pages after it, or the listing asked again on its own when the batch
+ * did not answer it. Mirrors Python's `_batch_page`.
+ */
+async function batchPage(
+  config: MsGraphConfigResolved,
+  url: string,
+  answer: [number, Record<string, unknown>],
+): Promise<Record<string, unknown>[]> {
+  const [status, body] = answer
+  if (status !== 200) return graphList(config, url)
+  const items: Record<string, unknown>[] = []
+  if (Array.isArray(body.value)) {
+    for (const item of body.value) {
+      if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+        items.push(item as Record<string, unknown>)
+      }
+    }
+  }
+  const rest = body['@odata.nextLink']
+  if (typeof rest === 'string') items.push(...(await graphList(config, rest)))
+  return items
+}
+
+/**
+ * Put a folder's rows into a tree read, and answer the folders among them, each
+ * by its path below the read with its own address. Mirrors Python's `_filed`.
+ */
+function filed(
+  found: Map<string, FileStat>,
+  rel: string,
+  folder: DriveLoc,
+  rows: readonly FileStat[],
+): [string, DriveLoc][] {
+  const folders: [string, DriveLoc][] = []
+  for (const row of rows) {
+    const key = rel !== '' ? `${rel}/${row.name}` : row.name
+    found.set(key, row)
+    if (row.type === FileType.DIRECTORY) folders.push([key, folder.child(row.name)])
+  }
+  return folders
 }
 
 /** Whether a feed item is a folder kept on another drive. Mirrors Python's `_remote_folder`. */

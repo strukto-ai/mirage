@@ -1,5 +1,6 @@
 import pytest
 from aioresponses import aioresponses
+from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.onedrive.read import read
@@ -332,21 +333,59 @@ async def test_tree_below_the_root_reads_the_feed_of_a_personal_drive():
     assert accessor.drive_type == "personal"
 
 
+_BATCH = "https://graph.microsoft.com/v1.0/$batch"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["business", "documentLibrary"])
-async def test_tree_of_a_business_drive_keeps_the_walk(kind):
+async def test_tree_of_a_business_drive_batches_its_folders(kind):
     accessor = _accessor()
     with aioresponses() as m:
         m.get(f"{_ME}?$select=driveType", payload={"driveType": kind})
-        assert await tree(accessor, PathSpec.from_str_path("/")) is None
-        assert await tree(accessor, PathSpec.from_str_path("/Docs")) is None
-        assert len(m.requests) == 1
+        m.get(f"{_ME}/root/children", payload={"value": [_FEED[1]]})
+        m.post(
+            _BATCH,
+            payload={
+                "responses": [
+                    {"id": "0", "status": 200, "body": {"value": [_FEED[2]]}}
+                ]
+            },
+        )
+        found = await tree(accessor, PathSpec.from_str_path("/"))
+        sent = m.requests[("POST", URL(_BATCH))][0].kwargs["json"]
+    assert sorted(found) == ["Docs", "Docs/report.docx"]
+    assert found["Docs/report.docx"].fingerprint == "c-report"
+    assert sent == {
+        "requests": [
+            {
+                "id": "0",
+                "method": "GET",
+                "url": "/me/drive/root:/Docs:/children",
+            }
+        ]
+    }
 
 
 @pytest.mark.asyncio
-async def test_tree_keeps_the_walk_while_the_drive_type_is_refused():
+async def test_tree_batches_while_the_drive_type_is_refused():
     accessor = _accessor()
     with aioresponses() as m:
         m.get(f"{_ME}?$select=driveType", status=403, payload={})
-        assert await tree(accessor, PathSpec.from_str_path("/Docs")) is None
+        m.get(f"{_DIR_URL}:/children", payload={"value": [_FEED[2]]})
+        found = await tree(accessor, PathSpec.from_str_path("/Docs"))
+    assert list(found) == ["report.docx"]
     assert accessor.drive_type is None
+
+
+@pytest.mark.asyncio
+async def test_tree_of_a_personal_drive_batches_when_the_feed_is_refused():
+    accessor = _accessor()
+    with aioresponses() as m:
+        m.get(f"{_ME}?$select=driveType", payload={"driveType": "personal"})
+        m.get(
+            f"{_DIR_URL}?$select=id,folder", payload={"id": "D", "folder": {}}
+        )
+        m.get(f"{_DIR_URL}:/delta", status=403, payload={})
+        m.get(f"{_DIR_URL}:/children", payload={"value": [_FEED[2]]})
+        found = await tree(accessor, PathSpec.from_str_path("/Docs"))
+    assert list(found) == ["report.docx"]

@@ -51,9 +51,11 @@ _PATCH_TARGETS = {
     # readdir's binding does not cover (#684).
     "list_files": [
         "mirage.core.gdrive.readdir.list_files",
-        "mirage.core.gdrive.tree.list_files",
         "mirage.core.gdrive.rename.list_files",
         "mirage.core.gdrive.rmdir.list_files",
+    ],
+    "list_children": [
+        "mirage.core.gdrive.tree.list_children",
     ],
     "list_shared_drives": [
         "mirage.core.gdrive.readdir.list_shared_drives",
@@ -414,6 +416,23 @@ def _build_fakes(registry):
             children = [c for c in children if c.get("name") == name]
         return children
 
+    async def fake_list_children(
+        token_manager,
+        folder_ids: list[str],
+        drive_id: str | None = None,
+        page_size: int = 1000,
+    ) -> list[dict]:
+        del drive_id, page_size
+        fake = _resolve_fake(token_manager, registry)
+        if fake is None:
+            return []
+        fake.calls["list_children"] += 1
+        return [
+            child
+            for folder_id in folder_ids
+            for child in fake.list_children(folder_id)
+        ]
+
     async def fake_list_all_files(
         token_manager,
         mime_type: str | None = None,
@@ -526,6 +545,7 @@ def _build_fakes(registry):
         "refresh": fake_refresh,
         "render": fake_render,
         "list_files": fake_list_files,
+        "list_children": fake_list_children,
         "list_shared_drives": fake_list_shared_drives,
         "list_all_files": fake_list_all_files,
         "download_file": fake_download_file,

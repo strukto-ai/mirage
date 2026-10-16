@@ -30,6 +30,7 @@ from mirage.core.generic.find_eval import (
 )
 from mirage.core.msgraph.client import (
     GraphError,
+    graph_batch,
     graph_delete,
     graph_get,
     graph_get_bytes,
@@ -45,6 +46,7 @@ from mirage.core.msgraph.client import (
     upload_chunk,
 )
 from mirage.core.msgraph.config import MsGraphConfig
+from mirage.core.msgraph.constants import BATCH_LIMIT
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup, listing_error
 from mirage.observe.context import (
     active_recorder,
@@ -701,6 +703,112 @@ async def delta_tree(
         if base is not None:
             found[f"{base}/{name}" if base else name] = entry_stat(item)
     return found
+
+
+async def batch_tree(
+    config: MsGraphConfig,
+    loc: DriveLoc,
+    virtual_key: str,
+    session: SessionArg = None,
+) -> dict[str, FileStat] | None:
+    """Every item under a folder, each as its folder's listing renders it,
+    from the folders' listings sent ``BATCH_LIMIT`` to a request through
+    Graph's JSON batching, where a walk sends a request per folder.
+
+    The folder's own children are its listing (``readdir_items``), so a
+    folder that is not there raises what a listing raises. A listing the
+    batch does not answer with its first page (Graph throttled or failed
+    that one) is asked on its own, and a listing's later pages are read
+    as a listing reads them. None when Graph refuses a batch, or when a
+    folder below is gone by the time its listing is asked, so the walk
+    lists what is there.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        loc (DriveLoc): the folder.
+        virtual_key (str): its mount-absolute path, which an error names.
+        session (SessionArg): pool or live session to ride.
+    """
+    found: dict[str, FileStat] = {}
+    rows = await readdir_items(config, loc, virtual_key, session=session)
+    level = _filed(found, "", loc, rows)
+    while level:
+        below: list[tuple[str, DriveLoc]] = []
+        for start in range(0, len(level), BATCH_LIMIT):
+            chunk = level[start : start + BATCH_LIMIT]
+            urls = [folder.item("/children") for _, folder in chunk]
+            try:
+                answers = await graph_batch(config, urls, session=session)
+            except GraphError as exc:
+                logger.debug("graph batch of %s refused: %s", loc.path, exc)
+                return None
+            for (rel, folder), url, answer in zip(chunk, urls, answers):
+                try:
+                    items = await _batch_page(config, url, answer, session)
+                except GraphError as exc:
+                    if exc.status != 404:
+                        raise
+                    logger.debug("graph folder %s gone: %s", folder.path, exc)
+                    return None
+                rows = sorted(map(entry_stat, items), key=lambda r: r.name)
+                below.extend(_filed(found, rel, folder, rows))
+        level = below
+    return found
+
+
+async def _batch_page(
+    config: MsGraphConfig,
+    url: str,
+    answer: tuple[int, dict[str, Any]],
+    session: SessionArg,
+) -> list[dict[str, Any]]:
+    """A folder's whole listing from its answer in a batch: the page the
+    batch held and the pages after it, or the listing asked again on its
+    own when the batch did not answer it.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        url (str): the listing's URL.
+        answer (tuple[int, dict[str, Any]]): its status and body.
+        session (SessionArg): pool or live session to ride.
+    """
+    status, body = answer
+    if status != 200:
+        return await graph_list(config, url, session=session)
+    value = body.get("value")
+    items = [
+        item
+        for item in (value if isinstance(value, list) else [])
+        if isinstance(item, dict)
+    ]
+    rest = body.get("@odata.nextLink")
+    if isinstance(rest, str):
+        items.extend(await graph_list(config, rest, session=session))
+    return items
+
+
+def _filed(
+    found: dict[str, FileStat],
+    rel: str,
+    folder: DriveLoc,
+    rows: list[FileStat],
+) -> list[tuple[str, DriveLoc]]:
+    """Put a folder's rows into a tree read, and answer the folders among
+    them, each by its path below the read with its own address.
+
+    Args:
+        found (dict[str, FileStat]): the tree read so far.
+        rel (str): the folder's path below the read, "" for its top.
+        folder (DriveLoc): the folder.
+        rows (list[FileStat]): its listing.
+    """
+    folders: list[tuple[str, DriveLoc]] = []
+    for row in rows:
+        key = f"{rel}/{row.name}" if rel else row.name
+        found[key] = row
+        if row.type is FileType.DIRECTORY:
+            folders.append((key, folder.child(row.name)))
+    return folders
 
 
 def _remote_folder(item: dict[str, Any]) -> bool:

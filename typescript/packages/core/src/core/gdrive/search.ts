@@ -20,9 +20,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import { GoogleApiError } from '../google/client.ts'
 import { searchFiles } from '../google/drive.ts'
 import { rootContext } from './resolve.ts'
-import { iterTree } from './tree.ts'
-
-export const PARENTS_PER_QUERY = 40
+import { PARENTS_PER_QUERY, iterTree } from './tree.ts'
 
 /**
  * The files under `under` Drive full-text search names. The folder is walked

@@ -2,9 +2,10 @@ import re
 
 import pytest
 from aioresponses import aioresponses
+from yarl import URL
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
-from mirage.core.sharepoint.readdir import readdir
+from mirage.core.sharepoint.readdir import readdir, tree
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -169,3 +170,58 @@ async def test_readdir_of_file_raises_not_a_directory():
         )
         with pytest.raises(NotADirectoryError):
             await readdir(_accessor(), path)
+
+
+def _sp(virtual: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=mount_key(virtual, "/sp"), virtual=virtual, directory=virtual
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("virtual", ["/sp/", "/sp/Engineering"])
+async def test_tree_above_the_libraries_is_left_to_the_walk(virtual):
+    with aioresponses() as m:
+        assert await tree(_accessor(), _sp(virtual)) is None
+        assert not m.requests
+
+
+@pytest.mark.asyncio
+async def test_tree_of_a_library_batches_its_folders():
+    with aioresponses() as m:
+        m.get(
+            f"{_BASE}/drives/{_DRIVE_ID}/root/children",
+            payload={
+                "value": [
+                    {"id": "1", "name": "readme.md", "size": 3, "file": {}},
+                    {"id": "2", "name": "src", "folder": {"childCount": 1}},
+                ]
+            },
+        )
+        m.post(
+            f"{_BASE}/$batch",
+            payload={
+                "responses": [
+                    {
+                        "id": "0",
+                        "status": 200,
+                        "body": {
+                            "value": [
+                                {
+                                    "id": "3",
+                                    "name": "main.py",
+                                    "size": 5,
+                                    "file": {},
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+        )
+        found = await tree(_accessor(), _sp("/sp/Engineering/Documents"))
+        sent = m.requests[("POST", URL(f"{_BASE}/$batch"))][0].kwargs["json"]
+    assert sorted(found) == ["readme.md", "src", "src/main.py"]
+    assert sent["requests"][0]["url"] == (
+        f"/drives/{_DRIVE_ID}/root:/src:/children"
+    )

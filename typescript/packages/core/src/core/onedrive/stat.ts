@@ -16,7 +16,7 @@ import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { GraphError, graphGet } from '../msgraph/client.ts'
-import { asNumber, deltaTree, folderChildCount, statItem } from '../msgraph/drive.ts'
+import { asNumber, batchTree, deltaTree, folderChildCount, statItem } from '../msgraph/drive.ts'
 import { driveBase, driveLoc } from './client.ts'
 
 export async function stat(accessor: OneDriveAccessor, path: PathSpec): Promise<FileStat> {
@@ -43,23 +43,28 @@ export async function stat(accessor: OneDriveAccessor, path: PathSpec): Promise<
 }
 
 /**
- * Every item under a folder, each as a listing's stat renders it, from one
- * read of Graph's `/delta` feed (`deltaTree`).
+ * Every item under a folder, each as a listing's stat renders it.
  *
- * Only a personal drive answers: it starts the feed at any folder and carries
- * each file's `cTag`, the token its listing row holds. OneDrive for Business
- * starts the feed only at the drive root and leaves the `cTag` out, so its walk
- * lists each folder. Which kind the drive is, Graph's `driveType`, is asked
- * once per mount. Null hands the folder to the walk, as does a drive that will
- * not say which kind it is. Mirrors Python's `tree`.
+ * A personal drive answers from one read of Graph's `/delta` feed
+ * (`deltaTree`): it starts the feed at any folder and carries each file's
+ * `cTag`, the token its listing row holds. OneDrive for Business starts the
+ * feed only at the drive root and leaves the `cTag` out, so its folders'
+ * listings go out batched instead (`batchTree`), as they do for a feed that
+ * does not answer and for a drive that will not say which kind it is. Which
+ * kind the drive is, Graph's `driveType`, is asked once per mount. Mirrors
+ * Python's `tree`.
  */
 export async function tree(
   accessor: OneDriveAccessor,
   path: PathSpec,
 ): Promise<Map<string, FileStat> | null> {
   const config = accessor.config
-  if ((await driveType(accessor)) !== 'personal') return null
-  return deltaTree(config, driveLoc(config, path.vfsPath))
+  const loc = driveLoc(config, path.vfsPath)
+  if ((await driveType(accessor)) === 'personal') {
+    const found = await deltaTree(config, loc)
+    if (found !== null) return found
+  }
+  return batchTree(config, loc, path)
 }
 
 /**

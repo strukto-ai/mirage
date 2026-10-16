@@ -8,6 +8,7 @@ from mirage.core.sharepoint.exists import exists as _exists
 from mirage.core.sharepoint.mkdir import mkdir as _mkdir
 from mirage.core.sharepoint.read import read as _read
 from mirage.core.sharepoint.readdir import readdir as _readdir
+from mirage.core.sharepoint.readdir import tree as _tree
 from mirage.core.sharepoint.rename import rename as _rename
 from mirage.core.sharepoint.rm import rm_r as _rm_r
 from mirage.core.sharepoint.rmdir import rmdir as _rmdir
@@ -73,6 +74,9 @@ class SharePointVFS(BaseVFS):
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
+
+    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

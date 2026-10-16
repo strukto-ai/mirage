@@ -18,7 +18,8 @@ import pytest
 import mirage.core.gdrive.search as search_mod
 import mirage.core.gdrive.tree as tree_mod
 from mirage.core.gdrive.readdir import readdir
-from mirage.core.gdrive.search import PARENTS_PER_QUERY, files_containing
+from mirage.core.gdrive.search import files_containing
+from mirage.core.gdrive.tree import PARENTS_PER_QUERY
 from mirage.types import PathSpec
 from tests.fixtures.handed import entry_at
 
@@ -100,6 +101,6 @@ async def test_a_search_that_cannot_answer_answers_none(
     if case == "timeout":
         monkeypatch.setattr(search_mod, "search_files", _raise(TimeoutError()))
     if case == "listing fails":
-        monkeypatch.setattr(tree_mod, "list_files", _raise(TimeoutError()))
+        monkeypatch.setattr(tree_mod, "list_children", _raise(TimeoutError()))
     out = await files_containing(gdrive_accessor, "wombat", scope(), None)
     assert out is None

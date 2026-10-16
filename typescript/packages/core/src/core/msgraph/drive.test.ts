@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { PathSpec } from '../../types.ts'
 import { GraphError } from './client.ts'
 import { resolveMsGraphConfig } from './config.ts'
 import {
   DriveLoc,
+  batchTree,
   copyTree,
   deltaTree,
   renameReplace,
@@ -438,5 +440,151 @@ describe('deltaTree', () => {
       },
     ])
     await expect(deltaTree(config, loc('f'))).rejects.toBeInstanceOf(GraphError)
+  })
+})
+
+const BATCH = 'https://graph.microsoft.com/v1.0/$batch'
+
+function children(path: string): string {
+  return itemUrl(path, '/children')
+}
+
+function relative(path: string): string {
+  return children(path).slice('https://graph.microsoft.com/v1.0'.length)
+}
+
+function batched(...bodies: unknown[]): unknown {
+  return { responses: bodies.map((body, i) => ({ id: String(i), status: 200, body })) }
+}
+
+function asked(...paths: string[]): unknown {
+  return {
+    requests: paths.map((path, i) => ({ id: String(i), method: 'GET', url: relative(path) })),
+  }
+}
+
+const TOP = [
+  row('A', 'a', 'T', { folder: { childCount: 2 } }),
+  row('B', 'b', 'T', { folder: { childCount: 1 } }),
+  row('f', 'f.txt', 'T', { size: 1, file: {}, cTag: 'cf' }),
+]
+const UNDER_A = [
+  row('C', 'c', 'A', { folder: { childCount: 1 } }),
+  row('x', 'x.txt', 'A', { size: 2, file: {}, cTag: 'cx' }),
+]
+const UNDER_B = [row('y', 'y.txt', 'B', { size: 3, file: {}, cTag: 'cy' })]
+const UNDER_C = [row('z', 'z.txt', 'C', { size: 4, file: {}, cTag: 'cz' })]
+
+const SPEC = PathSpec.fromStrPath('/od/top', 'top')
+
+describe('batchTree', () => {
+  it('lists a level per batch', async () => {
+    const rec = stubFetch([
+      { method: 'GET', url: children('top'), body: { value: TOP } },
+      { method: 'POST', url: BATCH, body: batched({ value: UNDER_A }, { value: UNDER_B }) },
+      { method: 'POST', url: BATCH, body: batched({ value: UNDER_C }) },
+    ])
+    const found = await batchTree(config, loc('top'), SPEC)
+    expect(rec.pending()).toBe(0)
+    expect([...(found?.keys() ?? [])].sort()).toEqual([
+      'a',
+      'a/c',
+      'a/c/z.txt',
+      'a/x.txt',
+      'b',
+      'b/y.txt',
+      'f.txt',
+    ])
+    expect(found?.get('a/c/z.txt')?.fingerprint).toBe('cz')
+    expect(found?.get('a')?.extra.child_count).toBe(2)
+    expect(rec.bodies).toEqual([asked('top/a', 'top/b'), asked('top/a/c')])
+  })
+
+  it('splits a wide level', async () => {
+    const names = Array.from({ length: 25 }, (_, i) => `d${String(i).padStart(2, '0')}`)
+    const rec = stubFetch([
+      {
+        method: 'GET',
+        url: children('top'),
+        body: { value: names.map((n) => row(n, n, 'T', { folder: {} })) },
+      },
+      {
+        method: 'POST',
+        url: BATCH,
+        body: batched(...names.slice(0, 20).map(() => ({ value: [] }))),
+      },
+      { method: 'POST', url: BATCH, body: batched(...names.slice(20).map(() => ({ value: [] }))) },
+    ])
+    const found = await batchTree(config, loc('top'), SPEC)
+    expect([...(found?.keys() ?? [])].sort()).toEqual(names)
+    expect(rec.bodies.map((b) => (b.requests as unknown[]).length)).toEqual([20, 5])
+  })
+
+  it('asks a listing the batch left unanswered on its own', async () => {
+    const rec = stubFetch([
+      { method: 'GET', url: children('top'), body: { value: TOP } },
+      {
+        method: 'POST',
+        url: BATCH,
+        body: {
+          responses: [
+            { id: '0', status: 200, body: { value: [] } },
+            { id: '1', status: 429, body: {} },
+          ],
+        },
+      },
+      { method: 'GET', url: children('top/b'), body: { value: UNDER_B } },
+    ])
+    const found = await batchTree(config, loc('top'), SPEC)
+    expect(found?.has('b/y.txt')).toBe(true)
+    expect(rec.pending()).toBe(0)
+  })
+
+  it("reads a listing's later pages", async () => {
+    const next = 'https://graph.microsoft.com/v1.0/next-page'
+    const rec = stubFetch([
+      { method: 'GET', url: children('top'), body: { value: TOP } },
+      {
+        method: 'POST',
+        url: BATCH,
+        body: batched({ value: [] }, { value: [], '@odata.nextLink': next }),
+      },
+      { method: 'GET', url: next, body: { value: UNDER_B } },
+    ])
+    const found = await batchTree(config, loc('top'), SPEC)
+    expect(found?.get('b/y.txt')?.size).toBe(3)
+    expect(rec.pending()).toBe(0)
+  })
+
+  it('leaves the walk a folder gone below', async () => {
+    const gone = { error: { code: 'itemNotFound', message: 'gone' } }
+    stubFetch([
+      { method: 'GET', url: children('top'), body: { value: TOP } },
+      {
+        method: 'POST',
+        url: BATCH,
+        body: {
+          responses: [
+            { id: '0', status: 200, body: { value: [] } },
+            { id: '1', status: 404, body: gone },
+          ],
+        },
+      },
+      { method: 'GET', url: children('top/b'), status: 404, body: gone },
+    ])
+    expect(await batchTree(config, loc('top'), SPEC)).toBeNull()
+  })
+
+  it('leaves the walk a refused batch', async () => {
+    stubFetch([
+      { method: 'GET', url: children('top'), body: { value: TOP } },
+      {
+        method: 'POST',
+        url: BATCH,
+        status: 400,
+        body: { error: { code: 'invalidRequest', message: 'no batching here' } },
+      },
+    ])
+    expect(await batchTree(config, loc('top'), SPEC)).toBeNull()
   })
 })

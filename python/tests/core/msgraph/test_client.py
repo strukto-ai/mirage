@@ -1,9 +1,11 @@
 import pytest
 from aioresponses import aioresponses
+from yarl import URL
 
 from mirage.core.msgraph.client import (
     GraphError,
     encoded_path,
+    graph_batch,
     graph_get,
     graph_get_bytes,
     graph_list,
@@ -179,3 +181,32 @@ async def test_401_with_static_token_does_not_retry():
         with pytest.raises(GraphError) as exc:
             await graph_get(_cfg(), _ROOT)
     assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_graph_batch_sends_relative_urls_and_answers_in_order():
+    api = "https://graph.example/v1.0"
+    urls = [
+        f"{api}/me/drive/root:/a:/children",
+        f"{api}/me/drive/root/children",
+    ]
+    with aioresponses() as m:
+        m.post(
+            f"{api}/$batch",
+            payload={
+                "responses": [
+                    {"id": "1", "status": 200, "body": {"value": [1]}},
+                    {"id": "0", "status": 429, "body": "throttled"},
+                ]
+            },
+        )
+        answers = await graph_batch(_cfg(graph_base_url=api), urls + [urls[0]])
+        sent = m.requests[("POST", URL(f"{api}/$batch"))][0].kwargs["json"]
+    assert sent == {
+        "requests": [
+            {"id": "0", "method": "GET", "url": "/me/drive/root:/a:/children"},
+            {"id": "1", "method": "GET", "url": "/me/drive/root/children"},
+            {"id": "2", "method": "GET", "url": "/me/drive/root:/a:/children"},
+        ]
+    }
+    assert answers == [(429, {}), (200, {"value": [1]}), (0, {})]

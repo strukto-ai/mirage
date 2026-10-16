@@ -92,7 +92,7 @@ interface ListDrivesResponse {
   nextPageToken?: string
 }
 
-export async function listFiles(
+export function listFiles(
   tm: TokenManager,
   opts: {
     folderId?: string
@@ -128,7 +128,35 @@ export async function listFiles(
   if (!trashed) parts.push('trashed=false')
   if (modifiedAfter !== null) parts.push(`modifiedTime >= '${modifiedAfter}'`)
   if (modifiedBefore !== null) parts.push(`modifiedTime < '${modifiedBefore}'`)
-  const q = parts.join(' and ')
+  return queryFiles(tm, parts.join(' and '), driveId, pageSize, limit)
+}
+
+/**
+ * The untrashed children of several folders of one corpus, from one query
+ * (`'a' in parents or 'b' in parents`), in the order a listing of each folder
+ * returns them. Mirrors Python's `list_children`.
+ */
+export function listChildren(
+  tm: TokenManager,
+  folderIds: readonly string[],
+  driveId: string | null = null,
+  pageSize = 1000,
+): Promise<DriveFile[]> {
+  const parents = folderIds.map((id) => `'${escapeQueryValue(id)}' in parents`).join(' or ')
+  return queryFiles(tm, `(${parents}) and trashed=false`, driveId, pageSize)
+}
+
+/**
+ * The files a query names, newest first, a page at a time. Mirrors Python's
+ * `_query_files`.
+ */
+async function queryFiles(
+  tm: TokenManager,
+  q: string,
+  driveId: string | null,
+  pageSize: number,
+  limit: number | null = null,
+): Promise<DriveFile[]> {
   const files: DriveFile[] = []
   let pageToken: string | null = null
   for (;;) {

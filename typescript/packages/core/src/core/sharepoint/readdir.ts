@@ -15,7 +15,7 @@
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { directoryPath, readdirItems } from '../msgraph/drive.ts'
+import { batchTree, directoryPath, readdirItems } from '../msgraph/drive.ts'
 import { driveLoc, listDrives, listSites, resolve } from './resolve.ts'
 
 // A namespace level (the sites, or one site's libraries) as rows. Mirrors
@@ -35,4 +35,23 @@ export async function readdir(accessor: SharePointAccessor, path: PathSpec): Pro
   }
   if (resolved.driveId === null) return []
   return readdirItems(accessor.config, driveLoc(accessor.config, resolved, target.vfsPath), target)
+}
+
+/**
+ * Every item under a folder of a document library, each as its folder's
+ * listing renders it, from the folders' listings batched (`batchTree`).
+ *
+ * Null above the libraries and for a library that is not there: the sites and
+ * a site's libraries are walked, and the walk reads each library's tree on its
+ * own. Mirrors Python's `tree`.
+ */
+export async function tree(
+  accessor: SharePointAccessor,
+  path: PathSpec,
+): Promise<Map<string, FileStat> | null> {
+  const resolved = await resolve(accessor, path)
+  if (resolved.level === 'root' || resolved.level === 'site' || resolved.driveId === null) {
+    return null
+  }
+  return batchTree(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath), path)
 }

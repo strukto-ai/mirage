@@ -30,7 +30,7 @@ from mirage.core.api.client import (
     header_delay,
     resolve_session,
 )
-from mirage.core.msgraph.config import MsGraphConfig
+from mirage.core.msgraph.config import MsGraphConfig, graph_api
 from mirage.core.msgraph.constants import MAX_BACKOFF, RETRY_STATUSES
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.secrets import reveal_secret
@@ -314,6 +314,47 @@ async def graph_post(
         config, "POST", url, json_body=body or {}, session=session
     )
     return data
+
+
+async def graph_batch(
+    config: MsGraphConfig,
+    urls: list[str],
+    session: SessionArg = None,
+) -> list[tuple[int, dict[str, Any]]]:
+    """The answers to several GETs from one JSON batch (``$batch``), each
+    as its status and body, in the order of ``urls``.
+
+    Graph runs at most ``BATCH_LIMIT`` requests in a batch. Each URL is a
+    full one under the mount's service root, and goes in relative to it,
+    as a batch names its requests. A request the reply leaves out answers
+    status 0, and a body that is not an object answers empty.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        urls (list[str]): the GETs, each under ``graph_api(config)``.
+        session (SessionArg): pool or live session to ride.
+    """
+    root = graph_api(config)
+    requests = [
+        {"id": str(i), "method": "GET", "url": url.removeprefix(root)}
+        for i, url in enumerate(urls)
+    ]
+    data = await _request(
+        config,
+        "POST",
+        f"{root}/$batch",
+        json_body={"requests": requests},
+        session=session,
+    )
+    answers: dict[str, tuple[int, dict[str, Any]]] = {}
+    for reply in data.get("responses") or []:
+        if isinstance(reply, dict):
+            status, body = reply.get("status"), reply.get("body")
+            answers[str(reply.get("id"))] = (
+                status if isinstance(status, int) else 0,
+                body if isinstance(body, dict) else {},
+            )
+    return [answers.get(str(i), (0, {})) for i in range(len(urls))]
 
 
 async def graph_post_monitor(

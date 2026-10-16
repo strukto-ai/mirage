@@ -14,3 +14,4 @@
 
 export const RETRY_STATUSES: ReadonlySet<number> = new Set([429, 503, 504])
 export const MAX_BACKOFF = 30
+export const BATCH_LIMIT = 20

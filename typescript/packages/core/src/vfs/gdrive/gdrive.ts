@@ -39,6 +39,7 @@ import { rename as gdriveRename } from '../../core/gdrive/rename.ts'
 import { copy as gdriveCopy } from '../../core/gdrive/copy.ts'
 import { truncate as gdriveTruncate } from '../../core/gdrive/truncate.ts'
 import { filesContaining as gdriveFilesContaining } from '../../core/gdrive/search.ts'
+import { tree as gdriveTree } from '../../core/gdrive/tree.ts'
 
 export interface GDriveVFSState {
   type: string
@@ -58,6 +59,7 @@ export class GDriveVFS extends BaseVFS {
     checksum: ['entry'],
     readStream: ['entry'],
     exists: ['entry'],
+    readTree: ['entry'],
     write: ['entry', 'parent'],
     create: ['entry', 'parent'],
     mkdir: ['parent'],
@@ -119,6 +121,10 @@ export class GDriveVFS extends BaseVFS {
 
   override exists(path: PathSpec, handed?: Handed): Promise<boolean> {
     return gdriveExists(this.accessor, path, handed?.entry)
+  }
+
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    return gdriveTree(this.accessor, path, handed?.entry)
   }
 
   override write(

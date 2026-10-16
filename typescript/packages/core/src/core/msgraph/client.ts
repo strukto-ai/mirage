@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MsGraphConfigResolved } from './config.ts'
+import { graphApi, type MsGraphConfigResolved } from './config.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 import { apiRequest, headerDelay, type ApiRequestOptions, type RetryPolicy } from '../api/client.ts'
 import { MAX_BACKOFF, RETRY_STATUSES } from './constants.ts'
@@ -242,6 +242,40 @@ export async function graphPost(
   body: Record<string, unknown> = {},
 ): Promise<Record<string, unknown>> {
   return (await graphRequest(config, 'POST', url, { json: body })) as Record<string, unknown>
+}
+
+/**
+ * The answers to several GETs from one JSON batch (`$batch`), each as its
+ * status and body, in the order of `urls`.
+ *
+ * Graph runs at most `BATCH_LIMIT` requests in a batch. Each URL is a full one
+ * under the mount's service root, and goes in relative to it, as a batch names
+ * its requests. A request the reply leaves out answers status 0, and a body
+ * that is not an object answers empty. Mirrors Python's `graph_batch`.
+ */
+export async function graphBatch(
+  config: MsGraphConfigResolved,
+  urls: readonly string[],
+): Promise<[number, Record<string, unknown>][]> {
+  const root = graphApi(config)
+  const requests = urls.map((url, i) => ({
+    id: String(i),
+    method: 'GET',
+    url: url.startsWith(root) ? url.slice(root.length) : url,
+  }))
+  const data = await graphPost(config, `${root}/$batch`, { requests })
+  const answers = new Map<string, [number, Record<string, unknown>]>()
+  for (const reply of Array.isArray(data.responses) ? data.responses : []) {
+    if (reply === null || typeof reply !== 'object' || Array.isArray(reply)) continue
+    const { id, status, body } = reply as { id?: unknown; status?: unknown; body?: unknown }
+    answers.set(String(id), [
+      typeof status === 'number' ? status : 0,
+      body !== null && typeof body === 'object' && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {},
+    ])
+  }
+  return urls.map((_, i) => answers.get(String(i)) ?? [0, {}])
 }
 
 export async function graphPostMonitor(

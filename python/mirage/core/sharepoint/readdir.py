@@ -14,6 +14,7 @@
 
 from mirage.accessor.sharepoint import SharePointAccessor
 from mirage.core.msgraph.drive import (
+    batch_tree,
     directory_path,
     readdir_items,
     virtual_key,
@@ -52,6 +53,32 @@ async def readdir(
     return await readdir_items(
         accessor.config,
         drive_loc(accessor.config, resolved, target.vfs_path),
+        virtual_key(path),
+        session=accessor.pool,
+    )
+
+
+async def tree(
+    accessor: SharePointAccessor, path: PathSpec
+) -> dict[str, FileStat] | None:
+    """Every item under a folder of a document library, each as its
+    folder's listing renders it, from the folders' listings batched
+    (``batch_tree``).
+
+    None above the libraries and for a library that is not there: the
+    sites and a site's libraries are walked, and the walk reads each
+    library's tree on its own.
+
+    Args:
+        accessor (SharePointAccessor): backend accessor.
+        path (PathSpec): the directory.
+    """
+    resolved = await resolve(accessor, path)
+    if resolved.level in ("root", "site") or resolved.drive_id is None:
+        return None
+    return await batch_tree(
+        accessor.config,
+        drive_loc(accessor.config, resolved, path.vfs_path),
         virtual_key(path),
         session=accessor.pool,
     )

@@ -52,6 +52,9 @@ class FakeDrive:
         # gave up on a corpus.
         self.searches: list[list[str]] = []
         self.incomplete = False
+        # The folder ids and shared drive of every listing of several
+        # folders at once.
+        self.child_queries: list[tuple[list[str], str | None]] = []
 
     def add(
         self,
@@ -118,6 +121,20 @@ class FakeDrive:
             if limit is not None and len(out) >= limit:
                 break
         return out
+
+    async def list_children(
+        self,
+        token_manager,
+        folder_ids: list[str],
+        drive_id: str | None = None,
+        page_size: int = 1000,
+    ) -> list[dict]:
+        self.child_queries.append((list(folder_ids), drive_id))
+        return [
+            self.public(item["id"])
+            for item in self.items.values()
+            if set(item["parents"]) & set(folder_ids)
+        ]
 
     async def search_files(
         self,
@@ -229,7 +246,7 @@ _PATCH_TARGETS = {
     rmdir_mod: ("delete_file", "list_files"),
     rm_mod: ("delete_file",),
     rename_mod: ("delete_file", "list_files", "patch_file"),
-    tree_mod: ("list_files",),
+    tree_mod: ("list_children",),
     copy_mod: ("copy_file", "create_folder", "delete_file", "list_files"),
     truncate_mod: ("download_file",),
     search_mod: ("search_files",),

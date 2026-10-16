@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rangeReply, route } from '../kit/typescript/index.ts'
+import { Router, rangeReply, route } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import { DEFAULT_DRIVE, DRIVE_BYTES, SITE_ID, SITE_NAME, type C } from './config.ts'
 import {
@@ -481,6 +481,47 @@ async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string)
   return found === null ? notFound() : { status: 200, body: found }
 }
 
+// Graph's JSON batching, for reads: each request is answered by the route its
+// own URL names, relative to the service root, and every answer comes back in
+// one reply. Graph runs at most twenty requests in a batch.
+const BATCH_LIMIT = 20
+
+async function batch(ctx: Ctx<C>): Promise<Reply> {
+  const requests = objOf(ctx.json()).requests
+  const asked = Array.isArray(requests) ? requests : []
+  if (asked.length > BATCH_LIMIT) {
+    return {
+      status: 400,
+      body: { error: { code: 'invalidRequest', message: 'Too many requests in a batch' } },
+    }
+  }
+  const router = new Router(onedriveRoutes())
+  const responses: JsonValue[] = []
+  for (const raw of asked) {
+    const request = objOf(raw)
+    const url = new URL(strOf(request.url), ctx.url.origin)
+    const matched =
+      strOf(request.method).toUpperCase() === 'GET' ? router.match('GET', url.pathname) : null
+    const reply =
+      matched === null
+        ? notFound()
+        : await matched.spec.handler({
+            ...ctx,
+            params: matched.params,
+            query: url.searchParams,
+            url,
+            body: Buffer.alloc(0),
+            json: () => null,
+          })
+    responses.push({
+      id: strOf(request.id),
+      status: reply.status,
+      body: Buffer.isBuffer(reply.body) ? null : (reply.body ?? null),
+    })
+  }
+  return { status: 200, body: { responses } }
+}
+
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 
 // The kit dispatches by (method, path) and Graph puts five methods on the same
@@ -503,6 +544,7 @@ function driveShape(path: string, driveOf: (ctx: Ctx<C>) => string): KitRoute<C>
 export function onedriveRoutes(): KitRoute<C>[] {
   return [
     route('GET', '/sites', sites),
+    route('POST', '/$batch', batch),
     route('GET', '/sites/:site/drives', siteDrives),
     route('PUT', '/drives/:drive', declareDrive, { write: true }),
     route('GET', '/me/drive', (ctx) => driveInfo(ctx, DEFAULT_DRIVE)),

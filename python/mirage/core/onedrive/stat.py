@@ -16,7 +16,13 @@ import logging
 
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.core.msgraph.client import GraphError, graph_get
-from mirage.core.msgraph.drive import delta_tree, folder_child_count, stat_item
+from mirage.core.msgraph.drive import (
+    batch_tree,
+    delta_tree,
+    folder_child_count,
+    stat_item,
+    virtual_key,
+)
 from mirage.core.onedrive.client import drive_base, drive_loc
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
@@ -61,25 +67,29 @@ async def stat(accessor: OneDriveAccessor, path: PathSpec) -> FileStat:
 async def tree(
     accessor: OneDriveAccessor, path: PathSpec
 ) -> dict[str, FileStat] | None:
-    """Every item under a folder, each as a listing's stat renders it, from
-    one read of Graph's ``/delta`` feed (``delta_tree``).
+    """Every item under a folder, each as a listing's stat renders it.
 
-    Only a personal drive answers: it starts the feed at any folder and
-    carries each file's ``cTag``, the token its listing row holds.
-    OneDrive for Business starts the feed only at the drive root and leaves
-    the ``cTag`` out, so its walk lists each folder. Which kind the drive
-    is, Graph's ``driveType``, is asked once per mount. None hands the
-    folder to the walk, as does a drive that will not say which kind it is.
+    A personal drive answers from one read of Graph's ``/delta`` feed
+    (``delta_tree``): it starts the feed at any folder and carries each
+    file's ``cTag``, the token its listing row holds. OneDrive for
+    Business starts the feed only at the drive root and leaves the
+    ``cTag`` out, so its folders' listings go out batched instead
+    (``batch_tree``), as they do for a feed that does not answer and for
+    a drive that will not say which kind it is. Which kind the drive is,
+    Graph's ``driveType``, is asked once per mount.
 
     Args:
         accessor (OneDriveAccessor): backend accessor.
         path (PathSpec): the directory.
     """
     config = accessor.config
-    if await _drive_type(accessor) != "personal":
-        return None
-    return await delta_tree(
-        config, drive_loc(config, path.vfs_path), session=accessor.pool
+    loc = drive_loc(config, path.vfs_path)
+    if await _drive_type(accessor) == "personal":
+        found = await delta_tree(config, loc, session=accessor.pool)
+        if found is not None:
+            return found
+    return await batch_tree(
+        config, loc, virtual_key(path), session=accessor.pool
     )
 
 

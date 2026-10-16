@@ -27,7 +27,8 @@ import { readdir } from './readdir.ts'
 import { GoogleApiError } from '../google/client.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
-import { PARENTS_PER_QUERY, filesContaining } from './search.ts'
+import { filesContaining } from './search.ts'
+import { PARENTS_PER_QUERY } from './tree.ts'
 
 const ENC = new TextEncoder()
 let fake: FakeDrive
@@ -94,7 +95,7 @@ describe('gdrive filesContaining', () => {
     ],
     [
       'a failed listing',
-      () => vi.spyOn(fake, 'listFiles').mockRejectedValue(new TypeError('fetch failed')),
+      () => vi.spyOn(fake, 'listChildren').mockRejectedValue(new TypeError('fetch failed')),
     ],
   ])('answers null for %s', async (name, breakIt) => {
     fake.add('a.txt', 'root', undefined, ENC.encode(name === 'no hit' ? 'nothing' : 'wombat'))

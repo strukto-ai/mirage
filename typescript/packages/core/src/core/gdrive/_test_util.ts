@@ -51,6 +51,9 @@ export class FakeDrive {
   // a corpus.
   searches: string[][] = []
   incomplete = false
+  // The folder ids and shared drive of every listing of several folders at
+  // once.
+  childQueries: [string[], string | null][] = []
   private counter = 0
 
   add(
@@ -119,6 +122,19 @@ export class FakeDrive {
       if (opts.mimeType != null && item.mimeType !== opts.mimeType) continue
       out.push(this.public(item.id))
       if (opts.limit != null && out.length >= opts.limit) break
+    }
+    return Promise.resolve(out)
+  }
+
+  listChildren(
+    _tm: TokenManager,
+    folderIds: readonly string[],
+    driveId: string | null = null,
+  ): Promise<DriveFile[]> {
+    this.childQueries.push([[...folderIds], driveId])
+    const out: DriveFile[] = []
+    for (const item of this.items.values()) {
+      if (item.parents.some((p) => folderIds.includes(p))) out.push(this.public(item.id))
     }
     return Promise.resolve(out)
   }
@@ -224,6 +240,12 @@ export function driveModuleMock(actual: object): object {
     listFiles: (...args: unknown[]) =>
       currentFakeDrive.listFiles(args[0] as TokenManager, args[1] as never),
     listSharedDrives: () => currentFakeDrive.listSharedDrives(),
+    listChildren: (...args: unknown[]) =>
+      currentFakeDrive.listChildren(
+        args[0] as TokenManager,
+        args[1] as readonly string[],
+        (args[2] as string | null | undefined) ?? null,
+      ),
     searchFiles: (...args: unknown[]) =>
       currentFakeDrive.searchFiles(
         args[0] as TokenManager,

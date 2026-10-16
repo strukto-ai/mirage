@@ -119,7 +119,53 @@ async def list_files(
         parts.append(f"modifiedTime >= '{modified_after}'")
     if modified_before:
         parts.append(f"modifiedTime < '{modified_before}'")
-    q = " and ".join(parts)
+    return await _query_files(
+        token_manager, " and ".join(parts), drive_id, page_size, limit
+    )
+
+
+async def list_children(
+    token_manager: TokenManager,
+    folder_ids: list[str],
+    drive_id: str | None = None,
+    page_size: int = 1000,
+) -> list[dict[str, Any]]:
+    """The untrashed children of several folders of one corpus, from one
+    query (``'a' in parents or 'b' in parents``), in the order a listing
+    of each folder returns them.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        folder_ids (list[str]): the folders.
+        drive_id (str | None): their shared drive, None for My Drive.
+        page_size (int): results per page.
+    """
+    parents = " or ".join(
+        f"'{escape_query_value(folder_id)}' in parents"
+        for folder_id in folder_ids
+    )
+    return await _query_files(
+        token_manager, f"({parents}) and trashed=false", drive_id, page_size
+    )
+
+
+async def _query_files(
+    token_manager: TokenManager,
+    q: str,
+    drive_id: str | None,
+    page_size: int,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """The files a query names, newest first, a page at a time.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        q (str): the Drive query.
+        drive_id (str | None): the shared drive searched, None for My
+            Drive.
+        page_size (int): results per page.
+        limit (int | None): stop once this many files are in hand.
+    """
     files: list[dict[str, Any]] = []
     page_token: str | None = None
     while True:

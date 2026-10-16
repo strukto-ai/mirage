@@ -11,7 +11,7 @@ import type { DeltaHook } from '../../watch/base.ts'
 import { buildDeltaHook } from '../../core/sharepoint/watch.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
 import type { Handed } from '../types.ts'
-import { readdir } from '../../core/sharepoint/readdir.ts'
+import { readdir, tree } from '../../core/sharepoint/readdir.ts'
 import { read } from '../../core/sharepoint/read.ts'
 import { stat } from '../../core/sharepoint/stat.ts'
 import { readStream } from '../../core/sharepoint/stream.ts'
@@ -80,6 +80,10 @@ export class SharePointVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return exists(this.accessor, path)
+  }
+
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return tree(this.accessor, path)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

@@ -85,14 +85,18 @@ entries of a `read_tree` answer cost none and do not count toward the cap.
 | GitHub | the repository tree the mount fetches once |
 | Redis | one key scan, with every stat in one pipeline |
 | OneDrive (personal) | one read of Graph's `/delta` feed from the folder |
+| OneDrive for Business, SharePoint | the folders' listings, twenty to a request through Graph's JSON batching |
+| Google Drive | one `files.list` per level, each asking for the children of up to forty folders of one drive |
 | SSH | one `find -L` on the server, when it runs commands and every entry is a file or a directory |
 | RAM | the store in memory |
 
 A walk on any other mount reads one directory at a time. The Hugging Face Hub
 already answers every `readdir` from the repository tree it fetches once.
 OneDrive for Business and SharePoint start the `/delta` feed only at a drive's
-root and leave out each file's `cTag`, which a listing carries, so a walk there
-lists each folder.
+root and leave out each file's `cTag`, which a listing carries, so they batch
+the listings instead; a listing the batch leaves unanswered is asked on its
+own. SharePoint's sites and a site's libraries are read one directory at a
+time, and each library's tree in one read.
 Nextcloud's file search needs a Nextcloud server; on another WebDAV server the
 walk lists each folder. GitHub answers `None` when GitHub truncated the tree of
 a large repository. SSH answers `None` on a server limited to SFTP, with a

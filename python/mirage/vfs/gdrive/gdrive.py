@@ -31,6 +31,7 @@ from mirage.core.gdrive.rmdir import rmdir as _rmdir
 from mirage.core.gdrive.search import files_containing as _files_containing
 from mirage.core.gdrive.set_attrs import set_attrs as _set_attrs
 from mirage.core.gdrive.stat import stat as _stat
+from mirage.core.gdrive.tree import tree as _tree
 from mirage.core.gdrive.truncate import truncate as _truncate
 from mirage.core.gdrive.unlink import unlink as _unlink
 from mirage.core.gdrive.watch import build_delta_hook
@@ -102,6 +103,11 @@ class GoogleDriveVFS(BaseVFS):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> bool:
         return await _exists(self.accessor, path, entry)
+
+    async def read_tree(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, entry)
 
     async def write(
         self,

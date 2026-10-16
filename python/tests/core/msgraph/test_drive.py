@@ -485,3 +485,175 @@ async def test_delta_tree_leaves_a_feed_of_another_folder_to_the_walk(
         MsGraphConfig(access_token="token"), _loc("d1", "team/reports")
     )
     assert found is None
+
+
+def _listings(
+    tree: dict[str, list[dict]],
+    throttled: frozenset[str] = frozenset(),
+    pages: dict[str, str] | None = None,
+):
+    asked: dict[str, list] = {"list": [], "batch": []}
+
+    async def listing(config, url, params=None, session=None):
+        asked["list"].append(url)
+        if url not in tree:
+            raise GraphError(404, "itemNotFound", url)
+        return tree[url]
+
+    async def batch(config, urls, session=None):
+        asked["batch"].append(list(urls))
+        answers = []
+        for url in urls:
+            if url in throttled:
+                answers.append((429, {}))
+            elif url in tree:
+                body = {"value": tree[url]}
+                if pages and url in pages:
+                    body = {"value": [], "@odata.nextLink": pages[url]}
+                answers.append((200, body))
+            else:
+                answers.append((404, {}))
+        return answers
+
+    return listing, batch, asked
+
+
+def _children(path: str) -> str:
+    return _url(path, "/children")
+
+
+def _graph_tree() -> dict[str, list[dict]]:
+    return {
+        _children("top"): [
+            _row("A", "a", "T", folder={"childCount": 2}),
+            _row("B", "b", "T", folder={"childCount": 1}),
+            _row("f", "f.txt", "T", size=1, file={}, cTag="cf"),
+        ],
+        _children("top/a"): [
+            _row("C", "c", "A", folder={"childCount": 1}),
+            _row("x", "x.txt", "A", size=2, file={}, cTag="cx"),
+        ],
+        _children("top/b"): [
+            _row("y", "y.txt", "B", size=3, file={}, cTag="cy")
+        ],
+        _children("top/a/c"): [
+            _row("z", "z.txt", "C", size=4, file={}, cTag="cz")
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_batch_tree_lists_a_level_per_batch(monkeypatch):
+    listing, batch, asked = _listings(_graph_tree())
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", batch)
+    found = await drive_ops.batch_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+    )
+    assert sorted(found) == [
+        "a",
+        "a/c",
+        "a/c/z.txt",
+        "a/x.txt",
+        "b",
+        "b/y.txt",
+        "f.txt",
+    ]
+    assert found["a/c/z.txt"].fingerprint == "cz"
+    assert found["a"].extra["child_count"] == 2
+    assert asked["list"] == [_children("top")]
+    assert asked["batch"] == [
+        [_children("top/a"), _children("top/b")],
+        [_children("top/a/c")],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_tree_splits_a_wide_level(monkeypatch):
+    names = [f"d{i:02d}" for i in range(25)]
+    tree = {_children("top"): [_row(n, n, "T", folder={}) for n in names]}
+    tree.update({_children(f"top/{n}"): [] for n in names})
+    listing, batch, asked = _listings(tree)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", batch)
+    found = await drive_ops.batch_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+    )
+    assert sorted(found) == names
+    assert [len(urls) for urls in asked["batch"]] == [20, 5]
+
+
+@pytest.mark.asyncio
+async def test_a_listing_the_batch_left_unanswered_is_asked_alone(
+    monkeypatch,
+):
+    listing, batch, asked = _listings(
+        _graph_tree(), throttled=frozenset({_children("top/b")})
+    )
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", batch)
+    found = await drive_ops.batch_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+    )
+    assert "b/y.txt" in found
+    assert asked["list"] == [_children("top"), _children("top/b")]
+
+
+@pytest.mark.asyncio
+async def test_a_listing_reads_its_later_pages(monkeypatch):
+    tree = _graph_tree()
+    nxt = "https://graph.example/next-page"
+    tree[nxt] = tree[_children("top/b")]
+    listing, batch, asked = _listings(tree, pages={_children("top/b"): nxt})
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", batch)
+    found = await drive_ops.batch_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+    )
+    assert found["b/y.txt"].size == 3
+    assert nxt in asked["list"]
+
+
+@pytest.mark.asyncio
+async def test_a_folder_gone_below_leaves_the_walk(monkeypatch):
+    tree = _graph_tree()
+    del tree[_children("top/b")]
+    listing, batch, _ = _listings(tree)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", batch)
+    found = await drive_ops.batch_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+    )
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_a_refused_batch_leaves_the_walk(monkeypatch):
+    listing, _, _ = _listings(_graph_tree())
+
+    async def refuse(config, urls, session=None):
+        raise GraphError(400, "invalidRequest", "no batching here")
+
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", refuse)
+    found = await drive_ops.batch_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+    )
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_a_missing_top_raises_what_its_listing_raises(monkeypatch):
+    listing, batch, _ = _listings({})
+
+    async def absent(*args, **kwargs):
+        return False
+
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", batch)
+    monkeypatch.setattr(drive_ops, "_is_file", absent)
+    monkeypatch.setattr(drive_ops, "_is_dir", absent)
+    with pytest.raises(FileNotFoundError):
+        await drive_ops.batch_tree(
+            MsGraphConfig(access_token="token"), _loc("d1", "top"), "/od/top"
+        )
