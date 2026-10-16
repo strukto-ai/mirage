@@ -339,6 +339,13 @@ class Finder(Shelf):
             for name in sorted(self.files)
         ]
 
+    @vfs_call(effect=Effect.READ)
+    async def rows(self, path: PathSpec, query: str) -> list[dict]:
+        return [
+            {"path": PathSpec.from_str_path(f"/shelf/{name}"), "score": 1}
+            for name in sorted(self.files)
+        ]
+
 
 @pytest.mark.asyncio
 async def test_a_custom_answer_loses_what_the_session_hides():
@@ -356,6 +363,8 @@ async def test_a_custom_answer_loses_what_the_session_hides():
         assert [p.virtual for p in found] == ["/shelf/a.txt"]
         ranked, _ = await ws.dispatch("ranked", root, query="x")
         assert [hit.path.virtual for hit in ranked] == ["/shelf/a.txt"]
+        rows, _ = await ws.dispatch("rows", root, query="x")
+        assert [row["path"].virtual for row in rows] == ["/shelf/a.txt"]
         with pytest.raises(OSError) as declined:
             await ws.dispatch("search_abc", root, query="x")
         assert declined.value.errno == errno.ENOTSUP

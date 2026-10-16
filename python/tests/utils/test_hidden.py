@@ -429,6 +429,14 @@ def test_leads_hidden_follows_a_link_into_hidden_space():
         assert not leads_hidden(vis, path, LINKS), path
 
 
+def test_leads_hidden_judges_what_a_link_brings_in_not_the_typed_path():
+    carved = _vis(["*.key"], (ShowEntry("/repo/*/public"),))
+    links = {"/other/l": "/x", "/repo/alias": "/repo/dir.key/public"}
+    assert path_visible(carved, "/repo/dir.key/public/f.txt")
+    assert not leads_hidden(carved, "/repo/dir.key/public/f.txt", links)
+    assert not leads_hidden(carved, "/repo/alias/f.txt", links)
+
+
 def test_leads_hidden_needs_a_hide_and_a_link():
     assert not leads_hidden(None, "/data/shared/to_secret", LINKS)
     assert not leads_hidden(_vis([]), "/data/shared/to_secret", LINKS)

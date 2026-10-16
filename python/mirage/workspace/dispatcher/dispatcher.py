@@ -19,7 +19,13 @@ import functools
 import logging
 import posixpath
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Mapping,
+)
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
@@ -408,7 +414,7 @@ def _visible_answer(
 def _answer_paths(result: Any) -> list[str] | None:
     """The virtual path each item of a custom function's answer names,
     None when the answer is not a list of paths or of records with a
-    ``path``.
+    ``path`` (an attribute, or a key of a mapping).
 
     Args:
         result (Any): the function's answer.
@@ -417,9 +423,13 @@ def _answer_paths(result: Any) -> list[str] | None:
         return None
     named: list[str] = []
     for item in result:
-        path = (
-            item if isinstance(item, PathSpec) else getattr(item, "path", None)
-        )
+        path: Any
+        if isinstance(item, PathSpec):
+            path = item
+        elif isinstance(item, Mapping):
+            path = item.get("path")
+        else:
+            path = getattr(item, "path", None)
         if not isinstance(path, PathSpec):
             return None
         named.append(path.virtual)

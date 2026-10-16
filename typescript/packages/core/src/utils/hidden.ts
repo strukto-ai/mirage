@@ -321,13 +321,15 @@ export function classifyShows(entries: readonly ShowEntry[]): ShownPaths | null 
 }
 
 /**
- * Whether a visible name leads where the session cannot see: the walk that
- * follows it, link by link, names a hidden path. Every name is judged as the
- * walk meets it, before a later `..` takes it back, so a link whose stored
- * target spells a hidden directory (`/data/secret/../pub`) leads there too:
- * its listing row, `readlink` and `ls -l` would print the hidden name. A
- * link that leads nowhere (dangling, or a loop) leads nowhere hidden.
- * Mirrors Python's leads_hidden.
+ * Whether a visible name leads where the session cannot see: a link the walk
+ * follows names a hidden path. The walk judges what a link brings in, not the
+ * typed path, which the caller judges whole (a carve-out keeps its hidden
+ * parents traversable): each link's own path, every name a stored target
+ * spells before a later `..` takes it back (`/data/secret/../pub` still
+ * prints `secret`), and the place the walk lands. Such a link is as hidden as
+ * its target, since its listing row, `readlink` and `ls -l` would print the
+ * hidden name; a link that leads nowhere (dangling, or a loop) leads nowhere
+ * hidden. Mirrors Python's leads_hidden.
  */
 export function leadsHidden(
   vis: Visibility | null | undefined,
@@ -335,28 +337,36 @@ export function leadsHidden(
   links: ReadonlyMap<string, string>,
 ): boolean {
   if (vis === null || vis === undefined || links.size === 0) return false
-  const pending = virtual.split('/').reverse()
+  const pending = virtual
+    .split('/')
+    .filter((p) => p !== '' && p !== '.')
+    .reverse()
   const walked: string[] = []
   let hops = 0
   while (pending.length > 0) {
     const part = pending.pop() ?? ''
-    if (part === '' || part === '.') continue
     if (part === '..') {
       walked.pop()
       continue
     }
     const name = '/' + [...walked, part].join('/')
-    if (!pathVisible(vis, name)) return true
     const target = links.get(name)
     if (target === undefined) {
+      if (hops > 0 && pending[pending.length - 1] === '..' && !pathVisible(vis, name)) return true
       walked.push(part)
       continue
     }
+    if (!pathVisible(vis, name)) return true
     if (++hops > MAX_SYMLINK_HOPS) return false
     if (target.startsWith('/')) walked.length = 0
-    pending.push(...target.split('/').reverse())
+    pending.push(
+      ...target
+        .split('/')
+        .filter((p) => p !== '' && p !== '.')
+        .reverse(),
+    )
   }
-  return false
+  return hops > 0 && !pathVisible(vis, '/' + walked.join('/'))
 }
 
 /**

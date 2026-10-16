@@ -406,6 +406,20 @@ describe('leadsHidden', () => {
     }
   })
 
+  it('judges what a link brings in, not the typed path', () => {
+    const carved = vis(
+      classifyPaths(['*.key']),
+      classifyShows([{ path: '/repo/*/public', mode: null }]),
+    )
+    const links = new Map([
+      ['/other/l', '/x'],
+      ['/repo/alias', '/repo/dir.key/public'],
+    ])
+    expect(pathVisible(carved, '/repo/dir.key/public/f.txt')).toBe(true)
+    expect(leadsHidden(carved, '/repo/dir.key/public/f.txt', links)).toBe(false)
+    expect(leadsHidden(carved, '/repo/alias/f.txt', links)).toBe(false)
+  })
+
   it('needs a hide and a link', () => {
     expect(leadsHidden(null, '/data/shared/to_secret', LINKS)).toBe(false)
     expect(leadsHidden(vis(classifyPaths([])), '/data/shared/to_secret', LINKS)).toBe(false)

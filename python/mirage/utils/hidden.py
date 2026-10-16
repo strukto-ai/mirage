@@ -450,14 +450,17 @@ def classify_shows(entries: Iterable[ShowEntry]) -> ShownPaths | None:
 def leads_hidden(
     vis: Visibility | None, virtual: str, links: Mapping[str, str]
 ) -> bool:
-    """Whether a visible name leads where the session cannot see: the
-    walk that follows it, link by link, names a hidden path.
+    """Whether a visible name leads where the session cannot see: a
+    link the walk follows names a hidden path.
 
-    Every name is judged as the walk meets it, before a later ``..``
-    takes it back, so a link whose stored target spells a hidden
-    directory (``/data/secret/../pub``) leads there too: its listing
-    row, ``readlink`` and ``ls -l`` would print the hidden name. A link
-    that leads nowhere (dangling, or a loop) leads nowhere hidden.
+    The walk judges what a link brings in, not the typed path, which
+    the caller judges whole (a carve-out keeps its hidden parents
+    traversable): each link's own path, every name a stored target
+    spells before a later ``..`` takes it back (``/data/secret/../pub``
+    still prints ``secret``), and the place the walk lands. Such a
+    link is as hidden as its target, since its listing row,
+    ``readlink`` and ``ls -l`` would print the hidden name; a link that
+    leads nowhere (dangling, or a loop) leads nowhere hidden.
 
     Args:
         vis (Visibility | None): the session's visibility, None for an
@@ -467,31 +470,34 @@ def leads_hidden(
     """
     if vis is None or not links:
         return False
-    pending = list(reversed(virtual.split("/")))
+    pending = [p for p in reversed(virtual.split("/")) if p not in ("", ".")]
     walked: list[str] = []
     hops = 0
     while pending:
         part = pending.pop()
-        if part in ("", "."):
-            continue
         if part == "..":
             if walked:
                 walked.pop()
             continue
         name = "/" + "/".join([*walked, part])
-        if not path_visible(vis, name):
-            return True
         target = links.get(name)
         if target is None:
+            if hops and pending and pending[-1] == "..":
+                if not path_visible(vis, name):
+                    return True
             walked.append(part)
             continue
+        if not path_visible(vis, name):
+            return True
         hops += 1
         if hops > MAX_SYMLINK_HOPS:
             return False
         if target.startswith("/"):
             walked.clear()
-        pending.extend(reversed(target.split("/")))
-    return False
+        pending.extend(
+            p for p in reversed(target.split("/")) if p not in ("", ".")
+        )
+    return hops > 0 and not path_visible(vis, "/" + "/".join(walked))
 
 
 def hidden_under(vis: Visibility | None, virtual: str) -> bool:
