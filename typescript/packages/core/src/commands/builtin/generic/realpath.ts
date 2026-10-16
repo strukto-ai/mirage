@@ -25,6 +25,7 @@ import { parent } from '../../../utils/path.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { dispatchStat, linkTarget } from '../utils/paths.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { linksOf } from '../utils/links.ts'
 
 const MODES: Record<string, string> = { canonicalize_existing: 'e', canonicalize_missing: 'm' }
 const LINKS: Record<string, string> = { logical: 'L', physical: 'P', strip: 's', no_symlinks: 's' }
@@ -235,8 +236,8 @@ export async function realpathGeneric(
     paths,
     pathStat,
     opts.cwd,
-    linkTarget(opts.ns?.links),
+    linkTarget(linksOf(opts)),
     parseFlags(opts.flags),
-    opts.ns?.visibility ?? null,
+    opts.vfs?.vis() ?? null,
   )
 }

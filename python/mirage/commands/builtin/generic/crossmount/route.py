@@ -42,7 +42,8 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import CheckFn, PathSpec
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import FollowOperands, SessionView
+from mirage.workspace.files import Files
 
 
 async def handle_cross_mount(
@@ -54,12 +55,13 @@ async def handle_cross_mount(
     run_single: RunSingle,
     stdin: ByteSource | None = None,
     storage_key: Callable[[PathSpec], str] | None = None,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     session_view: SessionView | None = None,
     cwd: str = "/",
     argv: tuple[str, ...] = (),
     aggregate: AggregateFn | None = None,
     check_unlink: CheckFn | None = None,
+    follow: FollowOperands | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -88,7 +90,7 @@ async def handle_cross_mount(
             identity (RELAY's transfer commands).
         check_unlink (CheckFn | None): Refuses a move's source whose
             mount cannot condition the delete, before anything is copied.
-        ns (NamespaceView | None): Name-plane facts for the RELAY
+        vfs (Files | None): Name-plane facts for the RELAY
             generics that render them (ls).
         session_view (SessionView | None): The session view, for
             the RELAY generic that renders the session's profile (ls).
@@ -98,6 +100,8 @@ async def handle_cross_mount(
         aggregate (AggregateFn | None): The reducer every operand's mount
             registered for a custom command, which then runs once per
             operand and reduces the outputs.
+        follow (FollowOperands | None): The line's operand resolution,
+            which a walk through the dispatcher's globs take.
     """
     native = run_single
     input_source = resolve_source(stdin)
@@ -134,7 +138,7 @@ async def handle_cross_mount(
                 dispatch,
                 run_single,
                 cwd,
-                ns,
+                vfs,
                 input_source,
             )
         if cmd_name == Cmd.DU:
@@ -145,8 +149,9 @@ async def handle_cross_mount(
                 dispatch,
                 run_single,
                 cwd,
-                ns,
+                vfs,
                 input_source,
+                follow=follow,
             )
         strategy = strategy_for(cmd_name)
         if strategy is Strategy.RELAY:
@@ -158,7 +163,7 @@ async def handle_cross_mount(
                 dispatch,
                 run_single,
                 storage_key,
-                ns,
+                vfs,
                 session_view,
                 stdin,
                 cwd,

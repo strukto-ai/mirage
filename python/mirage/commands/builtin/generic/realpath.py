@@ -17,6 +17,8 @@ from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec, StatFn, Visibility
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
+from mirage.commands.builtin.utils.links import links_of
+from mirage.context import session_visibility
 
 _MODES = {"canonicalize_existing": "e", "canonicalize_missing": "m"}
 _LINKS = {"logical": "L", "physical": "P", "strip": "s", "no_symlinks": "s"}
@@ -287,7 +289,7 @@ async def realpath_generic(
             else stat
         ),
         cwd=opts.cwd.virtual,
-        readlink=link_target(opts.ns.links if opts.ns is not None else None),
+        readlink=link_target(links_of(opts)),
         flags=parse_flags(opts.flags),
-        visibility=opts.ns.visibility if opts.ns is not None else None,
+        visibility=session_visibility(),
     )

@@ -46,6 +46,7 @@ from mirage.utils.stat_view import (
     size_unknown,
 )
 from mirage.view.types import LinkView, MountView, StatPath
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 _STR_DIRECTIVES = frozenset("nNF")
 
@@ -774,9 +775,9 @@ async def stat_generic(
         c=parsed.format,
         f=parsed.file_system,
         L=parsed.deref,
-        links=opts.ns.links if opts.ns is not None else None,
+        links=links_of(opts),
         stat_path=opts.stat_path,
-        mounts=opts.ns.mounts if opts.ns is not None else None,
+        mounts=mounts_of(opts),
         identity=identity_of(opts),
         statfs=statfs,
     )

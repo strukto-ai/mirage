@@ -25,21 +25,25 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     Operation,
     bound_op,
-    overlaid_stat,
     require_op,
 )
-from mirage.commands.builtin.utils.links import serves, typed_link
+from mirage.commands.builtin.utils.links import (
+    links_of,
+    mounts_of,
+    serves,
+    typed_link,
+)
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.context import session_visibility
 from mirage.core.generic.find import walk_find
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import NativeCopy, PathSpec, PrimitiveCopy
 from mirage.utils.key_prefix import rekey
 from mirage.vfs.types import OperationFn
 from mirage.view.namespace_view import paths_scoped
-from mirage.view.types import StatOverlay
 
 
 async def _walk_find(
@@ -70,30 +74,6 @@ def _make_find(
     return partial(_walk_find, readdir, stat, index)
 
 
-def overlayable_stat(
-    ops: CommandIO,
-    accessor: Accessor,
-    index: IndexCacheStore,
-    stat_overlay: StatOverlay | None,
-) -> OperationFn:
-    """The backend stat, merged with the namespace attr overlay if any.
-
-    cp/mv freshness checks (``-u``) must see touch/chmod overlay state,
-    exactly like ls and stat rendering.
-
-    Args:
-        ops (CommandIO): Backend command IO facade.
-        accessor (Accessor): Backend handle.
-        index (IndexCacheStore): Cache index threaded through.
-        stat_overlay (StatOverlay | None): Namespace merge, or None.
-    """
-    if stat_overlay is None:
-        return bound_op(ops.stat, accessor, index)
-    return partial(
-        overlaid_stat, partial(ops.stat, accessor), stat_overlay, index=index
-    )
-
-
 async def _write(
     op: OperationFn, accessor: Accessor, path: PathSpec, data: bytes = b""
 ) -> None:
@@ -115,7 +95,7 @@ async def cp(
     # dispatcher declines one whose tree the caller's view restricts; cp
     # takes the entry-by-entry walk up front there, which is where GNU's
     # per-entry refusals are worded.
-    if paths_scoped(opts.ns, paths, opts.mount_prefix):
+    if paths_scoped(paths, opts.mount_prefix):
         ops = replace(ops, copy=None, dir_copy=None)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     dir_copy = partial(ops.dir_copy, accessor) if ops.dir_copy else None
@@ -152,13 +132,12 @@ async def cp(
             dir_copy=dir_copy,
             mkdir=mkdir,
         )
-    overlay = opts.ns.stat_overlay if opts.ns is not None else None
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     cwd = opts.cwd.virtual if opts.cwd is not None else "/"
     return await generic_cp(
         paths,
         strategy=strategy,
-        stat=overlayable_stat(ops, accessor, opts.index, overlay),
+        stat=bound_op(ops.stat, accessor, opts.index),
         flags=parsed,
         readdir=bound_op(ops.readdir, accessor, opts.index),
         link_at=(
@@ -169,10 +148,10 @@ async def cp(
                 links,
                 opts.dispatch,
                 cwd,
-                opts.ns.visibility if opts.ns is not None else None,
+                session_visibility(),
                 partial(
                     serves,
-                    opts.ns.mounts if opts.ns is not None else None,
+                    mounts_of(opts),
                     opts.mount_prefix,
                 ),
             )

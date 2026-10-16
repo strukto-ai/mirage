@@ -14,10 +14,11 @@
 
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
-import { leadsHidden, pathVisible } from '../utils/hidden.ts'
+import { hiddenUnder, leadsHidden, pathVisible } from '../utils/hidden.ts'
+import { getAdmission, sessionVisibility } from '../context/session_context.ts'
 import { eloop } from '../errors/fs.ts'
 import { CycleError } from '../utils/path.ts'
-import type { LinkView, NamespaceLinks, NamespaceView } from './types.ts'
+import type { LinkView, NamespaceLinks } from './types.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
 /**
@@ -198,21 +199,18 @@ export function namespaceStat(
  * checked one.
  *
  * Per operand, not per session: a hidden `.env` under `/repo` must not
- * force `find` on `/s3` off its native op. `ns` is the command's
- * namespace view, whose `scoped` answers per path (none judges
- * nothing); `prefix` is the mount root, judged in place of a glob
- * operand.
+ * force `find` on `/s3` off its native op. The hides are the running
+ * session's and the rules the running command's gate; `prefix` is the
+ * mount root, judged in place of a glob operand. Mirrors Python's
+ * paths_scoped.
  */
-export function pathsScoped(
-  ns: NamespaceView | undefined,
-  paths: readonly PathSpec[],
-  prefix = '',
-): boolean {
-  const scoped = ns?.scoped
-  return (
-    scoped !== undefined &&
-    paths.some((path) => scoped(path.pattern !== null ? prefix || '/' : path.virtual))
-  )
+export function pathsScoped(paths: readonly PathSpec[], prefix = ''): boolean {
+  const vis = sessionVisibility()
+  const gate = getAdmission()
+  return paths.some((path) => {
+    const virtual = path.pattern !== null ? prefix || '/' : path.virtual
+    return hiddenUnder(vis, virtual) || (gate?.scopes(virtual) ?? false)
+  })
 }
 
 /**

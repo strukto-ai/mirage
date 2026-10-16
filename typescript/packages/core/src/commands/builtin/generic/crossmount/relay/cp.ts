@@ -20,10 +20,12 @@ import { cpGeneric, parseFlags } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { flatten, readBytesOp, readdirOp, relayCopy, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import type { LinkView, MountView, NamespaceView } from '../../../../../view/types.ts'
+import type { LinkView, MountView } from '../../../../../view/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
 import { rstripSlash } from '../../../../../utils/slash.ts'
+import type { Files } from '../../../../../workspace/files.ts'
+import { linkView, mountView } from '../../../utils/links.ts'
 
 // List a directory for cp -x: a mount root below the operands is empty, so
 // the copy makes the mount point and reads nothing on the other filesystem,
@@ -66,7 +68,7 @@ export async function runCp(
   storageKey?: (path: PathSpec) => string,
   // The namespace's links, which a copy that does not follow them recreates
   // by name.
-  ns?: NamespaceView,
+  vfs?: Files,
   // The working directory a typed link source resolves against.
   cwd = '/',
   // Where -i reads its answers.
@@ -76,12 +78,13 @@ export async function runCp(
   const stat = statOp(dispatch)
   const readBytes = readBytesOp(dispatch)
   const fl = new FlagView(flagKwargs, specOf('cp'))
-  const mounts = fl.asBool('one_file_system') ? ns?.mounts : undefined
+  const mounts = fl.asBool('one_file_system') ? mountView(vfs) : undefined
   const starts = new Set(scopes.map((s) => s.virtual))
   const relayed = readdirOp(dispatch)
   const readdir: typeof relayed =
     mounts === undefined ? relayed : (p) => ownFilesystem(relayed, mounts, starts, p)
-  const nsLinks = ns?.links
+  const nsLinks = linkView(vfs)
+  const vis = vfs?.vis() ?? null
   const links: LinkView | undefined =
     mounts === undefined || nsLinks === undefined
       ? nsLinks
@@ -111,7 +114,7 @@ export async function runCp(
           cwd,
           relay: strategy,
           relayStat: stat,
-          ...(ns?.visibility !== undefined ? { visibility: ns.visibility } : {}),
+          ...(vis === null ? {} : { visibility: vis }),
         },
     stdin,
     dispatch,

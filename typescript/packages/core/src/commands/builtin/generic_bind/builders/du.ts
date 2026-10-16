@@ -27,6 +27,7 @@ import type { CommandIO } from '../../../config.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { linksOf, mountsOf } from '../../utils/links.ts'
 
 /**
  * Entry allowance shared by every operand of one `du` invocation.
@@ -346,13 +347,13 @@ const du: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const budget = new WalkBudget(
     ops.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : ops.maxDuEntries,
-    opts.ns?.mounts,
+    mountsOf(opts),
   )
   const flags = new FlagView(opts.flags, specOf('du'))
-  const links = opts.ns?.links
+  const links = linksOf(opts)
   const follow =
     links !== undefined && flags.typedOrder('L', 'P').at(-1) === 'L'
-      ? new Dereference(links, flags.asBool('one_file_system') ? (opts.ns?.mounts ?? null) : null)
+      ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(opts) ?? null) : null)
       : null
   const computeSize: ComputeSize = (p) => walkSize(ops, accessor, idx, budget, follow, p)
   const computeEntries: ComputeEntries = (p) => walkEntries(ops, accessor, idx, budget, follow, p)

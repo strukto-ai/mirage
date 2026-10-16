@@ -524,6 +524,14 @@ export class MountRegistry {
     return this.visibleMounts().find((m) => m.prefix === owner) ?? null
   }
 
+  /** What the `Files` facade knows of the mount serving a path, or null when
+   * none does. Mirrors Python's mount_rows. */
+  mountOwner(path: string): { prefix: string; kind: string; maxDuEntries: number | null } | null {
+    const mount = this.tryMountFor(path)
+    if (mount === null) return null
+    return { prefix: mount.prefix, kind: mount.vfs.name, maxDuEntries: mount.vfs.maxDuEntries }
+  }
+
   visibleMounts(): MountEntry[] {
     return this.mountList.filter((m) => m.visible === null || m.visible())
   }

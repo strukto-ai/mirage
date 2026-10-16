@@ -44,6 +44,7 @@ from mirage.commands.builtin.utils.limit import (
     run_with_timeout,
     with_pull_timeout,
 )
+from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
 from mirage.commands.config import (
     Command,
@@ -1092,7 +1093,7 @@ class MountEntry:
             exec_path_allowed=context.exec_path_allowed,
             runtime=context.runtime,
             runtime_unavailable=context.runtime_unavailable,
-            ns=context.ns,
+            follow_operands=context.follow_operands,
             stat_path=context.stat_path,
             readdir_path=context.readdir_path,
             session_view=context.session_view,
@@ -1116,7 +1117,7 @@ class MountEntry:
             context (ExecContext): the invocation's execution context.
         """
         outer = current_caller()
-        links = context.ns.links if context.ns is not None else None
+        links = link_view(context.vfs)
         token = bind_caller(
             dataclasses.replace(
                 self._on_mount(outer),

@@ -16,9 +16,11 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Accessor } from '../../../../accessor/base.ts'
 import { RAMIndexCacheStore } from '../../../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import { materialize } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import { Files } from '../../../../workspace/files.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { eacces, enoent, walkDeclined } from '../../../../errors/fs.ts'
+import { eacces, enoent, walkDeclined, walkRefusal } from '../../../../errors/fs.ts'
 import type { CommandIO } from '../../../config.ts'
 import { generic } from '../factory.ts'
 import { BUILDER } from './rm.ts'
@@ -136,7 +138,11 @@ it.each([
 ] as const)(
   'rm handles a refused operand under -f=%s (%s) and continues',
   async (force, refusal, raw, code, err) => {
-    const stat = vi.fn(() => Promise.resolve(new FileStat({ name: 'ok', type: FileType.FILE })))
+    const stat = vi.fn((_accessor: unknown, path: PathSpec) =>
+      path.walkError !== null
+        ? Promise.reject(walkRefusal(path))
+        : Promise.resolve(new FileStat({ name: 'ok', type: FileType.FILE })),
+    )
     const unlink = vi.fn(() => Promise.resolve())
     const io: CommandIO = {
       readdir: () => Promise.resolve([]),
@@ -168,7 +174,7 @@ it.each([
     await materialize(result?.[0] ?? null)
     expect(result?.[1].exitCode).toBe(code)
     expect(new TextDecoder().decode(await materialize(result?.[1].stderr ?? null))).toBe(err)
-    expect(stat).toHaveBeenCalledTimes(1)
+    expect(stat).toHaveBeenCalledTimes(2)
     expect(unlink.mock.calls).toHaveLength(1)
   },
 )
@@ -196,21 +202,16 @@ it('rm -r names a mount below and fails', async () => {
     rmR: (_a, path) => Promise.reject(walkDeclined('s3', 'rm_r', path)),
     isMounted: () => true,
   }
-  const roots = ['/data/inner']
+  const dispatchNothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
   const command = generic('rm')
   const result = await command.fn({} as Accessor, [PathSpec.fromStrPath('/data')], [], {
     flags: { r: true },
     stdin: null,
     cwd: '/',
     io,
-    ns: {
-      mounts: {
-        descendants: () => roots,
-        visibleDescendants: () => roots,
-        isRoot: (path) => roots.includes(path),
-        rootOf: () => '/data',
-      },
-    },
+    vfs: new Files(dispatchNothing, null, null, () => null, {
+      prefixes: () => ['/data/', '/data/inner/'],
+    }),
   })
   await materialize(result?.[0] ?? null)
   expect(result?.[1].exitCode).toBe(1)

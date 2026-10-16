@@ -20,6 +20,7 @@ import { LINE_EXECUTOR } from './mixin.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import type { RunArgs, RunResult } from './types.ts'
 import { RuntimeFiles } from './files.ts'
+import { linkView, mountView } from '../commands/builtin/utils/links.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
@@ -167,7 +168,9 @@ describe('execution bindings', () => {
       ws.createSession('agent', { profile: { paths: { hide: ['/secret'] } } })
       const context = ws.runtimeContext('agent'),
         other = ws.runtimeContext()
-      expect(required(context.ns.mounts).visibleDescendants('/')).not.toContain('/secret/')
+      expect(required(mountView(context.vfs ?? undefined)).visibleDescendants('/')).not.toContain(
+        '/secret',
+      )
       await expect(context.dispatch('read', '/secret/a')).rejects.toThrow()
       expect(dec.decode((await other.dispatch('read', '/secret/a')) as Uint8Array)).toBe(
         'private\n',
@@ -201,7 +204,7 @@ describe('execution bindings', () => {
       await ws.shell('echo shared > /data/a; chmod 600 /data/a')
       const context = ws.runtimeContext()
       await ws.shell('ln -s /data/a /data/link')
-      expect(required(context.ns.links).resolve('/data/link')).toBe('/data/a')
+      expect(required(linkView(context.vfs ?? undefined)).resolve('/data/link')).toBe('/data/a')
       ws.addMount('/data/nested', new RAMVFS(), MountMode.EXEC)
       expect(context.resolver.ownerOf('/data/nested/a')).toBe('/data/nested/')
       const vfs = new RuntimeFiles(context.dispatch, context.resolver)

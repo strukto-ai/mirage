@@ -56,7 +56,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.types import PathSpec, Producer
-from mirage.view.types import NamespaceView, StatPath
+from mirage.view.types import StatPath
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.links.links import operand_follow
 from mirage.workspace.executor.command.cli import (
@@ -114,7 +114,6 @@ from mirage.workspace.lookup.constants import EXEC_WRAPPERS
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_stat
-from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.mount.storage import make_check_unlink, make_storage_key
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
@@ -147,7 +146,7 @@ async def _finish_find(
     registry: MountRegistry,
     context: EvaluationContext,
     execute_fn: ExecuteLine | None,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     stat_path: StatPath | None,
     dispatch: DispatchFn,
     stdin: ByteSource | None = None,
@@ -169,7 +168,7 @@ async def _finish_find(
         registry (MountRegistry): used to route per-match dispatch.
         context (EvaluationContext): the session the line runs under.
         execute_fn (ExecuteLine | None): runs an ``-exec`` line.
-        ns (NamespaceView | None): the name plane's facts.
+        vfs (Files | None): the name plane's facts.
         stat_path (StatPath | None): dispatcher stat.
         dispatch (DispatchFn): the op dispatcher every matched row is
             deleted through.
@@ -187,7 +186,7 @@ async def _finish_find(
         session.cwd,
         execute_fn=execute_fn,
         session_id=session.session_id,
-        ns=ns,
+        vfs=vfs,
         stat_path=stat_path,
         dispatch=dispatch,
         identity=identity_from(
@@ -291,6 +290,12 @@ async def handle_command(
             return await unbound(name, path, caller=caller, **kwargs)
 
         dispatch = made_by_command
+    files = Files(
+        registry.mount_rows(),
+        dispatch,
+        links=namespace,
+        visibility=lambda _session: session.visibility,
+    )
 
     # Installed CLIs: dispatch by name, never by operand path. Sits
     # below functions (a user can wrap an installed CLI, bash-style)
@@ -315,11 +320,7 @@ async def handle_command(
                 ),
                 command_limits=registry.command_limits,
                 entries=registry.runtime_entries,
-                vfs=(
-                    Files(registry.mount_rows(), dispatch, links=namespace)
-                    if dispatch is not None
-                    else None
-                ),
+                vfs=files,
                 session_view=session_view(
                     session,
                     registry.policies,
@@ -594,9 +595,6 @@ async def handle_command(
             execute_fn=execute_fn,
             follow=follow,
         )
-        cross_ns = namespace_view_of(
-            registry, namespace, dispatch, session, follow
-        )
         # A per-operand native run is single-mount by construction, so a
         # traversal operand holding nested mounts has to fan out inside
         # it, exactly as the same operand would on a line of its own.
@@ -610,13 +608,14 @@ async def handle_command(
             run_single,
             registry,
             session.cwd,
-            cross_ns,
+            files,
             session_view(
                 session,
                 registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
             dispatch=dispatch,
+            follow=follow,
         )
         stdout, io = await handle_cross_mount(
             cmd_name,
@@ -627,7 +626,7 @@ async def handle_command(
             run_operand,
             stdin=stdin,
             storage_key=make_storage_key(registry),
-            ns=cross_ns,
+            vfs=files,
             session_view=session_view(
                 session,
                 registry.policies,
@@ -637,6 +636,7 @@ async def handle_command(
             argv=spelled_words(parts[1:]),
             aggregate=aggregate_for(cmd_name, cross_scopes, registry),
             check_unlink=make_check_unlink(registry),
+            follow=follow,
         )
         if cmd_name == "find":
             stdout = await _finish_find(
@@ -646,7 +646,7 @@ async def handle_command(
                 registry,
                 context,
                 execute_fn,
-                cross_ns,
+                files,
                 cross_stat,
                 dispatch,
                 stdin=stdin,
@@ -762,9 +762,6 @@ async def handle_command(
         else b""
     )
 
-    single_ns = namespace_view_of(
-        registry, namespace, dispatch, session, follow
-    )
     single_stat = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None
@@ -785,7 +782,7 @@ async def handle_command(
             session.cwd,
             cmd_str,
             stdin,
-            ns=single_ns,
+            vfs=files,
             session_view=session_view(
                 session,
                 registry.policies,
@@ -802,6 +799,7 @@ async def handle_command(
                 argv=spelled_words(parts[1:]),
                 execute_fn=execute_fn,
             ),
+            follow=follow,
         )
         if cmd_name == "find":
             stdout = await _finish_find(
@@ -811,7 +809,7 @@ async def handle_command(
                 registry,
                 context,
                 execute_fn,
-                single_ns,
+                files,
                 single_stat,
                 dispatch,
                 stdin=stdin,
@@ -849,7 +847,7 @@ async def handle_command(
             registry,
             context,
             execute_fn,
-            single_ns,
+            files,
             single_stat,
             dispatch,
             stdin=stdin,

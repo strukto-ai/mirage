@@ -29,6 +29,7 @@ from mirage.view.types import (
     ReaddirPath,
     StatPath,
 )
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 logger = logging.getLogger(__name__)
 
@@ -470,7 +471,7 @@ async def tree_generic(
         index=opts.index,
         stat_path=opts.stat_path,
         readdir_path=opts.readdir_path,
-        mounts=opts.ns.mounts if opts.ns is not None else None,
+        mounts=mounts_of(opts),
         one_file_system=parsed.one_file_system,
-        links=opts.ns.links if opts.ns is not None else None,
+        links=links_of(opts),
     )

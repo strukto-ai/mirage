@@ -43,6 +43,7 @@ from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 from mirage.utils.path import CycleError, norm, parent, walk_nodes
 from mirage.vfs.types import OperationFn
 from mirage.view.types import LinkView
+from mirage.commands.builtin.utils.links import links_of
 
 
 async def mkdir(
@@ -84,7 +85,7 @@ async def mkdir(
     paths = await ops.resolve_glob(accessor, paths, opts.index)
     lines: list[str] = []
     errors: list[str] = []
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     for path in paths:
         taken, refusal = await mkdir_link_refusal(path, links, parents=parents)
         if taken:

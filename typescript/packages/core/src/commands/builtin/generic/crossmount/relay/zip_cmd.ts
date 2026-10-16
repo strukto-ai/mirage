@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
-import type { NamespaceView } from '../../../../../view/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { relayWalkOf } from '../../../generic_bind/archive_io.ts'
 import { zipGeneric } from '../../zip_cmd.ts'
 import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
+import type { Files } from '../../../../../workspace/files.ts'
+import { owedNames } from '../../../utils/links.ts'
 
 /**
  * Run a zip whose archive and operands span mounts.
@@ -34,18 +35,18 @@ export async function runZip(
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   // The symlinks and mount boundaries the scan merges into each walk.
-  ns?: NamespaceView,
+  vfs?: Files,
 ): Promise<CrossResult> {
   const result = await zipGeneric(
     flatten(scopes),
-    { ...crossOpts(flagKwargs), ...(ns !== undefined ? { ns } : {}) },
+    { ...crossOpts(flagKwargs), ...(vfs !== undefined ? { vfs } : {}) },
     {
       stream: streamOp(dispatch),
       write: async (p, data) => {
         await dispatch('write', p, [data])
       },
       stat: statOp(dispatch),
-      walk: relayWalkOf(dispatch, ns?.childMounts, 'zip'),
+      walk: relayWalkOf(dispatch, (dir: string) => owedNames(vfs, dir), 'zip'),
     },
   )
   return result ?? [null, new IOResult()]

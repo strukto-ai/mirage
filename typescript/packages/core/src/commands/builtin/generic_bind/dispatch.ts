@@ -21,19 +21,20 @@ import { FileType, PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { currentCaller, runWithCaller, type Caller } from '../../../context/session_context.ts'
-import type { MountView, NamespaceView } from '../../../view/types.ts'
+import type { FollowOperands, MountView } from '../../../view/types.ts'
+import type { Files } from '../../../workspace/files.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { dispatchedSlots, readAhead, type GenericCommand } from './adapter.ts'
+import { mountView } from '../utils/links.ts'
 import { dispatchStat } from '../utils/paths.ts'
 import type { CommandIO } from '../../config.ts'
 
 /** Use the workspace's policy-checked operations as a generic IO adapter.
- * The dispatcher's own answers are what a mount's table answers once its links
- * are stamped on (`withLinks`): a listing names the links in a directory and a
- * stat of one is the link's own row. With `bound` (a walk kept on one
+ * The dispatcher's own answers are what a mount's table answers: a listing
+ * names the links in a directory and a stat of one is the link's own row. With `bound` (a walk kept on one
  * filesystem, `du -x`) a listing also leaves out the roots of the mounts
  * below it, which the walk must neither list nor stat. Mirrors Python's
  * dispatch_io. */
@@ -90,14 +91,11 @@ export async function* callerStream(
   yield* chunks(data)
 }
 
-function noneBelow(): string[] {
-  return []
-}
-
 /** Run the existing builder once over the full virtual namespace. Mirrors
  * Python's run_dispatch. The dispatcher lists the mounts below a directory
- * itself, so `ns` offers no descendant to avoid; where each mount begins
- * stays for `--one-file-system`. The output is read before this returns,
+ * itself, so no descendant is left to avoid; where each mount begins stays
+ * for `--one-file-system`, and each mount's du budget for a walk. `follow`
+ * is the line's operand resolution, which its globs' matches take too. The output is read before this returns,
  * inside the running command: a `fresh` mount trusts only the listings that
  * command made, so a lazy stream read after it ends would be served the
  * previous command's. A builder that `streams` only reads, and each read opens
@@ -109,19 +107,13 @@ export async function runDispatch(
   bag: Record<string, FlagValue>,
   dispatch: DispatchFn,
   cwd: string,
-  ns?: NamespaceView,
+  vfs?: Files,
   stdin: ByteSource | null = null,
   signal?: AbortSignal,
   argv: readonly string[] = [],
+  follow?: FollowOperands,
 ): Promise<[ByteSource | null, IOResult]> {
   const bounded = builder.name === 'du' && new FlagView(bag, specOf('du')).asBool('one_file_system')
-  const view =
-    ns?.mounts === undefined || bounded
-      ? ns
-      : {
-          ...ns,
-          mounts: { ...ns.mounts, descendants: noneBelow, visibleDescendants: noneBelow },
-        }
   // The dispatcher keys every path by its whole virtual path, a path
   // option's value as well as an operand.
   const whole = (p: PathSpec): PathSpec =>
@@ -142,9 +134,9 @@ export async function runDispatch(
     else if (Array.isArray(value))
       rebased[key] = value.map((item) => (item instanceof PathSpec ? whole(item) : item))
   }
-  const io = dispatchIO(dispatch, bounded ? ns?.mounts : undefined, paths.map(whole))
+  const io = dispatchIO(dispatch, bounded ? mountView(vfs) : undefined, paths.map(whole))
   const result = await builder.fn(
-    ns?.followOperands === undefined ? io : { ...io, globFollow: ns.followOperands },
+    follow === undefined ? io : { ...io, globFollow: follow },
     new NOOPAccessor(),
     paths.map(whole),
     [...texts],
@@ -156,7 +148,8 @@ export async function runDispatch(
       dispatch,
       argv,
       ...(signal === undefined ? {} : { signal }),
-      ...(view === undefined ? {} : { ns: view }),
+      ...(vfs === undefined ? {} : { vfs }),
+      ...(follow === undefined ? {} : { followOperands: follow }),
     },
   )
   if (result === null) return [null, new IOResult()]

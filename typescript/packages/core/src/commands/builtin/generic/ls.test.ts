@@ -15,7 +15,9 @@
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { MountView } from '../../../view/types.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { IOResult } from '../../../io/types.ts'
+import { Files } from '../../../workspace/files.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
 import {
@@ -59,7 +61,6 @@ function opts(flags: Record<string, string | boolean | number | string[]>): Comm
     stdin: null,
     flags,
     cwd: '/',
-    vfs: null,
   } as unknown as CommandOpts
 }
 
@@ -171,27 +172,22 @@ describe('structure-only directories', () => {
     err.code = 'ENOENT'
     return Promise.reject(err)
   }
-  // Only `isRoot` is exercised: it is what tells a nested mount's root
-  // (whose listing belongs to another backend) from a directory the
-  // namespace merely owes children, which -R must still descend.
-  const mountsAt = (...roots: string[]): MountView => ({
-    descendants: (p) => roots.filter((r) => r.startsWith(`${rstripSlash(p)}/`)),
-    visibleDescendants: (p) => roots.filter((r) => r.startsWith(`${rstripSlash(p)}/`)),
-    isRoot: (p) => roots.includes(rstripSlash(p)),
-    rootOf: () => '/',
-  })
+  // Files whose mount table holds the given mounts: a nested mount's root
+  // (whose listing belongs to another backend) stops -R, while a directory
+  // the namespace merely owes children is still descended.
+  const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
+  const owing = (...prefixes: string[]): Files =>
+    new Files(nothing, null, null, () => null, { prefixes: () => prefixes })
 
   // A structure chain (a link's ancestors) continues below the first
   // level, so -R descends it: only a mount root stops the walk.
   it('-R descends structure that continues below', async () => {
-    const chain = (parent: string): string[] =>
-      parent === '/ghost' ? ['deep'] : parent === '/ghost/deep' ? ['lnk'] : []
     const result = await lsGeneric(
       [PathSpec.fromStrPath('/ghost')],
       {
         flags: { recursive: true },
         cwd: '/',
-        ns: { childMounts: chain, mounts: mountsAt('/ghost/deep/lnk') },
+        vfs: owing('/ghost/deep/lnk/'),
       } as never,
       missing,
       missing,
@@ -208,7 +204,7 @@ describe('structure-only directories', () => {
       {
         flags: { classify: true },
         cwd: '/',
-        ns: { childMounts: (parent: string) => (parent === '/ghost' ? ['deep'] : []) },
+        vfs: owing('/ghost/deep/'),
       } as never,
       missing,
       missing,

@@ -62,6 +62,7 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 import { contentSize } from '../../../utils/stat_view.ts'
 import { escapeName } from '../../../utils/quote.ts'
 import { charWidth } from '../../../utils/width.ts'
+import { linksOf, mountsOf, owedNames } from '../utils/links.ts'
 
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -1180,7 +1181,7 @@ export async function lsGeneric(
     followArgs,
   } = flags
   const listDirItself = flags.listDir
-  const links = opts.ns?.links ?? null
+  const links = linksOf(opts) ?? null
   const identity = identityOf(opts)
   const render: RenderOpts = {
     long,
@@ -1208,7 +1209,7 @@ export async function lsGeneric(
         collected.push({ row: asOperand(await stat(p), p), href: p.virtual })
       } catch (err) {
         if (!isWalkError(err)) throw err
-        if (!isDotWalkError(err) && (opts.ns?.childMounts?.(p.virtual) ?? []).length > 0) {
+        if (!isDotWalkError(err) && owedNames(opts.vfs, p.virtual).length > 0) {
           // No backend serves it, but the namespace owes it children,
           // so the dispatcher stats it as a directory and -d must print the
           // same row.
@@ -1258,8 +1259,8 @@ export async function lsGeneric(
     links,
     deref,
     followArgs,
-    childMounts: opts.ns?.childMounts ?? null,
-    mounts: opts.ns?.mounts ?? null,
+    childMounts: opts.vfs === undefined ? null : (dir: string) => owedNames(opts.vfs, dir),
+    mounts: mountsOf(opts) ?? null,
     statPath: opts.statPath ?? null,
     statNeeded: statNeeded(flags),
   }

@@ -18,6 +18,7 @@ from collections.abc import Coroutine, Iterator
 from typing import Any, TypeVar
 
 from mirage.bridge.sync import run_async_from_sync
+from mirage.commands.builtin.utils.links import link_view
 from mirage.concurrency.limiter import ConcurrencyLimiter
 from mirage.errors.fs import einval, eloop, numbered
 from mirage.errors.types import OperationNotSupportedError
@@ -161,12 +162,12 @@ class RuntimeFiles:
         """
         if context is None:
             return None
-        links = context.ns.links
+        links = link_view(context.vfs)
         return cls(
             context.dispatch,
             asyncio.get_running_loop(),
             context.resolver,
-            None if links is None else links.resolve,
+            None if links is None else context.scope.wrap(links.resolve),
         )
 
     def kept(self, path: str, *, stored: bool, rendered: bool) -> Kept:

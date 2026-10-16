@@ -45,6 +45,7 @@ import { UsageError } from '../../errors.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
 import { argmatchLine, argmatchValidBlock, usageHint } from '../../spec/usage.ts'
 import { argmatch } from '../../spec/argmatch.ts'
+import { linksOf, mountsOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 // GNU grep with no pattern prints its synopsis and the help hint, exit 2
@@ -359,12 +360,12 @@ export async function grepGeneric(
   }
   const worker = new Worker()
   const prefix = mountPrefixOf(first.virtual, first.vfsPath)
-  const mounts = opts.ns?.mounts
+  const mounts = mountsOf(opts)
   const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, prefix)
   const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)
   // The walk meets links as entries: -r leaves them, -R reads what each one
   // leads to, and a directory it reaches again is a loop.
-  const follow = f.recursive && f.dereference === true ? (opts.ns?.links ?? null) : null
+  const follow = f.recursive && f.dereference === true ? (linksOf(opts) ?? null) : null
   const walkedSt = (p: string) => followedStat(st, follow, p)
   let failed = false
   const notices: Uint8Array[] = []

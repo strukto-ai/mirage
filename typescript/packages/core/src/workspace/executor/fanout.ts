@@ -25,7 +25,7 @@ import { CommandTimeoutError } from '../../errors/types.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
-import type { NamespaceView, SessionView } from '../../view/types.ts'
+import type { FollowOperands, SessionView } from '../../view/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -34,6 +34,7 @@ import { formatFsError } from '../../errors/render.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
+import type { Files } from '../files.ts'
 
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 
@@ -48,7 +49,8 @@ function ownPart(
   registry: MountRegistry,
   dispatch: DispatchFn,
   cwd: string,
-  ns: NamespaceView | undefined,
+  vfs: Files | undefined,
+  follow: FollowOperands | undefined,
 ): RunSingle {
   return async (cmdName, paths, texts, bag, opts) => {
     try {
@@ -64,9 +66,11 @@ function ownPart(
         bag,
         dispatch,
         cwd,
-        ns,
+        vfs,
         opts?.stdin ?? null,
         opts?.signal,
+        [],
+        follow,
       )
     }
     return runSingle(cmdName, paths, texts, bag, opts ?? {})
@@ -107,18 +111,21 @@ export async function fanOutTraversal(
   cwd: string,
   cmdStr: string,
   stdin: ByteSource | null,
-  ns?: NamespaceView,
+  vfs?: Files,
   sessionView?: SessionView,
   signal?: AbortSignal,
   dispatch?: DispatchFn,
   native?: RunSingle,
+  // The line's operand resolution, which a walk through the dispatcher's
+  // globs take.
+  follow?: FollowOperands,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   signal?.throwIfAborted()
   if (dispatch === undefined || native === undefined)
     throw new Error('traversal requires dispatcher and native execution')
   let stdout: ByteSource | null
   let io: IOResult
-  const part = ownPart(native, registry, dispatch, cwd, ns)
+  const part = ownPart(native, registry, dispatch, cwd, vfs, follow)
   try {
     if (cmdName === 'find') {
       ;[stdout, io] = await runFind(
@@ -128,9 +135,10 @@ export async function fanOutTraversal(
         dispatch,
         part,
         cwd,
-        ns,
+        vfs,
         stdin,
         signal,
+        follow,
       )
     } else if (cmdName === 'du') {
       ;[stdout, io] = await runDu(
@@ -140,10 +148,11 @@ export async function fanOutTraversal(
         dispatch,
         part,
         cwd,
-        ns,
+        vfs,
         stdin,
         signal,
         true,
+        follow,
       )
     } else {
       ;[stdout, io] = await handleCrossMount(
@@ -155,9 +164,13 @@ export async function fanOutTraversal(
         native,
         stdin,
         undefined,
-        ns,
+        vfs,
         sessionView,
         cwd,
+        [],
+        null,
+        undefined,
+        follow,
       )
     }
   } catch (err) {
@@ -182,7 +195,7 @@ export async function fanOutTraversal(
   // Only the mounts the walk can reach bound its output: a hidden one never
   // contributes a row, so its stricter limit must not apply.
   const prefixes = new Set([primaryMount.prefix])
-  const vis = ns?.visibility
+  const vis = vfs?.vis()
   for (const path of paths) {
     if (path.walkError !== null) continue
     for (const mount of registry.descendantMounts(path.virtual))
@@ -208,17 +221,20 @@ export function runWithFanout(
   runSingle: RunSingle,
   registry: MountRegistry,
   cwd: string,
-  ns: NamespaceView | undefined,
+  vfs: Files | undefined,
   sessionView?: SessionView,
   signal?: AbortSignal,
   dispatch?: DispatchFn,
+  // The line's operand resolution, which a walk through the dispatcher's
+  // globs take.
+  follow?: FollowOperands,
 ): RunSingle {
   return async (cmdName, paths, texts, flagKwargs, opts) => {
     const stdin = opts?.stdin ?? null
     if (!shouldFanOut(cmdName, paths, flagKwargs, registry)) {
       const run =
         TRAVERSAL_CMDS.has(cmdName) && dispatch !== undefined
-          ? ownPart(runSingle, registry, dispatch, cwd, ns)
+          ? ownPart(runSingle, registry, dispatch, cwd, vfs, follow)
           : runSingle
       return run(cmdName, paths, texts, flagKwargs, opts ?? {})
     }
@@ -241,11 +257,12 @@ export function runWithFanout(
       cwd,
       cmdName,
       stdin,
-      ns,
+      vfs,
       sessionView,
       signal,
       dispatch,
       runSingle,
+      follow,
     )
     return [stdout, io]
   }

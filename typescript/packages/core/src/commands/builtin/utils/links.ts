@@ -12,16 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandIO, CommandOpts } from '../../config.ts'
-import type { Accessor } from '../../../accessor/base.ts'
-import type { IndexCacheStore } from '../../../cache/index/store.ts'
+import type { CommandOpts } from '../../config.ts'
 import type { LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import type { FileStat } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
-import { CycleError, gnuBasename, resolvePath } from '../../../utils/path.ts'
+import { IOResult } from '../../../io/types.ts'
+import { pathVisible } from '../../../utils/hidden.ts'
+import { CycleError, posixNormpath, resolvePath } from '../../../utils/path.ts'
+import { normDir, ownerPrefix, rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
+import { namespaceNames } from '../../../view/namespace_view.ts'
+import type { Files } from '../../../workspace/files.ts'
+import { resolvePathStat } from './paths.ts'
 
 /**
  * Where a name stands as lstat reaches it: every link above its final name
@@ -39,24 +43,6 @@ export function linkLocation(links: LinkView, virtual: string): string {
   if (name === '') return links.resolve(virtual)
   const head = virtual.slice(0, cut)
   return `${links.resolve(head === '' ? '/' : head).replace(/\/+$/, '')}/${name}`
-}
-
-/**
- * The names the links owe a directory: each link standing in it, and each
- * directory holding one further down.
- *
- * No backend can list either, and the second may be one no backend serves at
- * all (a link made below a directory chain that holds no key), so these are the
- * names the dispatcher merges into its own listing, derived from the same
- * table. Mirrors Python's owed_names.
- */
-export function owedNames(links: LinkView, directory: string): string[] {
-  const base = directory.replace(/\/+$/, '') + '/'
-  const names = new Set<string>()
-  for (const [path] of links.subtree(base)) {
-    names.add(path.slice(base.length).split('/')[0] ?? '')
-  }
-  return [...names].sort(compareCodePoints)
 }
 
 /**
@@ -168,12 +154,6 @@ export class LinkResolver {
   }
 }
 
-// What a table miss is: the name is not there, or a component above it is
-// not a directory. Mirrors Python's _MISSES.
-function missed(err: unknown): boolean {
-  return isEnoent(err) || isEnotdir(err)
-}
-
 function orEloop(resolve: (virtual: string) => string, virtual: string): string {
   try {
     return resolve(virtual)
@@ -181,18 +161,6 @@ function orEloop(resolve: (virtual: string) => string, virtual: string): string 
     if (err instanceof CycleError) throw eloop(virtual)
     throw err
   }
-}
-
-function named(row: FileStat, virtual: string): FileStat {
-  const name = gnuBasename(virtual)
-  return row.name === name ? row : row.with({ name })
-}
-
-/** An entry the dispatcher listed under `where`, named under `base`. Mirrors
- * Python's _rebased. */
-function rebased(entry: string, where: string, base: string): string {
-  const root = where.replace(/\/+$/, '') + '/'
-  return `${base}/${entry.startsWith(root) ? entry.slice(root.length) : gnuBasename(entry)}`
 }
 
 /** Whether the mount at `prefix` is the one serving `virtual`; every path is
@@ -212,120 +180,125 @@ export function landingRoot(mounts: MountView, links: LinkView | null, virtual: 
   return mounts.rootOf(links !== null ? links.resolve(virtual) : virtual)
 }
 
-async function linkedStat<A extends Accessor>(
-  stat: CommandIO<A>['stat'],
-  links: LinkView,
-  dispatch: DispatchFn,
-  owns: (virtual: string) => boolean,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<FileStat> {
-  const here = path.virtual
-  const where = orEloop((virtual) => linkLocation(links, virtual), here)
-  const row = here.endsWith('/') ? null : links.statAt(where)
-  if (row !== null) return row
-  if (where.replace(/\/+$/, '') !== here.replace(/\/+$/, '') || !owns(where)) {
-    const [found] = await dispatch('stat', PathSpec.fromStrPath(where), [], { nofollow: true })
-    return named(found as FileStat, here)
+/**
+ * The symlink facts a walk goes by, read off the session's files, or
+ * undefined outside a workspace.
+ *
+ * Filtered by the hides of the session the files run as, as the dispatcher's
+ * own answers are: a hidden link, or one that leads where the session cannot
+ * see, has no row, no listing entry and no target. Resolving a hidden path
+ * leaves it as typed, for the dispatcher to refuse; a visible one resolves,
+ * so a walker judges where it lands. Mirrors Python's link_view.
+ */
+export function linkView(files: Files | undefined): LinkView | undefined {
+  const table = files?.links ?? null
+  if (files === undefined || table === null) return undefined
+  const dispatch: DispatchFn = async (op, path, args, kwargs) => [
+    await files.dispatch(op, path, args, kwargs),
+    new IOResult(),
+  ]
+  return {
+    statAt: (path: string) => (files.isVisible(path) ? table.linkStatAt(path) : null),
+    subtree: (directory: string) =>
+      table.linkStatsBelow(directory).filter(([path]) => files.isVisible(path)),
+    resolve: (path: string) =>
+      pathVisible(files.vis(), path) ? posixNormpath(table.follow(path)) : path,
+    exists: async (path: string) => {
+      try {
+        return (
+          (await resolvePathStat(dispatch, PathSpec.fromStrPath(path, undefined, '/'))) !== null
+        )
+      } catch {
+        return false
+      }
+    },
+    targetStat: async (path: string) => {
+      if (!files.isVisible(path)) return null
+      let target: string
+      try {
+        target = posixNormpath(table.follow(path))
+      } catch {
+        return null
+      }
+      try {
+        return await files.stat(target)
+      } catch (err) {
+        if (isEnoent(err) || isEnotdir(err)) return null
+        throw err
+      }
+    },
   }
-  try {
-    return await stat(accessor, path, index)
-  } catch (err) {
-    if (!missed(err) || owedNames(links, here).length === 0) throw err
-    console.debug(`${here}: a directory for the links below it: ${String(err)}`)
-    return new FileStat({ name: gnuBasename(here), type: FileType.DIRECTORY })
-  }
-}
-
-async function linkedReaddir<A extends Accessor>(
-  readdir: CommandIO<A>['readdir'],
-  links: LinkView,
-  dispatch: DispatchFn,
-  owns: (virtual: string) => boolean,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<string[]> {
-  const here = path.virtual.replace(/\/+$/, '') || '/'
-  const where = orEloop((virtual) => links.resolve(virtual), here)
-  const base = here.replace(/\/+$/, '')
-  if (where !== here || !owns(where)) {
-    const [listed] = await dispatch('readdir', PathSpec.fromStrPath(where))
-    return (listed as string[]).map((entry) => rebased(entry, where, base))
-  }
-  const owed = owedNames(links, here)
-  let entries: string[]
-  try {
-    entries = await readdir(accessor, path, index)
-  } catch (err) {
-    if (!missed(err) || owed.length === 0) throw err
-    console.debug(`${here}: listed for the links below it: ${String(err)}`)
-    entries = []
-  }
-  if (owed.length === 0) return entries
-  const present = new Set(entries.map((entry) => gnuBasename(rstripSlash(entry))))
-  return [...entries, ...owed.filter((n) => !present.has(n)).map((n) => `${base}/${n}`)]
-}
-
-async function linkedTree<A extends Accessor>(
-  readTree: NonNullable<CommandIO<A>['readTree']>,
-  links: LinkView,
-  accessor: A,
-  path: PathSpec,
-  index?: IndexCacheStore,
-): Promise<Map<string, FileStat> | null> {
-  const found = await readTree(accessor, path, index)
-  const base = path.virtual.replace(/\/+$/, '') + '/'
-  const rows = links.subtree(base)
-  if (found === null || rows.length === 0) return found
-  const merged = new Map(found)
-  for (const [key, row] of rows) merged.set(key.slice(base.length), row)
-  return merged
 }
 
 /**
- * `ops` whose stat, readdir and subtree read see the namespace's links, the
- * way the dispatcher's own do.
+ * Where the mount boundaries are, read off the session's files, or undefined
+ * outside a workspace.
  *
- * No backend stores a link, so a mount's table asked about a name a link
- * stands at answers ENOENT, its listing leaves the link out, and a name below a
- * link to a directory reaches nothing. Here the table answers once for every
- * command: `stat` is lstat (a link's own row, and the dispatcher's answer for a
- * name a link above it leads elsewhere), `readdir` names the links among the
- * backend's entries and lists a directory a link leads to through the
- * dispatcher, `readTree` carries the links under its root, and a directory that
- * holds only a link stats and lists as the dispatcher's does. What a command
- * does with a link, follow it, copy it or leave it, stays its own rule. `owns`
- * says whether this mount serves a path; one a link led to on another mount
- * goes to the dispatcher. Mirrors Python's with_links.
+ * Every mount below a path, hidden or not, is a boundary a backend's own walk
+ * stops at: a mount the session cannot see still shadows the parent
+ * backend's keys under its prefix. Only the visible ones are ever named. A
+ * walk through the dispatcher (`crossing`) descends into each mount itself,
+ * so it has no boundary to stop at: no mount below a path, and no mount
+ * root. Mirrors Python's mount_view.
  */
-export function withLinks<A extends Accessor>(
-  ops: CommandIO<A>,
-  links: LinkView | undefined,
-  dispatch: DispatchFn | undefined,
-  owns: (virtual: string) => boolean,
-): CommandIO<A> {
-  if (links === undefined || dispatch === undefined) return ops
-  const { stat, readdir, readTree } = ops
+export function mountView(files: Files | undefined, crossing = false): MountView | undefined {
+  if (files === undefined) return undefined
+  const below = (path: string): string[] => {
+    if (crossing) return []
+    const base = normDir(path)
+    return [...files.prefixes()]
+      .filter((prefix) => prefix !== base && prefix.startsWith(base))
+      .sort(compareCodePoints)
+      .map((prefix) => rstripSlash(prefix) || '/')
+  }
   return {
-    ...ops,
-    stat: (accessor, path, index) => linkedStat(stat, links, dispatch, owns, accessor, path, index),
-    readdir: (accessor, path, index) =>
-      linkedReaddir(readdir, links, dispatch, owns, accessor, path, index),
-    ...(readTree !== undefined
-      ? {
-          readTree: (accessor: A, path: PathSpec, index?: IndexCacheStore) =>
-            linkedTree(readTree, links, accessor, path, index),
-        }
-      : {}),
+    descendants: below,
+    visibleDescendants: (path: string) => {
+      const vis = files.vis()
+      return below(path).filter((root) => pathVisible(vis, root))
+    },
+    isRoot: (path: string) => !crossing && files.prefixes().includes(normDir(path)),
+    rootOf: (path: string) => ownerPrefix(files.prefixes(), path) ?? '/',
+    maxDuEntries: (path: string) => files.ownerOf(path)?.maxDuEntries ?? null,
   }
 }
 
-/** The link resolver an invocation carries: null when the namespace holds no
- * link, the fast path, or outside a workspace. Mirrors Python's link_resolver. */
+/**
+ * The names a directory holds only as namespace structure, as the session
+ * sees them: the mounts below it and its links, each by its first segment
+ * under the directory.
+ *
+ * No backend can list either, and the first may be one no backend serves at
+ * all (a link made below a directory chain that holds no key); these are the
+ * names the dispatcher merges into its own listing, from the same tables.
+ * Mirrors Python's owed_names.
+ */
+export function owedNames(files: Files | undefined, directory: string): string[] {
+  if (files === undefined) return []
+  return namespaceNames(files.vis(), files.prefixes(), files.links, directory)
+}
+
+/** The workspace's links as the command's session sees them, read off its
+ * files; undefined outside a workspace. Mirrors Python's links_of. */
+export function linksOf(opts: CommandOpts): LinkView | undefined {
+  return linkView(opts.vfs)
+}
+
+/**
+ * Where the mount boundaries are for the command's walk, read off its files;
+ * undefined outside a workspace. A run whose table is the dispatcher itself
+ * (a dispatcher and no mount `io`) walks across mounts: the dispatcher
+ * descends into every mount, so it has no boundary to stop at. Mirrors
+ * Python's mounts_of.
+ */
+export function mountsOf(opts: CommandOpts): MountView | undefined {
+  return mountView(opts.vfs, opts.io === undefined && opts.dispatch !== undefined)
+}
+
+/** The link resolver an invocation carries: null outside a workspace.
+ * Mirrors Python's link_resolver. */
 export function linkResolver(opts: CommandOpts): LinkResolver | null {
-  const links = opts.ns?.links
+  const links = linksOf(opts)
   if (links === undefined || opts.dispatch === undefined) return null
   return new LinkResolver(links, opts.dispatch, opts.cwd)
 }

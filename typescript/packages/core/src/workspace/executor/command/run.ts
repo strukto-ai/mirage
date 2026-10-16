@@ -23,7 +23,6 @@ import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { envSnapshot, sessionView } from '../../session/state.ts'
 import { pathReaddir, pathStat } from '../../mount/namespace/probe.ts'
 import { Files } from '../../files.ts'
-import { namespaceViewOf } from '../../mount/namespace/view.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { ownLimit } from '../../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../../runtime/base.ts'
@@ -233,26 +232,10 @@ export async function runOnMount(
     mount.commandLimits.get(cmdName) ??
     ownLimit(registry.commandLimits, cmdName)
 
-  // The name plane's facts, bundled as one view: the attr overlay so
-  // ls -l and stat -c agree (cp/mv -u freshness and find -mtime compare
-  // the same merged mtimes), the symlink table no backend readdir or
-  // stat can see, the mount boundaries, and the child names the
-  // namespace owes a directory. A command that does not read `ns` off
-  // its context ignores it, so there is no list of aware commands to
-  // keep in step.
-  const ns = namespaceViewOf(
-    registry,
-    namespace ?? null,
-    dispatch,
-    session,
-    ctx.admission,
-    ctx.follow,
-  )
-  const statOverlay = ns.statOverlay ?? null
   // A traversal command's start point is statted through the dispatcher so
   // a start point under another mount answers (`find -L` follows a link
   // across mounts before the command ever runs).
-  const statPath: StatPath = (path) => pathStat(dispatch, path, statOverlay)
+  const statPath: StatPath = (path) => pathStat(dispatch, path)
   // The same entry point for a listing: a walker whose output is one document
   // (tree) reads the subtree under a nested mount through here, because
   // that subtree lives in a VFS its own accessor cannot open.
@@ -279,8 +262,9 @@ export async function runOnMount(
       stdin: opts.stdin ?? null,
       cwd: session.cwd,
       dispatch,
-      vfs: new Files(dispatch, null, namespace ?? null, () => null, {
-        prefixes: () => registry.visibleMounts().map((m) => m.prefix),
+      vfs: new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
+        prefixes: () => registry.mountPrefixes(),
+        visibility: () => session.visibility,
       }),
       sessionId: session.sessionId,
       env: envSnapshot(session),
@@ -289,7 +273,7 @@ export async function runOnMount(
       execAllowed: registry.isExecAllowed(access),
       execPathAllowed: (virtual) => registry.execAllowedAt(virtual, access),
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),
-      ns,
+      ...(ctx.follow !== undefined ? { followOperands: ctx.follow } : {}),
       statPath,
       readdirPath,
       ...(signal !== undefined ? { signal } : {}),

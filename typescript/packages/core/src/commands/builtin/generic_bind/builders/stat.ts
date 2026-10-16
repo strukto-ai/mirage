@@ -13,12 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { statGeneric } from '../../generic/stat.ts'
-import {
-  type GenericCommand,
-  overlaidStat,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
 const stat: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
@@ -26,7 +21,7 @@ const stat: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   return statGeneric(
     resolved,
     opts,
-    overlaidStat((p) => ops.stat(accessor, p, idx), opts.ns?.statOverlay),
+    (p) => ops.stat(accessor, p, idx),
   )
 }
 

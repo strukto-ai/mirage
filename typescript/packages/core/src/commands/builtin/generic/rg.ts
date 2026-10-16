@@ -54,7 +54,7 @@ import {
   type Tally,
 } from '../rg_search.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
-import { type LinkResolver, linkResolver } from '../utils/links.ts'
+import { type LinkResolver, linkResolver, mountsOf } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream, wrapBytes } from '../utils/stream.ts'
 import { RegexSyntax } from '../types.ts'
@@ -920,7 +920,7 @@ export async function rgGeneric(
     paths = [STDIN_OPERAND]
   }
   const [first = STDIN_OPERAND] = paths
-  const mounts = opts.ns?.mounts
+  const mounts = mountsOf(opts)
   const home = mountPrefixOf(first.virtual, first.vfsPath)
   const rd = mountParentReaddir((p: string) => readdir(sameMountSpec(p, first)), mounts, home)
   const st = mountParentStat((p: string) => stat(sameMountSpec(p, first)), mounts)

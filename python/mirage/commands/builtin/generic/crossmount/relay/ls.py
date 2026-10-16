@@ -19,16 +19,15 @@ from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import flat_scopes
 from mirage.commands.builtin.generic.ls import Stat, ls_options
 from mirage.commands.builtin.generic.ls import ls as generic_ls
-from mirage.commands.builtin.generic_bind.adapter import (
-    dispatched_call,
-    overlaid_stat,
-)
+from mirage.commands.builtin.generic_bind.adapter import dispatched_call
 from mirage.commands.builtin.utils.identity import identity_from
+from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import gnu_basename
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import SessionView
+from mirage.workspace.files import Files
 
 
 async def relayed_readdir(
@@ -84,7 +83,7 @@ async def run_ls(
     scopes: list[PathSpec],
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     session_view: SessionView | None = None,
 ) -> CrossResult:
     """List operands spanning mounts through the shared generic ls.
@@ -101,30 +100,23 @@ async def run_ls(
         scopes (list[PathSpec]): Path operands in command-line order.
         flag_kwargs (dict): Flags parsed against the shared ls spec.
         dispatch (DispatchFn): Workspace operation dispatcher.
-        ns (NamespaceView | None): Name-plane facts no backend can see.
-            The attr overlay matters most here: without it a relayed row
-            would report the raw backend mode and silently lose a chmod
-            the namespace holds. Every fact but ``mounts``, which names
-            the boundaries a walk's readdir cannot cross: this one's
-            does cross them, so the relay descends a nested mount
-            itself, and it has to, because nothing runs behind a relay
-            to contribute that group the way the fan-out does for a
+        vfs (Files | None): The session's files, whose links a listing
+            marks. The dispatcher's stat carries the attribute overlay
+            and its listing the mounts below, so the relay descends a
+            nested mount itself, as nothing runs behind a relay to
+            contribute that group the way the fan-out does for a
             single-mount run.
         session_view (SessionView | None): The session view,
             for the profile the group column renders.
     """
     p = functools.partial
     stat_fn: Stat = p(relayed_stat, dispatch)
-    overlay = ns.stat_overlay if ns is not None else None
-    if overlay is not None:
-        stat_fn = p(overlaid_stat, stat_fn, overlay)
-    links = ns.links if ns is not None else None
+    links = link_view(vfs)
     return await generic_ls(
         flat_scopes(scopes),
         readdir=p(relayed_readdir, dispatch),
         stat=stat_fn,
         links=links,
-        child_mounts=(ns.child_mounts if ns is not None else None),
         identity=identity_from(session_view),
         **ls_options(flag_kwargs),
     )

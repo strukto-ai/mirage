@@ -25,6 +25,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.commands.builtin.utils.links import links_of
 
 
 async def tee(
@@ -40,7 +41,7 @@ async def tee(
     # A backend that can append natively does; the rest fall back to the
     # read-modify-write inside the generic.
     append = ops.append
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     return await generic_tee(
         paths,
         texts,

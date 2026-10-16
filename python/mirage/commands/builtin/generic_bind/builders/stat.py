@@ -12,14 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.stat import stat_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
-    overlaid_stat,
 )
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
@@ -37,14 +35,6 @@ async def stat(
         raise ValueError("stat: no VFS")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
     stat_fn = bound_op(ops.stat, accessor, opts.index)
-    overlay = opts.ns.stat_overlay if opts.ns is not None else None
-    if overlay is not None:
-        stat_fn = partial(
-            overlaid_stat,
-            partial(ops.stat, accessor),
-            overlay,
-            index=opts.index,
-        )
     return await stat_generic(resolved, list(texts), opts, stat_fn)
 
 

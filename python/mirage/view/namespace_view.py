@@ -15,11 +15,12 @@
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Any
 
+from mirage.context import get_admission, session_visibility
 from mirage.errors.fs import eloop
 from mirage.types import FileStat, FileType, PathSpec, Visibility
-from mirage.utils.hidden import leads_hidden, path_visible
+from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
 from mirage.utils.path import CycleError, norm_dir
-from mirage.view.types import LinkView, NamespaceLinks, NamespaceView
+from mirage.view.types import LinkView, NamespaceLinks
 
 
 def visible_child_segments(
@@ -230,27 +231,29 @@ def namespace_stat(
     return FileStat(name=name, type=FileType.DIRECTORY)
 
 
-def paths_scoped(
-    ns: NamespaceView | None, paths: Sequence[PathSpec], prefix: str = ""
-) -> bool:
+def paths_scoped(paths: Sequence[PathSpec], prefix: str = "") -> bool:
     """Whether a hide or a path rule judges anything a command's
     operands reach, so a native walk that classifies the raw tree gives
     way to the checked one.
 
     Per operand, not per session: a hidden ``.env`` under ``/repo`` must
-    not force ``find`` on ``/s3`` off its native op.
+    not force ``find`` on ``/s3`` off its native op. The hides are the
+    running session's and the rules the running command's gate.
 
     Args:
-        ns (NamespaceView | None): the command's namespace view, whose
-            ``scoped`` answers per path; None judges nothing.
         paths (Sequence[PathSpec]): the operands, a default cwd
             included.
         prefix (str): the mount root, judged in place of a glob operand.
     """
-    scoped = ns.scoped if ns is not None else None
-    return scoped is not None and any(
-        scoped(prefix or "/" if path.pattern is not None else path.virtual)
-        for path in paths
+    vis = session_visibility()
+    gate = get_admission()
+    return any(
+        hidden_under(vis, virtual)
+        or (gate is not None and gate.scopes(virtual))
+        for virtual in (
+            prefix or "/" if path.pattern is not None else path.virtual
+            for path in paths
+        )
     )
 
 

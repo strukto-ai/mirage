@@ -90,7 +90,6 @@ describe('command() registers multiple mounts', () => {
       stdin: null,
       flags: { help: true },
       cwd: '/',
-      vfs: {} as never,
     }
     const cmd = cmds[0]
     if (cmd === undefined) throw new Error('expected a registered command')
@@ -131,7 +130,6 @@ describe('command() registers multiple mounts', () => {
       stdin: null,
       flags: { version: true },
       cwd: '/',
-      vfs: {} as never,
     }
     const cmd = cmds[0]
     if (cmd === undefined) throw new Error('expected a registered command')

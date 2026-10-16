@@ -42,6 +42,8 @@ class MountRow:
         visible (Callable[[], bool] | None): whether the running session
             is told of the mount at all, None for always (a session's own
             documents mount answers it).
+        max_du_entries (int | None): the mount VFS's ``du`` walk budget,
+            None for no cap.
     """
 
     prefix: str
@@ -50,6 +52,7 @@ class MountRow:
     sizes_always_known: bool = False
     anchor: bool = False
     visible: Callable[[], bool] | None = None
+    max_du_entries: int | None = None
 
 
 @dataclass

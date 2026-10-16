@@ -38,6 +38,7 @@ import { groupName, identityOf, ownerName, type Identity } from '../utils/identi
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { linksOf, mountsOf } from '../utils/links.ts'
 
 const TYPE_LABELS: Partial<Record<FileType, string>> = {
   [FileType.DIRECTORY]: 'directory',
@@ -523,14 +524,14 @@ export async function statGeneric(
   if (parsed.fileSystem) {
     const dispatch = opts.dispatch
     const probe = (p: PathSpec): Promise<FileStat> =>
-      operandStat(p, stat, opts.statPath, opts.ns?.mounts, opts.ns?.links)
+      operandStat(p, stat, opts.statPath, mountsOf(opts), linksOf(opts))
     const statfs: StatfsFn | null =
       dispatch !== undefined ? (p) => dispatchedStatfs(dispatch, p) : null
     return fileSystems(paths, fmt ?? FS_LAYOUT, probe, statfs)
   }
   const lines: string[] = []
   let err = ''
-  const links = parsed.deref ? null : (opts.ns?.links ?? null)
+  const links = parsed.deref ? null : (linksOf(opts) ?? null)
   const identity = identityOf(opts)
   for (const p of paths) {
     // GNU stat lstats: a symlink operand reports the link itself, not
@@ -547,7 +548,7 @@ export async function statGeneric(
     }
     let s: FileStat
     try {
-      s = await operandStat(p, stat, opts.statPath, opts.ns?.mounts, opts.ns?.links)
+      s = await operandStat(p, stat, opts.statPath, mountsOf(opts), linksOf(opts))
     } catch (e) {
       // GNU stat keeps reporting the remaining operands, exit 1.
       if (!isFsError(e)) throw e

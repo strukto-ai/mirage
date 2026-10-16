@@ -23,10 +23,10 @@ from mirage.commands.config import Command
 # A native fast path answers from the raw backend tree, so every place
 # one is wired must fork to the guarded walk when a hide, a path rule or
 # a pre_vfs policy could judge an entry inside the subtree it answers
-# for. The gate is `paths_scoped`, which reads the command's namespace
-# view; this meta-test pins the fork wherever a native core is wired, so
-# the next backend that ships one cannot silently list what a session
-# hides.
+# for. The gate is `paths_scoped`, which reads the running session's
+# hides and the command's rules; this meta-test pins the fork wherever
+# a native core is wired, so the next backend that ships one cannot
+# silently list what a session hides.
 GATE = "paths_scoped"
 
 
@@ -58,8 +58,8 @@ def _registered() -> tuple[list[Command], list[str]]:
 
 def test_the_chokepoints_read_the_gate():
     """The shared fast-path forks consume the per-operand gate;
-    deleting a read is how the guard silently dies, so each is pinned
-    the way test_links_optin pins ``opts.ns.links``. find and the other
+    deleting a read is how the guard silently dies, so each is pinned.
+    find and the other
     walks ask ``read_tree``, and grep and rg ask ``files_containing``
     and ``lines_containing``, all at the dispatcher, which judges them
     for the session itself."""

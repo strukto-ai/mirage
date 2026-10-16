@@ -242,7 +242,6 @@ describe('teeGeneric', () => {
         stdin: quiet,
         flags: { output_error: 'exit' },
         cwd: '/',
-        vfs: {},
       } as unknown as CommandOpts,
       () => {
         throw enoent('/unused')

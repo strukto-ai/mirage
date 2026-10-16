@@ -29,11 +29,13 @@ import { formatRecords } from '../utils/output.ts'
 import { scaledSize } from '../utils/formatting.ts'
 import { quoteText } from '../../quote.ts'
 import { INTMAX } from '../constants.ts'
-import type { MountView, NamespaceView, StatPath } from '../../../view/types.ts'
+import type { MountView, StatPath } from '../../../view/types.ts'
+import type { Files } from '../../../workspace/files.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import type { DuEntries } from '../../../vfs/types.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
+import { mountsOf } from '../utils/links.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
 
@@ -458,13 +460,13 @@ async function duOne(
   flags: DuFlags,
   mounts: MountView | null,
   directories?: () => readonly string[],
-  ns?: NamespaceView,
+  vfs?: Files,
 ): Promise<[string[], number, SizedRun | null]> {
   const label = path.rawPath
-  const vis = ns?.visibility
+  const vis = vfs?.vis()
   const roots = mounts?.descendants(path.virtual) ?? []
 
-  if (flags.s && !flags.S && roots.length === 0 && !pathsScoped(ns, [path])) {
+  if (flags.s && !flags.S && roots.length === 0 && !pathsScoped([path])) {
     // The one-total fast path trusts the backend's own sum, which a
     // session hiding paths cannot: hidden leaves would be counted into
     // a total their names never justify, so that session takes the
@@ -572,7 +574,7 @@ export async function du(
   mounts: MountView | null = null,
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
-  ns?: NamespaceView,
+  vfs?: Files,
   inaccessible?: () => readonly (readonly [string, string | null])[],
   // Asked before each operand's walk whether an earlier one already counted
   // it, which GNU then skips without a row.
@@ -590,7 +592,7 @@ export async function du(
       flags,
       mounts,
       directories,
-      ns,
+      vfs,
     )
     lines.push(...block)
     grand += total
@@ -659,7 +661,7 @@ export async function duGeneric(
     opts.cwd,
     resolveGlob,
     stat,
-    (p) => duHasContent(opts.ns?.visibility, computeEntries, p),
+    (p) => duHasContent(opts.vfs?.vis() ?? undefined, computeEntries, p),
     opts.mountPrefix,
     opts.statPath ?? null,
   )
@@ -670,10 +672,10 @@ export async function duGeneric(
     computeEntries,
     missing,
     truncated,
-    opts.ns?.mounts ?? null,
+    mountsOf(opts) ?? null,
     unreadable,
     directories,
-    opts.ns,
+    opts.vfs,
     inaccessible,
     repeated,
   )

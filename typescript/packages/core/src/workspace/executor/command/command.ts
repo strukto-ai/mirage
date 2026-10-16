@@ -81,9 +81,8 @@ import { standardRequest } from '../../../commands/spec/standard.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { Files } from '../../files.ts'
-import { namespaceViewOf } from '../../mount/namespace/view.ts'
 import { dropMountCaches, findStartPoints, runOnMount, type RunOnMountCtx } from './run.ts'
-import type { NamespaceView, SessionView, StatPath } from '../../../view/types.ts'
+import type { SessionView, StatPath } from '../../../view/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { operandFollow } from '../builtins/links/links.ts'
 import { sessionView } from '../../session/state.ts'
@@ -139,7 +138,7 @@ async function finishFind(
   registry: MountRegistry,
   context: EvaluationContext,
   executeFn: ExecuteFn | undefined,
-  ns: NamespaceView | undefined,
+  vfs: Files,
   statPath: StatPath,
   dispatch: CallerDispatchFn,
   stdin: ByteSource | null,
@@ -156,7 +155,7 @@ async function finishFind(
     {
       ...(executeFn !== undefined ? { executeFn } : {}),
       session,
-      ns: ns ?? null,
+      vfs,
       statPath,
       dispatch,
       identity: identityFrom(sessionView(session, registry.policies, context.frame.diagnostics)),
@@ -263,6 +262,10 @@ export async function handleCommand(
       report,
       caller ?? { ...currentCaller(), ruleGate: admission },
     )
+  const files = new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
+    prefixes: () => registry.mountPrefixes(),
+    visibility: () => session.visibility,
+  })
 
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)
@@ -295,9 +298,7 @@ export async function handleCommand(
           ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
           commandLimits: registry.commandLimits,
           entries: registry.runtimeEntries,
-          vfs: new Files(dispatch, null, namespace ?? null, () => null, {
-            prefixes: () => registry.visibleMounts().map((m) => m.prefix),
-          }),
+          vfs: files,
           sessionView: sessionView(session, registry.policies, context.frame.diagnostics),
           ...(registry.processView === undefined
             ? {}
@@ -503,7 +504,7 @@ export async function handleCommand(
         findExpr.newer,
         registry,
         session.cwd,
-        (path) => pathStat(dispatch, path, null),
+        (path) => pathStat(dispatch, path),
         namespace ?? null,
         dereferences(cmdName, parts),
       )
@@ -581,19 +582,19 @@ export async function handleCommand(
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
       runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
-    const csNs = namespaceViewOf(registry, namespace ?? null, dispatch, session, admission, follow)
     // A per-operand native run is single-mount by construction, so a
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
-    const csStat: StatPath = (path) => pathStat(dispatch, path, null)
+    const csStat: StatPath = (path) => pathStat(dispatch, path)
     const runOperand = runWithFanout(
       runSingle,
       registry,
       session.cwd,
-      csNs,
+      files,
       sessionView(session, registry.policies, context.frame.diagnostics),
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
+      follow,
     )
     const [csStdout0, csIo] = await handleCrossMount(
       cmdName,
@@ -604,12 +605,13 @@ export async function handleCommand(
       runOperand,
       stdin,
       makeStorageKey(registry),
-      csNs,
+      files,
       sessionView(session, registry.policies, context.frame.diagnostics),
       session.cwd,
       spelledWords(parts.slice(1)),
       aggregateFor(cmdName, csScopes, registry),
       makeCheckUnlink(registry, sessionAccess(session)),
+      follow,
     )
     const csExec = new ExecutionNode({
       command: cmdStr,
@@ -625,7 +627,7 @@ export async function handleCommand(
         registry,
         context,
         executeFn,
-        csNs,
+        files,
         csStat,
         dispatch,
         stdin,
@@ -747,15 +749,7 @@ export async function handleCommand(
       ? encodeText(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       : null
 
-  const singleNs = namespaceViewOf(
-    registry,
-    namespace ?? null,
-    dispatch,
-    session,
-    admission,
-    follow,
-  )
-  const singleStat: StatPath = (path) => pathStat(dispatch, path, null)
+  const singleStat: StatPath = (path) => pathStat(dispatch, path)
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
@@ -767,12 +761,13 @@ export async function handleCommand(
       session.cwd,
       cmdStr,
       stdin,
-      singleNs,
+      files,
       sessionView(session, registry.policies, context.frame.diagnostics),
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
       (name, ps, ts, fk, opts) =>
         runOnMount(runCtx, name, ps, ts, fk, { ...opts, argv: spelledWords(parts.slice(1)) }),
+      follow,
     )
     let fanOut = fanOut0
     if (cmdName === 'find') {
@@ -783,7 +778,7 @@ export async function handleCommand(
         registry,
         context,
         executeFn,
-        singleNs,
+        files,
         singleStat,
         dispatch,
         stdin,
@@ -816,7 +811,7 @@ export async function handleCommand(
       registry,
       context,
       executeFn,
-      singleNs,
+      files,
       singleStat,
       dispatch,
       stdin,

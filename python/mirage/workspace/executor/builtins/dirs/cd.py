@@ -36,8 +36,9 @@ from mirage.workspace.executor.builtins.dirs.dirs import (
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.expand.classify import classify_bare_path
+from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.mount.namespace.view import link_view
+from mirage.commands.builtin.utils.links import link_view
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import (
     change_dir,
@@ -141,7 +142,14 @@ def _session_follow(
     """
     if not namespace.symlink_targets():
         return None
-    links = link_view(namespace, dispatch, session.visibility)
+    links = link_view(
+        Files(
+            [],
+            dispatch,
+            links=namespace,
+            visibility=lambda _session: session.visibility,
+        )
+    )
     return links.resolve if links is not None else None
 
 

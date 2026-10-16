@@ -26,6 +26,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     require_op,
 )
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import mount_points
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.builtin.utils.slash_links import (
@@ -63,7 +64,7 @@ async def rm(
     recursive = fl.as_bool("r") or fl.as_bool("R")
     verbose_parts: list[str] = []
     errors: list[str] = []
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     for p in paths:
         if is_slashed_link(p, links):
             refusal = await rm_link_refusal(
@@ -128,7 +129,7 @@ async def rm(
                             rmdir=functools.partial(
                                 require_op(ops, Operation.RMDIR), accessor
                             ),
-                            ns=opts.ns,
+                            mounts=mounts_of(opts),
                             force=f,
                         )
                         errors.extend(
@@ -143,7 +144,7 @@ async def rm(
                         f"rm: skipping '{operand_spelling(root, p)}', "
                         "since it's on a different device"
                         for root in mount_points(
-                            opts.ns.mounts if opts.ns is not None else None,
+                            mounts_of(opts),
                             p.virtual,
                         )
                     )

@@ -38,7 +38,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import CheckFn, PathSpec
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import SessionView
+from mirage.workspace.files import Files
 
 
 async def run_relay(
@@ -49,7 +50,7 @@ async def run_relay(
     dispatch: DispatchFn,
     run_single: RunSingle,
     storage_key: Callable[[PathSpec], str] | None = None,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     session_view: SessionView | None = None,
     stdin: ByteSource | None = None,
     cwd: str = "/",
@@ -80,7 +81,7 @@ async def run_relay(
         storage_key (Callable | None): Maps an operand to its storage
             identity, for the transfer commands that must tell a real
             move from one whose two prefixes address a single store.
-        ns (NamespaceView | None): Name-plane facts for the generics that
+        vfs (Files | None): Name-plane facts for the generics that
             render them (ls: links, attr overlay, child mounts) and for
             the archivers' scan (tar, zip: links, mount boundaries).
         session_view (SessionView | None): The session view, for
@@ -110,28 +111,34 @@ async def run_relay(
         )
     if cmd_name == Cmd.WC:
         return await run_wc(
-            scopes, flag_kwargs, dispatch, run_single, cwd, ns, stdin
+            scopes, flag_kwargs, dispatch, run_single, cwd, vfs, stdin
         )
     if cmd_name == Cmd.LS:
-        return await run_ls(scopes, flag_kwargs, dispatch, ns, session_view)
+        return await run_ls(scopes, flag_kwargs, dispatch, vfs, session_view)
     if cmd_name == Cmd.CP:
         return await run_cp(
-            scopes, flag_kwargs, dispatch, storage_key, ns, cwd, stdin
+            scopes, flag_kwargs, dispatch, storage_key, vfs, cwd, stdin
         )
     if cmd_name == Cmd.MV:
         return await run_mv(
-            scopes, flag_kwargs, dispatch, storage_key, ns, stdin, check_unlink
+            scopes,
+            flag_kwargs,
+            dispatch,
+            storage_key,
+            vfs,
+            stdin,
+            check_unlink,
         )
     if cmd_name == Cmd.TAR:
         return await run_tar(
-            scopes, text_args, flag_kwargs, dispatch, ns, stdin
+            scopes, text_args, flag_kwargs, dispatch, vfs, stdin
         )
     if cmd_name == Cmd.TEE:
         return await run_tee(scopes, flag_kwargs, dispatch, stdin, storage_key)
     if cmd_name == Cmd.UNZIP:
         return await run_unzip(scopes, text_args, flag_kwargs, dispatch)
     if cmd_name == Cmd.ZIP:
-        return await run_zip(scopes, flag_kwargs, dispatch, ns)
+        return await run_zip(scopes, flag_kwargs, dispatch, vfs)
     if cmd_name in DISPATCH_BUILDERS:
         return await run_dispatch(
             DISPATCH_BUILDERS[cmd_name],
@@ -140,7 +147,7 @@ async def run_relay(
             flag_kwargs,
             dispatch,
             cwd,
-            ns,
+            vfs,
             stdin,
             argv,
         )

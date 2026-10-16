@@ -25,6 +25,7 @@ import type { MountView } from '../../../view/types.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
+import { linksOf, mountsOf } from '../utils/links.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
 
@@ -274,14 +275,14 @@ export async function treeGeneric(
         ]
   const readdirPath = opts.readdirPath
   const statPath = opts.statPath
-  const links = opts.ns?.links
+  const links = linksOf(opts)
   const treeOpts: TreeOpts = {
     showHidden: parsed.showHidden,
     maxDepth: parsed.maxDepth,
     ignorePattern: parsed.ignorePattern,
     dirsOnly: parsed.dirsOnly,
     matchPattern: parsed.matchPattern,
-    mounts: opts.ns?.mounts ?? null,
+    mounts: mountsOf(opts) ?? null,
     crossReaddir:
       readdirPath === undefined
         ? null

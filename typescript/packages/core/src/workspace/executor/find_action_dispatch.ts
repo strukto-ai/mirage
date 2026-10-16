@@ -37,7 +37,7 @@ import type { SessionState } from '../session/session.ts'
 import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lookupAll } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
-import type { NamespaceView, StatPath } from '../../view/types.ts'
+import type { StatPath } from '../../view/types.ts'
 import { SharedStdin } from '../../io/stream.ts'
 import {
   execActions,
@@ -51,6 +51,8 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { concat } from '../../utils/bytes.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import type { Files } from '../files.ts'
+import { linkView } from '../../commands/builtin/utils/links.ts'
 
 export interface FindActionOptions {
   // Runs an `-exec` line in the session; absent outside a workspace,
@@ -65,7 +67,7 @@ export interface FindActionOptions {
   // The name plane's facts, threaded into the -ls sub-dispatch so a
   // namespace-only row (a mount point, a symlink) renders the way
   // `ls -l` renders it.
-  ns?: NamespaceView | null
+  vfs?: Files | null
   // Dispatcher stat, threaded with it and used to find a
   // slash-carrying `-exec` head.
   statPath?: StatPath | null
@@ -191,7 +193,7 @@ async function runExec(
  * backend support, cache invalidation and namespace cleanup. */
 async function deleteRow(
   ps: PathSpec,
-  ns: NamespaceView | null,
+  vfs: Files | null,
   dispatch: DispatchFn | null,
   errors: Uint8Array[],
   statPath: StatPath | null,
@@ -202,7 +204,7 @@ async function deleteRow(
     return false
   }
   try {
-    const link = (ns?.links?.statAt(ps.virtual) ?? null) !== null
+    const link = (linkView(vfs ?? undefined)?.statAt(ps.virtual) ?? null) !== null
     const st = link || statPath === null ? null : await statPath(ps)
     if (!link && statPath !== null && st === null) throw enoent(ps)
     const op = st !== null && st.type === FileType.DIRECTORY ? 'rmdir' : 'unlink'
@@ -240,7 +242,7 @@ function refusalWhy(err: unknown): string {
  */
 async function rowStat(
   ps: PathSpec,
-  ns: NamespaceView | null,
+  vfs: Files | null,
   statPath: StatPath | null,
   errors: Uint8Array[],
 ): Promise<FileStat | null> {
@@ -249,7 +251,7 @@ async function rowStat(
     errors.push(encodeText(`find: '${path}': no stat function\n`))
     return null
   }
-  const link = ns?.links?.statAt(ps.virtual) ?? null
+  const link = linkView(vfs ?? undefined)?.statAt(ps.virtual) ?? null
   let st: FileStat | null
   try {
     st = link ?? (await statPath(ps))
@@ -279,9 +281,9 @@ function lsRow(ps: PathSpec, st: FileStat, identity: Identity | null): Uint8Arra
 async function printfFacts(
   ps: PathSpec,
   st: FileStat,
-  ns: NamespaceView | null,
+  vfs: Files | null,
 ): Promise<PrintfStatFacts> {
-  const links = ns?.links ?? null
+  const links = linkView(vfs ?? undefined) ?? null
   const link = links !== null && links.statAt(ps.virtual) !== null
   const target = link ? await links.targetStat(ps.virtual) : null
   return {
@@ -426,7 +428,7 @@ export async function applyFindActions(
     return [null, encodeText('find: -exec: no shell to run the command\n'), 1]
   }
   const session = options.session ?? getCurrentSession()
-  const ns = options.ns ?? null
+  const vfs = options.vfs ?? null
   const statPath = options.statPath ?? null
   const dispatch = options.dispatch ?? null
   const identity = options.identity ?? null
@@ -465,7 +467,7 @@ export async function applyFindActions(
     // held from there, as GNU stats a row once.
     let held =
       stats && (statted || startVirtuals.has(match.virtual))
-        ? await rowStat(match, ns, statPath, [])
+        ? await rowStat(match, vfs, statPath, [])
         : null
     for (const [position, action] of actions.entries()) {
       if (action.kind === 'exec') {
@@ -492,7 +494,7 @@ export async function applyFindActions(
         )
           break
       } else if (readsStat(action)) {
-        held = held ?? (await rowStat(match, ns, statPath, errors))
+        held = held ?? (await rowStat(match, vfs, statPath, errors))
         if (held === null) {
           // A row -ls or -printf cannot stat is false, so the chain ends
           // for it, as GNU's does.
@@ -501,7 +503,7 @@ export async function applyFindActions(
         }
         out.push(
           action.kind === 'printf'
-            ? printfRow(action, path, base, await printfFacts(match, held, ns), warnings, identity)
+            ? printfRow(action, path, base, await printfFacts(match, held, vfs), warnings, identity)
             : lsRow(match, held, identity),
         )
       } else if (action.kind === 'printf') {
@@ -510,7 +512,7 @@ export async function applyFindActions(
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.
         if (structural(match, registry)) continue
-        if (!(await deleteRow(match, ns, dispatch, errors, statPath))) {
+        if (!(await deleteRow(match, vfs, dispatch, errors, statPath))) {
           exitCode = 1
           break
         }

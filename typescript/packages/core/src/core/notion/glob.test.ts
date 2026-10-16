@@ -44,7 +44,6 @@ async function listedPaths(accessor: NotionAccessor, path: PathSpec): Promise<st
 const resolveNotionGlob = makeResolveGlob(
   listedPaths,
   undefined,
-  undefined,
   (accessor: NotionAccessor, path: PathSpec) => notionStat(accessor, path, ...handed(path)),
 )
 

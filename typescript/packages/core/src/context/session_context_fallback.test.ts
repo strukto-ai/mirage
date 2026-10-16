@@ -60,8 +60,7 @@ import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { ContextScope } from '../utils/context_scope.ts'
 import { pathVisible } from '../utils/hidden.ts'
-import { MountRegistry } from '../workspace/mount/registry.ts'
-import { namespaceViewOf } from '../workspace/mount/namespace/view.ts'
+import { Files } from '../workspace/files.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
@@ -278,7 +277,6 @@ describe('session predicates on the fallback storage', () => {
       visibility: { paths: { paths: ['/data/x'] } },
     })
     const other = new SessionState({ sessionId: 'other' })
-    const registry = new MountRegistry({ '/data': new RAMVFS() }, MountMode.WRITE)
     const dispatch = (() => Promise.reject(new Error('unused'))) as unknown as DispatchFn
     const [hold, release] = gate()
     let folded: boolean | undefined
@@ -286,7 +284,9 @@ describe('session predicates on the fallback storage', () => {
       await hold
     })
     const short = runWithSession(other, () => {
-      const vis = namespaceViewOf(registry, null, dispatch, other).visibility ?? null
+      const vis = new Files(dispatch, null, null, () => null, {
+        visibility: () => other.visibility,
+      }).vis()
       folded = pathVisible(vis, '/data/x')
       release()
       return Promise.resolve()
@@ -294,7 +294,9 @@ describe('session predicates on the fallback storage', () => {
     await Promise.all([long, short])
     expect(folded).toBe(true)
     // A session named outside any line keeps its own view.
-    const own = namespaceViewOf(registry, null, dispatch, other).visibility ?? null
+    const own = new Files(dispatch, null, null, () => null, {
+      visibility: () => other.visibility,
+    }).vis()
     expect(pathVisible(own, '/data/x')).toBe(true)
   })
 

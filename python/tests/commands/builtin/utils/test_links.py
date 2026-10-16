@@ -19,15 +19,27 @@ import pytest
 from mirage.commands.builtin.utils.links import (
     LinkResolver,
     link_resolver,
+    link_view,
+    mount_view,
     name_location,
+    owed_names,
     typed_link,
 )
 from mirage.commands.config import CommandOpts
 from mirage.errors.types import DotWalkLoop
 from mirage.io.types import IOResult
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    HiddenPaths,
+    MountMode,
+    PathSpec,
+    Visibility,
+)
 from mirage.utils.path import CycleError
-from mirage.view.types import LinkView, NamespaceView
+from mirage.view.types import LinkView
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 
 def _spec(
@@ -78,6 +90,44 @@ def _links(table: dict[str, str]) -> LinkView:
 
 
 LINKS = _links({"/data/dl": "/data/dir", "/data/dir/tl.gz": "/data/t.gz"})
+
+
+class _Table:
+    """A namespace link table over link paths and their targets.
+
+    Args:
+        targets (dict[str, str]): each link's path and what it names.
+    """
+
+    def __init__(self, targets: dict[str, str]) -> None:
+        self._targets = targets
+
+    def follow(self, path: str) -> str:
+        return self._targets.get(path, path)
+
+    def link_stat_at(self, path: str) -> FileStat | None:
+        if path not in self._targets:
+            return None
+        return FileStat(name=path.rsplit("/", 1)[-1], type=FileType.SYMLINK)
+
+    def link_stats_below(self, directory: str) -> list[tuple[str, FileStat]]:
+        base = directory.rstrip("/") + "/"
+        return [
+            (path, row)
+            for path in sorted(self._targets)
+            if path.startswith(base)
+            and (row := self.link_stat_at(path)) is not None
+        ]
+
+    def symlink_targets(self) -> dict[str, str]:
+        return dict(self._targets)
+
+
+def _rows(*prefixes: str) -> list[MountRow]:
+    return [
+        MountRow(prefix=p, resource_type="ram", mode=MountMode.READ)
+        for p in prefixes
+    ]
 
 
 def test_a_name_stands_in_the_directory_its_parent_link_names():
@@ -147,11 +197,10 @@ def test_a_link_the_router_followed_can_vanish_before_its_turn():
 
 
 def test_an_invocation_without_links_or_an_entry_point_has_no_link_resolver():
+    files = Files([], _Dispatch(), links=_Table({}))
     assert link_resolver(CommandOpts()) is None
-    assert link_resolver(CommandOpts(ns=NamespaceView(links=LINKS))) is None
-    resolver = link_resolver(
-        CommandOpts(ns=NamespaceView(links=LINKS), dispatch=_Dispatch())
-    )
+    assert link_resolver(CommandOpts(vfs=files)) is None
+    resolver = link_resolver(CommandOpts(vfs=files, dispatch=_Dispatch()))
     assert resolver is not None and resolver.cwd == "/"
 
 
@@ -181,3 +230,55 @@ def test_a_looping_link_is_the_eloop_a_walker_reports():
     )
     with pytest.raises(DotWalkLoop):
         resolver.target("/data/l")
+
+
+def test_owed_names_derive_from_the_mount_table():
+    files = Files(_rows("/base/", "/base/inner/", "/dev/"), _Dispatch())
+    assert owed_names(files, "/base") == ["inner"]
+    assert owed_names(files, "/") == ["base", "dev"]
+    assert owed_names(files, "/dev") == []
+
+
+def test_owed_names_include_link_ancestors():
+    # A link below a directory chain no backend serves synthesizes its
+    # ancestors, exactly as a nested mount prefix does, so `ls /` shows
+    # the way to it.
+    files = Files(
+        _rows("/base/"),
+        _Dispatch(),
+        links=_Table({"/ghost/deep/lnk": "/base"}),
+    )
+    assert owed_names(files, "/") == ["base", "ghost"]
+    assert owed_names(files, "/ghost") == ["deep"]
+    assert owed_names(None, "/") == []
+
+
+def test_a_link_view_is_live_whenever_the_files_hold_a_table():
+    table = _Table({})
+    view = link_view(Files([], _Dispatch(), links=table))
+    assert view is not None
+    assert view.subtree("/") == []
+    table._targets["/data/l"] = "/data/a"
+    assert view.stat_at("/data/l") is not None
+    assert link_view(Files([], _Dispatch())) is None
+    assert link_view(None) is None
+
+
+def test_a_hidden_mount_is_a_boundary_but_never_named():
+    hidden = Visibility(paths=HiddenPaths(paths=("/data/secret",)))
+    files = Files(
+        _rows("/data/", "/data/open/", "/data/secret/"),
+        _Dispatch(),
+        visibility=lambda _session: hidden,
+    )
+    mounts = mount_view(files)
+    assert mounts is not None
+    assert mounts.descendants("/data") == ["/data/open", "/data/secret"]
+    assert mounts.visible_descendants("/data") == ["/data/open"]
+    assert mounts.root_of("/data/open/x") == "/data/open/"
+    assert mounts.is_root("/data/secret")
+    crossing = mount_view(files, crossing=True)
+    assert crossing is not None
+    assert crossing.descendants("/data") == []
+    assert not crossing.is_root("/data/open")
+    assert crossing.root_of("/data/open/x") == "/data/open/"

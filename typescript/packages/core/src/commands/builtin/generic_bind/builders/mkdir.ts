@@ -31,6 +31,7 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 import type { MkdirOp } from '../../../../vfs/types.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { missingOperandError } from '../../../spec/usage.ts'
+import { linksOf } from '../../utils/links.ts'
 
 /**
  * Make one name of a walk a directory, or say why it is not one.
@@ -237,7 +238,7 @@ const mkdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
   const lines: string[] = []
   const errors: string[] = []
-  const links = opts.ns?.links ?? null
+  const links = linksOf(opts) ?? null
   for (const p of resolved) {
     const collision = await mkdirLinkRefusal(p, links, { parents })
     if (collision.taken) {

@@ -17,7 +17,6 @@ import errno
 
 from mirage.commands.builtin.generic.crossmount.relay.ls import run_ls
 from mirage.types import ContentType, FileStat, FileType, PathSpec
-from mirage.view.types import MountView, NamespaceView
 
 # Two mounts, /a/ and /b/, as a plain virtual-path tree. The relayed
 # primitives route by full virtual path, so one table stands for both,
@@ -80,14 +79,14 @@ def scope(virtual: str) -> PathSpec:
     )
 
 
-def run(scopes, flags=None, ns=None, roots=frozenset()):
+def run(scopes, flags=None, roots=frozenset()):
     calls = Calls()
     out, io = asyncio.run(
         run_ls(
             [scope(s) for s in scopes],
             flags or {},
             make_dispatch(calls, roots),
-            ns,
+            None,
         )
     )
     return out.decode(), io, calls
@@ -99,30 +98,6 @@ def test_the_callers_index_is_never_relayed_to_another_mount():
     _, _, calls = run(["/a", "/b"])
     assert calls.readdir == ["/a", "/b"]
     assert all(i is None for i in calls.indexes)
-
-
-def test_the_namespace_attr_overlay_still_reaches_the_rows():
-    # A naive relay would report the raw backend mode and silently lose
-    # a chmod the namespace holds.
-    def overlay(virtual: str, st: FileStat) -> FileStat:
-        if virtual != "/a/z.txt":
-            return st
-        return st.model_copy(update={"mode": 0o600})
-
-    out, _, _ = run(
-        ["/a", "/b"],
-        flags={"args_l": True},
-        ns=NamespaceView(stat_overlay=overlay),
-    )
-    assert "-rw-------" in out
-    assert out.count("-rw-------") == 1
-
-
-def test_a_missing_namespace_lists_the_same_names():
-    assert (
-        run(["/a", "/b"], ns=None)[0]
-        == run(["/a", "/b"], ns=NamespaceView())[0]
-    )
 
 
 def test_a_lone_operand_still_reaches_the_generic_unheaded():
@@ -139,33 +114,6 @@ def test_a_nested_mount_root_keeps_the_name_its_parent_lists_it_by():
     nested = frozenset({"/a/one"})
     assert run(["/a", "/b"], roots=nested)[0] == run(["/a", "/b"])[0]
     out, _, _ = run(["/a", "/b"], flags={"recursive": True}, roots=nested)
-    assert out == (
-        "/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n"
-    )
-
-
-def test_a_full_namespace_does_not_stop_the_relay_at_a_mount_root():
-    """The mount table names the boundaries a walk's readdir cannot
-    cross, and a relayed one crosses them: readdir and stat route per
-    path. Handed the whole namespace -- which is what the workspace
-    offers -- the relay must still descend `/a/one` and render its
-    group, because nothing runs behind a relay to contribute it the way
-    the fan-out does for a single-mount run.
-    """
-    nested = frozenset({"/a/one"})
-    ns = NamespaceView(
-        mounts=MountView(
-            descendants=lambda p: [],
-            visible_descendants=lambda p: [],
-            is_root=lambda p: p.rstrip("/") in nested,
-            root_of=lambda p: "/",
-        ),
-        child_mounts=lambda p: ["one"] if p == "/a" else [],
-    )
-    out, io, _ = run(
-        ["/a", "/b"], flags={"recursive": True}, ns=ns, roots=nested
-    )
-    assert io.exit_code == 0
     assert out == (
         "/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n"
     )

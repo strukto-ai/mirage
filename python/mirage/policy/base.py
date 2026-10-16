@@ -46,9 +46,8 @@ class Policy:
     never undoes a side effect: it holds back what came back. Hides,
     mount modes and path rules are not methods: they apply to every
     caller at the dispatcher. Every method's context also carries the
-    session (``session``), its namespace (``ns``) and its files
-    (``vfs``), all read only: a method reads, and a write it makes is
-    refused.
+    session (``session``) and its files (``vfs``), both read only: a
+    method reads, and a write it makes is refused.
     """
 
     async def pre_execute(

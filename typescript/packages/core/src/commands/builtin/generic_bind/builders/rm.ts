@@ -33,6 +33,7 @@ import {
 import { operandSpelling } from '../../../../errors/render.ts'
 import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import { linksOf, mountsOf } from '../../utils/links.ts'
 
 const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const fl = new FlagView(opts.flags, specOf('rm'))
@@ -48,7 +49,7 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const unlink = requireOp(ops.unlink, 'unlink')
   const lines: string[] = []
   const errors: string[] = []
-  const links = opts.ns?.links ?? null
+  const links = linksOf(opts) ?? null
   for (const p of resolved) {
     if (isSlashedLink(p, links)) {
       const refusal = await rmLinkRefusal(p, links, { recursive, force })
@@ -104,7 +105,7 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
               stat: probe,
               unlink: (spec) => unlink(accessor, spec),
               rmdir: (spec) => rmdir(accessor, spec, idx),
-              ns: opts.ns,
+              mounts: mountsOf(opts),
               force,
             }))
             for (const [entry, why] of failures) {
@@ -114,7 +115,7 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
           entryLines = verbose ? removalLines(listed, p) : []
           // A removal never crosses into a mount below, so it says so as
           // GNU's --one-file-system does.
-          for (const root of mountPoints(opts.ns?.mounts, p.virtual))
+          for (const root of mountPoints(mountsOf(opts), p.virtual))
             errors.push(
               `rm: skipping '${operandSpelling(root, p)}', since it's on a different device`,
             )

@@ -30,6 +30,7 @@ MEMBERS = (
     "readlink",
     "link_stat_at",
     "symlink_targets",
+    "link_stats_below",
     "link_names_under",
 )
 

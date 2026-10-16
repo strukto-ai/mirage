@@ -17,12 +17,13 @@ from collections.abc import AsyncIterator, Callable
 from typing import cast
 
 from mirage.commands.builtin.generic.crossmount.types import OwnedScope
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.errors.constants import FS_ERRORS
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import respell_one
-from mirage.view.types import NamespaceView
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 async def owned_scopes(
     path: PathSpec,
     dispatch: DispatchFn,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     admit: Callable[[PathSpec, FileStat], bool],
     walked: bool = False,
 ) -> AsyncIterator[OwnedScope]:
@@ -44,10 +45,11 @@ async def owned_scopes(
     Args:
         path (PathSpec): One operand, retaining its typed spelling.
         dispatch (DispatchFn): Policy-checked metadata operations.
-        ns (NamespaceView | None): Mount ownership facts.
+        vfs (Files | None): Mount ownership facts.
         admit (Callable): The command's traversal filter for walked entries.
         walked (bool): Whether this entry was discovered below an operand.
     """
+    mounts = mount_view(vfs)
     if path.walk_error is not None or is_stdin(path):
         yield OwnedScope(path, walked)
         return
@@ -57,7 +59,7 @@ async def owned_scopes(
         if walked and not admit(path, info):
             return
         boundaries = (
-            ns.mounts.descendants(path.virtual) if ns and ns.mounts else []
+            mounts.descendants(path.virtual) if mounts is not None else []
         )
         if info.type != FileType.DIRECTORY or not boundaries:
             yield OwnedScope(path, walked, info)
@@ -78,11 +80,11 @@ async def owned_scopes(
             vfs_path=virtual.strip("/"),
             raw_path=respell_one(virtual, path.virtual, path.raw_path),
         )
-        async for scope in owned_scopes(child, dispatch, ns, admit, True):
+        async for scope in owned_scopes(child, dispatch, vfs, admit, True):
             yield scope
 
 
-def mount_starts(path: PathSpec, ns: NamespaceView | None) -> list[PathSpec]:
+def mount_starts(path: PathSpec, vfs: Files | None) -> list[PathSpec]:
     """The operand, then each visible mount root below it, as start points.
 
     Each start is one mount's own part of the operand's tree: the
@@ -93,9 +95,10 @@ def mount_starts(path: PathSpec, ns: NamespaceView | None) -> list[PathSpec]:
 
     Args:
         path (PathSpec): One operand.
-        ns (NamespaceView | None): Mount ownership facts.
+        vfs (Files | None): Mount ownership facts.
     """
-    if path.walk_error is not None or ns is None or ns.mounts is None:
+    mounts = mount_view(vfs)
+    if path.walk_error is not None or vfs is None or mounts is None:
         return [path]
     return [path] + [
         PathSpec(
@@ -104,7 +107,7 @@ def mount_starts(path: PathSpec, ns: NamespaceView | None) -> list[PathSpec]:
             vfs_path=root.strip("/"),
             raw_path=respell_one(root, path.virtual, path.raw_path),
         )
-        for root in ns.mounts.visible_descendants(path.virtual)
+        for root in mounts.visible_descendants(path.virtual)
     ]
 
 

@@ -14,62 +14,13 @@
 
 import posixpath
 
+from mirage.commands.builtin.utils.paths import resolve_path_stat
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.utils.path import CycleError
-from mirage.workspace.mount.namespace import Namespace
-
-# What an existence probe reads as nothing there: every miss, and a link
-# loop, which the walk reaches nothing through.
-_ABSENT: tuple[type[Exception], ...] = (*MISS_ERRORS, DotWalkLoop)
-
-
-async def resolve_path_stat(
-    dispatch: DispatchFn, path: PathSpec
-) -> FileStat | None:
-    """What a path is, asked on both channels a backend can answer on.
-
-    A point lookup alone cannot decide. On a prefix store a directory is
-    not an object, it is the set of keys under it, so ``stat`` misses
-    what ``readdir`` would list. Absence therefore takes *both* channels
-    coming back empty, which is the only evidence that nothing is there.
-
-    The listing has to be non-empty to count: those stores answer a
-    missing path with ``[]`` rather than raising, and cannot hold an
-    empty directory anyway (one with no keys under it does not exist).
-    Measured across every integ target: an implicit directory answers
-    here, a missing path does not. That holds only while a backend's
-    readdir refuses a path it cannot prove: postgres answered
-    ``tables``/``views`` under any first segment, and every absent
-    schema read as a directory here.
-
-    A link loop in the path is absence too: the walk reaches nothing
-    there, which is the question this answers, and a diagnostic that has
-    to name the errno asks :func:`miss_condition`.
-
-    Args:
-        dispatch (DispatchFn): op dispatcher.
-        path (PathSpec): path to resolve.
-    """
-    stat: FileStat | None
-    try:
-        stat, _ = await dispatch("stat", path)
-    except _ABSENT:
-        stat = None
-    if stat is not None:
-        return stat
-    try:
-        entries, _ = await dispatch("readdir", path)
-    except _ABSENT:
-        return None
-    if not entries:
-        return None
-    return FileStat(
-        name=posixpath.basename(path.virtual.rstrip("/")),
-        type=FileType.DIRECTORY,
-    )
+from mirage.view.types import NamespaceLinks
 
 
 async def path_stat(
@@ -149,7 +100,7 @@ async def path_exists(dispatch: DispatchFn, virtual: str | PathSpec) -> bool:
         return False
 
 
-def resolve_link(namespace: Namespace, virtual: str) -> str:
+def resolve_link(namespace: NamespaceLinks, virtual: str) -> str:
     """Where a path really points, as the dispatcher can address it.
 
     The namespace's walk, with a relative target's walk up from the
@@ -169,7 +120,7 @@ def resolve_link(namespace: Namespace, virtual: str) -> str:
 
 
 async def link_target_stat(
-    namespace: Namespace, dispatch: DispatchFn, virtual: str
+    namespace: NamespaceLinks, dispatch: DispatchFn, virtual: str
 ) -> FileStat | None:
     """The stat of what a link points at, or None when it dangles.
 

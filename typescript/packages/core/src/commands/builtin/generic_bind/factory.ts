@@ -18,8 +18,6 @@ import { activeCacheManager } from '../../../cache/context.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
-import type { NamespaceView } from '../../../view/types.ts'
-import { serves, withLinks } from '../utils/links.ts'
 import {
   type CommandFn,
   type Command,
@@ -29,16 +27,10 @@ import {
   type CommandOpts,
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import {
-  type GenericCommand,
-  mountIo,
-  withAbortGuard,
-  withCommandGuards,
-  withDirGuard,
-} from './adapter.ts'
+import { linksOf } from '../utils/links.ts'
+import { type GenericCommand, mountIo, withAbortGuard, withDirGuard } from './adapter.ts'
 import { type StatOp } from '../../../vfs/types.ts'
 import { BUILDERS } from './builders/index.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
 
 function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
   return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
@@ -90,28 +82,6 @@ export function withSlashGuard<A extends Accessor>(ops: CommandIO<A>): CommandIO
   }
 }
 
-/**
- * The adapter a bespoke search command scans through, and whether a hide,
- * a path rule or a coded preVfs policy judges anything on its mount. The
- * mount, not the operands: a service's own search answers for more than
- * the operand it is given (a whole folder for one of its days, every
- * channel under a container). A judged command must not hand the
- * service's search the answer, since the service sees every entry, and
- * its scan reads the operands through the guards the generic builders
- * bind; an unjudged one scans the mount's own table. Either reads its
- * content at the dispatcher, which admits the path before a warm serve.
- * Mirrors Python's scan_io.
- */
-export function scanIo<A extends Accessor>(
-  ops: CommandIO<A>,
-  ns: NamespaceView | undefined,
-  prefix: string | undefined,
-): [CommandIO<A>, boolean] {
-  const scoped = ns?.scoped
-  if (!scoped?.(rstripSlash(prefix ?? '') || '/')) return [ops, false]
-  return [withCommandGuards(withStatCache(ops), prefix), true]
-}
-
 // The builder tier's stat and slash wraps, chosen at registration from
 // the builder's read/write kind and applied per invocation on top of
 // the path guards (mirror Python's _stat_wraps/_write_wraps).
@@ -123,32 +93,22 @@ function writeWraps<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return withSlashGuard(ops)
 }
 
-// The namespace facts a command's table reads, stamped on the adapter per
-// invocation: the child names the namespace owes a directory, the stat of
-// what such a name points at, so a trailing slash follows a link the way
-// bash does, the line's operand resolution a glob's matches take, and the
-// links themselves, which the table's stat and readdir answer for
-// (withLinks). Conditional spreads, not `undefined` values, because
-// exactOptionalPropertyTypes refuses an explicit undefined on an optional
-// field; Python's fields are `| None` and take the uniform path.
+// The facts a command's table reads off the session's files, stamped on the
+// adapter per invocation: the stat of what a link a glob matched points at,
+// so a trailing slash follows a link the way bash does, and the line's
+// operand resolution a glob's matches take. Conditional spreads, not
+// `undefined` values, because exactOptionalPropertyTypes refuses an
+// explicit undefined on an optional field; Python's fields are `| None` and
+// take the uniform path.
 function stampNamespace(raw: CommandIO, opts: CommandOpts): CommandIO {
-  const ns = opts.ns
-  const links = ns?.links
-  const mounts = ns?.mounts
-  const prefix = opts.mountPrefix ?? ''
-  return withLinks(
-    {
-      ...raw,
-      ...(ns?.childMounts === undefined ? {} : { globChildren: ns.childMounts }),
-      ...(links === undefined
-        ? {}
-        : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
-      ...(ns?.followOperands === undefined ? {} : { globFollow: ns.followOperands }),
-    },
-    links,
-    opts.dispatch,
-    (virtual: string) => serves(mounts, prefix, virtual),
-  )
+  const links = linksOf(opts)
+  return {
+    ...raw,
+    ...(links === undefined
+      ? {}
+      : { globTargetStat: (virtual: string) => links.targetStat(virtual) }),
+    ...(opts.followOperands === undefined ? {} : { globFollow: opts.followOperands }),
+  }
 }
 
 function bind(
@@ -160,23 +120,6 @@ function bind(
   // inside the command closure below. The mount's table stays untouched
   // for the dispatcher, which does its own enforcement.
   const finish = b.write === true && b.read !== true ? writeWraps : statWraps
-  // A nested mount's keys live in another VFS and no VFS
-  // stores a symlink, so a glob resolved by one backend's readdir
-  // misses both. The names are session-scoped, so the fact is stamped
-  // per invocation, and the whole guard chain is applied on top of
-  // the stamped copy: every guard that consumes a namespace fact
-  // simply reads it off the adapter it wraps (glob resolution derives
-  // from globChildren, the dir guard closes over it, the hidden
-  // guard's rmdir captures it for its emptiness judgment). Binding
-  // the guards at registration instead would strand them behind
-  // closures built before any invocation exists, which is exactly the
-  // wiring that made the rmdir guard blind to a mounted child. The
-  // guards read the current session at call time, so per-invocation
-  // binding changes cost, not behavior.
-  // The conditional spread is not a leftover: exactOptionalPropertyTypes
-  // refuses an explicit `undefined` for an optional field, so an absent
-  // namespace has to mean an absent key rather than an undefined value.
-  // Python's `glob_children` is `| None` and takes the uniform path.
   // The command's path checks speak outside the stat and slash wraps
   // (`finish`), for the slots that still reach the backend past the
   // dispatcher (stat, exists, readdir). Reads, writes and one-call walks
@@ -190,10 +133,7 @@ function bind(
   const fn: CommandFn = (accessor, paths, texts, opts) => {
     const io = mountIo(opts)
     const raw = table === undefined ? io : table(io)
-    const guarded = withAbortGuard(
-      withDirGuard(withCommandGuards(finish(stampNamespace(raw, opts)), opts.mountPrefix)),
-      opts.signal,
-    )
+    const guarded = withAbortGuard(withDirGuard(finish(stampNamespace(raw, opts))), opts.signal)
     const split = b.passThrough !== true
     return b.fn(
       {

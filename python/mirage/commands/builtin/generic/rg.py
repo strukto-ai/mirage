@@ -46,7 +46,11 @@ from mirage.commands.builtin.rg_search import (
 )
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
-from mirage.commands.builtin.utils.links import LinkResolver, link_resolver
+from mirage.commands.builtin.utils.links import (
+    LinkResolver,
+    link_resolver,
+    mounts_of,
+)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.pcre import PcreError, translate_pcre
 from mirage.commands.builtin.utils.rust_regex import (
@@ -1244,7 +1248,7 @@ async def rg_generic(
             raise UsageError(RG_NO_PATTERN)
         paths = [STDIN_OPERAND]
 
-    mounts = opts.ns.mounts if opts.ns is not None else None
+    mounts = mounts_of(opts)
     mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     rd = mount_parent_readdir(
         partial(call_readdir, readdir, prefix=mount_prefix),

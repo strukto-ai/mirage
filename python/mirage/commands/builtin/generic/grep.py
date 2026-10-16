@@ -65,6 +65,7 @@ from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one
 from mirage.view.namespace_view import followed_stat
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 # GNU grep with no pattern prints its synopsis and the help hint, exit 2
 # (grep 3.11; the same two lines follow `option requires an argument`).
@@ -404,13 +405,13 @@ async def grep_generic(
         ), io
 
     worker = Worker()
-    mounts = opts.ns.mounts if opts.ns is not None else None
+    mounts = mounts_of(opts)
     prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     rd = mount_parent_readdir(
         partial(call_readdir, readdir, prefix=prefix), mounts, prefix
     )
     st = mount_parent_stat(partial(call_stat, stat, prefix=prefix), mounts)
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     # The walk meets links as entries: -r leaves them, -R reads what each
     # one leads to, and a directory it reaches again is a loop.
     follow = links if f.recursive and f.dereference else None

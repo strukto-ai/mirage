@@ -16,9 +16,11 @@ import { commandIo } from '../../commands/builtin/generic_bind/adapter.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { type CommandOpts, type Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
-import { materialize } from '../../io/types.ts'
+import { IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
-import type { LinkView } from '../../view/types.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
+import { Files } from '../../workspace/files.ts'
 import { FileStat, FileType, LINK_TARGET_KEY, PathSpec, MountMode } from '../../types.ts'
 import { CycleError } from '../../utils/path.ts'
 import { readTar } from '../../commands/builtin/tar_helper.ts'
@@ -44,8 +46,8 @@ function dirSpec(virtual: string, raw: string): PathSpec {
   })
 }
 
-// The namespace's symlink facts, as the dispatcher would offer them.
-function linkView(entries: Record<string, string>, cycles = false): LinkView {
+// The namespace's symlink table, as the workspace holds it.
+function linkTable(entries: Record<string, string>, cycles = false): NamespaceLinks {
   const statOf = (path: string): FileStat =>
     new FileStat({
       name: path,
@@ -54,21 +56,32 @@ function linkView(entries: Record<string, string>, cycles = false): LinkView {
       extra: { [LINK_TARGET_KEY]: entries[path] ?? '' },
     })
   return {
-    statAt: (p) => (p in entries ? statOf(p) : null),
-    subtree: (dir) =>
-      Object.keys(entries)
-        .sort()
-        .filter((k) => k.startsWith(rstrip(dir) + '/'))
-        .map((k) => [k, statOf(k)] as [string, FileStat]),
-    resolve: (p) => {
+    follow: (p: string) => {
       // The namespace walks the chain under a hop limit and raises
       // ELOOP at the end of it; a real cycle never returns a target.
       if (cycles) throw new CycleError(p)
       return entries[p] ?? p
     },
-    exists: (p) => Promise.resolve(p in entries),
-    targetStat: () => Promise.resolve(null),
+    linkStatAt: (p: string) => (p in entries ? statOf(p) : null),
+    linkStatsBelow: (dir: string) =>
+      Object.keys(entries)
+        .sort()
+        .filter((k) => k.startsWith(rstrip(dir) + '/'))
+        .map((k) => [k, statOf(k)] as [string, FileStat]),
+    symlinkTargets: () => new Map(Object.entries(entries)),
+  } as unknown as NamespaceLinks
+}
+
+// The session's files over one RAM mount and a link table: the dispatcher
+// answers a stat from the mount itself.
+function filesOver(vfs: RAMVFS, links: NamespaceLinks): Files {
+  const io = commandIo(vfs)
+  const dispatch: DispatchFn = async (op, path) => {
+    if (op === 'stat') return [await io.stat(vfs.accessor, path), new IOResult()]
+    if (op === 'readdir') return [await io.readdir(vfs.accessor, path), new IOResult()]
+    throw new Error(`unexpected ${op}`)
   }
+  return new Files(dispatch, null, links)
 }
 
 function rstrip(s: string): string {
@@ -89,7 +102,7 @@ async function runCmd(
   flags: CommandOpts['flags'],
   texts: string[] = [],
   mountPrefix = '',
-  links: LinkView | null = null,
+  links: NamespaceLinks | null = null,
 ): Promise<CmdResult> {
   const cmd = reg[0]
   if (cmd === undefined) throw new Error('not registered')
@@ -100,7 +113,7 @@ async function runCmd(
     io: commandIo(vfs),
     cwd: '/',
     mountPrefix,
-    ...(links !== null ? { ns: { links } } : {}),
+    ...(links !== null ? { vfs: filesOver(vfs, links) } : {}),
   })
   if (result === null) {
     return { out: new Uint8Array(), writes: {}, exitCode: 0, stderr: new Uint8Array() }
@@ -522,7 +535,7 @@ describe('archive planner regressions', () => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/d')
     vfs.store.files.set('/d/a.txt', ENC.encode('alpha'))
-    const links = linkView({ '/d/one': '/d/a.txt', '/d/two': '/d/a.txt' })
+    const links = linkTable({ '/d/one': '/d/a.txt', '/d/two': '/d/a.txt' })
     const { out, exitCode, stderr } = await runCmd(
       RAM_TAR,
       vfs,
@@ -540,7 +553,7 @@ describe('archive planner regressions', () => {
   it('a real cycle is one fatal problem per member and keeps the directory', async () => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/d')
-    const links = linkView({ '/d/a': '/d/b', '/d/b': '/d/a' }, true)
+    const links = linkTable({ '/d/a': '/d/b', '/d/b': '/d/a' }, true)
     const { exitCode, stderr } = await runCmd(
       RAM_TAR,
       vfs,
@@ -562,7 +575,7 @@ describe('archive planner regressions', () => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/d')
     vfs.store.files.set('/d/a.txt', ENC.encode('alpha'))
-    const links = linkView({ '/link': '/d/a.txt' })
+    const links = linkTable({ '/link': '/d/a.txt' })
     const { writes } = await runCmd(
       RAM_TAR,
       vfs,
@@ -586,7 +599,7 @@ describe('archive planner regressions', () => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/d')
     vfs.store.files.set('/d/a.txt', ENC.encode('alpha'))
-    const links = linkView({ '/link': '/d/a.txt' })
+    const links = linkTable({ '/link': '/d/a.txt' })
     const { writes } = await runCmd(
       RAM_TAR,
       vfs,
@@ -606,7 +619,7 @@ describe('archive planner regressions', () => {
 
   it('-h on a link whose target is gone reports it and writes no member', async () => {
     const vfs = new RAMVFS()
-    const links = linkView({ '/link': '/d/missing.txt' })
+    const links = linkTable({ '/link': '/d/missing.txt' })
     const { exitCode, stderr } = await runCmd(
       RAM_TAR,
       vfs,

@@ -31,6 +31,7 @@ from mirage.commands.builtin.generic.crossmount.types import (
     RunSingle,
 )
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -41,7 +42,8 @@ from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.path import respell_one
-from mirage.view.types import NamespaceView
+from mirage.view.types import FollowOperands
+from mirage.workspace.files import Files
 
 # The tests whose verdict on one entry decides what the walk reads below
 # it, or that read a listing a mount boundary splits: no mount's own find
@@ -149,8 +151,9 @@ async def run_find(
     dispatch: DispatchFn,
     run_single: RunSingle,
     cwd: str,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     stdin: ByteSource | None = None,
+    follow: FollowOperands | None = None,
 ) -> CrossResult:
     """Compose find over operands holding mounts from each mount's own find.
 
@@ -174,12 +177,14 @@ async def run_find(
         dispatch (DispatchFn): Workspace operations, for the one walk.
         run_single (RunSingle): Runs one start point on its mount alone.
         cwd (str): The session's working directory.
-        ns (NamespaceView | None): Mount ownership and link facts.
+        vfs (Files | None): Mount ownership and link facts.
         stdin (ByteSource | None): The command's input.
+        follow (FollowOperands | None): The line's operand resolution,
+            which the one walk's globs take.
     """
+    mounts = mount_view(vfs)
     if (
-        ns is None
-        or ns.mounts is None
+        mounts is None
         or WALK_WIDE & {word for _, word in predicates(texts)}
         or FlagView(flags, spec=SPECS["find"]).as_bool("L")
     ):
@@ -190,16 +195,16 @@ async def run_find(
             flags,
             dispatch,
             cwd,
-            ns,
+            vfs,
             stdin,
+            follow=follow,
         )
-    mounts = ns.mounts
     expr = parse_find_expression(list(texts))
     plan: list[tuple[int, PathSpec, bool, list[str], dict[str, FlagValue]]]
     plan = []
     for index, path in enumerate(paths):
         base = path.virtual.rstrip("/")
-        starts = mount_starts(path, ns)
+        starts = mount_starts(path, vfs)
         steps = [(start, False) for start in starts]
         steps += [(joint, True) for joint in joints(path, starts)]
         for start, alone in steps:
@@ -224,8 +229,9 @@ async def run_find(
                 bag,
                 dispatch,
                 cwd,
-                ns,
+                vfs,
                 stdin,
+                follow=follow,
             )
         else:
             out, io = await run_single("find", [start], words, bag)
@@ -243,8 +249,9 @@ async def run_find(
             flags,
             dispatch,
             cwd,
-            ns,
+            vfs,
             stdin,
+            follow=follow,
         )
     between = [
         {step[1].virtual for step in plan if step[0] == index and step[2]}

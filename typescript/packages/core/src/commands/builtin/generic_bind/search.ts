@@ -38,6 +38,7 @@ import { searchTerms } from '../grep_pushdown.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
 import { beforeFullScan } from '../utils/tree.ts'
+import { linksOf } from '../utils/links.ts'
 
 type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -293,7 +294,7 @@ export async function searchReads<A extends Accessor>(
   const files = io.filesContaining
   const searchable = io.searchable ?? null
   const lines = io.linesContaining
-  const links = opts.ns?.links
+  const links = linksOf(opts)
   const fl = new FlagView(opts.flags, specOf(name))
   if (paths.length === 0 || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
     return stream

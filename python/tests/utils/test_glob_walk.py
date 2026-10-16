@@ -591,54 +591,55 @@ async def test_trailing_slash_zero_match_keeps_the_typed_word():
     assert [(m.raw_path, m.pattern) for m in out] == [("zz*/", None)]
 
 
-async def fake_target_stat(virtual: str) -> FileStat | None:
-    # The namespace's own answer for the names it owes: a link to a
-    # directory, a nested mount root, a link to a file, a link to nothing.
+LINKED = {"/": ["/alpha", "/beta.txt", "/broken", "/flink", "/lnk"]}
+
+
+async def linked_readdir(accessor, path, index=None):
+    return LINKED[path.virtual.rstrip("/") or "/"]
+
+
+async def linked_stat(accessor, path, index=None):
+    # The dispatcher's lstat: a link answers with its own row.
+    name = path.virtual.rstrip("/").rsplit("/", 1)[-1]
+    kinds = {"alpha": FileType.DIRECTORY, "beta.txt": FileType.FILE}
+    return FileStat(name=name, type=kinds.get(name, FileType.SYMLINK))
+
+
+async def linked_target_stat(virtual: str) -> FileStat | None:
+    # What each link leads to: a directory, a file, nothing.
     name = virtual.rsplit("/", 1)[-1]
-    if virtual in ("/lnk", "/inner"):
+    if virtual == "/lnk":
         return FileStat(name=name, type=FileType.DIRECTORY)
     if virtual == "/flink":
         return FileStat(name=name, type=FileType.FILE)
     return None
 
 
-def owed(parent: str) -> list[str]:
-    return ["broken", "flink", "inner", "lnk"] if parent == "/" else []
-
-
 @pytest.mark.asyncio
-async def test_trailing_slash_asks_the_namespace_about_an_owed_name():
+async def test_trailing_slash_follows_a_link_to_what_it_leads_to():
     # bash follows a link for `*/` and keeps it only when the target is
     # a directory; a dangling one is dropped like any file.
     out = await resolve_glob_with(
-        fake_readdir,
+        linked_readdir,
         None,
         [typed_spec("/*", "*/")],
         NULL_INDEX,
-        children=owed,
-        stat=fake_stat,
-        target_stat=fake_target_stat,
+        stat=linked_stat,
+        target_stat=linked_target_stat,
     )
-    assert [m.raw_path for m in out] == ["alpha/", "inner/", "lnk/"]
+    assert [m.raw_path for m in out] == ["alpha/", "lnk/"]
 
 
 @pytest.mark.asyncio
-async def test_trailing_slash_keeps_an_owed_name_it_cannot_ask_about():
+async def test_trailing_slash_drops_a_link_it_cannot_follow():
     out = await resolve_glob_with(
-        fake_readdir,
+        linked_readdir,
         None,
         [typed_spec("/*", "*/")],
         NULL_INDEX,
-        children=owed,
-        stat=fake_stat,
+        stat=linked_stat,
     )
-    assert [m.raw_path for m in out] == [
-        "alpha/",
-        "broken/",
-        "flink/",
-        "inner/",
-        "lnk/",
-    ]
+    assert [m.raw_path for m in out] == ["alpha/"]
 
 
 @pytest.mark.parametrize("text", ["!", "a!b", "!(a|b)", "*?[@+!()|"])

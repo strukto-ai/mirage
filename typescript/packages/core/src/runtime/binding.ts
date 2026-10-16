@@ -16,7 +16,7 @@ import type { ProcessView } from '../process/view.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { captureSessionContext } from '../context/session_context.ts'
 import { captureExecutionContext } from '../execution/context.ts'
-import type { NamespaceView, OpKwargs, SessionView } from '../view/types.ts'
+import type { OpKwargs, SessionView } from '../view/types.ts'
 import { isGlob, showHead } from '../utils/hidden.ts'
 import { PathSpec } from '../types.ts'
 import { ContextScope } from '../utils/context_scope.ts'
@@ -25,12 +25,14 @@ import type { BridgeDispatchFn } from './types.ts'
 import type { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 
-/** Local workspace entry points captured for one execution, never guest globals. */
+/** Local workspace entry points captured for one execution, never guest
+ * globals. `vfs` is the session's files, whose links a guest's path resolves
+ * through; null outside a workspace. */
 export interface RuntimeContext {
   readonly binding: WorkspaceBinding
   readonly dispatch: BridgeDispatchFn
   readonly resolver: MountResolver
-  readonly ns: NamespaceView
+  readonly vfs: Files | null
   readonly sessionView: SessionView | null
   readonly cwd: PathSpec
   readonly env: Readonly<Record<string, string>>
@@ -97,7 +99,7 @@ export function restrictedMountsFor(session: SessionState, prefixes: readonly st
 export function captureBinding(
   binding: WorkspaceBinding,
   views: {
-    ns?: NamespaceView
+    vfs?: Files
     sessionView?: SessionView
     processes?: ProcessView
     cwd?: PathSpec
@@ -109,38 +111,6 @@ export function captureBinding(
   } = {},
   scope = new ContextScope([...captureSessionContext(), captureExecutionContext()]),
 ): RuntimeContext {
-  const source = views.ns ?? {}
-  const links = source.links
-  const mounts = source.mounts
-  const ns: NamespaceView = {
-    ...source,
-    ...(links === undefined
-      ? {}
-      : {
-          links: {
-            statAt: scope.wrap(links.statAt.bind(links)),
-            subtree: scope.wrap(links.subtree.bind(links)),
-            resolve: scope.wrap(links.resolve.bind(links)),
-            exists: scope.wrap(links.exists.bind(links)),
-            targetStat: scope.wrap(links.targetStat.bind(links)),
-          },
-        }),
-    ...(mounts === undefined
-      ? {}
-      : {
-          mounts: {
-            descendants: scope.wrap(mounts.descendants.bind(mounts)),
-            visibleDescendants: scope.wrap(mounts.visibleDescendants.bind(mounts)),
-            isRoot: scope.wrap(mounts.isRoot.bind(mounts)),
-            rootOf: scope.wrap(mounts.rootOf.bind(mounts)),
-            ...(mounts.maxDuEntries === undefined
-              ? {}
-              : { maxDuEntries: scope.wrap(mounts.maxDuEntries.bind(mounts)) }),
-          },
-        }),
-    ...(source.statOverlay === undefined ? {} : { statOverlay: scope.wrap(source.statOverlay) }),
-    ...(source.childMounts === undefined ? {} : { childMounts: scope.wrap(source.childMounts) }),
-  }
   const session = views.sessionView
   const sessionView =
     session === undefined
@@ -163,15 +133,10 @@ export function captureBinding(
       ownerOf: scope.wrap((path: string) => binding.resolver.ownerOf(path)),
       linkChildren: scope.wrap((path: string) => binding.resolver.linkChildren(path)),
     },
-    ns,
+    vfs: views.vfs ?? null,
     sessionView,
     processes: views.processes ?? null,
-    restrictedMounts: Object.freeze(
-      views.restrictedMounts ??
-        (binding.mountPrefixes?.() ?? []).filter(
-          (prefix) => source.scoped?.(prefix.replace(/\/+$/, '') || '/') === true,
-        ),
-    ),
+    restrictedMounts: Object.freeze(views.restrictedMounts ?? []),
     cwd: views.cwd ?? PathSpec.fromStrPath('/'),
     env: Object.freeze({ ...views.env }),
     scope,

@@ -89,7 +89,7 @@ describe('wc asks the mount for a line count', () => {
       Promise.resolve(p.virtual === '/a' ? 5 : null)
     const paths = [PathSpec.fromStrPath('/a'), PathSpec.fromStrPath('/bb')]
     const run = async (flags: Record<string, boolean>): Promise<string> => {
-      const opts = { stdin: null, flags, cwd: '/', vfs: null } as unknown as CommandOpts
+      const opts = { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
       const result = await wcGeneric(paths, [], opts, stream, lineCount)
       return new TextDecoder().decode(await materialize(result?.[0] ?? null))
     }
@@ -118,7 +118,7 @@ describe('wc takes bytes alone from the size', () => {
       asked.push(p.virtual)
       return Promise.resolve(4)
     }
-    const opts = { stdin: null, flags, cwd: '/', vfs: null } as unknown as CommandOpts
+    const opts = { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
     await wcGeneric([PathSpec.fromStrPath('/f')], [], opts, stream, undefined, sizeOf)
     expect([asked.length > 0, reads.length > 0]).toEqual([sized, read])
   })
@@ -132,7 +132,6 @@ describe('wc takes bytes alone from the size', () => {
       stdin: null,
       flags: { bytes: true },
       cwd: '/',
-      vfs: null,
     } as unknown as CommandOpts
     const result = await wcGeneric([PathSpec.fromStrPath('/f')], [], opts, stream, undefined, () =>
       Promise.resolve(null),

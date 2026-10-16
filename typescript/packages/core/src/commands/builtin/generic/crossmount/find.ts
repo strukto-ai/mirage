@@ -28,11 +28,13 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { boundedMap } from '../../../../concurrency/limiter.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
-import type { NamespaceView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import type { FollowOperands } from '../../../../view/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import { respellOne } from '../../../../utils/path.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import type { Files } from '../../../../workspace/files.ts'
+import { mountView } from '../../utils/links.ts'
 
 // The tests whose verdict on one entry decides what the walk reads below it,
 // or that read a listing a mount boundary splits: no mount's own find can
@@ -155,15 +157,17 @@ export async function runFind(
   dispatch: DispatchFn,
   runSingle: RunSingle,
   cwd: string,
-  ns?: NamespaceView,
+  vfs?: Files,
   stdin: ByteSource | null = null,
   signal?: AbortSignal,
+  // The line's operand resolution, which the one walk's globs take.
+  follow?: FollowOperands,
 ): Promise<CrossResult> {
   const builder = DISPATCH_BUILDERS.get('find')
   if (builder === undefined) throw new Error('No dispatch builder for find')
   const walk = (): Promise<CrossResult> =>
-    runDispatch(builder, paths, texts, bag, dispatch, cwd, ns, stdin, signal)
-  const mounts = ns?.mounts
+    runDispatch(builder, paths, texts, bag, dispatch, cwd, vfs, stdin, signal, [], follow)
+  const mounts = mountView(vfs)
   if (
     mounts === undefined ||
     predicates(texts).some(([, word]) => WALK_WIDE.has(word)) ||
@@ -180,7 +184,7 @@ export async function runFind(
   }[] = []
   paths.forEach((path, index) => {
     const base = path.virtual.replace(/\/+$/, '')
-    const starts = mountStarts(path, ns)
+    const starts = mountStarts(path, vfs)
     const steps: [PathSpec, boolean][] = [
       ...starts.map((start): [PathSpec, boolean] => [start, false]),
       ...joints(path, starts).map((joint): [PathSpec, boolean] => [joint, true]),
@@ -203,9 +207,11 @@ export async function runFind(
             step.bag,
             dispatch,
             cwd,
-            ns,
+            vfs,
             stdin,
             signal,
+            [],
+            follow,
           )
         : await runSingle(
             'find',

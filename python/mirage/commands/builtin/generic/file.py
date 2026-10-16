@@ -30,6 +30,7 @@ from mirage.types import (
 )
 from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView, StatPath
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 _logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ async def file_generic(
         read_range=read_range,
         b=parsed.brief,
         i=parsed.mime,
-        links=opts.ns.links if opts.ns is not None else None,
+        links=links_of(opts),
         stat_path=opts.stat_path,
-        mounts=opts.ns.mounts if opts.ns is not None else None,
+        mounts=mounts_of(opts),
     )

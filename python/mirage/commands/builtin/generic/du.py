@@ -6,12 +6,14 @@ from functools import partial
 
 from mirage.commands.builtin.constants import INTMAX
 from mirage.commands.builtin.utils.formatting import scaled_size
+from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.context import session_visibility
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
@@ -23,7 +25,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
 from mirage.vfs.types import DuEntries
 from mirage.view.namespace_view import paths_scoped
-from mirage.view.types import MountView, NamespaceView, StatPath
+from mirage.view.types import MountView, StatPath
 
 logger = logging.getLogger(__name__)
 
@@ -528,13 +530,12 @@ async def _du_one(
     flags: DuFlags,
     mounts: MountView | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
-    ns: NamespaceView | None = None,
 ) -> tuple[list[str], int, SizedRun | None]:
     label = path.raw_path
-    vis = ns.visibility if ns is not None else None
+    vis = session_visibility()
     roots = mounts.descendants(path.virtual) if mounts is not None else []
 
-    if flags.s and not flags.S and not roots and not paths_scoped(ns, [path]):
+    if flags.s and not flags.S and not roots and not paths_scoped([path]):
         # The one-total fast path trusts the backend's own sum, which a
         # session hiding paths under this operand cannot: hidden leaves
         # would be counted into a total their names never justify, so
@@ -627,7 +628,6 @@ async def du(
     mounts: MountView | None = None,
     unreadable: Callable[[], Sequence[str]] | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
-    ns: NamespaceView | None = None,
     inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
     repeated: Callable[[PathSpec], bool] | None = None,
 ) -> DuOutput:
@@ -658,9 +658,6 @@ async def du(
         directories (Callable[[], Sequence[str]] | None): read after each
             operand's walk for every directory it met, so one no file
             points at (empty, or refused) still gets GNU's row.
-        ns (NamespaceView | None): the command's namespace view: the
-            session's hides drop leaves from every row and total, and
-            a judged subtree skips the one-total fast path.
         inaccessible (Callable[[], Sequence[tuple[str, str | None]]] |
             None): read after the walks for each link ``-L`` could not
             follow, with the strerror GNU adds for a chain that loops
@@ -682,7 +679,6 @@ async def du(
             flags,
             mounts,
             directories,
-            ns,
         )
         lines.extend(block)
         totals.append(total)
@@ -796,7 +792,7 @@ async def du_generic(
         stat,
         partial(
             du_has_content,
-            opts.ns.visibility if opts.ns is not None else None,
+            session_visibility(),
             compute_entries,
         ),
         stat_path=opts.stat_path,
@@ -810,8 +806,7 @@ async def du_generic(
         truncated=truncated,
         unreadable=unreadable,
         directories=directories,
-        mounts=opts.ns.mounts if opts.ns is not None else None,
-        ns=opts.ns,
+        mounts=mounts_of(opts),
         inaccessible=inaccessible,
         repeated=repeated,
     )

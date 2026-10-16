@@ -13,6 +13,7 @@ from typing import Any
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.awk_types import USAGE, AwkFlags
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.constants import ROOT_CWD
 from mirage.commands.errors import UsageError
@@ -48,7 +49,7 @@ from mirage.shell.bytes import (
 )
 from mirage.shell.join import shell_join
 from mirage.types import PathSpec
-from mirage.view.types import NamespaceView
+from mirage.workspace.files import Files
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
 
@@ -87,24 +88,23 @@ def split_assignments(raw: Sequence[str]) -> dict[str, str]:
     return out
 
 
-def served_here(
-    ns: NamespaceView | None, mount_prefix: str, path: PathSpec
-) -> bool:
+def served_here(vfs: Files | None, mount_prefix: str, path: PathSpec) -> bool:
     """Whether the mount awk runs on serves an operand.
 
     A line whose operands span mounts runs awk once, on its first file's
     mount; an operand another mount serves is read through the dispatcher.
 
     Args:
-        ns (NamespaceView | None): the name plane's facts, None outside a
+        vfs (Files | None): the name plane's facts, None outside a
             workspace, where every operand is the mount's own.
         mount_prefix (str): the prefix of the mount awk runs on.
         path (PathSpec): the operand.
     """
-    if ns is None or ns.mounts is None:
+    mounts = mount_view(vfs)
+    if vfs is None or mounts is None:
         return True
     home = mount_prefix.rstrip("/")
-    return ns.mounts.root_of(path.virtual).rstrip("/") == home
+    return mounts.root_of(path.virtual).rstrip("/") == home
 
 
 async def _guarded(source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
@@ -361,7 +361,7 @@ async def awk_generic(
     dispatch: DispatchFn | None = None,
     cwd: PathSpec = ROOT_CWD,
     shell: ShellFn | None = None,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     mount_prefix: str = "",
     env: Mapping[str, str] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -389,7 +389,7 @@ async def awk_generic(
         cwd (PathSpec): What relative file names resolve against.
         shell (ShellFn | None): Runs the command of a pipe or
             ``system()``.
-        ns (NamespaceView | None): The name plane's facts, which say
+        vfs (Files | None): The name plane's facts, which say
             which operands another mount serves.
         mount_prefix (str): The prefix of the mount awk runs on.
         env (Mapping[str, str] | None): The exported environment, which
@@ -433,7 +433,7 @@ async def awk_generic(
         dispatch,
         cwd,
         shell,
-        partial(served_here, ns, mount_prefix),
+        partial(served_here, vfs, mount_prefix),
     )
     interp = Interpreter(
         program,

@@ -13,12 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
-import type { NamespaceView, SessionView } from '../../../../../view/types.ts'
+import type { SessionView } from '../../../../../view/types.ts'
+import type { Files } from '../../../../../workspace/files.ts'
 import type { FileStat, PathSpec } from '../../../../../types.ts'
 import { gnuBasename } from '../../../../../utils/path.ts'
 import type { CommandOpts } from '../../../../config.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import { dispatchedCall, overlaidStat } from '../../../generic_bind/adapter.ts'
+import { dispatchedCall } from '../../../generic_bind/adapter.ts'
 import { lsGeneric } from '../../ls.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { crossOpts, flatten, readdirOp } from '../utils.ts'
@@ -41,15 +42,6 @@ function relayedStat(dispatch: DispatchFn) {
   }
 }
 
-// The name-plane facts minus the mount boundaries; see `runLs`.
-function crossingNs(ns: NamespaceView): NamespaceView {
-  return {
-    ...(ns.links !== undefined ? { links: ns.links } : {}),
-    ...(ns.statOverlay !== undefined ? { statOverlay: ns.statOverlay } : {}),
-    ...(ns.childMounts !== undefined ? { childMounts: ns.childMounts } : {}),
-  }
-}
-
 // List operands spanning mounts through the shared generic ls. ls relays
 // rather than fans out because its layout is decided across all operands at
 // once: GNU prints non-directory operands first as one globally sorted
@@ -58,38 +50,27 @@ function crossingNs(ns: NamespaceView): NamespaceView {
 // operand and cannot know any of that, so the generic has to see the whole
 // line -- which it can, because readdir and stat route per path.
 //
-// `ns` carries the name-plane facts no backend can see. The attr overlay
-// matters most here: without it a relayed row would report the raw backend
-// mode and silently lose a chmod the namespace holds.
-//
-// Every fact but `mounts`, which names the boundaries a walk's readdir
-// cannot cross. This one's does cross them -- readdir and stat route per
-// path -- so the relay descends a nested mount itself, and it has to:
-// nothing runs behind a relay to contribute that group the way the
-// fan-out does for a single-mount run. Handing it the boundaries would
-// stop the descent and drop the group. Python says the same thing by
-// omission, calling the generic with explicit keywords.
+// `vfs` is the session's files, whose links a listing marks. The
+// dispatcher's stat carries the attribute overlay and its listing the mounts
+// below, and a run outside a mount has no boundary to stop at, so the relay
+// descends a nested mount itself, as nothing runs behind a relay to
+// contribute that group the way the fan-out does for a single-mount run.
 export async function runLs(
   scopes: PathSpec[],
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
-  ns?: NamespaceView,
+  vfs?: Files,
   // The session view, for the profile the group column renders.
   sessionView?: SessionView,
 ): Promise<CrossResult> {
   const opts: CommandOpts = {
     ...crossOpts(flagKwargs),
-    ...(ns !== undefined ? { ns: crossingNs(ns) } : {}),
+    dispatch,
+    ...(vfs !== undefined ? { vfs } : {}),
     ...(sessionView !== undefined ? { sessionView } : {}),
   }
-  // The dispatcher's listing names the links among the entries, as a mount's
-  // table does once its links are stamped on. Mirrors Python's
-  // relayed_readdir.
-  const result = await lsGeneric(
-    flatten(scopes),
-    opts,
-    readdirOp(dispatch),
-    overlaidStat(relayedStat(dispatch), ns?.statOverlay),
-  )
+  // The dispatcher's listing names the links among the entries. Mirrors
+  // Python's relayed_readdir.
+  const result = await lsGeneric(flatten(scopes), opts, readdirOp(dispatch), relayedStat(dispatch))
   return result ?? [null, new IOResult()]
 }

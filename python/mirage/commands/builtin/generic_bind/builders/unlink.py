@@ -25,6 +25,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+from mirage.commands.builtin.utils.links import links_of
 
 
 async def unlink(
@@ -44,7 +45,7 @@ async def unlink(
     if len(paths) > 1:
         raise extra_operand_error("unlink", paths[1].raw_path)
     p = paths[0]
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     # unlink(2) never follows, so a trailing slash on a link operand is
     # refused rather than resolved: GNU answers `unlink dlink/` and
     # `unlink flink/` alike with ENOTDIR, where a real directory under a

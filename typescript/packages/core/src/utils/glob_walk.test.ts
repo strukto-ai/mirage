@@ -425,7 +425,6 @@ describe('resolveGlobWith trailing slash', () => {
       [typedSpec('/*', '*/')],
       undefined,
       undefined,
-      undefined,
       fakeStat,
     )
     expect(out.map((m) => [m.virtual, m.rawPath])).toEqual([['/alpha', 'alpha/']])
@@ -438,52 +437,53 @@ describe('resolveGlobWith trailing slash', () => {
       [typedSpec('/notion/p*', '/notion/p*/')],
       undefined,
       undefined,
-      undefined,
       fakeStat,
     )
     expect(out.map((m) => m.rawPath)).toEqual(['/notion/pages/'])
   })
 
-  // The namespace's own answer for the names it owes: a link to a
-  // directory, a nested mount root, a link to a file, a link to nothing.
-  function fakeTargetStat(virtual: string): Promise<FileStat | null> {
+  // The dispatcher's lstat: a link answers with its own row.
+  const linkedReaddir = (): Promise<string[]> =>
+    Promise.resolve(['/alpha', '/beta.txt', '/broken', '/flink', '/lnk'])
+  function linkedStat(_accessor: null, path: PathSpec): Promise<FileStat> {
+    const name = path.virtual.slice(path.virtual.lastIndexOf('/') + 1)
+    const type =
+      name === 'alpha' ? FileType.DIRECTORY : name === 'beta.txt' ? FileType.FILE : FileType.SYMLINK
+    return Promise.resolve(new FileStat({ name, type }))
+  }
+  // What each link leads to: a directory, a file, nothing.
+  function linkedTargetStat(virtual: string): Promise<FileStat | null> {
     const name = virtual.slice(virtual.lastIndexOf('/') + 1)
-    if (virtual === '/lnk' || virtual === '/inner') {
-      return Promise.resolve(new FileStat({ name, type: FileType.DIRECTORY }))
-    }
+    if (virtual === '/lnk') return Promise.resolve(new FileStat({ name, type: FileType.DIRECTORY }))
     if (virtual === '/flink') return Promise.resolve(new FileStat({ name, type: FileType.FILE }))
     return Promise.resolve(null)
   }
-  const owed = (parent: string): string[] =>
-    parent === '/' ? ['broken', 'flink', 'inner', 'lnk'] : []
 
-  it('asks the namespace about an owed name', async () => {
+  it('follows a link to what it leads to', async () => {
     // bash follows a link for `*/` and keeps it only when the target is
     // a directory; a dangling one is dropped like any file.
     const out = await resolveGlobWith(
-      fakeReaddir,
+      linkedReaddir,
       null,
       [typedSpec('/*', '*/')],
       undefined,
       undefined,
-      owed,
-      fakeStat,
-      fakeTargetStat,
+      linkedStat,
+      linkedTargetStat,
     )
-    expect(out.map((m) => m.rawPath)).toEqual(['alpha/', 'inner/', 'lnk/'])
+    expect(out.map((m) => m.rawPath)).toEqual(['alpha/', 'lnk/'])
   })
 
-  it('keeps an owed name it cannot ask about', async () => {
+  it('drops a link it cannot follow', async () => {
     const out = await resolveGlobWith(
-      fakeReaddir,
+      linkedReaddir,
       null,
       [typedSpec('/*', '*/')],
       undefined,
       undefined,
-      owed,
-      fakeStat,
+      linkedStat,
     )
-    expect(out.map((m) => m.rawPath)).toEqual(['alpha/', 'broken/', 'flink/', 'inner/', 'lnk/'])
+    expect(out.map((m) => m.rawPath)).toEqual(['alpha/'])
   })
 
   it('keeps every match without a stat function', async () => {
@@ -496,7 +496,6 @@ describe('resolveGlobWith trailing slash', () => {
       fakeReaddir,
       null,
       [typedSpec('/zz*', 'zz*/')],
-      undefined,
       undefined,
       undefined,
       fakeStat,

@@ -19,7 +19,7 @@ from mirage.commands.errors import UsageError
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import NamespaceView
+from mirage.view.types import MountView
 
 
 def rm_without_operands(force: bool) -> tuple[ByteSource | None, IOResult]:
@@ -47,7 +47,7 @@ async def remove_tree(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     unlink: Callable[[PathSpec], Awaitable[None]],
     rmdir: Callable[[PathSpec], Awaitable[None]],
-    ns: NamespaceView | None,
+    mounts: MountView | None,
     force: bool,
 ) -> tuple[list[tuple[PathSpec, bool]], list[tuple[PathSpec, OSError]]]:
     """Remove a directory tree entry by entry, as GNU ``rm -r`` does.
@@ -68,8 +68,8 @@ async def remove_tree(
         stat (Callable): stats a path.
         unlink (Callable): removes a file or a link.
         rmdir (Callable): removes an empty directory.
-        ns (NamespaceView | None): the namespace's links, mounts and the
-            session's visibility.
+        mounts (MountView | None): the mount boundaries the walk stops
+            at.
         force (bool): ``-f``.
 
     Returns:
@@ -77,9 +77,7 @@ async def remove_tree(
         first, and each failure with its error.
     """
     roots = (
-        set(ns.mounts.descendants(root.virtual))
-        if ns is not None and ns.mounts is not None
-        else set()
+        set(mounts.descendants(root.virtual)) if mounts is not None else set()
     )
     removed: list[tuple[PathSpec, bool]] = []
     failures: list[tuple[PathSpec, OSError]] = []

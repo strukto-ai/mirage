@@ -14,10 +14,9 @@
 
 import type { LinkView, StatPath } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { FileStat } from '../../../types.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import { FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'
-import { dotWalkError, eexist, enoent, isMissingPath } from '../../../errors/fs.ts'
+import { FileStat, FileType, LINK_TARGET_KEY, PathSpec, type StatFn } from '../../../types.ts'
+import { dotWalkError, eexist, enoent, isMissError, isMissingPath } from '../../../errors/fs.ts'
 import { operandSpelling } from '../../../errors/render.ts'
 import { type FsError } from '../../../errors/types.ts'
 import { mountKey, rekey, respelled } from '../../../utils/key_prefix.ts'
@@ -25,12 +24,58 @@ import {
   CycleError,
   dotLookups,
   dotPrefixes,
+  gnuBasename,
   norm,
   parent,
   resolvePath,
 } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { FsCondition } from '../../../errors/types.ts'
+
+// What a path is, asked on both channels a backend can answer on.
+//
+// A point lookup alone cannot decide. On a prefix store a directory is not
+// an object, it is the set of keys under it, so stat misses what readdir
+// would list. Absence therefore takes *both* channels coming back empty,
+// which is the only evidence that nothing is there.
+//
+// The listing has to be non-empty to count: those stores answer a missing
+// path with [] rather than raising, and cannot hold an empty directory
+// anyway (one with no keys under it does not exist). Measured across every
+// integ target: an implicit directory answers here, a missing path does not.
+// That holds only while a backend's readdir refuses a path it cannot prove:
+// postgres answered tables/views under any first segment, and every absent
+// schema read as a directory here.
+//
+// A link loop in the path is absence too: the walk reaches nothing there,
+// which is the question this answers, and a diagnostic that has to name
+// the errno asks missCondition. Mirrors Python's resolve_path_stat.
+export async function resolvePathStat(
+  dispatch: DispatchFn,
+  path: PathSpec,
+): Promise<FileStat | null> {
+  let stat: FileStat | null = null
+  try {
+    const [s] = await dispatch('stat', path)
+    stat = s as FileStat | null
+  } catch (exc) {
+    if (!isMissError(exc) && (exc as { code?: string }).code !== 'ELOOP') throw exc
+  }
+  if (stat !== null) return stat
+  let entries: unknown
+  try {
+    const [raw] = await dispatch('readdir', path)
+    entries = raw
+  } catch (exc) {
+    if (!isMissError(exc) && (exc as { code?: string }).code !== 'ELOOP') throw exc
+    return null
+  }
+  if (!Array.isArray(entries) || entries.length === 0) return null
+  return new FileStat({
+    name: gnuBasename(rstripSlash(path.virtual)),
+    type: FileType.DIRECTORY,
+  })
+}
 
 // Stat via dispatch in the shape the generics' probes take: destKind and
 // its kin are written against a backend stat that raises on a miss, so a

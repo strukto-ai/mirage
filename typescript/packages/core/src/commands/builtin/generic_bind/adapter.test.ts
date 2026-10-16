@@ -13,21 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { Accessor } from '../../../accessor/base.ts'
 import {
   runWithAdmission,
   runWithMountGate,
   runWithSession,
 } from '../../../context/session_context.ts'
-import type { Policy } from '../../../policy/base.ts'
-import { Policies, runWithOpPolicies } from '../../../policy/policies.ts'
-import type { Action, VfsContext } from '../../../policy/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { requireOp, withAbortGuard, withCommandGuards } from './adapter.ts'
+import { requireOp, withAbortGuard } from './adapter.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { eacces, eisdir, enoent } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { IOResult } from '../../../io/types.ts'
+import { Files } from '../../../workspace/files.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import type { CommandOpts, CommandIO } from '../../config.ts'
@@ -52,10 +49,11 @@ const accessor = {} as never
 // gets: the two probes below the backend are the only ones that can fire.
 const NO_NS = {} as CommandOpts
 // The one a mount parent needs: no backend row, a name plane that owes the
-// path a child name.
+// path a child name: a mount below it.
 function nsDir(dir: string): CommandOpts {
+  const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
   return {
-    ns: { childMounts: (parent: string) => (parent === dir ? ['alpha'] : []) },
+    vfs: new Files(nothing, null, null, () => null, { prefixes: () => [`${dir}/alpha/`] }),
   } as CommandOpts
 }
 
@@ -107,19 +105,23 @@ describe('commandIo', () => {
 })
 
 describe('resolveGlobOf', () => {
-  it('lets a trailing slash ask the namespace about an owed name', async () => {
-    // The factory stamps the invocation's link target stat beside the
-    // owed child names; the resolver drops a link to nothing the way
-    // bash does and keeps a link to a directory.
-    const readdir = () => Promise.resolve(['/d/alpha'])
-    const stat = () => Promise.resolve(new FileStat({ name: 'alpha', type: FileType.DIRECTORY }))
+  it('lets a trailing slash follow a link through the target stat', async () => {
+    // The factory stamps the invocation's link target stat; the resolver
+    // drops a link to nothing the way bash does and keeps a link to a
+    // directory.
+    const readdir = () => Promise.resolve(['/d/alpha', '/d/broken', '/d/lnk'])
+    const stat = (_a: unknown, p: PathSpec) =>
+      Promise.resolve(
+        p.virtual === '/d/alpha'
+          ? new FileStat({ name: 'alpha', type: FileType.DIRECTORY })
+          : new FileStat({ name: p.virtual.split('/').pop() ?? '', type: FileType.SYMLINK }),
+      )
     const ops: CommandIO = {
       readdir,
       readBytes: () => Promise.resolve(new Uint8Array()),
       readStream: () => oneChunkStream(new Uint8Array()),
       stat,
       isMounted: () => true,
-      globChildren: (parent) => (parent === '/d/' ? ['broken', 'lnk'] : []),
       globTargetStat: (virtual) =>
         Promise.resolve(
           virtual === '/d/lnk' ? new FileStat({ name: 'lnk', type: FileType.DIRECTORY }) : null,
@@ -333,13 +335,11 @@ function keyedReadOps(opts: {
   explicitDirs?: readonly string[]
   files?: Record<string, string>
   readError?: (p: PathSpec) => Error
-  children?: Record<string, string[]>
 }): CommandIO {
   const implicitDirs = opts.implicitDirs ?? []
   const explicitDirs = opts.explicitDirs ?? []
   const files = opts.files ?? {}
   const readError = opts.readError ?? ((p: PathSpec) => enoent(p))
-  const children = opts.children
   const encode = (t: string) => new TextEncoder().encode(t)
   return {
     readdir: (_a, p) => {
@@ -374,7 +374,6 @@ function keyedReadOps(opts: {
       return Promise.reject(enoent(p))
     },
     isMounted: () => true,
-    ...(children === undefined ? {} : { globChildren: (dir: string) => children[dir] ?? [] }),
   }
 }
 
@@ -383,102 +382,6 @@ async function drain(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
   for await (const chunk of stream) out.push(chunk)
   return out
 }
-
-const SEALED = { message: 'Permission denied', refusal: { reason: 'sealed' } }
-
-class SealedRead implements Policy {
-  readonly asked: [string, string, boolean][] = []
-  private readonly sealed: string
-  constructor(sealed: string) {
-    this.sealed = sealed
-  }
-  preVfs(ctx: VfsContext): Action | null {
-    this.asked.push([ctx.call.name, ctx.path.virtual, ctx.write])
-    if (!ctx.write && ctx.path.virtual === this.sealed) {
-      return { kind: 'deny', reason: 'sealed' }
-    }
-    return null
-  }
-}
-
-describe('withCommandGuards policy', () => {
-  const spec = (virtual: string): PathSpec =>
-    new PathSpec({
-      virtual,
-      directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-      vfsPath: virtual,
-      resolved: true,
-    })
-
-  function probeOps(calls: string[][]): CommandIO {
-    async function* stream(_a: Accessor, path: PathSpec): AsyncGenerator<Uint8Array> {
-      calls.push(['stream', path.virtual])
-      yield await Promise.resolve(new Uint8Array([1]))
-    }
-    return {
-      readdir: (_a, path) => {
-        calls.push(['readdir', path.virtual])
-        return Promise.resolve(['a'])
-      },
-      readBytes: (_a, path) => {
-        calls.push(['read', path.virtual])
-        return Promise.resolve(new Uint8Array([1]))
-      },
-      readStream: stream,
-      stat: (_a, path) => {
-        calls.push(['stat', path.virtual])
-        return Promise.resolve(
-          new FileStat({ name: 'k', type: FileType.FILE, content: ContentType.TEXT, size: 1 }),
-        )
-      },
-      isMounted: () => true,
-      copy: (_a, src, dst) => {
-        calls.push(['copy', src.virtual, dst.virtual])
-        return Promise.resolve()
-      },
-      unlink: (_a, path) => {
-        calls.push(['unlink', path.virtual])
-        return Promise.resolve()
-      },
-    }
-  }
-
-  it('admits a listing and leaves stat alone', async () => {
-    const calls: string[][] = []
-    const raw = probeOps(calls)
-    const policy = new SealedRead('/data/secret')
-    await runWithOpPolicies(new Policies([policy]), () =>
-      runWithMountGate('/data', MountMode.WRITE, async () => {
-        const ops = withCommandGuards(raw)
-        // stat is a presence fact: deny is present and refused.
-        expect((await ops.stat(accessor, spec('/data/secret'))).size).toBe(1)
-        // readdir asks about the directory it lists.
-        await expect(ops.readdir(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
-        expect(calls).not.toContainEqual(['readdir', '/data/secret'])
-        expect(await ops.readdir(accessor, spec('/data/dir'))).toEqual(['a'])
-        // Writes and copies are the dispatcher's, which judges them itself.
-        expect(ops.copy).toBe(raw.copy)
-        expect(ops.unlink).toBe(raw.unlink)
-      }),
-    )
-    expect(policy.asked).toContainEqual(['readdir', '/data/dir', false])
-    expect(policy.asked.some(([op]) => op === 'stat')).toBe(false)
-  })
-
-  it('wrap-time capture covers late calls', async () => {
-    // A slot called after dispatch has reset the context is still admitted
-    // by the scope the guard captured at wrap time (livePolicyScope).
-    const calls: string[][] = []
-    const raw = probeOps(calls)
-    const policy = new SealedRead('/data/secret')
-    const ops = await runWithOpPolicies(new Policies([policy]), () =>
-      Promise.resolve(withCommandGuards(raw)),
-    )
-    // The slot call happens outside the window now.
-    await expect(ops.readdir(accessor, spec('/data/secret'))).rejects.toMatchObject(SEALED)
-    expect(calls).not.toContainEqual(['readdir', '/data/secret'])
-  })
-})
 
 describe('withDirGuard', () => {
   it('refuses an explicit directory on every read slot', async () => {
@@ -500,15 +403,6 @@ describe('withDirGuard', () => {
     await expect(drain(ops.readStream(accessor, p, undefined))).rejects.toMatchObject({
       code: 'EISDIR',
     })
-  })
-
-  it('refuses a namespace-only directory', async () => {
-    // /a/b holds no key in this backend; it exists because a mount or a
-    // link sits under it, which only the namespace can see.
-    const ops = withDirGuard(keyedReadOps({ children: { '/a/b': ['inner'] } }))
-    await expect(
-      ops.readBytes(accessor, PathSpec.fromStrPath('/a/b'), undefined),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
   })
 
   it('refines a read failure that is not an FsError at all', async () => {
@@ -772,7 +666,7 @@ it.each(capabilityCases)(
     })
     await runWithSession(session, () =>
       runWithMountGate('/data', MountMode.WRITE, async () => {
-        const ops = withCommandGuards(capabilityOps(available ? backend : undefined))
+        const ops = capabilityOps(available ? backend : undefined)
         const path = PathSpec.fromStrPath(`/data/${region}/f`)
         const invoke = () => {
           if (operation === 'copy' || operation === 'rename') {
@@ -833,7 +727,7 @@ it.each([false, true])(
         // A rename the backend has is the dispatcher's, so the guards judge
         // only a missing one.
         delete table.rename
-        const ops = withCommandGuards(table)
+        const ops = table
         const src = PathSpec.fromStrPath('/data/src'),
           dst = PathSpec.fromStrPath('/data/dst')
         const copy = requireOp(ops.copy, 'copy')

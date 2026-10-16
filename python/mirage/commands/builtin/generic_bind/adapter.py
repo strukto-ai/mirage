@@ -30,6 +30,7 @@ from typing import Any, NoReturn, Protocol, overload
 from mirage.accessor.base import Accessor
 from mirage.cache.context import active_cache_manager
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.builtin.utils.links import owed_names
 from mirage.commands.builtin.utils.paths import dot_refusal
 from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.commands.config import (
@@ -74,9 +75,6 @@ from mirage.vfs.types import (
     Target,
     VfsCall,
 )
-from mirage.view.types import (
-    StatOverlay,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -95,31 +93,6 @@ class GenericCommandFn(Protocol):
         texts: list[str],
         opts: CommandOpts,
     ) -> Awaitable[CommandFnResult]: ...
-
-
-async def overlaid_stat(
-    stat: OperationFn,
-    overlay: StatOverlay,
-    path: PathSpec,
-    index: IndexCacheStore,
-) -> FileStat:
-    """Stat through the backend, then merge the namespace attr overlay.
-
-    Bound via ``partial(overlaid_stat, stat_fn, overlay)`` so stat-
-    rendering commands (ls) show chmod/chown/touch state the backend
-    itself cannot hold. Guarded itself because the overlay branch binds
-    the raw backend stat rather than a CommandIO slot.
-
-    Args:
-        stat (OperationFn): backend stat ``(path, index) -> FileStat``.
-        overlay (StatOverlay): namespace merge ``(virtual, stat) -> stat``.
-        path (PathSpec): entry being statted.
-        index (IndexCacheStore): cache index threaded through.
-    """
-    if path.walk_error is not None:
-        raise walk_refusal(path)
-    _refuse_hidden(path, create=False)
-    return overlay(path.virtual, await stat(path, index))
 
 
 @overload
@@ -924,12 +897,10 @@ def _is_namespace_dir(opts: CommandOpts, path: PathSpec) -> bool:
     absence.
 
     Args:
-        opts (CommandOpts): the invocation's bag, for ``ns.child_mounts``.
+        opts (CommandOpts): the invocation's bag, for its files.
         path (PathSpec): the operand whose stat raised ENOENT.
     """
-    if opts.ns is None or opts.ns.child_mounts is None:
-        return False
-    return bool(opts.ns.child_mounts(path.virtual))
+    return bool(owed_names(opts.vfs, path.virtual))
 
 
 _READ_SLOTS = ("read_bytes", "read_stream", "read_range")
@@ -1003,13 +974,7 @@ async def _read_hit_a_dir(
         # MISS_ERRORS for its other caller, where the stat is the
         # operation rather than a probe.
         logger.debug("read probe: listing %s failed: %s", path.virtual, probe)
-    # The same fact `_is_namespace_dir` reads, reached from the adapter
-    # rather than from the bag: this guard wraps a slot and never sees a
-    # CommandOpts, and the factory stamps the very callable
-    # `opts.ns.child_mounts` would hand over.
-    return bool(
-        ops.glob_children is not None and ops.glob_children(path.virtual)
-    )
+    return False
 
 
 async def _drain_refusing_dirs(
@@ -1069,12 +1034,12 @@ async def _guarded_read(
 def with_dir_guard(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose reads refuse a directory with GNU's EISDIR.
 
-    The read family's counterpart of ``with_command_guards`` and
-    ``with_slash_guard``: reading a directory is never a legitimate call,
-    so the refusal belongs to the slot rather than to each builder's
-    wiring. It used to belong to the wiring, and 23 of the read builders
-    passed a bare ``bound_op(ops.read_stream, ...)`` instead, so a
-    directory on a keyed backend reported ENOENT.
+    The read family's counterpart of ``with_slash_guard``: reading a
+    directory is never a legitimate call, so the refusal belongs to the
+    slot rather than to each builder's wiring. It used to belong to the
+    wiring, and 23 of the read builders passed a bare
+    ``bound_op(ops.read_stream, ...)`` instead, so a directory on a
+    keyed backend reported ENOENT.
 
     Refined after failure or an empty read: some drivers return EOF for
     directories. Nonempty successful reads need no extra probe.
@@ -1271,29 +1236,6 @@ def _refuse_hidden(path: PathSpec, create: bool) -> None:
     raise hidden_refusal(vis, path.virtual, create)
 
 
-async def _guarded_readdir(
-    fn: OperationFn, *args: Any, **kwargs: Any
-) -> list[str]:
-    """Readdir with hidden names dropped from the listing.
-
-    Args:
-        fn (OperationFn): the raw backend readdir.
-        *args: the call's positionals; the first PathSpec is the
-            directory being listed.
-        **kwargs: forwarded untouched.
-    """
-    parent = next(a for a in args if isinstance(a, PathSpec))
-    _refuse_hidden(parent, create=False)
-    entries = await fn(*args, **kwargs)
-    base = parent.virtual.rstrip("/")
-    vis = session_visibility()
-    return [
-        e
-        for e in entries
-        if path_visible(vis, f"{base}/{e.rstrip('/').rsplit('/', 1)[-1]}")
-    ]
-
-
 def _move_would_reveal(src: PathSpec, dst: PathSpec) -> bool:
     """Whether the session's hides make this relocation a reveal.
 
@@ -1321,20 +1263,6 @@ def refuse_reveal(src: PathSpec, dst: PathSpec) -> None:
     """
     if _move_would_reveal(src, dst):
         raise eacces(src.virtual)
-
-
-async def _guarded_exists(fn: OperationFn, *args: Any, **kwargs: Any) -> bool:
-    """Exists that answers False for a hidden path, never a refusal.
-
-    Args:
-        fn (OperationFn): the raw backend exists.
-        *args: the call's positionals; the first PathSpec is probed.
-        **kwargs: forwarded untouched.
-    """
-    probed = next(a for a in args if isinstance(a, PathSpec))
-    if not path_visible(session_visibility(), probed.virtual):
-        return False
-    return bool(await fn(*args, **kwargs))
 
 
 @dataclass(frozen=True)
@@ -1423,13 +1351,6 @@ def _with_operation_guards(fn: OperationFn, slot: str) -> OperationFn:
     return functools.partial(
         _walked_call, get_walk_probe(), slot == "mkdir", guarded
     )
-
-
-# The slots that take a path and still reach the backend past the
-# dispatcher, or whose failed walk a reader words itself: the kernel
-# resolves a path before the op sees it, whatever the op then does, so
-# presence facts (stat, exists) are walked too.
-_WALK_SLOTS = ("read_bytes", "read_range", "stat", "exists", "readdir")
 
 
 async def _walk_admit(
@@ -1526,65 +1447,6 @@ def _walked_call(
     if hasattr(result, "__aiter__") and not hasattr(result, "__await__"):
         return _walked_stream(admit, result)
     return _walked_await(admit, result)
-
-
-def with_command_guards(ops: CommandIO) -> CommandIO:
-    """Bind the command's path checks around the slots the dispatcher
-    does not run.
-
-    Reads, writes and one-call walks go through the dispatcher
-    (``dispatched_io``), which judges each itself. ``stat``, ``exists``
-    and ``readdir`` still reach the backend past it, so here a hidden
-    path answers as a missing one, a listing drops the names the session
-    hides, and a listed directory meets the command's path rule and the
-    coded pre_vfs methods. Every slot's operand dots are walked, a read's
-    as it starts, so a reader that words a failed open itself gets the
-    walk's refusal.
-
-    Args:
-        ops (CommandIO): the mount's table.
-    """
-    walk = get_walk_probe()
-    scope = _op_policy_scope()
-    read_stream = ops.read_stream
-
-    def guarded_stream(
-        accessor: Accessor, path: PathSpec, *args: Any, **kwargs: Any
-    ) -> AsyncIterator[bytes]:
-        # The walk at the first pull, as TypeScript's walkedStream does:
-        # a reader that turns a failed open into its own words (awk's
-        # `cannot open`) relays the stream through its own handler, so a
-        # walk that already failed (a link loop) must surface where it
-        # drains. Hides and the path rule are the dispatcher's.
-
-        async def admit() -> None:
-            if path.walk_error is not None:
-                raise walk_refusal(path)
-            probe = walk if walk is not None else get_walk_probe()
-            if path.dotted is not None and probe is not None:
-                await _walk_admit(probe, [path], False)
-
-        return _walked_stream(
-            admit, read_stream(accessor, path, *args, **kwargs)
-        )
-
-    changes: dict[str, Any] = {"read_stream": guarded_stream}
-    for slot in _WALK_SLOTS:
-        fn = getattr(ops, slot)
-        if fn is None:
-            continue
-        guarded = fn
-        if slot == "readdir":
-            guarded = functools.partial(
-                _guarded_readdir,
-                functools.partial(_policy_readdir, scope, fn),
-            )
-        if slot not in _READ_SLOTS:
-            guarded = functools.partial(_command_call, guarded, slot)
-        if slot == "exists":
-            guarded = functools.partial(_guarded_exists, guarded)
-        changes[slot] = functools.partial(_walked_call, walk, False, guarded)
-    return replace(ops, **changes)
 
 
 # (policies, mount prefix, session id); the unbound spelling for a
@@ -1710,31 +1572,3 @@ async def _policy_call(
             policies, prefix, session_id, op, write, first_source, args
         )
     return await fn(*args, **kwargs)
-
-
-async def _policy_readdir(
-    scope: _PolicyScope, fn: OperationFn, *args: Any, **kwargs: Any
-) -> list[str]:
-    """Readdir admitted through pre_vfs for the directory it lists.
-
-    Args:
-        scope (_PolicyScope): the wrap-time capture.
-        fn (OperationFn): the guarded backend readdir.
-        *args: the call's positionals; the first PathSpec is the
-            directory being listed.
-        **kwargs: forwarded untouched.
-    """
-    policies, prefix, session_id = _live_policy_scope(scope)
-    if policies is not None:
-        parent_spec = next(a for a in args if isinstance(a, PathSpec))
-        await _policy_admit(
-            policies,
-            prefix,
-            session_id,
-            "readdir",
-            False,
-            False,
-            (parent_spec,),
-        )
-    entries: list[str] = await fn(*args, **kwargs)
-    return entries

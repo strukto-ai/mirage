@@ -17,6 +17,9 @@ import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandOpts } from '../../config.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { IOResult } from '../../../io/types.ts'
+import { Files } from '../../../workspace/files.ts'
 import { treeGeneric } from './tree.ts'
 
 const DEC = new TextDecoder()
@@ -41,7 +44,6 @@ function opts(flags: Record<string, string | boolean | number | string[]>): Comm
     stdin: null,
     flags,
     cwd: '/',
-    vfs: null,
   } as unknown as CommandOpts
 }
 
@@ -98,7 +100,6 @@ describe('treeGeneric operand that is not a directory', () => {
       stdin: null,
       flags: {},
       cwd: '/',
-      vfs: null,
       statPath: () => Promise.resolve(start),
     } as unknown as CommandOpts
   }
@@ -167,18 +168,10 @@ describe('treeGeneric across a nested mount', () => {
   }
 
   function crossOpts(): CommandOpts {
-    const under = (path: string): string[] =>
-      [ROOT].filter((r) => r.startsWith(rstripSlash(path) + '/'))
+    const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
     return {
       ...opts({}),
-      ns: {
-        mounts: {
-          descendants: under,
-          visibleDescendants: under,
-          isRoot: (path: string) => rstripSlash(path) === ROOT,
-          rootOf: () => '/',
-        },
-      },
+      vfs: new Files(nothing, null, null, () => null, { prefixes: () => ['/', `${ROOT}/`] }),
       readdirPath: (virtual: string) => Promise.resolve(listing(owner(virtual), virtual)),
       statPath: (path: string | PathSpec) => {
         const virtual = path instanceof PathSpec ? path.virtual : path

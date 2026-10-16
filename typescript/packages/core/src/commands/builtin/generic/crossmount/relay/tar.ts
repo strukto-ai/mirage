@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteSource, IOResult } from '../../../../../io/types.ts'
-import type { NamespaceView } from '../../../../../view/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { relayIsDirOf, relayWalkOf } from '../../../generic_bind/archive_io.ts'
 import { parseFlags, tarGeneric } from '../../tar/tar.ts'
 import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
+import type { Files } from '../../../../../workspace/files.ts'
+import { owedNames } from '../../../utils/links.ts'
 
 /**
  * Run a tar whose archive, operands and -C destination span mounts.
@@ -36,7 +37,7 @@ export async function runTar(
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
   // The symlinks and mount boundaries the create scan merges into each walk.
-  ns?: NamespaceView,
+  vfs?: Files,
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   const parsed = parseFlags(flagKwargs)
@@ -45,7 +46,7 @@ export async function runTar(
   const result = await tarGeneric(
     flatten(created),
     textArgs,
-    { ...crossOpts(flagKwargs), stdin, ...(ns !== undefined ? { ns } : {}) },
+    { ...crossOpts(flagKwargs), stdin, ...(vfs !== undefined ? { vfs } : {}) },
     {
       stream: streamOp(dispatch),
       write: async (p, data) => {
@@ -55,7 +56,7 @@ export async function runTar(
         await dispatch('mkdir', p)
       },
       stat: statOp(dispatch),
-      walk: relayWalkOf(dispatch, ns?.childMounts, 'tar'),
+      walk: relayWalkOf(dispatch, (dir: string) => owedNames(vfs, dir), 'tar'),
       isDir: relayIsDirOf(dispatch),
     },
     true,

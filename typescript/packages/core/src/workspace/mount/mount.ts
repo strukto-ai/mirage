@@ -118,6 +118,7 @@ import { formatFsError } from '../../errors/render.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { dispatchStat, linkFollow } from '../../commands/builtin/utils/paths.ts'
+import { linkView } from '../../commands/builtin/utils/links.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -276,7 +277,7 @@ export interface MountInit {
 function walkProbeOf(context: ExecContext): WalkProbe | null {
   const dispatch = context.dispatch
   if (dispatch === undefined) return null
-  return { stat: dispatchStat(dispatch), follow: linkFollow(context.ns?.links) }
+  return { stat: dispatchStat(dispatch), follow: linkFollow(linkView(context.vfs)) }
 }
 
 export class MountEntry {
@@ -1641,7 +1642,7 @@ export class MountEntry {
         ? { execPathAllowed: context.execPathAllowed }
         : {}),
       ...(context.runtime !== undefined ? { runtime: context.runtime } : {}),
-      ...(context.ns !== undefined ? { ns: context.ns } : {}),
+      ...(context.followOperands !== undefined ? { followOperands: context.followOperands } : {}),
       ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
       ...(context.readdirPath !== undefined ? { readdirPath: context.readdirPath } : {}),
       ...(context.shell !== undefined ? { shell: context.shell } : {}),

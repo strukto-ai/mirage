@@ -32,7 +32,6 @@ from mirage.utils.fnmatch import (
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import rekey
 from mirage.view.types import (
-    ChildMounts,
     FollowOperands,
     LinkTargetStat,
     SessionAccess,
@@ -448,7 +447,6 @@ async def expand_pattern(
     accessor: Accessor,
     path: PathSpec,
     index: IndexCacheStore,
-    children: ChildMounts | None = None,
     access: SessionAccess | None = None,
 ) -> list[PathSpec]:
     """Expand a glob PathSpec segment-by-segment via readdir.
@@ -468,10 +466,6 @@ async def expand_pattern(
         path (PathSpec): unresolved spec whose ``vfs_path`` still
             contains the pattern.
         index (IndexCacheStore): the per-call cache index.
-        children (ChildMounts | None): child names the namespace owes a
-            directory (nested mount roots and symlinks). No backend can
-            see either, so a walk that stops at readdir misses both; this
-            is the union ``merge_readdir`` applies to a listing.
     """
     prefix = path.virtual[: len(path.virtual.rstrip("/")) - len(path.vfs_path)]
     segments = glob_parts(path.vfs_path, access) if path.vfs_path else []
@@ -519,17 +513,7 @@ async def expand_pattern(
                     entry.rsplit("/", 1)[-1], pattern, access
                 ):
                     next_level.append(entry)
-            if children is not None:
-                # A nested mount root or a link is a real child of this
-                # parent whether or not the backend could list it.
-                base_dir = parent.rstrip("/")
-                next_level.extend(
-                    f"{base_dir}/{name}"
-                    for name in children(f"{base_dir}/")
-                    if glob_name_matches(name, pattern, access)
-                )
-        # bash sorts a pathname expansion, and the two sources are
-        # enumerated separately, so the union is ordered here.
+        # bash sorts a pathname expansion.
         level = sorted(set(next_level))
         if not level:
             return []
@@ -574,7 +558,6 @@ class ResolveGlobFn(Protocol):
 def make_resolve_glob(
     readdir: Callable[..., Any],
     max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES,
-    children: ChildMounts | None = None,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
     access: SessionAccess | None = None,
@@ -587,12 +570,10 @@ def make_resolve_glob(
         readdir (Callable): backend readdir ``(accessor, path, index)``.
         max_glob_matches (int | None): cap on matches per pattern before
             truncation.
-        children (ChildMounts | None): child names the namespace owes a
-            directory, so an expansion sees nested mount roots and links.
         stat (Callable | None): backend stat ``(accessor, path, index)``,
             which is what lets a trailing slash keep directories only.
         target_stat (LinkTargetStat | None): the namespace's stat of what
-            an owed name points at, resolved through the workspace, so a
+            a link points at, resolved through the workspace, so a
             trailing slash can follow a link the way bash does.
         follow (FollowOperands | None): the line's operand resolution,
             given to a typed word's matches.
@@ -613,7 +594,6 @@ def make_resolve_glob(
             paths,
             index,
             max_glob_matches,
-            children,
             stat,
             target_stat,
             access,
@@ -656,43 +636,38 @@ async def _is_directory(
     accessor: Accessor,
     match: PathSpec,
     index: IndexCacheStore,
-    children: ChildMounts | None,
     target_stat: LinkTargetStat | None,
 ) -> bool:
     """Whether a match is a directory, the way a trailing slash asks.
 
-    A name the namespace owes the directory (a nested mount root or a
-    link) is no backend's to stat: the namespace answers for it through
-    ``target_stat``, which follows a link and stats what it reaches, so
-    a link to a directory is kept and a link to a file or to nothing is
-    dropped, bash's own rule for ``*/``. Without ``target_stat`` the owed name
-    is kept, and without a stat function every match is kept, since nothing
-    can tell them apart. Otherwise one stat per match, served from the
-    index the readdir just filled.
+    One stat per match, served from the index the readdir just filled. A
+    link's own row is followed through ``target_stat``, which stats what
+    the link reaches, so a link to a directory is kept and a link to a
+    file or to nothing is dropped, bash's own rule for ``*/``. Without a
+    stat function every match is kept, since nothing can tell them
+    apart.
 
     Args:
         stat (Callable | None): backend stat ``(accessor, path, index)``.
         accessor (Accessor): backend handle passed through to stat.
         match (PathSpec): one match.
         index (IndexCacheStore): the per-call cache index.
-        children (ChildMounts | None): child names the namespace owes a
-            directory.
         target_stat (LinkTargetStat | None): the namespace's stat of
-            what an owed name points at, None when it dangles.
+            what a link points at, None when it dangles.
     """
     if stat is None:
         return True
-    parent = match.virtual.rstrip("/").rsplit("/", 1)[0] + "/"
-    name = match.virtual.rstrip("/").rsplit("/", 1)[-1]
-    if children is not None and name in children(parent):
-        if target_stat is None:
-            return True
-        row = await target_stat(match.virtual.rstrip("/"))
-        return row is not None and row.type == FileType.DIRECTORY
     try:
         row = await stat(accessor, match, index=index)
     except WALK_ERRORS:
         return False
+    if (
+        isinstance(row, FileStat)
+        and row.type == FileType.SYMLINK
+        and target_stat is not None
+    ):
+        target = await target_stat(match.virtual.rstrip("/"))
+        return target is not None and target.type == FileType.DIRECTORY
     return isinstance(row, FileStat) and row.type == FileType.DIRECTORY
 
 
@@ -702,7 +677,6 @@ async def resolve_glob_with(
     paths: Sequence[PathSpec],
     index: IndexCacheStore,
     cap: int | None = None,
-    children: ChildMounts | None = None,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
     access: SessionAccess | None = None,
@@ -732,13 +706,11 @@ async def resolve_glob_with(
         paths (Sequence[PathSpec]): specs to resolve.
         index (IndexCacheStore): the per-call cache index.
         cap (int | None): cap on matches per pattern before truncation.
-        children (ChildMounts | None): child names the namespace owes a
-            directory, so an expansion sees nested mount roots and links.
         stat (Callable | None): backend stat ``(accessor, path, index)``;
             without it a trailing slash cannot drop the files it matched.
         target_stat (LinkTargetStat | None): the namespace's stat of what
-            an owed name (a link, a nested mount root) points at; without
-            it a trailing slash keeps every owed name.
+            a link points at; without it a trailing slash drops every
+            link.
         follow (FollowOperands | None): the line's operand resolution. A
             typed word's matches are the words bash would have put on the
             line, so a link one names resolves as the name typed would;
@@ -771,7 +743,7 @@ async def resolve_glob_with(
             matched = [
                 m
                 for m in await expand_pattern(
-                    readdir, accessor, word, index, children, access
+                    readdir, accessor, word, index, access
                 )
                 if path_visible(vis, m.virtual)
             ]
@@ -779,7 +751,7 @@ async def resolve_glob_with(
                 kept: list[PathSpec] = []
                 for m in matched:
                     if await _is_directory(
-                        stat, accessor, m, index, children, target_stat
+                        stat, accessor, m, index, target_stat
                     ):
                         kept.append(
                             dataclasses.replace(m, raw_path=m.raw_path + "/")

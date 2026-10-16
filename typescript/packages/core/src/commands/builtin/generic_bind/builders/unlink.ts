@@ -18,6 +18,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
+import { linksOf } from '../../utils/links.ts'
 
 const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   if (paths.length === 0) {
@@ -33,7 +34,7 @@ const unlink: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   if (p === undefined) return [null, new IOResult()]
   const unlinkOp = requireOp(ops.unlink, 'unlink')
   const enc = new TextEncoder()
-  const links = opts.ns?.links ?? null
+  const links = linksOf(opts) ?? null
   // unlink(2) never follows, so a trailing slash on a link operand is
   // refused rather than resolved: GNU answers `unlink dlink/` and
   // `unlink flink/` alike with ENOTDIR, where a real directory under a

@@ -21,9 +21,11 @@ from mirage.commands.builtin.generic_bind.builders.du import WalkBudget, du
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.errors.fs import enotsup, walk_declined
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import LinkView, MountView, NamespaceView
+from mirage.view.types import MountView
+from mirage.workspace.files import Files
 
 TREE = {
     "/db": ["/db/a.txt", "/db/sub"],
@@ -243,12 +245,26 @@ UNLISTED = CommandIO(
 )
 
 
-async def _target(path):
-    return LINKED if path == "/db/link" else None
+class _OneLink:
+    """A link table holding /db/link, which leads to /db/private/f."""
+
+    def follow(self, path: str) -> str:
+        return "/db/private/f" if path == "/db/link" else path
+
+    def link_stat_at(self, path: str) -> None:
+        return None
+
+    def link_stats_below(self, directory: str) -> list:
+        return []
+
+    def symlink_targets(self) -> dict[str, str]:
+        return {}
 
 
-async def _exists(_path):
-    return True
+async def _linked(op: str, path: PathSpec, **_):
+    if op == "stat" and path.virtual == "/db/private/f":
+        return LINKED, IOResult()
+    raise FileNotFoundError(path.virtual)
 
 
 @pytest.mark.asyncio
@@ -256,20 +272,14 @@ async def test_du_L_counts_a_link_whose_file_only_it_reaches():
     # A link into the operand's tree is left to the file's own name, but
     # a directory the walk may not list hides that name, and GNU then
     # counts the file under the link (coreutils 9.7).
-    links = LinkView(
-        stat_at=lambda _path: None,
-        subtree=lambda _path: [],
-        resolve=lambda path: "/db/private/f" if path == "/db/link" else path,
-        exists=_exists,
-        target_stat=_target,
-    )
     stream, io = await du(
         UNLISTED,
         object(),
         [_spec("/db")],
         [],
         CommandOpts(
-            flags={"a": True, "L": True}, ns=NamespaceView(links=links)
+            flags={"a": True, "L": True},
+            vfs=Files([], _linked, links=_OneLink()),
         ),
     )
     assert (await materialize(stream)).decode() == (

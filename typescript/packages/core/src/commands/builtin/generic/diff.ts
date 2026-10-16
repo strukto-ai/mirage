@@ -42,6 +42,7 @@ import { fnmatch } from '../../../utils/fnmatch.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { fullIsoTime } from '../utils/formatting.ts'
 import { UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
+import { linksOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -487,7 +488,7 @@ export async function diffGeneric(
   const dash0 = p0.rawPath === '-'
   const dash1 = p1.rawPath === '-'
   const errorPaths = [...paths, ...flags.excludeFrom]
-  const links = opts.ns?.links
+  const links = linksOf(opts)
   const trouble: Uint8Array[] = []
   let output: Uint8Array | undefined
   let differ = false

@@ -14,7 +14,6 @@
 
 import { fileStreamOp } from '../utils.ts'
 
-import type { NamespaceView } from '../../../../../view/types.ts'
 import { transferLinksOf } from '../utils.ts'
 import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
@@ -25,6 +24,8 @@ import { flatten, readBytesOp, readdirOp, relayCopy, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
+import type { Files } from '../../../../../workspace/files.ts'
+import { linkView, mountView } from '../../../utils/links.ts'
 
 // Move operands that span mounts via the shared generic mv. Pure wiring:
 // copy through the transfer primitives, then unlink the source on its own
@@ -37,7 +38,7 @@ export async function runMv(
   // two prefixes over one store would copy the object onto itself and
   // then unlink the source, destroying it.
   storageKey?: (path: PathSpec) => string,
-  ns?: NamespaceView,
+  vfs?: Files,
   // Where -i reads its answers.
   stdin: ByteSource | null = null,
   // Refuses a source whose mount cannot condition the delete.
@@ -59,7 +60,8 @@ export async function runMv(
   const rmdir = async (p: PathSpec): Promise<void> => {
     await dispatch('rmdir', p)
   }
-  const mounts = ns?.mounts
+  const mounts = mountView(vfs)
+  const links = linkView(vfs)
   return mvGeneric(
     flat,
     stat,
@@ -79,7 +81,9 @@ export async function runMv(
     storageKey,
     undefined,
     refuseReveal,
-    ns?.links == null ? undefined : transferLinksOf(ns.links, dispatch, '/', ns.visibility),
+    links === undefined
+      ? undefined
+      : transferLinksOf(links, dispatch, '/', vfs?.vis() ?? undefined),
     stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
     dispatch,

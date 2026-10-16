@@ -22,10 +22,12 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { boundedMap } from '../../../../concurrency/limiter.ts'
 import { IOResult, materialize, type ByteSource, type SizedRun } from '../../../../io/types.ts'
-import type { NamespaceView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import type { FollowOperands } from '../../../../view/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
+import type { Files } from '../../../../workspace/files.ts'
+import { mountView } from '../../utils/links.ts'
 
 // The flags that shape only the rendering: every mount measures without them,
 // and the line renders once.
@@ -52,10 +54,12 @@ export async function runDu(
   dispatch: DispatchFn,
   runSingle: RunSingle,
   cwd: string,
-  ns?: NamespaceView,
+  vfs?: Files,
   stdin: ByteSource | null = null,
   signal?: AbortSignal,
   nested = false,
+  // The line's operand resolution, which the one walk's globs take.
+  follow?: FollowOperands,
 ): Promise<CrossResult> {
   const rendering = parseFlags({ stdin: null, flags: bag, cwd })
   const bounded = new FlagView(bag, specOf('du')).asBool('one_file_system')
@@ -63,9 +67,9 @@ export async function runDu(
   // Each start is then one mount's own part, and keeps only what that mount
   // owns: a part walked through the dispatcher reaches the mounts below it
   // too, which measure themselves.
-  const mounts = nested && !bounded ? ns?.mounts : undefined
+  const mounts = nested && !bounded ? mountView(vfs) : undefined
   const plan: [number, PathSpec][] = paths.flatMap((path, index) =>
-    (mounts !== undefined ? mountStarts(path, ns) : [path]).map((start): [number, PathSpec] => [
+    (mounts !== undefined ? mountStarts(path, vfs) : [path]).map((start): [number, PathSpec] => [
       index,
       start,
     ]),
@@ -90,7 +94,7 @@ export async function runDu(
   if (ios.some((io) => io.sizedRuns === null && io.exitCode === 0)) {
     const builder = DISPATCH_BUILDERS.get('du')
     if (builder === undefined) throw new Error('No dispatch builder for du')
-    return runDispatch(builder, paths, texts, bag, dispatch, cwd, ns, stdin, signal)
+    return runDispatch(builder, paths, texts, bag, dispatch, cwd, vfs, stdin, signal, [], follow)
   }
   const kept = await reached(
     paths,
@@ -155,7 +159,7 @@ export async function runDu(
     null,
     undefined,
     () => [...measured.values()].flatMap(([, dirs]) => dirs),
-    ns,
+    vfs,
   )
   merged.stderr = new Uint8Array([...out.stderr, ...(await materialize(merged.stderr))])
   merged.exitCode = Math.max(out.exitCode, ...done.map(({ io }) => io.exitCode))

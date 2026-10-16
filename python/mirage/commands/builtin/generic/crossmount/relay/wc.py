@@ -42,7 +42,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
-from mirage.view.types import NamespaceView
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ async def recount(
     flags: dict[str, FlagValue],
     dispatch: DispatchFn,
     cwd: str,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     stdin: ByteSource | None,
 ) -> OperandRun:
     """The run as counted, recounting it through the dispatcher if needed.
@@ -98,7 +98,7 @@ async def recount(
         flags (dict[str, FlagValue]): The flags every run takes.
         dispatch (DispatchFn): Workspace operation dispatcher.
         cwd (str): The session's working directory.
-        ns (NamespaceView | None): Mount ownership and link facts.
+        vfs (Files | None): Mount ownership and link facts.
         stdin (ByteSource | None): The command's input.
     """
     if run.io.counted_runs is not None or run.io.exit_code != 0:
@@ -110,7 +110,7 @@ async def recount(
         flags,
         dispatch,
         cwd,
-        ns,
+        vfs,
         stdin,
     )
     return OperandRun(run.scope, b"", io)
@@ -122,7 +122,7 @@ async def run_wc(
     dispatch: DispatchFn,
     run_single: RunSingle,
     cwd: str = "/",
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     stdin: ByteSource | None = None,
 ) -> CrossResult:
     """Count each operand on its own mount and lay the rows out together.
@@ -141,7 +141,7 @@ async def run_wc(
         dispatch (DispatchFn): Workspace operation dispatcher, for sizes.
         run_single (RunSingle): Single-mount runner for each operand.
         cwd (str): The session's working directory.
-        ns (NamespaceView | None): Mount ownership and link facts.
+        vfs (Files | None): Mount ownership and link facts.
         stdin (ByteSource | None): The command's input.
     """
     try:
@@ -156,7 +156,7 @@ async def run_wc(
     columns = columns or ["lines", "words", "bytes_"]
     each = {**flag_kwargs, "total": "never"}
     runs = [
-        await recount(run, each, dispatch, cwd, ns, stdin)
+        await recount(run, each, dispatch, cwd, vfs, stdin)
         for run in await run_operands(run_single, Cmd.WC, scopes, [], each)
     ]
     rows: list[tuple[WCCounts, str | None]] = []

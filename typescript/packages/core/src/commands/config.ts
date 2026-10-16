@@ -23,9 +23,7 @@ import type { Runtime } from '../runtime/base.ts'
 import type { DispatchFn, ShellFn } from '../runtime/types.ts'
 import type {
   SessionAccess,
-  ChildMounts,
   FollowOperands,
-  NamespaceView,
   ReaddirPath,
   SessionView,
   StatPath,
@@ -85,7 +83,7 @@ export interface ExecContext {
   execAllowed?: boolean
   execPathAllowed?: (virtual: string) => boolean
   runtime?: Runtime
-  ns?: NamespaceView
+  followOperands?: FollowOperands
   statPath?: StatPath
   readdirPath?: ReaddirPath
   signal?: AbortSignal
@@ -147,17 +145,12 @@ export interface CommandIO<A extends Accessor = Accessor> {
   checksum?: ChecksumOp<A>
   follow?: FollowOp<A>
   readTree?: ReadTreeOp<A>
-  // Child names the namespace owes a directory (nested mount roots and
-  // symlinks). Stamped per invocation from opts.childMounts by the
-  // factory, because it is session-scoped state while the adapter itself
-  // is built once per backend.
-  globChildren?: ChildMounts
-  // What an owed name points at, the namespace's own stat resolved
-  // through the workspace. Stamped beside globChildren from opts.ns.links,
-  // so a trailing-slash glob follows a link the way bash does instead of
-  // keeping every link it cannot see through.
+  // What a link a glob matched points at, resolved through the workspace.
+  // Stamped per invocation from the session's files by the factory, because
+  // the adapter is built once per backend, so a trailing-slash glob follows
+  // a link the way bash does.
   globTargetStat?: TargetStat
-  // The line's operand resolution, stamped beside globChildren from opts.ns.
+  // The line's operand resolution, stamped beside globTargetStat.
   globFollow?: FollowOperands
   // Told what each glob resolution answers: the operands the dispatched table
   // warms a command's reads ahead of.
@@ -209,10 +202,10 @@ export interface CommandOpts {
   /** The runtime an interpreter runs in. */
   runtime?: Runtime
   /**
-   * What the namespace knows and no backend does: symlinks, mount
-   * boundaries, the attribute overlay.
+   * The line's pathname resolution of its operands, which a glob's matches
+   * take as typed words would.
    */
-  ns?: NamespaceView
+  followOperands?: FollowOperands
   /** Stat one path through the dispatcher, which may land on another mount. */
   statPath?: StatPath
   /** List one directory through the dispatcher, for a walk that crosses a mount. */

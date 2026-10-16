@@ -22,7 +22,10 @@ from mirage.commands.builtin.generic_bind.adapter import (
     Operation,
     require_op,
 )
-from mirage.commands.builtin.utils.links import link_location
+from mirage.commands.builtin.utils.links import (
+    link_location,
+    links_of,
+)
 from mirage.commands.builtin.utils.output import format_optional_records
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
@@ -112,7 +115,7 @@ async def rmdir(
         )
     rmdir_fn = require_op(ops, Operation.RMDIR)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     verbose_parts: list[str] = []
     errors: list[str] = []
 

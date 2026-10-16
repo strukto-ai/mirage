@@ -21,10 +21,11 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.builtin.generic_bind.builders.rm import rm
 from mirage.commands.config import CommandIO, CommandOpts
-from mirage.errors.fs import walk_declined
+from mirage.errors.fs import walk_declined, walk_refusal
 from mirage.io.stream import materialize
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import MountView, NamespaceView
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 INDEX = RAMIndexCacheStore()
 TREE = {
@@ -145,7 +146,12 @@ async def test_rm_reports_a_refused_stat_and_removes_the_rest():
 async def test_rm_refused_operand_keeps_spelling_and_continues(
     force, refusal, raw, code, stderr
 ):
-    stat = AsyncMock(return_value=FileStat(name="ok", type=FileType.FILE))
+    async def dispatched(_accessor, path, index=None):
+        if path.walk_error is not None:
+            raise walk_refusal(path)
+        return FileStat(name="ok", type=FileType.FILE)
+
+    stat = AsyncMock(side_effect=dispatched)
     unlink = AsyncMock()
     io = CommandIO(
         readdir=AsyncMock(return_value=[]),
@@ -165,7 +171,7 @@ async def test_rm_refused_operand_keeps_spelling_and_continues(
         None, [refused, valid], [], CommandOpts(flags={"f": force}, io=io)
     )
     assert (result.exit_code, result.stderr) == (code, stderr)
-    assert stat.await_count == 1
+    assert stat.await_count == 2
     assert unlink.await_args.args[1] == valid
 
 
@@ -198,20 +204,18 @@ async def test_rm_r_names_a_mount_below_and_fails():
         rmdir=rmdir,
         rm_r=_declined_rm_r,
     )
-    roots = ["/data/inner"]
-    ns = NamespaceView(
-        mounts=MountView(
-            descendants=lambda _v: roots,
-            visible_descendants=lambda _v: roots,
-            is_root=lambda v: v in roots,
-            root_of=lambda _v: "/data",
-        )
+    files = Files(
+        [
+            MountRow(prefix=p, resource_type="ram", mode=MountMode.WRITE)
+            for p in ("/data/", "/data/inner/")
+        ],
+        AsyncMock(),
     )
     _, result = await generic("rm").fn(
         None,
         [PathSpec.from_str_path("/data")],
         [],
-        CommandOpts(flags={"r": True}, io=io, ns=ns),
+        CommandOpts(flags={"r": True}, io=io, vfs=files),
     )
     assert result.exit_code == 1
     assert result.stderr == (

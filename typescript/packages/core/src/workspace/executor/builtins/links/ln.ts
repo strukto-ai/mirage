@@ -56,12 +56,8 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { absPath, fail, result } from '../shared.ts'
 import { posixRelative } from './links.ts'
-import {
-  linkTargetStat,
-  missCondition,
-  pathReaddir,
-  resolvePathStat,
-} from '../../../mount/namespace/probe.ts'
+import { linkTargetStat, missCondition, pathReaddir } from '../../../mount/namespace/probe.ts'
+import { resolvePathStat } from '../../../../commands/builtin/utils/paths.ts'
 import type { Result } from '../types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { classify } from '../../../../errors/classify.ts'
@@ -626,7 +622,7 @@ export async function makeLink(
     // dispatcher's "File exists" below.
     const linked = visibleLink(namespace, vis, plan.linkAbs)
     const behind = linked
-      ? await linkTargetStat(namespace, dispatch, plan.linkAbs, null)
+      ? await linkTargetStat(namespace, dispatch, plan.linkAbs)
       : await pathStat(dispatch, plan.linkAbs)
     if (behind !== null && behind.type !== FileType.DIRECTORY && (flags.force || backs)) {
       errors.push(refused(flags, typed, targetTyped, 'ENOTDIR'))

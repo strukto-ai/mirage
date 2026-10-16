@@ -14,7 +14,7 @@
 
 import { dotglobActive, extglobActive, sessionVisibility } from '../context/session_context.ts'
 import { pathVisible } from './hidden.ts'
-import type { ChildMounts, FollowOperands, SessionAccess } from '../view/types.ts'
+import type { FollowOperands, SessionAccess } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
 import { EXTGLOB_RE, fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
@@ -349,39 +349,30 @@ function isMissingDir(err: unknown): boolean {
 // the workspace: null when the link dangles or loops.
 export type TargetStat = (virtual: string) => Promise<FileStat | null>
 
-// Whether a match is a directory, the way a trailing slash asks. A name
-// the namespace owes the directory (a nested mount root or a link) is no
-// backend's to stat: the namespace answers for it through `targetStat`,
-// which follows a link and stats what it reaches, so a link to a
-// directory is kept and a link to a file or to nothing is dropped, bash's
-// own rule for `*/`. Without `targetStat` the owed name is kept, and without
-// a stat function every match is kept, since nothing can tell them apart.
-// Otherwise one stat per match, served from the index the readdir just
-// filled.
+// Whether a match is a directory, the way a trailing slash asks. One stat
+// per match, served from the index the readdir just filled. A link's own
+// row is followed through `targetStat`, which stats what the link reaches,
+// so a link to a directory is kept and a link to a file or to nothing is
+// dropped, bash's own rule for `*/`. Without a stat function every match is
+// kept, since nothing can tell them apart.
 async function isDirectory<A, I>(
   stat: ((accessor: A, path: PathSpec, index?: I) => Promise<FileStat>) | undefined,
   accessor: A,
   match: PathSpec,
   index: I | undefined,
-  children: ChildMounts | undefined,
   targetStat: TargetStat | undefined,
 ): Promise<boolean> {
   if (stat === undefined) return true
-  const trimmed = rstripSlash(match.virtual)
-  const cut = trimmed.lastIndexOf('/')
-  const parent = trimmed.slice(0, cut + 1)
-  const name = trimmed.slice(cut + 1)
-  if (children?.(parent).includes(name) === true) {
-    if (targetStat === undefined) return true
-    const target = await targetStat(trimmed)
-    return target?.type === FileType.DIRECTORY
-  }
   let row: FileStat
   try {
     row = await stat(accessor, match, index)
   } catch (err) {
     if (isFsError(err)) return false
     throw err
+  }
+  if (row.type === FileType.SYMLINK && targetStat !== undefined) {
+    const target = await targetStat(rstripSlash(match.virtual))
+    return target?.type === FileType.DIRECTORY
   }
   return row.type === FileType.DIRECTORY
 }
@@ -392,7 +383,6 @@ export async function resolveGlobWith<A, I>(
   paths: readonly PathSpec[],
   index: I | undefined,
   cap?: number,
-  children?: ChildMounts,
   stat?: (accessor: A, path: PathSpec, index?: I) => Promise<FileStat>,
   targetStat?: TargetStat,
   access?: SessionAccess,
@@ -429,13 +419,13 @@ export async function resolveGlobWith<A, I>(
       // before the empty-match test so an all-hidden match set reads as
       // no matches and falls back to the literal word, exactly what bash
       // prints when nothing matched.
-      let matched = (await expandPattern(readdir, accessor, word, index, children, access)).filter(
-        (m) => pathVisible(vis, m.virtual),
+      let matched = (await expandPattern(readdir, accessor, word, index, access)).filter((m) =>
+        pathVisible(vis, m.virtual),
       )
       if (dirsOnly) {
         const kept: PathSpec[] = []
         for (const m of matched) {
-          if (await isDirectory(stat, accessor, m, index, children, targetStat)) {
+          if (await isDirectory(stat, accessor, m, index, targetStat)) {
             kept.push(
               new PathSpec({
                 virtual: m.virtual,
@@ -510,7 +500,6 @@ export async function expandPattern<A, I>(
   accessor: A,
   path: PathSpec,
   index?: I,
-  children?: ChildMounts,
   access?: SessionAccess,
 ): Promise<PathSpec[]> {
   const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.vfsPath.length)
@@ -556,17 +545,8 @@ export async function expandPattern<A, I>(
         const entry = rstripSlash(e)
         if (globNameMatches(entry.split('/').pop() ?? '', matcher, access)) nextLevel.push(entry)
       }
-      if (children !== undefined) {
-        // A nested mount root or a link is a real child of this parent
-        // whether or not the backend could list it.
-        const baseDir = rstripSlash(parent)
-        for (const name of children(`${baseDir}/`)) {
-          if (globNameMatches(name, matcher, access)) nextLevel.push(`${baseDir}/${name}`)
-        }
-      }
     }
-    // bash sorts a pathname expansion, and the two sources are enumerated
-    // separately, so the union is ordered here.
+    // bash sorts a pathname expansion.
     level = [...new Set(nextLevel)].sort(compareCodePoints)
     if (level.length === 0) return []
   }
@@ -593,7 +573,6 @@ export async function expandPattern<A, I>(
 export function makeResolveGlob<A extends Accessor = Accessor>(
   readdir: ReaddirOp<A>,
   maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
-  children?: ChildMounts,
   stat?: StatOp<A>,
   targetStat?: TargetStat,
   access?: SessionAccess,
@@ -607,7 +586,6 @@ export function makeResolveGlob<A extends Accessor = Accessor>(
       paths,
       index,
       maxGlobMatches,
-      children,
       stat,
       targetStat,
       access,

@@ -15,7 +15,7 @@
 import { isStdin, resolveSource } from '../../utils/stream.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import type { NamespaceView, SessionView } from '../../../../view/types.ts'
+import type { FollowOperands, SessionView } from '../../../../view/types.ts'
 import { formatFsError } from '../../../../errors/render.ts'
 import { isFsError } from '../../../../errors/fs.ts'
 import { strategyFor } from './detect.ts'
@@ -31,6 +31,7 @@ import type { FlagValue } from '../../../spec/types.ts'
 import { readFailExitCode } from '../../../spec/usage.ts'
 import { UsageError } from '../../../errors.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 // Run a command whose path operands span mounts. Every command combines
 // per-mount work under one of three strategies (see Strategy): STREAM merges
@@ -53,7 +54,7 @@ export async function handleCrossMount(
   // Maps an operand to its storage identity (RELAY's transfer commands).
   storageKey?: (path: PathSpec) => string,
   // Name-plane facts for the RELAY generics that render them (ls).
-  ns?: NamespaceView,
+  vfs?: Files,
   // The session view, for the RELAY generic that renders the
   // session's profile (ls).
   sessionView?: SessionView,
@@ -63,6 +64,9 @@ export async function handleCrossMount(
   argv: readonly string[] = [],
   aggregate: AggregateFn | null = null,
   checkUnlink?: (path: PathSpec) => void,
+  // The line's operand resolution, which a walk through the dispatcher's
+  // globs take.
+  follow?: FollowOperands,
 ): Promise<CrossResult> {
   const native = runSingle
   const input = resolveSource(stdin)
@@ -89,12 +93,24 @@ export async function handleCrossMount(
         dispatch,
         runSingle,
         cwd,
-        ns,
+        vfs,
         input,
       )
     }
     if (cmdName === 'du') {
-      return await runDu(scopes, textArgs, flagKwargs, dispatch, runSingle, cwd, ns, input)
+      return await runDu(
+        scopes,
+        textArgs,
+        flagKwargs,
+        dispatch,
+        runSingle,
+        cwd,
+        vfs,
+        input,
+        undefined,
+        false,
+        follow,
+      )
     }
     const cmd = cmdName as Cmd
     const strategy = strategyFor(cmd)
@@ -107,7 +123,7 @@ export async function handleCrossMount(
         dispatch,
         runSingle,
         storageKey,
-        ns,
+        vfs,
         sessionView,
         stdin,
         cwd,

@@ -18,7 +18,7 @@ import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { CommandFnResult } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { descendantPath } from '../utils/paths.ts'
-import type { NamespaceView } from '../../../view/types.ts'
+import type { MountView } from '../../../view/types.ts'
 
 // rm's answer to a line with no operand, in GNU's words: nothing at all under
 // -f, and a missing-operand usage error otherwise (coreutils 9.7). Mirrors
@@ -48,11 +48,11 @@ export async function removeTree(
     stat: (path: PathSpec) => Promise<FileStat>
     unlink: (path: PathSpec) => Promise<void>
     rmdir: (path: PathSpec) => Promise<void>
-    ns: NamespaceView | null | undefined
+    mounts: MountView | undefined
     force: boolean
   },
 ): Promise<{ removed: { path: string; isDir: boolean }[]; failures: [PathSpec, unknown][] }> {
-  const roots = new Set(ops.ns?.mounts?.descendants(root.virtual) ?? [])
+  const roots = new Set(ops.mounts?.descendants(root.virtual) ?? [])
   const removed: { path: string; isDir: boolean }[] = []
   const failures: [PathSpec, unknown][] = []
   const remove = async (path: PathSpec, isDir: boolean): Promise<boolean> => {

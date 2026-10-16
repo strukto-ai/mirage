@@ -14,7 +14,7 @@
 
 import { expect, it } from 'vitest'
 import { IOResult } from '../../../../io/types.ts'
-import type { MountView, NamespaceView } from '../../../../view/types.ts'
+import { Files } from '../../../../workspace/files.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
@@ -28,16 +28,11 @@ const DIRS: Record<string, string[]> = {
 }
 const ROOTS = ['/a', '/a/m']
 
-function ns(): NamespaceView {
-  const below = (path: string): string[] =>
-    ROOTS.filter((r) => r.startsWith(path.replace(/\/$/, '') + '/'))
-  const mounts: MountView = {
-    descendants: below,
-    visibleDescendants: below,
-    isRoot: (p) => ROOTS.includes(p),
-    rootOf: (p) => (p.startsWith('/a/m') ? '/a/m/' : '/a/'),
-  }
-  return { mounts }
+function files(): Files {
+  const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
+  return new Files(nothing, null, null, () => null, {
+    prefixes: () => ROOTS.map((r) => `${r}/`),
+  })
 }
 
 function dispatcher(refused?: string): [DispatchFn, string[]] {
@@ -60,7 +55,7 @@ async function collect(
   admit: (p: PathSpec, s: FileStat) => boolean = () => true,
 ): Promise<OwnedScope[]> {
   const out: OwnedScope[] = []
-  for await (const scope of ownedScopes(PathSpec.fromStrPath(path), dispatch, ns(), admit))
+  for await (const scope of ownedScopes(PathSpec.fromStrPath(path), dispatch, files(), admit))
     out.push(scope)
   return out
 }
@@ -95,7 +90,7 @@ it('drops walked entries admit refuses and keeps a refusal as its own scope', as
 
 it('starts at the operand, then at each mount below it', () => {
   const operand = new PathSpec({ virtual: '/a', directory: '/a', vfsPath: 'a', rawPath: './a' })
-  const starts = mountStarts(operand, ns())
+  const starts = mountStarts(operand, files())
   expect(starts[0]).toBe(operand)
   expect(starts.slice(1).map((s) => [s.virtual, s.rawPath])).toEqual([['/a/m', './a/m']])
   const refused = new PathSpec({
@@ -104,7 +99,7 @@ it('starts at the operand, then at each mount below it', () => {
     vfsPath: 'a',
     walkError: 'ENOENT',
   })
-  expect(mountStarts(refused, ns())).toEqual([refused])
+  expect(mountStarts(refused, files())).toEqual([refused])
   expect(mountStarts(operand, undefined)).toEqual([operand])
 })
 

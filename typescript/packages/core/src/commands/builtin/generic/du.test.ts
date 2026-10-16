@@ -44,7 +44,6 @@ function opts(flags: Record<string, string | boolean> = {}): CommandOpts {
     stdin: null,
     flags,
     cwd: '/',
-    vfs: {} as never,
   } as unknown as CommandOpts
 }
 

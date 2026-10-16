@@ -63,10 +63,8 @@ from mirage.vfs.types import (
     WriteOp,
 )
 from mirage.view.types import (
-    ChildMounts,
     FollowOperands,
     LinkTargetStat,
-    NamespaceView,
     ReaddirPath,
     SessionAccess,
     SessionView,
@@ -106,7 +104,7 @@ class ExecContext:
     exec_path_allowed: ExecPathFn | None = None
     runtime: Runtime | None = None
     runtime_unavailable: str | None = None
-    ns: NamespaceView | None = None
+    follow_operands: FollowOperands | None = None
     stat_path: StatPath | None = None
     readdir_path: ReaddirPath | None = None
     session_view: SessionView | None = None
@@ -125,14 +123,11 @@ class CommandIO:
     admission guards these calls; POSIX policy methods belong to the
     filesystem dispatcher and are not part of this interface.
 
-    ``glob_children`` is the child names the namespace owes a directory
-    (nested mount roots and symlinks), and ``glob_target_stat`` what an
-    owed name points at, the namespace's own stat resolved through the
-    workspace. The factory stamps both per invocation from ``opts.ns``,
-    because they are session-scoped state and the adapter is built once
-    per backend; the target stat lets a trailing-slash glob follow a link
-    the way bash does instead of keeping every link it cannot see
-    through. ``glob_follow`` is the line's operand resolution, which a
+    ``glob_target_stat`` is what a link a glob matched points at,
+    resolved through the workspace; the factory stamps it per invocation
+    from the session's files, because the adapter is built once per
+    backend, and it lets a trailing-slash glob follow a link the way bash
+    does. ``glob_follow`` is the line's operand resolution, which a
     typed word's matches take as the names typed would, and
     ``glob_resolved`` is told what each resolution answers, the operands
     the dispatched table warms a command's reads ahead of.
@@ -171,7 +166,6 @@ class CommandIO:
     checksum: ChecksumOp | None = None
     follow: FollowOp | None = None
     read_tree: ReadTreeOp | None = None
-    glob_children: ChildMounts | None = None
     glob_target_stat: LinkTargetStat | None = None
     glob_follow: FollowOperands | None = None
     glob_resolved: Callable[[list[PathSpec]], None] | None = None
@@ -181,7 +175,6 @@ class CommandIO:
         return make_resolve_glob(
             self.readdir,
             self.max_glob_matches,
-            self.glob_children,
             self.stat,
             self.glob_target_stat,
             self.access,
@@ -222,9 +215,9 @@ class CommandOpts:
         runtime (Runtime | None): The runtime an interpreter runs in.
         runtime_unavailable (str | None): Why the requested runtime is
             missing. Python only; TypeScript refuses earlier.
-        ns (NamespaceView | None): What the namespace knows and no
-            backend does: symlinks, mount boundaries, the attribute
-            overlay.
+        follow_operands (FollowOperands | None): The line's pathname
+            resolution of its operands, which a glob's matches take as
+            typed words would.
         stat_path (StatPath | None): Stat one path through the
             dispatcher, which may land on another mount.
         readdir_path (ReaddirPath | None): List one directory through
@@ -256,7 +249,7 @@ class CommandOpts:
     exec_path_allowed: ExecPathFn | None = None
     runtime: Runtime | None = None
     runtime_unavailable: str | None = None
-    ns: NamespaceView | None = None
+    follow_operands: FollowOperands | None = None
     stat_path: StatPath | None = None
     readdir_path: ReaddirPath | None = None
     session_view: SessionView | None = None

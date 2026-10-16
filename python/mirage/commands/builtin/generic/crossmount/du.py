@@ -27,6 +27,7 @@ from mirage.commands.builtin.generic.crossmount.types import (
 )
 from mirage.commands.builtin.generic.du import du, parse_flags
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -37,7 +38,8 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, SizedRun
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.view.types import NamespaceView
+from mirage.view.types import FollowOperands
+from mirage.workspace.files import Files
 
 # The flags that shape only the rendering: every mount measures without
 # them, and the line renders once.
@@ -51,9 +53,10 @@ async def run_du(
     dispatch: DispatchFn,
     run_single: RunSingle,
     cwd: str,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     stdin: ByteSource | None = None,
     nested: bool = False,
+    follow: FollowOperands | None = None,
 ) -> CrossResult:
     """Render du over operands spanning mounts from each mount's own du.
 
@@ -73,12 +76,14 @@ async def run_du(
         dispatch (DispatchFn): Workspace operations, for the one walk.
         run_single (RunSingle): Runs one start point on its mount.
         cwd (str): The session's working directory.
-        ns (NamespaceView | None): Mount ownership and link facts.
+        vfs (Files | None): Mount ownership and link facts.
         stdin (ByteSource | None): The command's input.
         nested (bool): ``run_single`` answers only its own mount's part,
             so the mounts below each operand are measured here unless
             ``-x`` keeps the walk on one filesystem; otherwise each
             operand's run composes its own.
+        follow (FollowOperands | None): The line's operand resolution,
+            which the one walk's globs take.
     """
     rendering = parse_flags(CommandOpts(flags=flags))
     bounded = FlagView(flags, spec=SPECS["du"]).as_bool("one_file_system")
@@ -86,11 +91,11 @@ async def run_du(
     # Each start is then one mount's own part, and keeps only what that
     # mount owns: a part walked through the dispatcher reaches the mounts
     # below it too, which measure themselves.
-    mounts = ns.mounts if ns is not None and nested and not bounded else None
+    mounts = mount_view(vfs) if nested and not bounded else None
     plan = [
         (index, start)
         for index, path in enumerate(paths)
-        for start in (mount_starts(path, ns) if mounts else [path])
+        for start in (mount_starts(path, vfs) if mounts else [path])
     ]
 
     async def measure(step: tuple[int, PathSpec]) -> IOResult:
@@ -109,8 +114,9 @@ async def run_du(
             flags,
             dispatch,
             cwd,
-            ns,
+            vfs,
             stdin,
+            follow=follow,
         )
     kept = await reached(
         paths, plan, [io.exit_code != 0 for io in ios], dispatch
@@ -165,7 +171,6 @@ async def run_du(
         compute_entries=entries,
         flags=rendering,
         directories=lambda: [d for _, dirs in measured.values() for d in dirs],
-        ns=ns,
     )
     merged.stderr = out.stderr + await materialize(merged.stderr)
     merged.exit_code = max([out.exit_code, *(io.exit_code for _, io in done)])

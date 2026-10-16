@@ -44,6 +44,7 @@ import { printfKind } from '../../../core/generic/find_eval.ts'
 import { pathVisible } from '../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
+import { linksOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -401,7 +402,7 @@ export function findGeneric(
       // table it walks answers the link's own row, and GNU's default -P
       // reports the link and stops there. The dispatcher's stat would follow
       // it, so the start point's checks below leave it alone.
-      const rootIsLink = (opts.ns?.links ?? null)?.statAt(root.virtual) != null
+      const rootIsLink = (linksOf(opts) ?? null)?.statAt(root.virtual) != null
       // What the start point is decides which walk is even possible, so it
       // is resolved once, ahead of all of them: a symlink is walked as
       // itself, a non-directory has no subtree, and nothing at all is GNU's
@@ -426,7 +427,7 @@ export function findGeneric(
       // A start point's own `.` and `..` resolve first, link or not: the
       // lookup below asks about the path they simplify to.
       if (startStat !== undefined) {
-        const refusal = await dotRefusal(statOrEnoent(startStat), root, linkFollow(opts.ns?.links))
+        const refusal = await dotRefusal(statOrEnoent(startStat), root, linkFollow(linksOf(opts)))
         if (refusal !== null) {
           const label = root.rawPath !== '' ? root.rawPath : root.virtual
           missing.push(`find: '${label}': ${fsStrerror(refusal) ?? posixPhrase('ENOENT')}`)
@@ -504,7 +505,7 @@ export function findGeneric(
             ? await applyMtimeFilter(rootRows, effMtimeMin, effMtimeMax, stat, prefix)
             : rootRows
         first = respellRaw(
-          checked.filter((row) => pathVisible(opts.ns?.visibility, row)),
+          checked.filter((row) => pathVisible(opts.vfs?.vis(), row)),
           root.virtual,
           root.rawPath,
         )
@@ -585,7 +586,7 @@ export function findGeneric(
       // Hidden rows drop here, above the native-op/walk fork, so a mount's
       // visibility behavior cannot depend on whether its backend ships a
       // native find op.
-      const visibleRows = unpruned.filter((row) => pathVisible(opts.ns?.visibility, row))
+      const visibleRows = unpruned.filter((row) => pathVisible(opts.vfs?.vis(), row))
       const added = respellRaw(visibleRows, root.virtual, root.rawPath)
       for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')
       for (const r of added) run.push(matchedPath(r, root))

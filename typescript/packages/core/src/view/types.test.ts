@@ -30,6 +30,7 @@ const MEMBERS = [
   'readlink',
   'linkStatAt',
   'symlinkTargets',
+  'linkStatsBelow',
   'linkNamesUnder',
 ] as const
 

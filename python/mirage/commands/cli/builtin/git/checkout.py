@@ -793,9 +793,8 @@ async def checkout(
 
     Args:
         inv (CLIInvocation[None]): the line's invocation record.
-            git declares no config_model; the planes it reads
-            (data through ``dispatch``, names through ``ns``) ride
-            ``inv.view``.
+            git declares no config_model; it reads its repository
+            through ``inv.view.vfs``.
     """
     view = inv.view or CLIView()
     vfs = view.vfs

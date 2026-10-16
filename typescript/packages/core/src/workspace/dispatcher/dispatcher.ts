@@ -2134,7 +2134,10 @@ export class Dispatcher {
       result = this.onDevice(
         call.name,
         call.path.virtual,
-        this.withLinks(call.path, result as Map<string, FileStat>, call.vis),
+        this.overlaid(
+          call.path,
+          this.withLinks(call.path, result as Map<string, FileStat>, call.vis),
+        ),
       )
     }
     // A tree read keys its entries below the path; a search names each hit
@@ -2202,6 +2205,17 @@ export class Dispatcher {
    * is left out, as a listing leaves it out. Mirrors Python's
    * Dispatcher._with_links.
    */
+  /** A subtree read with the attributes the overlay holds for each entry, the
+   * ones a stat of that entry carries. */
+  private overlaid(path: PathSpec, tree: Map<string, FileStat>): Map<string, FileStat> {
+    const base = rstripSlash(path.virtual)
+    const merged = new Map<string, FileStat>()
+    for (const [rel, row] of tree) {
+      merged.set(rel, mergeOverlayStat(this.namespace.metaFor(`${base}/${rel}`), row))
+    }
+    return merged
+  }
+
   private withLinks(
     path: PathSpec,
     tree: Map<string, FileStat>,

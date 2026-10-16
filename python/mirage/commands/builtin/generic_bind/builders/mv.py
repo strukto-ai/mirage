@@ -25,10 +25,11 @@ from mirage.commands.builtin.generic_bind.adapter import (
     refuse_reveal,
     require_op,
 )
-from mirage.commands.builtin.generic_bind.builders.cp import overlayable_stat
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.context import session_visibility
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import NativeMove, PathSpec
 
@@ -45,34 +46,29 @@ async def mv(
     fl = FlagView(opts.flags, spec=SPECS["mv"])
     parsed = parse_flags(fl)
     paths = await ops.resolve_glob(accessor, paths, opts.index)
-    overlay = opts.ns.stat_overlay if opts.ns is not None else None
+    links = links_of(opts)
+    mounts = mounts_of(opts)
     return await generic_mv(
         paths,
         strategy=NativeMove(
             rename=partial(require_op(ops, Operation.RENAME), accessor)
         ),
-        stat=overlayable_stat(ops, accessor, opts.index, overlay),
+        stat=bound_op(ops.stat, accessor, opts.index),
         flags=parsed,
         readdir=bound_op(ops.readdir, accessor, opts.index),
         guard=refuse_reveal,
         copies=(
             transfer_links_of(
-                opts.ns.links,
+                links,
                 opts.dispatch,
                 opts.cwd.virtual if opts.cwd is not None else "/",
-                opts.ns.visibility,
+                session_visibility(),
             )
-            if opts.ns is not None
-            and opts.ns.links is not None
-            and opts.dispatch is not None
+            if links is not None and opts.dispatch is not None
             else None
         ),
         stdin=opts.stdin,
-        mount_root=(
-            opts.ns.mounts.is_root
-            if opts.ns is not None and opts.ns.mounts is not None
-            else None
-        ),
+        mount_root=mounts.is_root if mounts is not None else None,
     )
 
 

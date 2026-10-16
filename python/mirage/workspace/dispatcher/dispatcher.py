@@ -2393,7 +2393,9 @@ class Dispatcher:
             result = self._on_device(
                 call.name,
                 call.path.virtual,
-                self._with_links(call.path, result, call.vis),
+                self._overlaid(
+                    call.path, self._with_links(call.path, result, call.vis)
+                ),
             )
         # A tree read keys its entries below the path; a search names each
         # hit itself, and a store can rank a hit from outside the scope (a
@@ -2503,6 +2505,24 @@ class Dispatcher:
                 continue
             merged.setdefault(virtual[len(base) + 1 :], row)
         return merged
+
+    def _overlaid(
+        self, path: PathSpec, tree: dict[str, FileStat]
+    ) -> dict[str, FileStat]:
+        """A subtree read with the attributes the overlay holds for each
+        entry, the ones a stat of that entry carries.
+
+        Args:
+            path (PathSpec): the directory the read answered for.
+            tree (dict[str, FileStat]): the answer, keyed below ``path``.
+        """
+        base = path.virtual.rstrip("/")
+        return {
+            rel: merge_overlay_stat(
+                self._namespace.meta_for(f"{base}/{rel}"), row
+            )
+            for rel, row in tree.items()
+        }
 
     async def _settle_write(
         self,

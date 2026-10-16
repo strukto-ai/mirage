@@ -28,7 +28,8 @@ import { DISPATCH_BUILDERS, RELAY_COMMANDS } from '../constants.ts'
 import { runDispatch } from '../../../generic_bind/dispatch.ts'
 import type { CrossResult, DispatchFn, RunSingle } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import type { NamespaceView, SessionView } from '../../../../../view/types.ts'
+import type { SessionView } from '../../../../../view/types.ts'
+import type { Files } from '../../../../../workspace/files.ts'
 
 // Run a command whose work must see every operand at once. Pure wiring:
 // every operand is read or written through dispatch primitives on its owning
@@ -52,7 +53,7 @@ export async function runRelay(
   // Name-plane facts for the generics that render them (ls: links, attr
   // overlay, child mounts) and for the archivers' scan (tar, zip: links,
   // mount boundaries).
-  ns?: NamespaceView,
+  vfs?: Files,
   // The session view, for the generic that renders the session's
   // profile (ls -l).
   sessionView?: SessionView,
@@ -68,16 +69,16 @@ export async function runRelay(
   if (cmdName === 'awk') return runAwk(scopes, textArgs, flagKwargs, runSingle, stdin)
   if (cmdName === 'sed')
     return runSed(scopes, textArgs, flagKwargs, dispatch, stdin, cwd, argv, sessionView?.snapshot())
-  if (cmdName === 'wc') return runWc(scopes, flagKwargs, dispatch, runSingle, cwd, ns, stdin)
-  if (cmdName === 'ls') return runLs(scopes, flagKwargs, dispatch, ns, sessionView)
-  if (cmdName === 'cp') return runCp(scopes, flagKwargs, dispatch, storageKey, ns, cwd, stdin)
+  if (cmdName === 'wc') return runWc(scopes, flagKwargs, dispatch, runSingle, cwd, vfs, stdin)
+  if (cmdName === 'ls') return runLs(scopes, flagKwargs, dispatch, vfs, sessionView)
+  if (cmdName === 'cp') return runCp(scopes, flagKwargs, dispatch, storageKey, vfs, cwd, stdin)
   if (cmdName === 'mv') {
-    return runMv(scopes, flagKwargs, dispatch, storageKey, ns, stdin, checkUnlink)
+    return runMv(scopes, flagKwargs, dispatch, storageKey, vfs, stdin, checkUnlink)
   }
-  if (cmdName === 'tar') return runTar(scopes, textArgs, flagKwargs, dispatch, ns, stdin)
+  if (cmdName === 'tar') return runTar(scopes, textArgs, flagKwargs, dispatch, vfs, stdin)
   if (cmdName === 'tee') return runTee(scopes, flagKwargs, dispatch, stdin, storageKey)
   if (cmdName === 'unzip') return runUnzip(scopes, textArgs, flagKwargs, dispatch)
-  if (cmdName === 'zip') return runZip(scopes, flagKwargs, dispatch, ns)
+  if (cmdName === 'zip') return runZip(scopes, flagKwargs, dispatch, vfs)
   const builder = DISPATCH_BUILDERS.get(cmdName)
   if (builder !== undefined) {
     return runDispatch(
@@ -87,7 +88,7 @@ export async function runRelay(
       flagKwargs,
       dispatch,
       cwd,
-      ns,
+      vfs,
       stdin,
       undefined,
       argv,

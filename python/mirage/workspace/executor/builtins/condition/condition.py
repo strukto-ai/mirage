@@ -29,8 +29,9 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondNode,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.mount.namespace.view import link_view
+from mirage.commands.builtin.utils.links import link_view
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
@@ -62,7 +63,14 @@ async def handle_test(
         session=session,
         name=name,
         view=view,
-        links=link_view(namespace, dispatch, session.visibility),
+        links=link_view(
+            Files(
+                [],
+                dispatch,
+                links=namespace,
+                visibility=lambda _session: session.visibility,
+            )
+        ),
     )
     try:
         if isinstance(args, list):

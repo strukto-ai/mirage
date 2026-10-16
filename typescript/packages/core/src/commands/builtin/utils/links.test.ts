@@ -15,13 +15,29 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../io/types.ts'
-import type { LinkView } from '../../../view/types.ts'
+import type { LinkView, NamespaceLinks } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { FileStat, FileType, PathSpec, type WalkErrno } from '../../../types.ts'
+import {
+  DEFAULT_VISIBILITY,
+  FileStat,
+  FileType,
+  PathSpec,
+  type Visibility,
+  type WalkErrno,
+} from '../../../types.ts'
+import { Files } from '../../../workspace/files.ts'
 import { isDotWalkError } from '../../../errors/fs.ts'
 import { CycleError } from '../../../utils/path.ts'
 import type { CommandOpts } from '../../config.ts'
-import { LinkResolver, linkResolver, nameLocation, typedLink } from './links.ts'
+import {
+  LinkResolver,
+  linkResolver,
+  linkView,
+  mountView,
+  nameLocation,
+  owedNames,
+  typedLink,
+} from './links.ts'
 
 function spec(virtual: string, rawPath: string, walkError: WalkErrno | null = null): PathSpec {
   return new PathSpec({
@@ -148,8 +164,88 @@ describe('the link resolver', () => {
   it('is absent without links or a dispatcher', () => {
     const [dispatch] = recorder()
     const base: CommandOpts = { stdin: null, flags: {}, cwd: '/' }
+    const vfs = new Files(dispatch, null, table({}))
     expect(linkResolver(base)).toBeNull()
-    expect(linkResolver({ ...base, ns: { links: LINKS } })).toBeNull()
-    expect(linkResolver({ ...base, ns: { links: LINKS }, dispatch })?.cwd).toBe('/')
+    expect(linkResolver({ ...base, vfs })).toBeNull()
+    expect(linkResolver({ ...base, vfs, dispatch })?.cwd).toBe('/')
+  })
+})
+
+// A namespace link table over link paths and their targets.
+function table(targets: Record<string, string>): NamespaceLinks {
+  const row = (path: string): FileStat | null =>
+    path in targets
+      ? new FileStat({ name: path.split('/').pop() ?? '', type: FileType.SYMLINK })
+      : null
+  return {
+    follow: (path: string) => targets[path] ?? path,
+    linkStatAt: row,
+    linkStatsBelow: (directory: string) =>
+      Object.keys(targets)
+        .filter((path) => path.startsWith(directory.replace(/\/+$/, '') + '/'))
+        .sort()
+        .map((path): [string, FileStat] => [
+          path,
+          new FileStat({ name: path.split('/').pop() ?? '', type: FileType.SYMLINK }),
+        ]),
+    symlinkTargets: () => new Map(Object.entries(targets)),
+  } as unknown as NamespaceLinks
+}
+
+function files(prefixes: string[], links: NamespaceLinks | null = null, vis?: Visibility) {
+  const [dispatch] = recorder()
+  return new Files(dispatch, null, links, () => null, {
+    prefixes: () => prefixes,
+    ...(vis === undefined ? {} : { visibility: () => vis }),
+  })
+}
+
+describe('owedNames', () => {
+  it('derives from the mount table', () => {
+    const vfs = files(['/base/', '/base/inner/', '/dev/'])
+    expect(owedNames(vfs, '/base')).toEqual(['inner'])
+    expect(owedNames(vfs, '/')).toEqual(['base', 'dev'])
+    expect(owedNames(vfs, '/dev')).toEqual([])
+  })
+
+  // A link below a directory chain no backend serves synthesizes its
+  // ancestors, exactly as a nested mount prefix does, so `ls /` shows the
+  // way to it.
+  it('includes link ancestors', () => {
+    const vfs = files(['/base/'], table({ '/ghost/deep/lnk': '/base' }))
+    expect(owedNames(vfs, '/')).toEqual(['base', 'ghost'])
+    expect(owedNames(vfs, '/ghost')).toEqual(['deep'])
+    expect(owedNames(undefined, '/')).toEqual([])
+  })
+})
+
+describe('linkView', () => {
+  it('is live whenever the files hold a table', () => {
+    const targets: Record<string, string> = {}
+    const view = linkView(files([], table(targets)))
+    expect(view?.subtree('/')).toEqual([])
+    targets['/data/l'] = '/data/a'
+    expect(view?.statAt('/data/l')).not.toBeNull()
+    expect(linkView(files([]))).toBeUndefined()
+    expect(linkView(undefined)).toBeUndefined()
+  })
+})
+
+describe('mountView', () => {
+  it('stops at a hidden mount but never names it', () => {
+    const hidden: Visibility = {
+      ...DEFAULT_VISIBILITY,
+      paths: { paths: ['/data/secret'], patterns: [] },
+    }
+    const vfs = files(['/data/', '/data/open/', '/data/secret/'], null, hidden)
+    const mounts = mountView(vfs)
+    expect(mounts?.descendants('/data')).toEqual(['/data/open', '/data/secret'])
+    expect(mounts?.visibleDescendants('/data')).toEqual(['/data/open'])
+    expect(mounts?.rootOf('/data/open/x')).toBe('/data/open/')
+    expect(mounts?.isRoot('/data/secret')).toBe(true)
+    const crossing = mountView(vfs, true)
+    expect(crossing?.descendants('/data')).toEqual([])
+    expect(crossing?.isRoot('/data/open')).toBe(false)
+    expect(crossing?.rootOf('/data/open/x')).toBe('/data/open/')
   })
 })

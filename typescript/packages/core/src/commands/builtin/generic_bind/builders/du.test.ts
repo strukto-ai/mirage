@@ -14,12 +14,14 @@
 
 import { BUILDER, WalkBudget } from './du.ts'
 import { describe, expect, it } from 'vitest'
-import { materialize } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces, enoent, enotsup, walkDeclined } from '../../../../errors/fs.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandIO } from '../../../config.ts'
-import type { LinkView, MountView } from '../../../../view/types.ts'
+import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import { Files } from '../../../../workspace/files.ts'
 
 const DEC = new TextDecoder()
 
@@ -335,16 +337,18 @@ const UNLISTED: CommandIO = {
     ),
 }
 
-const UNLISTED_LINKS: LinkView = {
-  statAt: () => null,
-  subtree: () => [],
-  resolve: (path) => (path === '/db/link' ? '/db/private/f' : path),
-  exists: () => Promise.resolve(true),
-  targetStat: (path) =>
-    Promise.resolve(
-      path === '/db/link' ? new FileStat({ name: 'f', type: FileType.FILE, size: 6 }) : null,
-    ),
-}
+// A link table holding /db/link, which leads to /db/private/f.
+const ONE_LINK = {
+  follow: (path: string) => (path === '/db/link' ? '/db/private/f' : path),
+  linkStatAt: () => null,
+  linkStatsBelow: () => [],
+  symlinkTargets: () => new Map<string, string>(),
+} as unknown as NamespaceLinks
+
+const linked: DispatchFn = (op, path) =>
+  op === 'stat' && path.virtual === '/db/private/f'
+    ? Promise.resolve([new FileStat({ name: 'f', type: FileType.FILE, size: 6 }), new IOResult()])
+    : Promise.reject(enoent(path))
 
 // A link into the operand's tree is left to the file's own name, but a
 // directory the walk may not list hides that name, and GNU then counts the
@@ -355,7 +359,7 @@ describe('du -L through a directory it may not list', () => {
       stdin: null,
       flags: { a: true, L: true },
       cwd: '/',
-      ns: { links: UNLISTED_LINKS },
+      vfs: new Files(linked, null, ONE_LINK),
     })
     const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
     expect(DEC.decode(out)).toBe('6\t/db/link\n0\t/db/private\n6\t/db\n')

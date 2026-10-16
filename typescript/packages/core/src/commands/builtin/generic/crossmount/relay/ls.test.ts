@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../../../io/types.ts'
-import type { NamespaceView } from '../../../../../view/types.ts'
+import { Files } from '../../../../../workspace/files.ts'
 import { FileStat, FileType, PathSpec } from '../../../../../types.ts'
 import { enotdir } from '../../../../../errors/fs.ts'
 import { mountKey } from '../../../../../utils/key_prefix.ts'
@@ -74,11 +74,11 @@ function makeDispatch(calls: Calls, roots: ReadonlySet<string>): DispatchFn {
 async function run(
   paths: string[],
   flags: Record<string, FlagValue> = {},
-  ns?: NamespaceView,
+  vfs?: Files,
   roots: ReadonlySet<string> = new Set(),
 ): Promise<{ out: string; io: IOResult; calls: Calls }> {
   const calls: Calls = { readdir: [], stat: [] }
-  const [out, io] = await runLs(paths.map(spec), flags, makeDispatch(calls, roots), ns)
+  const [out, io] = await runLs(paths.map(spec), flags, makeDispatch(calls, roots), vfs)
   const text = out === null ? '' : new TextDecoder().decode(await materialize(out))
   return { out: text, io, calls }
 }
@@ -89,22 +89,6 @@ describe('runLs — cross-mount ls', () => {
     // for mount B; the relayed op consults its own mount's index.
     const { calls } = await run(['/a', '/b'])
     expect(calls.readdir).toEqual(['/a', '/b'])
-  })
-
-  it('still reaches the rows with the namespace attr overlay', async () => {
-    // A naive relay would report the raw backend mode and silently lose a
-    // chmod the namespace holds.
-    const overlay = (virtual: string, st: FileStat): FileStat =>
-      virtual === '/a/z.txt' ? st.with({ mode: 0o600 }) : st
-    const { out } = await run(['/a', '/b'], { args_l: true }, { statOverlay: overlay })
-    expect(out).toContain('-rw-------')
-    expect(out.split('-rw-------').length - 1).toBe(1)
-  })
-
-  it('lists the same names without a namespace', async () => {
-    const none = await run(['/a', '/b'])
-    const empty = await run(['/a', '/b'], {}, {})
-    expect(empty.out).toBe(none.out)
   })
 
   it('leaves a lone operand unheaded', async () => {
@@ -129,22 +113,16 @@ describe('runLs — cross-mount ls', () => {
 
   // The mount table names the boundaries a walk's readdir cannot cross,
   // and a relayed one crosses them: readdir and stat route per path.
-  // Handed the whole namespace — which is what the workspace offers —
-  // the relay must still descend `/a/one` and render its group, because
-  // nothing runs behind a relay to contribute it the way the fan-out
-  // does for a single-mount run.
-  it('is not stopped at a mount root by a full namespace', async () => {
+  // Handed the session's files, whose mount table holds `/a/one`, the relay
+  // must still descend it and render its group, because nothing runs behind
+  // a relay to contribute it the way the fan-out does for a single-mount run.
+  it('is not stopped at a mount root by the mount table', async () => {
     const nested = new Set(['/a/one'])
-    const ns: NamespaceView = {
-      mounts: {
-        descendants: () => [],
-        visibleDescendants: () => [],
-        isRoot: (p) => nested.has(rstripSlash(p)),
-        rootOf: () => '/',
-      },
-      childMounts: (parent) => (parent === '/a' ? ['one'] : []),
-    }
-    const { out, io } = await run(['/a', '/b'], { recursive: true }, ns, nested)
+    const calls: Calls = { readdir: [], stat: [] }
+    const files = new Files(makeDispatch(calls, nested), null, null, () => null, {
+      prefixes: () => ['/a/', '/a/one/', '/b/'],
+    })
+    const { out, io } = await run(['/a', '/b'], { recursive: true }, files, nested)
     expect(io.exitCode).toBe(0)
     expect(out).toBe('/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n')
   })

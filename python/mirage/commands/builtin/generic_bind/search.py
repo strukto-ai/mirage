@@ -55,6 +55,7 @@ from mirage.utils.encoding import bom_of
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import CycleError, glob_prefix_match
 from mirage.view.types import LinkView
+from mirage.commands.builtin.utils.links import links_of
 
 logger = logging.getLogger(__name__)
 
@@ -367,7 +368,7 @@ async def search_reads(
     read_bytes = bound_op(io.read_bytes, accessor, index)
     read_stream = bound_op(io.read_stream, accessor, index)
     files, lines = io.files_containing, io.lines_containing
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     fl = FlagView(opts.flags, spec=SPECS[name])
     if not paths or (
         name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))

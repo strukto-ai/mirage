@@ -22,24 +22,25 @@ from mirage.commands.builtin.generic.crossmount.scopes import (
     reached,
 )
 from mirage.errors.fs import eacces
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import MountView, NamespaceView
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 _DIRS = {"/a": ["/a/d", "/a/f", "/a/m"], "/a/d": ["/a/d/g"], "/a/m": []}
 _ROOTS = ["/a", "/a/m"]
 
 
-def _ns() -> NamespaceView:
-    def below(path: str) -> list[str]:
-        return [r for r in _ROOTS if r.startswith(path.rstrip("/") + "/")]
+async def _nothing(op: str, path: PathSpec, **_):
+    return None, None
 
-    return NamespaceView(
-        mounts=MountView(
-            descendants=below,
-            visible_descendants=below,
-            is_root=lambda p: p in _ROOTS,
-            root_of=lambda p: "/a/m/" if p.startswith("/a/m") else "/a/",
-        )
+
+def _files() -> Files:
+    return Files(
+        [
+            MountRow(prefix=r + "/", resource_type="ram", mode=MountMode.READ)
+            for r in _ROOTS
+        ],
+        _nothing,
     )
 
 
@@ -62,7 +63,7 @@ async def _collect(path: str, dispatch, admit=lambda p, s: True):
     return [
         s
         async for s in owned_scopes(
-            PathSpec.from_str_path(path), dispatch, _ns(), admit
+            PathSpec.from_str_path(path), dispatch, _files(), admit
         )
     ]
 
@@ -98,11 +99,11 @@ async def test_admit_drops_walked_entries_and_a_refusal_is_its_own_scope():
 
 def test_mount_starts_are_the_operand_then_each_mount_below_it():
     operand = replace(PathSpec.from_str_path("/a"), raw_path="./a")
-    starts = mount_starts(operand, _ns())
+    starts = mount_starts(operand, _files())
     assert starts[0] is operand
     assert [(s.virtual, s.raw_path) for s in starts[1:]] == [("/a/m", "./a/m")]
     refused = replace(operand, walk_error="ENOENT")
-    assert mount_starts(refused, _ns()) == [refused]
+    assert mount_starts(refused, _files()) == [refused]
     assert mount_starts(operand, None) == [operand]
 
 

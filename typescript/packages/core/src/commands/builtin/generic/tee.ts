@@ -31,6 +31,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { linksOf } from '../utils/links.ts'
 
 /**
  * How tee answers a write into a pipe whose reader has gone: SIGPIPE without
@@ -112,7 +113,7 @@ export async function teeGeneric(
           write,
           append,
           io,
-          outputKey ?? ((p) => opts.ns?.links?.resolve(p.virtual) ?? p.virtual),
+          outputKey ?? ((p) => linksOf(opts)?.resolve(p.virtual) ?? p.virtual),
           parked,
         )[Symbol.asyncIterator](),
         // Parked at a yield, tee's own return copies what its files still

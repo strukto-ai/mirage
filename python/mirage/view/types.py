@@ -19,7 +19,6 @@ from typing import Any, Protocol, runtime_checkable
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.types import FileStat, MountMode, PathSpec, Visibility
 
-StatOverlay = Callable[[str, FileStat], FileStat]
 # Stat one virtual path through the workspace rather than one backend, so
 # a path under another mount still answers; None when nothing is there.
 # What a traversal command asks about its own start point, which decides
@@ -201,8 +200,7 @@ class MountView:
     that needs both (``tar`` prunes by one and warns by the other) reads
     both fields.
 
-    Delivered as the ``mounts`` field of ``NamespaceView``, which rides
-    ``CommandOpts.ns``; a command opts in by reading ``opts.ns.mounts``.
+    Read off a command's files (``mounts_of(opts)``).
     """
 
     # Every mount root strictly under a path, for a caller avoiding one.
@@ -225,11 +223,11 @@ class NamespaceLinks(Protocol):
     """The symlink surface a namespace offers to lower layers.
 
     The workspace Namespace satisfies this structurally; FUSE and the
-    namespace view consume it through this seam so the dependency points
+    session's files consume it through this seam so the dependency points
     downward (workspace injects, lower layers never import workspace
     modules).
 
-    Read-only, and the TypeScript twin declares the same seven members
+    Read-only, and the TypeScript twin declares the same eight members
     in the same order. A link is created and removed through the
     dispatcher (``Files.symlink``, ``Files.unlink``), never here: the
     dispatcher is the only layer that sees both planes, so it is where
@@ -290,6 +288,15 @@ class NamespaceLinks(Protocol):
         """Every link path to its stored target, the whole table."""
         ...
 
+    def link_stats_below(self, directory: str) -> list[tuple[str, FileStat]]:
+        """Every link at any depth under ``directory``, each with its own
+        row, which a walk that reads a subtree in one call merges in.
+
+        Args:
+            directory (str): absolute virtual directory path.
+        """
+        ...
+
     def link_names_under(self, directory: str) -> set[str]:
         """The names of the links directly under ``directory``, which a
         listing's link marks need; a link prefix resolves first, as the
@@ -312,14 +319,13 @@ class LinkView:
     builder in the chain, and the generic; it reads another field off
     the view it already receives.
 
-    Delivered as the ``links`` field of ``NamespaceView``, which rides
-    ``CommandOpts.ns``; a command opts in by reading ``opts.ns.links``.
+    Read off a command's files (``links_of(opts)``).
     """
 
     # lstat one path (a link operand: `ls -l link`, `stat link`).
     stat_at: LinkStat
-    # The links under a directory, which every bound table lists and
-    # reads with the backend's own (`with_links`).
+    # The links under a directory, which the dispatcher lists and reads
+    # with the backend's own.
     subtree: LinkSubtree
     # Where a path really points, and whether anything is there. Both
     # are needed to tell a live link from a broken one.
@@ -329,43 +335,6 @@ class LinkView:
     # link's), resolved through the workspace so a link that crosses
     # mounts still answers.
     target_stat: LinkTargetStat
-
-
-@dataclass(frozen=True)
-class NamespaceView:
-    """The name plane's facts a command may consult, as one injected object.
-
-    Everything here answers from the workspace's addressing authority
-    (the namespace node table plus the mount table), which no backend
-    can see: symlinks, mount boundaries, the chmod/chown/touch attr
-    overlay, and the child names the namespace owes a directory. One
-    view per plane means a command that grows a new name-plane need
-    adds a field read, not a new keyword threaded through
-    ``run_command``, every builder, and the generic.
-
-    Delivered as ``CommandOpts.ns`` to every command handler and as
-    ``CLIView.ns`` to a CLI verb; a command opts in by reading the
-    field it wants, so there is no signature for the dispatcher to
-    inspect and no registry to keep in step. Fields default to None so
-    a unit test constructs only what it exercises; inside a workspace
-    the dispatcher fills them all.
-    """
-
-    # The symlink facts; None when the namespace holds no links, which
-    # is the fast path a walker checks before merging.
-    links: LinkView | None = None
-    # Where the mount boundaries are (tar, zip, du).
-    mounts: MountView | None = None
-    # The namespace attr merge for stat-rendering commands (ls).
-    stat_overlay: StatOverlay | None = None
-    # Child names the namespace owes a directory (mounts and links).
-    child_mounts: ChildMounts | None = None
-    # The running session's hides and shows; None when unrestricted.
-    visibility: Visibility | None = None
-    # Whether anything at or under a path is judged; a native walk yields.
-    scoped: Callable[[str], bool] | None = None
-    # The line's operand resolution, which a glob's matches take as well.
-    follow_operands: FollowOperands | None = None
 
 
 # Run one facade op as a session: ``(session_id, run) -> result``, None

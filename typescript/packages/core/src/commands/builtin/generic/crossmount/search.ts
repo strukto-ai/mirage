@@ -41,7 +41,6 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
-import type { NamespaceView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { isFsError } from '../../../../errors/fs.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
@@ -50,9 +49,10 @@ import { walkErrorLine } from '../../rg_scan.ts'
 import { Totals, splitFooter, type RgFlags } from '../../rg_search.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import { LinkResolver } from '../../utils/links.ts'
+import { LinkResolver, linkView, mountView } from '../../utils/links.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 function admitGrep(flags: FlagSet, path: PathSpec, stat: FileStat): boolean {
   if (stat.type === FileType.DIRECTORY) return dirAdmitted(path.virtual, flags.filters)
@@ -74,7 +74,7 @@ export async function runSearch(
   dispatch: DispatchFn,
   runSingle: RunSingle,
   cwd: string,
-  ns?: NamespaceView,
+  vfs?: Files,
   stdin: ByteSource | null = null,
   signal?: AbortSignal,
 ): Promise<CrossResult> {
@@ -87,8 +87,8 @@ export async function runSearch(
   // a file that could not be read is noted once, here.
   const notes: string[] = []
   const ignores = rg === null ? null : await ignoreRules(view, dispatch, notes)
-  const nested = paths.some((p) => (ns?.mounts?.descendants(p.virtual).length ?? 0) > 0)
-  const linked = paths.some((p) => (ns?.links?.subtree(p.virtual).length ?? 0) > 0)
+  const nested = paths.some((p) => (mountView(vfs)?.descendants(p.virtual).length ?? 0) > 0)
+  const linked = paths.some((p) => (linkView(vfs)?.subtree(p.virtual).length ?? 0) > 0)
   const planned =
     rg !== null &&
     (linked ||
@@ -123,7 +123,7 @@ export async function runSearch(
   const input = resolveSource(stdin)
   const execute: RunSingle = (cmd, operands, words, bag) =>
     runSingle(cmd, operands, words, bag, { stdin: operands.some((p) => isStdin(p)) ? input : null })
-  const owners = paths.map((p) => ns?.mounts?.rootOf(p.virtual))
+  const owners = paths.map((p) => mountView(vfs)?.rootOf(p.virtual))
   const walk = rg === null ? null : walkFilter(rg, undefined, ignores ?? undefined)
   const admit = (path: PathSpec, stat: FileStat): boolean => {
     if (grep !== null) return admitGrep(grep, path, stat)
@@ -157,7 +157,8 @@ export async function runSearch(
         if (info.type === FileType.DIRECTORY) await beforeFullScan(dispatch, path, name)
       }
       const warnings: string[] = []
-      const resolver = ns?.links === undefined ? null : new LinkResolver(ns.links, dispatch, cwd)
+      const links = linkView(vfs)
+      const resolver = links === undefined ? null : new LinkResolver(links, dispatch, cwd)
       const found = haystacks(
         paths,
         readdir,
@@ -166,7 +167,7 @@ export async function runSearch(
         walk,
         rg,
         warnings,
-        rg.oneFileSystem ? (ns?.mounts ?? null) : null,
+        rg.oneFileSystem ? (mountView(vfs) ?? null) : null,
         resolver,
       )
       if (rg.sort !== null && rg.sort !== 'none' && !(rg.sort === 'path' && !rg.sortReverse)) {
@@ -212,7 +213,7 @@ export async function runSearch(
       return
     }
     for (const path of paths) {
-      if (rg !== null || grep?.recursive) yield* ownedScopes(path, dispatch, ns, admit)
+      if (rg !== null || grep?.recursive) yield* ownedScopes(path, dispatch, vfs, admit)
       else yield { path, walked: false }
     }
   }
@@ -245,12 +246,12 @@ export async function runSearch(
     const local = grep === null ? labelFlags(bag) : { ...bag }
     if (grep !== null) flagOccurrences(local).push(...flagOccurrences(bag))
     if (grep !== null && filenameMode(view) === null) {
-      const owner = ns?.mounts?.rootOf(scope.path.virtual)
+      const owner = mountView(vfs)?.rootOf(scope.path.virtual)
       const repeated = owners.filter((o) => o === owner).length > 1
       if (
         scope.stat?.type !== FileType.DIRECTORY ||
         repeated ||
-        (scope.walked && !ns?.mounts?.isRoot(scope.path.virtual))
+        (scope.walked && !mountView(vfs)?.isRoot(scope.path.virtual))
       )
         local.with_filename = true
     }

@@ -12,18 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, replace
-from typing import Any
+import posixpath
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 
-from mirage.commands.config import CommandIO, CommandOpts
+from mirage.commands.builtin.utils.paths import resolve_path_stat
+from mirage.commands.config import CommandOpts
 from mirage.errors.fs import eloop
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.path import CycleError, gnu_basename, resolve_path
+from mirage.types import FileStat, PathSpec
+from mirage.utils.hidden import path_visible
+from mirage.utils.path import (
+    CycleError,
+    gnu_basename,
+    norm_dir,
+    owner_prefix,
+    resolve_path,
+)
+from mirage.view.namespace_view import namespace_names
 from mirage.view.types import LinkView, MountView
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 logger = logging.getLogger(__name__)
 
@@ -50,25 +60,6 @@ def link_location(links: LinkView, virtual: str) -> str:
     if not name:
         return links.resolve(virtual)
     return f"{links.resolve(head or '/').rstrip('/')}/{name}"
-
-
-def owed_names(links: LinkView, directory: str) -> list[str]:
-    """The names the links owe a directory: each link standing in it, and
-    each directory holding one further down.
-
-    No backend can list either, and the second may be one no backend
-    serves at all (a link made below a directory chain that holds no key),
-    so these are the names the dispatcher merges into its own listing,
-    derived from the same table.
-
-    Args:
-        links (LinkView): the namespace's symlink facts.
-        directory (str): the directory's virtual path, its links resolved.
-    """
-    base = directory.rstrip("/") + "/"
-    return sorted(
-        {path[len(base) :].split("/", 1)[0] for path, _ in links.subtree(base)}
-    )
 
 
 def name_location(links: LinkView, path: PathSpec, cwd: str) -> str | None:
@@ -247,21 +238,6 @@ def _named(row: FileStat, virtual: str) -> FileStat:
     return row if row.name == name else row.model_copy(update={"name": name})
 
 
-def _rebased(entry: str, where: str, base: str) -> str:
-    """An entry the dispatcher listed under ``where``, named under ``base``.
-
-    Args:
-        entry (str): the listed entry's virtual path.
-        where (str): the directory the dispatcher listed.
-        base (str): the directory the caller asked for, without a slash.
-    """
-    root = where.rstrip("/") + "/"
-    rest = (
-        entry[len(root) :] if entry.startswith(root) else gnu_basename(entry)
-    )
-    return f"{base}/{rest}"
-
-
 def serves(mounts: MountView | None, prefix: str, virtual: str) -> bool:
     """Whether the mount at ``prefix`` is the one serving ``virtual``.
 
@@ -295,133 +271,188 @@ def landing_root(
     )
 
 
-async def _linked_stat(
-    stat: Callable[..., Awaitable[FileStat]],
-    links: LinkView,
-    dispatch: DispatchFn,
-    owns: Callable[[str], bool],
-    accessor: Any,
-    path: PathSpec,
-    *args: Any,
-    **kwargs: Any,
-) -> FileStat:
-    here = path.virtual
-    where = _or_eloop(functools.partial(link_location, links), here)
-    row = None if here.endswith("/") else links.stat_at(where)
-    if row is not None:
-        return row
-    if where.rstrip("/") != here.rstrip("/") or not owns(where):
-        found, _ = await dispatch(
-            "stat", PathSpec.from_str_path(where), nofollow=True
-        )
-        return _named(found, here)
-    try:
-        return await stat(accessor, path, *args, **kwargs)
-    except _MISSES as exc:
-        if not owed_names(links, here):
-            raise
-        logger.debug("%s: a directory for the links below it: %s", here, exc)
-        return FileStat(name=gnu_basename(here), type=FileType.DIRECTORY)
+def link_view(files: Files | None) -> LinkView | None:
+    """The symlink facts a walk goes by, read off the session's files, or
+    None outside a workspace.
 
-
-async def _linked_readdir(
-    readdir: Callable[..., Awaitable[list[str]]],
-    links: LinkView,
-    dispatch: DispatchFn,
-    owns: Callable[[str], bool],
-    accessor: Any,
-    path: PathSpec,
-    *args: Any,
-    **kwargs: Any,
-) -> list[str]:
-    here = path.virtual.rstrip("/") or "/"
-    where = _or_eloop(links.resolve, here)
-    base = here.rstrip("/")
-    if where != here or not owns(where):
-        listed, _ = await dispatch("readdir", PathSpec.from_str_path(where))
-        return [_rebased(entry, where, base) for entry in listed]
-    owed = owed_names(links, here)
-    try:
-        entries: list[str] = await readdir(accessor, path, *args, **kwargs)
-    except _MISSES as exc:
-        if not owed:
-            raise
-        logger.debug("%s: listed for the links below it: %s", here, exc)
-        entries = []
-    if not owed:
-        return entries
-    present = {gnu_basename(entry.rstrip("/")) for entry in entries}
-    return [*entries, *(f"{base}/{n}" for n in owed if n not in present)]
-
-
-async def _linked_tree(
-    read_tree: Callable[..., Awaitable[dict[str, FileStat] | None]],
-    links: LinkView,
-    accessor: Any,
-    path: PathSpec,
-    *args: Any,
-    **kwargs: Any,
-) -> dict[str, FileStat] | None:
-    found = await read_tree(accessor, path, *args, **kwargs)
-    base = path.virtual.rstrip("/") + "/"
-    rows = links.subtree(base)
-    if found is None or not rows:
-        return found
-    return {**found, **{key[len(base) :]: row for key, row in rows}}
-
-
-def with_links(
-    ops: CommandIO,
-    links: LinkView | None,
-    dispatch: DispatchFn | None,
-    owns: Callable[[str], bool],
-) -> CommandIO:
-    """``ops`` whose stat, readdir and subtree read see the namespace's
-    links, the way the dispatcher's own do.
-
-    No backend stores a link, so a mount's table asked about a name a link
-    stands at answers ENOENT, its listing leaves the link out, and a name
-    below a link to a directory reaches nothing. Here the table answers
-    once for every command: ``stat`` is lstat (a link's own row, and the
-    dispatcher's answer for a name a link above it leads elsewhere),
-    ``readdir`` names the links among the backend's entries and lists a
-    directory a link leads to through the dispatcher, ``read_tree``
-    carries the links under its root, and a directory that holds only a
-    link stats and lists as the dispatcher's does. What a command does
-    with a link, follow it, copy it or leave it, stays its own rule.
+    Filtered by the hides of the session the files run as, as the
+    dispatcher's own answers are: a hidden link, or one that leads where
+    the session cannot see, has no row, no listing entry and no target.
+    Resolving a hidden path leaves it as typed, for the dispatcher to
+    refuse; a visible one resolves, so a walker judges where it lands.
 
     Args:
-        ops (CommandIO): the mount's table.
-        links (LinkView | None): the namespace's symlink facts.
-        dispatch (DispatchFn | None): the dispatcher, which reaches the
-            mount a link leads to.
-        owns (Callable[[str], bool]): whether this mount serves a path;
-            one a link led to on another mount goes to the dispatcher.
+        files (Files | None): the session's files.
     """
-    if links is None or dispatch is None:
-        return ops
-    return replace(
-        ops,
-        stat=functools.partial(_linked_stat, ops.stat, links, dispatch, owns),
-        readdir=functools.partial(
-            _linked_readdir, ops.readdir, links, dispatch, owns
-        ),
-        read_tree=(
-            functools.partial(_linked_tree, ops.read_tree, links)
-            if ops.read_tree is not None
-            else None
-        ),
+    table = files._links if files is not None else None
+    if files is None or table is None:
+        return None
+    seen, links = files, table
+
+    def stat_at(virtual: str) -> FileStat | None:
+        return (
+            links.link_stat_at(virtual) if seen.is_visible(virtual) else None
+        )
+
+    def subtree(directory: str) -> list[tuple[str, FileStat]]:
+        return [
+            (path, row)
+            for path, row in links.link_stats_below(directory)
+            if seen.is_visible(path)
+        ]
+
+    def resolve(virtual: str) -> str:
+        if not path_visible(seen._vis(), virtual):
+            return virtual
+        return posixpath.normpath(links.follow(virtual))
+
+    async def exists(virtual: str) -> bool:
+        spec = PathSpec.from_str_path(virtual, cwd="/")
+        try:
+            return await resolve_path_stat(seen.dispatch, spec) is not None
+        except (OSError, ValueError):
+            return False
+
+    async def target_stat(virtual: str | PathSpec) -> FileStat | None:
+        path = virtual.virtual if isinstance(virtual, PathSpec) else virtual
+        if not seen.is_visible(path):
+            return None
+        try:
+            return await seen.stat(posixpath.normpath(links.follow(path)))
+        except CycleError:
+            return None
+        except _MISSES:
+            return None
+
+    return LinkView(
+        stat_at=stat_at,
+        subtree=subtree,
+        resolve=resolve,
+        exists=exists,
+        target_stat=target_stat,
     )
 
 
-def link_resolver(opts: CommandOpts) -> LinkResolver | None:
-    """The link resolver an invocation carries: None when the namespace holds
-    no link, the fast path, or outside a workspace.
+def mount_view(
+    files: Files | None, crossing: bool = False
+) -> MountView | None:
+    """Where the mount boundaries are, read off the session's files, or
+    None outside a workspace.
+
+    Every mount below a path, hidden or not, is a boundary a backend's
+    own walk stops at: a mount the session cannot see still shadows the
+    parent backend's keys under its prefix. Only the visible ones are
+    ever named. A walk through the dispatcher (``crossing``) descends
+    into each mount itself, so it has no boundary to stop at: no mount
+    below a path, and no mount root.
+
+    Args:
+        files (Files | None): the session's files.
+        crossing (bool): the walk goes through the dispatcher.
+    """
+    if files is None:
+        return None
+    seen = files
+
+    def below(virtual: str) -> list[str]:
+        if crossing:
+            return []
+        base = norm_dir(virtual)
+        return [
+            m.prefix.rstrip("/") or "/"
+            for m in sorted(seen._served(), key=lambda m: m.prefix)
+            if m.prefix != base and m.prefix.startswith(base)
+        ]
+
+    def visible_below(virtual: str) -> list[str]:
+        vis = seen._vis()
+        return [root for root in below(virtual) if path_visible(vis, root)]
+
+    def owner(virtual: str) -> MountRow | None:
+        prefixes = [m.prefix for m in seen._served()]
+        found = owner_prefix(prefixes, virtual)
+        return next((m for m in seen._served() if m.prefix == found), None)
+
+    def is_root(virtual: str) -> bool:
+        if crossing:
+            return False
+        return any(m.prefix == norm_dir(virtual) for m in seen._served())
+
+    def root_of(virtual: str) -> str:
+        row = owner(virtual)
+        return row.prefix if row is not None else "/"
+
+    def max_du_entries(virtual: str) -> int | None:
+        row = owner(virtual)
+        return row.max_du_entries if row is not None else None
+
+    return MountView(
+        descendants=below,
+        visible_descendants=visible_below,
+        is_root=is_root,
+        root_of=root_of,
+        max_du_entries=max_du_entries,
+    )
+
+
+def owed_names(files: Files | None, directory: str) -> list[str]:
+    """The names a directory holds only as namespace structure, as the
+    session sees them: the mounts below it and its links, each by its
+    first segment under the directory.
+
+    No backend can list either, and the first may be one no backend
+    serves at all (a link made below a directory chain that holds no
+    key); these are the names the dispatcher merges into its own
+    listing, from the same tables.
+
+    Args:
+        files (Files | None): the session's files, None outside a
+            workspace.
+        directory (str): the directory's virtual path.
+    """
+    if files is None:
+        return []
+    return namespace_names(
+        files._vis(),
+        [m.prefix for m in files._served()],
+        files._links,
+        directory,
+    )
+
+
+def links_of(opts: CommandOpts) -> LinkView | None:
+    """The workspace's links as the command's session sees them, read off
+    its files; None outside a workspace.
 
     Args:
         opts (CommandOpts): the invocation's context.
     """
-    links = opts.ns.links if opts.ns is not None else None
+    return link_view(opts.vfs)
+
+
+def mounts_of(opts: CommandOpts) -> MountView | None:
+    """Where the mount boundaries are for the command's walk, read off
+    its files; None outside a workspace.
+
+    A run whose table is the dispatcher itself (a dispatcher and no
+    mount ``io``) walks across mounts: the dispatcher descends into
+    every mount, so it has no boundary to stop at.
+
+    Args:
+        opts (CommandOpts): the invocation's context.
+    """
+    return mount_view(
+        opts.vfs, crossing=opts.io is None and opts.dispatch is not None
+    )
+
+
+def link_resolver(opts: CommandOpts) -> LinkResolver | None:
+    """The link resolver an invocation carries: None outside a workspace.
+
+    Args:
+        opts (CommandOpts): the invocation's context.
+    """
+    links = links_of(opts)
     if links is None or opts.dispatch is None:
         return None
     return LinkResolver(
@@ -433,9 +464,12 @@ __all__ = [
     "LinkResolver",
     "link_location",
     "link_resolver",
+    "link_view",
+    "mount_view",
+    "links_of",
+    "mounts_of",
     "name_location",
     "owed_names",
     "serves",
     "typed_link",
-    "with_links",
 ]

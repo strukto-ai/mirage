@@ -18,8 +18,7 @@ export {
   commandIo,
   mountIo,
   overMountIo,
-  overlaidStat,
   resolveGlobOf,
 } from './adapter.ts'
 export { type ResolveGlobOp } from '../../../vfs/types.ts'
-export { GENERIC_COMMANDS, generic, scanIo } from './factory.ts'
+export { GENERIC_COMMANDS, generic } from './factory.ts'

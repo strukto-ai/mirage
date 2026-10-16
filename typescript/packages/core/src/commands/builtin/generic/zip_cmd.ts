@@ -28,6 +28,7 @@ import { ZipUpdateError } from './archive/errors.ts'
 import type { MemberKind, ZipArchive, ZipRecord } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { linksOf, mountsOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -255,8 +256,8 @@ async function planZip(
     const scan = await scanOperand(path, {
       stat: deps.stat,
       walk: deps.walk,
-      links: opts.ns?.links ?? null,
-      mounts: opts.ns?.mounts ?? null,
+      links: linksOf(opts) ?? null,
+      mounts: mountsOf(opts) ?? null,
       dereference: !parsed.storeLinks,
       recurse,
     })

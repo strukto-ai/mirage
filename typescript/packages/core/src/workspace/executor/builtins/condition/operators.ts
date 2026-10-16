@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
+import {
+  dispatchStat,
+  dotRefusal,
+  resolvePathStat,
+} from '../../../../commands/builtin/utils/paths.ts'
 import { CycleError, dottedSpelling, resolvePath } from '../../../../utils/path.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
@@ -20,7 +24,6 @@ import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
 import { isEfbig } from '../../../../errors/fs.ts'
 import { operandAbs } from '../links/index.ts'
-import { resolvePathStat } from '../../../mount/namespace/probe.ts'
 import { toScope, scopePath } from '../scope.ts'
 import { elementIsSet } from '../../../session/elements.ts'
 import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from './constants.ts'

@@ -9,7 +9,11 @@ from mirage.commands.builtin.find_parse import (
     parse_mtime,
     parse_size,
 )
-from mirage.commands.builtin.utils.links import landing_root
+from mirage.commands.builtin.utils.links import (
+    landing_root,
+    links_of,
+    mounts_of,
+)
 from mirage.commands.builtin.utils.paths import (
     dot_refusal,
     link_follow,
@@ -33,6 +37,7 @@ from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw
 from mirage.view.types import LinkView, StatPath
+from mirage.context import session_visibility
 
 
 def parse_find_args(
@@ -498,9 +503,9 @@ async def find_walk_generic(
     parsed = parse_flags(opts.flags)
     flags = FlagView(opts.flags, spec=SPECS["find"])
     bounded = flags.as_bool("xdev") or flags.as_bool("mount")
-    mounts = opts.ns.mounts if opts.ns else None
+    mounts = mounts_of(opts)
     stat_path = opts.stat_path
-    links = opts.ns.links if opts.ns is not None else None
+    links = links_of(opts)
     searches = (
         paths if paths else [PathSpec(virtual="/", directory="/", vfs_path="")]
     )
@@ -536,7 +541,7 @@ async def find_walk_generic(
                 search,
                 args,
                 start,
-                opts.ns.visibility if opts.ns is not None else None,
+                session_visibility(),
             )
             for row in first:
                 yield (row + "\n").encode()

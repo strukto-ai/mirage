@@ -31,6 +31,7 @@ from mirage import (
     UnsupportedExecutionError,
     Workspace,
 )
+from mirage.commands.builtin.utils.links import link_view
 from mirage.context import (
     get_current_session,
     get_current_session_for,
@@ -127,7 +128,8 @@ async def test_callbacks_retain_session_and_gate_after_capture():
         context = ws.runtime_context("agent")
         other = ws.runtime_context()
         assert context.session_view is not None
-        assert "/secret/" not in context.ns.mounts.visible_descendants("/")
+        assert context.vfs is not None
+        assert "/secret/" not in context.scope.call(context.vfs.mount_prefixes)
         with pytest.raises((FileNotFoundError, PermissionError)):
             await context.dispatch("read", PathSpec.from_str_path("/secret/a"))
         assert (
@@ -169,8 +171,9 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
         await ws.shell("echo shared > /data/a; chmod 600 /data/a")
         context = ws.runtime_context()
         await ws.shell("ln -s /data/a /data/link")
-        assert context.ns.links is not None
-        assert context.ns.links.resolve("/data/link") == "/data/a"
+        links = link_view(context.vfs)
+        assert links is not None
+        assert context.scope.call(links.resolve, "/data/link") == "/data/a"
         ws.add_mount("/data/nested", RAMVFS(), mode=MountMode.EXEC)
         assert context.resolver.owner_of("/data/nested/a") == "/data/nested/"
         vfs = RuntimeFiles.of(context)

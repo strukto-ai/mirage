@@ -118,7 +118,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 function opts(flags: Record<string, string | boolean>): CommandOpts {
-  return { stdin: null, flags, cwd: '/', vfs: null } as unknown as CommandOpts
+  return { stdin: null, flags, cwd: '/' } as unknown as CommandOpts
 }
 
 const fileStat = (p: PathSpec): Promise<FileStat> =>

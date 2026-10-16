@@ -49,7 +49,7 @@ async def resolve_operands(
     run: list[PathSpec] = []
     for path in paths:
         if split_assignment(path.raw_path) is None and served_here(
-            opts.ns, opts.mount_prefix, path
+            opts.vfs, opts.mount_prefix, path
         ):
             run.append(path)
             continue
@@ -79,7 +79,7 @@ async def awk(
         cwd=opts.cwd,
         index=opts.index,
         shell=opts.shell,
-        ns=opts.ns,
+        vfs=opts.vfs,
         mount_prefix=opts.mount_prefix,
         env=opts.env,
     )

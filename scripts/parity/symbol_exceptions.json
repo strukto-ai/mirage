@@ -1,5 +1,5 @@
 {
-  "baseline": 3655,
+  "baseline": 3650,
  "modules": {
   "core/api/client": {
    "typescript_only": {

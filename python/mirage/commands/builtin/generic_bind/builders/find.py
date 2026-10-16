@@ -20,7 +20,6 @@ from mirage.commands.builtin.generic.find import find_walk_generic
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
-    overlaid_stat,
 )
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
@@ -43,12 +42,6 @@ async def find(
     whole_readdir, whole_stat = tree_walk(
         bound_op(ops.read_tree, accessor, opts.index), readdir, stat
     )
-    # -mtime must see namespace times (touch results, observed writes on
-    # mtime-less backends), same as ls.
-    overlay = opts.ns.stat_overlay if opts.ns is not None else None
-    if overlay is not None:
-        stat = partial(overlaid_stat, stat, overlay)
-        whole_stat = partial(overlaid_stat, whole_stat, overlay)
     return await find_walk_generic(
         resolved,
         list(texts),

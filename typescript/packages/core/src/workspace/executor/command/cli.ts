@@ -321,7 +321,7 @@ export async function handleCli(
       new IOResult(),
     ]
     for (const base of result.operandBases) {
-      const info = await pathStat(dispatch, base, null)
+      const info = await pathStat(dispatch, base)
       if (info !== null && info.type === FileType.DIRECTORY) continue
       const reason = info === null ? await missCondition(dispatch, base) : 'ENOTDIR'
       const [stderr, code] = directoryRefusal(

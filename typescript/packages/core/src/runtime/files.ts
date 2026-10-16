@@ -34,6 +34,7 @@ import type { FlushStep, Kept } from './handles/index.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import type { RuntimeContext } from './binding.ts'
+import { linkView } from '../commands/builtin/utils/links.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
@@ -153,11 +154,11 @@ export class RuntimeFiles {
   static of(context: RuntimeContext | undefined): RuntimeFiles | null
   static of(context: RuntimeContext | undefined): RuntimeFiles | null {
     if (context === undefined) return null
-    const links = context.ns.links
+    const links = linkView(context.vfs ?? undefined)
     return new RuntimeFiles(
       context.dispatch,
       context.resolver,
-      links === undefined ? null : links.resolve.bind(links),
+      links === undefined ? null : context.scope.wrap(links.resolve.bind(links)),
     )
   }
 

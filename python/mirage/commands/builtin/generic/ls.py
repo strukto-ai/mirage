@@ -9,6 +9,11 @@ from typing import Any
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.utils import formatting
 from mirage.commands.builtin.utils.identity import Identity, identity_of
+from mirage.commands.builtin.utils.links import (
+    links_of,
+    mounts_of,
+    owed_names,
+)
 from mirage.commands.builtin.utils.output import (
     format_optional_records,
     format_records,
@@ -1920,9 +1925,13 @@ async def ls_generic(
         readdir=readdir,
         stat=stat,
         index=opts.index,
-        links=opts.ns.links if opts.ns is not None else None,
-        child_mounts=opts.ns.child_mounts if opts.ns is not None else None,
-        mounts=opts.ns.mounts if opts.ns is not None else None,
+        links=links_of(opts),
+        child_mounts=(
+            functools.partial(owed_names, opts.vfs)
+            if opts.vfs is not None
+            else None
+        ),
+        mounts=mounts_of(opts),
         stat_path=opts.stat_path,
         identity=identity_of(opts),
         **ls_options(opts.flags),

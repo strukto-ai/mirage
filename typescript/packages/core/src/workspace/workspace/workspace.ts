@@ -113,7 +113,6 @@ import {
   sessionVisibility,
 } from '../../context/session_context.ts'
 import { pathVisible } from '../../utils/hidden.ts'
-import { namespaceViewOf } from '../mount/namespace/view.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
 import { eacces, enoent } from '../../errors/fs.ts'
@@ -514,10 +513,7 @@ export class Workspace {
         await this.observer.logOp(rec, sessionId)
       },
       this.namespace,
-      (path) => {
-        const mount = this.registry.tryMountFor(path)
-        return mount === null ? null : { prefix: mount.prefix, kind: mount.vfs.name }
-      },
+      (path) => this.registry.mountOwner(path),
       {
         bind: (sessionId, run) => this.bindSession(sessionId, run),
         prefixes: () => this.registry.visibleMounts().map((m) => m.prefix),
@@ -669,7 +665,16 @@ export class Workspace {
     return captureBinding(
       this.runtimeBinding,
       {
-        ns: namespaceViewOf(this.registry, this.namespace, dispatcher.dispatch, session),
+        vfs: new Files(
+          dispatcher.dispatch,
+          null,
+          this.namespace,
+          (path) => this.registry.mountOwner(path),
+          {
+            prefixes: () => this.registry.mountPrefixes(),
+            visibility: () => session.visibility,
+          },
+        ),
         sessionView: sessionView(session, this.policies),
         processes: this.processView(session),
         cwd: PathSpec.fromStrPath(session.cwd),

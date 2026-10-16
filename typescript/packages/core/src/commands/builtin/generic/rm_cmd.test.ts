@@ -19,7 +19,7 @@ import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { enoent } from '../../../errors/fs.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { NamespaceView } from '../../../view/types.ts'
+import type { MountView } from '../../../view/types.ts'
 import { removeTree } from './rm_cmd.ts'
 
 it('loads rm first under native ESM without the Vitest module runner', async () => {
@@ -78,14 +78,12 @@ function treeOps(calls: string[][], gone: string | null = null) {
   }
 }
 
-function ns(mounts: string[]): NamespaceView {
+function boundaries(mounts: string[]): MountView {
   return {
-    mounts: {
-      descendants: () => mounts,
-      visibleDescendants: () => mounts,
-      isRoot: (path) => mounts.includes(path),
-      rootOf: () => '/',
-    },
+    descendants: () => mounts,
+    visibleDescendants: () => mounts,
+    isRoot: (path) => mounts.includes(path),
+    rootOf: () => '/',
   }
 }
 
@@ -94,7 +92,7 @@ describe('removeTree', () => {
     const calls: string[][] = []
     const { failures } = await removeTree(PathSpec.fromStrPath('/t'), {
       ...treeOps(calls),
-      ns: ns(['/t/inner']),
+      mounts: boundaries(['/t/inner']),
       force: false,
     })
     expect(calls).toEqual([['unlink', '/t/a.txt']])
@@ -105,7 +103,7 @@ describe('removeTree', () => {
     const calls: string[][] = []
     const { failures } = await removeTree(PathSpec.fromStrPath('/t/inner'), {
       ...treeOps(calls, '/t/inner/b.txt'),
-      ns: null,
+      mounts: undefined,
       force,
     })
     expect(failures.map(([path]) => path.virtual)).toEqual(force ? [] : ['/t/inner/b.txt'])

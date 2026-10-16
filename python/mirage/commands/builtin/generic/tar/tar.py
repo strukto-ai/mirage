@@ -61,6 +61,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.compress import GZIP_MAGIC, GzipDataError, gunzip_partial
 from mirage.view.types import LinkView, MountView
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 logger = logging.getLogger(__name__)
 
@@ -883,8 +884,8 @@ async def tar_generic(
         strip_components=parsed.strip_components,
         exclude=parsed.exclude,
         one_file_system=parsed.one_file_system,
-        links=opts.ns.links if opts.ns is not None else None,
-        mounts=opts.ns.mounts if opts.ns is not None else None,
+        links=links_of(opts),
+        mounts=mounts_of(opts),
         cwd=opts.cwd,
         relay=relay,
         stdin=opts.stdin,

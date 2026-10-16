@@ -24,13 +24,19 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
     transfer_primitives,
 )
+from mirage.commands.builtin.utils.links import (
+    link_view,
+    mount_view,
+)
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context import session_visibility
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, PrimitiveCopy
-from mirage.view.types import LinkSubtree, MountView, NamespaceView
+from mirage.view.types import LinkSubtree, MountView
+from mirage.workspace.files import Files
 
 
 async def _own_filesystem(
@@ -85,7 +91,7 @@ async def run_cp(
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
     storage_key: Callable[[PathSpec], str] | None = None,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     cwd: str = "/",
     stdin: ByteSource | None = None,
 ) -> CrossResult:
@@ -101,24 +107,25 @@ async def run_cp(
         dispatch (DispatchFn): Workspace operation dispatcher.
         storage_key (Callable | None): Maps an operand to its storage
             identity so two prefixes over one store compare equal.
-        ns (NamespaceView | None): The namespace's links, which a copy
+        vfs (Files | None): The namespace's links, which a copy
             that does not follow them recreates by name.
         cwd (str): The working directory a typed link source resolves
             against.
         stdin (ByteSource | None): where ``-i`` reads its answers.
     """
+    mounts = mount_view(vfs)
     fl = FlagView(flag_kwargs, spec=SPECS["cp"])
     primitives = transfer_primitives(dispatch)
-    links = ns.links if ns is not None else None
-    if fl.as_bool("one_file_system") and ns is not None and ns.mounts:
+    links = link_view(vfs)
+    if fl.as_bool("one_file_system") and vfs is not None and mounts:
         starts = {s.virtual for s in scopes}
         primitives["readdir"] = partial(
-            _own_filesystem, primitives["readdir"], ns.mounts, starts
+            _own_filesystem, primitives["readdir"], mounts, starts
         )
         if links is not None:
             links = replace(
                 links,
-                subtree=partial(_own_links, links.subtree, ns.mounts, starts),
+                subtree=partial(_own_links, links.subtree, mounts, starts),
             )
     strategy = PrimitiveCopy(
         read_bytes=primitives["read_bytes"],
@@ -141,7 +148,7 @@ async def run_cp(
                 cwd=cwd,
                 relay=strategy,
                 relay_stat=primitives["stat"],
-                visibility=ns.visibility if ns is not None else None,
+                visibility=session_visibility(),
             )
             if links is not None
             else None

@@ -32,6 +32,7 @@ import { LINK_TARGET_KEY } from '../../../types.ts'
 import type { LinkView } from '../../../view/types.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
+import { linksOf, mountsOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -112,7 +113,7 @@ export async function fileGeneric(
   const lines: string[] = []
   // Without -L the operand arrives unfollowed, so a link is described
   // as a link rather than sniffed as its target.
-  const links = opts.ns?.links ?? null
+  const links = linksOf(opts) ?? null
   for (const p of paths) {
     if (links !== null) {
       const described = await linkDescription(p, links)
@@ -121,7 +122,7 @@ export async function fileGeneric(
         continue
       }
     }
-    const s = await operandStat(p, stat, opts.statPath, opts.ns?.mounts, opts.ns?.links)
+    const s = await operandStat(p, stat, opts.statPath, mountsOf(opts), linksOf(opts))
     if (s.type === FileType.DIRECTORY) {
       lines.push(formatFileResult(p.rawPath, FileType.DIRECTORY, brief, mime))
       continue

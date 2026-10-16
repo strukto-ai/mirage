@@ -25,7 +25,6 @@ from mirage.commands.builtin.generic_bind.adapter import (
     file_size,
     require_op,
     resolve_or_empty,
-    with_command_guards,
     with_dir_guard,
 )
 from mirage.commands.config import CommandIO, CommandOpts
@@ -38,14 +37,7 @@ from mirage.context import (
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import OperationNotSupportedError
 from mirage.observe.context import push_revisions, reset_revisions
-from mirage.policy import Action, Deny, Policy, VfsContext
-from mirage.policy.policies import (
-    Policies,
-    reset_op_policies,
-    set_op_policies,
-)
 from mirage.types import (
-    ContentType,
     FileStat,
     FileType,
     HiddenPaths,
@@ -56,9 +48,10 @@ from mirage.types import (
     Visibility,
 )
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
-from mirage.view.types import NamespaceView
 from mirage.workspace import Workspace
+from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
+from mirage.workspace.types import MountRow
 from tests.fixtures.vfs_io import BatchedRAM
 
 TREE = {
@@ -186,13 +179,17 @@ def _probe_ops(
 NO_NS = CommandOpts()
 
 
+async def _nothing(op: str, path: PathSpec, **_):
+    return None, None
+
+
 def _ns_dir(directory: str) -> CommandOpts:
-    """A bag whose namespace owes one path a child name and nothing else."""
-
-    def child_mounts(parent: str) -> list[str]:
-        return ["alpha"] if parent == directory else []
-
-    return CommandOpts(ns=NamespaceView(child_mounts=child_mounts))
+    """A bag whose namespace owes one path a child name and nothing else:
+    a mount below it."""
+    row = MountRow(
+        prefix=f"{directory}/alpha/", resource_type="ram", mode=MountMode.READ
+    )
+    return CommandOpts(vfs=Files([row], _nothing))
 
 
 @pytest.mark.asyncio
@@ -345,57 +342,6 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
-class _SealedRead(Policy):
-    """Refuse reads of one path; record every op asked."""
-
-    def __init__(self, sealed: str) -> None:
-        self.sealed = sealed
-        self.asked: list[tuple[str, str, bool]] = []
-
-    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
-        self.asked.append((ctx.call.name, ctx.path.virtual, ctx.write))
-        if not ctx.write and ctx.path.virtual == self.sealed:
-            return Deny("sealed")
-        return None
-
-
-def _policy_probe_ops(calls: list[tuple[str, ...]]) -> CommandIO:
-    """A CommandIO whose slots record their calls; closures on `calls`."""
-
-    async def read_bytes(accessor, path, index=None):
-        calls.append(("read", path.virtual))
-        return b"x"
-
-    def read_stream(accessor, path, index=None):
-        return _probe_chunks(calls, path)
-
-    async def stat(accessor, path, index=None):
-        calls.append(("stat", path.virtual))
-        return FileStat(
-            name="k", type=FileType.FILE, content=ContentType.TEXT, size=1
-        )
-
-    async def readdir(accessor, path, index=None):
-        calls.append(("readdir", path.virtual))
-        return ["a"]
-
-    async def copy(accessor, src, dst):
-        calls.append(("copy", src.virtual, dst.virtual))
-
-    async def unlink(accessor, path, index=None):
-        calls.append(("unlink", path.virtual))
-
-    return CommandIO(
-        readdir=readdir,
-        read_bytes=read_bytes,
-        read_stream=read_stream,
-        stat=stat,
-        is_mounted=lambda a: True,
-        copy=copy,
-        unlink=unlink,
-    )
-
-
 async def _probe_chunks(calls: list[tuple[str, ...]], path: PathSpec):
     calls.append(("stream", path.virtual))
     yield b"x"
@@ -410,7 +356,6 @@ def _keyed_read_ops(
     explicit_dirs: set[str] | None = None,
     files: dict[str, bytes] | None = None,
     read_error: type[BaseException] = FileNotFoundError,
-    children: dict[str, list[str]] | None = None,
 ) -> CommandIO:
     """A keyed backend: no directory objects, so a read of one misses.
 
@@ -422,7 +367,6 @@ def _keyed_read_ops(
     dirs = implicit_dirs or set()
     typed = explicit_dirs or set()
     stored = files or {}
-    owed = children or {}
 
     async def stat(_accessor, path, _index):
         if path.virtual in typed:
@@ -465,7 +409,6 @@ def _keyed_read_ops(
         read_range=read_range,
         stat=stat,
         is_mounted=lambda _a: True,
-        glob_children=(lambda p: owed.get(p, [])) if owed else None,
     )
 
 
@@ -493,16 +436,6 @@ async def test_dir_guard_refuses_an_implicit_keyed_directory():
         await ops.read_bytes(None, path)
     with pytest.raises(IsADirectoryError):
         await _drain(ops.read_stream(None, path))
-
-
-@pytest.mark.asyncio
-async def test_dir_guard_refuses_a_namespace_only_directory():
-    # /a/b holds no key in this backend; it exists because a mount or a
-    # link sits under it, which only the namespace can see.
-    ops = with_dir_guard(_keyed_read_ops(children={"/a/b": ["inner"]}))
-    path = PathSpec.from_str_path("/a/b")
-    with pytest.raises(IsADirectoryError):
-        await ops.read_bytes(None, path)
 
 
 @pytest.mark.asyncio
@@ -712,10 +645,8 @@ async def test_capability_and_mode_share_path_guards(
     st = set_current_session(session)
     mt = set_mount_gate("/data", MountMode.WRITE)
     try:
-        ops = with_command_guards(
-            make_io(
-                stat=regions, **{operation.value: backend} if available else {}
-            )
+        ops = make_io(
+            stat=regions, **{operation.value: backend} if available else {}
         )
         path = _spec(f"/data/{region}/f")
         args = [NOOPAccessor(), path]
@@ -771,9 +702,7 @@ async def test_copy_reads_source_but_rename_mutates_source_and_subtrees(
     try:
         # A rename the backend has is the dispatcher's, so the guards
         # judge only a missing one.
-        ops = with_command_guards(
-            make_io(**{"copy": backend} if available else {})
-        )
+        ops = make_io(**{"copy": backend} if available else {})
         src, dst = _spec("/data/src"), _spec("/data/dst")
         if available:
             await require_op(ops, Operation.COPY)(NOOPAccessor(), src, dst)
@@ -833,56 +762,6 @@ async def test_dir_guard_distinguishes_empty_files_from_directory_eof(is_dir):
         assert await ops.read_bytes(None, path) == b""
         assert await _drain(ops.read_stream(None, path)) == [b""]
         assert await ops.read_range(None, path) == b""
-
-
-@pytest.mark.asyncio
-async def test_command_guards_admit_a_listing_and_leave_stat_alone():
-    calls: list[tuple[str, ...]] = []
-    raw = _policy_probe_ops(calls)
-    acc = NOOPAccessor()
-    policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_command_guards(raw)
-        # stat is a presence fact: deny is present and refused.
-        assert (await ops.stat(acc, _spec("/data/secret"))).size == 1
-        # readdir asks about the directory it lists.
-        with pytest.raises(PermissionError) as excinfo:
-            await ops.readdir(acc, _spec("/data/secret"))
-        assert excinfo.value.errno == errno.EACCES
-        assert ("readdir", "/data/secret") not in calls
-        assert await ops.readdir(acc, _spec("/data/dir")) == ["a"]
-        # Writes and copies are the dispatcher's, which judges them itself.
-        assert ops.copy is raw.copy
-        assert ops.unlink is raw.unlink
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
-    assert ("readdir", "/data/dir", False) in policy.asked
-    assert not any(op == "stat" for op, _, _ in policy.asked)
-
-
-@pytest.mark.asyncio
-async def test_command_guards_wrap_time_capture_covers_late_calls():
-    # A slot called after dispatch has reset the context is still
-    # admitted by the scope the guard captured at wrap time
-    # (_live_policy_scope).
-    calls: list[tuple[str, ...]] = []
-    raw = _policy_probe_ops(calls)
-    acc = NOOPAccessor()
-    policy = _SealedRead("/data/secret")
-    ptoken = set_op_policies(Policies([policy]))
-    gtoken = set_mount_gate("/data", MountMode.WRITE)
-    try:
-        ops = with_command_guards(raw)
-    finally:
-        reset_mount_gate(gtoken)
-        reset_op_policies(ptoken)
-    # The slot call happens outside the window now.
-    with pytest.raises(PermissionError):
-        await ops.readdir(acc, _spec("/data/secret"))
-    assert ("readdir", "/data/secret") not in calls
 
 
 async def _unused(*_args):

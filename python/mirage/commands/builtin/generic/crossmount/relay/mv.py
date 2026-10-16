@@ -27,13 +27,15 @@ from mirage.commands.builtin.generic_bind.adapter import (
     dispatched_call,
     refuse_reveal,
 )
+from mirage.commands.builtin.utils.links import link_view, mount_view
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context import session_visibility
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import CheckFn, PathSpec, PrimitiveMove
-from mirage.view.types import NamespaceView
+from mirage.workspace.files import Files
 
 
 async def run_mv(
@@ -41,7 +43,7 @@ async def run_mv(
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
     storage_key: Callable[[PathSpec], str] | None = None,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     stdin: ByteSource | None = None,
     check_unlink: CheckFn | None = None,
 ) -> CrossResult:
@@ -58,11 +60,13 @@ async def run_mv(
             identity. Without it a move between two prefixes over one
             store would copy the object onto itself and then unlink the
             source, destroying it.
-        ns (NamespaceView | None): Namespace facts for link operands.
+        vfs (Files | None): Namespace facts for link operands.
         stdin (ByteSource | None): where ``-i`` reads its answers.
         check_unlink (CheckFn | None): Refuses a source whose mount
             cannot condition the delete, before anything is copied.
     """
+    links = link_view(vfs)
+    mounts = mount_view(vfs)
     p = functools.partial
     fl = FlagView(flag_kwargs, spec=SPECS["mv"])
     primitives = transfer_primitives(dispatch)
@@ -84,15 +88,11 @@ async def run_mv(
         backend_key=storage_key,
         guard=refuse_reveal,
         copies=(
-            transfer_links_of(ns.links, dispatch, "/", ns.visibility)
-            if ns is not None and ns.links is not None
+            transfer_links_of(links, dispatch, "/", session_visibility())
+            if links is not None
             else None
         ),
         stdin=stdin,
-        mount_root=(
-            ns.mounts.is_root
-            if ns is not None and ns.mounts is not None
-            else None
-        ),
+        mount_root=(mounts.is_root if mounts is not None else None),
         dispatch=dispatch,
     )

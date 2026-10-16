@@ -26,6 +26,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     bound_op,
 )
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
@@ -396,18 +397,13 @@ async def du(
 ) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
         raise ValueError("du: no VFS")
-    budget = WalkBudget(
-        ops.max_du_entries, mounts=opts.ns.mounts if opts.ns else None
-    )
+    mounts = mounts_of(opts)
+    budget = WalkBudget(ops.max_du_entries, mounts=mounts)
     fl = FlagView(opts.flags, spec=SPECS["du"])
+    links = links_of(opts)
     follow = (
-        Dereference(
-            opts.ns.links,
-            opts.ns.mounts if fl.as_bool("one_file_system") else None,
-        )
-        if opts.ns is not None
-        and opts.ns.links is not None
-        and fl.typed_order("L", "P")[-1:] == ["L"]
+        Dereference(links, mounts if fl.as_bool("one_file_system") else None)
+        if links is not None and fl.typed_order("L", "P")[-1:] == ["L"]
         else None
     )
     compute_size: ComputeSize = partial(

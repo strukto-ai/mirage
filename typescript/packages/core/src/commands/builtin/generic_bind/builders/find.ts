@@ -16,7 +16,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
-import { landingRoot } from '../../utils/links.ts'
+import { landingRoot, linksOf, mountsOf } from '../../utils/links.ts'
 import { treeWalk } from '../../utils/tree.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
@@ -52,8 +52,8 @@ export function findWalk<A extends Accessor>(
   // the walk meets.
   const follow = flags.typedOrder('H', 'L', 'P').at(-1) === 'L'
   const loops: [string, string][] = []
-  const mounts = opts.ns?.mounts
-  const links = opts.ns?.links ?? null
+  const mounts = mountsOf(opts)
+  const links = linksOf(opts) ?? null
   const { readTree } = ops
   // The walk classifies entries through stat (see walkFind). A directory the guarded readdir
   // refuses, and an entry whose stat fails, are collected here and
@@ -82,13 +82,7 @@ export function findWalk<A extends Accessor>(
           ...(home !== null && mounts !== undefined
             ? { enters: (virtual: string) => landingRoot(mounts, links, virtual) === home }
             : {}),
-          // -mtime must see namespace times (touch results, observed
-          // writes on mtime-less backends), same as ls.
-          stat: async (spec, i) => {
-            const st = await stat(spec, i)
-            const overlay = opts.ns?.statOverlay
-            return overlay !== undefined ? overlay(spec.virtual, st) : st
-          },
+          stat,
           follow: follow ? links : null,
           loops,
         },

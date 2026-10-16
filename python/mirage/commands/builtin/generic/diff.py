@@ -39,6 +39,7 @@ from mirage.utils.quote import shell_quote
 from mirage.utils.timezone import zone_from_env
 from mirage.view.namespace_view import followed_stat
 from mirage.view.types import LinkView, StatPath
+from mirage.commands.builtin.utils.links import links_of
 
 
 @dataclass(frozen=True, slots=True)
@@ -618,5 +619,5 @@ async def diff_generic(
         stat_path=opts.stat_path,
         zone=zone_from_env(opts.env),
         dispatch=opts.dispatch,
-        links=opts.ns.links if opts.ns is not None else None,
+        links=links_of(opts),
     )

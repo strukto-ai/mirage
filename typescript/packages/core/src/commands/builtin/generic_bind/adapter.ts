@@ -12,17 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  Effect,
-  Target,
-  type ReadBytesOp,
-  type ResolveGlobOp,
-  type SearchQuery,
-} from '../../../vfs/types.ts'
+import { type ReadBytesOp, type ResolveGlobOp, type SearchQuery } from '../../../vfs/types.ts'
 import { activeCacheManager } from '../../../cache/context.ts'
 import { revisionFor } from '../../../observe/context.ts'
-import { BaseVFS } from '../../../vfs/base.ts'
-import { declared } from '../../../vfs/call.ts'
+import type { BaseVFS } from '../../../vfs/base.ts'
 import { getExtension } from '../../../utils/filetype.ts'
 import { streamFromBytes } from '../utils/wrap.ts'
 import { ensureStream } from '../../../io/stream.ts'
@@ -32,19 +25,16 @@ import type { Accessor } from '../../../accessor/base.ts'
 import {
   requirePathsWritable,
   getAdmission,
-  getCurrentSession,
   hiddenRefusal,
   mountGateFor,
   sessionVisibility,
   walkProbeFor,
 } from '../../../context/session_context.ts'
-import type { EntryGate } from '../../../policy/types.ts'
-import { preVfsGate, type Policies, getOpPolicies } from '../../../policy/policies.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
 import { moveReveals, pathVisible } from '../../../utils/hidden.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
-import type { SessionAccess, StatOverlay } from '../../../view/types.ts'
+import type { SessionAccess } from '../../../view/types.ts'
 
 import {
   DirListing,
@@ -64,6 +54,7 @@ import {
   isEnotdir,
   walkRefusal,
 } from '../../../errors/fs.ts'
+import { owedNames } from '../utils/links.ts'
 import { dotRefusal } from '../utils/paths.ts'
 import { makeResolveGlob } from '../../../utils/glob_walk.ts'
 import { norm, parent } from '../../../utils/path.ts'
@@ -751,7 +742,6 @@ export function resolveGlobOf<A extends Accessor = Accessor>(ops: CommandIO<A>):
   return makeResolveGlob(
     ops.readdir,
     ops.maxGlobMatches,
-    ops.globChildren,
     ops.stat,
     ops.globTargetStat,
     ops.access,
@@ -822,9 +812,7 @@ async function isImplicitDir<A extends Accessor>(
 // disagree. It is hide-filtered for free, which is what keeps the parent of a
 // mount the session may not be told about reading as absence.
 function isNamespaceDir(opts: CommandOpts, p: PathSpec): boolean {
-  const children = opts.ns?.childMounts
-  if (children === undefined) return false
-  return children(p.virtual).length > 0
+  return owedNames(opts.vfs, p.virtual).length > 0
 }
 
 // The one place the read family decides what a directory is, shared by the
@@ -900,25 +888,6 @@ export function fileSize<A extends Accessor>(
   }
 }
 
-// Stat through the backend, then merge the namespace attr overlay, so the
-// stat-rendering commands (ls -l, stat -c) show the chmod/chown/touch state a
-// backend without an attribute slot cannot hold itself. Returns the plain stat
-// unchanged when the executor injected no overlay. Mirrors the Python
-// `overlaid_stat`; every stat-rendering command binds through here so no
-// backend can quietly skip the merge and disagree with `ws.vfs`.
-export function overlaidStat(
-  stat: (p: PathSpec) => Promise<FileStat>,
-  overlay: StatOverlay | undefined,
-): (p: PathSpec) => Promise<FileStat> {
-  // Guarded itself, as Python's overlaid_stat is: a caller may bind a raw
-  // backend stat (the object-store family's core) rather than a slot.
-  return async (p) => {
-    if (p.walkError !== null) throw walkRefusal(p)
-    const row = await stat(p)
-    return overlay === undefined ? row : overlay(p.virtual, row)
-  }
-}
-
 /**
  * Whether a failed or empty read was a read of a directory.
  *
@@ -969,11 +938,7 @@ async function readHitADir<A extends Accessor>(
   } catch {
     // negative probe, see above
   }
-  // The same fact isNamespaceDir reads, reached from the adapter rather
-  // than from the bag: this guard wraps a slot and never sees a
-  // CommandOpts, and the factory stamps the very callable
-  // opts.ns.childMounts would hand over.
-  return ops.globChildren !== undefined && ops.globChildren(path.virtual).length > 0
+  return false
 }
 
 async function* drainRefusingDirs<A extends Accessor>(
@@ -1119,15 +1084,6 @@ export function refuseHidden(path: PathSpec, create: boolean, access?: SessionAc
   throw hiddenRefusal(vis, path.virtual, create)
 }
 
-function visibleChildren(entries: string[], parent: PathSpec, access?: SessionAccess): string[] {
-  const base = rstripSlash(parent.virtual)
-  const vis = sessionVisibility(access)
-  return entries.filter((e) => {
-    const trimmed = rstripSlash(e)
-    return pathVisible(vis, `${base}/${trimmed.slice(trimmed.lastIndexOf('/') + 1)}`)
-  })
-}
-
 /** Whether the bound session's hides make this relocation a reveal. */
 function moveWouldReveal(src: PathSpec, dst: PathSpec, access?: SessionAccess): boolean {
   return moveReveals(sessionVisibility(access), src.virtual, dst.virtual)
@@ -1144,35 +1100,6 @@ function moveWouldReveal(src: PathSpec, dst: PathSpec, access?: SessionAccess): 
  * file. */
 export function refuseReveal(src: PathSpec, dst: PathSpec, access?: SessionAccess): void {
   if (moveWouldReveal(src, dst, access)) throw eacces(src.virtual)
-}
-
-/**
- * Return `ops` whose slots refuse hidden paths like missing ones.
- *
- * The commands factory hands this copy to every generic command, the
- * same shape as `withReadCache`, so hidden-path enforcement lands once
- * for the whole command tier (resolveGlobOf derives from the wrapped
- * readdir). The backends' own IO constants stay raw: the ops tables
- * built from them serve the dispatcher, which enforces hiding itself
- * at the dispatcher. The guards read the current session at call time, so
- * one wrapped copy is shared across sessions.
- */
-function namespaceOps<A extends Accessor = Accessor>(ops: CommandIO<A>): CommandIO<A> {
-  const guarded: CommandIO<A> = {
-    ...ops,
-    readdir: async (accessor, path, index, nofollow) => {
-      refuseHidden(path, false, ops.access)
-      return visibleChildren(await ops.readdir(accessor, path, index, nofollow), path, ops.access)
-    },
-  }
-  const ex = ops.exists
-  if (ex !== undefined) {
-    guarded.exists = async (accessor, path) => {
-      if (!pathVisible(sessionVisibility(ops.access), path.virtual)) return false
-      return ex(accessor, path)
-    }
-  }
-  return guarded
 }
 
 interface Mutation {
@@ -1269,17 +1196,6 @@ function walkedCall<Args extends unknown[], R>(
     if (walk !== null) await walkAdmit(walk[0], walk[1], creates)
     return fn(...args)
   }
-}
-
-/** Drain a read stream once its operand walks, before any byte is pulled. */
-async function* walkedStream(
-  probe: WalkProbe | null,
-  specs: readonly PathSpec[],
-  source: AsyncIterable<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  refuseUnwalked(specs)
-  if (probe !== null) await walkAdmit(probe, specs)
-  yield* source
 }
 
 /** `fn`, refused with the line's abort instead of started once `signal` has fired. */
@@ -1398,151 +1314,6 @@ function commandCall<T extends (...args: never[]) => unknown>(
 ): T {
   return ((...args: never[]) => {
     checkCommandPaths(pathsOf(args), slot, true, checkMode, access, admission)
-    return fn(...args)
-  }) as T
-}
-
-/**
- * Bind the command's path checks around the slots the dispatcher does not run.
- *
- * Reads, writes and one-call walks go through the dispatcher (`dispatchedIo`),
- * which judges each itself. `stat`, `exists` and `readdir` still reach the
- * backend past it, so here a hidden path answers as a missing one, a listing
- * drops the names the session hides, and a listed directory meets the
- * command's path rule and the coded preVfs methods. Every slot's operand dots
- * are walked, a read's as it starts, so a reader that words a failed open
- * itself gets the walk's refusal. Mirrors Python's `with_command_guards`.
- */
-export function withCommandGuards<A extends Accessor>(
-  ops: CommandIO<A>,
-  prefix?: string,
-): CommandIO<A> {
-  const probe = ops.walkProbe ?? (prefix === undefined ? null : walkProbeFor(prefix))
-  const scope = opPolicyScope(prefix ?? null, ops.access, ops.admission)
-  const prepared = namespaceOps({ ...ops, readdir: policyCall(scope, ops.readdir, 'readdir') })
-  const guarded = { ...prepared }
-  for (const slot of ['readBytes', 'readRange', 'stat', 'exists', 'readdir'] as const) {
-    const fn = prepared[slot]
-    if (fn === undefined) continue
-    // Hides and the path rule on a content read are the dispatcher's.
-    const call =
-      slot === 'readBytes' || slot === 'readRange'
-        ? fn
-        : commandCall(fn, slot, true, ops.access, ops.admission)
-    Object.assign(guarded, {
-      [slot]: walkedCall(probe, call as (...args: unknown[]) => Promise<unknown>),
-    })
-  }
-  guarded.readStream = (accessor, path, index) => {
-    const source = prepared.readStream(accessor, path, index)
-    const walk = walkProbeOf(probe, [path])
-    return walkedStream(walk?.[0] ?? null, [path], source)
-  }
-  if (guarded.exists !== undefined) {
-    const exists = guarded.exists
-    guarded.exists = (accessor, path) =>
-      pathVisible(sessionVisibility(ops.access), path.virtual)
-        ? exists(accessor, path)
-        : Promise.resolve(false)
-  }
-  return guarded
-}
-
-/** The policies to consult for one slot call, with the mount prefix
- * and session identity the call belongs to. */
-interface OpPolicyScope {
-  policies: Policies
-  /** The wrap site's mount prefix; null resolves per path at admit
-   * time (a registration-time wrap has no one mount). */
-  prefix: string | null
-  sessionId: string
-  access?: SessionAccess
-  /** The command's own gate, where the wrap site knows it: a once grant is
-   * remembered there, not by whatever gate is live beside it. */
-  gate?: EntryGate | null
-}
-
-/**
- * The scope to consult for this op call: null is the fast path (no
- * dispatched command bound policies, or none of them override preVfs).
- */
-function opPolicyScope(
-  prefix: string | null,
-  access?: SessionAccess,
-  gate?: EntryGate | null,
-): OpPolicyScope | null {
-  const policies = getOpPolicies()
-  if (!policies?.wants('preVfs')) return null
-  return {
-    policies,
-    prefix,
-    sessionId: access?.sessionId ?? getCurrentSession()?.sessionId ?? '',
-    ...(access === undefined ? {} : { access }),
-    ...(gate === undefined ? {} : { gate }),
-  }
-}
-
-/**
- * The wrap-time scope when it caught a bound command, else the
- * call-time context.
- *
- * The factory applies the guard inside the command's window, so its
- * wrap-time capture also covers a slot called after dispatch has reset
- * the context, with the prefix and session identity the op belongs to;
- * a registration-time wrap (the object-store overrides,
- * the loose-write chain) has no window when applied and reads the
- * live context instead, which its eager handlers are inside.
- */
-function livePolicyScope(scope: OpPolicyScope | null): OpPolicyScope | null {
-  return scope ?? opPolicyScope(null)
-}
-
-/** Fire preVfs for one PathSpec of one slot call; the call is the built-in
- * one the slot is named for, or one of that name with a read or write
- * effect for a slot that is no call, in its shared snake spelling, so a
- * policy portable across the languages and tiers sees one vocabulary.
- * The hides are not judged
- * here: the command guards wrapped around this one answer them first,
- * and the remnant cascade reaches below them on purpose to remove what
- * the session cannot see. */
-async function policyAdmit(
-  scope: OpPolicyScope,
-  op: string,
-  path: PathSpec,
-  write: boolean,
-): Promise<void> {
-  const owner = scope.prefix ?? mountGateFor(path.virtual)?.[0] ?? null
-  // The mount prefix as the dispatcher reports it, with its slash.
-  const prefix = owner === null ? '' : `${rstripSlash(owner)}/`
-  const call = declared(BaseVFS, op) ?? {
-    name: op,
-    effect: write ? Effect.WRITE : Effect.READ,
-    target: Target.ANY,
-    creates: false,
-    subtree: false,
-  }
-  await preVfsGate(scope.policies, call, path, write, prefix, scope.sessionId, undefined, {
-    checkHidden: false,
-    ...(scope.access === undefined ? {} : { access: scope.access }),
-    ...(scope.gate === undefined ? {} : { gate: scope.gate }),
-  })
-}
-
-function policyCall<T extends (...args: never[]) => unknown>(
-  scope: OpPolicyScope | null,
-  fn: T,
-  slot: GuardedSlot,
-): T {
-  return (async (...args: never[]) => {
-    const p = livePolicyScope(scope)
-    if (p !== null) {
-      const access = mutationOf(slot)
-      const paths = pathsOf(args)
-      const name = slot.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
-      for (const [i, path] of paths.entries()) {
-        await policyAdmit(p, name, path, access !== undefined && !(i === 0 && access.firstSource))
-      }
-    }
     return fn(...args)
   }) as T
 }

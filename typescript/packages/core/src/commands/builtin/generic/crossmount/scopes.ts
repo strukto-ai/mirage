@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OwnedScope } from './types.ts'
-import type { NamespaceView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
 import { isFsError } from '../../../../errors/fs.ts'
 import { respellOne } from '../../../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import { isStdin } from '../../utils/stream.ts'
+import type { Files } from '../../../../workspace/files.ts'
+import { mountView } from '../../utils/links.ts'
 
 /** Lazily partition an operand into maximal scopes with one owner.
  * Only directories containing mount boundaries are expanded. Listings
@@ -27,7 +28,7 @@ import { isStdin } from '../../utils/stream.ts'
 export async function* ownedScopes(
   path: PathSpec,
   dispatch: DispatchFn,
-  ns: NamespaceView | undefined,
+  vfs: Files | undefined,
   admit: (path: PathSpec, stat: FileStat) => boolean,
   walked = false,
 ): AsyncIterable<OwnedScope> {
@@ -40,7 +41,7 @@ export async function* ownedScopes(
     const [info] = await dispatch('stat', path, [], { nofollow: true })
     const stat = info as FileStat
     if (walked && !admit(path, stat)) return
-    const boundaries = ns?.mounts?.descendants(path.virtual) ?? []
+    const boundaries = mountView(vfs)?.descendants(path.virtual) ?? []
     if (stat.type !== FileType.DIRECTORY || boundaries.length === 0) {
       yield { path, walked, stat }
       return
@@ -60,7 +61,7 @@ export async function* ownedScopes(
       vfsPath: virtual.replace(/^\/+|\/+$/g, ''),
       rawPath: respellOne(virtual, path.virtual, path.rawPath),
     })
-    yield* ownedScopes(child, dispatch, ns, admit, true)
+    yield* ownedScopes(child, dispatch, vfs, admit, true)
   }
 }
 
@@ -72,11 +73,12 @@ export async function* ownedScopes(
  * below answers from its root, spelled as the operand was typed. A hidden
  * mount is never a start, though it still shadows the parent backend's keys.
  */
-export function mountStarts(path: PathSpec, ns: NamespaceView | undefined): PathSpec[] {
-  if (path.walkError !== null || ns?.mounts === undefined) return [path]
+export function mountStarts(path: PathSpec, vfs: Files | undefined): PathSpec[] {
+  const mounts = mountView(vfs)
+  if (path.walkError !== null || mounts === undefined) return [path]
   return [
     path,
-    ...ns.mounts.visibleDescendants(path.virtual).map(
+    ...mounts.visibleDescendants(path.virtual).map(
       (root) =>
         new PathSpec({
           virtual: root,

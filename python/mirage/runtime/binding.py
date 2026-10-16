@@ -24,7 +24,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import MountMode, PathSpec
 from mirage.utils.context_scope import ContextScope
 from mirage.utils.hidden import is_glob, show_head
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import SessionView
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 
@@ -35,13 +35,14 @@ class RuntimeContext:
 
     The scoped entry points retain session, policy, and observation context
     even when called later from a worker callback. No workspace stores are
-    exposed.
+    exposed. ``vfs`` is the session's files, whose links a guest's path
+    resolves through; None outside a workspace.
     """
 
     binding: WorkspaceBinding
     dispatch: DispatchFn
     resolver: MountResolver
-    ns: NamespaceView
+    vfs: Files | None
     session_view: SessionView | None
     cwd: PathSpec
     env: Mapping[str, str]
@@ -135,7 +136,7 @@ def restricted_mounts_for(
 def capture_binding(
     binding: WorkspaceBinding,
     *,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     session_view: SessionView | None = None,
     processes: ProcessView | None = None,
     cwd: PathSpec | None = None,
@@ -144,42 +145,6 @@ def capture_binding(
 ) -> RuntimeContext:
     """Capture callback context while reading live workspace state."""
     scope = ContextScope()
-    view = ns or NamespaceView()
-    links = view.links
-    if links is not None:
-        links = replace(
-            links,
-            stat_at=scope.wrap(links.stat_at),
-            subtree=scope.wrap(links.subtree),
-            resolve=scope.wrap(links.resolve),
-            exists=scope.wrap_async(links.exists),
-            target_stat=scope.wrap_async(links.target_stat),
-        )
-    mounts = view.mounts
-    if mounts is not None:
-        mounts = replace(
-            mounts,
-            descendants=scope.wrap(mounts.descendants),
-            visible_descendants=scope.wrap(mounts.visible_descendants),
-            is_root=scope.wrap(mounts.is_root),
-            root_of=scope.wrap(mounts.root_of),
-            max_du_entries=(
-                scope.wrap(mounts.max_du_entries)
-                if mounts.max_du_entries is not None
-                else None
-            ),
-        )
-    view = replace(
-        view,
-        links=links,
-        mounts=mounts,
-        stat_overlay=scope.wrap(view.stat_overlay)
-        if view.stat_overlay
-        else None,
-        child_mounts=scope.wrap(view.child_mounts)
-        if view.child_mounts
-        else None,
-    )
     if session_view is not None:
         session_view = replace(
             session_view,
@@ -197,22 +162,13 @@ def capture_binding(
         binding=binding,
         dispatch=scope.wrap_async(binding.dispatch),
         resolver=resolver,
-        ns=view,
+        vfs=vfs,
         session_view=session_view,
         cwd=cwd or PathSpec.from_str_path("/"),
         env=MappingProxyType(dict(env or {})),
         scope=scope,
         processes=processes,
-        restricted_mounts=restricted_mounts
-        if restricted_mounts is not None
-        else tuple(
-            prefix
-            for prefix in (
-                binding.mount_prefixes() if binding.mount_prefixes else ()
-            )
-            if view.scoped is not None
-            and view.scoped(prefix.rstrip("/") or "/")
-        ),
+        restricted_mounts=restricted_mounts or (),
     )
 
 

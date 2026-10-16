@@ -27,8 +27,6 @@ export interface OpKwargs {
   [k: string]: unknown
 }
 
-export type StatOverlay = (path: string, stat: FileStat) => FileStat
-
 // Stat one virtual path through the workspace rather than one backend, so
 // a path under another mount still answers; null when nothing is there.
 // What a traversal command asks about its own start point, which decides
@@ -162,11 +160,11 @@ export interface SessionView {
 }
 
 // The symlink surface a namespace offers to lower layers. The workspace
-// Namespace satisfies this structurally; FUSE and the namespace view
+// Namespace satisfies this structurally; FUSE and the session's files
 // consume it through this seam so the dependency points downward
 // (workspace injects, lower layers never import workspace modules).
 //
-// Read-only, and the Python twin declares the same seven members in the
+// Read-only, and the Python twin declares the same eight members in the
 // same order. A link is created and removed through the dispatcher
 // (`Files.symlink`, `Files.unlink`), never here: the dispatcher is the only layer
 // that sees both planes, so it is where symlink(2)'s refusal to
@@ -192,6 +190,9 @@ export interface NamespaceLinks {
   linkStatAt(path: string): FileStat | null
   // Every link path to its stored target, the whole table.
   symlinkTargets(): ReadonlyMap<string, string>
+  // Every link at any depth under `directory`, each with its own row, which a
+  // walk that reads a subtree in one call merges in.
+  linkStatsBelow(directory: string): [string, FileStat][]
   // The names of the links directly under `directory`, which a listing's
   // link marks need; a link prefix resolves first, as the listing does.
   linkNamesUnder(directory: string): Set<string>
@@ -204,14 +205,12 @@ export interface NamespaceLinks {
 // above. Bundling them means a command that grows a new symlink need
 // does not also grow a new property on every call site between here and
 // the generic; it reads another field off the view it already receives.
-//
-// Unlike python, no gating is needed: a command that does not read
-// `links` off its context simply ignores the property.
+// Read off a command's files (`linksOf(opts)`).
 export interface LinkView {
   // lstat one path (a link operand: `ls -l link`, `stat link`).
   statAt(path: string): FileStat | null
-  // The links under a directory, which every bound table lists and reads
-  // with the backend's own (`withLinks`).
+  // The links under a directory, which the dispatcher lists and reads with
+  // the backend's own.
   subtree(directory: string): [string, FileStat][]
   // Where a path really points, for deciding whether a link is broken.
   resolve(path: string): string
@@ -222,35 +221,6 @@ export interface LinkView {
   // link's), null when it dangles or loops. Resolved through the
   // workspace too, for the same reason.
   targetStat(path: string): Promise<FileStat | null>
-}
-
-// The name plane's facts a command may consult, as one injected object.
-//
-// Everything here answers from the workspace's addressing authority (the
-// namespace node table plus the mount table), which no backend can see:
-// symlinks, mount boundaries, the chmod/chown/touch attr overlay, and the
-// child names the namespace owes a directory. One view per plane means a
-// command that grows a new name-plane need reads another field instead of
-// threading a new keyword through `runCommand` and every builder. A
-// command opts in by reading `ns` off its opts; fields are absent when
-// the plane has nothing to offer (no links, no overlay) or outside a
-// workspace.
-export interface NamespaceView {
-  // The symlink facts; absent when the namespace holds no links, which
-  // is the fast path a walker checks before merging.
-  links?: LinkView
-  // Where the mount boundaries are (tar, zip, du).
-  mounts?: MountView
-  // The namespace attr merge for stat-rendering commands (ls).
-  statOverlay?: StatOverlay
-  // Child names the namespace owes a directory (mounts and links).
-  childMounts?: ChildMounts
-  // The running session's hides and shows; absent when unrestricted.
-  visibility?: Visibility
-  // Whether anything at or under a path is judged; a native walk yields.
-  scoped?: (virtual: string) => boolean
-  // The line's operand resolution, which a glob's matches take as well.
-  followOperands?: FollowOperands
 }
 
 /**

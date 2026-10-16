@@ -41,6 +41,7 @@ import { currentCaller } from '../../../context/session_context.ts'
 import { fsStrerror, isEnotdir, isFsError, isMissingPath, isWalkError } from '../../../errors/fs.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
+import { mountsOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -83,7 +84,7 @@ function isFatal(err: unknown): err is AwkRuntimeError | AwkSyntaxError {
  * every operand is the mount's own.
  */
 export function servedHere(opts: CommandOpts, path: PathSpec): boolean {
-  const mounts = opts.ns?.mounts
+  const mounts = mountsOf(opts)
   if (mounts === undefined) return true
   const home = (opts.mountPrefix ?? '').replace(/\/+$/, '')
   return mounts.rootOf(path.virtual).replace(/\/+$/, '') === home

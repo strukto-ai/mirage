@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
-import type { NamespaceView } from '../../../../../view/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../../../types.ts'
 import { isFsError } from '../../../../../errors/fs.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
@@ -29,6 +28,7 @@ import {
   type RunSingle,
 } from '../types.ts'
 import { mergeOperandIos, runOperands, statOp } from '../utils.ts'
+import type { Files } from '../../../../../workspace/files.ts'
 
 const ENC = new TextEncoder()
 
@@ -74,13 +74,13 @@ export async function recount(
   bag: Record<string, FlagValue>,
   dispatch: DispatchFn,
   cwd: string,
-  ns: NamespaceView | undefined,
+  vfs: Files | undefined,
   stdin: ByteSource | null,
 ): Promise<OperandRun> {
   if (run.io.countedRuns !== null || run.io.exitCode !== 0) return run
   const builder = DISPATCH_BUILDERS.get(Cmd.WC)
   if (builder === undefined) throw new Error('No dispatch builder for wc')
-  const [, io] = await runDispatch(builder, [run.scope], [], bag, dispatch, cwd, ns, stdin)
+  const [, io] = await runDispatch(builder, [run.scope], [], bag, dispatch, cwd, vfs, stdin)
   return { scope: run.scope, data: new Uint8Array(0), io }
 }
 
@@ -100,7 +100,7 @@ export async function runWc(
   dispatch: DispatchFn,
   runSingle: RunSingle,
   cwd = '/',
-  ns?: NamespaceView,
+  vfs?: Files,
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   const parsed = parseFlags(flagKwargs)
@@ -112,7 +112,7 @@ export async function runWc(
   const each = { ...flagKwargs, total: 'never' }
   const runs: OperandRun[] = []
   for (const run of await runOperands(runSingle, Cmd.WC, scopes, [], each)) {
-    runs.push(await recount(run, each, dispatch, cwd, ns, stdin))
+    runs.push(await recount(run, each, dispatch, cwd, vfs, stdin))
   }
   const rows: WcRow[] = []
   const sizes: (number | null)[] = []

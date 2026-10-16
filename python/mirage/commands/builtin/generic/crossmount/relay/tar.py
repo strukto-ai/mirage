@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
+
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
@@ -22,11 +24,16 @@ from mirage.commands.builtin.generic_bind.archive_io import (
     relay_is_dir_of,
     relay_walk_of,
 )
+from mirage.commands.builtin.utils.links import (
+    link_view,
+    mount_view,
+    owed_names,
+)
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.view.types import NamespaceView
+from mirage.workspace.files import Files
 
 
 async def run_tar(
@@ -34,7 +41,7 @@ async def run_tar(
     text_args: list[str],
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     stdin: ByteSource | None = None,
 ) -> CrossResult:
     """Run a tar whose archive, operands and -C destination span mounts.
@@ -51,7 +58,7 @@ async def run_tar(
         flag_kwargs (dict): Flags parsed against the shared tar spec,
             with path-valued flags retaining their PathSpec metadata.
         dispatch (DispatchFn): Workspace operation dispatcher.
-        ns (NamespaceView | None): The symlinks and mount boundaries the
+        vfs (Files | None): The symlinks and mount boundaries the
             create scan merges into each walk.
         stdin (ByteSource | None): The archive input when ``-f -`` is used.
     """
@@ -67,7 +74,7 @@ async def run_tar(
         mkdir_fn=prim["mkdir"],
         stat=prim["stat"],
         walk=relay_walk_of(
-            dispatch, ns.child_mounts if ns is not None else None, "tar"
+            dispatch, functools.partial(owed_names, vfs), "tar"
         ),
         is_dir=relay_is_dir_of(dispatch),
         selectors=list(text_args),
@@ -85,8 +92,8 @@ async def run_tar(
         strip_components=parsed.strip_components,
         exclude=parsed.exclude,
         one_file_system=parsed.one_file_system,
-        links=ns.links if ns is not None else None,
-        mounts=ns.mounts if ns is not None else None,
+        links=link_view(vfs),
+        mounts=mount_view(vfs),
         relay=True,
         stdin=stdin,
     )

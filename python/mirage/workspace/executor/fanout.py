@@ -31,6 +31,7 @@ from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.context import session_visibility
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -39,7 +40,8 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.utils.hidden import path_visible
-from mirage.view.types import NamespaceView, SessionView
+from mirage.view.types import FollowOperands, SessionView
+from mirage.workspace.files import Files
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -57,7 +59,8 @@ async def _own_part(
     registry: MountRegistry,
     dispatch: DispatchFn,
     cwd: str,
-    ns: NamespaceView | None,
+    vfs: Files | None,
+    follow: FollowOperands | None,
     cmd_name: str,
     paths: list[PathSpec],
     texts: list[str],
@@ -75,7 +78,9 @@ async def _own_part(
         registry (MountRegistry): Registry holding the mount table.
         dispatch (DispatchFn): Workspace operation dispatcher.
         cwd (str): Session working directory.
-        ns (NamespaceView | None): Name-plane facts.
+        vfs (Files | None): Name-plane facts.
+        follow (FollowOperands | None): The line's operand resolution,
+            which the walk's globs take.
         cmd_name (str): find or du.
         paths (list[PathSpec]): The part's start point.
         texts (list[str]): Positional text operands.
@@ -92,8 +97,9 @@ async def _own_part(
             flag_kwargs,
             dispatch,
             cwd,
-            ns,
+            vfs,
             options.get("stdin"),
+            follow=follow,
         )
     return await run_single(cmd_name, paths, texts, flag_kwargs, **options)
 
@@ -140,10 +146,11 @@ async def _fan_out_traversal(
     cwd: str,
     cmd_str: str,
     stdin: ByteSource | None,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     session_view: SessionView | None = None,
     dispatch: DispatchFn | None = None,
     native: RunSingle | None = None,
+    follow: FollowOperands | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Compose a traversal over the mounts inside its operands.
 
@@ -162,19 +169,31 @@ async def _fan_out_traversal(
         cwd (str): Session working directory.
         cmd_str (str): The command as typed, for the execution record.
         stdin (ByteSource | None): Standard input for the command.
-        ns (NamespaceView | None): Name-plane facts.
+        vfs (Files | None): Name-plane facts.
         session_view (SessionView | None): The session view.
         dispatch (DispatchFn | None): Workspace operation dispatcher.
         native (RunSingle | None): Single-mount runner each mount's part
             of the walk runs on.
+        follow (FollowOperands | None): The line's operand resolution,
+            which a walk through the dispatcher's globs take.
     """
     if dispatch is None or native is None:
         raise ValueError("traversal requires dispatcher and native execution")
-    part = functools.partial(_own_part, native, registry, dispatch, cwd, ns)
+    part = functools.partial(
+        _own_part, native, registry, dispatch, cwd, vfs, follow
+    )
     try:
         if cmd_name == "find":
             stdout, io = await run_find(
-                paths, texts, flag_kwargs, dispatch, part, cwd, ns, stdin
+                paths,
+                texts,
+                flag_kwargs,
+                dispatch,
+                part,
+                cwd,
+                vfs,
+                stdin,
+                follow=follow,
             )
         elif cmd_name == "du":
             stdout, io = await run_du(
@@ -184,9 +203,10 @@ async def _fan_out_traversal(
                 dispatch,
                 part,
                 cwd,
-                ns,
+                vfs,
                 stdin,
                 nested=True,
+                follow=follow,
             )
         else:
             stdout, io = await handle_cross_mount(
@@ -197,9 +217,10 @@ async def _fan_out_traversal(
                 dispatch,
                 native,
                 stdin=stdin,
-                ns=ns,
+                vfs=vfs,
                 session_view=session_view,
                 cwd=cwd,
+                follow=follow,
             )
     except UsageError as exc:
         stdout, io = (
@@ -223,7 +244,7 @@ async def _fan_out_traversal(
     # Only the mounts the walk can reach bound its output: a hidden one
     # never contributes a row, so its stricter limit must not apply.
     prefixes = {primary_mount.prefix}
-    vis = ns.visibility if ns is not None else None
+    vis = session_visibility()
     for path in paths:
         if path.walk_error is None:
             prefixes.update(
@@ -247,7 +268,7 @@ async def run_with_fanout(
     run_single: RunSingle,
     registry: MountRegistry,
     cwd: str,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     session_view: SessionView | None,
     cmd_name: str,
     paths: list[PathSpec],
@@ -257,6 +278,7 @@ async def run_with_fanout(
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     dispatch: DispatchFn | None = None,
+    follow: FollowOperands | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """One operand's native run, fanned out over the mounts nested in it.
 
@@ -273,7 +295,7 @@ async def run_with_fanout(
         run_single (RunSingle): the executor's single-mount runner.
         registry (MountRegistry): registry holding the mount table.
         cwd (str): session working directory.
-        ns (NamespaceView | None): the name plane's facts, offered
+        vfs (Files | None): the name plane's facts, offered
             whole to the sub-runs.
         session_view (SessionView | None): The session profile rendered by ls.
         dispatch (DispatchFn | None): Operations for a unified rg walk.
@@ -285,6 +307,8 @@ async def run_with_fanout(
         resolve_hint (PathSpec | None): mount-resolution path for a run
             with no operand of its own (the stream strategy's single
             native run over the merged bytes).
+        follow (FollowOperands | None): the line's operand resolution,
+            which a walk through the dispatcher's globs take.
     """
     if not _should_fan_out(cmd_name, paths, flag_kwargs, registry):
         if cmd_name in _TRAVERSAL_CMDS and dispatch is not None:
@@ -293,7 +317,8 @@ async def run_with_fanout(
                 registry,
                 dispatch,
                 cwd,
-                ns,
+                vfs,
+                follow,
                 cmd_name,
                 paths,
                 texts,
@@ -334,9 +359,10 @@ async def run_with_fanout(
         cwd,
         cmd_name,
         stdin,
-        ns=ns,
+        vfs=vfs,
         session_view=session_view,
         dispatch=dispatch,
         native=run_single,
+        follow=follow,
     )
     return stdout, io

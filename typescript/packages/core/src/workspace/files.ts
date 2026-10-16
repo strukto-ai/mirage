@@ -38,6 +38,8 @@ export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>
 interface MountOwner {
   readonly prefix: string
   readonly kind: string
+  // The mount VFS's du walk budget, null for no cap.
+  readonly maxDuEntries?: number | null
 }
 
 export type OwnerOf = (path: string) => MountOwner | null
@@ -140,11 +142,22 @@ export class Files {
    * @internal Not part of the supported surface; Python keeps it private.
    */
   readonly links: NamespaceLinks | null
-  private readonly ownerOf: OwnerOf
+  /**
+   * The mount serving a path, by longest prefix.
+   *
+   * @internal Not part of the supported surface; Python keeps it private.
+   */
+  readonly ownerOf: OwnerOf
   private readonly bind: SessionBind | null
   private readonly dispatchAs: ((owner: SessionAccess) => CallerDispatchFn) | null
   private readonly caller: Partial<Caller> | null
-  private readonly prefixes: () => readonly string[]
+  /**
+   * The prefixes of the mounts the running session is told of at all,
+   * hides aside.
+   *
+   * @internal Not part of the supported surface; Python keeps it private.
+   */
+  readonly prefixes: () => readonly string[]
   private readonly visibilityOf: ((sessionId: string | null) => Visibility | null) | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
@@ -223,9 +236,13 @@ export class Files {
     })
   }
 
-  /** The visibility of the session an op would run as: the bound one, else
-   * this facade's own. */
-  private vis(): Visibility | null {
+  /**
+   * The visibility of the session an op would run as: the bound one, else
+   * this facade's own.
+   *
+   * @internal Not part of the supported surface; Python keeps it private.
+   */
+  vis(): Visibility | null {
     return this.visibilityOf === null ? sessionVisibility() : this.visibilityOf(this.sessionId)
   }
 

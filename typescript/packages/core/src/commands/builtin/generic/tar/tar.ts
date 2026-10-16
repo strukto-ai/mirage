@@ -49,6 +49,7 @@ import { stdinStream } from '../../utils/stream.ts'
 import { lsModeString } from '../../utils/formatting.ts'
 import { ensureDir, extractDest } from '../archive/extract.ts'
 import type { Compression, CompressionKind, CreateResult, ReadResult } from './types.ts'
+import { linksOf, mountsOf } from '../../utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -528,8 +529,8 @@ export async function tarGeneric(
       walk: deps.walk,
       isDir: deps.isDir,
       directories,
-      links: opts.ns?.links ?? null,
-      mounts: opts.ns?.mounts ?? null,
+      links: linksOf(opts) ?? null,
+      mounts: mountsOf(opts) ?? null,
       oneFileSystem: parsed.oneFileSystem,
     })
     if (!plan.write) {

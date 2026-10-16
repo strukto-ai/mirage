@@ -12,14 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import posixpath
 from collections.abc import Callable
 from dataclasses import replace
 
+from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import dot_walk_error, eexist, eloop, enoent
 from mirage.errors.render import operand_spelling
-from mirage.errors.types import (
-    FsCondition,
-)
+from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
 from mirage.types import LINK_TARGET_KEY, FileStat, FileType, PathSpec, StatFn
 from mirage.utils.key_prefix import rekey
@@ -32,6 +32,10 @@ from mirage.utils.path import (
     resolve_path,
 )
 from mirage.view.types import LinkView, StatPath
+
+# What an existence probe reads as nothing there: every miss, and a link
+# loop, which the walk reaches nothing through.
+_ABSENT: tuple[type[Exception], ...] = (*MISS_ERRORS, DotWalkLoop)
 
 
 def has_unresolved_glob(paths: list[PathSpec]) -> bool:
@@ -96,6 +100,52 @@ async def dispatch_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
     if stat is None:
         raise enoent(path)
     return stat
+
+
+async def resolve_path_stat(
+    dispatch: DispatchFn, path: PathSpec
+) -> FileStat | None:
+    """What a path is, asked on both channels a backend can answer on.
+
+    A point lookup alone cannot decide. On a prefix store a directory is
+    not an object, it is the set of keys under it, so ``stat`` misses
+    what ``readdir`` would list. Absence therefore takes *both* channels
+    coming back empty, which is the only evidence that nothing is there.
+
+    The listing has to be non-empty to count: those stores answer a
+    missing path with ``[]`` rather than raising, and cannot hold an
+    empty directory anyway (one with no keys under it does not exist).
+    Measured across every integ target: an implicit directory answers
+    here, a missing path does not. That holds only while a backend's
+    readdir refuses a path it cannot prove: postgres answered
+    ``tables``/``views`` under any first segment, and every absent
+    schema read as a directory here.
+
+    A link loop in the path is absence too: the walk reaches nothing
+    there, which is the question this answers, and a diagnostic that has
+    to name the errno asks ``miss_condition``.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        path (PathSpec): path to resolve.
+    """
+    stat: FileStat | None
+    try:
+        stat, _ = await dispatch("stat", path)
+    except _ABSENT:
+        stat = None
+    if stat is not None:
+        return stat
+    try:
+        entries, _ = await dispatch("readdir", path)
+    except _ABSENT:
+        return None
+    if not entries:
+        return None
+    return FileStat(
+        name=posixpath.basename(path.virtual.rstrip("/")),
+        type=FileType.DIRECTORY,
+    )
 
 
 async def stat_or_enoent(stat_path: StatPath, path: PathSpec) -> FileStat:

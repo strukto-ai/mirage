@@ -26,6 +26,7 @@ from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
 from mirage.view.types import LinkView, MountView
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 # Info-ZIP 3.0's wording, pinned on debian:stable-slim. A warning is
 # indented with a tab and -q silences it; the "Nothing to do!" error is
@@ -477,6 +478,6 @@ async def zip_generic(
         q=parsed.quiet,
         y=parsed.store_links,
         x=list(parsed.exclude) or None,
-        links=opts.ns.links if opts.ns is not None else None,
-        mounts=opts.ns.mounts if opts.ns is not None else None,
+        links=links_of(opts),
+        mounts=mounts_of(opts),
     )

@@ -16,7 +16,7 @@ import pytest
 
 from mirage.commands.builtin.generic.rm_cmd import remove_tree
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import MountView, NamespaceView
+from mirage.view.types import MountView
 
 TREE = {"/t": ["/t/a.txt", "/t/inner"], "/t/inner": ["/t/inner/b.txt"]}
 
@@ -44,14 +44,12 @@ def _tree_ops(calls: list[tuple[str, str]], gone: str | None = None):
     return {"readdir": readdir, "stat": stat, "unlink": unlink, "rmdir": rmdir}
 
 
-def _ns(mounts: list[str]) -> NamespaceView:
-    return NamespaceView(
-        mounts=MountView(
-            descendants=lambda _v: list(mounts),
-            visible_descendants=lambda _v: list(mounts),
-            is_root=lambda v: v in mounts,
-            root_of=lambda _v: "/",
-        ),
+def _mounts(mounts: list[str]) -> MountView:
+    return MountView(
+        descendants=lambda _v: list(mounts),
+        visible_descendants=lambda _v: list(mounts),
+        is_root=lambda v: v in mounts,
+        root_of=lambda _v: "/",
     )
 
 
@@ -61,7 +59,7 @@ async def test_remove_tree_never_enters_a_mount_below():
     removed, failures = await remove_tree(
         _spec("/t"),
         **_tree_ops(calls),
-        ns=_ns(mounts=["/t/inner"]),
+        mounts=_mounts(["/t/inner"]),
         force=False,
     )
     assert calls == [("unlink", "/t/a.txt")]
@@ -75,7 +73,7 @@ async def test_remove_tree_force_takes_an_entry_gone_as_removed(force):
     _, failures = await remove_tree(
         _spec("/t/inner"),
         **_tree_ops(calls, gone="/t/inner/b.txt"),
-        ns=None,
+        mounts=None,
         force=force,
     )
     assert [p.virtual for p, _ in failures] == (

@@ -26,6 +26,7 @@ from mirage.commands.builtin.types import (
 )
 from mirage.commands.builtin.utils.formatting import format_find_ls
 from mirage.commands.builtin.utils.identity import Identity
+from mirage.commands.builtin.utils.links import link_view
 from mirage.context import (
     get_current_session,
     reset_program_invocation,
@@ -42,7 +43,8 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import resolve_path
-from mirage.view.types import NamespaceView, StatPath
+from mirage.view.types import StatPath
+from mirage.workspace.files import Files
 from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.types import Consumer
@@ -204,7 +206,7 @@ async def _run_exec(
 
 async def _delete(
     ps: PathSpec,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     dispatch: DispatchFn | None,
     errors: list[bytes],
     stat_path: StatPath | None,
@@ -216,21 +218,18 @@ async def _delete(
 
     Args:
         ps (PathSpec): the selected row, with its display spelling.
-        ns (NamespaceView | None): the namespace's link facts.
+        vfs (Files | None): the namespace's link facts.
         dispatch (DispatchFn | None): the workspace dispatcher.
         errors (list[bytes]): receives a failure in find's voice.
         stat_path (StatPath | None): distinguishes files from directories.
     """
+    links = link_view(vfs)
     path = ps.raw_path or ps.virtual
     if dispatch is None:
         errors.append(b"find: -delete requires an operation dispatcher\n")
         return False
     try:
-        link = (
-            ns is not None
-            and ns.links is not None
-            and ns.links.stat_at(ps.virtual) is not None
-        )
+        link = links is not None and links.stat_at(ps.virtual) is not None
         st = (
             await stat_path(ps) if not link and stat_path is not None else None
         )
@@ -251,7 +250,7 @@ async def _delete(
 
 async def _row_stat(
     ps: PathSpec,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     stat_path: StatPath | None,
     errors: list[bytes],
 ) -> FileStat | None:
@@ -268,21 +267,18 @@ async def _row_stat(
 
     Args:
         ps (PathSpec): the selected row, with its display spelling.
-        ns (NamespaceView | None): the name plane's facts, so a symlink
+        vfs (Files | None): the name plane's facts, so a symlink
             row renders as the link.
         stat_path (StatPath | None): dispatcher stat; None outside a
             workspace, where no row can be rendered.
         errors (list[bytes]): where a failure's line is appended.
     """
+    links = link_view(vfs)
     path = ps.raw_path or ps.virtual
     if stat_path is None:
         errors.append(encode_text(f"find: '{path}': no stat function\n"))
         return None
-    link = (
-        ns.links.stat_at(ps.virtual)
-        if ns is not None and ns.links is not None
-        else None
-    )
+    link = links.stat_at(ps.virtual) if links is not None else None
     try:
         st = link if link is not None else await stat_path(ps)
     except Exception as exc:
@@ -324,7 +320,7 @@ async def _printf_row(
     ps: PathSpec,
     start: PathSpec,
     st: FileStat | None,
-    ns: NamespaceView | None,
+    vfs: Files | None,
     warnings: list[str],
     identity: Identity | None,
 ) -> bytes:
@@ -341,13 +337,13 @@ async def _printf_row(
             ``%P`` and ``%d`` measure from.
         st (FileStat | None): the stat find holds for the row; None when
             the format names no stat directive.
-        ns (NamespaceView | None): the name plane's facts, for a symlink
+        vfs (Files | None): the name plane's facts, for a symlink
             row's target.
         warnings (list[str]): sink for GNU's warning lines.
         identity (Identity | None): who the session is, for the owner
             directives on an entry that reports no owner of its own.
     """
-    links = ns.links if ns is not None else None
+    links = link_view(vfs)
     target = (
         await links.target_stat(ps.virtual)
         if st is not None
@@ -459,7 +455,7 @@ async def _apply_find_actions(
     *,
     execute_fn: ExecuteLine | None = None,
     session_id: str = "",
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     stat_path: StatPath | None = None,
     dispatch: DispatchFn | None = None,
     identity: Identity | None = None,
@@ -517,7 +513,7 @@ async def _apply_find_actions(
             session; None outside a workspace, where ``-exec`` is
             refused.
         session_id (str): the session the ``-exec`` lines run under.
-        ns (NamespaceView | None): the name plane's facts, threaded into
+        vfs (Files | None): the name plane's facts, threaded into
             the -ls sub-dispatch so a namespace-only row (a mount point,
             a symlink) renders the way ``ls -l`` renders it.
         stat_path (StatPath | None): dispatcher stat, threaded with it
@@ -579,7 +575,7 @@ async def _apply_find_actions(
         # it never statted is looked up by the first action that reads
         # it, and held from there, as GNU stats a row once.
         held = (
-            await _row_stat(match, ns, stat_path, [])
+            await _row_stat(match, vfs, stat_path, [])
             if stats and (statted or match.virtual in start_virtuals)
             else None
         )
@@ -604,7 +600,7 @@ async def _apply_find_actions(
                     break
             elif _reads_stat(action):
                 if held is None:
-                    held = await _row_stat(match, ns, stat_path, errors)
+                    held = await _row_stat(match, vfs, stat_path, errors)
                 if held is None:
                     # A row -ls or -printf cannot stat is false, so the
                     # chain ends for it, as GNU's does.
@@ -612,7 +608,7 @@ async def _apply_find_actions(
                     break
                 out.append(
                     await _printf_row(
-                        action, match, start, held, ns, warnings, identity
+                        action, match, start, held, vfs, warnings, identity
                     )
                     if isinstance(action, PrintfAction)
                     else _ls_row(match, held, identity)
@@ -620,7 +616,7 @@ async def _apply_find_actions(
             elif isinstance(action, PrintfAction):
                 out.append(
                     await _printf_row(
-                        action, match, start, None, ns, warnings, identity
+                        action, match, start, None, vfs, warnings, identity
                     )
                 )
             elif action.kind == "delete":
@@ -628,7 +624,7 @@ async def _apply_find_actions(
                 # leaves a mount point in place.
                 if _structural(match, registry):
                     continue
-                if not await _delete(match, ns, dispatch, errors, stat_path):
+                if not await _delete(match, vfs, dispatch, errors, stat_path):
                     exit_code = 1
                     break
             else:

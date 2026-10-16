@@ -17,7 +17,7 @@ import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { requireOp } from './adapter.ts'
 import type { CommandIO } from '../../config.ts'
 import { BUILDERS } from './builders/index.ts'
-import { GENERIC_COMMANDS, generic, scanIo, withSlashGuard, withStatCache } from './factory.ts'
+import { GENERIC_COMMANDS, generic, withSlashGuard, withStatCache } from './factory.ts'
 import { FakeAccessor, spec } from '../../../core/object_store/fakes.ts'
 
 function makeOps(overrides: Partial<CommandIO> = {}): CommandIO {
@@ -133,18 +133,3 @@ describe('withSlashGuard on the write tier', () => {
   })
 })
 
-describe('scanIo', () => {
-  it('guards only a judged mount', () => {
-    // A bespoke search scans the raw adapter when nothing on its mount is
-    // hidden or refused, and the guarded one when anything is, since the
-    // service's own search can answer for more than the operand.
-    const io = makeOps()
-    const free = { scoped: () => false }
-    const judged = { scoped: (virtual: string) => virtual === '/s3' }
-    expect(scanIo(io, free, '/s3/')).toEqual([io, false])
-    expect(scanIo(io, undefined, '/s3/')).toEqual([io, false])
-    const [scan, scoped] = scanIo(io, judged, '/s3/')
-    expect(scan).not.toBe(io)
-    expect(scoped).toBe(true)
-  })
-})

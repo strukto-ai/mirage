@@ -29,7 +29,8 @@ import { ShellBuiltin as SB } from '../../../../shell/types.ts'
 import { wordText } from '../../../../types.ts'
 import { sessionView } from '../../../session/state.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { linkViewFor } from '../../../mount/namespace/view.ts'
+import { linkView } from '../../../../commands/builtin/utils/links.ts'
+import { Files } from '../../../files.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
@@ -44,14 +45,16 @@ export async function handleTest(
   name = 'test',
   view?: SessionView,
 ): Promise<Result> {
-  const links = linkViewFor(namespace, dispatch, session.visibility)
+  const links = linkView(
+    new Files(dispatch, null, namespace, () => null, { visibility: () => session.visibility }),
+  )
   const ctx: CondContext = {
     dispatch,
     namespace,
     session,
     name,
     ...(view !== undefined ? { view } : {}),
-    ...(links !== null ? { links } : {}),
+    ...(links !== undefined ? { links } : {}),
   }
   let result: boolean
   try {

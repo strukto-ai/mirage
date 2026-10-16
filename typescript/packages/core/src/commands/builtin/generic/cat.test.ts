@@ -44,7 +44,7 @@ function spec(path: string): PathSpec {
 }
 
 function opts(): CommandOpts {
-  return { stdin: null, flags: {}, cwd: '/', vfs: {} } as CommandOpts
+  return { stdin: null, flags: {}, cwd: '/' } as CommandOpts
 }
 
 async function* fileStream(path: string, pulled: string[]): AsyncIterable<Uint8Array> {

@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     dispatched_slots,
     read_ahead,
 )
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.builtin.utils.paths import dispatch_stat
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.spec import SPECS
@@ -39,15 +40,12 @@ from mirage.io.stream import close_quietly, ensure_stream, materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.view.types import MountView, NamespaceView
+from mirage.view.types import FollowOperands, MountView
+from mirage.workspace.files import Files
 
 
 def _mounted(accessor: Accessor) -> bool:
     return True
-
-
-def _none_below(path: str) -> list[str]:
-    return []
 
 
 def dispatch_io(
@@ -57,9 +55,9 @@ def dispatch_io(
 ) -> CommandIO:
     """Bind a generic's IO to workspace operations.
 
-    The dispatcher's own answers are what a mount's table answers once
-    its links are stamped on (``with_links``): a listing names the links
-    in a directory and a stat of one is the link's own row.
+    The dispatcher's own answers are what a mount's table answers: a
+    listing names the links in a directory and a stat of one is the
+    link's own row.
 
     Args:
         dispatch (DispatchFn): policy-checked operation dispatcher.
@@ -164,9 +162,10 @@ async def run_dispatch(
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
     cwd: str,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     stdin: ByteSource | None = None,
     argv: tuple[str, ...] = (),
+    follow: FollowOperands | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the same builder once across every operand's owning mount.
 
@@ -183,21 +182,18 @@ async def run_dispatch(
         flag_kwargs (dict[str, FlagValue]): the parsed flags.
         dispatch (DispatchFn): policy-checked operation dispatcher.
         cwd (str): the shell's working directory.
-        ns (NamespaceView | None): name-plane facts. The dispatcher lists
+        vfs (Files | None): name-plane facts. The dispatcher lists
             the mounts below a directory itself, so no descendant is left
             to avoid; where each mount begins stays for
             ``--one-file-system``, and each mount's du budget for a walk.
         stdin (ByteSource | None): the command's input.
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
+        follow (FollowOperands | None): the line's operand resolution,
+            which its globs' matches take too.
     """
     bounded = builder.name == "du" and FlagView(
         flag_kwargs, spec=SPECS["du"]
     ).as_bool("one_file_system")
-    if ns is not None and ns.mounts is not None and not bounded:
-        mounts = replace(
-            ns.mounts, descendants=_none_below, visible_descendants=_none_below
-        )
-        ns = replace(ns, mounts=mounts)
     # The dispatcher keys every path by its whole virtual path, a path
     # option's value as well as an operand.
     rebased = FlagBag(flag_kwargs)
@@ -215,17 +211,14 @@ async def run_dispatch(
         flags=rebased,
         stdin=stdin,
         cwd=PathSpec(virtual=cwd, directory=cwd, vfs_path=cwd.strip("/")),
-        ns=ns,
+        vfs=vfs,
         dispatch=dispatch,
+        follow_operands=follow,
         argv=argv,
     )
     io_ops = replace(
-        dispatch_io(
-            dispatch,
-            ns.mounts if ns is not None and bounded else None,
-            paths,
-        ),
-        glob_follow=ns.follow_operands if ns is not None else None,
+        dispatch_io(dispatch, mount_view(vfs) if bounded else None, paths),
+        glob_follow=follow,
     )
     result = await builder.fn(
         io_ops,

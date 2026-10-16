@@ -14,7 +14,11 @@
 
 from functools import partial
 
-from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
+from mirage.commands.builtin.utils.paths import (
+    dispatch_stat,
+    dot_refusal,
+    resolve_path_stat,
+)
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import materialize
 from mirage.shell.errors import ArithError
@@ -33,7 +37,6 @@ from mirage.workspace.executor.builtins.condition.types import (
 )
 from mirage.workspace.executor.builtins.links import operand_abs
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
-from mirage.workspace.mount.namespace.probe import resolve_path_stat
 from mirage.workspace.session.elements import element_is_set
 
 

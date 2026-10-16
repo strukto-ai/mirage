@@ -14,32 +14,17 @@
 
 import { transferLinksOf } from '../../generic/crossmount/utils.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
-import type { StatOverlay } from '../../../../view/types.ts'
-import type { Accessor } from '../../../../accessor/base.ts'
-import type { FileStat, NativeCopy, PathSpec, PrimitiveCopy, StatFn } from '../../../../types.ts'
+import type { FileStat, NativeCopy, PathSpec, PrimitiveCopy } from '../../../../types.ts'
 import { treeWalk } from '../../utils/tree.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
-import { serves, typedLink } from '../../utils/links.ts'
+import { serves, typedLink, linksOf, mountsOf } from '../../utils/links.ts'
 import type { GenericCommand } from '../adapter.ts'
 import type { CommandIO } from '../../../config.ts'
 import { requireOp, resolveGlobOf } from '../adapter.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { pathsScoped } from '../../../../view/namespace_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
-
-// The backend stat, merged with the namespace attr overlay if any. cp/mv
-// freshness checks (-u) must see touch/chmod overlay state, exactly like
-// ls and stat rendering.
-export function overlayableStat(
-  ops: CommandIO,
-  accessor: Accessor,
-  index: IndexCacheStore | undefined,
-  statOverlay: StatOverlay | undefined,
-): StatFn {
-  if (statOverlay === undefined) return (p) => ops.stat(accessor, p, index)
-  return async (p) => statOverlay(p.virtual, await ops.stat(accessor, p, index))
-}
 
 export const BUILDER: GenericCommand = {
   name: 'cp',
@@ -50,7 +35,7 @@ export const BUILDER: GenericCommand = {
     // takes the entry-by-entry walk up front there, which is where GNU's
     // per-entry refusals are worded.
     const ops: CommandIO = { ...raw }
-    if (pathsScoped(opts.ns, paths, opts.mountPrefix ?? '')) {
+    if (pathsScoped(paths, opts.mountPrefix ?? '')) {
       delete ops.copy
       delete ops.dirCopy
     }
@@ -102,11 +87,11 @@ export const BUILDER: GenericCommand = {
               : { dirCopy: (src: PathSpec, target: PathSpec) => dirCopy(accessor, src, target) }),
             ...(mkdir === undefined ? {} : { mkdir: (p: PathSpec) => mkdir(accessor, p) }),
           }
-    const links = opts.ns?.links ?? null
+    const links = linksOf(opts) ?? null
     const cwd = opts.cwd
     return cpGeneric(
       resolved,
-      overlayableStat(ops, accessor, idx, opts.ns?.statOverlay),
+      (p: PathSpec) => ops.stat(accessor, p, idx),
       strategy,
       parsed,
       idx,
@@ -115,8 +100,8 @@ export const BUILDER: GenericCommand = {
       links === null ? undefined : (p: PathSpec) => typedLink(links, p, cwd),
       links === null || opts.dispatch === undefined
         ? undefined
-        : transferLinksOf(links, opts.dispatch, cwd, opts.ns?.visibility, (virtual) =>
-            serves(opts.ns?.mounts, opts.mountPrefix ?? '', virtual),
+        : transferLinksOf(links, opts.dispatch, cwd, opts.vfs?.vis() ?? undefined, (virtual) =>
+            serves(mountsOf(opts), opts.mountPrefix ?? '', virtual),
           ),
       opts.stdin,
       opts.dispatch,

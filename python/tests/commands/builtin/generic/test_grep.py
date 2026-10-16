@@ -5,9 +5,10 @@ import pytest
 from mirage.commands.builtin.generic.grep import grep_generic, labelled
 from mirage.commands.config import CommandOpts
 from mirage.errors.fs import no_mount
-from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
-from mirage.view.types import MountView, NamespaceView
+from mirage.workspace.files import Files
+from mirage.workspace.types import MountRow
 
 
 def _spec(path: str) -> PathSpec:
@@ -254,20 +255,21 @@ async def test_grep_recursive_not_a_directory_operand_keeps_the_others():
     assert b"/a.txt/x" in (io.stderr or b"")
 
 
-def _mount_parent_ns(descendant: str) -> NamespaceView:
-    """A bag whose mount table puts one mount under a path."""
+async def _nothing(op: str, path: PathSpec, **_):
+    return None, None
 
-    def descendants(parent: str) -> list[str]:
-        base = parent.rstrip("/") or "/"
-        return [descendant] if descendant.startswith(f"{base}/") else []
 
-    return NamespaceView(
-        mounts=MountView(
-            descendants=descendants,
-            visible_descendants=descendants,
-            is_root=lambda p: False,
-            root_of=lambda p: "/",
-        )
+def _on_a_mount(descendant: str) -> CommandOpts:
+    """A bag whose files' mount table puts one mount under a path."""
+    return CommandOpts(
+        flags={"recursive": True},
+        vfs=Files(
+            [
+                MountRow(prefix=p, resource_type="ram", mode=MountMode.READ)
+                for p in ("/", descendant + "/")
+            ],
+            _nothing,
+        ),
     )
 
 
@@ -282,9 +284,7 @@ async def test_grep_reads_the_mount_boundaries_off_the_bag():
     output, io = await grep_generic(
         [_spec("/ghost")],
         ["x"],
-        CommandOpts(
-            flags={"recursive": True}, ns=_mount_parent_ns("/ghost/deep")
-        ),
+        _on_a_mount("/ghost/deep"),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -302,9 +302,7 @@ async def test_grep_still_reports_a_path_with_no_mount_below_it():
     out, io = await grep_generic(
         [_spec("/nope")],
         ["x"],
-        CommandOpts(
-            flags={"recursive": True}, ns=_mount_parent_ns("/ghost/deep")
-        ),
+        _on_a_mount("/ghost/deep"),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,

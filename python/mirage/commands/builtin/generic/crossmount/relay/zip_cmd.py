@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
+
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
@@ -19,17 +21,22 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 )
 from mirage.commands.builtin.generic.zip_cmd import parse_flags, zip_cmd
 from mirage.commands.builtin.generic_bind.archive_io import relay_walk_of
+from mirage.commands.builtin.utils.links import (
+    link_view,
+    mount_view,
+    owed_names,
+)
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
-from mirage.view.types import NamespaceView
+from mirage.workspace.files import Files
 
 
 async def run_zip(
     scopes: list[PathSpec],
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
-    ns: NamespaceView | None,
+    vfs: Files | None,
 ) -> CrossResult:
     """Run a zip whose archive and operands span mounts.
 
@@ -43,7 +50,7 @@ async def run_zip(
             the archive is first.
         flag_kwargs (dict): Flags parsed against the shared zip spec.
         dispatch (DispatchFn): Workspace operation dispatcher.
-        ns (NamespaceView | None): The symlinks and mount boundaries the
+        vfs (Files | None): The symlinks and mount boundaries the
             scan merges into each walk.
     """
     parsed = parse_flags(flag_kwargs)
@@ -54,13 +61,13 @@ async def run_zip(
         write_bytes=prim["write"],
         stat=prim["stat"],
         walk=relay_walk_of(
-            dispatch, ns.child_mounts if ns is not None else None, "zip"
+            dispatch, functools.partial(owed_names, vfs), "zip"
         ),
         r=parsed.recursive,
         j=parsed.junk_paths,
         q=parsed.quiet,
         y=parsed.store_links,
         x=list(parsed.exclude) or None,
-        links=ns.links if ns is not None else None,
-        mounts=ns.mounts if ns is not None else None,
+        links=link_view(vfs),
+        mounts=mount_view(vfs),
     )

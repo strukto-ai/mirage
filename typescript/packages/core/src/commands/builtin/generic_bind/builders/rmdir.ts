@@ -21,7 +21,7 @@ import { mountPrefixOf, mountedPath, respelled } from '../../../../utils/key_pre
 import { CycleError, resolvePath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { formatRecords } from '../../utils/output.ts'
-import { linkLocation } from '../../utils/links.ts'
+import { linkLocation, linksOf } from '../../utils/links.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
@@ -84,7 +84,7 @@ const rmdir: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const rmdirOp = requireOp(ops.rmdir, 'rmdir')
   const lines: string[] = []
   const errors: string[] = []
-  const links = opts.ns?.links ?? null
+  const links = linksOf(opts) ?? null
   const remove = async (p: PathSpec): Promise<string | null> => {
     // rmdir(2) never follows, so a link operand never reaches the
     // directory it points at. GNU words the two spellings apart: a bare

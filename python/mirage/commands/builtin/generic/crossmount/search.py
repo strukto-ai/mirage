@@ -62,7 +62,11 @@ from mirage.commands.builtin.grep_pattern import compile_pattern, pattern_arg
 from mirage.commands.builtin.grep_select import dir_admitted, file_admitted
 from mirage.commands.builtin.rg_scan import walk_error_line
 from mirage.commands.builtin.rg_search import RgFlags, Totals, split_footer
-from mirage.commands.builtin.utils.links import LinkResolver
+from mirage.commands.builtin.utils.links import (
+    LinkResolver,
+    link_view,
+    mount_view,
+)
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.builtin.utils.tree import before_full_scan
@@ -77,7 +81,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
-from mirage.view.types import NamespaceView
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +107,7 @@ async def run_search(
     dispatch: DispatchFn,
     run_single: RunSingle,
     cwd: str,
-    ns: NamespaceView | None = None,
+    vfs: Files | None = None,
     stdin: ByteSource | None = None,
 ) -> CrossResult:
     """Compose the registered search handlers, preserving operand order.
@@ -121,9 +125,11 @@ async def run_search(
         dispatch (DispatchFn): Workspace operations.
         run_single (RunSingle): Full native command execution boundary.
         cwd (str): Working directory.
-        ns (NamespaceView | None): Namespace ownership and link facts.
+        vfs (Files | None): Namespace ownership and link facts.
         stdin (ByteSource | None): Shared standard input.
     """
+    links = link_view(vfs)
+    mounts = mount_view(vfs)
     started = time.perf_counter()
     view = FlagView(flags, spec=SPECS[name])
     grep = parse_flags(view, never_match=False) if name == "grep" else None
@@ -136,13 +142,12 @@ async def run_search(
         await ignore_rules(view, dispatch, notes) if rg is not None else None
     )
     nested = bool(
-        ns
-        and ns.mounts
-        and any(ns.mounts.descendants(p.virtual) for p in paths)
+        mounts is not None
+        and any(mounts.descendants(p.virtual) for p in paths)
     )
     # A link can change the owner without appearing in the mount table.
     linked = bool(
-        ns and ns.links and any(ns.links.subtree(p.virtual) for p in paths)
+        links is not None and any(links.subtree(p.virtual) for p in paths)
     )
     planned = rg is not None and (
         linked
@@ -181,7 +186,7 @@ async def run_search(
 
     input_source = resolve_source(stdin)
     owners = [
-        ns.mounts.root_of(p.virtual) if ns and ns.mounts else None
+        mounts.root_of(p.virtual) if mounts is not None else None
         for p in paths
     ]
 
@@ -238,8 +243,8 @@ async def run_search(
                     await before_full_scan(dispatch, path, name)
             warnings: list[str] = []
             resolver = (
-                LinkResolver(ns.links, dispatch, cwd)
-                if ns and ns.links
+                LinkResolver(links, dispatch, cwd)
+                if links is not None
                 else None
             )
             found = haystacks(
@@ -250,7 +255,7 @@ async def run_search(
                 walk,
                 rg,
                 warnings,
-                ns.mounts if ns and rg.one_file_system else None,
+                mounts if rg.one_file_system else None,
                 resolver,
             )
             if rg.sort not in (None, "none") and not (
@@ -287,7 +292,7 @@ async def run_search(
             return
         for path in paths:
             if rg is not None or (grep is not None and grep.recursive):
-                async for scope in owned_scopes(path, dispatch, ns, admit):
+                async for scope in owned_scopes(path, dispatch, vfs, admit):
                     yield scope
             else:
                 yield OwnedScope(path)
@@ -330,8 +335,8 @@ async def run_search(
             # A directory run already labels its files. Keep its native
             # search eligibility; only split file operands need explicit H.
             owner = (
-                ns.mounts.root_of(scope.path.virtual)
-                if ns and ns.mounts
+                mounts.root_of(scope.path.virtual)
+                if mounts is not None
                 else None
             )
             repeated = owners.count(owner) > 1
@@ -342,9 +347,8 @@ async def run_search(
                 or (
                     scope.walked
                     and not (
-                        ns
-                        and ns.mounts
-                        and ns.mounts.is_root(scope.path.virtual)
+                        mounts is not None
+                        and mounts.is_root(scope.path.virtual)
                     )
                 )
             ):

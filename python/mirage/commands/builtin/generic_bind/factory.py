@@ -22,11 +22,10 @@ from mirage.cache.context import active_cache_manager
 from mirage.commands.builtin.generic_bind.adapter import (
     GenericCommand,
     mount_io,
-    with_command_guards,
     with_dir_guard,
 )
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
-from mirage.commands.builtin.utils.links import serves, with_links
+from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.config import (
     Command,
     CommandCatalog,
@@ -39,7 +38,6 @@ from mirage.commands.spec import SPECS
 from mirage.errors.fs import eisdir
 from mirage.io.cooperative import chunks
 from mirage.types import PathSpec
-from mirage.view.types import NamespaceView
 
 
 def _cached_stat(
@@ -74,34 +72,6 @@ async def _cached_stat_result(
         if size is not None:
             result = result.model_copy(update={"size": size})
     return result
-
-
-def scan_io(
-    ops: CommandIO,
-    ns: NamespaceView | None,
-    prefix: str,
-) -> tuple[CommandIO, bool]:
-    """The adapter a bespoke search command scans through, and whether a
-    hide, a path rule or a coded pre_vfs policy judges anything on its
-    mount.
-
-    The mount, not the operands: a service's own search answers for more
-    than the operand it is given (a whole folder for one of its days,
-    every channel under a container). A judged command must not hand the
-    service's search the answer, since the service sees every entry, and
-    its scan reads the operands through the guards the generic builders
-    bind; an unjudged one scans the mount's own table. Either reads its
-    content at the dispatcher, which admits the path before a warm serve.
-
-    Args:
-        ops (CommandIO): the backend's raw IO adapter.
-        ns (NamespaceView | None): the command's namespace view.
-        prefix (str): the prefix of the mount running the command.
-    """
-    scoped = ns.scoped if ns is not None else None
-    if scoped is None or not scoped(prefix.rstrip("/") or "/"):
-        return ops, False
-    return with_command_guards(with_stat_cache(ops)), True
 
 
 async def _slash_checked_write(
@@ -170,7 +140,7 @@ def _write_wraps(ops: CommandIO) -> CommandIO:
     return with_slash_guard(ops)
 
 
-async def _run_with_namespace_globs(
+async def _run_builder(
     finish: Callable[[CommandIO], CommandIO],
     fn: Callable[..., Any],
     table: Callable[[CommandIO], CommandIO] | None,
@@ -181,22 +151,15 @@ async def _run_with_namespace_globs(
     *,
     split: bool = True,
 ) -> Any:
-    """Run a builder over the mount's table, with the invocation's
-    namespace facts stamped on below every guard.
+    """Run a builder over the mount's table, with the invocation's glob
+    facts stamped on below the dir guard.
 
     The table is the mount's (``opts.io``), read per invocation, so one
-    registration serves every mount. No VFS stores a symlink and a nested
-    mount's keys live in another VFS, so the table answers for the links
-    (``with_links``) and a glob takes the names the namespace owes a
-    directory (``glob_children``). Both are session-scoped, so they are
-    stamped on here, per invocation, from ``opts.ns`` -- and
-    the whole guard chain is applied on top of the stamped copy, so every
-    guard that consumes a namespace fact simply reads it off the table it
-    wraps: glob resolution derives from ``glob_children``, the dir guard
-    closes over it, and the hidden guard's rmdir captures it for its
-    emptiness judgment. The stamp happens whether or not the namespace
-    owes this directory anything, so there is one code path rather than
-    two; the guards read the current session at call time.
+    registration serves every mount. Its stat and readdir are the
+    dispatcher's, which answer for links and nested mounts, so what is
+    stamped is only what a glob needs beside them: where a link it
+    matched leads (``glob_target_stat``), read off the session's files,
+    and the line's operand resolution (``glob_follow``).
 
     Args:
         finish (Callable): the builder tier's stat and slash wraps,
@@ -213,22 +176,11 @@ async def _run_with_namespace_globs(
     """
     io = mount_io(opts)
     raw = table(io) if table is not None else io
-    ns = opts.ns
-    links = ns.links if ns is not None else None
-    stamped = with_links(
-        replace(
-            raw,
-            glob_children=ns.child_mounts if ns is not None else None,
-            glob_target_stat=(
-                links.target_stat if links is not None else None
-            ),
-            glob_follow=ns.follow_operands if ns is not None else None,
-        ),
-        links,
-        opts.dispatch,
-        functools.partial(
-            serves, ns.mounts if ns is not None else None, opts.mount_prefix
-        ),
+    links = links_of(opts)
+    stamped = replace(
+        raw,
+        glob_target_stat=(links.target_stat if links is not None else None),
+        glob_follow=opts.follow_operands,
     )
     # The command's path checks speak outside the stat and slash wraps
     # (`finish`), for the slots that still reach the backend past the
@@ -236,7 +188,7 @@ async def _run_with_namespace_globs(
     # walks are the dispatcher's (`dispatched_io` on the mount's table),
     # which judges each itself and declines a one-call walk whose subtree
     # the caller's view restricts.
-    bound = with_dir_guard(with_command_guards(finish(stamped)))
+    bound = with_dir_guard(finish(stamped))
     if split:
         # A RAM or cache read arrives as one whole chunk, over which a
         # scan that splits its buffer per line is quadratic and cannot be
@@ -270,7 +222,7 @@ def _bind(
         _write_wraps if builder.write and not builder.read else _stat_wraps
     )
     bound = functools.partial(
-        _run_with_namespace_globs,
+        _run_builder,
         finish,
         builder.fn,
         table,

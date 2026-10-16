@@ -18,12 +18,7 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { treeWalk } from '../../utils/tree.ts'
 import type { IndexCacheStore } from '../../../../cache/index/store.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
-import {
-  type GenericCommand,
-  overlaidStat,
-  resolveGlobOf,
-  type GenericCommandFn,
-} from '../adapter.ts'
+import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
 const ls: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
@@ -37,7 +32,7 @@ const ls: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
       ops.readdir(accessor, p, idx, nofollow),
     (p: PathSpec) => ops.stat(accessor, p, idx),
   )
-  return lsGeneric(resolved, opts, readdir, overlaidStat(stat, opts.ns?.statOverlay))
+  return lsGeneric(resolved, opts, readdir, stat)
 }
 
 export const BUILDER: GenericCommand = {

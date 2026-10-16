@@ -25,7 +25,8 @@ import { toScope, scopePath } from '../scope.ts'
 import { joinPath, resolveTarget, typedPath, splitModeOptions } from './dirs.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import { linkViewFor } from '../../../mount/namespace/view.ts'
+import { linkView } from '../../../../commands/builtin/utils/links.ts'
+import { Files } from '../../../files.ts'
 import { CD_OPTIONS, CD_USAGE } from './constants.ts'
 import { classifyBarePath } from '../../../expand/classify/index.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -82,8 +83,10 @@ function sessionFollow(
   session: SessionState,
 ): ((path: string) => string) | null {
   if (namespace.symlinkTargets().size === 0) return null
-  const links = linkViewFor(namespace, dispatch, session.visibility)
-  return links === null ? null : (path: string) => links.resolve(path)
+  const links = linkView(
+    new Files(dispatch, null, namespace, () => null, { visibility: () => session.visibility }),
+  )
+  return links === undefined ? null : (path: string) => links.resolve(path)
 }
 
 export async function handleCd(

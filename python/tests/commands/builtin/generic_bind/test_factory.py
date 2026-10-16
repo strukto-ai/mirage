@@ -19,16 +19,15 @@ import pytest
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.factory import (
     GENERIC_COMMANDS,
-    _run_with_namespace_globs,
+    _run_builder,
     generic,
-    scan_io,
     with_slash_guard,
     with_stat_cache,
 )
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
-from mirage.view.types import LinkView, NamespaceView
+from mirage.workspace.files import Files
 
 
 class _CountingBackend:
@@ -96,38 +95,24 @@ def test_generic_with_a_table_registers_a_copy_for_one_backend():
     assert ls.spec == generic("ls").spec
 
 
-def test_scan_io_guards_only_a_judged_mount():
-    # A bespoke search scans the raw adapter when nothing on its mount is
-    # hidden or refused, and the guarded one when anything is, since the
-    # service's own search can answer for more than the operand.
-    io = _ops(_CountingBackend(b"payload"))
-    free = NamespaceView(scoped=lambda _virtual: False)
-    judged = NamespaceView(scoped=lambda virtual: virtual == "/s3")
-    for ns in (free, None):
-        scan, scoped = scan_io(io, ns, "/s3/")
-        assert scan is io and not scoped
-    scan, scoped = scan_io(io, judged, "/s3/")
-    assert scan is not io and scoped
+class _NoLinks:
+    """An empty link table, as a workspace with no links holds."""
+
+    def follow(self, path: str) -> str:
+        return path
+
+    def link_stat_at(self, path: str) -> None:
+        return None
+
+    def link_stats_below(self, directory: str) -> list:
+        return []
+
+    def symlink_targets(self) -> dict[str, str]:
+        return {}
 
 
-async def _no_target(virtual: str):
-    return None
-
-
-async def _nothing_there(virtual: str) -> bool:
-    return False
-
-
-def _no_links(directory: str) -> list:
-    return []
-
-
-def _same(path: str) -> str:
-    return path
-
-
-def _owes_nothing(parent: str) -> list[str]:
-    return []
+async def _nothing(op: str, path: PathSpec, **_):
+    return None, None
 
 
 @pytest.mark.asyncio
@@ -140,17 +125,8 @@ async def test_namespace_globs_stamp_the_link_target_stat():
     async def capture(ops, accessor, paths, texts, opts):
         seen.append(ops)
 
-    links = LinkView(
-        stat_at=_no_links,
-        subtree=_no_links,
-        resolve=_same,
-        exists=_nothing_there,
-        target_stat=_no_target,
-    )
-    opts = CommandOpts(
-        ns=NamespaceView(links=links, child_mounts=_owes_nothing)
-    )
-    await _run_with_namespace_globs(
+    opts = CommandOpts(vfs=Files([], _nothing, links=_NoLinks()))
+    await _run_builder(
         lambda ops: ops,
         capture,
         None,
@@ -159,7 +135,7 @@ async def test_namespace_globs_stamp_the_link_target_stat():
         [],
         replace(opts, io=_ops(_CountingBackend(b""))),
     )
-    assert seen[0].glob_target_stat is _no_target
+    assert seen[0].glob_target_stat is not None
 
 
 @pytest.mark.asyncio
@@ -169,8 +145,8 @@ async def test_namespace_globs_stamp_nothing_without_links():
     async def capture(ops, accessor, paths, texts, opts):
         seen.append(ops)
 
-    opts = CommandOpts(ns=NamespaceView(child_mounts=_owes_nothing))
-    await _run_with_namespace_globs(
+    opts = CommandOpts(vfs=Files([], _nothing))
+    await _run_builder(
         lambda ops: ops,
         capture,
         None,

@@ -146,7 +146,6 @@ from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.store import NamespaceStore
-from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.mount.read_policy import check_read_capability
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import (
@@ -1113,8 +1112,11 @@ class Workspace:
         try:
             return capture_binding(
                 self._runtime_binding,
-                ns=namespace_view_of(
-                    self._registry, self._namespace, self.dispatch, session
+                vfs=Files(
+                    self._registry.mount_rows(),
+                    self.dispatch,
+                    links=self._namespace,
+                    visibility=lambda _session: session.visibility,
                 ),
                 session_view=session_view(session, self.policies),
                 processes=self._process_view(session),

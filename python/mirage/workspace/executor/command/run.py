@@ -42,7 +42,6 @@ from mirage.workspace.mount import (
 )
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_readdir, path_stat
-from mirage.workspace.mount.namespace.view import namespace_view_of
 from mirage.workspace.session import env_snapshot, session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
@@ -276,18 +275,9 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
-    # The facts the backend cannot supply, offered to every command and
-    # delivered only to the handlers that name them as a parameter.
-    # ls/stat render stat rows from the backend's own stat, which never
-    # sees namespace attr overlays (chmod/chown/touch on overlay backends)
-    # or the default owner; the merge makes ls -l and stat -c agree.
-    # cp/mv -u freshness checks compare the same merged mtimes, and
-    # find -mtime filters on them (touch results, observed writes).
-    # Symlinks are namespace state no backend readdir or stat can see.
     # A traversal command's start point is statted through the dispatcher
     # so a start point under another mount answers (`find -L` follows a
     # link across mounts before the command ever runs).
-    ns = namespace_view_of(registry, namespace, dispatch, session, follow)
     stat_path = (
         functools.partial(path_stat, dispatch)
         if dispatch is not None
@@ -321,7 +311,12 @@ async def run_on_mount(
                 stdin=stdin,
                 cwd=session.cwd,
                 dispatch=dispatch,
-                vfs=Files(registry.mount_rows(), dispatch, links=namespace),
+                vfs=Files(
+                    registry.mount_rows(),
+                    dispatch,
+                    links=namespace,
+                    visibility=lambda _session: session.visibility,
+                ),
                 session_id=session.session_id,
                 env=env_snapshot(session),
                 session_view=session_view(
@@ -336,7 +331,7 @@ async def run_on_mount(
                 exec_path_allowed=registry.exec_allowed_at,
                 runtime=line_runtime,
                 runtime_unavailable=registry.runtime_unavailable.get(cmd_name),
-                ns=ns,
+                follow_operands=follow,
                 stat_path=stat_path,
                 readdir_path=readdir_path,
                 shell=(

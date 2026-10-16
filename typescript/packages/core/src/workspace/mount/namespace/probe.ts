@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, PathSpec } from '../../../types.ts'
 import { isEnotdir, isMissError, isEnoent } from '../../../errors/fs.ts'
-import { gnuBasename, posixNormpath } from '../../../utils/path.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
-import type { StatOverlay } from '../../../view/types.ts'
+import { posixNormpath } from '../../../utils/path.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { Namespace } from './namespace.ts'
 import type { FsCondition } from '../../../errors/types.ts'
+import { resolvePathStat } from '../../../commands/builtin/utils/paths.ts'
 
 export async function statOrNull(dispatch: DispatchFn, path: PathSpec): Promise<FileStat | null> {
   // A missing destination is an expected mv case (plain rename), not an
@@ -36,68 +35,17 @@ export async function statOrNull(dispatch: DispatchFn, path: PathSpec): Promise<
   }
 }
 
-// What a path is, asked on both channels a backend can answer on.
-//
-// A point lookup alone cannot decide. On a prefix store a directory is not
-// an object, it is the set of keys under it, so stat misses what readdir
-// would list. Absence therefore takes *both* channels coming back empty,
-// which is the only evidence that nothing is there.
-//
-// The listing has to be non-empty to count: those stores answer a missing
-// path with [] rather than raising, and cannot hold an empty directory
-// anyway (one with no keys under it does not exist). Measured across every
-// integ target: an implicit directory answers here, a missing path does not.
-// That holds only while a backend's readdir refuses a path it cannot prove:
-// postgres answered tables/views under any first segment, and every absent
-// schema read as a directory here.
-//
-// A link loop in the path is absence too: the walk reaches nothing there,
-// which is the question this answers, and a diagnostic that has to name
-// the errno asks missCondition.
-export async function resolvePathStat(
-  dispatch: DispatchFn,
-  path: PathSpec,
-): Promise<FileStat | null> {
-  let stat: FileStat | null = null
-  try {
-    const [s] = await dispatch('stat', path)
-    stat = s as FileStat | null
-  } catch (exc) {
-    if (!isMissError(exc) && !isEloop(exc)) throw exc
-  }
-  if (stat !== null) return stat
-  let entries: unknown
-  try {
-    const [raw] = await dispatch('readdir', path)
-    entries = raw
-  } catch (exc) {
-    if (!isMissError(exc) && !isEloop(exc)) throw exc
-    return null
-  }
-  if (!Array.isArray(entries) || entries.length === 0) return null
-  return new FileStat({
-    name: gnuBasename(rstripSlash(path.virtual)),
-    type: FileType.DIRECTORY,
-  })
-}
-
 // Stat one virtual path through the workspace, null when absent.
 //
 // Resolves through the op dispatcher rather than one backend, so a path
 // under another mount answers correctly. This is what a traversal command
 // asks about its own start point: a directory can be walked, a file is
-// reported as itself, and null is GNU's missing-operand error. The
-// overlay is applied on the way out for the reason linkTargetStat states:
-// Python's dispatcher applies it itself, this one does not.
+// reported as itself, and null is GNU's missing-operand error.
 export async function pathStat(
   dispatch: DispatchFn,
   virtual: string | PathSpec,
-  overlay: StatOverlay | null = null,
 ): Promise<FileStat | null> {
-  const spec = PathSpec.fromStrPath(virtual, undefined, '/')
-  const stat = await resolvePathStat(dispatch, spec)
-  if (stat === null) return null
-  return overlay !== null ? overlay(spec.virtual, stat) : stat
+  return resolvePathStat(dispatch, PathSpec.fromStrPath(virtual, undefined, '/'))
 }
 
 // The condition a diagnostic names for a path pathStat found nothing at.
@@ -152,15 +100,6 @@ export async function pathExists(
   }
 }
 
-// The stat of what a link points at, or null when it dangles.
-//
-// Under -L the reported entity is the target, so its type drives -type
-// and its size and mtime drive -size and -mtime. The stat goes through
-// dispatch rather than one backend because a link may point into
-// another mount, and through the overlay because the target's mtime may
-// be namespace state (touch results, observed writes). Python gets the
-// overlay from the ops dispatcher itself; here it is applied on the way
-// out, against the resolved path rather than the link's.
 /**
  * Where a path really points, as the dispatcher can address it: the namespace's
  * walk, with a relative target's walk up from the link's own directory
@@ -173,11 +112,16 @@ export function resolveLink(namespace: Namespace, virtual: string): string {
   return posixNormpath(namespace.follow(virtual))
 }
 
+// The stat of what a link points at, or null when it dangles.
+//
+// Under -L the reported entity is the target, so its type drives -type
+// and its size and mtime drive -size and -mtime. The stat goes through
+// dispatch rather than one backend because a link may point into
+// another mount. Mirrors Python's link_target_stat.
 export async function linkTargetStat(
   namespace: Namespace,
   dispatch: DispatchFn,
   virtual: string,
-  overlay: StatOverlay | null,
 ): Promise<FileStat | null> {
   let target: string
   try {
@@ -190,7 +134,5 @@ export async function linkTargetStat(
     // as -type l and exit 0.
     return null
   }
-  const stat = await statOrNull(dispatch, PathSpec.fromStrPath(target, ''))
-  if (stat === null || overlay === null) return stat
-  return overlay(target, stat)
+  return statOrNull(dispatch, PathSpec.fromStrPath(target, ''))
 }
