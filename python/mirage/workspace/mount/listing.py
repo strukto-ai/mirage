@@ -144,27 +144,37 @@ async def unproven_miss(index: IndexCacheStore, key: str) -> bool:
     )
 
 
-async def stored_stat(index: IndexCacheStore, key: str) -> FileStat | None:
+async def stored_stat(
+    index: IndexCacheStore,
+    key: str,
+    proves: Callable[[str], bool] | None = None,
+) -> FileStat | None:
     """A stat the stored listings answer, None when none does.
 
     The row the parent's listing holds answers it, so a listing costs
     one request and the stat of each child after it none. A complete
-    listing that does not name the path answers ENOENT the same way; a
-    window that does not answers nothing. A directory whose own listing
-    is held answers with the row a subtree read kept for it.
+    listing that does not name the path answers ENOENT the same way,
+    where ``proves`` says its folder's listing proves a name absent; a
+    window that does not answers nothing, and neither does a listing
+    that proves nothing. A directory whose own listing is held answers
+    with the row a subtree read kept for it.
 
     Args:
         index (IndexCacheStore): the mount's index.
         key (str): the path's key, below the mount root.
+        proves (Callable[[str], bool] | None): whether a folder's
+            complete listing proves a name it leaves out absent; None
+            for every one.
 
     Raises:
         FileNotFoundError: a complete, live listing of the parent does
             not name the path.
     """
-    listing = await index.list_dir(folder_of(key))
+    folder = folder_of(key)
+    listing = await index.list_dir(folder)
     if listing.entries is not None:
         if key not in listing.entries:
-            if listing.window:
+            if listing.window or (proves is not None and not proves(folder)):
                 return None
             raise enoent(key)
     elif key not in (listing.partial_entries or []):

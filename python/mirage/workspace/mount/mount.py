@@ -1486,13 +1486,23 @@ class MountEntry:
             index (IndexCacheStore): the mount's index.
             key (str): the path's key, below the mount root.
         """
-        try:
-            return self._whole(await stored_stat(index, key))
-        except FileNotFoundError as exc:
-            if await self._unproven(index, key):
-                logger.debug("%s left to the backend: %s", key, exc)
-                return None
-            raise
+        return self._whole(
+            await stored_stat(
+                index, key, functools.partial(self._proves, index)
+            )
+        )
+
+    def _proves(self, index: IndexCacheStore, folder: str) -> bool:
+        """Whether a complete listing of ``folder`` proves a name it
+        leaves out absent: always, but on a VFS that checks such a name
+        again (``_unproven``), only a listing the running command fetched.
+
+        Args:
+            index (IndexCacheStore): the mount's index.
+            folder (str): the folder's key.
+        """
+        checks = self._asks_by_path or self.vfs.supports("write")
+        return not checks or index.listed_this_command(folder)
 
     @property
     def _asks_by_path(self) -> bool:

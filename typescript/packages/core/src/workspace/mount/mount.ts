@@ -1012,13 +1012,17 @@ export class MountEntry {
    * Mirrors Python's `_stored_row`.
    */
   private async storedRow(index: IndexCacheStore, key: string): Promise<FileStat | null> {
-    try {
-      return this.whole(await storedStat(index, key))
-    } catch (err) {
-      if (!isEnoent(err) || !(await this.unproven(index, key))) throw err
-      console.debug(`${key} left to the backend: ${String(err)}`)
-      return null
-    }
+    return this.whole(await storedStat(index, key, (folder) => this.proves(index, folder)))
+  }
+
+  /**
+   * Whether a complete listing of `folder` proves a name it leaves out absent:
+   * always, but on a VFS that checks such a name again (`unproven`), only a
+   * listing the running command fetched. Mirrors Python's `_proves`.
+   */
+  private proves(index: IndexCacheStore, folder: string): boolean {
+    const checks = this.asksByPath || this.vfs.supports('write')
+    return !checks || index.listedThisCommand(folder)
   }
 
   /** Whether the VFS's stat asks by path, handed no stored row. */

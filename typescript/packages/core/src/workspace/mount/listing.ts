@@ -112,16 +112,22 @@ export async function unprovenMiss(index: IndexCacheStore, key: string): Promise
  * A stat the stored listings answer, null when none does. The row the
  * parent's listing holds answers it, so a listing costs one request and the
  * stat of each child after it none. A complete listing that does not name the
- * path rejects with ENOENT the same way; a window that does not answers
- * nothing. A directory whose own listing is held
- * answers with the row a subtree read kept for it. `key` is below the mount
- * root.
+ * path rejects with ENOENT the same way, where `proves` says its folder's
+ * listing proves a name absent; a window that does not answers nothing, and
+ * neither does a listing that proves nothing. A directory whose own listing is
+ * held answers with the row a subtree read kept for it. `key` is below the
+ * mount root.
  */
-export async function storedStat(index: IndexCacheStore, key: string): Promise<FileStat | null> {
-  const listing = await index.listDir(folderOf(key))
+export async function storedStat(
+  index: IndexCacheStore,
+  key: string,
+  proves: ((folder: string) => boolean) | null = null,
+): Promise<FileStat | null> {
+  const folder = folderOf(key)
+  const listing = await index.listDir(folder)
   if (listing.entries != null) {
     if (!listing.entries.includes(key)) {
-      if (listing.window === true) return null
+      if (listing.window === true || (proves !== null && !proves(folder))) return null
       throw enoent(key)
     }
   } else if (listing.partialEntries?.includes(key) !== true) {
