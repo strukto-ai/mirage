@@ -149,17 +149,18 @@
                   "home/setup/notion",
                   "home/setup/trello"
                 ]
-              },
-              {
-                "group": "Search & Performance",
-                "icon": "plug",
-                "pages": [
-                  "home/integration/search",
-                  "home/integration/lines",
-                  "home/integration/checksums",
-                  "home/integration/walks"
-                ]
               }
+            ]
+          },
+          {
+            "group": "Integration",
+            "icon": "plug",
+            "pages": [
+              "home/integration/overview",
+              "home/integration/search",
+              "home/integration/lines",
+              "home/integration/checksums",
+              "home/integration/walks"
             ]
           },
           {

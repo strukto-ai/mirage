@@ -1,0 +1,23 @@
+---
+title: Integration
+sidebarTitle: Overview
+description: Connect your backend's search and query APIs to familiar shell commands.
+icon: plug
+---
+
+Mirage can use your backend's search, queries and metadata to answer shell
+commands with fewer requests and downloads. For example, `grep` can use a
+RAG index to find candidate documents, and `head` can fetch a few database
+rows without reading the whole table.
+
+| Capability | Commands | Your backend provides |
+| --- | --- | --- |
+| [Search](/home/integration/search) | `grep`, `rg` | Candidate files or lines from a search index. |
+| [Lines](/home/integration/lines) | `head`, `tail`, `wc -l` | First or last rows, line counts and live updates. |
+| [Checksums](/home/integration/checksums) | `md5sum`, `sha256sum` and other hash commands | A stored hash or a hash computed remotely. |
+| [Walks](/home/integration/walks) | `find`, `du`, `ls -R`, `tree` | A directory tree returned in bulk. |
+
+Supported VFS types already connect these capabilities where available.
+For a custom VFS, implement the methods in each guide. Mirage handles
+command options and formatting, and uses ordinary file reads or directory
+listings when a capability cannot answer.
