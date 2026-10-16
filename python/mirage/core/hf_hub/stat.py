@@ -20,7 +20,7 @@ from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.hf_hub.client import HfHubError
 from mirage.core.hf_hub.lookup import refusals_denied
 from mirage.core.hf_hub.repo import head_commit, mount_version
-from mirage.core.hf_hub.tree import fetch_path, row_of
+from mirage.core.hf_hub.tree import fetch_path, fetch_tree, row_of, tree_rows
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -69,6 +69,39 @@ async def stat(
     if found is None:
         raise enoent(path_spec.virtual)
     return row_of(found, rel.rsplit("/", 1)[-1])
+
+
+async def tree(
+    accessor: HfHubAccessor, path: PathSpec
+) -> dict[str, FileStat] | None:
+    """Every entry under a directory of the repository, each as its row,
+    from the one paged walk of the Hub's tree API with ``recursive=true``
+    that a listing takes, at the commit the revision's head names, as a
+    listing walks it. None when ``path`` is no directory in it, so the
+    walk's readdir reports what is there.
+
+    Args:
+        accessor (HfHubAccessor): backend handle.
+        path (PathSpec): the directory.
+
+    Raises:
+        PermissionError: the Hub declined to show the repository.
+    """
+    rel = path.mount_path.strip("/")
+    with refusals_denied(path):
+        head = await head_commit(accessor) or None
+        folders = tree_rows(await fetch_tree(accessor, head))
+    if rel not in folders:
+        return None
+    lead = rel + "/" if rel else ""
+    found: dict[str, FileStat] = {}
+    for folder, rows in folders.items():
+        if folder != rel and not folder.startswith(lead):
+            continue
+        base = folder[len(lead) :]
+        for row in rows:
+            found[f"{base}/{row.name}" if base else row.name] = row
+    return found
 
 
 async def _root_version(

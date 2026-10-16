@@ -123,6 +123,10 @@ function resolveOneDriveConfig(config: OneDriveConfig): OneDriveConfigResolved {
 
 export class OneDriveAccessor extends Accessor {
   readonly config: OneDriveConfigResolved
+  // The drive's Graph `driveType` (personal, business or documentLibrary),
+  // asked once and kept: it decides whether the `/delta` feed can start below
+  // the drive root.
+  driveType: string | null = null
 
   constructor(config: OneDriveConfig) {
     super()

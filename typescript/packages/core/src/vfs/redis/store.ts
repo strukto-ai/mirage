@@ -67,6 +67,8 @@ export interface RedisStoreLike {
   statMany(
     paths: readonly (readonly [string, boolean])[],
   ): Promise<[Record<string, string>, number | null, string | null][]>
+  /** The server's `INFO memory` section, as the server prints it. */
+  infoMemory(): Promise<string>
   setAttrs(path: string, fields: Record<string, string>): Promise<void>
   delAttrs(path: string): Promise<void>
   listAttrs(): Promise<Record<string, Record<string, string>>>

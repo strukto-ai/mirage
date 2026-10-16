@@ -14,7 +14,7 @@ import { capacity as onedriveCapacity } from '../../core/onedrive/capacity.ts'
 import type { Handed } from '../types.ts'
 import { readdir } from '../../core/onedrive/readdir.ts'
 import { read } from '../../core/onedrive/read.ts'
-import { stat } from '../../core/onedrive/stat.ts'
+import { stat, tree } from '../../core/onedrive/stat.ts'
 import { readStream } from '../../core/onedrive/stream.ts'
 import { exists } from '../../core/onedrive/exists.ts'
 import { write } from '../../core/onedrive/write.ts'
@@ -82,6 +82,10 @@ export class OneDriveVFS extends BaseVFS {
 
   override exists(path: PathSpec): Promise<boolean> {
     return exists(this.accessor, path)
+  }
+
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return tree(this.accessor, path)
   }
 
   override write(path: PathSpec, data: Uint8Array): Promise<void> {

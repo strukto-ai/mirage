@@ -27,6 +27,8 @@ import { stat as hubStat } from '../../core/hf_hub/stat.ts'
 import { readStream as hubStream } from '../../core/hf_hub/stream.ts'
 import { exists as hubExists } from '../../core/hf_hub/exists.ts'
 import { SCOPE_ERROR } from '../../core/hf_hub/constants.ts'
+import { checksum as hubChecksum } from '../../core/hf_hub/checksum.ts'
+import { tree as hubTree } from '../../core/hf_hub/stat.ts'
 
 /**
  * The shared body of the three Hub *repository* VFS.
@@ -73,6 +75,7 @@ export abstract class HfHubVFS extends BaseVFS {
     readStream: ['entry'],
     stat: ['entry', 'index'],
     exists: ['entry'],
+    checksum: ['entry'],
   } as const
 
   override readdir(path: PathSpec): Promise<DirListing> {
@@ -100,5 +103,13 @@ export abstract class HfHubVFS extends BaseVFS {
 
   override exists(path: PathSpec, handed?: Handed): Promise<boolean> {
     return hubExists(this.accessor, path, handed?.entry)
+  }
+
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    return hubTree(this.accessor, path)
+  }
+
+  override checksum(path: PathSpec, algorithm: string, handed?: Handed): Promise<string | null> {
+    return hubChecksum(this.accessor, path, algorithm, handed?.entry)
   }
 }

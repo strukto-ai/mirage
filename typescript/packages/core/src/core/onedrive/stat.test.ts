@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
-import { stat } from './stat.ts'
+import { stat, tree } from './stat.ts'
 
 function answer(body: unknown): void {
   vi.stubGlobal(
@@ -54,5 +54,88 @@ describe('OneDrive stat', () => {
     const [docs] = await readdir(accessor, PathSpec.fromStrPath('/od', ''))
     expect(docs?.type).toBe('directory')
     expect(docs?.fingerprint).toBeNull()
+  })
+})
+
+const ME = 'https://graph.microsoft.com/v1.0/me/drive'
+
+function query(url: string, select: string): string {
+  const target = new URL(url)
+  target.searchParams.set('$select', select)
+  return target.toString()
+}
+
+// Each URL answers its body; any other request fails the test.
+function routes(bodies: Record<string, unknown>): string[] {
+  const asked: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: unknown) => {
+      const url = String(input)
+      asked.push(url)
+      if (!(url in bodies)) throw new Error(`unstubbed request: ${url}`)
+      return Promise.resolve(new Response(JSON.stringify(bodies[url]), { status: 200 }))
+    }),
+  )
+  return asked
+}
+
+const FEED = [
+  { id: 'R', name: 'root', root: {}, folder: {} },
+  { id: 'D', name: 'Docs', parentReference: { id: 'R' }, folder: { childCount: 1 } },
+  {
+    id: 'f',
+    name: 'report.docx',
+    parentReference: { id: 'D' },
+    size: 4,
+    file: {},
+    cTag: 'c-report',
+  },
+]
+
+describe('OneDrive tree', () => {
+  it('reads the feed of a personal drive root in one read', async () => {
+    routes({
+      [query(ME, 'driveType')]: { driveType: 'personal' },
+      [query(`${ME}/root`, 'id,folder')]: { id: 'R', folder: {} },
+      [`${ME}/root/delta`]: { value: FEED },
+    })
+    const found = await tree(
+      new OneDriveAccessor({ accessToken: 'token' }),
+      PathSpec.fromStrPath('/od', ''),
+    )
+    expect([...(found?.keys() ?? [])].sort()).toEqual(['Docs', 'Docs/report.docx'])
+    expect(found?.get('Docs/report.docx')?.size).toBe(4)
+    expect(found?.get('Docs/report.docx')?.fingerprint).toBe('c-report')
+  })
+
+  it('reads the feed below the root of a personal drive', async () => {
+    const accessor = new OneDriveAccessor({ accessToken: 'token' })
+    routes({
+      [query(ME, 'driveType')]: { driveType: 'personal' },
+      [query(`${ME}/root:/Docs`, 'id,folder')]: { id: 'D', folder: {} },
+      [`${ME}/root:/Docs:/delta`]: { value: FEED.slice(1) },
+    })
+    const found = await tree(accessor, PathSpec.fromStrPath('/od/Docs', 'Docs'))
+    expect([...(found?.keys() ?? [])]).toEqual(['report.docx'])
+    expect(accessor.driveType).toBe('personal')
+  })
+
+  it.each(['business', 'documentLibrary'])('keeps the walk on a %s drive', async (kind) => {
+    const accessor = new OneDriveAccessor({ accessToken: 'token' })
+    const asked = routes({ [query(ME, 'driveType')]: { driveType: kind } })
+    expect(await tree(accessor, PathSpec.fromStrPath('/od', ''))).toBeNull()
+    expect(await tree(accessor, PathSpec.fromStrPath('/od/Docs', 'Docs'))).toBeNull()
+    expect(asked).toHaveLength(1)
+  })
+
+  it('keeps the walk while the drive type is refused', async () => {
+    const accessor = new OneDriveAccessor({ accessToken: 'token' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(JSON.stringify({}), { status: 403 }))),
+    )
+    expect(await tree(accessor, PathSpec.fromStrPath('/od/Docs', 'Docs'))).toBeNull()
+    expect(accessor.driveType).toBeNull()
   })
 })

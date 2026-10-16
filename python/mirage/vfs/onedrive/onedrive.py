@@ -29,6 +29,7 @@ from mirage.core.onedrive.rename import rename as _rename
 from mirage.core.onedrive.rm import rm_r as _rm_r
 from mirage.core.onedrive.rmdir import rmdir as _rmdir
 from mirage.core.onedrive.stat import stat as _stat
+from mirage.core.onedrive.stat import tree as _tree
 from mirage.core.onedrive.stream import read_stream as _read_stream
 from mirage.core.onedrive.truncate import truncate as _truncate
 from mirage.core.onedrive.unlink import unlink as _unlink
@@ -87,6 +88,9 @@ class OneDriveVFS(BaseVFS):
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
+
+    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         await _write(self.accessor, path, data)

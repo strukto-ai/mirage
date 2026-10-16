@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from mirage.core.redis.append import append_bytes as _append
+from mirage.core.redis.capacity import capacity as _capacity
 from mirage.core.redis.constants import SCOPE_ERROR
 from mirage.core.redis.copy import copy as _copy
 from mirage.core.redis.create import create as _create
@@ -33,7 +34,7 @@ from mirage.core.redis.stream import read_stream as _read_stream
 from mirage.core.redis.truncate import truncate as _truncate
 from mirage.core.redis.unlink import unlink as _unlink
 from mirage.core.redis.write import write as _write
-from mirage.types import FileStat, PathSpec
+from mirage.types import CapacityResult, FileStat, PathSpec
 
 try:
     import redis as sync_redis
@@ -157,6 +158,9 @@ class RedisVFS(BaseVFS):
             atime=atime,
             mtime=mtime,
         )
+
+    async def capacity(self) -> CapacityResult:
+        return await _capacity(self.accessor)
 
     def storage_location(self) -> str:
         # The server URL (host, port and db) plus the key prefix pin the

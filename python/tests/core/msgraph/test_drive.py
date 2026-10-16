@@ -317,3 +317,151 @@ async def test_stream_item_records_the_virtual_path_on_a_pinned_read():
         reset_revisions(revisions)
     assert b"".join(chunks) == b"old"
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+def _feed(top: dict, rows: list[dict]):
+    asked: dict[str, list] = {"get": [], "list": []}
+
+    async def get(config, url, params=None, session=None):
+        asked["get"].append((url, params))
+        if isinstance(top, Exception):
+            raise top
+        return top
+
+    async def listing(config, url, params=None, session=None):
+        asked["list"].append(url)
+        return rows
+
+    return get, listing, asked
+
+
+def _row(item_id: str, name: str, parent: str, **facets) -> dict:
+    return {
+        "id": item_id,
+        "name": name,
+        "parentReference": {"id": parent},
+        **facets,
+    }
+
+
+@pytest.mark.asyncio
+async def test_delta_tree_places_every_item_by_its_parents(monkeypatch):
+    rows = [
+        _row("T", "reports", "OUT", folder={"childCount": 2}),
+        _row("a", "a.txt", "A", size=3, file={}, cTag="c1"),
+        _row("A", "sub", "T", folder={"childCount": 1}),
+        _row("b", "b.txt", "T", size=1, file={}, cTag="c2"),
+        _row("b", "b.txt", "T", size=5, file={}, cTag="c3"),
+        _row("P", "notes", "T", package={"type": "oneNote"}, size=9),
+        _row("p", "page.one", "P", size=2, file={}, cTag="c4"),
+        _row("x", "gone.txt", "T", file={}, deleted={}),
+        _row("o", "lost.txt", "NOWHERE", size=1, file={}, cTag="c5"),
+    ]
+    get, listing, asked = _feed({"id": "T", "folder": {}}, rows)
+    monkeypatch.setattr(drive_ops, "graph_get", get)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    found = await drive_ops.delta_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "team/reports")
+    )
+    assert asked["get"] == [(_url("team/reports"), {"$select": "id,folder"})]
+    assert asked["list"] == [_url("team/reports", "/delta")]
+    assert sorted(found) == ["b.txt", "notes", "sub", "sub/a.txt"]
+    assert found["b.txt"].size == 5
+    assert found["sub"].extra["child_count"] == 1
+    assert found["sub/a.txt"].fingerprint == "c1"
+    assert found["notes"].size == 9
+
+
+@pytest.mark.asyncio
+async def test_delta_tree_ignores_a_parent_loop(monkeypatch):
+    rows = [
+        _row("X", "x", "Y", folder={}),
+        _row("Y", "y", "X", folder={}),
+        _row("f", "f.txt", "X", size=1, file={}, cTag="c1"),
+        _row("g", "g.txt", "T", size=1, file={}, cTag="c2"),
+    ]
+    get, listing, _ = _feed({"id": "T", "folder": {}}, rows)
+    monkeypatch.setattr(drive_ops, "graph_get", get)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    found = await drive_ops.delta_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "")
+    )
+    assert list(found) == ["g.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "top",
+    [GraphError(404, "itemNotFound", "gone"), {"id": "F", "file": {}}],
+)
+async def test_delta_tree_leaves_a_file_or_nothing_to_the_walk(
+    monkeypatch, top
+):
+    get, listing, asked = _feed(top, [])
+    monkeypatch.setattr(drive_ops, "graph_get", get)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    found = await drive_ops.delta_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "f")
+    )
+    assert found is None
+    assert asked["list"] == []
+
+
+@pytest.mark.asyncio
+async def test_delta_tree_raises_what_graph_refuses(monkeypatch):
+    get, listing, _ = _feed(GraphError(403, "accessDenied", "no"), [])
+    monkeypatch.setattr(drive_ops, "graph_get", get)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    with pytest.raises(GraphError):
+        await drive_ops.delta_tree(
+            MsGraphConfig(access_token="token"), _loc("d1", "f")
+        )
+
+
+@pytest.mark.asyncio
+async def test_delta_tree_leaves_a_folder_from_another_drive_to_the_walk(
+    monkeypatch,
+):
+    rows = [
+        _row("S", "shared", "T", folder={}, remoteItem={"folder": {}}),
+        _row("g", "g.txt", "T", size=1, file={}, cTag="c1"),
+    ]
+    get, listing, _ = _feed({"id": "T", "folder": {}}, rows)
+    monkeypatch.setattr(drive_ops, "graph_get", get)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    found = await drive_ops.delta_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "")
+    )
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_delta_tree_leaves_a_refused_feed_to_the_walk(monkeypatch):
+    get, _, _ = _feed({"id": "T", "folder": {}}, [])
+
+    async def refused(config, url, params=None, session=None):
+        raise GraphError(400, "invalidRequest", "no delta here")
+
+    monkeypatch.setattr(drive_ops, "graph_get", get)
+    monkeypatch.setattr(drive_ops, "graph_list", refused)
+    found = await drive_ops.delta_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "f")
+    )
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_delta_tree_leaves_a_feed_without_ctags_to_the_walk(
+    monkeypatch,
+):
+    rows = [
+        _row("a", "a.txt", "T", size=1, file={}, cTag="c1"),
+        _row("b", "b.txt", "T", size=1, file={}),
+    ]
+    get, listing, _ = _feed({"id": "T", "folder": {}}, rows)
+    monkeypatch.setattr(drive_ops, "graph_get", get)
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    found = await drive_ops.delta_tree(
+        MsGraphConfig(access_token="token"), _loc("d1", "")
+    )
+    assert found is None

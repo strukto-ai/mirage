@@ -6,8 +6,9 @@ icon: fingerprint
 
 A VFS that defines `checksum` lets `md5sum`, `sha1sum`, `sha256sum`,
 `sha384sum`, `sha512sum` and `md5` print a file's digest without reading it,
-when the store already keeps that digest: an object's MD5 ETag, or the MD5,
-SHA-1 and SHA-256 a drive records for each file.
+when the store already keeps that digest (an object's MD5 ETag, or the MD5,
+SHA-1 and SHA-256 a drive records for each file) or can hash the file where it
+lives.
 
 ## Interface
 
@@ -51,3 +52,6 @@ mount's mode and policies apply to it.
 | S3, R2, GCS, MinIO, Ceph, DigitalOcean Spaces, Wasabi | `md5`, from the object's ETag | a multipart upload, an object under SSE-KMS or SSE-C, and on stores other than AWS any encrypted object |
 | Google Drive | `md5`, `sha1`, `sha256` | Google Docs, Sheets and Slides files, which have no stored bytes |
 | Box | `sha1`, asked live | a file Box has not hashed yet |
+| Hugging Face models, datasets and spaces | `sha256` of an LFS file, its LFS oid, asked live | a file kept in git, whose oid also hashes a git header |
+| Nextcloud | `md5`, `sha1`, `sha256`, from `oc:checksums` | a file written without an `OC-Checksum` header, which keeps none |
+| SSH | every algorithm, by `md5sum` to `sha512sum` on the server | a server limited to SFTP, or one without the tool |

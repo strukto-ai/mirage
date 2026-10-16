@@ -509,6 +509,123 @@ export async function* iterTree(
   }
 }
 
+/**
+ * The id of the folder a driveItem sits in, '' when it names none: a listing's
+ * item or a `/delta` feed's. Mirrors Python's `parent_id`.
+ */
+export function parentId(item: { parentReference?: unknown }): string {
+  const ref = item.parentReference
+  if (ref === null || typeof ref !== 'object') return ''
+  const id = (ref as { id?: unknown }).id
+  return typeof id === 'string' ? id : ''
+}
+
+/**
+ * Every item under a folder, each as a listing's stat renders it, from one
+ * read of Graph's `/delta` feed started at that folder.
+ *
+ * One request asks the folder for its id, then the feed lists every item below
+ * it a page at a time, where a walk sends a listing per folder. The feed names
+ * an item by id with its name and its parent's id, never its path, and may
+ * list one more than once (its last row is its state), so each is placed by
+ * its parents up to the folder. An item under one a listing shows as a file (a
+ * package's contents) is left out, as a listing of that file would leave it.
+ * Null when no folder is at `loc`, so the walk's readdir reports what is
+ * there, when Graph refuses the feed, when the feed holds a folder shared from
+ * another drive, whose items only that drive's feed lists, and when a file
+ * comes without the `cTag` its listing row carries (OneDrive for Business and
+ * SharePoint leave it out of the feed), since the mount keeps the answer as
+ * the folders' listings. Mirrors Python's `delta_tree`.
+ */
+export async function deltaTree(
+  config: MsGraphConfigResolved,
+  loc: DriveLoc,
+): Promise<Map<string, FileStat> | null> {
+  let top: Record<string, unknown>
+  try {
+    top = await graphGet(config, loc.item(), { $select: 'id,folder' })
+  } catch (err) {
+    if (!(err instanceof GraphError) || err.status !== 404) throw err
+    console.debug(`graph tree of ${loc.path} left to the walk: ${err.message}`)
+    return null
+  }
+  const topId = top.id
+  if (!isFolder(top) || typeof topId !== 'string') return null
+  let rows: Record<string, unknown>[]
+  try {
+    rows = await graphList(config, loc.item('/delta'))
+  } catch (err) {
+    if (!(err instanceof GraphError)) throw err
+    console.debug(`graph feed of ${loc.path} left to the walk: ${err.message}`)
+    return null
+  }
+  const items = new Map<string, Record<string, unknown>>()
+  for (const item of rows) {
+    if (typeof item.id !== 'string') continue
+    items.delete(item.id)
+    items.set(item.id, item)
+  }
+  const folders = new Map<string, Record<string, unknown>>()
+  for (const [id, item] of items) {
+    if (isFolder(item) && item.deleted === undefined) folders.set(id, item)
+  }
+  for (const item of folders.values()) if (remoteFolder(item)) return null
+  for (const item of items.values()) {
+    const live = item.file !== undefined && item.deleted === undefined
+    if (live && (typeof item.cTag !== 'string' || item.cTag === '')) return null
+  }
+  const places = new Map<string, string | null>([[topId, '']])
+  const found = new Map<string, FileStat>()
+  for (const [id, item] of items) {
+    const name = asString(item.name)
+    if (id === topId || item.deleted !== undefined || item.root !== undefined) continue
+    if (name === null || name === '') continue
+    const base = placed(parentId(item), folders, places)
+    if (base !== null) found.set(base === '' ? name : `${base}/${name}`, entryStat(item))
+  }
+  return found
+}
+
+/** Whether a feed item is a folder kept on another drive. Mirrors Python's `_remote_folder`. */
+function remoteFolder(item: Record<string, unknown>): boolean {
+  const remote = item.remoteItem
+  return remote !== null && typeof remote === 'object' && 'folder' in remote
+}
+
+/**
+ * A folder's path below the top of a `/delta` read, null when its parents
+ * never reach it; each folder looked at is kept in `places`. Mirrors Python's
+ * `_placed`.
+ */
+function placed(
+  folder: string,
+  folders: ReadonlyMap<string, Record<string, unknown>>,
+  places: Map<string, string | null>,
+): string | null {
+  const chain: string[] = []
+  const seen = new Set<string>()
+  let current = folder
+  while (!places.has(current)) {
+    const item = folders.get(current)
+    if (item === undefined || seen.has(current)) {
+      places.set(current, null)
+      break
+    }
+    chain.push(current)
+    seen.add(current)
+    current = parentId(item)
+  }
+  let base = places.get(current) ?? null
+  for (const link of chain.reverse()) {
+    if (base !== null) {
+      const name = asString(folders.get(link)?.name) ?? ''
+      base = base !== '' && name !== '' ? `${base}/${name}` : name !== '' ? name : null
+    }
+    places.set(link, base)
+  }
+  return places.get(folder) ?? null
+}
+
 // Walk knobs for callers that stack findItems under synthetic namespace
 // levels (SharePoint's site/library directories): `depthOffset` shifts the
 // reported depth so `-maxdepth`/`-mindepth` count from the real start path,

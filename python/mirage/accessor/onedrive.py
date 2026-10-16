@@ -58,3 +58,7 @@ class OneDriveAccessor(SessionAccessor):
     def __init__(self, config: OneDriveConfig) -> None:
         super().__init__(timeout=aiohttp.ClientTimeout(total=config.timeout))
         self.config = config
+        # The drive's Graph `driveType` (personal, business or
+        # documentLibrary), asked once and kept: it decides whether the
+        # `/delta` feed can start below the drive root.
+        self.drive_type: str | None = None

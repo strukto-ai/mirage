@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import asyncssh
@@ -91,6 +92,31 @@ class SSHAccessor(Accessor):
             out if isinstance(out, bytes) else b"",
             err if isinstance(err, bytes) else b"",
         )
+
+    async def run_stream(
+        self, command: str, size: int = 65536
+    ) -> AsyncGenerator[bytes, None]:
+        """Run ``command`` on the server over the mount's connection and
+        yield its output as it arrives, its standard input closed. Closing
+        the stream closes the command's channel.
+
+        Args:
+            command (str): the command line, as the server's shell reads it.
+            size (int): the most bytes one chunk carries.
+        """
+        await self.sftp()
+        conn = self._conn
+        if conn is None:
+            raise ConnectionError("the ssh connection closed")
+        process = await conn.create_process(
+            command, encoding=None, stdin=asyncssh.DEVNULL
+        )
+        try:
+            while chunk := await process.stdout.read(size):
+                yield chunk
+        finally:
+            process.close()
+            await process.wait_closed()
 
     async def close(self) -> None:
         async with self._lock:

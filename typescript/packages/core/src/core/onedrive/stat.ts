@@ -16,8 +16,8 @@ import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { GraphError, graphGet } from '../msgraph/client.ts'
-import { asNumber, folderChildCount, statItem } from '../msgraph/drive.ts'
-import { driveLoc } from './client.ts'
+import { asNumber, deltaTree, folderChildCount, statItem } from '../msgraph/drive.ts'
+import { driveBase, driveLoc } from './client.ts'
 
 export async function stat(accessor: OneDriveAccessor, path: PathSpec): Promise<FileStat> {
   if (path.vfsPath === '') {
@@ -40,4 +40,46 @@ export async function stat(accessor: OneDriveAccessor, path: PathSpec): Promise<
     }
   }
   return statItem(accessor.config, driveLoc(accessor.config, path.vfsPath), path)
+}
+
+/**
+ * Every item under a folder, each as a listing's stat renders it, from one
+ * read of Graph's `/delta` feed (`deltaTree`).
+ *
+ * Only a personal drive answers: it starts the feed at any folder and carries
+ * each file's `cTag`, the token its listing row holds. OneDrive for Business
+ * starts the feed only at the drive root and leaves the `cTag` out, so its walk
+ * lists each folder. Which kind the drive is, Graph's `driveType`, is asked
+ * once per mount. Null hands the folder to the walk, as does a drive that will
+ * not say which kind it is. Mirrors Python's `tree`.
+ */
+export async function tree(
+  accessor: OneDriveAccessor,
+  path: PathSpec,
+): Promise<Map<string, FileStat> | null> {
+  const config = accessor.config
+  if ((await driveType(accessor)) !== 'personal') return null
+  return deltaTree(config, driveLoc(config, path.vfsPath))
+}
+
+/**
+ * The drive's Graph `driveType`, asked on first use and kept; '' while Graph
+ * refuses to say, which is asked again next time. Mirrors Python's
+ * `_drive_type`.
+ */
+async function driveType(accessor: OneDriveAccessor): Promise<string> {
+  if (accessor.driveType === null) {
+    let drive: Record<string, unknown>
+    try {
+      drive = await graphGet(accessor.config, driveBase(accessor.config), {
+        $select: 'driveType',
+      })
+    } catch (err) {
+      if (!(err instanceof GraphError)) throw err
+      console.debug(`onedrive drive type unanswered: ${err.message}`)
+      return ''
+    }
+    accessor.driveType = typeof drive.driveType === 'string' ? drive.driveType : ''
+  }
+  return accessor.driveType
 }

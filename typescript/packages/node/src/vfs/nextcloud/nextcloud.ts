@@ -30,6 +30,7 @@ import { rename } from '../../core/nextcloud/rename.ts'
 import { copy, dirCopy } from '../../core/nextcloud/copy.ts'
 import { truncate } from '../../core/nextcloud/truncate.ts'
 import { capacity } from '../../core/nextcloud/capacity.ts'
+import { checksum } from '../../core/nextcloud/checksum.ts'
 import { setAttrs } from '../../core/nextcloud/set_attrs.ts'
 import { SCOPE_ERROR } from '../../core/nextcloud/constants.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -82,6 +83,10 @@ export class NextcloudVFS extends BaseVFS {
 
   override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     return readStream(this.accessor, path)
+  }
+
+  override checksum(path: PathSpec, algorithm: string): Promise<string | null> {
+    return checksum(this.accessor, path, algorithm)
   }
 
   override exists(path: PathSpec): Promise<boolean> {

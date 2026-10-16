@@ -224,6 +224,11 @@ export class RedisStore implements RedisStoreLike {
    * The attributes, length and modified time of many paths. node-redis
    * pipelines commands issued in the same tick, so this is one round trip.
    */
+  async infoMemory(): Promise<string> {
+    const c = await this.client()
+    return c.info('memory')
+  }
+
   async statMany(
     paths: readonly (readonly [string, boolean])[],
   ): Promise<[Record<string, string>, number | null, string | null][]> {

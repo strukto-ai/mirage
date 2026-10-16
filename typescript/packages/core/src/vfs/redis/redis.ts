@@ -20,7 +20,7 @@ import { BaseVFS } from '../base.ts'
 import { REDACTED_SECRET } from '../secrets.ts'
 import { PROMPT } from './prompt.ts'
 import type { RedisStoreLike } from './store.ts'
-import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
+import type { CapacityResult, PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { readdir as redisReaddir } from '../../core/redis/readdir.ts'
 import { read as redisRead } from '../../core/redis/read.ts'
@@ -40,6 +40,7 @@ import { truncate as redisTruncate } from '../../core/redis/truncate.ts'
 import { setAttrs as redisSetAttrs } from '../../core/redis/set_attrs.ts'
 import { SCOPE_ERROR } from '../../core/redis/constants.ts'
 import { tree as redisTree } from '../../core/redis/readdir.ts'
+import { capacity as redisCapacity } from '../../core/redis/capacity.ts'
 
 export interface RedisVFSState {
   type: string
@@ -172,6 +173,10 @@ export class RedisResourceBase extends BaseVFS {
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     return redisTruncate(this.accessor, path, length, noCreate)
+  }
+
+  override capacity(): Promise<CapacityResult> {
+    return redisCapacity(this.accessor)
   }
 
   override setattr(

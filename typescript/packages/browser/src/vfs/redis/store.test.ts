@@ -51,6 +51,11 @@ function bodyBytesFetch(fake: ReturnType<typeof createFakeUpstash>, sizes: numbe
 }
 
 describe('UpstashRedisStore', () => {
+  it('surfaces a refused INFO', async () => {
+    const { store } = make()
+    await expect(store.infoMemory()).rejects.toThrow(/INFO/)
+  })
+
   it('seeds the root directory before the first command', async () => {
     const { fake, store } = make()
     expect(fake.keys()).toEqual([])

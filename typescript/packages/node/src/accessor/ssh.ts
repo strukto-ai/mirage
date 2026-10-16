@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type * as Ssh2Mod from 'ssh2'
-import type { Client, SFTPWrapper } from 'ssh2'
+import type { Client, ClientChannel, SFTPWrapper } from 'ssh2'
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
 import { connectOptions } from '../utils/ssh.ts'
 import type { SSHConfig } from '../vfs/ssh/config.ts'
@@ -124,6 +124,33 @@ export class SSHAccessor extends Accessor {
         })
       })
     })
+  }
+
+  /**
+   * Run `command` on the server over the mount's connection and yield its
+   * output as it arrives, its standard input closed. Closing the stream closes
+   * the command's channel. Mirrors Python's `run_stream`.
+   */
+  async *runStream(command: string): AsyncGenerator<Uint8Array> {
+    await this.sftp()
+    const client = this.client
+    if (client === null) throw new Error('the ssh connection closed')
+    const channel = await new Promise<ClientChannel>((resolveFn, rejectFn) => {
+      client.exec(command, (err, opened) => {
+        if (err !== undefined) rejectFn(err)
+        else resolveFn(opened)
+      })
+    })
+    channel.stderr.resume()
+    channel.end()
+    try {
+      for await (const chunk of channel) {
+        const buf = chunk as Buffer
+        yield new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      }
+    } finally {
+      channel.close()
+    }
   }
 
   close(): Promise<void> {

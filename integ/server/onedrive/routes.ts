@@ -366,18 +366,31 @@ async function searchItems(
 // only in which drive they name and are resolved to (drive, rest) before this.
 // What changed after the link's token, the newest state of each item, and the
 // link the next read starts from; `token=latest` lists nothing. An item gone
-// since is its id with the `deleted` facet, which is all the vendor sends.
-async function delta(ctx: Ctx<C>, drive: string): Promise<Reply> {
-  const token = ctx.query.get('token') ?? '0'
+// since is its id with the `deleted` facet, which is all the vendor sends. A
+// read with no token is the full enumeration: the folder the feed starts at
+// and every folder and file under it, each once, the way personal OneDrive
+// answers both `root/delta` and `root:/path:/delta`. A feed started below the
+// root lists only the changes under its folder.
+async function delta(ctx: Ctx<C>, drive: string, folder: string): Promise<Reply> {
+  const scope = norm(folder)
+  if (scope !== '' && !(await dirAt(ctx.db, ctx.tenant, drive, scope))) return notFound()
+  const token = ctx.query.get('token')
   const last = await lastChange(ctx.db, ctx.tenant, drive)
   const link = `${ctx.url.origin}${ctx.url.pathname}?token=${String(last)}`
   if (token === 'latest') return { status: 200, body: { value: [], '@odata.deltaLink': link } }
+  if (token === null) {
+    return {
+      status: 200,
+      body: { value: await enumerate(ctx, drive, scope), '@odata.deltaLink': link },
+    }
+  }
   const after = Number(token)
   if (!Number.isInteger(after)) {
     return { status: 410, body: { error: { code: 'resyncRequired', message: 'Resync required' } } }
   }
   const latest = new Map<string, string>()
   for (const row of await changesAfter(ctx.db, ctx.tenant, drive, after)) {
+    if (scope !== '' && row.path !== scope && !row.path.startsWith(`${scope}/`)) continue
     latest.delete(row.itemId)
     latest.set(row.itemId, row.path)
   }
@@ -387,6 +400,28 @@ async function delta(ctx: Ctx<C>, drive: string): Promise<Reply> {
     value.push(found ?? { id, name: baseName(path), deleted: {} })
   }
   return { status: 200, body: { value, '@odata.deltaLink': link } }
+}
+
+// Every item at or under `scope`, folders first and each before its children,
+// as a full enumeration lists them; the root folder carries its `root` facet.
+async function enumerate(ctx: Ctx<C>, drive: string, scope: string): Promise<JsonValue[]> {
+  const inside = (path: string): boolean =>
+    scope === '' || path === scope || path.startsWith(`${scope}/`)
+  const at = stamp(ctx)
+  const dirs = await ctx.db.graphDir.findMany({
+    where: { tenant: ctx.tenant, drive },
+    select: { path: true },
+  })
+  const folders = new Set([scope, ...dirs.map((row) => row.path).filter(inside)])
+  const value: JsonValue[] = []
+  for (const path of [...folders].sort()) {
+    value.push(await folderItem(ctx.db, ctx.tenant, drive, path, at))
+  }
+  const files = await ctx.db.graphFile.findMany({ where: { tenant: ctx.tenant, drive } })
+  for (const row of files.sort((a, b) => (a.path < b.path ? -1 : 1))) {
+    if (inside(row.path)) value.push(await fileItem(ctx.db, ctx.tenant, ctx.url.origin, row))
+  }
+  return value
 }
 
 // An item by the id the renderer gave it, null when it is gone.
@@ -402,12 +437,13 @@ async function itemById(ctx: Ctx<C>, drive: string, id: string): Promise<JsonVal
 
 async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string): Promise<Reply> {
   if (!(await hasDrive(ctx.db, ctx.tenant, drive))) return notFound()
-  if (method === 'GET' && rest === 'root/delta') return delta(ctx, drive)
+  if (method === 'GET' && rest === 'root/delta') return delta(ctx, drive, '')
   if (method === 'GET' && rest.startsWith('items/')) {
     const found = await itemById(ctx, drive, decodeURIComponent(rest.slice('items/'.length)))
     return found === null ? notFound() : { status: 200, body: found }
   }
   const { item, action } = parseItemPath(`/${rest}`)
+  if (method === 'GET' && action === 'delta') return delta(ctx, drive, item)
   if (action === 'children') {
     return method === 'POST' ? mkdir(ctx, drive, item) : childrenOf(ctx, drive, item)
   }

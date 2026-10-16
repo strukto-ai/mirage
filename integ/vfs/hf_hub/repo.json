@@ -159,6 +159,17 @@
         "stdout": "",
         "stderr": "/repo/new.txt: Operation not supported\nls: cannot access '/repo/new.txt': No such file or directory\n"
       }
+    },
+    {
+      "id": "hf_hub_sums_hash_a_plain_blob",
+      "seq": 960029,
+      "targets": ["hf-hub"],
+      "command": "sha256sum /repo/one_byte.txt; md5sum /repo/poem.txt; sha256sum /repo/sub; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881  /repo/one_byte.txt\nc2e8fd25e15c3ac8b2cb0f016d8db73d  /repo/poem.txt\nrc=1\n",
+        "stderr": "sha256sum: /repo/sub: Is a directory\n"
+      }
     }
   ]
 }

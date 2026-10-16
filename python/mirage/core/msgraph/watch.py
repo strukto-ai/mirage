@@ -29,6 +29,7 @@ from mirage.core.msgraph.client import (
     id_segment,
 )
 from mirage.core.msgraph.config import MsGraphConfig
+from mirage.core.msgraph.drive import parent_id
 from mirage.types import Delta, FileChangeKind, PathSpec
 from mirage.watch.delta import (
     changes_under,
@@ -219,12 +220,12 @@ class GraphDeltaHook:
             elif "folder" in item:
                 folders[item["id"]] = [
                     str(item.get("name", "")),
-                    _parent_of(item),
+                    parent_id(item),
                 ]
         moves: dict[str, str | None] = {}
         for item in placed_items:
             item_id = item["id"]
-            parent = _parent_of(item)
+            parent = parent_id(item)
             now = None
             if "deleted" not in item and parent:
                 base = (
@@ -331,15 +332,6 @@ class GraphDeltaHook:
             return ["", ""]
         parent = (item.get("parentReference") or {}).get("id") or ""
         return [str(item.get("name", "")), parent]
-
-
-def _parent_of(item: dict[str, Any]) -> str:
-    """The id of the folder a feed item sits in, "" when it names none.
-
-    Args:
-        item (dict[str, Any]): One ``/delta`` item.
-    """
-    return str((item.get("parentReference") or {}).get("id") or "")
 
 
 def _join(virtual: str, relative: str) -> str:

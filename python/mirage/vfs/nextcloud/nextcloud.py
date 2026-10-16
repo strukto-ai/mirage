@@ -4,6 +4,7 @@ from typing import Any
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.core.generic.rewrite import append_by_rewrite
 from mirage.core.nextcloud.capacity import capacity as _capacity
+from mirage.core.nextcloud.checksum import checksum as _checksum
 from mirage.core.nextcloud.constants import SCOPE_ERROR
 from mirage.core.nextcloud.copy import copy as _copy
 from mirage.core.nextcloud.copy import dir_copy as _dir_copy
@@ -64,6 +65,13 @@ class NextcloudVFS(BaseVFS):
 
     def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         return _read_stream(self.accessor, path)
+
+    async def checksum(
+        self,
+        path: PathSpec,
+        algorithm: str,
+    ) -> str | None:
+        return await _checksum(self.accessor, path, algorithm)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)

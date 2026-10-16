@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "graph_tree_places_every_item_below_a_folder",
+      "seq": 310068,
+      "targets": [
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "command": "mkdir -p /data/dtr/a/b /data/dtr/c && printf x > /data/dtr/a/f.txt && find /data -path '/data/dtr*' && find /data/dtr -empty && find /data/dtr -type f -size -2c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/dtr\n/data/dtr/a\n/data/dtr/a/b\n/data/dtr/a/f.txt\n/data/dtr/c\n/data/dtr/a/b\n/data/dtr/c\n/data/dtr/a/f.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

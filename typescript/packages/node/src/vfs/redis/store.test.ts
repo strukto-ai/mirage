@@ -161,6 +161,12 @@ describe.skipIf(skip)('RedisStore', () => {
     expect(await store.statMany([])).toEqual([])
   })
 
+  it('infoMemory answers the memory section', async () => {
+    const text = await store.infoMemory()
+    expect(text).toMatch(/^used_memory:\d+\r?$/m)
+    expect(text).toMatch(/^maxmemory:\d+\r?$/m)
+  })
+
   it('clear drops a staging key left by a chunked browser write', async () => {
     const c = await store.client()
     await c.set(`${prefix}tmp:/big:abc`, 'partial')

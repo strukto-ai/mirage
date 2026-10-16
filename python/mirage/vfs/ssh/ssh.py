@@ -18,6 +18,7 @@ from typing import Any
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh.append import append_bytes as _append
 from mirage.core.ssh.capacity import capacity as _capacity
+from mirage.core.ssh.checksum import checksum as _checksum
 from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy as _copy
 from mirage.core.ssh.copy import dir_copy as _dir_copy
@@ -35,6 +36,7 @@ from mirage.core.ssh.search import files_containing as _files_containing
 from mirage.core.ssh.set_attrs import set_attrs as _set_attrs
 from mirage.core.ssh.stat import stat as _stat
 from mirage.core.ssh.stat import tree as _tree
+from mirage.core.ssh.stream import follow as _follow
 from mirage.core.ssh.stream import read_stream as _read_stream
 from mirage.core.ssh.truncate import truncate as _truncate
 from mirage.core.ssh.unlink import unlink as _unlink
@@ -90,6 +92,21 @@ class SSHVFS(BaseVFS):
 
     async def line_count(self, path: PathSpec) -> int | None:
         return await _line_count(self.accessor, path)
+
+    async def checksum(
+        self,
+        path: PathSpec,
+        algorithm: str,
+    ) -> str | None:
+        return await _checksum(self.accessor, path, algorithm)
+
+    async def follow(
+        self,
+        path: PathSpec,
+        n: int,
+        interval: float,
+    ) -> AsyncIterator[bytes] | None:
+        return await _follow(self.accessor, path, n, interval)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)

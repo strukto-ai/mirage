@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "ssh_sums_are_what_the_server_hashes",
+      "seq": 923380,
+      "targets": [
+        "ssh"
+      ],
+      "command": "printf '' > /data/ssum.txt; printf 'hello\\n' >> /data/ssum.txt; sha256sum /data/ssum.txt; md5sum /data/ssum.txt; sha1sum /data/ssum.txt; sha512sum /data/ssum.txt | cut -c1-16",
+      "expect": {
+        "exit": 0,
+        "stdout": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03  /data/ssum.txt\nb1946ac92492d2347c6235b4d2611184  /data/ssum.txt\nf572d396fae9206628714fb2ce00f72e94f2258f  /data/ssum.txt\ne7c22b994c59d9cf\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ssh_sum_refusals_are_the_reads",
+      "seq": 923381,
+      "targets": [
+        "ssh"
+      ],
+      "command": "sha256sum /data/ssum_nope.txt /data; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "sha256sum: /data/ssum_nope.txt: No such file or directory\nsha256sum: /data: Is a directory\n"
+      }
+    },
+    {
+      "id": "ssh_tail_follow_prints_what_lands",
+      "seq": 923382,
+      "targets": [
+        "ssh"
+      ],
+      "command": "printf 'a\\nb\\n' > /data/sfol.txt; (sleep 1; printf 'c\\n' >> /data/sfol.txt) & tail -n1 -f /data/sfol.txt | head -n2; echo rc=$?; wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\nc\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "f"
+      ]
+    },
+    {
+      "id": "ssh_tail_follow_keeps_an_unended_line",
+      "seq": 923383,
+      "targets": [
+        "ssh"
+      ],
+      "command": "printf 'x\\ny' > /data/sfpart.txt; (sleep 1; printf 'z\\nw\\n' >> /data/sfpart.txt) & tail -n1 -f /data/sfpart.txt | head -n2; echo rc=$?; wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "yz\nw\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "f"
+      ]
+    }
+  ]
+}

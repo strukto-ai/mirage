@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -45,6 +46,34 @@ class RunAccessor(SSHAccessor):
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
+
+
+class StreamAccessor(SSHAccessor):
+    """An accessor whose server streams ``chunks`` for every command.
+
+    Args:
+        root (str): the mount's remote root.
+        chunks (list[bytes] | Exception): what the command prints, chunk
+            by chunk, or what starting it raises.
+    """
+
+    def __init__(self, root: str, chunks: list[bytes] | Exception) -> None:
+        super().__init__(SSHConfig(host="example.test", root=root))
+        self.chunks = chunks
+        self.sent: list[str] = []
+        self.closed = 0
+
+    async def run_stream(
+        self, command: str, size: int = 65536
+    ) -> AsyncGenerator[bytes, None]:
+        self.sent.append(command)
+        if isinstance(self.chunks, Exception):
+            raise self.chunks
+        try:
+            for chunk in self.chunks:
+                yield chunk
+        finally:
+            self.closed += 1
 
 
 def sftp_only_connection() -> MagicMock:

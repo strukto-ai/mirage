@@ -225,6 +225,13 @@ class RedisStore:
             for k, v in raw.items()
         }
 
+    async def info_memory(self) -> dict[str, int | float | str]:
+        """The server's ``INFO memory`` section, field by field."""
+        return await cast(
+            "Awaitable[dict[str, int | float | str]]",
+            self._client.info("memory"),
+        )
+
     async def stat_many(
         self, paths: list[tuple[str, bool]]
     ) -> list[tuple[dict[str, str], int | None, str | None]]:

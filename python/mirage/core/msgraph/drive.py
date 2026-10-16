@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -57,6 +58,8 @@ from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.ranges import window_for
 from mirage.utils.stat_view import DIR_SIZE
+
+logger = logging.getLogger(__name__)
 
 SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 UPLOAD_CHUNK = 10 * 327680
@@ -605,6 +608,138 @@ async def iter_tree(
         if is_dir:
             async for entry in iter_tree(config, child_loc, session=session):
                 yield entry
+
+
+def parent_id(item: dict[str, Any]) -> str:
+    """The id of the folder a driveItem sits in, "" when it names none.
+
+    Args:
+        item (dict[str, Any]): a driveItem, from a listing or a ``/delta``
+            feed.
+    """
+    return str((item.get("parentReference") or {}).get("id") or "")
+
+
+async def delta_tree(
+    config: MsGraphConfig,
+    loc: DriveLoc,
+    session: SessionArg = None,
+) -> dict[str, FileStat] | None:
+    """Every item under a folder, each as a listing's stat renders it, from
+    one read of Graph's ``/delta`` feed started at that folder.
+
+    One request asks the folder for its id, then the feed lists every item
+    below it a page at a time, where a walk sends a listing per folder. The
+    feed names an item by id with its name and its parent's id, never its
+    path, and may list one more than once (its last row is its state), so
+    each is placed by its parents up to the folder. An item under one a
+    listing shows as a file (a package's contents) is left out, as a
+    listing of that file would leave it. None when no folder is at
+    ``loc``, so the walk's readdir reports what is there, when Graph
+    refuses the feed, when the feed holds a folder shared from another
+    drive, whose items only that drive's feed lists, and when a file comes
+    without the ``cTag`` its listing row carries (OneDrive for Business
+    and SharePoint leave it out of the feed), since the mount keeps the
+    answer as the folders' listings.
+
+    Args:
+        config (MsGraphConfig): Graph config.
+        loc (DriveLoc): the folder.
+        session (SessionArg): pool or live session to ride.
+    """
+    try:
+        top = await graph_get(
+            config, loc.item(), {"$select": "id,folder"}, session=session
+        )
+    except GraphError as exc:
+        if exc.status != 404:
+            raise
+        logger.debug("graph tree of %s left to the walk: %s", loc.path, exc)
+        return None
+    top_id = top.get("id")
+    if "folder" not in top or not isinstance(top_id, str):
+        return None
+    try:
+        rows = await graph_list(config, loc.item("/delta"), session=session)
+    except GraphError as exc:
+        logger.debug("graph feed of %s left to the walk: %s", loc.path, exc)
+        return None
+    items: dict[str, dict[str, Any]] = {}
+    for item in rows:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            items.pop(item["id"], None)
+            items[item["id"]] = item
+    folders = {
+        item_id: item
+        for item_id, item in items.items()
+        if "folder" in item and "deleted" not in item
+    }
+    if any(_remote_folder(item) for item in folders.values()) or any(
+        "file" in item and "deleted" not in item and not item.get("cTag")
+        for item in items.values()
+    ):
+        return None
+    places: dict[str, str | None] = {top_id: ""}
+    found: dict[str, FileStat] = {}
+    for item_id, item in items.items():
+        name = item.get("name")
+        if (
+            item_id == top_id
+            or "deleted" in item
+            or "root" in item
+            or not isinstance(name, str)
+            or not name
+        ):
+            continue
+        base = _placed(parent_id(item), folders, places)
+        if base is not None:
+            found[f"{base}/{name}" if base else name] = entry_stat(item)
+    return found
+
+
+def _remote_folder(item: dict[str, Any]) -> bool:
+    """Whether a feed item is a folder kept on another drive.
+
+    Args:
+        item (dict[str, Any]): one ``/delta`` item.
+    """
+    remote = item.get("remoteItem")
+    return isinstance(remote, dict) and "folder" in remote
+
+
+def _placed(
+    folder: str,
+    folders: dict[str, dict[str, Any]],
+    places: dict[str, str | None],
+) -> str | None:
+    """A folder's path below the top of a ``/delta`` read, None when its
+    parents never reach it; each folder looked at is kept in ``places``.
+
+    Args:
+        folder (str): the folder's id.
+        folders (dict[str, dict[str, Any]]): every live folder the feed
+            listed, by id.
+        places (dict[str, str | None]): the paths found so far, the top
+            folder's "" among them.
+    """
+    chain: list[str] = []
+    seen: set[str] = set()
+    current = folder
+    while current not in places:
+        item = folders.get(current)
+        if item is None or current in seen:
+            places[current] = None
+            break
+        chain.append(current)
+        seen.add(current)
+        current = parent_id(item)
+    base = places[current]
+    for link in reversed(chain):
+        if base is not None:
+            name = str(folders[link].get("name") or "")
+            base = f"{base}/{name}" if base and name else name or None
+        places[link] = base
+    return places[folder]
 
 
 async def find_items(

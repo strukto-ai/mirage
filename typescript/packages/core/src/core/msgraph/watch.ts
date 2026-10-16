@@ -19,6 +19,7 @@ import type { DeltaHook } from '../../watch/base.ts'
 import { changesUnder, folderPath, justMade, movedBelow, settle } from '../../watch/delta.ts'
 import { encodedPath, GraphError, graphGet } from './client.ts'
 import type { MsGraphConfigResolved } from './config.ts'
+import { parentId } from './drive.ts'
 
 /** One drive a watch reads, and where its mount root sits. Mirrors Python `DeltaTarget`. */
 export interface DeltaTarget {
@@ -193,12 +194,12 @@ export class GraphDeltaHook implements DeltaHook {
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
         delete folders[item.id]
       } else if (item.folder !== undefined) {
-        folders[item.id] = [item.name ?? '', parentOf(item)]
+        folders[item.id] = [item.name ?? '', parentId(item)]
       }
     }
     const moves = new Map<string, string | null>()
     for (const item of placed) {
-      const parent = parentOf(item)
+      const parent = parentId(item)
       let now: string | null = null
       if (item.deleted === undefined && parent !== '') {
         const base = parent === top ? '' : await folderPath(parent, top, folders, lookUp)
@@ -275,11 +276,6 @@ export class GraphDeltaHook implements DeltaHook {
     if (item.root !== undefined) return ['', '']
     return [item.name ?? '', item.parentReference?.id ?? '']
   }
-}
-
-/** The id of the folder a feed item sits in, '' when it names none. Mirrors Python's `_parent_of`. */
-function parentOf(item: GraphItem): string {
-  return item.parentReference?.id ?? ''
 }
 
 /** The virtual path of a path below a mount root. Mirrors Python's `_join`. */

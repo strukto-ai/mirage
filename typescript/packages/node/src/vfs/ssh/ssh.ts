@@ -28,7 +28,8 @@ import type { MkdirOp } from '@struktoai/mirage-core/vfs/types'
 import { readdir as sshReaddir } from '../../core/ssh/readdir.ts'
 import { lineCount as sshLineCount, read as sshRead } from '../../core/ssh/read.ts'
 import { stat as sshStat, tree as sshTree } from '../../core/ssh/stat.ts'
-import { readStream as sshStream } from '../../core/ssh/stream.ts'
+import { follow as sshFollow, readStream as sshStream } from '../../core/ssh/stream.ts'
+import { checksum as sshChecksum } from '../../core/ssh/checksum.ts'
 import { exists as sshExists } from '../../core/ssh/exists.ts'
 import { filesContaining as sshFilesContaining } from '../../core/ssh/search.ts'
 import { write as sshWrite } from '../../core/ssh/write.ts'
@@ -120,6 +121,18 @@ export class SSHVFS extends BaseVFS {
 
   override lineCount(path: PathSpec): Promise<number | null> {
     return sshLineCount(this.accessor, path)
+  }
+
+  override checksum(path: PathSpec, algorithm: string): Promise<string | null> {
+    return sshChecksum(this.accessor, path, algorithm)
+  }
+
+  override follow(
+    path: PathSpec,
+    n: number,
+    interval: number,
+  ): Promise<AsyncIterable<Uint8Array> | null> {
+    return sshFollow(this.accessor, path, n, interval)
   }
 
   override exists(path: PathSpec): Promise<boolean> {

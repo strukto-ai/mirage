@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import * as client from './client.ts'
 import * as repo from './repo.ts'
-import { stat } from './stat.ts'
+import { stat, tree } from './stat.ts'
 import { codeOf, ps, rowAt, walking } from './_test_util.ts'
 
 beforeEach(() => {
@@ -151,5 +151,40 @@ describe('the gate check', () => {
     const err = await checked(ps('a.txt')).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(client.HfHubError)
     expect(String(err)).toContain('boom')
+  })
+})
+
+describe('tree', () => {
+  it('lists every entry below the mount root in one walk', async () => {
+    const accessor = walking()
+    const rows = await tree(accessor, ps(''))
+    expect(client.hubGetResponse).toHaveBeenCalledTimes(1)
+    expect([...(rows?.keys() ?? [])].sort()).toEqual(['a.txt', 'd', 'd/b.txt'])
+    expect(rows?.get('a.txt')).toEqual(await statAt(accessor, ps('a.txt')))
+    expect(rows?.get('d')?.type).toBe('directory')
+    expect(rows?.get('d/b.txt')?.size).toBe(3)
+  })
+
+  it('keys a subtree below its own root', async () => {
+    const rows = await tree(walking(), ps('d'))
+    expect([...(rows?.keys() ?? [])]).toEqual(['b.txt'])
+    expect(rows?.get('b.txt')?.fingerprint).toBe('oid-b')
+  })
+
+  it('names the directories the listing only implies', async () => {
+    const accessor = walking([{ type: 'file', oid: 'o', size: 1, path: 'd/e/b.txt' }])
+    const rows = await tree(accessor, ps(''))
+    expect([...(rows?.keys() ?? [])].sort()).toEqual(['d', 'd/e', 'd/e/b.txt'])
+    expect(rows?.get('d/e')?.type).toBe('directory')
+  })
+
+  it.each(['a.txt', 'nope'])('leaves the walk for %s, a file or nothing', async (path) => {
+    expect(await tree(walking(), ps(path))).toBeNull()
+  })
+
+  it('reports a refused repository as permission denied', async () => {
+    const accessor = walking()
+    vi.spyOn(client, 'hubGetResponse').mockRejectedValue(new client.HfHubError('gated', 403))
+    expect(await codeOf(() => tree(accessor, ps('')))).toBe('EACCES')
   })
 })

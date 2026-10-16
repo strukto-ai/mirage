@@ -441,6 +441,10 @@ export class UpstashRedisStore implements RedisStoreLike {
   }
 
   /** The attributes, length and modified time of many paths, in one pipeline. */
+  async infoMemory(): Promise<string> {
+    return expectString(await this.command(['INFO', 'memory']), 'INFO')
+  }
+
   async statMany(
     paths: readonly (readonly [string, boolean])[],
   ): Promise<[Record<string, string>, number | null, string | null][]> {

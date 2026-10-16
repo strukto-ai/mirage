@@ -138,6 +138,20 @@
         "stdout": "Filesystem     Size Used Avail Use% Mounted on\nram               -    -     -    - /data\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "df_store_without_a_limit_prints_dashes",
+      "seq": 612018,
+      "targets": [
+        "ram",
+        "redis"
+      ],
+      "command": "df -P /data | awk 'NR == 2 { print $2, $3, $4, $6 }'",
+      "expect": {
+        "exit": 0,
+        "stdout": "- - - /data\n",
+        "stderr": ""
+      }
     }
   ]
 }

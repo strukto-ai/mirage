@@ -18,8 +18,8 @@ import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { ReadStream, SFTPWrapper } from 'ssh2'
 import { SSHAccessor } from '../../accessor/ssh.ts'
-import { makeFakeAccessor } from './_test_utils.ts'
-import { readStream } from './stream.ts'
+import { StreamAccessor, makeFakeAccessor } from './_test_utils.ts'
+import { follow, readStream } from './stream.ts'
 
 class DelayedCloseStream extends Readable {
   private sent = false
@@ -121,5 +121,62 @@ describe('core/ssh/stream', () => {
     rs.releaseClose()
     await expect(done).resolves.toEqual({ done: true, value: undefined })
     expect(settledBeforeClose).toBe(false)
+  })
+})
+
+describe('follow', () => {
+  const ENC = new TextEncoder()
+  const DEC = new TextDecoder()
+
+  function file(vfsPath: string): PathSpec {
+    return new PathSpec({
+      virtual: `/s/${vfsPath}`,
+      directory: '/s',
+      vfsPath,
+      rawPath: `/s/${vfsPath}`,
+    })
+  }
+
+  it("streams what the server's tail prints", async () => {
+    const accessor = new StreamAccessor('data', [
+      ENC.encode('\nb\nc\n'),
+      ENC.encode('d\n'),
+      ENC.encode('e'),
+    ])
+    const stream = await follow(accessor, file('a b.txt'), 2, 1)
+    expect(stream).not.toBeNull()
+    const chunks: string[] = []
+    for await (const chunk of stream ?? []) chunks.push(DEC.decode(chunk))
+    expect(chunks).toEqual(['b\nc\n', 'd\n', 'e'])
+    expect(accessor.sent).toEqual([
+      "test -f 'data/a b.txt' && test -r 'data/a b.txt'" +
+        ' && command -v tail >/dev/null' +
+        " && echo && exec tail -n 2 -f -- 'data/a b.txt'",
+    ])
+    expect(accessor.closed).toBe(1)
+  })
+
+  it('closes the command when the caller stops', async () => {
+    const accessor = new StreamAccessor('data', [
+      ENC.encode('\n'),
+      ENC.encode('x\n'),
+      ENC.encode('y\n'),
+    ])
+    const stream = await follow(accessor, file('a'), 0, 1)
+    for await (const chunk of stream ?? []) {
+      expect(DEC.decode(chunk)).toBe('x\n')
+      break
+    }
+    expect(accessor.closed).toBe(1)
+  })
+
+  it.each<[string, Uint8Array[] | Error]>([
+    ['no output', []],
+    ['a forced sftp', [ENC.encode('This service allows sftp connections only.\n')]],
+    ['a closed connection', new Error('closed')],
+  ])('leaves the poll on %s', async (_name, chunks) => {
+    const accessor = new StreamAccessor('data', chunks)
+    expect(await follow(accessor, file('a'), 1, 1)).toBeNull()
+    if (!(chunks instanceof Error)) expect(accessor.closed).toBe(1)
   })
 })

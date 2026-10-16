@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { GraphError } from './client.ts'
 import { resolveMsGraphConfig } from './config.ts'
-import { DriveLoc, copyTree, renameReplace, type DriveRef, type DriveUrl } from './drive.ts'
+import {
+  DriveLoc,
+  copyTree,
+  deltaTree,
+  renameReplace,
+  type DriveRef,
+  type DriveUrl,
+} from './drive.ts'
 
 // drive.ts is one module implementing copy-with-monitor-polling and
 // replace-on-409 for OneDrive and SharePoint in both languages, and it had
@@ -278,5 +285,138 @@ describe('renameReplace', () => {
     await renameReplace(config, loc('a.txt'), loc('b.txt'))
 
     expect(rec.bodies[0]).toEqual({ name: 'b.txt' })
+  })
+})
+
+function selected(url: string): string {
+  const target = new URL(url)
+  target.searchParams.set('$select', 'id,folder')
+  return target.toString()
+}
+
+function row(id: string, name: string, parent: string, facets: Record<string, unknown> = {}) {
+  return { id, name, parentReference: { id: parent }, ...facets }
+}
+
+describe('deltaTree', () => {
+  it('places every item by its parents', async () => {
+    const feed = [
+      row('T', 'reports', 'OUT', { folder: { childCount: 2 } }),
+      row('a', 'a.txt', 'A', { size: 3, file: {}, cTag: 'c1' }),
+      row('A', 'sub', 'T', { folder: { childCount: 1 } }),
+      row('b', 'b.txt', 'T', { size: 1, file: {}, cTag: 'c2' }),
+      row('b', 'b.txt', 'T', { size: 5, file: {}, cTag: 'c3' }),
+      row('P', 'notes', 'T', { package: { type: 'oneNote' }, size: 9 }),
+      row('p', 'page.one', 'P', { size: 2, file: {}, cTag: 'c4' }),
+      row('x', 'gone.txt', 'T', { file: {}, deleted: {} }),
+      row('o', 'lost.txt', 'NOWHERE', { size: 1, file: {}, cTag: 'c5' }),
+    ]
+    const recorder = stubFetch([
+      { method: 'GET', url: selected(itemUrl('team/reports')), body: { id: 'T', folder: {} } },
+      { method: 'GET', url: itemUrl('team/reports', '/delta'), body: { value: feed } },
+    ])
+    const found = await deltaTree(config, loc('team/reports'))
+    expect(recorder.pending()).toBe(0)
+    expect([...(found?.keys() ?? [])].sort()).toEqual(['b.txt', 'notes', 'sub', 'sub/a.txt'])
+    expect(found?.get('b.txt')?.size).toBe(5)
+    expect(found?.get('sub')?.extra.child_count).toBe(1)
+    expect(found?.get('sub/a.txt')?.fingerprint).toBe('c1')
+    expect(found?.get('notes')?.size).toBe(9)
+  })
+
+  it('ignores a parent loop', async () => {
+    stubFetch([
+      { method: 'GET', url: selected(itemUrl('')), body: { id: 'T', folder: {} } },
+      {
+        method: 'GET',
+        url: itemUrl('', '/delta'),
+        body: {
+          value: [
+            row('X', 'x', 'Y', { folder: {} }),
+            row('Y', 'y', 'X', { folder: {} }),
+            row('f', 'f.txt', 'X', { size: 1, file: {}, cTag: 'c1' }),
+            row('g', 'g.txt', 'T', { size: 1, file: {}, cTag: 'c2' }),
+          ],
+        },
+      },
+    ])
+    const found = await deltaTree(config, loc(''))
+    expect([...(found?.keys() ?? [])]).toEqual(['g.txt'])
+  })
+
+  it.each<[string, Route]>([
+    [
+      'nothing',
+      {
+        method: 'GET',
+        url: selected(itemUrl('f')),
+        status: 404,
+        body: { error: { code: 'itemNotFound', message: 'gone' } },
+      },
+    ],
+    ['a file', { method: 'GET', url: selected(itemUrl('f')), body: { id: 'F', file: {} } }],
+  ])('leaves %s to the walk', async (_name, route) => {
+    const recorder = stubFetch([route])
+    expect(await deltaTree(config, loc('f'))).toBeNull()
+    expect(recorder.calls).toHaveLength(1)
+  })
+
+  it('leaves a folder from another drive to the walk', async () => {
+    stubFetch([
+      { method: 'GET', url: selected(itemUrl('')), body: { id: 'T', folder: {} } },
+      {
+        method: 'GET',
+        url: itemUrl('', '/delta'),
+        body: {
+          value: [
+            row('S', 'shared', 'T', { folder: {}, remoteItem: { folder: {} } }),
+            row('g', 'g.txt', 'T', { size: 1, file: {}, cTag: 'c1' }),
+          ],
+        },
+      },
+    ])
+    expect(await deltaTree(config, loc(''))).toBeNull()
+  })
+
+  it('leaves a refused feed to the walk', async () => {
+    stubFetch([
+      { method: 'GET', url: selected(itemUrl('f')), body: { id: 'T', folder: {} } },
+      {
+        method: 'GET',
+        url: itemUrl('f', '/delta'),
+        status: 400,
+        body: { error: { code: 'invalidRequest', message: 'no delta here' } },
+      },
+    ])
+    expect(await deltaTree(config, loc('f'))).toBeNull()
+  })
+
+  it('leaves a feed without cTags to the walk', async () => {
+    stubFetch([
+      { method: 'GET', url: selected(itemUrl('')), body: { id: 'T', folder: {} } },
+      {
+        method: 'GET',
+        url: itemUrl('', '/delta'),
+        body: {
+          value: [
+            row('a', 'a.txt', 'T', { size: 1, file: {}, cTag: 'c1' }),
+            row('b', 'b.txt', 'T', { size: 1, file: {} }),
+          ],
+        },
+      },
+    ])
+    expect(await deltaTree(config, loc(''))).toBeNull()
+  })
+
+  it('raises what Graph refuses', async () => {
+    stubFetch([
+      {
+        method: 'GET',
+        url: selected(itemUrl('f')),
+        status: 403,
+        body: { error: { code: 'accessDenied', message: 'no' } },
+      },
+    ])
+    await expect(deltaTree(config, loc('f'))).rejects.toBeInstanceOf(GraphError)
   })
 })

@@ -15,6 +15,7 @@
 import argparse
 import asyncio
 import functools
+import hashlib
 import logging
 import os
 import posixpath
@@ -51,6 +52,51 @@ TREE_FORMAT = "%y %m %s %T@ %A@ %U %G %P\\0"
 WC = ["env", "LC_ALL=C", "wc", "-l", "<"]
 CP = ["env", "LC_ALL=C", "cp", "-RL", "--"]
 COPIED = ["&&", "echo", "copied"]
+SUMS = {
+    "md5sum": "md5",
+    "sha1sum": "sha1",
+    "sha256sum": "sha256",
+    "sha384sum": "sha384",
+    "sha512sum": "sha512",
+}
+# How often the follow looks at its file again for what it gained.
+FOLLOW_POLL = 0.05
+
+
+def follow_shape(target: str, count: str) -> list[str]:
+    """The follow command an ssh mount sends for ``tail -f``, split as the
+    shell splits it.
+
+    Args:
+        target (str): The file, as the client named it.
+        count (str): The ``-n`` count, as the client wrote it.
+    """
+    return [
+        "test",
+        "-f",
+        target,
+        "&&",
+        "test",
+        "-r",
+        target,
+        "&&",
+        "command",
+        "-v",
+        "tail",
+        ">/dev/null",
+        "&&",
+        "echo",
+        "&&",
+        "exec",
+        "tail",
+        "-n",
+        count,
+        "-f",
+        "--",
+        target,
+    ]
+
+
 FIND_KINDS = (
     (stat.S_ISDIR, "d"),
     (stat.S_ISREG, "f"),
@@ -263,6 +309,98 @@ def line_total(root: str, target: str) -> tuple[int, bytes, bytes]:
     return 0, b"%d\n" % data.count(b"\n"), b""
 
 
+def file_digest(root: str, tool: str, target: str) -> tuple[int, bytes, bytes]:
+    """What ``TOOL < TARGET`` answers under the chroot for one of the
+    coreutils sums: a regular file's digest of standard input, or the
+    tool's or the shell's complaint. Nothing outside ``root`` is read.
+
+    Args:
+        root (str): Local directory served as the SFTP root.
+        tool (str): The sum, ``sha256sum`` and its siblings.
+        target (str): The file, as the client named it.
+    """
+    root = os.path.realpath(root)
+    path = os.path.join(root, target.lstrip("/"))
+    if not _inside(root, path):
+        return 1, b"", f"sh: {target}: No such file or directory\n".encode()
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except IsADirectoryError:
+        return 1, b"", f"{tool}: -: Is a directory\n".encode()
+    except OSError as exc:
+        return 1, b"", f"sh: {target}: {exc.strerror}\n".encode()
+    digest = hashlib.new(SUMS[tool], data).hexdigest()
+    return 0, f"{digest}  -\n".encode(), b""
+
+
+def last_lines(data: bytes, count: int) -> bytes:
+    """The last ``count`` lines of ``data`` as ``tail -n`` prints them, a
+    last line with no newline counted as one.
+
+    Args:
+        data (bytes): The file's bytes.
+        count (int): How many lines.
+    """
+    if count <= 0:
+        return b""
+    cut = len(data) - 1 if data.endswith(b"\n") else len(data)
+    for _ in range(count):
+        cut = data.rfind(b"\n", 0, cut)
+        if cut < 0:
+            return data
+    return data[cut + 1 :]
+
+
+async def follow_file(
+    root: str, target: str, count: int, process: asyncssh.SSHServerProcess
+) -> None:
+    """What the follow command does under the chroot: an empty line once a
+    regular readable file is at ``target``, its last ``count`` lines, then
+    what it gains until the client closes the channel, from the top again
+    once it shrinks, as ``tail -f`` does. Anything else exits 1 silently,
+    as the shell's tests do.
+
+    Args:
+        root (str): Local directory served as the SFTP root.
+        target (str): The file, as the client named it.
+        count (int): The ``-n`` count.
+        process (asyncssh.SSHServerProcess): The exec request.
+    """
+    root = os.path.realpath(root)
+    path = os.path.join(root, target.lstrip("/"))
+    if (
+        not _inside(root, path)
+        or not os.path.isfile(path)
+        or not os.access(path, os.R_OK)
+    ):
+        process.exit(1)
+        return
+    data = await asyncio.to_thread(_read_bytes, path)
+    position = len(data)
+    try:
+        process.stdout.write(b"\n" + last_lines(data, count))
+        while not process.channel.is_closing():
+            await asyncio.sleep(FOLLOW_POLL)
+            try:
+                data = await asyncio.to_thread(_read_bytes, path)
+            except OSError as exc:
+                logger.debug("followed %s is gone: %s", path, exc)
+                continue
+            if len(data) < position:
+                position = 0
+            if len(data) > position:
+                process.stdout.write(data[position:])
+                position = len(data)
+    except BrokenPipeError as exc:
+        logger.debug("follow of %s closed by the client: %s", path, exc)
+
+
+def _read_bytes(path: str) -> bytes:
+    with open(path, "rb") as handle:
+        return handle.read()
+
+
 def tree_copy(root: str, source: str, target: str) -> tuple[int, bytes, bytes]:
     """What ``cp -RL SOURCE TARGET && echo copied`` answers under the
     chroot: the tree copied with links followed, then the echo. A missing
@@ -363,6 +501,8 @@ def _answer(root: str, argv: list[str]) -> tuple[int, bytes, bytes] | None:
         TREE_FORMAT,
     ]:
         return tree_records(root, argv[len(FIND)])
+    if len(argv) == 3 and argv[0] in SUMS and argv[1] == "<":
+        return file_digest(root, argv[0], argv[2])
     if argv[: len(WC)] == WC and len(argv) == len(WC) + 1:
         return line_total(root, argv[-1])
     if (
@@ -376,15 +516,22 @@ def _answer(root: str, argv: list[str]) -> tuple[int, bytes, bytes] | None:
 
 async def run_command(root: str, process: asyncssh.SSHServerProcess) -> None:
     """Answer the ssh search's grep, the tree's find, the line count's
-    wc and the tree copy's cp, and refuse any other command.
+    wc, the checksum's sums, the tree copy's cp and the follow's tail,
+    and refuse any other command.
 
     Args:
         root (str): Local directory served as the SFTP root.
         process (asyncssh.SSHServerProcess): The exec request.
     """
-    answer = await asyncio.to_thread(
-        _answer, root, shlex.split(process.command or "")
-    )
+    argv = shlex.split(process.command or "")
+    if (
+        len(argv) == 22
+        and argv[18].isdigit()
+        and argv == follow_shape(argv[2], argv[18])
+    ):
+        await follow_file(root, argv[2], int(argv[18]), process)
+        return
+    answer = await asyncio.to_thread(_answer, root, argv)
     if answer is None:
         process.stderr.write(b"only the mount's own commands run here\n")
         process.exit(127)
@@ -397,7 +544,7 @@ async def run_command(root: str, process: asyncssh.SSHServerProcess) -> None:
 
 async def start_server(root: str, port: int = 0) -> asyncssh.SSHAcceptor:
     """Start a no-auth SFTP server chrooted to root, which runs no command
-    but the mount's grep, find, wc and cp.
+    but the mount's grep, find, wc, sums, cp and tail.
 
     Args:
         root (str): Local directory served as the SFTP root.

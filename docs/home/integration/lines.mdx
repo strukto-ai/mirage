@@ -103,7 +103,7 @@ files' total size.
 | PostgreSQL | `LIMIT` on `rows.jsonl` | `COUNT(*)`, then `LIMIT` and `OFFSET` | `COUNT(*)` | | `max_read_rows` |
 | MongoDB | | sort by `_id` descending with a limit, on `documents.jsonl` | `count_documents` | the last documents at one snapshot, then a change stream of the inserts after it, on a collection's `documents.jsonl` | `max_doc_limit` |
 | Airtable | `maxRecords` on `records.jsonl` and view files | | | | `max_read_records` |
-| SSH | | | `wc -l` on the server | | |
+| SSH | | | `wc -l` on the server | `tail -f` on the server | |
 | Slack | | | | the day's last messages, then `conversations.history` for the messages after the last one, every `-s` seconds while the day lasts, on a `chat.jsonl` | |
 | Discord | | | | the day's last messages, then the channel's messages `after` the last one, every `-s` seconds while the day lasts, on a `chat.jsonl` | |
 
@@ -117,7 +117,9 @@ collection as a stream and stops after the count, so it needs no
 `first_lines`.
 
 SSH asks the server's `wc -l` only when it can run commands: a server limited
-to SFTP, or a `wc` that fails, leaves the file to be read. Slack and Discord
-read a followed day once, then fetch only new messages; once the UTC day is
-over, nothing more lands in its file, so they ask one last time and stop
+to SFTP, or a `wc` that fails, leaves the file to be read. Its `tail -f` runs
+the server's own `tail -f` once the server finds a readable regular file and a
+`tail` there, and prints what that prints; anything else is polled. Slack and
+Discord read a followed day once, then fetch only new messages; once the UTC
+day is over, nothing more lands in its file, so they ask one last time and stop
 polling while `tail -f` keeps waiting.
