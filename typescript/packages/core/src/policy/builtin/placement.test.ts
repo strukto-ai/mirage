@@ -86,8 +86,5 @@ describe('PlacementPolicy', () => {
     expect(() => placement({ script: 'route.py', runtime: 'monty' })).toThrow(
       /routePolicy names a policy by path/,
     )
-    expect(() =>
-      placement({ script: new ScriptSource('pass', 'python') } as unknown as RoutePolicy),
-    ).toThrow(/runtime/)
   })
 })

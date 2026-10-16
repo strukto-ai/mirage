@@ -22,6 +22,7 @@ from mirage.policy.constants import (
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
     METHODS,
+    PROGRAM_RUNTIME,
 )
 from mirage.policy.types import (
     AdmissionRules,
@@ -557,8 +558,7 @@ class ProfileMount(BaseModel):
 
 class ProfilePolicy(BaseModel):
     """One program of a profile's policy, as the document states it: the
-    program, and the runtime that runs it. A block, not a path: with no
-    default runtime a path alone would name a program nothing could run.
+    program, and the runtime that runs it.
 
     Args:
         script (ScriptSource | str): the policy program. A ``str`` is
@@ -568,15 +568,15 @@ class ProfilePolicy(BaseModel):
             layer never saw it, and is refused there.
         runtime (str | dict[str, Any]): the runtime the program runs on:
             a name, or ``{name, config}`` for one that needs settings,
-            the shape a ``runtimes`` entry has. Required: there is no
-            default runtime, because one the operator never chose should
-            not be the one their policy runs on.
+            the shape a ``runtimes`` entry has. Monty when the program
+            names none; without the ``monty`` extra installed, such a
+            program fails closed with the extra's install hint.
     """
 
     model_config = _DOC
 
     script: ScriptSource | str
-    runtime: str | dict[str, Any]
+    runtime: str | dict[str, Any] = PROGRAM_RUNTIME
 
     @field_validator("runtime")
     @classmethod

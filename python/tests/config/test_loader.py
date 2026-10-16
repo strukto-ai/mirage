@@ -1051,9 +1051,7 @@ profiles:
     assert second.runtime == {"name": "wasi", "config": {"home": "/w"}}
 
 
-def test_profile_policy_states_its_runtime(tmp_path):
-    # There is no default engine: a policy the config does not pin to an
-    # engine is refused at load, not guessed at the gate.
+def test_profile_policy_with_no_runtime_runs_on_monty(tmp_path):
     (tmp_path / "roles").mkdir()
     (tmp_path / "roles" / "x.py").write_text("None\n")
     cfg_file = tmp_path / "ws.yaml"
@@ -1064,8 +1062,10 @@ mounts:
 profiles:
   release: {policy: {pre_command: [{script: roles/x.py}]}}
 """)
-    with pytest.raises(ValueError, match="runtime"):
-        load_config(cfg_file)
+    cfg = load_config(cfg_file)
+    release = cfg.to_workspace_kwargs()["profiles"]["release"]
+    assert release.policy is not None
+    assert release.policy["pre_command"][0].runtime == "monty"
 
 
 def test_a_profile_written_with_script_is_told_where_the_keys_went(tmp_path):

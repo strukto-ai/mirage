@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
@@ -267,13 +267,39 @@ describe('profile policies', () => {
     }
   }, 120000)
 
-  it('a policy program states its runtime', async () => {
-    await expect(
-      build({
-        release: { policy: { preCommand: [{ script: new ScriptSource(JUDGE, 'python') }] } },
-      }),
-    ).rejects.toThrow(/runtime names the runtime the program runs on/)
-  })
+  it('a policy program that names no runtime runs on monty', async () => {
+    const ws = await build({
+      release: { policy: { preCommand: [{ script: new ScriptSource(JUDGE, 'python') }] } },
+    })
+    try {
+      await ws.shell('mkdir -p /data/sealed && echo k > /data/sealed/k')
+      ws.createSession('s', { profile: 'release' })
+      expect((await ws.shell('echo hi', { sessionId: 's' })).exitCode).toBe(0)
+      const denied = await ws.shell('cat /data/sealed/k', { sessionId: 's' })
+      expect(denied.exitCode).toBe(126)
+      expect(denied.stderrText).toBe('cat: Permission denied\n')
+    } finally {
+      await ws.close()
+    }
+  }, 120000)
+
+  it('without @pydantic/monty a program on monty fails closed', async () => {
+    vi.doMock('@pydantic/monty', () => {
+      throw new Error('not installed')
+    })
+    const ws = await build({
+      release: { policy: { preCommand: [{ script: new ScriptSource(JUDGE, 'python') }] } },
+    })
+    try {
+      ws.createSession('s', { profile: 'release' })
+      const refused = await ws.shell('echo hi', { sessionId: 's' })
+      expect(refused.exitCode).toBe(126)
+      expect(refused.refusal?.reason).toMatch(/^profile 'release' policy .*@pydantic\/monty/)
+    } finally {
+      await ws.close()
+      vi.doUnmock('@pydantic/monty')
+    }
+  }, 120000)
 
   it('the old script and runtime keys are told the new block', async () => {
     // Shipped first as `script` with `runtime` beside it, a word for

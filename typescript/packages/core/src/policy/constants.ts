@@ -101,6 +101,9 @@ export const METHODS = {
 /** The runtimes a policy program runs on: monty, and Python on wasm. */
 export const PROGRAM_RUNTIMES: ReadonlySet<string> = new Set(['monty', 'pyodide'])
 
+/** The runtime a policy program runs on when it names none. */
+export const PROGRAM_RUNTIME = 'monty'
+
 /**
  * The interpreter switches a program runs with, per runtime: `-P` keeps
  * the session's directory off `sys.path`, so no file there stands in for

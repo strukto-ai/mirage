@@ -349,9 +349,6 @@ describe('configToWorkspaceArgs', () => {
     expect(() =>
       loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, route_policy: 'route.py' }),
     ).toThrow(/route_policy must be a mapping/)
-    expect(() =>
-      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, route_policy: { script: 'r.py' } }),
-    ).toThrow(/route_policy.runtime names the runtime/)
   })
 
   // The camelCase spelling of a snake_case config key is a key Python
@@ -1364,10 +1361,10 @@ describe('CLI to daemon round trip', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('refuses a profile policy that states no runtime', () => {
-    // There is no default engine: a policy the config does not pin to
-    // an engine is refused at load, not guessed at the gate.
+  it('runs a profile policy that states no runtime on monty', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-policy-'))
+    mkdirSync(join(dir, 'roles'))
+    writeFileSync(join(dir, 'roles', 'x.py'), "print('')\n")
     const file = join(dir, 'w.yaml')
     writeFileSync(
       file,
@@ -1380,9 +1377,9 @@ describe('CLI to daemon round trip', () => {
         '',
       ].join('\n'),
     )
-    expect(() => checkWorkspaceConfigFile(file)).toThrow(
-      /runtime names the runtime the program runs on/,
-    )
+    const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(file))
+    const [only] = args.options.profiles?.release?.policy?.preCommand ?? []
+    expect(only?.runtime).toBe('monty')
     rmSync(dir, { recursive: true, force: true })
   })
 

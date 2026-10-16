@@ -418,6 +418,19 @@
           "buffer_bytes": 16384
         }
       }
+    },
+    {
+      "name": "route_policy: a program without its runtime runs on monty",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "route_policy": {
+          "script": "route.py"
+        }
+      }
     }
   ]
 }

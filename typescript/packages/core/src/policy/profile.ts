@@ -15,7 +15,7 @@
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
 import type { Limit } from '../types.ts'
 import { parseCommandLimits } from './builtin/output_cap.ts'
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, METHODS } from './constants.ts'
+import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, METHODS, PROGRAM_RUNTIME } from './constants.ts'
 import type {
   CommandRule,
   AdmissionRules,
@@ -167,13 +167,13 @@ export interface SessionProfile {
  * passes the loaded ScriptSource, so a path still spelled as a string
  * when the workspace reads it means the config layer never saw it.
  * `runtime` is a name, or `{name, config}` for one that needs settings,
- * the shape a `runtimes` entry has. Required: there is no default
- * runtime, because one the operator never chose should not be the one
- * their policy runs on.
+ * the shape a `runtimes` entry has. Monty when the program names none;
+ * without `@pydantic/monty` installed, such a program fails closed with
+ * the package's install hint.
  */
 export interface ProfilePolicySpec {
   readonly script: ScriptSource | string
-  readonly runtime:
+  readonly runtime?:
     | string
     | { readonly name: string; readonly config?: Readonly<Record<string, unknown>> }
 }
@@ -564,7 +564,8 @@ export function parseProfileMounts(
 /** Validate one profile (a `profiles.<name>` block, or an inline document). */
 /**
  * Validate a profile's `policy` block: per method, a list of programs,
- * each naming its program and the runtime that runs it, both required.
+ * each naming its program and the runtime that runs it, monty when it
+ * names none.
  * A config file spells the methods and a runtime's settings as the
  * document does (`pre_command`, `auto_load_from_imports`); code, with
  * `code` set, as the interface does (`preCommand`, `autoLoadFromImports`).
@@ -615,10 +616,7 @@ export function parseProgram(raw: unknown, at: string, code = false): ProfilePol
   if (!(script instanceof ScriptSource) && typeof script !== 'string') {
     throw new Error(`${at}.script must be a script path or source`)
   }
-  const runtime = program.runtime
-  if (runtime === undefined || runtime === null) {
-    throw new Error(`${at}.runtime names the runtime the program runs on, and is required`)
-  }
+  const runtime = program.runtime ?? PROGRAM_RUNTIME
   if (typeof runtime === 'string') return { script, runtime }
   const named = asObject(runtime, `${at}.runtime`)
   const settings = named.config
@@ -655,8 +653,8 @@ export function compileProgram(program: ProfilePolicySpec, profile: string): Pro
         `pass ScriptSource in code`,
     )
   }
-  const runtime =
-    typeof program.runtime === 'string' ? { name: program.runtime, config: {} } : program.runtime
+  const named = program.runtime ?? PROGRAM_RUNTIME
+  const runtime = typeof named === 'string' ? { name: named, config: {} } : named
   return {
     profile,
     script: program.script,

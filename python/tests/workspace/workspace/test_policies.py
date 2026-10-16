@@ -40,6 +40,7 @@ from mirage.policy.profile import (
 )
 from mirage.policy.script import script_context
 from mirage.policy.types import RouteContext
+from mirage.runtime.python.monty import runtime as monty_runtime
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console.types import Channel
 from mirage.types import Limit, MountMode, OnExceed, PathSpec, Refusal
@@ -950,6 +951,49 @@ async def test_a_profile_script_judges_each_command():
 
 
 @pytest.mark.asyncio
+async def test_a_profile_script_naming_no_runtime_runs_on_monty():
+    profiles = {
+        "release": {
+            "policy": {"pre_command": [{"script": ScriptSource(JUDGE)}]}
+        }
+    }
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=profiles
+    )
+    try:
+        await ws.shell("mkdir -p /data/sealed && echo k > /data/sealed/k")
+        ws.create_session("s", profile="release")
+        assert (await ws.shell("echo hi", session_id="s")).exit_code == 0
+        denied = await ws.shell("cat /data/sealed/k", session_id="s")
+        assert denied.exit_code == 126
+        assert denied.stderr == b"cat: Permission denied\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_script_without_monty_fails_closed(monkeypatch):
+    monkeypatch.setattr(monty_runtime, "pydantic_monty", None)
+    profiles = {
+        "release": {
+            "policy": {"pre_command": [{"script": ScriptSource(JUDGE)}]}
+        }
+    }
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles=profiles
+    )
+    try:
+        ws.create_session("s", profile="release")
+        refused = await ws.shell("echo hi", session_id="s")
+        assert refused.exit_code == 126
+        assert refused.refusal is not None
+        assert "names runtime 'monty'" in refused.refusal.reason
+        assert "monty' extra" in refused.refusal.reason
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_the_script_reads_resolved_paths_not_typed_words():
     # `cd /data && cat sealed/k` names no /data/sealed word; the gate
     # hands the script the resolved operand, so the deny still lands.
@@ -1151,22 +1195,6 @@ async def test_a_runtime_policies_do_not_run_on_fails_closed():
         )
     finally:
         await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_profile_policy_states_its_runtime():
-    with pytest.raises(ValueError, match="runtime"):
-        Workspace(
-            {"/data/": RAMVFS()},
-            mode=MountMode.WRITE,
-            profiles={
-                "release": {
-                    "policy": {
-                        "pre_command": [{"script": ScriptSource(JUDGE)}]
-                    }
-                }
-            },
-        )
 
 
 def test_the_old_script_and_runtime_keys_are_told_the_new_block():

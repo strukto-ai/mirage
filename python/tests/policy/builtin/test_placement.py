@@ -108,5 +108,3 @@ def test_a_path_is_the_yamls_to_load():
         ValueError, match="route_policy names a policy by path"
     ):
         _placement({"script": "route.py", "runtime": "monty"})
-    with pytest.raises(ValueError):
-        _placement({"script": ScriptSource("pass")})

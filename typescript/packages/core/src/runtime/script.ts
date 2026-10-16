@@ -5,11 +5,12 @@ import { buildRuntime } from './table.ts'
 
 /**
  * Build the runtime a config program runs on: the one the config named,
- * with the settings it gave, and the config always names one.
+ * with the settings it gave.
  *
- * There is no default runtime to fall back to: a program without a
- * `runtime` is refused where the config is validated, because a default
- * the operator never wrote is a runtime they never chose. The runtime is
+ * A policy program that names no runtime arrives here as monty, the
+ * default its parser fills in, so a missing `@pydantic/monty` is
+ * reported as any missing dependency is, never swapped for another
+ * runtime. The runtime is
  * built fresh and never picked out of a workspace's runtime world: the
  * world is the ordered set that serves *agent* code, it is mutable after
  * construction, and an entry drops out of it silently when an optional

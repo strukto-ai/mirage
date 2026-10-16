@@ -28,8 +28,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 import { OPFSVFS, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
-import type { ReadSpec } from '@struktoai/mirage-node'
-import type { RedisCacheConfig } from '@struktoai/mirage-core/cache/file/config'
+import type { ReadSpec, RedisCacheConfig } from '@struktoai/mirage-node'
 import {
   AIRTABLE,
   AirtableVFS,

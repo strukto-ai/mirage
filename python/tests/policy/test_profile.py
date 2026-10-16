@@ -2917,13 +2917,12 @@ def test_a_policy_rides_beside_the_document():
     assert profile.commands is not None
 
 
-def test_a_policy_program_without_a_runtime_is_refused():
-    # There is no default runtime, so a program that names none is a
-    # config error, not a guess.
-    with pytest.raises(ValidationError, match="runtime"):
-        SessionProfile.model_validate(
-            {"policy": {"pre_command": [{"script": ScriptSource("pass")}]}}
-        )
+def test_a_policy_program_without_a_runtime_runs_on_monty():
+    profile = SessionProfile.model_validate(
+        {"policy": {"pre_command": [{"script": ScriptSource("pass")}]}}
+    )
+    assert profile.policy is not None
+    assert profile.policy["pre_command"][0].runtime == "monty"
 
 
 @pytest.mark.parametrize(
