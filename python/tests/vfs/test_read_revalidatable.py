@@ -213,8 +213,9 @@ DECOY = b"decoy at the unprefixed key\n"
 # left it never pulls.
 BIG = (b"x" * 1023 + b"\n") * 300
 
+# The bytes row is a whole read, which only the file API makes now that
+# `cp` streams its source.
 COMMANDS = {
-    "bytes": "cp {v} /r/a.txt",
     "stream": "cat {v}",
     "partial": "cat {v} | head -c 1",
 }
@@ -790,6 +791,12 @@ async def _line(ws: Workspace, line: str) -> bytes:
     return out
 
 
+async def _read_row(ws: Workspace, row: str, virtual: str) -> bytes:
+    if row == "bytes":
+        return await ws.vfs.read(virtual)
+    return await _line(ws, COMMANDS[row].format(v=virtual))
+
+
 async def _reconcile_stat(ws: Workspace, virtual: str) -> FileStat:
     # Reconcile stats through its own check store (workspace/reconcile.py),
     # so a listing's index row, which carries no token, cannot answer for it.
@@ -923,7 +930,6 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
     with _fake(name, shape, data, monkeypatch) as fake:
         slots = _spy_slots(fake, monkeypatch)
         virtual = "/m/" + fake.key
-        line = COMMANDS[row].format(v=virtual)
 
         async def run():
             ws = _fresh_workspace(fake.vfs)
@@ -932,20 +938,16 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
                     await _line(ws, "ls /m")
                 cached_before = await ws.cache.exists(virtual)
                 before = fake.fetches()
-                first = await _line(ws, line)
+                first = await _read_row(ws, row, virtual)
                 fetched = fake.fetches() - before
                 taken = list(slots)
-                if row == "bytes":
-                    first = await _line(ws, "cat /r/a.txt")
                 stat = await _reconcile_stat(ws, virtual)
                 fresh = (
                     stat.fingerprint is not None
                     and await ws.cache.is_fresh(virtual, stat.fingerprint)
                 )
                 middle = fake.fetches()
-                second = await _line(ws, line)
-                if row == "bytes":
-                    second = await _line(ws, "cat /r/a.txt")
+                second = await _read_row(ws, row, virtual)
                 return (
                     cached_before,
                     first,
@@ -975,9 +977,9 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
     assert fetched == 1
     assert first == data
     assert stat.fingerprint is not None
-    # A cp of a rendered Google file reads through the dispatcher, where a
-    # filetype read op always renders and keeps nothing, so its second cp
-    # fetches again. Every other read left an entry reconcile calls FRESH,
+    # A whole read of a rendered Google file goes through the dispatcher,
+    # where a filetype read op always renders and keeps nothing, so its
+    # second read fetches again. Every other read left an entry reconcile calls FRESH,
     # and the warm read made no content fetch.
     renders = row == "bytes" and name in GAPPS
     assert fresh is not renders
@@ -1580,7 +1582,7 @@ def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
         async def run():
             ws = _fresh_workspace(fake.vfs)
             try:
-                await _line(ws, f"cp {virtual} /r/a.txt")
+                await ws.vfs.read(virtual)
                 holds_read_token = await ws.cache.is_fresh(
                     virtual, hashlib.md5(SEED).hexdigest()
                 )

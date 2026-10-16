@@ -860,9 +860,8 @@
       "expect": {
         "exit": 0,
         "stdout": "st=141\n",
-        "stderr": ""
-      },
-      "note": "Divergence: GNU coreutils' tee opens every output before it writes, so it also prints \"tee: .../procsub-nodir/x: No such file or directory\". Mirage's tee writes each output whole once its input has ended, and SIGPIPE at the pipe ends it before it reaches the outputs after it."
+        "stderr": "tee: {mount}/procsub-nodir/x: No such file or directory\n"
+      }
     },
     {
       "id": "procsub_exec_input_background_reader_reads_during_command",

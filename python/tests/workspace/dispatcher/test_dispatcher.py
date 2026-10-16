@@ -2660,11 +2660,13 @@ async def test_failed_streamed_write_invalidates_old_content_and_closes_input():
 
 
 @pytest.mark.asyncio
-async def test_stream_invalidation_keeps_versions_without_keeping_upload_bytes(
-    monkeypatch,
+@pytest.mark.parametrize("budget,kept", [(None, b"new"), (2, None)])
+async def test_a_streamed_write_keeps_what_fits_the_drain_budget(
+    budget, kept, monkeypatch
 ):
     destination = StreamWritingRAM()
     ws = Workspace({"/dst": destination}, mode=MountMode.WRITE)
+    ws.cache.max_drain_bytes = budget
     tokens = []
     original = destination.write_stream
 
@@ -2680,7 +2682,7 @@ async def test_stream_invalidation_keeps_versions_without_keeping_upload_bytes(
         await ws.cache.set("/dst/f", b"old", fingerprint="v1")
         await ws.vfs.write("/dst/f", yield_bytes(b"new"))
         assert tokens == ["v1"]
-        assert not await ws.cache.exists("/dst/f")
+        assert await ws.cache.get("/dst/f") == kept
         assert await ws.cache.fingerprint("/dst/f") == "v2"
     finally:
         await ws.close()

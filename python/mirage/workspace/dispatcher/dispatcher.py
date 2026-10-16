@@ -279,17 +279,27 @@ class _LentPayload:
     The producer may wait on another writer of the same name (``tee -a f
     | tee -a f``, a loop appending to the file it pipes into), so the
     write holds the name only while the store takes a chunk, and writers
-    interleave between chunks as appends do on one file.
+    interleave between chunks as appends do on one file. What the store
+    took is kept while it fits the cache's drain budget, so the next read
+    is served what was written, as a whole write's is.
 
     Args:
         source (ByteSource): the producer's bytes.
         holds (list[KeyHold]): the write's names, held.
+        budget (int): the most bytes kept for the cache.
     """
 
-    def __init__(self, source: ByteSource, holds: list[KeyHold]) -> None:
+    def __init__(
+        self, source: ByteSource, holds: list[KeyHold], budget: int
+    ) -> None:
         self.source = ensure_stream(source)
         self.holds = holds
+        self.budget = budget
         self.moved = 0
+        self.kept: list[bytes] | None = []
+
+    def whole(self) -> bytes | None:
+        return None if self.kept is None else b"".join(self.kept)
 
     async def chunks(self) -> AsyncIterator[bytes]:
         try:
@@ -301,6 +311,10 @@ class _LentPayload:
                 if chunk is None:
                     return
                 self.moved += len(chunk)
+                if self.kept is not None and self.moved > self.budget:
+                    self.kept = None
+                if self.kept is not None:
+                    self.kept.append(chunk)
                 yield chunk
         finally:
             await close_quietly(self.source)
@@ -2118,7 +2132,13 @@ class Dispatcher:
             ]
             before = await self._cached_before(call, mount)
             payload = (
-                _LentPayload(kwargs["data"], holds)
+                _LentPayload(
+                    kwargs["data"],
+                    holds,
+                    self._cache.drain_budget
+                    if _facts_of(mount).cacheable
+                    else 0,
+                )
                 if call.name in ("write", "append")
                 and not isinstance(kwargs.get("data"), bytes)
                 else None
@@ -2149,7 +2169,15 @@ class Dispatcher:
             await self._settle_write(
                 mount, call.name, call.path, kwargs, call.vis, created=result
             )
-            await self._keep_written(call, mount, mine, before)
+            await self._keep_written(
+                call,
+                mount,
+                mine,
+                before,
+                call.kwargs.get("data")
+                if payload is None
+                else payload.whole(),
+            )
         return result
 
     async def _invalidate_stream(
@@ -2190,6 +2218,7 @@ class Dispatcher:
         mount: MountEntry,
         records: list[OpRecord],
         before: tuple[bytes, str | None] | None,
+        data: bytes | None,
     ) -> None:
         """Keep a write's bytes for the next read, under its name's hold.
 
@@ -2212,8 +2241,9 @@ class Dispatcher:
             records (list[OpRecord]): the records the write emitted.
             before (tuple[bytes, str | None] | None): an append's cached
                 copy and its token, from before it ran.
+            data (bytes | None): the bytes it sent, None for a stream the
+                cache's drain budget could not hold.
         """
-        data = call.kwargs.get("data")
         if (
             call.name not in ("write", "append")
             or not _facts_of(mount).cacheable

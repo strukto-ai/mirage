@@ -593,8 +593,9 @@ const BIG = ENC.encode(('x'.repeat(1023) + '\n').repeat(300))
 
 type Row = 'bytes' | 'stream' | 'partial'
 
-const COMMANDS: Record<Row, (v: string) => string> = {
-  bytes: (v) => `cp ${v} /r/a.txt`,
+// The bytes row is a whole read, which only the file API makes now that `cp`
+// streams its source.
+const COMMANDS: Record<Exclude<Row, 'bytes'>, (v: string) => string> = {
   stream: (v) => `cat ${v}`,
   partial: (v) => `cat ${v} | head -c 1`,
 }
@@ -1227,6 +1228,10 @@ function freshWorkspace(vfs: BaseVFS): Workspace {
   return ws
 }
 
+async function readRow(ws: Workspace, row: Row, virtual: string): Promise<Uint8Array> {
+  return row === 'bytes' ? ws.vfs.read(virtual) : line(ws, COMMANDS[row](virtual))
+}
+
 async function line(ws: Workspace, command: string): Promise<Uint8Array> {
   const result = await ws.shell(command)
   expect([result.exitCode, new TextDecoder().decode(result.stderr)], command).toEqual([0, ''])
@@ -1459,28 +1464,25 @@ describe('the read-token contract', () => {
       const data = SEED
       const fake = await makeFake(name, shape, data)
       const virtual = `/m/${fake.key}`
-      const command = COMMANDS[row](virtual)
       const ws = freshWorkspace(fake.vfs)
       try {
         if (shape === 'listed') await line(ws, 'ls /m')
         expect(await ws.cache.exists(virtual)).toBe(false)
-        let first = await line(ws, command)
+        const first = await readRow(ws, row, virtual)
         expect(readsOnMount()).toEqual([[slotOf(fake, row), virtual]])
         expect(fake.fetches()).toBe(1)
-        if (row === 'bytes') first = await line(ws, 'cat /r/a.txt')
         expect(first).toEqual(data)
 
-        // A cp of a rendered Google file reads through the dispatcher, where a
-        // filetype read op always renders and keeps nothing, so its second cp
-        // fetches again. Every other read left an entry reconcile calls
-        // FRESH, and the warm read made no content fetch.
+        // A whole read of a rendered Google file goes through the dispatcher,
+        // where a filetype read op always renders and keeps nothing, so its
+        // second read fetches again. Every other read left an entry reconcile
+        // calls FRESH, and the warm read made no content fetch.
         const renders = row === 'bytes' && name in GAPPS
         const stat = await reconcileStat(ws, fake, virtual)
         expect(stat.fingerprint).not.toBeNull()
         expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(!renders)
 
-        let second = await line(ws, command)
-        if (row === 'bytes') second = await line(ws, 'cat /r/a.txt')
+        const second = await readRow(ws, row, virtual)
         expect(fake.fetches()).toBe(renders ? 2 : 1)
         expect(second).toEqual(data)
         expect(H.reach).toEqual([])
@@ -1496,7 +1498,7 @@ describe('the read-token contract', () => {
       const virtual = `/m/${fake.key}`
       const ws = freshWorkspace(fake.vfs)
       try {
-        expect(await line(ws, COMMANDS[row](virtual))).toEqual(BIG.slice(0, 1))
+        expect(await readRow(ws, row, virtual)).toEqual(BIG.slice(0, 1))
         expect(readsOnMount()).toEqual([[slotOf(fake, row), virtual]])
         expect(fake.fetches()).toBe(1)
         expect(await ws.cache.get(virtual)).toBeNull()
@@ -1662,7 +1664,7 @@ describe('the read-token contract', () => {
     const virtual = '/m/a.txt'
     const ws = freshWorkspace(fake.vfs)
     try {
-      await line(ws, `cp ${virtual} /r/a.txt`)
+      await ws.vfs.read(virtual)
       expect(await ws.cache.isFresh(virtual, xetHash(SEED))).toBe(true)
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe(blobOid(SEED))
@@ -1683,7 +1685,7 @@ describe('the read-token contract', () => {
     const virtual = '/m/a.txt'
     const ws = freshWorkspace(fake.vfs)
     try {
-      await line(ws, `cp ${virtual} /r/a.txt`)
+      await ws.vfs.read(virtual)
       expect(await ws.cache.isFresh(virtual, 'e1')).toBe(true)
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe('c1')
@@ -1706,13 +1708,13 @@ describe('the read-token contract', () => {
     const virtual = '/m/a.txt'
     const ws = freshWorkspace(fake.vfs)
     try {
-      await line(ws, `cp ${virtual} /r/a.txt`)
+      await ws.vfs.read(virtual)
       expect(await ws.cache.isFresh(virtual, otherKind)).toBe(true)
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe(xetHash(SEED))
       expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
       const before = fake.fetches()
-      await line(ws, `cp ${virtual} /r/b.txt`)
+      await ws.vfs.read(virtual)
       expect(fake.fetches() - before).toBe(1)
     } finally {
       await ws.close()
@@ -1738,7 +1740,7 @@ describe('the read-token contract', () => {
     const virtual = '/m/a.txt'
     const ws = freshWorkspace(fake.vfs)
     try {
-      await line(ws, `cp ${virtual} /r/a.txt`)
+      await ws.vfs.read(virtual)
       expect(await ws.cache.isFresh(virtual, md5Hex(SEED))).toBe(true)
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe(blobSha(SEED))

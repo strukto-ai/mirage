@@ -71,11 +71,9 @@ async def test_relay_sort_caches_inputs_and_replacements(overwrite):
         assert await result.materialize_stdout() == (
             b"" if overwrite else b"a\nm\nz\n"
         )
-        if overwrite:
-            assert await ws.cache.get("/a/input") is None
-            assert await ws.vfs.read("/a/input") == b"a\nm\nz\n"
-        else:
-            assert await ws.cache.get("/a/input") == b"z\na\n"
+        assert await ws.cache.get("/a/input") == (
+            b"a\nm\nz\n" if overwrite else b"z\na\n"
+        )
         assert await ws.cache.get("/b/input") == b"m\n"
         left.load_state({"files": {"/input": b"changed\n"}})
         again = await ws.shell("cat /a/input" if overwrite else command)

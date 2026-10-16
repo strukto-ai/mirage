@@ -215,9 +215,13 @@ it('names the path the op ran on in its report', async () => {
   }
 })
 
-it('retains versions across stream invalidation without retaining upload bytes', async () => {
+it.each([
+  [null, 'new'],
+  [2, null],
+])('keeps what a streamed write sent within drain budget %s', async (budget, kept) => {
   const destination = new StreamWritingRAM()
   const ws = new Workspace({ '/dst': destination }, { mode: MountMode.WRITE })
+  ws.cache.maxDrainBytes = budget
   const tokens: (string | null)[] = []
   const original = destination.writeStream.bind(destination)
   vi.spyOn(destination, 'writeStream').mockImplementation(async (path, data) => {
@@ -231,7 +235,8 @@ it('retains versions across stream invalidation without retaining upload bytes',
     await ws.cache.set('/dst/f', new TextEncoder().encode('old'), { fingerprint: 'v1' })
     await ws.vfs.write('/dst/f', yieldBytes(new TextEncoder().encode('new')))
     expect(tokens).toEqual(['v1'])
-    expect(await ws.cache.exists('/dst/f')).toBe(false)
+    const cached = await ws.cache.get('/dst/f')
+    expect(cached === null ? null : new TextDecoder().decode(cached)).toBe(kept)
     expect(await ws.cache.fingerprint('/dst/f')).toBe('v2')
   } finally {
     await ws.close()

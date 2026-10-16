@@ -251,13 +251,21 @@ async def write_output(
         # open would fail, so the open is probed for every output, not
         # only the ones --output-error=exit probed above.
         refusal = None
+        # Under exit every output was proved or opened above.
+        proved = stat is not None and parsed.stop_on_error
         if stat is not None and not parsed.stop_on_error:
             try:
                 refusal = await open_refusal(stat, path, paths[:index])
+                proved = refusal is None
             except Exception as exc:
                 logger.debug("tee: probing %s failed: %s", path.virtual, exc)
         if refusal is not None and not isinstance(refusal, FileNotFoundError):
             errors.append(error_line(path, refusal))
+            continue
+        if opened_paths is not None and proved:
+            # A streamed output's own write creates it; writing it nothing
+            # first would cost the store a write (a PUT, a revision).
+            opened_paths.append(path)
             continue
         try:
             await write_one(

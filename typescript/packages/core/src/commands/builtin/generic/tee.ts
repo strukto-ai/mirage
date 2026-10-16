@@ -286,15 +286,24 @@ export async function writeOutput(
     // --output-error=exit probed above. A missing parent is the write's to
     // refuse, which a keyed store makes as a redirect does.
     let refusal: FsError | null = null
+    // Under exit every output was proved or opened above.
+    let proved = stat !== undefined && parsed.stopOnError
     if (stat !== undefined && !parsed.stopOnError) {
       try {
         refusal = await openRefusal(stat, path, paths.slice(0, index))
+        proved = refusal === null
       } catch (err) {
         console.warn(`tee: probing ${path.virtual} failed: ${String(err)}`)
       }
     }
     if (refusal !== null && refusal.code !== 'ENOENT') {
       errors.push(errorLine(path, refusal))
+      continue
+    }
+    if (openedPaths !== undefined && proved) {
+      // A streamed output's own write creates it; writing it nothing first
+      // would cost the store a write (a PUT, a revision).
+      openedPaths.push(path)
       continue
     }
     try {

@@ -13,12 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { closeQuietly, ensureStream } from '../../io/stream.ts'
+import { concat } from '../../utils/bytes.ts'
 import type { ByteSource } from '../../io/types.ts'
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
-import type { FileCache } from '../../cache/file/mixin.ts'
+import { drainBudget, type FileCache } from '../../cache/file/mixin.ts'
 import { type KeyHold, KeyLock } from '../../cache/lock.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
@@ -511,15 +512,23 @@ async function* resumed(
  * wait on another writer of the same name (`tee -a f | tee -a f`, a loop
  * appending to the file it pipes into), so the write holds the name only
  * while the store takes a chunk, and writers interleave between chunks as
- * appends do on one file. Mirrors Python's `_LentPayload`.
+ * appends do on one file. What the store took is kept while it fits the
+ * cache's drain budget, so the next read is served what was written, as a
+ * whole write's is. Mirrors Python's `_LentPayload`.
  */
 class LentPayload {
   moved = 0
+  private kept: Uint8Array[] | null = []
 
   constructor(
     private readonly source: ByteSource,
     private readonly holds: readonly KeyHold[],
+    private readonly budget: number,
   ) {}
+
+  whole(): Uint8Array | null {
+    return this.kept === null ? null : concat(this.kept)
+  }
 
   async *chunks(): AsyncGenerator<Uint8Array> {
     const iterator = ensureStream(this.source)[Symbol.asyncIterator]()
@@ -532,6 +541,8 @@ class LentPayload {
         const next = await pull()
         if (next.done === true) return
         this.moved += next.value.byteLength
+        if (this.kept !== null && this.moved > this.budget) this.kept = null
+        this.kept?.push(next.value)
         yield next.value
       }
     } finally {
@@ -1882,7 +1893,8 @@ export class Dispatcher {
           line = activeRecords()
           before = await this.cachedBefore(call, mount)
           if ((name === 'write' || name === 'append') && !(fullArgs[0] instanceof Uint8Array)) {
-            payload = new LentPayload(fullArgs[0] as ByteSource, holds)
+            const budget = factsOf(mount).cacheable ? drainBudget(this.cache) : 0
+            payload = new LentPayload(fullArgs[0] as ByteSource, holds, budget)
             fullArgs[0] = payload.chunks()
             await this.invalidateStream(mount, p)
           }
@@ -1908,7 +1920,13 @@ export class Dispatcher {
             async (value) => {
               served(report, value, payload?.moved ?? null)
               await this.settleWrite(name, p, dst, fullArgs, others, value)
-              await this.keepWritten(call, mount, fullArgs, mine, before)
+              await this.keepWritten(
+                call,
+                mount,
+                payload === null ? fullArgs[0] : payload.whole(),
+                mine,
+                before,
+              )
             },
             async () => {
               await this.evictFailedWrite(name, p, dst, others, lostPaths(line), owners)
@@ -1995,11 +2013,10 @@ export class Dispatcher {
   private async keepWritten(
     call: Call,
     mount: MountEntry,
-    args: readonly unknown[],
+    sent: unknown,
     records: readonly OpRecord[],
     before: [Uint8Array, string | null] | null,
   ): Promise<void> {
-    const sent = args[0]
     if ((call.name !== 'write' && call.name !== 'append') || !factsOf(mount).cacheable) {
       return
     }
