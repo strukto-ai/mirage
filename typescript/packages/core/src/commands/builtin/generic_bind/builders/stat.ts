@@ -18,11 +18,7 @@ import { type GenericCommand, resolveGlobOf, type GenericCommandFn } from '../ad
 const stat: GenericCommandFn = async (ops, accessor, paths, _texts, opts) => {
   const idx = opts.index ?? undefined
   const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
-  return statGeneric(
-    resolved,
-    opts,
-    (p) => ops.stat(accessor, p, idx),
-  )
+  return statGeneric(resolved, opts, (p) => ops.stat(accessor, p, idx))
 }
 
 export const BUILDER: GenericCommand = {

@@ -132,4 +132,3 @@ describe('withSlashGuard on the write tier', () => {
     expect(guarded.append).toBeUndefined()
   })
 })
-

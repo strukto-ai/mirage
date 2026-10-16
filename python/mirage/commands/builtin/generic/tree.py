@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
@@ -29,7 +30,6 @@ from mirage.view.types import (
     ReaddirPath,
     StatPath,
 )
-from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 logger = logging.getLogger(__name__)
 

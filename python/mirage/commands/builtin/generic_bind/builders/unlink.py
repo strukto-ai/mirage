@@ -18,6 +18,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     Operation,
     require_op,
 )
+from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import extra_operand_error
@@ -25,7 +26,6 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
-from mirage.commands.builtin.utils.links import links_of
 
 
 async def unlink(

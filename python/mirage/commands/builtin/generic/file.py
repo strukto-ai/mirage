@@ -7,6 +7,7 @@ from mirage.commands.builtin.file_sniff import (
     detect_file_type,
     format_file_result,
 )
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import (
     normalized_read,
     operand_stat,
@@ -30,7 +31,6 @@ from mirage.types import (
 )
 from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView, StatPath
-from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 _logger = logging.getLogger(__name__)
 

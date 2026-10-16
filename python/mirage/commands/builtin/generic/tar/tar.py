@@ -49,6 +49,7 @@ from mirage.commands.builtin.generic.tar.types import (
     ReadResult,
     WriteMode,
 )
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.stream import stdin_bytes
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
@@ -61,7 +62,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.compress import GZIP_MAGIC, GzipDataError, gunzip_partial
 from mirage.view.types import LinkView, MountView
-from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 logger = logging.getLogger(__name__)
 

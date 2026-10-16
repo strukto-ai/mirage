@@ -40,6 +40,7 @@ from mirage.commands.builtin.grep_pushdown import (
     search_terms,
 )
 from mirage.commands.builtin.types import SearchTerms
+from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.commands.errors import UsageError
@@ -55,7 +56,6 @@ from mirage.utils.encoding import bom_of
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import CycleError, glob_prefix_match
 from mirage.view.types import LinkView
-from mirage.commands.builtin.utils.links import links_of
 
 logger = logging.getLogger(__name__)
 

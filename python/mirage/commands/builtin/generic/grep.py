@@ -29,6 +29,7 @@ from mirage.commands.builtin.grep_select import (
     file_admitted,
     parse_file_globs,
 )
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     operand_label,
@@ -65,7 +66,6 @@ from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one
 from mirage.view.namespace_view import followed_stat
-from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 # GNU grep with no pattern prints its synopsis and the help hint, exit 2
 # (grep 3.11; the same two lines follow `option requires an argument`).

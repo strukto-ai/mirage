@@ -14,6 +14,7 @@ from mirage.commands.builtin.utils.identity import (
     identity_of,
     owner_name,
 )
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import operand_stat
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
@@ -46,7 +47,6 @@ from mirage.utils.stat_view import (
     size_unknown,
 )
 from mirage.view.types import LinkView, MountView, StatPath
-from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 _STR_DIRECTIVES = frozenset("nNF")
 

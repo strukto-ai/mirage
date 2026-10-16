@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.commands.builtin.utils.links import link_view
 from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
@@ -31,7 +32,6 @@ from mirage.workspace.executor.builtins.condition.types import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace import Namespace
-from mirage.commands.builtin.utils.links import link_view
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode

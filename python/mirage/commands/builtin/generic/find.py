@@ -23,6 +23,7 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.context import session_visibility
 from mirage.core.generic import find_eval
 from mirage.core.generic.find import modified_ts, walk_find
 from mirage.core.generic.find_eval import printf_kind
@@ -37,7 +38,6 @@ from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import respell_one, respell_raw
 from mirage.view.types import LinkView, StatPath
-from mirage.context import session_visibility
 
 
 def parse_find_args(

@@ -15,6 +15,7 @@ from mirage.commands.builtin.generic.archive.zip_update import (
     read_archive,
     update_archive,
 )
+from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -26,7 +27,6 @@ from mirage.types import PathSpec
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.path import respell_one
 from mirage.view.types import LinkView, MountView
-from mirage.commands.builtin.utils.links import links_of, mounts_of
 
 # Info-ZIP 3.0's wording, pinned on debian:stable-slim. A warning is
 # indented with a tab and -q silences it; the "Nothing to do!" error is

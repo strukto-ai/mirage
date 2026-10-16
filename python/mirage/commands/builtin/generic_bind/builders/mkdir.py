@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic_bind.adapter import (
     Operation,
     require_op,
 )
+from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.builtin.utils.paths import (
     descendant_path,
     entry_kind,
@@ -43,7 +44,6 @@ from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 from mirage.utils.path import CycleError, norm, parent, walk_nodes
 from mirage.vfs.types import OperationFn
 from mirage.view.types import LinkView
-from mirage.commands.builtin.utils.links import links_of
 
 
 async def mkdir(

@@ -22,10 +22,10 @@ from mirage.commands.builtin.generic_bind.adapter import (
     bound_op,
     require_op,
 )
+from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.config import CommandIO, CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-from mirage.commands.builtin.utils.links import links_of
 
 
 async def tee(

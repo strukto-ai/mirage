@@ -3,6 +3,7 @@ import posixpath
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_target
 from mirage.commands.builtin.utils.wrap import to_pathspec
 from mirage.commands.config import CommandOpts
@@ -10,6 +11,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import missing_operand_error
+from mirage.context import session_visibility
 from mirage.errors.fs import eloop, enoent, enotdir
 from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
@@ -17,8 +19,6 @@ from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec, StatFn, Visibility
 from mirage.utils.hidden import path_visible
 from mirage.utils.key_prefix import mount_prefix_of
-from mirage.commands.builtin.utils.links import links_of
-from mirage.context import session_visibility
 
 _MODES = {"canonicalize_existing": "e", "canonicalize_missing": "m"}
 _LINKS = {"logical": "L", "physical": "P", "strip": "s", "no_symlinks": "s"}

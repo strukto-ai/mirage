@@ -8,6 +8,7 @@ from functools import partial
 from mirage.commands.builtin.diff_format import ed_script, normal_diff
 from mirage.commands.builtin.utils.formatting import full_iso_time
 from mirage.commands.builtin.utils.lines import split_lines_keepends
+from mirage.commands.builtin.utils.links import links_of
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     stdin_bytes,
@@ -39,7 +40,6 @@ from mirage.utils.quote import shell_quote
 from mirage.utils.timezone import zone_from_env
 from mirage.view.namespace_view import followed_stat
 from mirage.view.types import LinkView, StatPath
-from mirage.commands.builtin.utils.links import links_of
 
 
 @dataclass(frozen=True, slots=True)

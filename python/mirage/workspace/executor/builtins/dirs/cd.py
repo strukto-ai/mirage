@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
 
+from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
@@ -38,7 +39,6 @@ from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace import Namespace
-from mirage.commands.builtin.utils.links import link_view
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import (
     change_dir,
