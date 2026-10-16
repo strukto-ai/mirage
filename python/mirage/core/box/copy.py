@@ -36,6 +36,7 @@ from mirage.core.box.readdir import stat_from_item
 from mirage.core.box.resolve import (
     item_of,
     live_item,
+    live_item_of,
     parent_folder,
     path_parts,
 )
@@ -232,5 +233,5 @@ async def copy(
         item,
         dst,
         parent_folder(accessor, dst, dst_parent),
-        item_of(dst_entry),
+        await live_item_of(accessor, dst, dst_entry),
     )

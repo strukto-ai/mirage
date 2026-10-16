@@ -14,10 +14,12 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
+import { GoogleApiError } from '../google/client.ts'
 import {
   type DriveFile,
   FOLDER_MIME,
   MIME_TO_EXT,
+  getFile,
   listFiles,
   listSharedDrives,
 } from '../google/drive.ts'
@@ -67,6 +69,7 @@ export function statFromItem(item: DriveFile): FileStat {
   const modified = item.modifiedTime ?? ''
   const extra: Record<string, unknown> = { file_id: item.id, mime_type: mime }
   if (item.driveId !== undefined && item.driveId !== '') extra.drive_id = item.driveId
+  if (item.parents !== undefined && item.parents.length > 0) extra.parents = [...item.parents]
   if (mime === FOLDER_MIME) {
     return new FileStat({ name: item.name, type: FileType.DIRECTORY, modified, extra })
   }
@@ -96,6 +99,48 @@ export function statFromItem(item: DriveFile): FileStat {
     fingerprint: driveFingerprint(resourceType, item.md5Checksum, item.headRevisionId, modified),
     extra: { ...extra, resource_type: resourceType },
   })
+}
+
+/**
+ * What is at `path` now, for a change about to be made to it.
+ *
+ * A listed row names its item by id, and another client may have moved,
+ * renamed or trashed the item since: a change made by that id would land on a
+ * file at another path. One `files.get` confirms the item still has the name
+ * and the folders the listing gave it; otherwise that folder is listed again,
+ * and what it names at the path answers, null for nothing. A row that names
+ * no folder (a Shared Drive) is taken as is. Mirrors Python's `live_row`.
+ */
+export async function liveRow(
+  accessor: GDriveAccessor,
+  path: PathSpec,
+  entry: FileStat | null | undefined,
+): Promise<FileStat | null> {
+  if (entry === null || entry === undefined) return null
+  const folders = entry.extra.parents as string[] | undefined
+  const folder = folders?.[0]
+  if (folders === undefined || folder === undefined) return entry
+  const tm = accessor.tokenManager
+  try {
+    const item = await getFile(tm, entry.extra.file_id as string)
+    const row = statFromItem(item)
+    const filed = row.extra.parents as string[] | undefined
+    if (
+      item.trashed !== true &&
+      row.name === entry.name &&
+      JSON.stringify(filed ?? []) === JSON.stringify(folders)
+    ) {
+      return row
+    }
+  } catch (err) {
+    if (!(err instanceof GoogleApiError) || err.status !== 404) throw err
+    console.debug(`listed id for ${path.virtual} is gone: ${String(err)}`)
+  }
+  const files = await listFiles(tm, {
+    folderId: folder,
+    driveId: (entry.extra.drive_id as string | undefined) ?? null,
+  })
+  return files.map(statFromItem).find((row) => row.name === entry.name) ?? null
 }
 
 /**

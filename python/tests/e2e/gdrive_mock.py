@@ -89,6 +89,7 @@ _PATCH_TARGETS = {
     "get_file": [
         "mirage.core.google.entry.get_file",
         "mirage.core.gdrive.resolve.get_file",
+        "mirage.core.gdrive.readdir.get_file",
     ],
     # A native file's bytes do not exist until Docs, Sheets or Slides
     # renders them, so the fake stands in for the renderer and counts each

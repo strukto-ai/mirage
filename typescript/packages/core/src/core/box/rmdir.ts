@@ -23,7 +23,7 @@ import { BoxApiError, type BoxTokenManager } from './client.ts'
 import { type BoxItem, deleteFile, deleteFolder, deleteWebLink, listFolderItems } from './api.ts'
 import { GONE_STATUS, LOST_STATUS, CONFLICT_STATUS } from './constants.ts'
 import { liveOf } from './fingerprint.ts'
-import { itemOf, pathParts } from './resolve.ts'
+import { liveItemOf, pathParts } from './resolve.ts'
 import { deleteResolved } from './unlink.ts'
 
 export async function rmdir(
@@ -31,7 +31,7 @@ export async function rmdir(
   path: PathSpec,
   handed: Handed = {},
 ): Promise<void> {
-  const item = itemOf(handed.entry)
+  const item = await liveItemOf(accessor, path, handed.entry)
   if (item === null) throw enoent(path.virtual)
   if (item.type !== 'folder') throw enotdir(path.virtual)
   await deleteEmptyFolder(accessor.tokenManager, item.id, path)
@@ -137,7 +137,7 @@ export async function rmR(
   handed: Handed = {},
 ): Promise<void> {
   if (pathParts(path).length === 0) return
-  const item = itemOf(handed.entry)
+  const item = await liveItemOf(accessor, path, handed.entry)
   if (item === null) throw enoent(path.virtual)
   const upto = lostCount()
   const timer = startOp()

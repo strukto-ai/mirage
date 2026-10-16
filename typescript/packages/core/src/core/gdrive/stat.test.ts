@@ -139,7 +139,12 @@ describe('a Drive item as a row', () => {
         content: ContentType.JSON,
         modified: '2026-01-01T00:00:00Z',
         fingerprint: '2026-01-01T00:00:00Z',
-        extra: { file_id: 'id1', mime_type: DOC_MIME, resource_type: 'gdrive/gdoc' },
+        extra: {
+          file_id: 'id1',
+          mime_type: DOC_MIME,
+          parents: ['root'],
+          resource_type: 'gdrive/gdoc',
+        },
       }),
     )
     expect(statFromItem(fake.public(folder))).toEqual(
@@ -147,7 +152,11 @@ describe('a Drive item as a row', () => {
         name: 'd',
         type: FileType.DIRECTORY,
         modified: '2026-01-01T00:00:00Z',
-        extra: { file_id: 'id2', mime_type: 'application/vnd.google-apps.folder' },
+        extra: {
+          file_id: 'id2',
+          mime_type: 'application/vnd.google-apps.folder',
+          parents: ['root'],
+        },
       }),
     )
     expect(statFromItem(fake.public(blob))).toEqual(
@@ -161,6 +170,7 @@ describe('a Drive item as a row', () => {
         extra: {
           file_id: 'id3',
           mime_type: 'application/octet-stream',
+          parents: ['root'],
           md5_checksum: '5d41402abc4b2a76b9719d911017c592',
           head_revision_id: 'id3-r1',
           resource_type: 'gdrive/file',

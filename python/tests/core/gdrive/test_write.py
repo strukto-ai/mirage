@@ -19,7 +19,7 @@ from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.write import write
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
-from tests.fixtures.handed import call
+from tests.fixtures.handed import call, entry_at
 
 DOC_MIME = "application/vnd.google-apps.document"
 
@@ -43,6 +43,21 @@ async def test_write_overwrites_same_id(fake_drive, gdrive_accessor):
     await call(write, readdir, gdrive_accessor, spec("/f.txt"), b"new")
     assert fake_drive.items[file_id]["content"] == b"new"
     assert len(fake_drive.items) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_write_lands_on_the_file_at_the_path_now(
+    fake_drive, gdrive_accessor
+):
+    # The listing named a.txt; another client then renamed that file to
+    # b.txt and made a new a.txt. The write goes to the new a.txt.
+    moved = fake_drive.add("a.txt", content=b"old")
+    listed = await entry_at(readdir, gdrive_accessor, spec("/a.txt"))
+    fake_drive.items[moved]["name"] = "b.txt"
+    made = fake_drive.add("a.txt", content=b"other")
+    await write(gdrive_accessor, spec("/a.txt"), b"new", entry=listed)
+    assert fake_drive.items[made]["content"] == b"new"
+    assert fake_drive.items[moved]["content"] == b"old"
 
 
 @pytest.mark.asyncio

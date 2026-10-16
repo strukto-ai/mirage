@@ -20,7 +20,7 @@ import { eacces, eisdir } from '../../errors/fs.ts'
 import { uploadToken } from '../../utils/upload.ts'
 import { updateFileContent, uploadFile } from '../google/drive.ts'
 import { NATIVE_RESOURCE_TYPES } from './fingerprint.ts'
-import { statFromItem } from './readdir.ts'
+import { liveRow, statFromItem } from './readdir.ts'
 import { eaccesOnDenied, parentFolder } from './resolve.ts'
 
 /**
@@ -38,7 +38,7 @@ async function writeImpl(
   if (key === '') throw eisdir(path)
   const timer = startOp()
   const tm = accessor.tokenManager
-  const entry = handed.entry ?? null
+  const entry = await liveRow(accessor, path, handed.entry)
   if (entry !== null && entry.type === FileType.DIRECTORY) throw eisdir(path)
   // Google-native files are written through the gws commands, not raw bytes.
   if (entry !== null && NATIVE_RESOURCE_TYPES.has(entry.extra.resource_type as string)) {

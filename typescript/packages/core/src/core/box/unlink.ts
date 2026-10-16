@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { deleteCondition, nativeCondition, writesConditioned } from '../../cache/context.ts'
+import { deleteCondition, nativeCondition } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
@@ -31,13 +31,10 @@ export async function deleteResolved(
   path: PathSpec,
   lead: BoxItem,
 ): Promise<void> {
-  let item = lead
-  if (writesConditioned(path)) {
-    // The listed row can be older than the version the mount holds.
-    const found = await liveItem(accessor, path, item)
-    if (found === null) throw enoent(path.virtual)
-    item = found
-  }
+  // The listed row can be older than the path's file, and older than the
+  // version the mount holds.
+  const item = await liveItem(accessor, path, lead)
+  if (item === null) throw enoent(path.virtual)
   const live = liveOf(item)
   const cond = await deleteCondition(path, live?.content ?? null)
   const etag = await nativeCondition(path, cond, live, 'delete')

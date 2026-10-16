@@ -35,7 +35,7 @@ import {
 } from './api.ts'
 import { liveOf } from './fingerprint.ts'
 import { statFromItem } from './readdir.ts'
-import { itemOf, liveItem, parentFolder, pathParts } from './resolve.ts'
+import { itemOf, liveItem, liveItemOf, parentFolder, pathParts } from './resolve.ts'
 
 /**
  * Clear the file a copy or move lands on, held to the version read. Returns
@@ -180,6 +180,6 @@ export async function copy(
     item,
     dst,
     parentFolder(accessor, dst, handed.dstParent),
-    itemOf(handed.dstEntry),
+    await liveItemOf(accessor, dst, handed.dstEntry),
   )
 }

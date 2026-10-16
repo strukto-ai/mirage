@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.google.drive import delete_file, list_files
 from mirage.errors.fs import enoent, enotdir, enotempty
@@ -44,6 +45,7 @@ async def rmdir(
     virtual = path.virtual
     if not path.vfs_path:
         return
+    entry = await live_row(accessor, path, entry)
     if entry is None:
         raise enoent(virtual)
     if entry.type is not FileType.DIRECTORY:

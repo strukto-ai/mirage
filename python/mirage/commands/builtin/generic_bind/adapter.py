@@ -618,7 +618,8 @@ async def _dispatched_exists(
     """
     try:
         await _dispatched_stat(dispatch, accessor, path)
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
+        logger.debug("nothing at %s: %s", path.virtual, exc)
         return False
     return True
 

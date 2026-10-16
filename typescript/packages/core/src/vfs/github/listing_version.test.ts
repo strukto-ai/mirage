@@ -302,7 +302,7 @@ describe('github versions a listing by its head commit', () => {
       expect(await stored(w, '/gh/d1')).toBeNull()
       gh.log.length = 0
       expect(await out(w, 'ls /gh/d1')).toBe(LISTED)
-      costs.push([gh.counts(), gh.count('sha_dir')])
+      costs.push([gh.counts(), gh.count('dir')])
     }
     expect(costs[0]).toEqual(costs[1])
   })
@@ -373,6 +373,17 @@ describe('github versions a listing by its head commit', () => {
     },
   )
 
+  // A truncated tree lists a folder by its path at the ref, so one first listed
+  // after the repository moved shows what the move added: the sha an older
+  // listing of its parent carries would not.
+  it("lists a truncated folder at the ref, not a parent's sha", async () => {
+    gh.truncatedRecursive = true
+    const w = await wsOf(await vfsOf(), ReadPolicy.BOUNDED)
+    await out(w, 'ls /gh')
+    gh.set('d1/new.txt', 'new\n')
+    expect(await out(w, 'ls /gh/d1')).toBe(GROWN)
+  })
+
   // A truncated tree has no whole listing to refill, so the folder that names
   // the evicted row is listed again on its own.
   it('re-lists the folder of a listed child without a row in a truncated tree', async () => {
@@ -384,7 +395,7 @@ describe('github versions a listing by its head commit', () => {
     gh.log.length = 0
     expect(await out(w, 'cat /gh/d1/a.txt')).toBe('x\n')
     expect(gh.count('recursive')).toBe(0)
-    expect(gh.count('sha_dir')).toBeGreaterThanOrEqual(1)
+    expect(gh.count('dir')).toBeGreaterThanOrEqual(1)
   })
 
   // A listed child whose row is still missing after the eviction refill is
@@ -416,7 +427,7 @@ describe('github versions a listing by its head commit', () => {
       const result = await w.shell('stat /gh/d1/a.txt')
       expect(result.exitCode).toBe(1)
       expect(gh.count('recursive')).toBe(0)
-      expect(gh.count('sha_dir'), String(command)).toBe(1)
+      expect(gh.count('dir'), String(command)).toBe(1)
     }
   })
 

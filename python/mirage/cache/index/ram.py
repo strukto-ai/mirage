@@ -84,7 +84,12 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         async with self._lock_for(vfs_path):
             self._entries[vfs_path] = entry
 
-    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
+    async def add_entry(
+        self,
+        vfs_path: str,
+        entry: FileStat,
+        expired_at: datetime | None = None,
+    ) -> None:
         folder = vfs_path.rsplit("/", 1)[0] or "/"
         async with self._lock_for(folder):
             now = datetime.now(timezone.utc)
@@ -92,8 +97,13 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             children = self._children.get(folder)
             exp = self._expiry.get(folder)
             if children is None or exp is None or now >= exp:
+                lifetime = now + timedelta(seconds=self._ttl)
                 self._children[folder] = [vfs_path]
-                self._expiry[folder] = now + timedelta(seconds=self._ttl)
+                self._expiry[folder] = (
+                    lifetime
+                    if expired_at is None
+                    else min(lifetime, expired_at)
+                )
                 self._partial.add(folder)
                 self._windows.discard(folder)
                 self._versions.pop(folder, None)

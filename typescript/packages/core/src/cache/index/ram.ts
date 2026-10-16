@@ -80,7 +80,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     })
   }
 
-  override addEntry(vfsPath: string, entry: FileStat): Promise<void> {
+  override addEntry(vfsPath: string, entry: FileStat, expiredAt?: Date | null): Promise<void> {
     const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     return this.lock.withLock(folder, () => {
       const now = Date.now()
@@ -88,8 +88,12 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       const children = this.children.get(folder)
       const exp = this.expiry.get(folder)
       if (children === undefined || exp === undefined || now >= exp) {
+        const lifetime = now + this.ttl * 1000
         this.children.set(folder, [vfsPath])
-        this.expiry.set(folder, now + this.ttl * 1000)
+        this.expiry.set(
+          folder,
+          expiredAt == null ? lifetime : Math.min(lifetime, expiredAt.getTime()),
+        )
         this.partial.add(folder)
         this.windowed.delete(folder)
         this.versions.delete(folder)

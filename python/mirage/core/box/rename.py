@@ -21,7 +21,7 @@ from mirage.core.box.api import (
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.copy import replace_file, retaken
 from mirage.core.box.readdir import stat_from_item
-from mirage.core.box.resolve import item_of, parent_folder, path_parts
+from mirage.core.box.resolve import live_item_of, parent_folder, path_parts
 from mirage.core.box.rmdir import delete_empty_folder
 from mirage.errors.fs import eisdir, enoent, enotdir
 from mirage.observe.context import lift_lost, lost_count, record, start_op
@@ -55,7 +55,7 @@ async def rename(
             reply names none.
     """
     tm = accessor.token_manager
-    item = item_of(entry)
+    item = await live_item_of(accessor, src, entry)
     if item is None:
         raise enoent(src.virtual)
     if src.virtual == dst.virtual:
@@ -72,7 +72,7 @@ async def rename(
     upto = lost_count()
     timer = start_op()
     cond: WriteCondition | None = None
-    existing = item_of(dst_entry)
+    existing = await live_item_of(accessor, dst, dst_entry)
     if existing is None and item.get("type") == "file":
         cond = await replace_file(accessor, dst, None)
     if existing is not None and existing["id"] != item["id"]:

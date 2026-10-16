@@ -19,7 +19,7 @@ from mirage.cache.context import own_write_version
 from mirage.cache.types import OwnRead
 from mirage.core.box.api import download_file
 from mirage.core.box.fingerprint import live_of
-from mirage.core.box.resolve import item_of
+from mirage.core.box.resolve import live_item_of
 from mirage.core.box.write import write
 from mirage.errors.fs import enotsup
 from mirage.types import FileStat, PathSpec
@@ -51,7 +51,7 @@ async def truncate(
     if length == 0:
         await write(accessor, path, b"", entry, parent)
         return
-    item = item_of(entry)
+    item = await live_item_of(accessor, path, entry)
     live = live_of(item)
     data = b""
     own: str | OwnRead | None = OwnRead.ABSENT

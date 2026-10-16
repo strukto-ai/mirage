@@ -662,17 +662,25 @@ class RedisIndexCacheStore(IndexCacheStore):
         pipe.set(self._entry_key(vfs_path), entry.model_dump_json())
         await pipe.execute()
 
-    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
+    async def add_entry(
+        self,
+        vfs_path: str,
+        entry: FileStat,
+        expired_at: datetime | None = None,
+    ) -> None:
         await self._flush_seed()
         folder = vfs_path.rsplit("/", 1)[0] or "/"
         now = datetime.now(timezone.utc)
+        lifetime = now + timedelta(seconds=self._ttl)
         generation = await self._generation(self._generation_key)
         directory_generation = await self._generation(
             f"{self._directory_generation_prefix}{folder}"
         )
         fresh = IndexDirectory(
             entries=[vfs_path],
-            expires_at=(now + timedelta(seconds=self._ttl)).timestamp(),
+            expires_at=(
+                lifetime if expired_at is None else min(lifetime, expired_at)
+            ).timestamp(),
             generation=f"{generation}:{directory_generation}",
             partial=True,
         )

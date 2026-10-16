@@ -474,6 +474,32 @@ async def test_a_commands_glob_past_a_window_asks_the_backend():
 
 
 @pytest.mark.asyncio
+async def test_a_lookup_a_check_cleared_midway_looks_again():
+    # A fresh check clears the index without the lookup's lock: the
+    # parent's listing lands, then is gone before its row is read.
+    store = Days()
+    ws = Workspace({"/w/": (store, MountMode.READ)})
+    try:
+        index = ws.mount("/w").index_store
+        listed = index.set_dir
+        cleared: list[str] = []
+
+        async def set_then_clear(key, *args, **kwargs):
+            gone = await listed(key, *args, **kwargs)
+            if key == "/w" and not cleared:
+                cleared.append(key)
+                await index.clear()
+            return gone
+
+        with patch.object(index, "set_dir", set_then_clear):
+            row, _ = await ws.dispatch("stat", _at("/w/chan"))
+        assert row.type is FileType.DIRECTORY
+        assert cleared == ["/w"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_root_stat_lists_nothing_outside_the_mount():
     store = Days()
     ws = Workspace({"/m/w/": (store, MountMode.READ)})

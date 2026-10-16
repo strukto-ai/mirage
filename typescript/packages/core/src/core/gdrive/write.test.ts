@@ -61,6 +61,19 @@ function spec(virtual: string): PathSpec {
 }
 
 describe('gdrive write', () => {
+  it('lands on the file at the path now', async () => {
+    // The listing named a.txt; another client then renamed that file to b.txt
+    // and made a new a.txt. The write goes to the new a.txt.
+    const moved = fake.add('a.txt', 'root', undefined, ENC.encode('old'))
+    const listed = await handedAt(readdir, accessor, spec('/a.txt'))
+    const renamed = fake.items.get(moved)
+    if (renamed !== undefined) renamed.name = 'b.txt'
+    const made = fake.add('a.txt', 'root', undefined, ENC.encode('other'))
+    await write(accessor, spec('/a.txt'), ENC.encode('new'), listed)
+    expect(DEC.decode(fake.items.get(made)?.content)).toBe('new')
+    expect(DEC.decode(fake.items.get(moved)?.content)).toBe('old')
+  })
+
   it('creates a file in an existing parent', async () => {
     fake.folder('a')
     await write(

@@ -15,7 +15,7 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.readdir import stat_from_item
+from mirage.core.gdrive.readdir import live_row, stat_from_item
 from mirage.core.gdrive.resolve import (
     drive_target_name,
     eacces_on_denied,
@@ -23,7 +23,6 @@ from mirage.core.gdrive.resolve import (
 )
 from mirage.core.google.drive import (
     delete_file,
-    get_file,
     list_files,
     patch_file,
 )
@@ -53,8 +52,10 @@ async def rename(
         dst_entry (FileStat | None): what is at ``dst``.
     """
     token_manager = accessor.token_manager
+    entry = await live_row(accessor, src, entry)
     if entry is None:
         raise enoent(src.virtual)
+    dst_entry = await live_row(accessor, dst, dst_entry)
     if dst_entry is not None:
         # GNU mv overwrites the destination: drop a conflicting file (or
         # empty folder) before the move. A non-empty folder conflict is mv's
@@ -77,14 +78,12 @@ async def rename(
     add_parents = dst_parent_id if dst_parent_id != src_parent_id else None
     remove_parents = src_parent_id if add_parents else None
     # Drive stamps a rename as an edit, so the time goes back as rename(2)
-    # keeps it. Drive has no conditional update; reading it just before
-    # leaves one request for another writer's edit to land in.
+    # keeps it, as the live row just read it. Drive has no conditional
+    # update; reading it just before leaves one request for another
+    # writer's edit to land in.
     body = {"name": name}
-    modified = (await get_file(token_manager, entry.extra["file_id"])).get(
-        "modifiedTime"
-    )
-    if modified:
-        body["modifiedTime"] = modified
+    if entry.modified:
+        body["modifiedTime"] = entry.modified
     item = await patch_file(
         token_manager,
         entry.extra["file_id"],

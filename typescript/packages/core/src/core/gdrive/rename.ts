@@ -16,8 +16,8 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { enoent, enotempty } from '../../errors/fs.ts'
-import { deleteFile, getFile, listFiles, patchFile } from '../google/drive.ts'
-import { statFromItem } from './readdir.ts'
+import { deleteFile, listFiles, patchFile } from '../google/drive.ts'
+import { liveRow, statFromItem } from './readdir.ts'
 import { driveTargetName, eaccesOnDenied, parentFolder } from './resolve.ts'
 
 /**
@@ -32,9 +32,9 @@ async function renameImpl(
   handed: Handed = {},
 ): Promise<FileStat | null> {
   const tm = accessor.tokenManager
-  const entry = handed.entry ?? null
+  const entry = await liveRow(accessor, src, handed.entry)
   if (entry === null) throw enoent(src)
-  const dstEntry = handed.dstEntry ?? null
+  const dstEntry = await liveRow(accessor, dst, handed.dstEntry)
   if (dstEntry !== null) {
     // GNU mv overwrites the destination: drop a conflicting file (or empty
     // folder) before the move. A non-empty folder conflict is mv's
@@ -58,10 +58,11 @@ async function renameImpl(
   const name = driveTargetName(basename, typeof mime === 'string' ? mime : '')
   const move = dstParentId !== srcParentId
   // Drive stamps a rename as an edit, so the time goes back as rename(2)
-  // keeps it. Drive has no conditional update; reading it just before leaves
-  // one request for another writer's edit to land in.
+  // keeps it, as the live row just read it. Drive has no conditional update;
+  // reading it just before leaves one request for another writer's edit to
+  // land in.
   const fileId = entry.extra.file_id as string
-  const modified = (await getFile(tm, fileId)).modifiedTime
+  const modified = entry.modified
   const item = await patchFile(tm, fileId, {
     body: modified ? { name, modifiedTime: modified } : { name },
     ...(move ? { addParents: dstParentId, removeParents: srcParentId } : {}),

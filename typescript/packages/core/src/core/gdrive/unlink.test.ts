@@ -41,6 +41,19 @@ function spec(virtual: string): PathSpec {
 }
 
 describe('gdrive unlink', () => {
+  it('removes the file at the path now', async () => {
+    // The listing named a.txt; another client then renamed that file to b.txt
+    // and made a new a.txt. The unlink removes the new a.txt.
+    const moved = fake.add('a.txt', 'root', undefined, ENC.encode('old'))
+    const listed = await handedAt(readdir, accessor, spec('/a.txt'))
+    const renamed = fake.items.get(moved)
+    if (renamed !== undefined) renamed.name = 'b.txt'
+    const made = fake.add('a.txt', 'root', undefined, ENC.encode('other'))
+    await unlink(accessor, spec('/a.txt'), listed)
+    expect(fake.items.has(made)).toBe(false)
+    expect(fake.items.has(moved)).toBe(true)
+  })
+
   it('removes a file', async () => {
     fake.add('f.txt', 'root', undefined, ENC.encode('x'))
     await unlink(accessor, spec('/f.txt'), await handedAt(readdir, accessor, spec('/f.txt')))

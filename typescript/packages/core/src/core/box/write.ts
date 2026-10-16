@@ -24,7 +24,7 @@ import { BoxApiError } from './client.ts'
 import { CONFLICT_STATUS } from './constants.ts'
 import { liveOf } from './fingerprint.ts'
 import { statFromItem } from './readdir.ts'
-import { itemOf, liveItem, parentFolder, pathParts } from './resolve.ts'
+import { itemOf, liveItem, liveItemOf, parentFolder, pathParts } from './resolve.ts'
 
 /**
  * Upload `data` as a new file at `path`, plainly. The listing named nothing
@@ -71,10 +71,12 @@ export async function write(
   const tm = accessor.tokenManager
   const cond = await writeCondition(path, 'put')
   const timer = startOp()
-  let existing = itemOf(handed.entry)
-  // A held version is checked against what is there now: the listed row can
-  // be older than the read that holds it.
-  if (cond !== null) existing = await liveItem(accessor, path, existing)
+  // What is there now: the listed row can be older than the path's file, and
+  // older than the read a held version came from.
+  const existing =
+    cond !== null
+      ? await liveItem(accessor, path, itemOf(handed.entry))
+      : await liveItemOf(accessor, path, handed.entry)
   const etag = await nativeCondition(path, cond, liveOf(existing), 'put')
   let reply: unknown
   try {

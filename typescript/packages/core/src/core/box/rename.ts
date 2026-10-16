@@ -23,7 +23,7 @@ import { uploadStat } from '../../utils/upload.ts'
 import { updateFile, updateFolder, type BoxItem } from './api.ts'
 import { replaceFile, retaken } from './copy.ts'
 import { statFromItem } from './readdir.ts'
-import { itemOf, parentFolder, pathParts } from './resolve.ts'
+import { liveItemOf, parentFolder, pathParts } from './resolve.ts'
 import { deleteEmptyFolder } from './rmdir.ts'
 
 async function clearDest(
@@ -63,14 +63,19 @@ export async function rename(
   handed: Handed = {},
 ): Promise<FileStat | null> {
   const tm = accessor.tokenManager
-  const item = itemOf(handed.entry)
+  const item = await liveItemOf(accessor, src, handed.entry)
   if (item === null) throw enoent(src.virtual)
   if (src.virtual === dst.virtual) return null
   const folderId = parentFolder(accessor, dst, handed.dstParent)
   const dstParts = pathParts(dst)
   const upto = lostCount()
   const timer = startOp()
-  const cond = await clearDest(accessor, dst, itemOf(handed.dstEntry), item)
+  const cond = await clearDest(
+    accessor,
+    dst,
+    await liveItemOf(accessor, dst, handed.dstEntry),
+    item,
+  )
   const newName = dstParts[dstParts.length - 1] ?? ''
   let moved: BoxItem
   try {

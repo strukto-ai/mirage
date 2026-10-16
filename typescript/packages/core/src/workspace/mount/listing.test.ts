@@ -527,6 +527,34 @@ describe('a window', () => {
     }
   })
 
+  it('looks again after a check cleared the index midway', async () => {
+    // A fresh check clears the index without the lookup's lock: the parent's
+    // listing lands, then is gone before its row is read.
+    const store = new Days()
+    const ws = new Workspace(
+      { '/w/': store },
+      { mode: MountMode.READ, shellParser: await getTestParser() },
+    )
+    try {
+      const index = ws.mount('/w').indexStore
+      const listed = index.setDir.bind(index)
+      const cleared: string[] = []
+      vi.spyOn(index, 'setDir').mockImplementation(async (key, ...rest) => {
+        const gone = await listed(key, ...rest)
+        if (key === '/w' && cleared.length === 0) {
+          cleared.push(key)
+          await index.clear()
+        }
+        return gone
+      })
+      const row = (await ws.dispatch('stat', '/w/chan')) as FileStat
+      expect(row.type).toBe(FileType.DIRECTORY)
+      expect(cleared).toEqual(['/w'])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('lets a root stat list nothing outside the mount', async () => {
     const store = new Days()
     const ws = new Workspace(

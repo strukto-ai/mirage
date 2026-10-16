@@ -41,9 +41,10 @@ export abstract class IndexCacheStore {
    * held for the parent gains the name, in order, and stays what it was: a
    * complete one stays complete, since the create is the only change to it.
    * With none held, the parent gets a partial listing that names the one
-   * entry, which proves it without proving anything absent.
+   * entry, which proves it without proving anything absent; `expiredAt` is
+   * the latest that listing may live, null for the store's own lifetime.
    */
-  abstract addEntry(vfsPath: string, entry: FileStat): Promise<void>
+  abstract addEntry(vfsPath: string, entry: FileStat, expiredAt?: Date | null): Promise<void>
   /** Atomically replace an existing row without renewing its listing; custom stores may decline. */
   replaceIfUnchanged(_path: string, _predecessor: string, _entry: FileStat): Promise<boolean> {
     return Promise.resolve(false)

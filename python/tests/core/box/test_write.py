@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import mirage.core.box.readdir as readdir_mod
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.copy import copy
 from mirage.core.box.mkdir import mkdir
@@ -30,7 +31,7 @@ from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.box import BoxVFS
 from mirage.vfs.box.config import BoxConfig
 from mirage.workspace import Workspace
-from tests.fixtures.handed import call
+from tests.fixtures.handed import call, entry_at
 
 _TREE = {
     "0": [
@@ -44,6 +45,42 @@ _TREE = {
     "300": [],
     "400": [],
 }
+
+
+async def _info_from_listings(tm, item_id: str) -> dict:
+    """``GET /files|folders/{id}`` answered from whichever listing the test
+    patched in, with the ancestry Box reports."""
+    pending = [("0", [{"id": "0", "name": "All Files"}])]
+    while pending:
+        folder, chain = pending.pop()
+        for child in await readdir_mod.list_folder_items(tm, folder):
+            if child["id"] == item_id:
+                return {
+                    **child,
+                    "item_status": "active",
+                    "path_collection": {"entries": chain},
+                }
+            if child.get("type") == "folder":
+                pending.append(
+                    (
+                        child["id"],
+                        [*chain, {"id": child["id"], "name": child["name"]}],
+                    )
+                )
+    raise BoxApiError(f"no item {item_id}", 404)
+
+
+@pytest.fixture(autouse=True)
+def _live_by_id():
+    with (
+        patch(
+            "mirage.core.box.resolve.get_file_info", new=_info_from_listings
+        ),
+        patch(
+            "mirage.core.box.resolve.get_folder_info", new=_info_from_listings
+        ),
+    ):
+        yield
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -97,6 +134,33 @@ async def test_write_existing_file_uploads_version(root_accessor):
         )
     ver.assert_awaited_once_with(
         root_accessor.token_manager, "200", "a.txt", b"OVER", None
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_write_lands_on_the_file_at_the_path_now(root_accessor):
+    # The listing named a.txt (id 200); another client then renamed it to
+    # b.txt and made a new a.txt (id 210). The write goes to 210.
+    tree = {key: list(rows) for key, rows in _TREE.items()}
+
+    async def listing(_tm, folder_id, limit=1000):
+        return tree.get(folder_id, [])
+
+    with (
+        patch("mirage.core.box.readdir.list_folder_items", new=listing),
+        patch("mirage.core.box.resolve.list_folder_items", new=listing),
+        patch(
+            "mirage.core.box.write.upload_file_version", new_callable=AsyncMock
+        ) as ver,
+    ):
+        listed = await entry_at(readdir, root_accessor, _spec("/data/a.txt"))
+        tree["100"] = [
+            {"id": "200", "name": "b.txt", "type": "file", "size": 5},
+            {"id": "210", "name": "a.txt", "type": "file", "size": 5},
+        ]
+        await write(root_accessor, _spec("/data/a.txt"), b"new", listed)
+    ver.assert_awaited_once_with(
+        root_accessor.token_manager, "210", "a.txt", b"new", None
     )
 
 

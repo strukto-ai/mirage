@@ -15,6 +15,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ObserveModule from '../../observe/context.ts'
 import type * as ApiModule from './api.ts'
+import type * as ClientModule from './client.ts'
 
 const H = vi.hoisted(() => ({
   order: [] as string[],
@@ -33,9 +34,36 @@ vi.mock('../../observe/context.ts', async (importOriginal) => {
 
 vi.mock('./api.ts', async () => {
   const actual = await vi.importActual<typeof ApiModule>('./api.ts')
+  const client = await vi.importActual<typeof ClientModule>('./client.ts')
+  const listFolderItems = vi.fn()
+  // `GET /files|folders/{id}` answered from whichever listing the test set,
+  // with the ancestry Box reports.
+  const info = async (tm: unknown, id: string): Promise<unknown> => {
+    const pending: [string, { id: string; name: string }[]][] = [
+      ['0', [{ id: '0', name: 'All Files' }]],
+    ]
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      const [folder, chain] = next
+      for (const child of (await listFolderItems(tm, folder)) as ApiModule.BoxItem[]) {
+        if (child.id === id) {
+          return {
+            ...child,
+            item_status: 'active',
+            path_collection: { total_count: chain.length, entries: chain },
+          }
+        }
+        if (child.type === 'folder') {
+          pending.push([child.id, [...chain, { id: child.id, name: child.name }]])
+        }
+      }
+    }
+    throw new client.BoxApiError(`no item ${id}`, 404)
+  }
   return {
     ...actual,
-    listFolderItems: vi.fn(),
+    listFolderItems,
+    getFileInfo: info,
+    getFolderInfo: info,
     uploadNewFile: vi.fn(),
     uploadFileVersion: vi.fn(),
     createFolder: vi.fn(),
@@ -148,6 +176,30 @@ describe('box write ops', () => {
     expect(vi.mocked(api.uploadFileVersion)).toHaveBeenCalledWith(
       STUB_TM,
       '200',
+      'a.txt',
+      new Uint8Array([9]),
+      null,
+    )
+  })
+
+  it('lands a write on the file at the path now', async () => {
+    // The listing named a.txt (id 200); another client then renamed it to
+    // b.txt and made a new a.txt (id 210). The write goes to 210.
+    const listed = await handed(spec('/data/a.txt'))
+    const tree: Record<string, ApiModule.BoxItem[]> = {
+      ...TREE,
+      '100': [
+        { type: 'file', id: '200', name: 'b.txt', size: 5 },
+        { type: 'file', id: '210', name: 'a.txt', size: 5 },
+      ],
+    }
+    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
+      Promise.resolve(tree[folderId] ?? []),
+    )
+    await write(makeAccessor(), spec('/data/a.txt'), new Uint8Array([9]), listed)
+    expect(vi.mocked(api.uploadFileVersion)).toHaveBeenCalledWith(
+      STUB_TM,
+      '210',
       'a.txt',
       new Uint8Array([9]),
       null,

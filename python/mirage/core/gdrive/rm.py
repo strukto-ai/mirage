@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.google.drive import delete_file
 from mirage.errors.fs import enoent
@@ -26,6 +27,7 @@ async def rm_r(
     # A Drive folder delete removes its subtree in one call.
     if not path.vfs_path:
         return
+    entry = await live_row(accessor, path, entry)
     if entry is None:
         raise enoent(path.virtual)
     await delete_file(accessor.token_manager, entry.extra["file_id"])

@@ -17,6 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { deleteFile } from '../google/drive.ts'
+import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 
 // A Drive folder delete removes its subtree in one call.
@@ -26,7 +27,7 @@ async function rmRImpl(
   handed: Handed = {},
 ): Promise<void> {
   if (path.vfsPath === '') return
-  const entry = handed.entry ?? null
+  const entry = await liveRow(accessor, path, handed.entry)
   if (entry === null) throw enoent(path)
   await deleteFile(accessor.tokenManager, entry.extra.file_id as string)
 }

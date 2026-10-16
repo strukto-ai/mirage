@@ -15,7 +15,7 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.readdir import stat_from_item
+from mirage.core.gdrive.readdir import live_row, stat_from_item
 from mirage.core.gdrive.resolve import (
     DriveNode,
     drive_target_name,
@@ -88,6 +88,7 @@ async def copy(
     if entry is None:
         raise enoent(src.virtual)
     token_manager = accessor.token_manager
+    dst_entry = await live_row(accessor, dst, dst_entry)
     src_node = node_of(entry)
     if src_node.is_folder:
         if dst_entry is not None and dst_entry.type is not FileType.DIRECTORY:

@@ -56,7 +56,12 @@ class NullIndexCacheStore(IndexCacheStore):
     async def put(self, vfs_path: str, entry: FileStat) -> None:
         return None
 
-    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
+    async def add_entry(
+        self,
+        vfs_path: str,
+        entry: FileStat,
+        expired_at: datetime | None = None,
+    ) -> None:
         return None
 
     async def list_dir(self, vfs_path: str) -> ListResult:

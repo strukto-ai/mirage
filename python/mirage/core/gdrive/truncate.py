@@ -14,6 +14,7 @@
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
+from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.gdrive.write import write
 from mirage.core.google.drive import download_file
@@ -32,6 +33,7 @@ async def truncate(
 ) -> None:
     if no_create:
         raise enotsup("gdrive", "truncate --no-create", path)
+    entry = await live_row(accessor, path, entry)
     if entry is not None and entry.type is FileType.DIRECTORY:
         raise eisdir(path.virtual)
     if (

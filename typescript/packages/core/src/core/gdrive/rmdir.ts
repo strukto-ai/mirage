@@ -18,6 +18,7 @@ import { FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { deleteFile, listFiles } from '../google/drive.ts'
+import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 
 /**
@@ -37,7 +38,7 @@ async function rmdirImpl(
   handed: Handed = {},
 ): Promise<void> {
   if (path.vfsPath === '') return
-  const entry = handed.entry ?? null
+  const entry = await liveRow(accessor, path, handed.entry)
   if (entry === null) throw enoent(path)
   if (entry.type !== FileType.DIRECTORY) throw enotdir(path)
   const driveId = entry.extra.drive_id

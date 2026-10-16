@@ -18,7 +18,7 @@ import type { Handed } from '../../vfs/types.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import type { TokenManager } from '../google/client.ts'
 import { copyFile, createFolder, deleteFile, listFiles } from '../google/drive.ts'
-import { statFromItem } from './readdir.ts'
+import { liveRow, statFromItem } from './readdir.ts'
 import type { DriveNode } from './resolve.ts'
 import {
   driveTargetName,
@@ -60,7 +60,7 @@ async function copyImpl(
   if (entry === null) throw enoent(src)
   const tm = accessor.tokenManager
   const srcNode = nodeOf(entry)
-  const dstEntry = handed.dstEntry ?? null
+  const dstEntry = await liveRow(accessor, dst, handed.dstEntry)
   const dstKey = dst.vfsPath
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
   if (isFolder(srcNode)) {

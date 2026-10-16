@@ -15,6 +15,7 @@
 from datetime import datetime
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.google.drive import patch_file
 from mirage.errors.fs import enoent
@@ -60,6 +61,7 @@ async def set_attrs(
     if not path.vfs_path.strip("/"):
         residual["mtime"] = mtime
         return residual
+    entry = await live_row(accessor, path, entry)
     if entry is None:
         raise enoent(path)
     await patch_file(

@@ -478,8 +478,9 @@ async function dispatchedExists(dispatch: DispatchFn, path: PathSpec): Promise<b
   try {
     await dispatchedStat(dispatch, path)
   } catch (err) {
-    if (isEnoent(err)) return false
-    throw err
+    if (!isEnoent(err)) throw err
+    console.debug(`nothing at ${path.virtual}: ${String(err)}`)
+    return false
   }
   return true
 }

@@ -29,7 +29,7 @@ from typing import Any, Callable, cast
 from mirage.accessor.base import Accessor
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX
-from mirage.cache.index.config import IndexConfig
+from mirage.cache.index.config import IndexConfig, LookupStatus
 from mirage.cache.index.factory import build_index
 from mirage.cache.index.lock import index_lock
 from mirage.cache.index.ram import ListingCheckStore
@@ -1534,7 +1534,10 @@ class MountEntry:
         """What is at ``scope``, as its parent's listing names it, listing
         the parent when no stored listing does. Under ``fresh`` the running
         command's check of ``scope`` already asked the backend, so its
-        answer stands in for the walk; a check itself always walks.
+        answer stands in for the walk; a check itself always walks. A miss
+        right after a listing of the parent landed, with no listing left
+        now, says only that a check cleared the index mid-lookup, so it is
+        looked up once more.
 
         Args:
             scope (PathSpec): a path keyed below the mount.
@@ -1548,8 +1551,22 @@ class MountEntry:
             probed = manager.probed_stat(scope)
             if probed is not None:
                 return probed
-        warm = functools.partial(self._listed, self._folder(scope), index)
+        listed: list[str] = []
+
+        async def warm() -> list[str]:
+            names = await self._listed(self._folder(scope), index)
+            listed.append(key)
+            return names
+
         row = await entry_at(index, key, warm)
+        if (
+            row is None
+            and listed
+            and index is not NULL_INDEX
+            and (await index.list_dir(folder_of(key))).status
+            is LookupStatus.NOT_FOUND
+        ):
+            row = await entry_at(index, key, warm)
         if row is not None:
             return row
         if await beyond_window(index, key):

@@ -19,7 +19,7 @@ import { publishRead } from './context.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { FileStat, FileType, PathSpec } from '../types.ts'
+import { DEFAULT_READ_TTL, FileStat, FileType, PathSpec } from '../types.ts'
 import { withCacheMutation } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { LookupStatus } from './index/config.ts'
@@ -67,6 +67,30 @@ describe('CacheManager', () => {
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
     const listing = await index.listDir('/data/arch')
     expect(listing.entries ?? null).toBeNull()
+  })
+
+  it('keeps a created row no longer than the read limit', async () => {
+    // A store whose own lifetime is a day must not keep the listing a create
+    // starts past the mount's read limit.
+    const index = new RAMIndexCacheStore({ ttl: 86400 })
+    const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+    const row = new FileStat({ name: 'new.txt', type: FileType.FILE, size: 1 })
+    await manager.keepCreated('/new.txt', row)
+    const listing = await index.listDir('/data')
+    expect(listing.partialEntries).toEqual(['/data/new.txt'])
+    const expiry = (index as unknown as { expiry: Map<string, number> }).expiry.get('/data') ?? 0
+    expect(expiry - Date.now()).toBeLessThanOrEqual(DEFAULT_READ_TTL * 1000)
+  })
+
+  it('lists the parent again for a created row naming another file', async () => {
+    // A store that matches names without case wrote `N` for a write to `n`:
+    // the row proves nothing about `n`, so the parent is listed again.
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await index.setDir('/data', [['N', new FileStat({ name: 'N', type: FileType.FILE, size: 1 })]])
+    const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+    await manager.keepCreated('/n', new FileStat({ name: 'N', type: FileType.FILE, size: 2 }))
+    expect((await index.listDir('/data')).entries ?? null).toBeNull()
+    expect((await index.get('/data/n')).entry ?? null).toBeNull()
   })
 
   it('unlink evicts file entry, listing, and index entry', async () => {

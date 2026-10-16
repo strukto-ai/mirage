@@ -21,7 +21,7 @@ import type { Handed } from '../../vfs/types.ts'
 import { sha1Hex } from '../../utils/hash.ts'
 import { downloadFile } from './api.ts'
 import { liveOf } from './fingerprint.ts'
-import { itemOf } from './resolve.ts'
+import { liveItemOf } from './resolve.ts'
 import { write } from './write.ts'
 
 /**
@@ -41,7 +41,7 @@ export async function truncate(
     await write(accessor, path, new Uint8Array(0), handed)
     return
   }
-  const item = itemOf(handed.entry)
+  const item = await liveItemOf(accessor, path, handed.entry)
   const live = liveOf(item)
   let data: Uint8Array = new Uint8Array(0)
   let own: string | OwnRead | null = OwnRead.ABSENT

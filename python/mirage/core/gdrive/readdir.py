@@ -15,12 +15,15 @@
 import logging
 from typing import Any
 
+import aiohttp
+
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.resolve import root_context
 from mirage.core.google.drive import (
     FOLDER_MIME,
     MIME_TO_EXT,
+    get_file,
     list_files,
     list_shared_drives,
 )
@@ -66,7 +69,8 @@ def stat_from_item(item: dict[str, Any]) -> FileStat:
     ``mimeType`` reads as a plain file: natives are refused before any
     upload, so a reply without one names bytes. ``extra`` carries what
     the functions handed the stat act on: the file id, its shared drive,
-    its MIME type, and the md5 and head revision a read checks.
+    its MIME type, the folders it was filed in, and the md5 and head
+    revision a read checks.
 
     Args:
         item (dict[str, Any]): a Drive file resource with ``ITEM_FIELDS``.
@@ -77,6 +81,8 @@ def stat_from_item(item: dict[str, Any]) -> FileStat:
     extra: dict[str, Any] = {"file_id": item.get("id"), "mime_type": mime}
     if item.get("driveId"):
         extra["drive_id"] = item["driveId"]
+    if item.get("parents"):
+        extra["parents"] = list(item["parents"])
     if mime == FOLDER_MIME:
         return FileStat(
             name=name, type=FileType.DIRECTORY, modified=modified, extra=extra
@@ -111,6 +117,50 @@ def stat_from_item(item: dict[str, Any]) -> FileStat:
             modified,
         ),
         extra={**extra, "resource_type": resource_type},
+    )
+
+
+async def live_row(
+    accessor: GDriveAccessor, path: PathSpec, entry: FileStat | None
+) -> FileStat | None:
+    """What is at ``path`` now, for a change about to be made to it.
+
+    A listed row names its item by id, and another client may have moved,
+    renamed or trashed the item since: a change made by that id would land
+    on a file at another path. One ``files.get`` confirms the item still
+    has the name and the folders the listing gave it; otherwise that folder
+    is listed again, and what it names at the path answers, None for
+    nothing. A row that names no folder (a Shared Drive) is taken as is.
+
+    Args:
+        accessor (GDriveAccessor): Drive accessor.
+        path (PathSpec): the path about to change.
+        entry (FileStat | None): what its folder's listing named there.
+    """
+    folders = None if entry is None else entry.extra.get("parents")
+    if entry is None or not folders:
+        return entry
+    tm = accessor.token_manager
+    try:
+        item = await get_file(tm, entry.extra["file_id"])
+    except aiohttp.ClientResponseError as exc:
+        if exc.status != 404:
+            raise
+        logger.debug("listed id for %s is gone: %s", path.virtual, exc)
+    else:
+        row = stat_from_item(item)
+        if (
+            not item.get("trashed")
+            and row.name == entry.name
+            and row.extra.get("parents") == folders
+        ):
+            return row
+    files = await list_files(
+        tm, folder_id=folders[0], drive_id=entry.extra.get("drive_id")
+    )
+    return next(
+        (row for row in map(stat_from_item, files) if row.name == entry.name),
+        None,
     )
 
 

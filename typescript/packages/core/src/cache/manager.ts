@@ -645,12 +645,20 @@ export class CacheManager {
    * Settle a create that answered its new entry's stat. The entry is kept
    * where its parent's listing names it, so a listing of the parent and the
    * next level of a nested create need no request: what `invalidateAfterWrite`
-   * drops for a re-list is the one name the create added. Mirrors Python's
-   * `keep_created`.
+   * drops for a re-list is the one name the create added. A row naming another
+   * file (a store that matches names without case wrote the one it holds)
+   * proves nothing about the path, so the parent is listed again. Mirrors
+   * Python's `keep_created`.
    */
   async keepCreated(path: string | PathSpec, row: FileStat): Promise<void> {
     const key = await this.invalidatePath(path)
-    if (this.index !== null) await this.index.addEntry(key, row)
+    if (row.name !== key.slice(key.lastIndexOf('/') + 1)) {
+      await this.invalidateParent(key)
+      return
+    }
+    if (this.index !== null) {
+      await this.index.addEntry(key, row, new Date(Date.now() + this.readTtl * 1000))
+    }
   }
 
   /** Invalidate caches after a deletion of `path`; only `virtual` is read. */

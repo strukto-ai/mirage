@@ -16,7 +16,7 @@ import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
-from mirage.core.gdrive.readdir import stat_from_item
+from mirage.core.gdrive.readdir import live_row, stat_from_item
 from mirage.core.gdrive.resolve import eacces_on_denied, parent_folder
 from mirage.core.google.drive import update_file_content, upload_file
 from mirage.errors.fs import eacces, eisdir
@@ -50,6 +50,7 @@ async def write(
     key = path.vfs_path
     if not key:
         raise eisdir(virtual)
+    entry = await live_row(accessor, path, entry)
     timer = start_op()
     token_manager = accessor.token_manager
     if entry is not None and entry.type is FileType.DIRECTORY:

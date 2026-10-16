@@ -396,9 +396,10 @@ async def test_a_move_lifts_a_kept_version(drive, workspace, ancestor):
 async def test_a_box_conditional_write_asks_by_id_before_each_upload(
     drive, workspace
 ):
-    # A plain write uploads to the id the listing named; a held version is
-    # checked live first, by that id, so a changed file is refused before
-    # its body goes out. The redirect truncates, then writes: two uploads.
+    # Every write first asks, by the id the listing named, that the file is
+    # still at the path; a held version is checked against that answer, so a
+    # changed file is refused before its body goes out. The redirect
+    # truncates, then writes: two uploads.
     logs = []
     fid = drive.box.id_of("f")
     for policy in (WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL):
@@ -409,7 +410,7 @@ async def test_a_box_conditional_write_asks_by_id_before_each_upload(
         logs.append(drive.box.log[before:])
         drive.put("f", SEED["f"])
     upload = f"upload:{fid}"
-    assert logs == [[upload, upload], [f"info:{fid}", upload] * 2]
+    assert logs == [[f"info:{fid}", upload] * 2] * 2
 
 
 @pytest.mark.asyncio

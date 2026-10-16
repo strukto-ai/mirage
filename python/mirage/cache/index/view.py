@@ -190,10 +190,17 @@ class IndexView(IndexCacheStore):
             if self._owns(vfs_path):
                 await self._store.put(vfs_path, entry)
 
-    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
+    async def add_entry(
+        self,
+        vfs_path: str,
+        entry: FileStat,
+        expired_at: datetime | None = None,
+    ) -> None:
         async with self._fence():
             if self._owns(vfs_path):
-                await self._store.add_entry(vfs_path, entry)
+                await self._store.add_entry(
+                    vfs_path, entry, self._deadline(expired_at)
+                )
 
     async def replace_if_unchanged(
         self, vfs_path: str, predecessor: str, entry: FileStat

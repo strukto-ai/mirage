@@ -17,6 +17,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 
 from mirage.cache.context import capture_read
@@ -795,14 +796,24 @@ class CacheManager:
         The entry is kept where its parent's listing names it, so a
         listing of the parent and the next level of a nested create need
         no request: what ``invalidate_after_write`` drops for a re-list
-        is the one name the create added.
+        is the one name the create added. A row naming another file (a
+        store that matches names without case wrote the one it holds)
+        proves nothing about the path, so the parent is listed again.
 
         Args:
             path (PathSpec): the created path; only ``virtual`` is read.
             row (FileStat): the backend's stat of it.
         """
         key = await self._invalidate_path(path)
-        await self._index.add_entry(key, row)
+        if row.name != key.rsplit("/", 1)[-1]:
+            await self._invalidate_parent(key)
+            return
+        deadline = (
+            None
+            if self._read_ttl is None
+            else datetime.now(timezone.utc) + timedelta(seconds=self._read_ttl)
+        )
+        await self._index.add_entry(key, row, deadline)
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         """Invalidate caches after a deletion of ``path``.

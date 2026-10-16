@@ -22,6 +22,7 @@ from mirage.core.box.readdir import stat_from_item
 from mirage.core.box.resolve import (
     item_of,
     live_item,
+    live_item_of,
     parent_folder,
     path_parts,
 )
@@ -88,11 +89,13 @@ async def write(
     tm = accessor.token_manager
     cond = await write_condition(path, "put")
     timer = start_op()
-    existing = item_of(entry)
-    if cond is not None:
-        # A held version is checked against what is there now: the listed
-        # row can be older than the read that holds it.
-        existing = await live_item(accessor, path, existing)
+    # What is there now: the listed row can be older than the path's file,
+    # and older than the read a held version came from.
+    existing = (
+        await live_item(accessor, path, item_of(entry))
+        if cond is not None
+        else await live_item_of(accessor, path, entry)
+    )
     etag = await native_condition(path, cond, live_of(existing), "put")
     try:
         if existing is not None and existing.get("type") == "file":

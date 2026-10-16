@@ -310,7 +310,7 @@ async def test_a_truncated_pinned_mount_relists_like_an_unpinned_one():
                 assert await _stored(ws, "/gh/d1") is None
                 hub.log.clear()
                 assert await _out(ws, "ls /gh/d1") == LISTED
-                costs.append((hub.counts(), hub.count("sha_dir")))
+                costs.append((hub.counts(), hub.count("dir")))
     assert costs[0] == costs[1]
 
 
@@ -398,7 +398,7 @@ async def test_a_listed_child_without_a_row_in_a_truncated_tree_relists():
             hub.log.clear()
             assert await _out(ws, "cat /gh/d1/a.txt") == b"x\n"
             assert hub.count("recursive") == 0
-            assert hub.count("sha_dir") >= 1
+            assert hub.count("dir") >= 1
 
 
 # A name the live listing does not hold is absent, and costs no refill.
@@ -494,6 +494,19 @@ async def test_a_row_missing_after_its_refill_costs_one_refill():
                 assert hub.count("recursive") == 1, command
 
 
+# A truncated tree lists a folder by its path at the ref, so one first
+# listed after the repository moved shows what the move added: the sha an
+# older listing of its parent carries would not.
+@pytest.mark.asyncio
+async def test_a_truncated_folder_lists_at_the_ref_not_a_parents_sha():
+    with serve(_three()) as hub:
+        hub.truncated_recursive = True
+        async with _open(_ws(_vfs(hub), policy=ReadPolicy.BOUNDED)) as ws:
+            await _out(ws, "ls /gh")
+            hub.files["d1/new.txt"] = b"new\n"
+            assert await _out(ws, "ls /gh/d1") == GROWN
+
+
 # The truncated arm re-lists the folder once per command, not twice.
 @pytest.mark.asyncio
 async def test_a_row_missing_after_its_relist_relists_once():
@@ -510,7 +523,7 @@ async def test_a_row_missing_after_its_relist_relists_once():
                 result = await ws.shell("stat /gh/d1/a.txt")
                 assert result.exit_code == 1
                 assert hub.count("recursive") == 0
-                assert hub.count("sha_dir") == 1, command
+                assert hub.count("dir") == 1, command
 
 
 # A warm tree walk reads the root listing once: the version the liveness

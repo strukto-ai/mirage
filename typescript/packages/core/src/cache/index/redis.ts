@@ -628,17 +628,18 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     await pipe.exec()
   }
 
-  async addEntry(vfsPath: string, entry: FileStat): Promise<void> {
+  async addEntry(vfsPath: string, entry: FileStat, expiredAt?: Date | null): Promise<void> {
     await this.flushSeed()
     const c = await this.client()
     const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     const now = new Date()
+    const lifetime = now.getTime() + this.ttl * 1000
     const generation = await this.generation(c, this.generationKey)
     const directory = await this.generation(c, `${this.generationKey}:${folder}`)
     const fresh: IndexDirectory = {
       entries: [vfsPath],
       generation: `${generation}:${directory}`,
-      expires_at: (now.getTime() + this.ttl * 1000) / 1000,
+      expires_at: (expiredAt == null ? lifetime : Math.min(lifetime, expiredAt.getTime())) / 1000,
       partial: true,
       version: null,
       window: false,

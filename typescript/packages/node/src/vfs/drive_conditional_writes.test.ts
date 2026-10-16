@@ -378,6 +378,9 @@ describe('conditional writes only Box has', () => {
   // checked live first, by that id, so a changed file is refused before its
   // body goes out. The redirect truncates, then writes: two uploads.
   it('a conditional write asks by id before each upload', async () => {
+    // Every write first asks, by the id the listing named, that the file is
+    // still at the path; a held version is checked against that answer. The
+    // redirect truncates, then writes: two uploads.
     const logs: string[][] = []
     const fid = drive.box.idOf('f')
     for (const policy of [WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL]) {
@@ -389,10 +392,8 @@ describe('conditional writes only Box has', () => {
       drive.put('f', SEED.f ?? '')
     }
     const upload = `upload:${fid}`
-    expect(logs).toEqual([
-      [upload, upload],
-      [`info:${fid}`, upload, `info:${fid}`, upload],
-    ])
+    const asked = [`info:${fid}`, upload, `info:${fid}`, upload]
+    expect(logs).toEqual([asked, asked])
   })
 
   it('resizing holds the bytes it downloaded', async () => {

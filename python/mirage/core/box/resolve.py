@@ -16,7 +16,11 @@ import logging
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
-from mirage.core.box.api import get_file_info, list_folder_items
+from mirage.core.box.api import (
+    get_file_info,
+    get_folder_info,
+    list_folder_items,
+)
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.constants import (
     ACTIVE,
@@ -156,11 +160,12 @@ def mount_relative_key(
 def names_this_path(
     accessor: BoxAccessor, item: dict[str, Any], path: PathSpec
 ) -> bool:
-    """Whether a live ``GET /files/{id}`` answer is the active file at ``path``.
+    """Whether a live ``GET /files/{id}`` or ``GET /folders/{id}`` answer is
+    the active item at ``path``.
 
-    Box enforces unique names per folder, so a file whose live chain of names
+    Box enforces unique names per folder, so an item whose live chain of names
     from the mount root equals the path is the very item walking the path
-    would reach. Four checks: the item is a file, its ``item_status`` is
+    would reach. Four checks: the item is a file or folder, its ``item_status`` is
     active, its ``path_collection`` starts at All Files and passes no Trash
     folder, and its names below the mount root equal the path. The name
     comparison alone already rejects a trashed chain below the mount root;
@@ -174,7 +179,9 @@ def names_this_path(
         item (dict[str, Any]): ``GET /files/{id}`` answer.
         path (PathSpec): the path being checked.
     """
-    if item.get("type") != "file" or item.get("item_status") != ACTIVE:
+    if item.get("type") not in ("file", "folder"):
+        return False
+    if item.get("item_status") != ACTIVE:
         return False
     chain = (item.get("path_collection") or {}).get("entries") or []
     if not chain or chain[0].get("id") != ALL_FILES_FOLDER_ID:
@@ -185,26 +192,46 @@ def names_this_path(
     return key == "/".join(path_parts(path))
 
 
+async def live_item_of(
+    accessor: BoxAccessor, path: PathSpec, row: FileStat | None
+) -> dict[str, Any] | None:
+    """The item a listed row names, as :func:`live_item` finds it at
+    ``path`` now; None for no row.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        path (PathSpec): the path about to change.
+        row (FileStat | None): what its folder's listing named there.
+    """
+    item = item_of(row)
+    return None if item is None else await live_item(accessor, path, item)
+
+
 async def live_item(
     accessor: BoxAccessor, path: PathSpec, lead: dict[str, Any] | None
 ) -> dict[str, Any] | None:
     """What is at ``path`` now, asked live.
 
-    A listed row can be older than the version an op holds, so a check
-    or a conditional write asks again: one ``GET /files/{id}`` by the
-    id the row names, when the answer is still the active file at
-    exactly this path, else a walk of the listings from the mount root.
-    Only the walk may call a path gone, so a 404 or 403 by id falls
-    back to it rather than answering None.
+    A listed row can be older than the path's item: another client may
+    have moved, renamed or trashed it, and a change made by its id would
+    land at another path. So a check and every change ask again: one
+    ``GET /files/{id}`` or ``GET /folders/{id}`` by the id the row names,
+    when the answer is still the active item at exactly this path, else a
+    walk of the listings from the mount root. Only the walk may call a
+    path gone, so a 404 or 403 by id falls back to it rather than
+    answering None.
 
     Args:
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): the path.
         lead (dict[str, Any] | None): the item the listed row names.
     """
-    if lead is not None and lead.get("type") == "file" and lead.get("id"):
+    if lead is not None and lead.get("id"):
+        info = (
+            get_folder_info if lead.get("type") == "folder" else get_file_info
+        )
         try:
-            item = await get_file_info(accessor.token_manager, lead["id"])
+            item = await info(accessor.token_manager, lead["id"])
         except BoxApiError as exc:
             if exc.status not in (403, 404):
                 raise

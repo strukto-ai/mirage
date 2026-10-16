@@ -17,6 +17,7 @@ import { enoent, enotdir } from '../../errors/fs.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import {
   getFileInfo,
+  getFolderInfo,
   listFolderItems,
   type BoxFileInfo,
   type BoxItem,
@@ -136,7 +137,8 @@ export function mountRelativeKey(
  * in Trash.
  */
 export function namesThisPath(accessor: BoxAccessor, item: BoxFileInfo, path: PathSpec): boolean {
-  if (item.type !== 'file' || item.item_status !== ACTIVE) return false
+  if (item.type !== 'file' && item.type !== 'folder') return false
+  if (item.item_status !== ACTIVE) return false
   const chain = item.path_collection?.entries ?? []
   if (chain.length === 0 || chain[0]?.id !== ALL_FILES_FOLDER_ID) return false
   if (chain.some((anc) => anc.id === TRASH_FOLDER_ID)) return false
@@ -144,22 +146,40 @@ export function namesThisPath(accessor: BoxAccessor, item: BoxFileInfo, path: Pa
 }
 
 /**
+ * The item a listed row names, as `liveItem` finds it at `path` now; null for
+ * no row. Mirrors Python's `live_item_of`.
+ */
+export async function liveItemOf(
+  accessor: BoxAccessor,
+  path: PathSpec,
+  row: FileStat | null | undefined,
+): Promise<BoxItem | null> {
+  const item = itemOf(row)
+  return item === null ? null : liveItem(accessor, path, item)
+}
+
+/**
  * What is at `path` now, asked live. A listed row can be older than the
- * version an op holds, so a check or a conditional write asks again: one
- * `GET /files/{id}` by the id the row names, when the answer is still the
- * active file at exactly this path, else a walk of the listings from the
- * mount root. Only the walk may call a path gone, so a 404 or 403 by id falls
- * back to it rather than answering null. Mirrors Python's `live_item`.
+ * path's item: another client may have moved, renamed or trashed it, and a
+ * change made by its id would land at another path. So a check and every
+ * change ask again: one `GET /files/{id}` or `GET /folders/{id}` by the id the
+ * row names, when the answer is still the active item at exactly this path,
+ * else a walk of the listings from the mount root. Only the walk may call a
+ * path gone, so a 404 or 403 by id falls back to it rather than answering
+ * null. Mirrors Python's `live_item`.
  */
 export async function liveItem(
   accessor: BoxAccessor,
   path: PathSpec,
   lead: BoxItem | null,
 ): Promise<BoxItem | null> {
-  if (lead?.type === 'file' && lead.id !== '') {
+  if (lead !== null && lead.id !== '') {
     let item: BoxFileInfo | null = null
     try {
-      item = await getFileInfo(accessor.tokenManager, lead.id)
+      item =
+        lead.type === 'folder'
+          ? await getFolderInfo(accessor.tokenManager, lead.id)
+          : await getFileInfo(accessor.tokenManager, lead.id)
     } catch (err) {
       if (!(err instanceof BoxApiError) || (err.status !== 403 && err.status !== 404)) throw err
       console.warn(`listed id for ${path.virtual} unusable: ${String(err)}`)

@@ -31,7 +31,7 @@ from mirage.core.box.api import (
 from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.core.box.constants import CONFLICT_STATUS, GONE_STATUS, LOST_STATUS
 from mirage.core.box.fingerprint import live_of
-from mirage.core.box.resolve import item_of, path_parts
+from mirage.core.box.resolve import live_item_of, path_parts
 from mirage.core.box.unlink import delete_resolved
 from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.observe.context import lift_lost, lost_count, record, start_op
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 async def rmdir(
     accessor: BoxAccessor, path: PathSpec, entry: FileStat | None = None
 ) -> None:
-    item = item_of(entry)
+    item = await live_item_of(accessor, path, entry)
     if item is None:
         raise enoent(path.virtual)
     if item.get("type") != "folder":
@@ -184,7 +184,7 @@ async def rm_r(
     """
     if not path_parts(path):
         return
-    item = item_of(entry)
+    item = await live_item_of(accessor, path, entry)
     if item is None:
         raise enoent(path.virtual)
     upto = lost_count()

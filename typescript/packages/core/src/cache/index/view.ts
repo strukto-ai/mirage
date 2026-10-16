@@ -193,9 +193,9 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
-  addEntry(path: string, entry: FileStat): Promise<void> {
+  addEntry(path: string, entry: FileStat, expiredAt?: Date | null): Promise<void> {
     return this.fence(async () => {
-      if (this.owns(path)) await this.inner.addEntry(path, entry)
+      if (this.owns(path)) await this.inner.addEntry(path, entry, this.deadline(expiredAt))
     })
   }
 

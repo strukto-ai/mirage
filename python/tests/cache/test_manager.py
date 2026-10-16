@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -35,7 +36,7 @@ from mirage.observe.context import (
     active_records,
 )
 from mirage.observe.record import OpRecord, RecordIndex
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import DEFAULT_READ_TTL, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 
@@ -78,6 +79,34 @@ def test_write_evicts_file_and_parent_listing():
     cached, listed = _run(_write_case())
     assert cached is False
     assert listed is False
+
+
+@pytest.mark.asyncio
+async def test_a_created_row_lives_no_longer_than_the_read_limit():
+    # A store whose own lifetime is a day must not keep the listing a
+    # create starts past the mount's read limit.
+    index = RAMIndexCacheStore(ttl=86400)
+    manager = CacheManager(RAMFileCacheStore(), index, "/data/", True)
+    row = FileStat(name="new.txt", type=FileType.FILE, size=1)
+    await manager.keep_created(PathSpec.from_str_path("/new.txt"), row)
+    listing = await index.list_dir("/data")
+    assert listing.partial_entries == ["/data/new.txt"]
+    lifetime = index._expiry["/data"] - datetime.now(timezone.utc)
+    assert lifetime <= timedelta(seconds=DEFAULT_READ_TTL)
+
+
+@pytest.mark.asyncio
+async def test_a_created_row_naming_another_file_lists_the_parent_again():
+    # A store that matches names without case wrote `N` for a write to `n`:
+    # the row proves nothing about `n`, so the parent is listed again.
+    index = RAMIndexCacheStore(ttl=600)
+    old = FileStat(name="N", type=FileType.FILE, size=1)
+    await index.set_dir("/data", [("N", old)])
+    manager = CacheManager(RAMFileCacheStore(), index, "/data/", True)
+    row = FileStat(name="N", type=FileType.FILE, size=2)
+    await manager.keep_created(PathSpec.from_str_path("/n"), row)
+    assert (await index.list_dir("/data")).entries is None
+    assert (await index.get("/data/n")).entry is None
 
 
 async def _unlink_case() -> tuple[bool, bool, FileStat | None]:

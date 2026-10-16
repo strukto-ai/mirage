@@ -219,6 +219,7 @@ def test_an_item_renders_every_kind_in_full(fake_drive):
         extra={
             "file_id": "id1",
             "mime_type": DOC_MIME,
+            "parents": ["root"],
             "resource_type": "gdrive/gdoc",
         },
     )
@@ -229,6 +230,7 @@ def test_an_item_renders_every_kind_in_full(fake_drive):
         extra={
             "file_id": "id2",
             "mime_type": "application/vnd.google-apps.folder",
+            "parents": ["root"],
         },
     )
     assert stat_from_item(fake_drive.public(blob)) == FileStat(
@@ -241,6 +243,7 @@ def test_an_item_renders_every_kind_in_full(fake_drive):
         extra={
             "file_id": "id3",
             "mime_type": "application/octet-stream",
+            "parents": ["root"],
             "md5_checksum": "5d41402abc4b2a76b9719d911017c592",
             "head_revision_id": "id3-r1",
             "resource_type": "gdrive/file",

@@ -32,7 +32,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { coerceReadPolicy } from './read_policy.ts'
 import { coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
-import type { IndexConfig } from '../../cache/index/config.ts'
+import { type IndexConfig, LookupStatus } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
 import { withIndexLock } from '../../cache/index/lock.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
@@ -973,7 +973,9 @@ export class MountEntry {
    * What is at `scope`, as its parent's listing names it, listing the parent
    * when no stored listing does. Under `fresh` the running command's check of
    * `scope` already asked the backend, so its answer stands in for the walk;
-   * a check itself always walks. Mirrors Python's `_entry`.
+   * a check itself always walks. A miss right after a listing of the parent
+   * landed, with no listing left now, says only that a check cleared the index
+   * mid-lookup, so it is looked up once more. Mirrors Python's `_entry`.
    */
   private async entry(scope: PathSpec, index: IndexCacheStore): Promise<FileStat | null> {
     const key = indexKey(this.prefix, scope)
@@ -982,8 +984,20 @@ export class MountEntry {
       const probed = this.cacheManager.probedStat(scope)
       if (probed !== null) return probed
     }
-    const warm = (): Promise<string[]> => this.listed(this.folder(scope), index)
-    const row = await entryAt(index, key, warm)
+    const listed: string[] = []
+    const warm = async (): Promise<string[]> => {
+      const names = await this.listed(this.folder(scope), index)
+      listed.push(key)
+      return names
+    }
+    let row = await entryAt(index, key, warm)
+    if (
+      row === null &&
+      listed.length > 0 &&
+      (await index.listDir(folderOf(key))).status === LookupStatus.NOT_FOUND
+    ) {
+      row = await entryAt(index, key, warm)
+    }
     if (row !== null) return row
     if (await beyondWindow(index, key)) return this.beyond(scope, index)
     if (!(await this.unproven(index, key))) return null

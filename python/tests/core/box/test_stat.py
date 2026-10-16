@@ -367,6 +367,7 @@ async def _scratch_stat(
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=box.list_items),
         patch("mirage.core.box.resolve.get_file_info", new=box.file_info),
+        patch("mirage.core.box.resolve.get_folder_info", new=box.file_info),
     ):
         return await stat(
             accessor,
@@ -472,17 +473,22 @@ async def test_only_a_scratch_store_takes_the_one_request_path(accessor):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "row_id, kind",
-    [("", "box/file"), ("F1", "box/folder")],
-    ids=["empty-id", "folder"],
-)
-async def test_an_unusable_hint_walks_without_asking_for_it(
-    accessor, row_id, kind
-):
+async def test_an_unusable_hint_walks_without_asking_for_it(accessor):
     box = _Box(_walk_tree(leaf=_row("F2", "c.txt", SHA_WALK)), None)
-    info = await _scratch_stat(accessor, box, row_id=row_id, kind=kind)
+    info = await _scratch_stat(accessor, box, row_id="", kind="box/file")
     assert box.log == WALK_FOUND
+    assert info.fingerprint == SHA_WALK
+
+
+@pytest.mark.asyncio
+async def test_a_folder_hint_is_asked_by_id_then_walked(accessor):
+    # A folder is asked for by id as a file is; one gone by id is walked.
+    box = _Box(
+        _walk_tree(leaf=_row("F2", "c.txt", SHA_WALK)),
+        BoxApiError("gone", 404),
+    )
+    info = await _scratch_stat(accessor, box, row_id="F1", kind="box/folder")
+    assert box.log == ["info:F1", *WALK_FOUND]
     assert info.fingerprint == SHA_WALK
 
 

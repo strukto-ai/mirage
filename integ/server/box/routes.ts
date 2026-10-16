@@ -130,7 +130,13 @@ async function folderInfo(ctx: Ctx<C>): Promise<Reply> {
     ctx.params.folder_id ?? '',
     ctx.clock.nowIso(false),
   )
-  return item === null ? notFound('folder') : { status: 200, body: render(item) }
+  if (item === null) return notFound('folder')
+  // The vendor places a folder with its live ancestry and status, as it does
+  // a file, which is what a check by id confirms before a change.
+  const out = obj(render(item))
+  out.path_collection = pathCollection(await ancestors(ctx.db, ctx.tenant, item))
+  out.item_status = 'active'
+  return { status: 200, body: out }
 }
 
 // The user's storage: the bytes every stored file holds against a Personal

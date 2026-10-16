@@ -18,6 +18,7 @@ import { FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eisdir } from '../../errors/fs.ts'
 import { downloadFile } from '../google/drive.ts'
+import { liveRow } from './readdir.ts'
 import { NATIVE_RESOURCE_TYPES } from './fingerprint.ts'
 import { eaccesOnDenied } from './resolve.ts'
 import { write } from './write.ts'
@@ -30,7 +31,7 @@ async function truncateImpl(
   handed: Handed = {},
 ): Promise<void> {
   if (noCreate) throw enotsup('gdrive', 'truncate --no-create', path)
-  const entry = handed.entry ?? null
+  const entry = await liveRow(accessor, path, handed.entry)
   if (entry !== null && entry.type === FileType.DIRECTORY) throw eisdir(path)
   let data: Uint8Array
   if (entry === null || NATIVE_RESOURCE_TYPES.has(entry.extra.resource_type as string)) {
@@ -45,7 +46,7 @@ async function truncateImpl(
     out = new Uint8Array(length)
     out.set(data, 0)
   }
-  await write(accessor, path, out, handed)
+  await write(accessor, path, out, { ...handed, entry })
 }
 
 export const truncate = eaccesOnDenied(truncateImpl)

@@ -76,7 +76,12 @@ class IndexCacheStore:
     async def put(self, vfs_path: str, entry: FileStat) -> None:
         raise NotImplementedError
 
-    async def add_entry(self, vfs_path: str, entry: FileStat) -> None:
+    async def add_entry(
+        self,
+        vfs_path: str,
+        entry: FileStat,
+        expired_at: datetime | None = None,
+    ) -> None:
         """Keep a row a create just made, named in its parent's listing.
 
         A listing held for the parent gains the name, in order, and stays
@@ -88,6 +93,8 @@ class IndexCacheStore:
         Args:
             vfs_path (str): mount-absolute entry key.
             entry (FileStat): the created entry.
+            expired_at (datetime | None): the latest a listing this starts
+                may live, None for the store's own lifetime.
         """
         raise NotImplementedError
 

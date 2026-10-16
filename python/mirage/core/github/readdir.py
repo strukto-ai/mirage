@@ -12,7 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import aiohttp
+
 from mirage.accessor.github import GitHubAccessor
+from mirage.core.github.constants import DEFER_STATUSES
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree import (
     fetch_dir_tree,
@@ -34,8 +37,9 @@ async def readdir(
     One recursive tree answers the whole repository at the head it names,
     so the listing carries that head as its version. A tree GitHub
     truncated names only some paths; the folder is then read from its own
-    tree, by the sha its row carries, and once a mount has seen its tree
-    truncated it asks no recursive tree again.
+    tree, asked by its path at the ref so it is as current as the request
+    (a sha from an older parent listing is not), and once a mount has seen
+    its tree truncated it asks no recursive tree again.
 
     Args:
         accessor (GitHubAccessor): backend handle.
@@ -52,15 +56,21 @@ async def readdir(
         if fetched is not None:
             tree, version = fetched
             return tree_listing(tree, rel, version, path.virtual)
-    if not rel:
-        sha = await ensure_ref(accessor)
-    elif entry is None:
+    ref = await ensure_ref(accessor)
+    if rel and entry is None:
         raise enoent(path.virtual)
-    elif entry.type is not FileType.DIRECTORY:
+    if entry is not None and entry.type is not FileType.DIRECTORY:
         raise enotdir(path.virtual)
-    else:
-        sha = str(entry.extra["sha"])
-    rows = await fetch_dir_tree(
-        accessor.config, accessor.owner, accessor.repo, sha, accessor.pool
-    )
+    try:
+        rows = await fetch_dir_tree(
+            accessor.config,
+            accessor.owner,
+            accessor.repo,
+            f"{ref}:{rel}" if rel else ref,
+            accessor.pool,
+        )
+    except aiohttp.ClientResponseError as exc:
+        if exc.status not in DEFER_STATUSES:
+            raise
+        raise enoent(path.virtual) from exc
     return DirListing(entries=[row_of(row, row.path) for row in rows])
