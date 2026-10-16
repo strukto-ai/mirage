@@ -30,14 +30,70 @@ mode: "frame"
   <img noZoom src="/images/mirage-overview-dark.svg" alt="Mirage architecture: agents and harness reach profiles and the Mirage shell, which resolve Unix-like commands, virtual CLIs and programming languages onto runtimes and the virtual filesystem, with authentication, the policy engine and notifications alongside" className="hidden dark:block w-full" />
 </div>
 
-<h2 className="text-2xl font-bold mt-16 mb-6">Mirage in 30 Seconds</h2>
+<h2 className="text-2xl font-bold mt-16 mb-6">Try Mirage</h2>
+
+Create a workspace with an in-memory filesystem, write a file, and search it.
+This example needs no credentials or external services.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import MountMode, RAMVFS, Workspace
+
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell('echo "hello mirage" > /data/hello.txt')
+    result = await ws.shell("grep -n hello /data/hello.txt")
+    print(await result.stdout_str(), end="")
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('echo "hello mirage" > /data/hello.txt')
+    const result = await ws.shell('grep -n hello /data/hello.txt')
+    process.stdout.write(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="CLI" icon="terminal">
+    [Install the CLI](/home/install#cli), then run:
+
+    ```bash
+    cat > workspace.yaml <<'EOF'
+    mounts:
+      /data:
+        vfs: ram
+        mode: write
+    EOF
+
+    mirage workspace create workspace.yaml --id hello
+    mirage shell -w hello -c 'echo "hello mirage" > /data/hello.txt'
+    mirage shell -w hello -c 'grep -n hello /data/hello.txt'
+    ```
+  </Tab>
+</Tabs>
+
+The search prints:
+
+```text
+1:hello mirage
+```
+
+`/data` is a path inside Mirage. Replace RAM with a [supported VFS](/home/setup/vfs)
+to use the same commands on your own data. Continue with the
+[Python](/python/quickstart) or [TypeScript](/typescript/quickstart) quickstart.
+
+<h2 className="text-2xl font-bold mt-16 mb-6">Real use case: run a Slack report and save it to Redis</h2>
 
 <div className="max-w-none text-[15px] leading-7 mb-4">
   <p className="my-0">
-    Mount your sources, pick the runtimes, and register the CLIs. Here RAM, <Icon icon="database" /> Redis and <Icon icon="slack" /> Slack share one root, <code>python3</code> runs on Monty inside the workspace, and <code>slack</code> is a virtual CLI.
+    An agent can read a script shared in Slack, run it, save the result to Redis, and post a reply. Here RAM, <Icon icon="database" /> Redis and <Icon icon="slack" /> Slack share one root, <code>python3</code> runs on Monty inside the workspace, and <code>slack</code> is a virtual CLI.
   </p>
   <p className="mt-3 mb-0">
-    It needs the Redis and Monty extras: <code>uv add "mirage-ai[redis,monty]"</code> in Python, or <code>npm install @struktoai/mirage-node redis @pydantic/monty</code> in TypeScript.
+    Set up <a href="/home/setup/slack">Slack credentials</a> and a Redis connection first. Set <code>SLACK_BOT_TOKEN</code> and <code>REDIS_URL</code>, then replace the example channel and file path with your own. Install the Redis and Monty extras: <code>uv add "mirage-ai[redis,monty]"</code> in Python, or <code>npm install @struktoai/mirage-node redis @pydantic/monty</code> in TypeScript.
   </p>
 </div>
 
@@ -231,8 +287,8 @@ mode: "frame"
   <Card title="CLI" icon="terminal" href="/home/access/cli">
     Drive workspaces from the shell: create, run shell lines, snapshot, and restore.
   </Card>
-  <Card title="VFS Providers" icon="grid-2" href="/home/setup/vfs">
-    Set up S3, Drive, Slack and the other VFS backends.
+  <Card title="Supported VFS" icon="grid-2" href="/home/setup/vfs">
+    Compare supported VFS types and connect S3, Drive, Slack and more.
   </Card>
 </CardGroup>
 

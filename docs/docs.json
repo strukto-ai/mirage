@@ -119,99 +119,88 @@
             ]
           },
           {
-            "group": "Help",
-            "pages": [
-              "home/troubleshooting"
-            ]
-          },
-          {
             "group": "VFS",
             "pages": [
+              "home/setup/vfs",
               {
-                "group": "Providers",
-                "icon": "grid-2",
+                "group": "Object Storage",
+                "icon": "cloud",
                 "pages": [
-                  "home/setup/vfs",
-                  {
-                    "group": "Object Storage",
-                    "icon": "cloud",
-                    "pages": [
-                      "home/setup/s3",
-                      "home/setup/r2",
-                      "home/setup/gcs",
-                      "home/setup/oci",
-                      "home/setup/supabase",
-                      "home/setup/minio",
-                      "home/setup/ceph",
-                      "home/setup/seaweedfs",
-                      "home/setup/wasabi",
-                      "home/setup/backblaze",
-                      "home/setup/digitalocean",
-                      "home/setup/tencent",
-                      "home/setup/aliyun",
-                      "home/setup/scaleway",
-                      "home/setup/qingstor"
-                    ]
-                  },
-                  {
-                    "group": "Hugging Face",
-                    "icon": "/images/huggingface-logo.svg",
-                    "pages": [
-                      "home/setup/hf_buckets",
-                      "home/setup/hf_datasets",
-                      "home/setup/hf_models",
-                      "home/setup/hf_spaces"
-                    ]
-                  },
-                  {
-                    "group": "Cloud & Productivity",
-                    "icon": "folder-open",
-                    "pages": [
-                      "home/setup/google",
-                      "home/setup/onedrive",
-                      "home/setup/sharepoint",
-                      "home/setup/dropbox",
-                      "home/setup/box",
-                      "home/setup/nextcloud",
-                      "home/setup/databricks"
-                    ]
-                  },
-                  {
-                    "group": "Developer & Messaging",
-                    "icon": "code",
-                    "pages": [
-                      "home/setup/github",
-                      "home/setup/linear",
-                      "home/setup/wandb",
-                      "home/setup/langfuse",
-                      "home/setup/slack",
-                      "home/setup/discord",
-                      "home/setup/email"
-                    ]
-                  },
-                  {
-                    "group": "Data & AI",
-                    "icon": "database",
-                    "pages": [
-                      "home/setup/mongodb",
-                      "home/setup/gridfs",
-                      "home/setup/postgres",
-                      "home/setup/airtable",
-                      "home/setup/chroma",
-                      "home/setup/lancedb",
-                      "home/setup/qdrant",
-                      "home/setup/dify",
-                      "home/setup/mem0"
-                    ]
-                  },
-                  {
-                    "group": "Notes & Tasks",
-                    "icon": "book",
-                    "pages": [
-                      "home/setup/notion",
-                      "home/setup/trello"
-                    ]
-                  }
+                  "home/setup/s3",
+                  "home/setup/r2",
+                  "home/setup/gcs",
+                  "home/setup/oci",
+                  "home/setup/supabase",
+                  "home/setup/minio",
+                  "home/setup/ceph",
+                  "home/setup/seaweedfs",
+                  "home/setup/wasabi",
+                  "home/setup/backblaze",
+                  "home/setup/digitalocean",
+                  "home/setup/tencent",
+                  "home/setup/aliyun",
+                  "home/setup/scaleway",
+                  "home/setup/qingstor"
+                ]
+              },
+              {
+                "group": "Hugging Face",
+                "icon": "/images/huggingface-logo.svg",
+                "pages": [
+                  "home/setup/hf_buckets",
+                  "home/setup/hf_datasets",
+                  "home/setup/hf_models",
+                  "home/setup/hf_spaces"
+                ]
+              },
+              {
+                "group": "Cloud & Productivity",
+                "icon": "folder-open",
+                "pages": [
+                  "home/setup/google",
+                  "home/setup/onedrive",
+                  "home/setup/sharepoint",
+                  "home/setup/dropbox",
+                  "home/setup/box",
+                  "home/setup/nextcloud",
+                  "home/setup/databricks"
+                ]
+              },
+              {
+                "group": "Developer & Messaging",
+                "icon": "code",
+                "pages": [
+                  "home/setup/github",
+                  "home/setup/linear",
+                  "home/setup/wandb",
+                  "home/setup/langfuse",
+                  "home/setup/jaeger",
+                  "home/setup/slack",
+                  "home/setup/discord",
+                  "home/setup/email"
+                ]
+              },
+              {
+                "group": "Data & AI",
+                "icon": "database",
+                "pages": [
+                  "home/setup/mongodb",
+                  "home/setup/gridfs",
+                  "home/setup/postgres",
+                  "home/setup/airtable",
+                  "home/setup/chroma",
+                  "home/setup/lancedb",
+                  "home/setup/qdrant",
+                  "home/setup/dify",
+                  "home/setup/mem0"
+                ]
+              },
+              {
+                "group": "Notes & Tasks",
+                "icon": "book",
+                "pages": [
+                  "home/setup/notion",
+                  "home/setup/trello"
                 ]
               }
             ]
@@ -283,6 +272,12 @@
                   "home/setup/windows"
                 ]
               }
+            ]
+          },
+          {
+            "group": "Help",
+            "pages": [
+              "home/troubleshooting"
             ]
           }
         ]

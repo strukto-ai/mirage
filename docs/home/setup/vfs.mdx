@@ -1,8 +1,118 @@
 ---
-title: Overview
+title: VFS
+sidebarTitle: Overview
 icon: grid-2
-description: Shared provider setup for Mirage mounts.
+description: Virtualize files, databases and cloud services in one workspace.
 ---
 
-These pages cover credentials and service setup shared by the Python and
-TypeScript mounts. Choose a provider below.
+A VFS (virtual filesystem) makes a data source available at a path in Mirage.
+Virtualize S3 at `/data`, Slack at `/slack`, or PostgreSQL at `/db`, then use
+commands such as `ls`, `cat`, `grep` and `find` to explore them.
+
+Each VFS gives the service a file layout: objects become files, database rows
+become JSONL, and messages appear under channels or mailboxes. Start with
+[RAM](/python/vfs/ram) to try it without credentials, or choose your data
+source below.
+
+## Supported VFS
+
+The columns show SDK availability: **Python**, **TypeScript on Node.js**, and
+**TypeScript in a browser**. Linked names open setup or usage instructions.
+Read and write operations depend on the VFS and your account permissions.
+
+Browser connections may need a proxy, presigned URLs or CORS configuration.
+In particular, [Redis](/typescript/setup/redis#browser) uses an HTTP endpoint,
+[PostgreSQL](/typescript/setup/postgres) uses Neon, and
+[MongoDB](/typescript/setup/mongodb) uses an HTTP bridge.
+
+### Local and infrastructure
+
+| VFS | What you can browse | Python | Node.js | Browser |
+| --- | --- | --- | --- | --- |
+| [RAM](/python/vfs/ram) | Temporary files in memory | ✓ | ✓ | ✓ |
+| [Disk](/python/vfs/disk) | Local files and folders | ✓ | ✓ | — |
+| [OPFS](/typescript/setup/opfs) | Persistent files in the browser | — | — | ✓ |
+| [Redis](/python/vfs/redis) | Keys exposed as files | ✓ | ✓ | ✓ |
+| [SSH](/python/vfs/ssh) | Files on a remote machine | ✓ | ✓ | — |
+
+### Object storage
+
+| VFS | What you can browse | Python | Node.js | Browser |
+| --- | --- | --- | --- | --- |
+| [Amazon S3](/home/setup/s3) | Bucket objects | ✓ | ✓ | ✓ |
+| [Cloudflare R2](/home/setup/r2) | Bucket objects | ✓ | ✓ | ✓ |
+| [Google Cloud Storage](/home/setup/gcs) | Bucket objects | ✓ | ✓ | ✓ |
+| [Oracle Cloud Storage](/home/setup/oci) | Bucket objects | ✓ | ✓ | ✓ |
+| [Supabase Storage](/home/setup/supabase) | Bucket objects | ✓ | ✓ | ✓ |
+| [MinIO](/home/setup/minio) | Bucket objects | ✓ | ✓ | ✓ |
+| [Ceph](/home/setup/ceph) | Bucket objects | ✓ | ✓ | ✓ |
+| [SeaweedFS](/home/setup/seaweedfs) | Bucket objects | ✓ | ✓ | ✓ |
+| [Wasabi](/home/setup/wasabi) | Bucket objects | ✓ | ✓ | ✓ |
+| [Backblaze B2](/home/setup/backblaze) | Bucket objects | ✓ | ✓ | ✓ |
+| [DigitalOcean Spaces](/home/setup/digitalocean) | Bucket objects | ✓ | ✓ | ✓ |
+| [Tencent COS](/home/setup/tencent) | Bucket objects | ✓ | ✓ | ✓ |
+| [Alibaba OSS](/home/setup/aliyun) | Bucket objects | ✓ | ✓ | ✓ |
+| [Scaleway](/home/setup/scaleway) | Bucket objects | ✓ | ✓ | ✓ |
+| [QingStor](/home/setup/qingstor) | Bucket objects | ✓ | ✓ | ✓ |
+| [Hugging Face Buckets](/home/setup/hf_buckets) | Bucket files | ✓ | ✓ | — |
+| [Hugging Face Datasets](/home/setup/hf_datasets) | Dataset repository files | ✓ | ✓ | — |
+| [Hugging Face Models](/home/setup/hf_models) | Model repository files | ✓ | ✓ | — |
+| [Hugging Face Spaces](/home/setup/hf_spaces) | Space repository files | ✓ | ✓ | — |
+
+### Cloud files and Google Workspace
+
+| VFS | What you can browse | Python | Node.js | Browser |
+| --- | --- | --- | --- | --- |
+| [Google Drive](/home/setup/google) | Files and folders | ✓ | ✓ | ✓ |
+| [Google Docs](/home/setup/google) | Documents | ✓ | ✓ | ✓ |
+| [Google Sheets](/home/setup/google) | Spreadsheets | ✓ | ✓ | ✓ |
+| [Google Slides](/home/setup/google) | Presentations | ✓ | ✓ | ✓ |
+| [Google Calendar](/home/setup/google) | Calendars and events | ✓ | ✓ | ✓ |
+| [Gmail](/home/setup/google) | Mailboxes and messages | ✓ | ✓ | ✓ |
+| [OneDrive](/home/setup/onedrive) | Files and folders | ✓ | ✓ | ✓ |
+| [SharePoint](/home/setup/sharepoint) | Sites and document libraries | ✓ | ✓ | ✓ |
+| [Dropbox](/home/setup/dropbox) | Files and folders | ✓ | ✓ | ✓ |
+| [Box](/home/setup/box) | Files and folders | ✓ | ✓ | ✓ |
+| [Nextcloud](/home/setup/nextcloud) | Files over WebDAV | ✓ | ✓ | — |
+| [Databricks Volumes](/home/setup/databricks) | Unity Catalog volume files | ✓ | ✓ | — |
+
+### Collaboration and messaging
+
+| VFS | What you can browse | Python | Node.js | Browser |
+| --- | --- | --- | --- | --- |
+| [GitHub](/home/setup/github) | Repository files | ✓ | ✓ | ✓ |
+| [Slack](/home/setup/slack) | Channels, messages and shared files | ✓ | ✓ | ✓ |
+| [Discord](/home/setup/discord) | Channels and messages | ✓ | ✓ | ✓ |
+| [Email](/home/setup/email) | IMAP mailboxes and messages | ✓ | ✓ | — |
+| [Linear](/home/setup/linear) | Teams, issues and projects | ✓ | ✓ | ✓ |
+| [Notion](/home/setup/notion) | Pages and databases | ✓ | ✓ | ✓ |
+| [Trello](/home/setup/trello) | Boards, lists and cards | ✓ | ✓ | ✓ |
+
+### Databases, knowledge and memory
+
+| VFS | What you can browse | Python | Node.js | Browser |
+| --- | --- | --- | --- | --- |
+| [PostgreSQL](/home/setup/postgres) | Schemas, tables and rows | ✓ | ✓ | ✓ |
+| [MongoDB](/home/setup/mongodb) | Databases and collections | ✓ | ✓ | ✓ |
+| [GridFS](/home/setup/gridfs) | Files stored in MongoDB | ✓ | ✓ | — |
+| [Airtable](/home/setup/airtable) | Bases, tables and records | ✓ | ✓ | ✓ |
+| [Chroma](/home/setup/chroma) | Documents assembled from chunks | ✓ | ✓ | ✓ |
+| [LanceDB](/home/setup/lancedb) | Tables and document cards | ✓ | ✓ | — |
+| [Qdrant](/home/setup/qdrant) | Collections and points | ✓ | ✓ | ✓ |
+| [Dify](/home/setup/dify) | Knowledge-base documents | ✓ | ✓ | ✓ |
+| [Mem0](/home/setup/mem0) | Stored memories | ✓ | ✓ | ✓ |
+
+### Observability
+
+| VFS | What you can browse | Python | Node.js | Browser |
+| --- | --- | --- | --- | --- |
+| [Weights & Biases](/home/setup/wandb) | Projects, runs and artifacts | ✓ | ✓ | ✓ |
+| [Langfuse](/home/setup/langfuse) | Traces and sessions | ✓ | ✓ | ✓ |
+| [Jaeger](/home/setup/jaeger) | Services and traces | ✓ | ✓ | — |
+
+## Add your own VFS
+
+Implement `readdir`, `stat` and `read` to expose another service as files.
+Start with the [Python](/python/vfs/new) or [TypeScript](/typescript/vfs/new)
+guide. Optional [search methods](/home/integration/search) let commands use
+your service's index to avoid reading every file.

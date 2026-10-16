@@ -1,0 +1,63 @@
+---
+title: Jaeger
+icon: chart-line
+description: Virtualize Jaeger services and traces as read-only JSON files.
+---
+
+Connect to an existing Jaeger query service. Set `host` to its base URL,
+such as `http://localhost:16686`.
+
+## Connect
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from mirage import Workspace
+    from mirage.vfs.jaeger import JaegerConfig, JaegerVFS
+
+    ws = Workspace({
+        "/jaeger": JaegerVFS(JaegerConfig(host="http://localhost:16686")),
+    })
+    result = await ws.shell("ls /jaeger/services")
+    print(await result.stdout_str(), end="")
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    import { JaegerVFS, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({
+      '/jaeger': new JaegerVFS({ host: 'http://localhost:16686' }),
+    })
+    const result = await ws.shell('ls /jaeger/services')
+    process.stdout.write(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="YAML">
+    ```yaml
+    mounts:
+      /jaeger:
+        vfs: jaeger
+        config:
+          host: http://localhost:16686
+    ```
+  </Tab>
+</Tabs>
+
+## Browse traces
+
+Each service has an operations list and a directory of traces:
+
+```text
+/jaeger/services/<service>/
+  operations.json
+  traces/
+    <trace-id>.json
+```
+
+Use `ls` to find services and traces, then `cat` or `jq` to read a trace.
+Files are read-only. Trace listings return up to 100 traces per service by
+default; set `default_trace_limit` in Python or YAML, or `defaultTraceLimit`
+in TypeScript, to change the limit.

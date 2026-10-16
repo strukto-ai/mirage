@@ -1,50 +1,82 @@
 ---
 title: Troubleshooting
-description: Common Mirage setup failures and the fastest path to getting unblocked.
+description: Fix installation, connection and file-access problems.
 icon: life-ring
 ---
 
-## Common Issues
+## Python import errors
 
-### Import Errors After Install (Python)
+Run your script in the environment where Mirage is installed. For a uv
+project, use `uv run python your_script.py`.
 
-- Make sure you installed the package into the environment you are actually using.
-- If you need VFS-specific dependencies, install the matching extra such as `mirage-ai[s3]`, `mirage-ai[redis]`, or `mirage-ai[fuse]`.
-- For source installs, run `uv sync --all-extras`.
+Some VFS types need an extra package:
 
-### Import Errors After Install (TypeScript)
+```bash
+uv add "mirage-ai[s3]"     # S3 and compatible stores
+uv add "mirage-ai[redis]"  # Redis
+```
 
-- Pick the entrypoint that matches your runtime: `mirage/node` for Node servers and CLIs, `mirage/browser` for browser and edge runtimes, `mirage/core` for runtime-agnostic primitives.
-- Native peers like FUSE and Redis are opt-in. Install them only on Node, alongside `mirage`, when you need those mounts.
-- If your bundler complains about Node built-ins, you are probably importing `mirage/node` from a browser entry. Switch to `mirage/browser` or `mirage/core`.
+See [Python installation](/python/install) for the available extras.
 
-### Credential Errors
+## TypeScript import errors
 
-- Check that the VFS-specific environment variables are set in the current shell.
-- Confirm you followed the right setup guide from the [Setup](/home/setup/s3) section.
-- If a VFS depends on Google OAuth or bot tokens, verify the scopes and app installation steps.
+Use the package for your environment:
 
-### FUSE Does Not Mount
+| Environment | Package |
+| --- | --- |
+| Node.js | `@struktoai/mirage-node` |
+| Browser | `@struktoai/mirage-browser` |
+| Shared types and primitives | `@struktoai/mirage-core` |
 
-- Follow the OS-level setup first: [macOS](/home/setup/macos) or [Linux](/home/setup/linux).
-- Then confirm you installed `mirage[fuse]`.
-- If Mirage falls back to virtual mode, check the FUSE installation before debugging command behavior.
+If a browser build complains about Node built-ins, check for imports from
+`@struktoai/mirage-node`. Use the browser package and a
+[browser-supported VFS](/home/setup/vfs#supported-vfs) instead.
 
-### Commands Return Empty Output
+For missing optional dependencies such as `redis` or `pg`, follow
+[TypeScript installation](/typescript/install#optional-peer-dependencies).
 
-- Verify the mount prefix and the path you are querying.
-- Start with `ls`, `tree`, or `stat` before assuming the VFS is broken.
-- For remote systems, confirm the underlying account has access to the target VFS.
+## Credentials or connection errors
 
-### Docs and Examples Disagree
+- Set credentials in the environment of the process running Mirage.
+- Check the service URL, account permissions and required token scopes.
+- Follow the setup guide for your [VFS](/home/setup/vfs#supported-vfs).
 
-- Prefer the Python quickstart and the current VFS docs over older snippets copied from issues or experiments.
-- If something still looks inconsistent, open an issue or contact the team directly.
+## Missing files or empty output
 
-## Book Time With The Team
+Start by inspecting the mounted paths:
 
-If you are blocked and want direct help, book a troubleshooting call:
+```bash
+mount
+ls /
+ls /your-mount/
+stat /your-mount/path/to/file
+```
 
-<Card title="30-Minute Troubleshooting Call" icon="calendar" href="https://cal.com/strukto/30min">
-  Book time with the Mirage team on Cal.com.
-</Card>
+Use the exact path shown by the listing. Confirm that the connected account
+can access the file. In SDK code, inspect the command's exit code and stderr
+as well as stdout.
+
+## Writes are refused
+
+Check that the VFS supports the operation and that the mount has `write` or
+`exec` mode. A read-only backend stays read-only even on a writable mount.
+Session [policies](/home/policy/overview) can also restrict access.
+
+## FUSE does not mount
+
+FUSE is optional; `ws.shell(...)` works without an OS mount. If you need a
+mounted folder, follow the [macOS](/home/setup/macos) or
+[Linux](/home/setup/linux) setup, then install the binding for your SDK:
+
+- Python: `uv add "mirage-ai[fuse]"`.
+- TypeScript: follow the [FUSE setup](/typescript/setup/fuse), including its
+  native dependency installation steps.
+
+## Still stuck?
+
+[Open an issue](https://github.com/strukto-ai/mirage/issues) with your Mirage
+version, operating system, SDK, error message and a minimal example. Remove
+credentials from logs and configuration before sharing them.
+
+You can also ask in [Discord](https://discord.gg/u8BPQ65KsS) or
+[book a troubleshooting call](https://cal.com/strukto/30min).
