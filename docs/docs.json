@@ -149,6 +149,17 @@
                   "home/setup/notion",
                   "home/setup/trello"
                 ]
+              },
+              {
+                "group": "Local FUSE mount",
+                "icon": "folder-open",
+                "pages": [
+                  "home/setup/local-fuse",
+                  "home/setup/fuse",
+                  "home/setup/macos",
+                  "home/setup/linux",
+                  "home/setup/windows"
+                ]
               }
             ]
           },
@@ -273,17 +284,7 @@
                   "home/access/cli"
                 ]
               },
-              {
-                "group": "FUSE",
-                "icon": "folder-open",
-                "pages": [
-                  "home/access/fuse",
-                  "home/setup/fuse",
-                  "home/setup/macos",
-                  "home/setup/linux",
-                  "home/setup/windows"
-                ]
-              }
+              "home/access/fuse"
             ]
           },
           {

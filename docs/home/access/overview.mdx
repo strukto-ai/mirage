@@ -20,9 +20,11 @@ A Mirage virtual terminal is a workspace: one terminal over your mounted backend
 | [RPC](/home/access/rpc) | programs that run lines and move bytes | `/v1/workspaces/{id}/rpc`, or `mirage rpc` on stdio |
 | [CLI](/home/access/cli) | people and scripts | `mirage <verb>` |
 | [SSH](/home/access/ssh) | people and tools that speak SSH | `ssh`, `sftp`, `scp`, on the SSH port or through `mirage ssh-proxy` |
-| [FUSE](/home/access/fuse) | any program that works on files | a folder: `backend: fuse` on the server's machine, `sshfs` on yours |
+| [FUSE connection](/home/access/fuse) | any program that works on files | `sshfs` exposes the server's workspace as a folder on your machine |
 
-Every way in but in-app goes through the Mirage server, a FastAPI app in [Python](/python/access/server) and a Fastify app in [TypeScript](/typescript/access/server) that speak the same protocol. It serves HTTP, and SSH on its own port when `ssh_port` is set or over HTTP through `mirage ssh-proxy`; MCP and RPC are HTTP routes, a FUSE folder is mounted by the server itself or by `sshfs` over its SSH, and the CLI is an HTTP client that starts the server on your machine when it needs one.
+Every way in but in-app goes through the Mirage server, a FastAPI app in [Python](/python/access/server) and a Fastify app in [TypeScript](/typescript/access/server) that speak the same protocol. It serves HTTP, and SSH on its own port when `ssh_port` is set or over HTTP through `mirage ssh-proxy`; MCP and RPC are HTTP routes, SSHFS uses the server's SSH/SFTP connection, and the CLI is an HTTP client that starts the server on your machine when it needs one.
+
+To expose a VFS directly from your own app, see [Local FUSE mount](/home/setup/local-fuse).
 
 ## What each one exposes
 
@@ -46,7 +48,7 @@ Each way in exposes what its own protocol defines. A dash means the protocol has
 
 ## Sessions
 
-Every call acts as one session, with its own working directory and environment, under the [profile](/home/policy/overview) it was created with. HTTP, MCP and RPC pick the session with `?session_id=` (or `-s` on stdio), and the CLI with `-s`; each SSH login, an `sshfs` mount among them, gets a fresh session under its key's profile. Without one, a call runs in the workspace's default session, under the default profile: the one the config's `profile:` names, else the profile called `default`, else none. A FUSE folder the server mounts is the exception: it belongs to no session, so no profile applies.
+Every call acts as one session, with its own working directory and environment, under the [profile](/home/policy/overview) it was created with. HTTP, MCP and RPC pick the session with `?session_id=` (or `-s` on stdio), and the CLI with `-s`; each SSH login, an `sshfs` mount among them, gets a fresh session under its key's profile. Without one, a call runs in the workspace's default session, under the default profile: the one the config's `profile:` names, else the profile called `default`, else none.
 
 ## Cancel
 
