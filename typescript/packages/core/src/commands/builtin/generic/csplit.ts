@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { RecordSpool } from '../../../io/record_spool.ts'
+import { type RecordSpool, delimited } from '../../../io/record_spool.ts'
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -26,7 +25,7 @@ import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 
 function isRegex(pattern: string): boolean {
   return pattern.startsWith('/') && pattern.endsWith('/')
@@ -85,7 +84,8 @@ async function splitByPatterns(
       const regex = new RegExp(pat.slice(1, -1))
       let found = -1
       for (let idx = seen; idx < lines.count; idx++) {
-        if (regex.test(DEC.decode(await lines.read(idx)).slice(0, -1))) {
+        const line = await lines.read(idx)
+        if (regex.test(DEC.decode(line.at(-1) === 0x0a ? line.subarray(0, -1) : line))) {
           found = idx
           break
         }
@@ -167,10 +167,8 @@ export async function csplitGeneric(
   const first = paths[0]
   const source =
     first !== undefined && first.rawPath !== '-' ? stream(first) : (opts.stdin ?? new Uint8Array())
-  const records = new RecordSpool()
-  const reader = new AsyncLineIterator(source)
+  const records = await delimited([source], 0x0a)
   try {
-    for await (const line of reader) await records.append(ENC.encode(DEC.decode(line) + '\n'))
     const checked = checkLineNumbers(texts)
     let diagnostics = checked[0]
     if (checked[1])
@@ -229,10 +227,6 @@ export async function csplitGeneric(
       }),
     ]
   } finally {
-    try {
-      await reader.discard()
-    } finally {
-      await records.close()
-    }
+    await records.close()
   }
 }

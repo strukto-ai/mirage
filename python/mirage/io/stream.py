@@ -255,3 +255,25 @@ def slice_stream(
                 return
 
     return OutputStream(window(), partial(close_quietly, source))
+
+
+def rechunk(source: ByteSource, size: int) -> OutputStream:
+    """Re-cut a stream into parts of up to ``size`` bytes, joining short
+    ones, so a consumer pays once per block rather than once per record.
+
+    Args:
+        source (ByteSource): input owned by the result.
+        size (int): the largest part.
+    """
+
+    async def parts() -> AsyncIterator[bytes]:
+        pending = bytearray()
+        async for part in ensure_stream(source):
+            pending += part
+            while len(pending) >= size:
+                yield bytes(pending[:size])
+                del pending[:size]
+        if pending:
+            yield bytes(pending)
+
+    return OutputStream(parts(), partial(close_quietly, source))

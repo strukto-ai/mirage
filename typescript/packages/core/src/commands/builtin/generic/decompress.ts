@@ -1,4 +1,4 @@
-import { ByteSpool } from '../../../io/spool.ts'
+import { ByteSpool, spooled } from '../../../io/spool.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -374,14 +374,7 @@ export async function decompressInputs(
   }
   const body = run()
   if (testOnly || operands.some((p) => !(options.toStdout === true || p.rawPath === '-'))) {
-    const spool = new ByteSpool()
-    try {
-      await spool.fill(body)
-      return [await spool.output(), io]
-    } catch (error) {
-      await spool.close()
-      throw error
-    }
+    return [await spooled(body), io]
   }
   return [body, io]
 }

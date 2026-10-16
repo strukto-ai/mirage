@@ -71,5 +71,10 @@ async def write_stream(
     finally:
         await close_quietly(data)
         if staged:
-            await sftp.remove(target)
+            try:
+                await sftp.remove(target)
+            except Exception:
+                logger.debug(
+                    "Could not remove staged %s", target, exc_info=True
+                )
     record("write", path_spec.virtual, "ssh", size, timer)

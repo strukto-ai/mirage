@@ -150,6 +150,25 @@ export class ByteSpool {
   }
 }
 
+/**
+ * Hold `source` in a spool: its bytes when they fit in memory, a stream that
+ * owns the spool past that, null when it is empty. Mirrors Python's spooled.
+ */
+export async function spooled(source: ByteSource | null): Promise<ByteSource | null> {
+  const store = new ByteSpool()
+  try {
+    await store.fill(source ?? new Uint8Array())
+    if (store.size === 0) {
+      await store.close()
+      return null
+    }
+    return await store.output()
+  } catch (error) {
+    await store.close()
+    throw error
+  }
+}
+
 export class ByteSlice {
   constructor(
     readonly source: ByteSpool,

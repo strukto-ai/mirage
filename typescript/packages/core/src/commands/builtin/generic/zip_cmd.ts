@@ -25,36 +25,13 @@ import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
 import { respellOne } from '../../../utils/path.ts'
 import { ByteSpool, ByteSlice } from '../../../io/spool.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { readSpooledArchive, updateSpooledArchive } from './archive/zip_update.ts'
+import { encodeRecord, readArchive, updateArchive } from './archive/zip_update.ts'
 import { ZipUpdateError } from './archive/errors.ts'
-import type { MemberKind, SpoolZipArchive, SpoolZipRecord } from './archive/types.ts'
+import type { MemberKind, ZipArchive, ZipRecord } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
-
-function writeU16LE(buf: Uint8Array, offset: number, value: number): void {
-  buf[offset] = value & 0xff
-  buf[offset + 1] = (value >>> 8) & 0xff
-}
-
-function writeU32LE(buf: Uint8Array, offset: number, value: number): void {
-  buf[offset] = value & 0xff
-  buf[offset + 1] = (value >>> 8) & 0xff
-  buf[offset + 2] = (value >>> 16) & 0xff
-  buf[offset + 3] = (value >>> 24) & 0xff
-}
-
-interface ZipItem {
-  name: string
-  size: number
-  compressed: ByteSlice
-  crc: number
-  method: number
-  // Unix mode bits in the high half of external_attr, which is where
-  // Info-ZIP puts them and where a symlink entry is told from a file.
-  externalAttr: number
-}
 
 // One entry the plan decided to store, before its bytes are read.
 interface ZipMember {
@@ -73,54 +50,6 @@ interface ZipPlan {
   // The warning for two paths that store under one name, empty when every
   // name is unique.
   repeated: string
-}
-
-// The stamp every member carries: 1980-01-01 00:00, the DOS epoch and
-// Python zipfile's default, which Info-ZIP lists as `80-Jan-01 00:00`.
-// A zero date has month 0 and day 0, which is no date at all.
-const DOS_EPOCH_DATE = (1 << 5) | 1
-
-async function buildZip(
-  items: ZipItem[],
-  original: SpoolZipArchive | null,
-  spool: ByteSpool,
-): Promise<AsyncGenerator<Uint8Array>> {
-  const records: SpoolZipRecord[] = []
-  for (const item of items) {
-    const name = ENC.encode(item.name)
-    if (Math.max(item.size, item.compressed.size) >= 0xffffffff || name.length > 0xffff) {
-      throw new ZipUpdateError('ZIP32 member limit exceeded')
-    }
-    const header = new Uint8Array(30 + name.length)
-    writeU32LE(header, 0, 0x04034b50)
-    writeU16LE(header, 4, 20)
-    writeU16LE(header, 6, 0x800)
-    writeU16LE(header, 8, item.method)
-    writeU16LE(header, 12, DOS_EPOCH_DATE)
-    writeU32LE(header, 14, item.crc)
-    writeU32LE(header, 18, item.compressed.size)
-    writeU32LE(header, 22, item.size)
-    writeU16LE(header, 26, name.length)
-    header.set(name, 30)
-
-    const central = new Uint8Array(46 + name.length)
-    writeU32LE(central, 0, 0x02014b50)
-    // Unix in the high byte, so the mode bits below are read as such.
-    writeU16LE(central, 4, (3 << 8) | 20)
-    // Version through extra-field length have the same layout in both headers.
-    central.set(header.subarray(4, 30), 6)
-    writeU32LE(central, 38, item.externalAttr)
-    central.set(name, 46)
-    const start = spool.size
-    await spool.append(header)
-    await spool.fill(item.compressed.stream())
-    records.push({
-      name: item.name,
-      local: new ByteSlice(spool, start, spool.size - start),
-      central,
-    })
-  }
-  return updateSpooledArchive(original, records)
 }
 
 // Info-ZIP 3.0's wording, pinned on debian:stable-slim. A warning is
@@ -357,14 +286,12 @@ export async function zipGeneric(
   const archivePath = paths[0]
   if (archivePath === undefined) return [null, new IOResult()]
   const originalSpool = new ByteSpool()
-  const compressedSpool = new ByteSpool()
   const additionsSpool = new ByteSpool()
-  const outputSpool = new ByteSpool()
   try {
-    let original: SpoolZipArchive | null = null
+    let original: ZipArchive | null = null
     try {
       await originalSpool.fill(deps.stream(archivePath))
-      original = await readSpooledArchive(originalSpool)
+      original = await readArchive(originalSpool)
     } catch (err) {
       if (err instanceof ZipUpdateError || isEisdir(err)) return invalidArchive(archivePath)
       // Only absence means create; a refused or broken read must not overwrite.
@@ -387,7 +314,7 @@ export async function zipGeneric(
       return [null, new IOResult({ exitCode: NOTHING_TO_DO_EXIT, stderr: ENC.encode(message) })]
     }
 
-    const items: ZipItem[] = []
+    const additions: ZipRecord[] = []
     const outputLines: string[] = []
     // A member the session may not read (a rule refused it below the
     // operand) aborts the run with zip's name on the refusal and writes no
@@ -413,27 +340,29 @@ export async function zipGeneric(
           yield data
         }
       }
-      const start = compressedSpool.size
-      await compressedSpool.fill(member.kind === 'dir' ? counted() : deflateRawStream(counted()))
-      items.push({
-        name: member.name,
-        size,
+      const start = additionsSpool.size
+      await additionsSpool.fill(member.kind === 'dir' ? counted() : deflateRawStream(counted()))
+      const name = ENC.encode(member.name)
+      if (name.length > 0xffff) return invalidArchive(archivePath)
+      const compressed = additionsSpool.size - start
+      const [head, central] = encodeRecord(
+        name,
+        member.kind === 'dir' ? 0 : 8,
         crc,
-        compressed: new ByteSlice(compressedSpool, start, compressedSpool.size - start),
-        method: member.kind === 'dir' ? 0 : 8,
-        externalAttr:
-          member.kind === 'dir' ? DIR_MODE : member.kind === 'link' ? LINK_MODE : FILE_MODE,
+        compressed,
+        size,
+        member.kind === 'dir' ? DIR_MODE : member.kind === 'link' ? LINK_MODE : FILE_MODE,
+      )
+      additions.push({
+        name: member.name,
+        local: new ByteSlice(additionsSpool, start, compressed),
+        central,
+        head,
       })
       outputLines.push(`${oldOrder.has(member.name) ? 'updating:' : '  adding:'} ${member.name}`)
     }
     try {
-      await outputSpool.fill(await buildZip(items, original, additionsSpool))
-    } catch (err) {
-      if (!(err instanceof ZipUpdateError)) throw err
-      return invalidArchive(archivePath)
-    }
-    try {
-      await deps.write(archivePath, outputSpool.stream())
+      await deps.write(archivePath, updateArchive(original, additions))
     } catch (err) {
       if (!isFsError(err)) throw err
       return createError(archivePath, String(fsStrerror(err)), warningText(plan.warnings, quiet))
@@ -445,15 +374,7 @@ export async function zipGeneric(
     try {
       await originalSpool.close()
     } finally {
-      try {
-        await compressedSpool.close()
-      } finally {
-        try {
-          await additionsSpool.close()
-        } finally {
-          await outputSpool.close()
-        }
-      }
+      await additionsSpool.close()
     }
   }
 }

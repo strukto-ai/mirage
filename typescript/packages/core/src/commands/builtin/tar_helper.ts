@@ -137,7 +137,9 @@ export async function* writeTarStream(
   } finally {
     await reader.cancel()
     reader.releaseLock()
-    await producer
+    // A consumer that stops early cancels the packer, which fails the
+    // producer with that cancel; a real failure already surfaced above.
+    await producer.catch(() => undefined)
   }
 }
 

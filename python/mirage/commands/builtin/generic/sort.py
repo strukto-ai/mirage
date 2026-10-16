@@ -12,7 +12,6 @@ from mirage.commands.builtin.sort_keys import (
     parse_keydef,
     sort_lines,
 )
-from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import (
     stdin_stream,
 )
@@ -27,7 +26,6 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.spool import ByteSpool
-from mirage.io.stream import OutputStream
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.types import PathSpec, PolymorphicReadFn
@@ -290,15 +288,6 @@ def operand_refusal(
     return None
 
 
-def _split_records(raw: bytes, zero_terminated: bool) -> list[str]:
-    if not zero_terminated:
-        return split_lines(raw.decode(errors="replace"))
-    records = raw.split(b"\x00")
-    if records and records[-1] == b"":
-        records.pop()
-    return [record.decode(errors="replace") for record in records]
-
-
 def _label(path: PathSpec | None) -> str:
     if path is None:
         return "-"
@@ -332,7 +321,7 @@ def _chunked(records: list[str]) -> Iterator[list[str]]:
 
 
 async def _ordered_records(
-    runs: list[list[str]], cfg: SortConfig, merge: bool
+    runs: list[list[str]], cfg: SortConfig
 ) -> list[str]:
     """The records in output order, worked out on the loop.
 
@@ -340,18 +329,15 @@ async def _ordered_records(
     paces: up to CHUNK records, and CHUNK_CHARS characters unless one
     record alone is longer, sort as one step, then the sorted chunks
     merge pairwise, a tie going to the earlier chunk, which is the order
-    one stable sort of every record gives, ``-u`` included. Under ``-m``
-    the inputs merge as given. A large sort shares the loop's core rather
-    than using another (strukto-ai/mirage#1590).
+    one stable sort of every record gives, ``-u`` included. A large sort
+    shares the loop's core rather than using another
+    (strukto-ai/mirage#1590).
 
     Args:
         runs (list[list[str]]): one record list per input.
         cfg (SortConfig): the comparison.
-        merge (bool): whether ``-m`` merges the inputs as given.
     """
     budget = YieldBudget()
-    if merge:
-        return await _drain(merged(runs, cfg), budget)
     chunks: list[list[str]] = []
     for chunk in _chunked([record for run in runs for record in run]):
         chunks.append(sort_lines(chunk, cfg))
@@ -371,20 +357,24 @@ MERGE_FAN_IN = 16
 async def _merge_spools(
     runs: list[ByteSpool], cfg: SortConfig, separator: bytes
 ) -> ByteSpool:
-    output = ByteSpool(0)
+    output = ByteSpool()
     readers = [AsyncLineIterator(run.stream()) for run in runs]
     budget = YieldBudget()
+
+    async def head(reader: AsyncLineIterator) -> str | None:
+        raw = await reader.readline(separator)
+        return None if raw is None else raw.decode()
+
     try:
-        heads = [await reader.readline(separator) for reader in readers]
+        heads = [await head(reader) for reader in readers]
         previous: str | None = None
-        while any(head is not None for head in heads):
+        while any(text is not None for text in heads):
             chosen = -1
             line = ""
-            for index, head in enumerate(heads):
-                if head is None:
-                    continue
-                text = head.decode()
-                if chosen < 0 or compare_lines(text, line, cfg) < 0:
+            for index, text in enumerate(heads):
+                if text is not None and (
+                    chosen < 0 or compare_lines(text, line, cfg) < 0
+                ):
                     chosen, line = index, text
             if (
                 not cfg.unique
@@ -393,7 +383,7 @@ async def _merge_spools(
             ):
                 await output.append(line.encode() + separator)
                 previous = line
-            heads[chosen] = await readers[chosen].readline(separator)
+            heads[chosen] = await head(readers[chosen])
             await budget.run()
         return output
     except BaseException:
@@ -418,9 +408,10 @@ async def _external_records(
     refused: tuple[InputStage, bytes] | None = None
     stream = stdin_stream(read, stdin)
     buffer: list[str] = []
-    size = 0
+    size = merges = 0
 
     async def add_run(run: ByteSpool) -> None:
+        nonlocal merges
         level = 0
         while True:
             if level == len(levels):
@@ -430,13 +421,14 @@ async def _external_records(
                 return
             group, levels[level] = levels[level], []
             run = await _merge_spools(group, cfg, separator)
+            merges += 1
             level += 1
 
     async def flush() -> None:
         nonlocal buffer, size
         if not buffer:
             return
-        ordered = await _ordered_records([buffer], cfg, False)
+        ordered = await _ordered_records([buffer], cfg)
         run = ByteSpool()
         try:
             for line in ordered:
@@ -492,12 +484,14 @@ async def _external_records(
                 merged_run = await _merge_spools(
                     runs[start : start + MERGE_FAN_IN], cfg, separator
                 )
+                merges += 1
                 levels.append([merged_run])
                 next_runs.append(merged_run)
             runs = next_runs
         output = runs[0] if runs else ByteSpool()
-        # A single -m input still needs -u's adjacent duplicate removal.
-        if parsed.merge and cfg.unique:
+        # A single -m input still needs -u's adjacent duplicate removal;
+        # merged inputs already had it.
+        if parsed.merge and cfg.unique and merges == 0:
             output = await _merge_spools([output], cfg, separator)
         for level in levels:
             for run in level:
@@ -649,7 +643,7 @@ async def sort_generic(
         finally:
             await ordered.close()
         return b"", IOResult()
-    return OutputStream(ordered.stream(), ordered.close), IOResult()
+    return await ordered.output(), IOResult()
 
 
 __all__ = ["sort_generic"]

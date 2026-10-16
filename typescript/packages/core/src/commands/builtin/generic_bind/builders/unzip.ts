@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
-import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
+import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { unzipGeneric } from '../../generic/unzip.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 
@@ -27,15 +26,11 @@ const unzip: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     // Extraction writes wherever cwd or -d says, which need not be
     // this mount, so the functions are dispatch-relayed and each path
     // routes to the mount that owns it.
-    const readBytes = readBytesOp(dispatch)
-    async function* streamOf(p: PathSpec): AsyncIterable<Uint8Array> {
-      yield await readBytes(p)
-    }
     return unzipGeneric(
       resolved,
       texts,
       opts,
-      streamOf,
+      fileStreamOp(dispatch),
       async (p, data) => {
         await dispatch('write', p, [data])
       },

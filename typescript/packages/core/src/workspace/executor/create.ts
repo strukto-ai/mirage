@@ -20,7 +20,8 @@ import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_conte
 import type { DispatchFn } from '../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
-import { sliceStream } from '../../io/stream.ts'
+import { rechunk, sliceStream } from '../../io/stream.ts'
+import { MEMORY_LIMIT } from '../../io/spool.ts'
 import type { SessionState } from '../session/session.ts'
 import { hasAborted, makeAbortError } from '../../utils/abort.ts'
 
@@ -106,6 +107,7 @@ export async function writeDescription(
   session: SessionState,
   file: FileDescription,
   data: ByteSource,
+  replace = false,
 ): Promise<void> {
   if (file.emit !== null) {
     for await (const part of chunks(data)) await file.emit(part)
@@ -118,57 +120,51 @@ export async function writeDescription(
     await turn
     const writer = getCurrentEvaluation()?.frame.abortSignal ?? undefined
     if (hasAborted(writer)) throw makeAbortError(writer)
-    if (!(data instanceof Uint8Array) && file.source === null && (!file.opened || file.append)) {
-      let size = 0
-      async function* counted(): AsyncGenerator<Uint8Array> {
-        for await (const part of chunks(data)) {
-          size += part.length
-          yield part
-        }
-      }
-      await createFile(dispatch, session, file.scope, counted(), file.append)
+    if (file.source === null && (!file.opened || file.append || (replace && file.offset === 0))) {
+      file.offset += await createCounted(dispatch, session, file.scope, data, file.append)
       file.opened = true
-      file.offset += size
-    } else for await (const part of chunks(data)) await writeThrough(dispatch, session, file, part)
+      return
+    }
+    if (!file.opened) {
+      await createFile(dispatch, session, file.scope, new Uint8Array(), file.append)
+      file.opened = true
+    }
+    const start = file.offset + (file.source?.lines.position ?? 0)
+    let offset = start
+    for await (const part of rechunk(data, MEMORY_LIMIT)) {
+      await dispatch('pwrite', file.scope, [part, offset])
+      offset += part.byteLength
+    }
+    file.offset = offset
+    if (file.source !== null && offset !== start) {
+      await file.source.lines.discard()
+      const content = (await dispatch('read', file.scope, [], { stream: true }))[0] as ByteSource
+      file.source.lines = new AsyncLineIterator(sliceStream(content, offset))
+    }
   } finally {
     done()
   }
 }
 
-async function writeThrough(
+/** `createFile` that answers how many bytes it wrote. Mirrors Python's create_counted. */
+async function createCounted(
   dispatch: DispatchFn,
   session: SessionState,
-  file: FileDescription,
-  data: Uint8Array,
-): Promise<void> {
-  if (!file.opened) {
-    await createFile(
-      dispatch,
-      session,
-      file.scope,
-      file.source === null ? data : new Uint8Array(),
-      file.append,
-    )
-    file.opened = true
-    if (file.source === null) {
-      file.offset += data.byteLength
-      return
+  scope: PathSpec,
+  data: ByteSource,
+  append = false,
+): Promise<number> {
+  if (data instanceof Uint8Array) {
+    await createFile(dispatch, session, scope, data, append)
+    return data.byteLength
+  }
+  let size = 0
+  async function* counted(): AsyncGenerator<Uint8Array> {
+    for await (const part of chunks(data)) {
+      size += part.byteLength
+      yield part
     }
   }
-  if (data.byteLength === 0) return
-  if (file.source === null) {
-    if (file.append) {
-      await createFile(dispatch, session, file.scope, data, true)
-    } else {
-      await dispatch('pwrite', file.scope, [data, file.offset])
-      file.offset += data.byteLength
-    }
-    return
-  }
-  const offset = file.offset + file.source.lines.position
-  await dispatch('pwrite', file.scope, [data, offset])
-  await file.source.lines.discard()
-  file.offset = offset + data.length
-  const content = (await dispatch('read', file.scope, [], { stream: true }))[0] as ByteSource
-  file.source.lines = new AsyncLineIterator(sliceStream(content, file.offset))
+  await createFile(dispatch, session, scope, counted(), append)
+  return size
 }

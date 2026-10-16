@@ -1,8 +1,7 @@
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
-from itertools import islice
 
 from mirage.commands.builtin.constants import (
     SPLIT_BYTE_SUFFIXES,
@@ -21,8 +20,9 @@ from mirage.commands.spec.usage import extra_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.record_spool import RecordSpool
-from mirage.io.stream import OutputStream
+from mirage.io.stream import OutputStream, rechunk
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.writer import ByteWriter
 from mirage.types import PathSpec
@@ -243,158 +243,6 @@ def _chunk_end(index: int, base: int, rem: int) -> int:
     return base * index + min(index, rem)
 
 
-def _byte_chunks(data: bytes, count: int) -> Iterator[bytes]:
-    """The byte chunks of ``data`` in order, the way GNU sizes them.
-
-    ``size // count`` bytes each, with the remainder spread one byte at
-    a time over the FIRST chunks: 7 bytes in 3 are 3, 2, 2 (coreutils
-    9.7). Stops once the input is used up, because every chunk after
-    that is empty; ``chunk_parts`` pads and ``chunk_at`` reads past the
-    end, so a huge N never costs N slices.
-
-    Args:
-        data (bytes): the whole input.
-        count (int): N.
-    """
-    base, rem = divmod(len(data), count)
-    pos = 0
-    for index in range(count):
-        if pos >= len(data):
-            return
-        size = base + (1 if index < rem else 0)
-        yield data[pos : pos + size]
-        pos += size
-
-
-def _line_chunks(data: bytes, count: int, eol: bytes) -> Iterator[bytes]:
-    """The line chunks of ``data`` in order, no record cut.
-
-    GNU's ``lines_chunk_split``: the byte boundaries are those of
-    ``_byte_chunks`` over ``max(size, count)``, and a chunk runs to the
-    first terminator at or after its own last byte, so a record that
-    straddles a boundary goes whole to the chunk it started in. A
-    record long enough to cover a whole later chunk leaves that chunk
-    empty, and a chunk that begins exactly where the previous one ended
-    takes the next record. Measured on coreutils 9.7 (``-n l/7`` over
-    five 6-byte lines is line1, line2, line3, empty, line4, line5,
-    empty). Stops once the input is used up, like ``_byte_chunks``.
-
-    Args:
-        data (bytes): the whole input.
-        count (int): N.
-        eol (bytes): the one-byte record terminator.
-    """
-    size = max(len(data), count)
-    base, rem = divmod(size, count)
-    buf = bytearray()
-    pos = 0
-    chunk = 0
-    while pos < len(data) and chunk < count:
-        start = max(pos, _chunk_end(chunk + 1, base, rem) - 1)
-        found = data.find(eol, start) if start < len(data) else -1
-        end, terminated = (
-            (found + 1, True) if found >= 0 else (len(data), False)
-        )
-        buf += data[pos:end]
-        pos = end
-        while terminated or _chunk_end(chunk + 1, base, rem) <= pos:
-            if not terminated and pos >= len(data):
-                break
-            yield bytes(buf)
-            buf = bytearray()
-            chunk += 1
-            if chunk >= count:
-                break
-            if _chunk_end(chunk + 1, base, rem) > pos:
-                terminated = False
-    if chunk < count:
-        yield bytes(buf)
-
-
-def _records(data: bytes, eol: bytes) -> list[bytes]:
-    """The records of ``data``, a final unterminated one included.
-
-    Args:
-        data (bytes): the whole input.
-        eol (bytes): the one-byte record terminator.
-    """
-    records: list[bytes] = []
-    pos = 0
-    while pos < len(data):
-        found = data.find(eol, pos)
-        end = found + 1 if found >= 0 else len(data)
-        records.append(data[pos:end])
-        pos = end
-    return records
-
-
-def _round_robin_chunks(
-    data: bytes, count: int, eol: bytes
-) -> Iterator[bytes]:
-    """The chunks of ``data`` dealt record by record in turn.
-
-    Chunk ``k`` holds every ``count``-th record from the ``k``-th; a
-    chunk past the last record is empty, so the walk stops there.
-
-    Args:
-        data (bytes): the whole input.
-        count (int): N.
-        eol (bytes): the one-byte record terminator; a final record
-            without one is dealt too.
-    """
-    records = _records(data, eol)
-    for index in range(min(count, len(records))):
-        yield b"".join(records[index::count])
-
-
-def _cut(data: bytes, chunks: ChunkSpec, separator: bytes) -> Iterator[bytes]:
-    if chunks.kind is ChunkKind.LINES:
-        return _line_chunks(data, chunks.count, separator)
-    if chunks.kind is ChunkKind.ROUND_ROBIN:
-        return _round_robin_chunks(data, chunks.count, separator)
-    return _byte_chunks(data, chunks.count)
-
-
-def chunk_parts(
-    data: bytes, chunks: ChunkSpec, separator: bytes
-) -> Iterator[bytes]:
-    """Every chunk of ``data`` under one ``-n`` spec, in order.
-
-    Exactly N chunks, the empty tail included, one at a time: the
-    caller writes each to its file as it arrives, so N files never
-    mean N chunks held at once.
-
-    Args:
-        data (bytes): the whole input.
-        chunks (ChunkSpec): the parsed ``-n`` value.
-        separator (bytes): the record terminator (``-t``).
-    """
-    produced = 0
-    for part in _cut(data, chunks, separator):
-        yield part
-        produced += 1
-    for _ in range(chunks.count - produced):
-        yield b""
-
-
-def chunk_at(
-    data: bytes, chunks: ChunkSpec, separator: bytes, index: int
-) -> bytes:
-    """Chunk ``index`` (1-based) of ``data`` under one ``-n`` spec.
-
-    ``K/N`` wants one chunk, so only the chunks before it are cut, and
-    a K past the input's last byte is empty at no cost per skipped
-    chunk (``-n 2/1000000000`` over 8 bytes is ``b``, instant in GNU).
-
-    Args:
-        data (bytes): the whole input.
-        chunks (ChunkSpec): the parsed ``-n`` value.
-        separator (bytes): the record terminator (``-t``).
-        index (int): K.
-    """
-    return next(islice(_cut(data, chunks, separator), index - 1, None), b"")
-
-
 async def _number_parts(
     records: RecordSpool, spec: ChunkSpec, separator: bytes
 ) -> AsyncIterator[ByteSource]:
@@ -409,7 +257,9 @@ async def _number_parts(
         return
     if spec.kind is ChunkKind.ROUND_ROBIN:
         for index in indices:
-            yield _round_robin_source(records, index, count)
+            yield rechunk(
+                _round_robin_source(records, index, count), CHUNK_SIZE
+            )
         return
     base, rem = divmod(max(spool.size, count), count)
     index = pos = record = 0
@@ -426,8 +276,6 @@ async def _number_parts(
             else sum(await records.window(record))
         )
         terminated = end > 0 and await spool.read(end - 1, 1) == separator
-        if record < records.count - 1:
-            terminated = True
         start, pos = pos, end
         while terminated or _chunk_end(index + 1, base, rem) <= pos:
             if not terminated and pos >= spool.size:

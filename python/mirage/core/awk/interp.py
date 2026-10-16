@@ -915,9 +915,11 @@ class Interpreter:
 
     async def release(self) -> None:
         """Let held standard output go, as a flush of stdout does."""
-        await self.out.fill(self.held.stream())
-        await self.held.close()
-        self.held = ByteSpool()
+        if not self.held.size:
+            return
+        held, self.held = self.held, ByteSpool()
+        async with held:
+            await self.out.fill(held.stream())
 
     async def write_file(self, name: str, body: str, append: bool) -> None:
         """Write through the host, a failure ending the run.
@@ -1349,9 +1351,15 @@ class Interpreter:
         return await self.take()
 
     async def take(self) -> tuple[ByteSource, ByteSource]:
-        out, err = self.out, self.err
-        self.out, self.err = ByteSpool(), ByteSpool()
-        return await out.output(), await err.output()
+        out: ByteSource = b""
+        err: ByteSource = b""
+        if self.out.size:
+            spool, self.out = self.out, ByteSpool()
+            out = await spool.output()
+        if self.err.size:
+            spool, self.err = self.err, ByteSpool()
+            err = await spool.output()
+        return out, err
 
 
 __all__ = [

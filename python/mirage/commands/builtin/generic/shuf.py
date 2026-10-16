@@ -1,6 +1,13 @@
 import random
 import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+)
+from contextlib import aclosing
 from dataclasses import dataclass
 from enum import Enum
 
@@ -12,9 +19,10 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.io.async_line_iterator import AsyncLineIterator
-from mirage.io.record_spool import RecordSpool
-from mirage.io.stream import OutputStream, close_quietly
+from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.record_spool import delimited
+from mirage.io.spool import MEMORY_LIMIT, ByteSpool
+from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
 
@@ -60,6 +68,11 @@ SIZE_MAX = 18446744073709551615
 # divergence: a range GNU would enumerate given enough memory is refused
 # above this, with GNU's own wording for the same situation.
 MAX_OUTPUT_LINES = 1_000_000
+# How input past the memory budget is shuffled: scattered into this many
+# buckets, each scattered again while it is still too large, at most this
+# deep (one record larger than the budget stops anywhere).
+SCATTER_FAN_OUT = 16
+SCATTER_DEPTH = 4
 
 # One unsigned value as `strtoumax` reads it, which is both `-n`'s whole
 # argument and each `-i` bound.
@@ -420,6 +433,82 @@ def _range_lines(
     return out
 
 
+async def _count_records(data: ByteSpool, terminator: bytes) -> int:
+    count = 0
+    last = b""
+    async for chunk in data.stream():
+        count += chunk.count(terminator)
+        last = chunk[-1:]
+    return count + (last not in (b"", terminator))
+
+
+async def _shuffled(
+    data: ByteSpool, terminator: bytes, depth: int = 0
+) -> AsyncGenerator[bytes, None]:
+    """Every record of ``data`` once, terminated, in uniformly random order.
+
+    Input past the memory budget is scattered into buckets by one
+    sequential pass, then each bucket is shuffled in turn, which is still
+    a uniform permutation and never reads at random.
+
+    Args:
+        data (ByteSpool): the records.
+        terminator (bytes): what ends each one.
+        depth (int): how many scatters deep this bucket is.
+    """
+    if data.size <= MEMORY_LIMIT or depth == SCATTER_DEPTH:
+        records = (await data.read(0, data.size)).split(terminator)
+        if records[-1] == b"":
+            records.pop()
+        random.shuffle(records)
+        for record in records:
+            yield record + terminator
+        return
+    buckets = [ByteSpool(0) for _ in range(SCATTER_FAN_OUT)]
+    try:
+        rest = b""
+        async for chunk in data.stream():
+            records = (rest + chunk).split(terminator)
+            rest = records.pop()
+            parts = [bytearray() for _ in buckets]
+            for record, chosen in zip(
+                records, random.choices(range(len(buckets)), k=len(records))
+            ):
+                parts[chosen] += record + terminator
+            for bucket, part in zip(buckets, parts):
+                if part:
+                    await bucket.append(bytes(part))
+        if rest:
+            await random.choice(buckets).append(rest + terminator)
+        for bucket in buckets:
+            async for record in _shuffled(bucket, terminator, depth + 1):
+                yield record
+            await bucket.close()
+    finally:
+        for bucket in buckets:
+            await bucket.close()
+
+
+async def _drawn(
+    data: ByteSpool, terminator: bytes, available: int
+) -> AsyncGenerator[bytes, None]:
+    """Records of ``data`` drawn at random with replacement, terminated.
+
+    Args:
+        data (ByteSpool): the records.
+        terminator (bytes): what ends each one.
+        available (int): how many records it holds.
+    """
+    if data.size <= MEMORY_LIMIT:
+        held = (await data.read(0, data.size)).split(terminator)
+        while True:
+            yield held[random.randrange(available)] + terminator
+    async with await delimited([data.stream()], terminator) as records:
+        while True:
+            record = await records.read(random.randrange(available))
+            yield record.removesuffix(terminator) + terminator
+
+
 async def _sample_records(
     paths: list[PathSpec],
     read: PolymorphicReadFn,
@@ -428,38 +517,31 @@ async def _sample_records(
     count: int | None,
     repeat: bool,
 ) -> ByteSource:
-    records = RecordSpool()
     stream = stdin_stream(read, stdin)
+    terminator = sep.encode()
+    data = ByteSpool()
     try:
-        sources = [stream(path) for path in paths] if paths else [stdin or b""]
-        for source in sources:
-            reader = AsyncLineIterator(source)
-            try:
-                while (
-                    line := await reader.readline(sep.encode())
-                ) is not None:
-                    await records.append(
-                        line.decode(errors="replace").encode()
-                    )
-            finally:
-                await reader.discard()
-        need = _need(records.count, count, repeat)
-        indices = (
-            (random.randrange(records.count) for _ in range(need))
-            if repeat
-            else iter(random.sample(range(records.count), need))
-        )
+        for source in (
+            [stream(path) for path in paths] if paths else [stdin or b""]
+        ):
+            await data.fill(source)
+        available = await _count_records(data, terminator)
+        need = _need(available, count, repeat)
     except BaseException:
-        await records.close()
+        await data.close()
         raise
+    picks = (
+        _drawn(data, terminator, available)
+        if repeat
+        else _shuffled(data, terminator)
+    )
 
     async def output() -> AsyncIterator[bytes]:
-        for index in indices:
-            async for part in records.stream(index):
-                yield part
-            yield sep.encode()
+        async with aclosing(picks) as records:
+            for _ in range(need):
+                yield await anext(records)
 
-    return OutputStream(output(), records.close)
+    return rechunk(OutputStream(output(), data.close), CHUNK_SIZE)
 
 
 async def shuf_generic(

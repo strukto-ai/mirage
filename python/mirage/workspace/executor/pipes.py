@@ -564,6 +564,9 @@ async def handle_subshell(
                 ExitSignal(141), recorder, session, sink, all_stdout, merged_io
             )
             break
+        except BaseException:
+            await recorder.close()
+            raise
         if errexit_acts(child, io.exit_code, session):
             break
     cleanup = await run_exit_trap(

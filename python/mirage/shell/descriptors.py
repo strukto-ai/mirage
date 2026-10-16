@@ -158,6 +158,17 @@ class Recorder(JobConsole, StreamOwner):
             stream if isinstance(stream, Inherited) else stream.channel, data
         )
 
+    async def close(self) -> None:
+        """Drop what was recorded and never taken, for a level that failed
+        before it routed its output; a late job write starts afresh."""
+        async with self.writing:
+            self.chunks = []
+            storage, self.storage = self.storage, ByteSpool()
+        try:
+            await storage.close()
+        finally:
+            await super().close()
+
     async def take(self) -> list[tuple[Channel | Inherited, ByteSource]]:
         async with self.writing:
             entries, self.chunks = self.chunks, []

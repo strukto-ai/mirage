@@ -390,7 +390,7 @@ async def _write_archive(
                             source = await prime_stream(read(member.path))
                     else:
                         size = 0
-                except PermissionError as exc:
+                except FS_ERRORS as exc:
                     notices.append(
                         f"tar: {member.spelled or member.name}: "
                         f"Cannot open: {fs_strerror(exc)}"

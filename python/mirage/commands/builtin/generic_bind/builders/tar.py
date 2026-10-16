@@ -58,7 +58,7 @@ async def tar(
             resolved,
             list(texts),
             opts,
-            prim["read_bytes"],
+            prim["read_stream"],
             prim["write"],
             prim["mkdir"],
             prim["stat"],

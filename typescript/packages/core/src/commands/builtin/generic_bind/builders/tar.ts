@@ -15,7 +15,7 @@
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
+import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { tarGeneric } from '../../generic/tar/tar.ts'
 import { type GenericCommand, requireOp, resolveGlobOf, type GenericCommandFn } from '../adapter.ts'
 import { isDirOf, relayIsDirOf, walkOf } from '../archive_io.ts'
@@ -33,16 +33,12 @@ const tar: GenericCommandFn = async (ops, accessor, paths, texts, opts) => {
     // be this mount, so both run on dispatch-relayed calls and each
     // path routes to the mount that owns it. Only -c stays on the
     // accessor: its planner walks this mount's tree.
-    const readBytes = readBytesOp(dispatch)
-    async function* streamOf(p: PathSpec): AsyncIterable<Uint8Array> {
-      yield await readBytes(p)
-    }
     return tarGeneric(
       resolved,
       texts,
       opts,
       {
-        stream: streamOf,
+        stream: fileStreamOp(dispatch),
         write: async (p, data) => {
           await dispatch('write', p, [data])
         },

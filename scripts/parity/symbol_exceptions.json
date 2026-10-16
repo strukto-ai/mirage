@@ -1,5 +1,5 @@
 {
-  "baseline": 3647,
+  "baseline": 3643,
  "modules": {
   "core/api/client": {
    "typescript_only": {
@@ -778,11 +778,6 @@
    },
    "typescript_only": {
     "handedOf": "TypeScript carries a call's handed stats in its keyword bag and reads them off it; Python passes them to the backend function as keywords."
-   }
-  },
-  "commands/builtin/generic/sort": {
-   "python_only": {
-    "_split_records": "Python byte splitting has a local helper; TypeScript uses its shared byte scanner."
    }
   },
   "commands/builtin/generic/unzip": {

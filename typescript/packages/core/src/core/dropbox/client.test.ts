@@ -229,11 +229,7 @@ it.each([false, true])(
       }
       expect(arg.cursor.offset).toBe(spool.size)
       expect(arg.commit.mode).toEqual({ '.tag': 'update', update: 'rev1' })
-      expect(appends).toHaveLength(fail ? 3 : 2)
-      if (fail)
-        expect(
-          JSON.parse(new Headers(appends.at(-1)?.init.headers).get('Dropbox-API-Arg') ?? '{}'),
-        ).toMatchObject({ close: true })
+      expect(appends).toHaveLength(2)
     } finally {
       await spool.close()
     }

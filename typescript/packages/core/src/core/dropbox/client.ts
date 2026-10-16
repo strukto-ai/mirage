@@ -293,37 +293,22 @@ async function dropboxUploadSession(
     rev === null
       ? { path, mode: 'overwrite', mute: true }
       : { path, mode: { '.tag': 'update', update: rev }, mute: true, autorename: false }
-  try {
-    while (offset < spool.size) {
-      const body = await spool.read(offset, 8 * 1024 * 1024)
-      await sessionRequest(
-        tm,
-        path,
-        'append_v2',
-        { cursor: { session_id: sessionId, offset }, close: false },
-        body,
-      )
-      offset += body.length
-    }
-    return await sessionRequest(
+  while (offset < spool.size) {
+    const body = await spool.read(offset, 8 * 1024 * 1024)
+    await sessionRequest(
       tm,
       path,
-      'finish',
-      { cursor: { session_id: sessionId, offset }, commit },
-      new Uint8Array(),
+      'append_v2',
+      { cursor: { session_id: sessionId, offset }, close: false },
+      body,
     )
-  } catch (error) {
-    try {
-      await sessionRequest(
-        tm,
-        path,
-        'append_v2',
-        { cursor: { session_id: sessionId, offset }, close: true },
-        new Uint8Array(),
-      )
-    } catch (cleanup) {
-      console.debug('Could not close Dropbox upload session', cleanup)
-    }
-    throw error
+    offset += body.length
   }
+  return await sessionRequest(
+    tm,
+    path,
+    'finish',
+    { cursor: { session_id: sessionId, offset }, commit },
+    new Uint8Array(),
+  )
 }

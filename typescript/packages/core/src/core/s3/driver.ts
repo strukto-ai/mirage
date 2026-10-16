@@ -239,9 +239,10 @@ async function guarded<T>(key: string, call: Promise<T>, matched = false): Promi
 async function putIf(
   conn: S3Conn,
   key: string,
-  data: Uint8Array,
+  data: Uint8Array | Blob | AsyncIterable<Uint8Array>,
   cond: WriteCondition,
-): Promise<ObjectMeta | null> {
+  size = data instanceof Uint8Array ? data.byteLength : 0,
+): Promise<ObjectMeta> {
   // The ETag is read through the same helper `head` uses, so the token a
   // write stamps and the token a later stat reports are one spelling.
   // A write carries no type of its own, so the mount's default is the one the
@@ -254,6 +255,7 @@ async function putIf(
         Bucket: conn.config.bucket,
         Key: key,
         Body: data,
+        ...(data instanceof Uint8Array ? {} : { ContentLength: size }),
         ...(contentType !== undefined && contentType !== '' ? { ContentType: contentType } : {}),
         ...condition(cond),
       }),
@@ -262,7 +264,7 @@ async function putIf(
   )) as { ETag?: string; VersionId?: string }
   const etag = etagOf(resp)
   return {
-    size: data.byteLength,
+    size,
     fingerprint: etag !== '' ? etag : null,
     revision: versionOf(resp),
   }
@@ -285,29 +287,10 @@ async function putStream(
     try {
       await spool.fill(data)
       if (spool.size > 5 * 1024 ** 3) throw new Error('s3: single PUT exceeds 5 GiB')
-      const response = (await guarded(
-        key,
-        conn.send(
-          new conn.mod.PutObjectCommand({
-            Bucket: conn.config.bucket,
-            Key: key,
-            Body: await spool.body(
-              conn.config.presignedUrlProvider === undefined ? 'sdk' : 'fetch',
-            ),
-            ContentLength: spool.size,
-            ...(conn.config.defaultContentType
-              ? { ContentType: conn.config.defaultContentType }
-              : {}),
-            ...condition(cond),
-          }),
-        ),
-        cond.ifMatch !== undefined,
-      )) as { ETag?: string; VersionId?: string }
-      return {
-        size: spool.size,
-        fingerprint: etagOf(response) || null,
-        revision: versionOf(response),
-      }
+      const body = await spool.body(
+        conn.config.presignedUrlProvider === undefined ? 'sdk' : 'fetch',
+      )
+      return await putIf(conn, key, body, cond, spool.size)
     } finally {
       await spool.close()
     }
@@ -361,9 +344,7 @@ async function putStream(
       }
     }
     if (upload === null) {
-      const meta = await putIf(conn, key, buffer.slice(0, used), cond)
-      if (meta === null) throw new Error('s3: write returned no metadata')
-      return meta
+      return await putIf(conn, key, buffer.slice(0, used), cond)
     }
     if (used > 0) await sendPart(buffer.slice(0, used))
     const response = (await guarded(

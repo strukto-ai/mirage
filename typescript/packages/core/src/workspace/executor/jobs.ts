@@ -16,7 +16,7 @@ import { childContext, type EvaluationContext } from '../evaluation.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 
 import { ExecutionScope } from '../execution.ts'
-import type { SharedInput } from '../../io/async_line_iterator.ts'
+import { type SharedInput, holdInputs } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { PipeClosed } from '../../io/errors.ts'
@@ -196,6 +196,7 @@ export async function handleBackground(
   const releaseProgram = retainPrograms([left])
   const childEvaluation = childContext(context)
   const bgSession = childEvaluation.session
+  const heldInputs = holdInputs(bgSession.openInputs())
   inheritTraps(bgSession)
   const output = session.jobOutput ?? session.tty.jobs
   // A job is a shell of its own: what jobs it starts write into the
@@ -312,6 +313,7 @@ export async function handleBackground(
       return await (asyncContextIsolatesTasks ? runWithCaller(own, body) : body())
     } finally {
       releaseProgram()
+      for (const lines of heldInputs) await lines.unhold()
 
       if (jobHanded !== null && decisions !== null) {
         // A job that ended held on a question leaves its grants standing
@@ -339,6 +341,7 @@ export async function handleBackground(
     })
   } catch (err) {
     releaseProgram()
+    for (const lines of heldInputs) await lines.unhold()
 
     // A submission that fails (a console the table cannot build, a
     // session at its process cap) starts no runner, so nothing would ever

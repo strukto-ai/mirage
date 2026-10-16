@@ -58,6 +58,7 @@ from mirage.errors.fs import (
 )
 from mirage.errors.types import DotWalkError
 from mirage.io.stream import close_quietly, ensure_stream, materialize
+from mirage.io.types import ByteSource
 from mirage.observe.context import revision_for
 from mirage.policy.policies import Policies, get_op_policies, pre_vfs_gate
 from mirage.runtime.types import DispatchFn
@@ -365,6 +366,26 @@ def command_io(vfs: BaseVFS) -> CommandIO:
             return None
         return _without_accessor(getattr(vfs, name))
 
+    def stored(name: str) -> OperationFn | None:
+        # A command hands a write a stream, as it does the mount's own
+        # write; a VFS's function takes bytes.
+        fn = slot(name)
+        if fn is None:
+            return None
+
+        async def call(
+            accessor: Accessor,
+            path: PathSpec,
+            data: ByteSource,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            return await fn(
+                accessor, path, await materialize(data), *args, **kwargs
+            )
+
+        return call
+
     read_bytes = _without_accessor(_reader(vfs))
     streams = vfs.supports("read_stream")
     return CommandIO(
@@ -384,8 +405,8 @@ def command_io(vfs: BaseVFS) -> CommandIO:
         ),
         read_range=read_bytes if vfs.reads_ranges else None,
         exists=slot("exists") or functools.partial(_exists_by_stat, vfs),
-        write=slot("write"),
-        append=slot("append"),
+        write=stored("write"),
+        append=stored("append"),
         pwrite=slot("pwrite"),
         create=slot("create"),
         mkdir=slot("mkdir"),

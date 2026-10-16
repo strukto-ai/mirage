@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { ByteSpool } from '../../io/spool.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import type { TokenManager } from '../google/client.ts'
 import type { DriveFile } from '../google/drive.ts'
@@ -40,6 +41,10 @@ export interface FakeItem {
 
 // In-memory Drive: id-addressed items with parent links. Test files mock
 // ../google/drive.ts and delegate its functions to the current instance.
+function bytesOf(data: Uint8Array | ByteSpool): Promise<Uint8Array> {
+  return data instanceof ByteSpool ? data.read(0, data.size) : Promise.resolve(data)
+}
+
 export class FakeDrive {
   items = new Map<string, FakeItem>()
   // Every `limit` a caller asked for, so a test can pin that an emptiness
@@ -162,21 +167,25 @@ export class FakeDrive {
     return Promise.resolve(this.public(this.folder(name, parentId)))
   }
 
-  uploadFile(
+  async uploadFile(
     _tm: TokenManager,
     name: string,
     parentId: string,
-    data: Uint8Array,
+    data: Uint8Array | ByteSpool,
     mimeType: string = FILE_MIME,
   ): Promise<DriveFile> {
-    return Promise.resolve(this.public(this.add(name, parentId, mimeType, data)))
+    return this.public(this.add(name, parentId, mimeType, await bytesOf(data)))
   }
 
-  updateFileContent(_tm: TokenManager, fileId: string, data: Uint8Array): Promise<DriveFile> {
+  async updateFileContent(
+    _tm: TokenManager,
+    fileId: string,
+    data: Uint8Array | ByteSpool,
+  ): Promise<DriveFile> {
     const item = this.items.get(fileId)
     if (item === undefined) throw new Error(`no item ${fileId}`)
-    item.content = data
-    return Promise.resolve(this.public(fileId))
+    item.content = await bytesOf(data)
+    return this.public(fileId)
   }
 
   deleteFile(_tm: TokenManager, fileId: string): Promise<void> {
@@ -259,14 +268,14 @@ export function driveModuleMock(actual: object): object {
         args[0] as TokenManager,
         args[1] as string,
         args[2] as string,
-        args[3] as Uint8Array,
+        args[3] as Uint8Array | ByteSpool,
         args[4] as string | undefined,
       ),
     updateFileContent: (...args: unknown[]) =>
       currentFakeDrive.updateFileContent(
         args[0] as TokenManager,
         args[1] as string,
-        args[2] as Uint8Array,
+        args[2] as Uint8Array | ByteSpool,
       ),
     deleteFile: (...args: unknown[]) =>
       currentFakeDrive.deleteFile(args[0] as TokenManager, args[1] as string),

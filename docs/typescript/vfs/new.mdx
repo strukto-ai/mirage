@@ -89,11 +89,11 @@ becomes visible, and abort uploads when the producer fails or is cancelled.
 replaces the existing object.
 
 Replayable command input and deferred output spill after 1 MiB per spool.
-The Node workspace installs async temporary-file storage; the browser workspace
-installs OPFS scratch storage when available. Embeddings that use core directly
-can install a host factory with `setSpoolFactory` from the `io/spool` subpath.
-Without a host factory, core retains spooled data in memory. OPFS quota and
-temporary-disk capacity therefore matter for large archive and sort operations.
+The Node workspace installs async temporary-file storage. Embeddings that use
+core directly can install a host factory with `setSpoolFactory` from the
+`io/spool` subpath. Without a host factory, as in the browser, core retains
+spooled data in memory. Temporary-disk capacity therefore matters for large
+archive and sort operations.
 
 Streamed cache fills retain at most 8 MiB by default, further limited by cache
 capacity. Larger files continue streaming but are not admitted to the whole-file

@@ -20,8 +20,6 @@ from mirage.commands.builtin.generic import split as split_generic
 from mirage.commands.builtin.generic.split import (
     ChunkKind,
     ChunkSpec,
-    chunk_at,
-    chunk_parts,
     parse_bytes_value,
     parse_chunks_value,
     parse_lines_value,
@@ -30,6 +28,8 @@ from mirage.commands.builtin.generic.split import (
     parse_suffix_start,
 )
 from mirage.commands.errors import UsageError
+from mirage.io.record_spool import delimited
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 _TRY = "\nTry 'split --help' for more information."
@@ -308,55 +308,34 @@ def test_chunk_spec_reads_k_of_n():
     )
 
 
-def test_byte_chunks_spread_the_remainder_over_the_first_chunks():
-    assert list(chunk_parts(b"abcdefg", parse_chunks_value("3"), b"\n")) == [
-        b"abc",
-        b"de",
-        b"fg",
-    ]
+_HUGE = 1_000_000_000
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "value,expected",
+    "value,data,expected",
     [
-        ("l/3", [b"line1\nline2\n", b"line3\nline4\n", b"line5\n"]),
+        ("3", b"abcdefg", [b"abc", b"de", b"fg"]),
+        ("l/3", _LINES, [b"line1\nline2\n", b"line3\nline4\n", b"line5\n"]),
+        ("l/3", b"aaaaaa\nb\n", [b"aaaaaa\n", b"", b"b\n"]),
+        ("l/2", b"aa\nbb\ncc", [b"aa\nbb\n", b"cc"]),
+        (f"2/{_HUGE}", b"abc\ndef\n", [b"b"]),
+        (f"l/5/{_HUGE}", b"abc\ndef\n", [b"def\n"]),
+        (f"r/2/{_HUGE}", b"abc\ndef\n", [b"def\n"]),
+        (str(_HUGE), b"ab", [b"a", b"b", b"", b""]),
     ],
 )
-def test_line_chunks_keep_records_whole(value, expected):
-    assert (
-        list(chunk_parts(_LINES, parse_chunks_value(value), b"\n")) == expected
-    )
-
-
-def test_line_chunks_leave_a_swallowed_chunk_empty():
-    assert list(
-        chunk_parts(b"aaaaaa\nb\n", parse_chunks_value("l/3"), b"\n")
-    ) == [b"aaaaaa\n", b"", b"b\n"]
-
-
-def test_line_chunks_give_an_unterminated_tail_to_its_chunk():
-    assert list(
-        chunk_parts(b"aa\nbb\ncc", parse_chunks_value("l/2"), b"\n")
-    ) == [b"aa\nbb\n", b"cc"]
-
-
-def test_chunk_at_reads_one_chunk_without_cutting_the_rest():
-    # coreutils 9.7 over `abc\ndef\n`, each instant however large N is.
-    huge = 1_000_000_000
-    data = b"abc\ndef\n"
-    assert chunk_at(data, parse_chunks_value(f"2/{huge}"), b"\n", 2) == b"b"
-    assert (
-        chunk_at(data, parse_chunks_value(f"l/5/{huge}"), b"\n", 5) == b"def\n"
-    )
-    assert (
-        chunk_at(data, parse_chunks_value(f"r/2/{huge}"), b"\n", 2) == b"def\n"
-    )
-
-
-def test_chunk_parts_pads_the_empty_tail_lazily():
-    huge = 1_000_000_000
-    parts = chunk_parts(b"ab", parse_chunks_value(str(huge)), b"\n")
-    assert [next(parts) for _ in range(4)] == [b"a", b"b", b"", b""]
+async def test_number_parts_cut_like_gnu(value, data, expected):
+    """GNU's -n chunks (coreutils 9.7): the remainder goes to the first
+    chunks, a line chunk keeps records whole and may be left empty, K/N
+    cuts one chunk, and a huge N pads its empty tail lazily."""
+    spec = parse_chunks_value(value)
+    async with await delimited([data], b"\n") as records:
+        parts = split_generic._number_parts(records, spec, b"\n")
+        got = [
+            await materialize(await anext(parts)) for _ in range(len(expected))
+        ]
+    assert got == expected
 
 
 def test_hex_start_values_are_lower_case_only():

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { KeyLock } from '../cache/lock.ts'
+import { concat } from '../utils/bytes.ts'
 import { SharedInput } from './async_line_iterator.ts'
 import type { ByteSource, IOResult } from './types.ts'
 
@@ -202,4 +203,28 @@ export function sliceStream(
     }
   }
   return new OutputStream(window(), () => closeQuietly(source))
+}
+
+/**
+ * Re-cut a stream into parts of up to `size` bytes, joining short ones, so a
+ * consumer pays once per block rather than once per record. Mirrors Python's
+ * rechunk.
+ */
+export function rechunk(source: ByteSource, size: number): OutputStream {
+  async function* parts(): AsyncGenerator<Uint8Array> {
+    let pending: Uint8Array[] = []
+    let held = 0
+    for await (const part of ensureStream(source)) {
+      pending.push(part)
+      held += part.byteLength
+      while (held >= size) {
+        const joined = concat(pending)
+        yield joined.subarray(0, size)
+        pending = held > size ? [joined.subarray(size)] : []
+        held -= size
+      }
+    }
+    if (held > 0) yield concat(pending)
+  }
+  return new OutputStream(parts(), () => closeQuietly(source))
 }

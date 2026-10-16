@@ -63,7 +63,10 @@ export async function appendStream(
     writable = null
   } finally {
     await source.return?.()
-    if (writable !== null) await writable.abort()
+    if (writable !== null)
+      await writable.abort().catch((cleanup: unknown) => {
+        console.debug('Could not abort OPFS append', cleanup)
+      })
   }
   record('append', p.virtual, VFSName.OPFS, size, timer)
 }

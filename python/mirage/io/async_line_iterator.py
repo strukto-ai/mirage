@@ -90,6 +90,8 @@ class AsyncLineIterator:
         self._view_key: tuple[tuple[bytes, ...], bool] = ((), False)
         self._hits: list[int] = []
         self._unskipped = 0
+        self.holders = 0
+        self._released = False
 
     @property
     def position(self) -> int:
@@ -326,6 +328,19 @@ class AsyncLineIterator:
         if not self._started and close is not None:
             await close()
 
+    async def release(self) -> None:
+        """Close once no descriptor names this reader, or when the last
+        job still holding it ends."""
+        self._released = True
+        if not self.holders:
+            await self.discard()
+
+    async def unhold(self) -> None:
+        """End a job's hold, closing a reader its shell already closed."""
+        self.holders -= 1
+        if not self.holders and self._released:
+            await self.discard()
+
     async def load_rest(self) -> None:
         """Read what the source has left into the buffer, for a descriptor
         that outlives its pipe: reads go on from memory."""
@@ -502,4 +517,16 @@ async def release_inputs(
     for source in inputs:
         if id(source.lines) not in retained:
             retained.add(id(source.lines))
-            await source.discard()
+            await source.lines.release()
+
+
+def hold_inputs(inputs: list[SharedInput]) -> list[AsyncLineIterator]:
+    """Keep each reader a job inherits open until the job ends.
+
+    Args:
+        inputs (list[SharedInput]): the job's inherited descriptors.
+    """
+    held = list({id(source.lines): source.lines for source in inputs}.values())
+    for lines in held:
+        lines.holders += 1
+    return held

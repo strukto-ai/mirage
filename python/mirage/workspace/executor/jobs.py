@@ -30,7 +30,7 @@ from mirage.context import (
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
-from mirage.io.async_line_iterator import SharedInput
+from mirage.io.async_line_iterator import SharedInput, hold_inputs
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
@@ -226,6 +226,7 @@ async def handle_background(
     release_program = retain_programs([left])
     child_evaluation = child_context(context)
     bg_session = child_evaluation.session
+    held_inputs = hold_inputs(bg_session.open_inputs())
 
     def release_job(_: asyncio.Task[Any] | None = None) -> None:
         release_program()
@@ -364,6 +365,8 @@ async def handle_background(
         finally:
             release_job()
             reset_caller(token)
+            for lines in held_inputs:
+                await lines.unhold()
             if job_handed is not None and decisions is not None:
                 # A job that ended held on a question leaves its grants
                 # standing for the retry, as a held line does; a killed
@@ -388,6 +391,8 @@ async def handle_background(
         )
     except Exception as exc:
         release_job()
+        for lines in held_inputs:
+            await lines.unhold()
         # A submission that fails (a console the table cannot build, a
         # session at its process cap) starts no runner, so nothing would
         # ever revoke the job's hand-off: its grants would stay reserved

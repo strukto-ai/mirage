@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
-import { chunkAt, chunkParts, parseChunksValue, splitGeneric } from './split.ts'
+import { parseChunksValue, splitGeneric } from './split.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -196,54 +196,42 @@ describe('split -n names the component GNU names', () => {
 
 // Every row measured on coreutils 9.7 (debian:stable-slim).
 describe('split -n cuts the way GNU cuts', () => {
-  const LINES = ENC.encode('line1\nline2\nline3\nline4\nline5\n')
-  const text = (parts: Uint8Array[]): string[] => parts.map((p) => DEC.decode(p))
+  const LINES = 'line1\nline2\nline3\nline4\nline5\n'
 
-  it('leaves the tail chunks empty when the input is shorter than N', () => {
-    expect(text([...chunkParts(ENC.encode('ab'), parseChunksValue('5'), 0x0a)])).toEqual([
-      'a',
-      'b',
-      '',
-      '',
-      '',
-    ])
+  it.each([
+    ['5', 'ab', ['a', 'b', '', '', '']],
+    ['l/3', LINES, ['line1\nline2\n', 'line3\nline4\n', 'line5\n']],
+    ['l/3', 'aaaaaa\nb\n', ['aaaaaa\n', '', 'b\n']],
+    ['l/2', 'aa\nbb\ncc', ['aa\nbb\n', 'cc']],
+  ])('cuts -n %j over %j', async (value, input, expected) => {
+    const written = await runSplit({ number: value }, input)
+    expect(
+      Object.keys(written)
+        .sort()
+        .map((name) => written[name]),
+    ).toEqual(expected)
   })
 
-  it.each([['l/3', ['line1\nline2\n', 'line3\nline4\n', 'line5\n']]])(
-    'keeps records whole under %j',
-    (value, expected) => {
-      expect(text([...chunkParts(LINES, parseChunksValue(value), 0x0a)])).toEqual(expected)
-    },
-  )
-
-  it('leaves a chunk a long record swallowed whole empty', () => {
-    expect(text([...chunkParts(ENC.encode('aaaaaa\nb\n'), parseChunksValue('l/3'), 0x0a)])).toEqual(
-      ['aaaaaa\n', '', 'b\n'],
+  it.each([
+    ['2/1000000000', 'b'],
+    ['l/5/1000000000', 'def\n'],
+    ['r/2/1000000000', 'def\n'],
+  ])('reads chunk %j alone however large N is', async (value, expected) => {
+    const opts = {
+      stdin: ENC.encode('abc\ndef\n'),
+      flags: { number: value },
+      cwd: '/',
+      vfs: { kind: 'ram' } as never,
+    } as CommandOpts
+    const result = await splitGeneric(
+      [],
+      opts,
+      () => {
+        throw new Error('paths are empty; the source is stdin')
+      },
+      () => Promise.resolve(),
     )
-  })
-
-  it('gives an unterminated tail to the chunk it started in', () => {
-    expect(text([...chunkParts(ENC.encode('aa\nbb\ncc'), parseChunksValue('l/2'), 0x0a)])).toEqual([
-      'aa\nbb\n',
-      'cc',
-    ])
-  })
-
-  it('reads one chunk without cutting the rest', () => {
-    // coreutils 9.7 over `abc\ndef\n`, each instant however large N is.
-    const huge = '1000000000'
-    const data = ENC.encode('abc\ndef\n')
-    const at = (spec: string, k: number): string =>
-      DEC.decode(chunkAt(data, parseChunksValue(spec), 0x0a, k))
-    expect(at(`2/${huge}`, 2)).toBe('b')
-    expect(at(`l/5/${huge}`, 5)).toBe('def\n')
-    expect(at(`r/2/${huge}`, 2)).toBe('def\n')
-  })
-
-  it('pads the empty tail lazily', () => {
-    const parts = chunkParts(ENC.encode('ab'), parseChunksValue('1000000000'), 0x0a)
-    const first = [parts.next(), parts.next(), parts.next(), parts.next()]
-    expect(first.map((r) => DEC.decode(r.value as Uint8Array))).toEqual(['a', 'b', '', ''])
+    expect(DEC.decode(await materialize(result?.[0] ?? null))).toBe(expected)
   })
 
   it('refuses a chunk count past the safe integer range', () => {

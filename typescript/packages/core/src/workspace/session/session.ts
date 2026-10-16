@@ -23,7 +23,7 @@ import {
   type ProcessPermissions,
 } from '../../process/config.ts'
 import type { Limit } from '../../types.ts'
-import type { SharedInput } from '../../io/async_line_iterator.ts'
+import { type SharedInput, releaseInputs } from '../../io/async_line_iterator.ts'
 import { parseCommandLimits, commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
 import {
   BIN_PREFIX,
@@ -506,6 +506,9 @@ export class SessionState {
   // from fd 0 copies that (`exec 2<&0` then writes to stdout) or is
   // refused (`0: Bad file descriptor`); null for the read end itself.
   execStdinIdentity: string | null = null
+  // The readers a fork inherited: its parent still holds them, so the fork
+  // closing one never closes the parent's. Mirrors Python's _borrowed.
+  borrowed: SharedInput[] = []
   localFrames: Map<string, ShellVar | null>[] = []
   // The names a running `declare -g` has put at global scope
   // (`reachGlobal`), each with its frame and the function's local it set
@@ -674,6 +677,7 @@ export class SessionState {
     forked.execStdin = this.execStdin
     forked.execStdinUnreadable = this.execStdinUnreadable
     forked.execStdinIdentity = this.execStdinIdentity
+    forked.borrowed = [...this.borrowed, ...this.openInputs()]
     return forked
   }
 
@@ -837,6 +841,11 @@ export class SessionState {
       this.execStderrInput,
       ...[...this.descriptors.values()].map((descriptor) => descriptor.source),
     ].filter((source): source is SharedInput => source !== null)
+  }
+
+  /** Close the readers among `inputs` that this shell no longer names and did not inherit. */
+  releaseInputs(inputs: SharedInput[]): Promise<void> {
+    return releaseInputs(inputs, [...this.openInputs(), ...this.borrowed])
   }
 
   /**

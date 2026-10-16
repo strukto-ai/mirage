@@ -19,7 +19,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eloop, enoent
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import DotWalkMissing
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, spooled
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
@@ -448,13 +448,7 @@ async def decompress_inputs(
     if test_only or any(
         not (to_stdout or p.raw_path == "-") for p in operands
     ):
-        spool = ByteSpool()
-        try:
-            await spool.fill(body)
-            return (await spool.output()) or None, io
-        except BaseException:
-            await spool.close()
-            raise
+        return await spooled(body), io
     return body, io
 
 

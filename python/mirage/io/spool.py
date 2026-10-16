@@ -148,6 +148,25 @@ class ByteSpool:
         await self.close()
 
 
+async def spooled(source: ByteSource | None) -> ByteSource | None:
+    """Hold ``source`` in a spool: its bytes when they fit in memory, a
+    stream that owns the spool past that, None when it is empty.
+
+    Args:
+        source (ByteSource | None): the input, consumed.
+    """
+    store = ByteSpool()
+    try:
+        await store.fill(source or b"")
+        if not store.size:
+            await store.close()
+            return None
+        return await store.output()
+    except BaseException:
+        await store.close()
+        raise
+
+
 class ByteSlice:
     def __init__(self, source: ByteSpool, offset: int, size: int) -> None:
         self.source, self.offset, self.size = source, offset, size

@@ -1,4 +1,5 @@
 import { ByteSpool, MEMORY_LIMIT } from './spool.ts'
+import type { ByteSource } from './types.ts'
 
 /** Replay variable-length records without retaining their byte offsets in RAM. */
 export class RecordSpool {
@@ -12,11 +13,16 @@ export class RecordSpool {
   }
 
   async append(record: Uint8Array): Promise<void> {
+    const offset = this.data.size
+    await this.data.append(record)
+    await this.addEntry(offset, record.length)
+  }
+
+  private async addEntry(offset: number, size: number): Promise<void> {
     const entry = new Uint8Array(16)
     const view = new DataView(entry.buffer)
-    view.setBigUint64(0, BigInt(this.data.size), true)
-    view.setBigUint64(8, BigInt(record.length), true)
-    await this.data.append(record)
+    view.setBigUint64(0, BigInt(offset), true)
+    view.setBigUint64(8, BigInt(size), true)
     await this.index.append(entry)
     this.count++
   }
@@ -26,26 +32,19 @@ export class RecordSpool {
       throw new RangeError('record index requires an empty index and one-byte separator')
     let start = 0
     let offset = 0
-    const append = async (end: number): Promise<void> => {
-      const entry = new Uint8Array(16)
-      const view = new DataView(entry.buffer)
-      view.setBigUint64(0, BigInt(start), true)
-      view.setBigUint64(8, BigInt(end - start), true)
-      await this.index.append(entry)
-      this.count++
-      start = end
-    }
     for await (const chunk of this.data.stream()) {
       let position = 0
       for (;;) {
         const found = chunk.indexOf(separator, position)
         if (found < 0) break
-        await append(offset + found + 1)
+        const end = offset + found + 1
+        await this.addEntry(start, end - start)
+        start = end
         position = found + 1
       }
       offset += chunk.length
     }
-    if (start < this.data.size) await append(this.data.size)
+    if (start < this.data.size) await this.addEntry(start, this.data.size - start)
   }
 
   async window(index: number): Promise<[number, number]> {
@@ -73,4 +72,20 @@ export class RecordSpool {
       await this.index.close()
     }
   }
+}
+
+/**
+ * The records `separator` ends across `sources` read back to back, byte for
+ * byte; the last one may lack it. Mirrors Python's delimited.
+ */
+export async function delimited(sources: ByteSource[], separator: number): Promise<RecordSpool> {
+  const records = new RecordSpool()
+  try {
+    for (const source of sources) await records.data.fill(source)
+    await records.indexDelimited(separator)
+  } catch (error) {
+    await records.close()
+    throw error
+  }
+  return records
 }

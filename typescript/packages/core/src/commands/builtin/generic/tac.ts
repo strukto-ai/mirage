@@ -20,44 +20,80 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
-import { asyncChain } from '../../../io/stream.ts'
+import { asyncChain, rechunk } from '../../../io/stream.ts'
+import { CHUNK_SIZE } from '../../../io/cooperative.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { RecordSpool } from '../../../io/record_spool.ts'
+import { RecordSpool, delimited } from '../../../io/record_spool.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import { concat } from '../../../utils/bytes.ts'
+import { concat, findBytes } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-async function* reverseSource(
-  source: AsyncIterable<Uint8Array>,
+function reverseSource(
+  source: ByteSource,
   separator: string,
   before: boolean,
   regex: boolean,
+): AsyncIterable<Uint8Array> {
+  return rechunk(
+    regex
+      ? reversedRegex(source, separator, before)
+      : reversed(source, encodeText(separator), before),
+    CHUNK_SIZE,
+  )
+}
+
+async function* reversed(
+  source: ByteSource,
+  separator: Uint8Array,
+  before: boolean,
 ): AsyncGenerator<Uint8Array> {
-  if (!regex) {
-    const delimiter = encodeText(separator)
+  let records: RecordSpool
+  if (separator.length === 1) records = await delimited([source], separator[0] ?? 0)
+  else {
+    records = new RecordSpool()
     const reader = new AsyncLineIterator(source)
-    const records = new RecordSpool()
     try {
-      let prefix: Uint8Array = new Uint8Array()
-      try {
-        for (;;) {
-          const [raw, found] = await reader.readUntil(delimiter)
-          const record = before ? concat([prefix, raw]) : found ? concat([raw, delimiter]) : raw
-          if (record.length > 0) await records.append(record)
-          if (!found) break
-          prefix = delimiter
-        }
-      } finally {
-        await reader.discard()
+      for (;;) {
+        const [raw, found] = await reader.readUntil(separator)
+        if (raw.length > 0 || found) await records.append(found ? concat([raw, separator]) : raw)
+        if (!found) break
       }
-      for (let index = records.count - 1; index >= 0; index--) yield* records.stream(index)
-    } finally {
+    } catch (error) {
       await records.close()
+      throw error
+    } finally {
+      await reader.discard()
     }
-    return
   }
+  try {
+    for (let index = records.count - 1; index >= 0; index--) {
+      const [offset, whole] = await records.window(index)
+      let size = whole
+      if (before) {
+        const tail =
+          size >= separator.length
+            ? await records.data.read(offset + size - separator.length, separator.length)
+            : null
+        if (tail !== null && findBytes(tail, separator) === 0) {
+          size -= separator.length
+          if (index === records.count - 1) yield separator
+        }
+        if (index > 0) yield separator
+      }
+      yield* records.data.stream(offset, size)
+    }
+  } finally {
+    await records.close()
+  }
+}
+
+async function* reversedRegex(
+  source: ByteSource,
+  separator: string,
+  before: boolean,
+): AsyncGenerator<Uint8Array> {
   const text = DEC.decode(await materialize(source))
   const matcher = new RegExp(`(${separator})`, 'g')
   const parts = text.split(matcher)

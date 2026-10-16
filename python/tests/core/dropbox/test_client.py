@@ -263,12 +263,5 @@ async def test_upload_session_chunks_and_conditional_commit(fail):
                 ".tag": "update",
                 "update": "rev1",
             }
-            assert len(appends) == (3 if fail else 2)
-            if fail:
-                assert (
-                    json.loads(
-                        appends[-1].kwargs["headers"]["Dropbox-API-Arg"]
-                    )["close"]
-                    is True
-                )
+            assert len(appends) == 2
     await tm.close()

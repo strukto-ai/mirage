@@ -825,7 +825,7 @@ export async function unzipGeneric(
           try {
             await drain(memberStream(entry))
           } catch (error) {
-            if (!(error instanceof Error)) throw error
+            if (!(error instanceof ZipFormatError)) throw error
             return [ENC.encode(head + `first bad file: ${entry.name}\n`), new IOResult()]
           }
         }

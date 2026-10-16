@@ -793,9 +793,14 @@ export class Interpreter {
 
   /** Let held standard output go, as a flush of stdout does. */
   private async release(): Promise<void> {
-    await this.out.fill(this.held.stream())
-    await this.held.close()
+    if (this.held.size === 0) return
+    const held = this.held
     this.held = new ByteSpool()
+    try {
+      await this.out.fill(held.stream())
+    } finally {
+      await held.close()
+    }
   }
 
   /** Write through the host, a failure ending the run. */
@@ -1194,10 +1199,18 @@ export class Interpreter {
   }
 
   private async take(): Promise<[ByteSource, ByteSource]> {
-    const out = this.out,
-      err = this.err
-    this.out = new ByteSpool()
-    this.err = new ByteSpool()
-    return [await out.output(), await err.output()]
+    let out: ByteSource = new Uint8Array()
+    let err: ByteSource = new Uint8Array()
+    if (this.out.size > 0) {
+      const spool = this.out
+      this.out = new ByteSpool()
+      out = await spool.output()
+    }
+    if (this.err.size > 0) {
+      const spool = this.err
+      this.err = new ByteSpool()
+      err = await spool.output()
+    }
+    return [out, err]
   }
 }

@@ -18,8 +18,9 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.async_line_iterator import AsyncLineIterator
-from mirage.io.record_spool import RecordSpool
-from mirage.io.stream import async_chain
+from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.record_spool import RecordSpool, delimited
+from mirage.io.stream import OutputStream, async_chain, rechunk
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
@@ -53,33 +54,60 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TacFlags:
     )
 
 
-async def _reverse_source(
+def _reverse_source(
     source: ByteSource, separator: str, before: bool, regex: bool
+) -> OutputStream:
+    return rechunk(
+        _reversed_regex(source, separator, before)
+        if regex
+        else _reversed(source, encode_text(separator), before),
+        CHUNK_SIZE,
+    )
+
+
+async def _reversed(
+    source: ByteSource, separator: bytes, before: bool
 ) -> AsyncIterator[bytes]:
-    if not regex:
-        delimiter = encode_text(separator)
+    if len(separator) == 1:
+        records = await delimited([source], separator)
+    else:
+        records = RecordSpool()
         reader = AsyncLineIterator(source)
-        async with RecordSpool() as records:
-            try:
-                prefix = b""
-                while True:
-                    raw, found = await reader.read_until(delimiter)
-                    record = (
-                        prefix + raw
-                        if before
-                        else raw + (delimiter if found else b"")
+        try:
+            while True:
+                raw, found = await reader.read_until(separator)
+                if raw or found:
+                    await records.append(raw + (separator if found else b""))
+                if not found:
+                    break
+        except BaseException:
+            await records.close()
+            raise
+        finally:
+            await reader.discard()
+    async with records:
+        for index in range(records.count - 1, -1, -1):
+            offset, size = await records.window(index)
+            if before:
+                ended = size >= len(separator) and (
+                    await records.data.read(
+                        offset + size - len(separator), len(separator)
                     )
-                    if record:
-                        await records.append(record)
-                    if not found:
-                        break
-                    prefix = delimiter
-            finally:
-                await reader.discard()
-            for index in range(records.count - 1, -1, -1):
-                async for part in records.stream(index):
-                    yield part
-        return
+                    == separator
+                )
+                if ended:
+                    size -= len(separator)
+                    if index == records.count - 1:
+                        yield separator
+                if index:
+                    yield separator
+            async for part in records.data.stream(offset, size):
+                yield part
+
+
+async def _reversed_regex(
+    source: ByteSource, separator: str, before: bool
+) -> AsyncIterator[bytes]:
     text = (await materialize(source)).decode(errors="replace")
     parts = re.split(f"({separator})", text)
     pieces: list[str] = []

@@ -7,8 +7,7 @@ from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.io.async_line_iterator import AsyncLineIterator
-from mirage.io.record_spool import RecordSpool
+from mirage.io.record_spool import RecordSpool, delimited
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.key_prefix import mount_key
@@ -91,7 +90,8 @@ async def _split_by_patterns(
             regex = re.compile(pat[1:-1])
             found = None
             for idx in range(seen, lines.count):
-                if regex.search((await lines.read(idx)).decode()[:-1]):
+                line = (await lines.read(idx)).removesuffix(b"\n")
+                if regex.search(line.decode(errors="replace")):
                     found = idx
                     break
             if found is None:
@@ -154,13 +154,8 @@ async def csplit_generic(
         if paths and paths[0].raw_path != "-"
         else (stdin or b"")
     )
-    records = RecordSpool()
-    reader = AsyncLineIterator(source)
+    records = await delimited([source], b"\n")
     try:
-        async for line in reader:
-            await records.append(
-                (line.decode(errors="replace") + "\n").encode()
-            )
         diagnostics, refused = _check_line_numbers(list(patterns))
         if refused:
             return b"", IOResult(stderr=diagnostics.encode(), exit_code=1)
@@ -212,10 +207,7 @@ async def csplit_generic(
             exit_code=0 if error is None else 1,
         )
     finally:
-        try:
-            await reader.discard()
-        finally:
-            await records.close()
+        await records.close()
 
 
 __all__ = ["csplit_generic"]

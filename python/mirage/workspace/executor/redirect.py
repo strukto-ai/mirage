@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from enum import Enum, auto
 from functools import partial
@@ -24,10 +24,10 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io import IOResult
-from mirage.io.async_line_iterator import SharedInput, release_inputs, share
+from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.cooperative import chunks as byte_chunks
 from mirage.io.errors import PipeClosed
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import spooled
 from mirage.io.stream import async_chain, discard_streams, materialize
 from mirage.io.types import ByteSource, DeviceInput, PipeStream
 from mirage.io.writer import ByteWriter
@@ -478,7 +478,7 @@ async def handle_redirect(
             forked,
         )
     finally:
-        await release_inputs(owned, context.session.open_inputs())
+        await context.session.release_inputs(owned)
 
 
 async def _handle_redirect(
@@ -853,6 +853,9 @@ async def _handle_redirect(
             diagnostic = await take_stderr(sig)
             if diagnostic:
                 await recorder.emit(Channel.STDERR, diagnostic)
+    except BaseException:
+        await recorder.close()
+        raise
     finally:
         await recorder.abort()
         for field, value in held.items():
@@ -922,28 +925,9 @@ async def _handle_redirect(
             file: FileDescription, data: ByteSource, *, replace: bool = False
         ) -> None:
             try:
-                if replace and file.source is None and file.offset == 0:
-                    size = 0
-
-                    async def counted() -> AsyncIterator[bytes]:
-                        nonlocal size
-                        async with aclosing(byte_chunks(data)) as source:
-                            async for part in source:
-                                size += len(part)
-                                yield part
-
-                    await create_file(
-                        dispatch,
-                        session,
-                        file.scope,
-                        data if isinstance(data, bytes) else counted(),
-                        append=file.append,
-                    )
-                    if isinstance(data, bytes):
-                        size = len(data)
-                    file.offset += size
-                else:
-                    await write_description(dispatch, session, file, data)
+                await write_description(
+                    dispatch, session, file, data, replace=replace
+                )
             except OSError as exc:
                 out, error, _ = await failed(
                     _redirect_failure(file.scope, exc), failed_file=file
@@ -971,11 +955,7 @@ async def _handle_redirect(
                         chunk = next(pending, None)
                     await write(
                         target,
-                        b"".join(p for p in parts if isinstance(p, bytes))
-                        if all(isinstance(p, bytes) for p in parts)
-                        and sum(len(p) for p in parts if isinstance(p, bytes))
-                        <= 1048576
-                        else async_chain(parts),
+                        parts[0] if len(parts) == 1 else async_chain(parts),
                         replace=not refused
                         and target is complete_output
                         and len(parts) == len(chunks),
@@ -1009,20 +989,12 @@ async def _handle_redirect(
                     async for part in source:
                         await sink.emit(channel, part)
         else:
-            out_store, err_store = ByteSpool(), ByteSpool()
-            try:
-                for channel, data in kept:
-                    await (
-                        out_store if channel == Channel.STDOUT else err_store
-                    ).fill(data)
-                stdout, io.stderr = (
-                    await out_store.output(),
-                    await err_store.output(),
-                )
-            except BaseException:
-                await out_store.close()
-                await err_store.close()
-                raise
+            stdout = await spooled(
+                async_chain(d for c, d in kept if c == Channel.STDOUT)
+            )
+            io.stderr = await spooled(
+                async_chain(d for c, d in kept if c != Channel.STDOUT)
+            )
     finally:
         await route.release()
     if unwound is not None:

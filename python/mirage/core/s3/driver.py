@@ -15,7 +15,7 @@
 import logging
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import aclosing, asynccontextmanager
-from typing import Any, NoReturn, TypeVar
+from typing import Any, BinaryIO, NoReturn, TypeVar
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.types import KnownVersions, Measured, OwnRead, WriteCondition
@@ -251,7 +251,11 @@ async def _guarded(key: str, call: Awaitable[T], matched: bool = False) -> T:
 
 
 async def _put_if(
-    conn: S3Conn, key: str, data: bytes, cond: WriteCondition
+    conn: S3Conn,
+    key: str,
+    data: bytes | BinaryIO,
+    cond: WriteCondition,
+    size: int | None = None,
 ) -> ObjectMeta | None:
     # The ETag is read through the same helper _head uses, so the token a
     # write stamps and the token a later stat reports are one spelling.
@@ -264,13 +268,14 @@ async def _put_if(
             Bucket=conn.config.bucket,
             Key=key,
             Body=data,
+            **({} if size is None else {"ContentLength": size}),
             **({"ContentType": content_type} if content_type else {}),
             **_condition(cond),
         ),
         matched=cond.if_match is not None,
     )
     return ObjectMeta(
-        size=len(data),
+        size=len(data) if isinstance(data, bytes) else size or 0,
         fingerprint=_etag_of(resp) or None,
         revision=_version_of(resp),
     )
@@ -285,27 +290,11 @@ async def _put_stream(
             await spool.fill(data)
             if spool.size > 5 * 1024**3:
                 raise ValueError("s3: single PUT exceeds 5 GiB")
-            response = await _guarded(
-                key,
-                conn.client.put_object(
-                    Bucket=conn.config.bucket,
-                    Key=key,
-                    Body=await spool.file(),
-                    ContentLength=spool.size,
-                    **(
-                        {"ContentType": conn.config.default_content_type}
-                        if conn.config.default_content_type
-                        else {}
-                    ),
-                    **_condition(cond),
-                ),
-                matched=True,
+            meta = await _put_if(
+                conn, key, await spool.file(), cond, spool.size
             )
-            return ObjectMeta(
-                size=spool.size,
-                fingerprint=_etag_of(response) or None,
-                revision=_version_of(response),
-            )
+            assert meta is not None
+            return meta
     upload: str | None = None
     parts: list[dict[str, Any]] = []
     buffer = bytearray()

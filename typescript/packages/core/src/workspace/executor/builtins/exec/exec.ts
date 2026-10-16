@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { asyncChain, discardStreams } from '../../../../io/stream.ts'
-import { PipeInput, SharedInput, releaseInputs, share } from '../../../../io/async_line_iterator.ts'
+import { PipeInput, SharedInput, share } from '../../../../io/async_line_iterator.ts'
 import { callerSignal } from '../../../abort.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
 import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
@@ -318,17 +318,17 @@ export async function installExecRedirects(
     err = await install(owned, dispatch, session, redirects, stdin, expand)
   } catch (error) {
     Object.assign(session, saved)
-    await releaseInputs(owned, before)
+    await session.releaseInputs(owned)
     throw error
   }
   if (err === null) {
-    await releaseInputs([...before, ...owned], session.openInputs())
+    await session.releaseInputs([...before, ...owned])
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
   }
   try {
     return await rollBack(dispatch, session, saved, err)
   } finally {
-    await releaseInputs([...before, ...owned], session.openInputs())
+    await session.releaseInputs([...before, ...owned])
   }
 }
 

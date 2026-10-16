@@ -52,7 +52,7 @@ import { C_SPACE, UINTMAX } from '../../constants.ts'
 import { UsageError } from '../../../errors.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { checkDirectories, planCreate, type DirProbe, type StatFn, type WalkFn } from './create.ts'
-import { eisdir, fsStrerror, isEacces, isFsError } from '../../../../errors/fs.ts'
+import { eisdir, fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { GzipDataError } from '../../../../utils/compress.ts'
 import { stdinStream } from '../../utils/stream.ts'
 import { lsModeString } from '../../utils/formatting.ts'
@@ -467,7 +467,7 @@ async function writeArchive(
               size = spool.size
             } else source = await primeStream(deps.stream(member.path))
           } catch (error) {
-            if (!isEacces(error)) throw error
+            if (!isFsError(error)) throw error
             notices.push(
               `tar: ${member.spelled ?? member.name}: Cannot open: ${String(fsStrerror(error))}`,
             )

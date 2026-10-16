@@ -2,7 +2,7 @@ import { concat } from '../../../../utils/bytes.ts'
 import { ZipUpdateError } from './errors.ts'
 import type { ByteSpool } from '../../../../io/spool.ts'
 import { ByteSlice } from '../../../../io/spool.ts'
-import type { ZipArchive, ZipRecord, SpoolZipArchive, SpoolZipRecord } from './types.ts'
+import type { ZipArchive, ZipRecord } from './types.ts'
 
 const CP437 =
   'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒ' +
@@ -22,141 +22,8 @@ function checkExtra(data: Uint8Array): void {
   }
 }
 
-/** Read opaque records; updates need no decompressor or password. */
-export function readArchive(data: Uint8Array): ZipArchive {
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-  const u16 = (offset: number): number => view.getUint16(offset, true)
-  const u32 = (offset: number): number => view.getUint32(offset, true)
-  let end = data.length - 22
-  for (; end >= Math.max(0, data.length - 65557); end--) {
-    if (u32(end) === 0x06054b50 && end + 22 + u16(end + 20) === data.length) break
-  }
-  if (end < Math.max(0, data.length - 65557)) throw new ZipUpdateError('missing end record')
-  const count = u16(end + 10)
-  const size = u32(end + 12)
-  const offset = u32(end + 16)
-  if (u16(end + 4) || u16(end + 6) || u16(end + 8) !== count)
-    throw new ZipUpdateError('split archive')
-  // The writer emits single-disk ZIP32. Refuse other formats before writing.
-  if (count === 0xffff || Math.max(size, offset) === 0xffffffff)
-    throw new ZipUpdateError('ZIP64 archive')
-  const shift = end - size - offset
-  const start = end - size
-  if (shift < 0 || start < 0) throw new ZipUpdateError('invalid directory offset')
-  let pos = start
-  const entries: { name: string; central: Uint8Array; local: number; csize: number }[] = []
-  for (let i = 0; i < count; i++) {
-    if (pos + 46 > end || u32(pos) !== 0x02014b50)
-      throw new ZipUpdateError('invalid directory entry')
-    const flags = u16(pos + 8)
-    const csize = u32(pos + 20)
-    const usize = u32(pos + 24)
-    const nameLen = u16(pos + 28)
-    const extraLen = u16(pos + 30)
-    const noteLen = u16(pos + 32)
-    const local = u32(pos + 42)
-    const next = pos + 46 + nameLen + extraLen + noteLen
-    if (u16(pos + 34) || Math.max(csize, usize, local) === 0xffffffff || next > end)
-      throw new ZipUpdateError('unsupported or truncated entry')
-    const rawName = data.subarray(pos + 46, pos + 46 + nameLen)
-    checkExtra(data.subarray(pos + 46 + nameLen, next - noteLen))
-    let name: string
-    try {
-      name =
-        flags & 0x800
-          ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(rawName)
-          : Array.from(rawName, (b) =>
-              b < 128 ? String.fromCharCode(b) : CP437.charAt(b - 128),
-            ).join('')
-    } catch (err) {
-      if (!(err instanceof TypeError)) throw err
-      throw new ZipUpdateError('invalid entry name')
-    }
-    entries.push({ name, central: data.subarray(pos, next), local: local + shift, csize })
-    pos = next
-  }
-  if (pos !== end) throw new ZipUpdateError('invalid directory size')
-  const offsets = entries.map((e) => e.local).sort((a, b) => a - b)
-  if (new Set(offsets).size !== offsets.length)
-    throw new ZipUpdateError('overlapping local records')
-  const limits = new Map(offsets.map((offset, i) => [offset, offsets[i + 1] ?? start]))
-  const records = entries.map((entry) => {
-    const limit = limits.get(entry.local) ?? start
-    if (entry.local < 0 || entry.local + 30 > limit || u32(entry.local) !== 0x04034b50)
-      throw new ZipUpdateError('invalid local record')
-    if (entry.local + 30 + u16(entry.local + 26) + u16(entry.local + 28) + entry.csize > limit)
-      throw new ZipUpdateError('truncated local record')
-    const local = entry.local
-    const nameLen = u16(local + 26)
-    const extraLen = u16(local + 28)
-    const central = new DataView(
-      entry.central.buffer,
-      entry.central.byteOffset,
-      entry.central.length,
-    )
-    if (
-      nameLen !== central.getUint16(28, true) ||
-      !data
-        .subarray(local + 30, local + 30 + nameLen)
-        .every((b, i) => b === entry.central[46 + i]) ||
-      u32(local + 6) !== central.getUint32(8, true)
-    )
-      throw new ZipUpdateError('inconsistent local record')
-    if (u32(local + 18) === 0xffffffff || u32(local + 22) === 0xffffffff)
-      throw new ZipUpdateError('ZIP64 local record')
-    if (
-      !(central.getUint16(8, true) & 8) &&
-      !data.subarray(local + 14, local + 26).every((b, i) => b === entry.central[16 + i])
-    )
-      throw new ZipUpdateError('inconsistent local sizes or CRC')
-    checkExtra(data.subarray(local + 30 + nameLen, local + 30 + nameLen + extraLen))
-    return { name: entry.name, central: entry.central, local: data.subarray(entry.local, limit) }
-  })
-  return {
-    records,
-    prefix: data.subarray(0, offsets[0] ?? start),
-    comment: data.subarray(end + 22),
-  }
-}
-
-/** Replace names in place, append new ones, and copy untouched bytes. */
-export function updateArchive(
-  original: ZipArchive | null,
-  additions: readonly ZipRecord[],
-): Uint8Array {
-  original ??= { records: [], prefix: new Uint8Array(), comment: new Uint8Array() }
-  const replacements = new Map(additions.map((e) => [e.name, e]))
-  const oldNames = new Set(original.records.map((e) => e.name))
-  const records = [
-    ...original.records.map((e) => replacements.get(e.name) ?? e),
-    ...additions.filter((e) => !oldNames.has(e.name)),
-  ]
-  const localParts = [original.prefix]
-  const centralParts: Uint8Array[] = []
-  let offset = original.prefix.length
-  for (const entry of records) {
-    if (offset >= 0xffffffff) throw new ZipUpdateError('ZIP64 required')
-    const central = new Uint8Array(entry.central)
-    new DataView(central.buffer).setUint32(42, offset, true)
-    centralParts.push(central)
-    localParts.push(entry.local)
-    offset += entry.local.length
-  }
-  const directory = concat(centralParts)
-  if (records.length >= 0xffff || Math.max(offset, directory.length) >= 0xffffffff)
-    throw new ZipUpdateError('ZIP64 required')
-  const end = new Uint8Array(22)
-  const view = new DataView(end.buffer)
-  view.setUint32(0, 0x06054b50, true)
-  view.setUint16(8, records.length, true)
-  view.setUint16(10, records.length, true)
-  view.setUint32(12, directory.length, true)
-  view.setUint32(16, offset, true)
-  view.setUint16(20, original.comment.length, true)
-  return concat([...localParts, directory, end, original.comment])
-}
-
-export async function readSpooledArchive(data: ByteSpool): Promise<SpoolZipArchive> {
+/** Read opaque records; updates need no decompressor or password. ZIP64 and split archives are refused. */
+export async function readArchive(data: ByteSpool): Promise<ZipArchive> {
   const tailStart = Math.max(0, data.size - 65557)
   const tail = await data.read(tailStart, data.size - tailStart)
   const tailView = new DataView(tail.buffer, tail.byteOffset, tail.length)
@@ -225,7 +92,7 @@ export async function readSpooledArchive(data: ByteSpool): Promise<SpoolZipArchi
   if (new Set(offsets).size !== offsets.length)
     throw new ZipUpdateError('overlapping local records')
   const limits = new Map(offsets.map((o, i) => [o, offsets[i + 1] ?? start]))
-  const records: SpoolZipRecord[] = []
+  const records: ZipRecord[] = []
   for (const entry of entries) {
     const limit = limits.get(entry.local) ?? start
     if (entry.local < 0 || entry.local + 30 > limit)
@@ -266,9 +133,102 @@ export async function readSpooledArchive(data: ByteSpool): Promise<SpoolZipArchi
   return { records, prefix: new ByteSlice(data, 0, offsets[0] ?? start), comment }
 }
 
-export async function* updateSpooledArchive(
-  original: SpoolZipArchive | null,
-  additions: readonly SpoolZipRecord[],
+// The stamp every member carries: 1980-01-01 00:00, the DOS epoch and
+// Python zipfile's default, which Info-ZIP lists as `80-Jan-01 00:00`.
+// A zero date has month 0 and day 0, which is no date at all.
+const DOS_EPOCH_DATE = (1 << 5) | 1
+const ZIP32_MAX = 0xffffffff
+
+/**
+ * A new member's local header and central record, the record's offset left
+ * for `updateArchive`; sizes past ZIP32 go in a ZIP64 field. Mirrors Python's
+ * encode_record.
+ */
+export function encodeRecord(
+  name: Uint8Array,
+  method: number,
+  crc: number,
+  compressed: number,
+  size: number,
+  externalAttr: number,
+): [Uint8Array, Uint8Array] {
+  const large = Math.max(size, compressed) >= ZIP32_MAX
+  const version = large ? 45 : 20
+  const extra = new Uint8Array(large ? 20 : 0)
+  if (large) {
+    const view = new DataView(extra.buffer)
+    view.setUint16(0, 1, true)
+    view.setUint16(2, 16, true)
+    view.setBigUint64(4, BigInt(size), true)
+    view.setBigUint64(12, BigInt(compressed), true)
+  }
+  const head = new Uint8Array(30 + name.length + extra.length)
+  const view = new DataView(head.buffer)
+  view.setUint32(0, 0x04034b50, true)
+  view.setUint16(4, version, true)
+  view.setUint16(6, 0x800, true)
+  view.setUint16(8, method, true)
+  view.setUint16(12, DOS_EPOCH_DATE, true)
+  view.setUint32(14, crc, true)
+  view.setUint32(18, large ? ZIP32_MAX : compressed, true)
+  view.setUint32(22, large ? ZIP32_MAX : size, true)
+  view.setUint16(26, name.length, true)
+  view.setUint16(28, extra.length, true)
+  head.set(name, 30)
+  head.set(extra, 30 + name.length)
+  const central = new Uint8Array(46 + name.length + extra.length)
+  const record = new DataView(central.buffer)
+  record.setUint32(0, 0x02014b50, true)
+  // Unix in the high byte, so the mode bits below are read as such.
+  record.setUint16(4, (3 << 8) | version, true)
+  // Version through extra-field length have the same layout in both headers.
+  central.set(head.subarray(4, 30), 6)
+  record.setUint32(38, externalAttr, true)
+  central.set(name, 46)
+  central.set(extra, 46 + name.length)
+  return [head, central]
+}
+
+/**
+ * `central` pointing at its local record, through a ZIP64 field when the
+ * offset is past ZIP32 (after the sizes one already holds). Mirrors Python's
+ * _placed.
+ */
+function placed(central: Uint8Array, offset: number): Uint8Array {
+  const record = central.slice()
+  const view = new DataView(record.buffer)
+  if (offset < ZIP32_MAX) {
+    view.setUint32(42, offset, true)
+    return record
+  }
+  view.setUint32(42, ZIP32_MAX, true)
+  view.setUint16(6, 45, true)
+  const start = 46 + view.getUint16(28, true)
+  const extraLen = view.getUint16(30, true)
+  const extra = record.subarray(start, start + extraLen)
+  const tail = new Uint8Array(8)
+  new DataView(tail.buffer).setBigUint64(0, BigInt(offset), true)
+  let merged: Uint8Array
+  if (extra[0] === 1 && extra[1] === 0) {
+    const size = new DataView(extra.buffer, extra.byteOffset).getUint16(2, true)
+    merged = concat([extra.subarray(0, 4 + size), tail, extra.subarray(4 + size)])
+    new DataView(merged.buffer).setUint16(2, size + 8, true)
+  } else {
+    const field = new Uint8Array([1, 0, 8, 0])
+    merged = concat([field, tail, extra])
+  }
+  view.setUint16(30, merged.length, true)
+  return concat([record.subarray(0, start), merged, record.subarray(start + extraLen)])
+}
+
+/**
+ * Replace names in place, append new ones, and copy untouched bytes, in
+ * ZIP64 form where the archive outgrows ZIP32. Mirrors Python's
+ * update_archive.
+ */
+export async function* updateArchive(
+  original: ZipArchive | null,
+  additions: readonly ZipRecord[],
 ): AsyncGenerator<Uint8Array> {
   const replacements = new Map(additions.map((e) => [e.name, e]))
   const oldNames = new Set(original?.records.map((e) => e.name))
@@ -279,26 +239,41 @@ export async function* updateSpooledArchive(
   let offset = original?.prefix.size ?? 0
   const centralParts: Uint8Array[] = []
   for (const entry of records) {
-    if (offset >= 0xffffffff) throw new ZipUpdateError('ZIP64 required')
-    const central = entry.central.slice()
-    new DataView(central.buffer).setUint32(42, offset, true)
-    centralParts.push(central)
-    offset += entry.local.size
+    centralParts.push(placed(entry.central, offset))
+    offset += (entry.head?.length ?? 0) + entry.local.size
   }
   const directorySize = centralParts.reduce((n, c) => n + c.length, 0)
-  if (records.length >= 0xffff || Math.max(offset, directorySize) >= 0xffffffff)
-    throw new ZipUpdateError('ZIP64 required')
   if (original !== null) yield* original.prefix.stream()
-  for (const entry of records) yield* entry.local.stream()
+  for (const entry of records) {
+    if (entry.head !== undefined && entry.head.length > 0) yield entry.head
+    yield* entry.local.stream()
+  }
   yield* centralParts
+  const count = records.length
+  if (count >= 0xffff || Math.max(offset, directorySize) >= ZIP32_MAX) {
+    const zip64 = new Uint8Array(76)
+    const view = new DataView(zip64.buffer)
+    view.setUint32(0, 0x06064b50, true)
+    view.setBigUint64(4, 44n, true)
+    view.setUint16(12, 45, true)
+    view.setUint16(14, 45, true)
+    view.setBigUint64(24, BigInt(count), true)
+    view.setBigUint64(32, BigInt(count), true)
+    view.setBigUint64(40, BigInt(directorySize), true)
+    view.setBigUint64(48, BigInt(offset), true)
+    view.setUint32(56, 0x07064b50, true)
+    view.setBigUint64(64, BigInt(offset + directorySize), true)
+    view.setUint32(72, 1, true)
+    yield zip64
+  }
   const comment = original?.comment ?? new Uint8Array()
   const end = new Uint8Array(22)
   const view = new DataView(end.buffer)
   view.setUint32(0, 0x06054b50, true)
-  view.setUint16(8, records.length, true)
-  view.setUint16(10, records.length, true)
-  view.setUint32(12, directorySize, true)
-  view.setUint32(16, offset, true)
+  view.setUint16(8, Math.min(count, 0xffff), true)
+  view.setUint16(10, Math.min(count, 0xffff), true)
+  view.setUint32(12, Math.min(directorySize, ZIP32_MAX), true)
+  view.setUint32(16, Math.min(offset, ZIP32_MAX), true)
   view.setUint16(20, comment.length, true)
   yield end
   yield comment

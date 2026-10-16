@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import logging
 from collections.abc import AsyncIterator, Callable, Mapping
 from functools import partial
 from typing import Any
@@ -34,8 +33,6 @@ from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.dropbox.config import DropboxConfig
 from mirage.vfs.secrets import reveal_secret
-
-logger = logging.getLogger(__name__)
 
 
 class DropboxApiError(RuntimeError):
@@ -297,45 +294,27 @@ async def dropbox_upload_session(
     commit: dict[str, Any] = {"path": path, "mode": "overwrite", "mute": True}
     if rev is not None:
         commit.update(mode={".tag": "update", "update": rev}, autorename=False)
-    try:
-        while offset < spool.size:
-            body = await spool.read(offset, 8 * 1024 * 1024)
-            await _session_request(
-                tm,
-                path,
-                "append_v2",
-                {
-                    "cursor": {"session_id": session_id, "offset": offset},
-                    "close": False,
-                },
-                body,
-            )
-            offset += len(body)
-        result: JsonValue = await _session_request(
+    while offset < spool.size:
+        body = await spool.read(offset, 8 * 1024 * 1024)
+        await _session_request(
             tm,
             path,
-            "finish",
+            "append_v2",
             {
                 "cursor": {"session_id": session_id, "offset": offset},
-                "commit": commit,
+                "close": False,
             },
-            b"",
+            body,
         )
-        return result
-    except BaseException:
-        try:
-            await _session_request(
-                tm,
-                path,
-                "append_v2",
-                {
-                    "cursor": {"session_id": session_id, "offset": offset},
-                    "close": True,
-                },
-                b"",
-            )
-        except Exception:
-            logger.debug(
-                "Could not close Dropbox upload session", exc_info=True
-            )
-        raise
+        offset += len(body)
+    result: JsonValue = await _session_request(
+        tm,
+        path,
+        "finish",
+        {
+            "cursor": {"session_id": session_id, "offset": offset},
+            "commit": commit,
+        },
+        b"",
+    )
+    return result

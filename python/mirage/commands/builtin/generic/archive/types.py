@@ -11,20 +11,6 @@ MemberKind: TypeAlias = Literal["file", "dir", "link"]
 
 
 @dataclass(frozen=True, slots=True)
-class ZipRecord:
-    name: str
-    local: bytes
-    central: bytes
-
-
-@dataclass(frozen=True, slots=True)
-class ZipArchive:
-    records: tuple[ZipRecord, ...]
-    prefix: bytes
-    comment: bytes
-
-
-@dataclass(frozen=True, slots=True)
 class Entry:
     """One thing found under an operand, before it is named or filtered.
 
@@ -112,14 +98,26 @@ class Scan:
 
 
 @dataclass(frozen=True, slots=True)
-class SpoolZipRecord:
+class ZipRecord:
+    """One member as stored: its local record, the header kept apart when
+    it was encoded here rather than copied, and its central record.
+
+    Args:
+        name (str): the member name.
+        local (ByteSlice): the local record, or just its data after
+            ``head``.
+        central (bytes): the central record, its offset not yet set.
+        head (bytes): a new member's local header.
+    """
+
     name: str
     local: ByteSlice
     central: bytes
+    head: bytes = b""
 
 
 @dataclass(frozen=True, slots=True)
-class SpoolZipArchive:
-    records: tuple[SpoolZipRecord, ...]
+class ZipArchive:
+    records: tuple[ZipRecord, ...]
     prefix: ByteSlice
     comment: bytes

@@ -22,8 +22,8 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
-from mirage.io.spool import ByteSpool
-from mirage.io.stream import async_chain
+from mirage.io.spool import spooled
+from mirage.io.stream import async_chain, discard_streams
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.console import Channel, JobConsole
@@ -518,22 +518,10 @@ async def statement_output(
             written.append((key, data, False))
         elif key.owner is own or not await deliver(sink, key, data):
             written.append((key.channel, data, True))
-    out_store = ByteSpool()
-    try:
-        await out_store.fill(stdout or b"")
-        out = await out_store.output()
-    except BaseException:
-        await out_store.close()
-        raise
+    out = await spooled(stdout)
     if out:
         written.append((Channel.STDOUT, out, False))
-    err_store = ByteSpool()
-    try:
-        await err_store.fill(io.stderr or b"")
-        err = await err_store.output()
-    except BaseException:
-        await err_store.close()
-        raise
+    err = await spooled(io.stderr)
     io.stderr = None
     if err:
         written.append((Channel.STDERR, err, False))
@@ -565,10 +553,12 @@ async def land(
             except PipeClosed:
                 # SIGPIPE keeps what the writer already said on stderr.
                 for later, more, _ in written[index + 1 :]:
-                    if later == Channel.STDERR:
-                        async with aclosing(chunks(more)) as source:
-                            async for part in source:
-                                await sink.emit(later, part)
+                    if later != Channel.STDERR:
+                        await discard_streams(more)
+                        continue
+                    async with aclosing(chunks(more)) as source:
+                        async for part in source:
+                            await sink.emit(later, part)
                 raise
         return merged_io
     all_stdout.extend(d for c, d, _ in written if c == Channel.STDOUT)

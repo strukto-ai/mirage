@@ -1,5 +1,3 @@
-import struct
-import zipfile
 import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -7,7 +5,7 @@ from dataclasses import dataclass
 from mirage.commands.builtin.generic.archive.errors import ZipUpdateError
 from mirage.commands.builtin.generic.archive.types import (
     MemberKind,
-    SpoolZipRecord,
+    ZipRecord,
 )
 from mirage.commands.builtin.generic.archive.walk import (
     OTHER_FILESYSTEM,
@@ -16,8 +14,9 @@ from mirage.commands.builtin.generic.archive.walk import (
     scan_operand,
 )
 from mirage.commands.builtin.generic.archive.zip_update import (
-    read_spooled_archive,
-    update_spooled_archive,
+    encode_record,
+    read_archive,
+    update_archive,
 )
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.operands import normalized_read
@@ -301,19 +300,10 @@ async def plan_zip(
     )
 
 
-def _info(member: ZipMember, size: int) -> zipfile.ZipInfo:
-    info = zipfile.ZipInfo(filename=member.name)
-    info.compress_type = zipfile.ZIP_DEFLATED
-    info.create_system = 3
-    info.file_size = size
-    if member.kind == "dir":
-        info.external_attr = DIR_MODE
-        info.compress_type = zipfile.ZIP_STORED
-    elif member.kind == "link":
-        info.external_attr = LINK_MODE
-    else:
-        info.external_attr = FILE_MODE
-    return info
+def _external_attr(kind: MemberKind) -> int:
+    if kind == "dir":
+        return DIR_MODE
+    return LINK_MODE if kind == "link" else FILE_MODE
 
 
 def _stderr(warnings: tuple[str, ...], quiet: bool) -> bytes:
@@ -358,7 +348,6 @@ async def zip_cmd(
     async with (
         ByteSpool() as original_spool,
         ByteSpool() as additions_spool,
-        ByteSpool() as output_spool,
     ):
         archive_path = paths[0]
         try:
@@ -374,7 +363,7 @@ async def zip_cmd(
             return _create_error(archive_path, fs_strerror(exc))
         else:
             try:
-                original = await read_spooled_archive(original_spool)
+                original = await read_archive(original_spool)
             except ZipUpdateError:
                 return _invalid_archive(archive_path)
         plan = await plan_zip(
@@ -405,7 +394,7 @@ async def zip_cmd(
                 exit_code=NOTHING_TO_DO_EXIT,
                 stderr=_stderr(plan.warnings, q) + nothing.encode(),
             )
-        additions: list[SpoolZipRecord] = []
+        additions: list[ZipRecord] = []
         output_lines: list[str] = []
         # A member the session may not read (a rule refused it below the
         # operand) aborts the run with zip's name on the refusal and writes
@@ -430,98 +419,50 @@ async def zip_cmd(
                     member.target.encode() if member.kind == "link" else b""
                 )
             )
-            async with ByteSpool() as compressed:
-                size = crc = 0
+            size = crc = 0
 
-                async def counted() -> AsyncIterator[bytes]:
-                    nonlocal size, crc
-                    async for data in chunks(source):
-                        size += len(data)
-                        crc = zlib.crc32(data, crc)
-                        yield data
+            async def counted() -> AsyncIterator[bytes]:
+                nonlocal size, crc
+                async for data in chunks(source):
+                    size += len(data)
+                    crc = zlib.crc32(data, crc)
+                    yield data
 
-                await compressed.fill(
-                    counted()
-                    if member.kind == "dir"
-                    else deflate_raw_stream(counted())
+            start = additions_spool.size
+            await additions_spool.fill(
+                counted()
+                if member.kind == "dir"
+                else deflate_raw_stream(counted())
+            )
+            encoded = member.name.encode()
+            if len(encoded) > 0xFFFF:
+                return _invalid_archive(archive_path)
+            compressed = additions_spool.size - start
+            head, central = encode_record(
+                encoded,
+                0 if member.kind == "dir" else 8,
+                crc,
+                compressed,
+                size,
+                _external_attr(member.kind),
+            )
+            additions.append(
+                ZipRecord(
+                    member.name,
+                    ByteSlice(additions_spool, start, compressed),
+                    central,
+                    head,
                 )
-                if (
-                    max(size, compressed.size) >= 0xFFFFFFFF
-                    or len(member.name.encode()) > 0xFFFF
-                ):
-                    return _invalid_archive(archive_path)
-                info = _info(member, size)
-                info.CRC, info.compress_size = crc, compressed.size
-                info.flag_bits = 0x800
-                encoded = member.name.encode()
-                method = 0 if member.kind == "dir" else 8
-                header = (
-                    struct.pack(
-                        "<I5H3I2H",
-                        0x04034B50,
-                        20,
-                        0x800,
-                        method,
-                        0,
-                        33,
-                        crc,
-                        compressed.size,
-                        size,
-                        len(encoded),
-                        0,
-                    )
-                    + encoded
-                )
-                central = (
-                    struct.pack(
-                        "<I6H3I5H2I",
-                        0x02014B50,
-                        (3 << 8) | 20,
-                        20,
-                        0x800,
-                        method,
-                        0,
-                        33,
-                        crc,
-                        compressed.size,
-                        size,
-                        len(encoded),
-                        0,
-                        0,
-                        0,
-                        0,
-                        info.external_attr,
-                        0,
-                    )
-                    + encoded
-                )
-                start = additions_spool.size
-                await additions_spool.append(header)
-                await additions_spool.fill(compressed.stream())
-                additions.append(
-                    SpoolZipRecord(
-                        member.name,
-                        ByteSlice(
-                            additions_spool,
-                            start,
-                            len(header) + compressed.size,
-                        ),
-                        central,
-                    )
-                )
+            )
             output_lines.append(
                 f"updating: {member.name}"
                 if member.name in old_order
                 else f"  adding: {member.name}"
             )
         try:
-            await output_spool.fill(
-                update_spooled_archive(original, additions)
+            await write_bytes(
+                archive_path, update_archive(original, additions)
             )
-        except ZipUpdateError:
-            return _invalid_archive(archive_path)
-        try:
-            await write_bytes(archive_path, output_spool.stream())
         except FS_ERRORS as exc:
             return _create_error(
                 archive_path, fs_strerror(exc), _stderr(plan.warnings, q)

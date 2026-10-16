@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../../utils/bytes.ts'
 import { chunks as byteChunks } from '../../io/cooperative.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import { spooled } from '../../io/spool.ts'
 import { asyncChain, discardStreams } from '../../io/stream.ts'
 import { ByteWriter } from '../../io/writer.ts'
 
@@ -23,7 +22,7 @@ import { PipeClosed } from '../../io/errors.ts'
 import { type RedirectGuard, runWithRedirectPaths } from '../../context/session_context.ts'
 import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
 import { ownerPrefix, stripSlash } from '../../utils/slash.ts'
-import { SharedInput, releaseInputs, share } from '../../io/async_line_iterator.ts'
+import { SharedInput, share } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { DeviceInput, IOResult, PipeStream, materialize } from '../../io/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -348,7 +347,7 @@ export async function handleRedirect(
       forked,
     )
   } finally {
-    await releaseInputs(owned, context.session.openInputs())
+    await context.session.releaseInputs(owned)
   }
 }
 
@@ -690,7 +689,10 @@ async function runRedirects(
       }
     }
   } catch (error) {
-    if (!isUnwinding(error)) throw error
+    if (!isUnwinding(error)) {
+      await recorder.close()
+      throw error
+    }
     unwound = error
     const output = await takeStdout(error)
     if (output.byteLength > 0) await recorder.emit(Channel.STDOUT, output)
@@ -754,24 +756,7 @@ async function runRedirects(
     const writeFiles = async () => {
       const write = async (file: FileDescription, data: ByteSource, replace = false) => {
         try {
-          if (replace && file.source === null && file.offset === 0) {
-            let size = 0
-            async function* counted(): AsyncGenerator<Uint8Array> {
-              for await (const part of byteChunks(data)) {
-                size += part.length
-                yield part
-              }
-            }
-            await createFile(
-              dispatch,
-              session,
-              file.scope,
-              data instanceof Uint8Array ? data : counted(),
-              file.append,
-            )
-            if (data instanceof Uint8Array) size = data.length
-            file.offset += size
-          } else await writeDescription(dispatch, session, file, data)
+          await writeDescription(dispatch, session, file, data, replace)
         } catch (error) {
           if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
           const [out, refusal] = await failed(redirectFailure(file.scope, error), file)
@@ -795,10 +780,7 @@ async function runRedirects(
           }
           await write(
             target,
-            parts.every((part): part is Uint8Array => part instanceof Uint8Array) &&
-              parts.reduce((sum, part) => sum + part.length, 0) <= 1048576
-              ? concat(parts)
-              : asyncChain(parts),
+            parts.length === 1 && parts[0] !== undefined ? parts[0] : asyncChain(parts),
             !refused && target === completeOutput && parts.length === chunks.length,
           )
         } else if (target === TO_STDOUT) routed.push([Channel.STDOUT, data])
@@ -822,20 +804,12 @@ async function runRedirects(
       for (const [channel, data] of kept)
         for await (const part of byteChunks(data)) await sink.emit(channel, part)
     } else {
-      const outStore = new ByteSpool(),
-        errStore = new ByteSpool()
-      try {
-        for (const [channel, data] of kept)
-          await (channel === Channel.STDOUT ? outStore : errStore).fill(data)
-        stdout = outStore.size > 0 ? await outStore.output() : null
-        io.stderr = errStore.size > 0 ? await errStore.output() : null
-        if (stdout === null) await outStore.close()
-        if (io.stderr === null) await errStore.close()
-      } catch (error) {
-        await outStore.close()
-        await errStore.close()
-        throw error
-      }
+      stdout = await spooled(
+        asyncChain(kept.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d)),
+      )
+      io.stderr = await spooled(
+        asyncChain(kept.filter(([c]) => c !== Channel.STDOUT).map(([, d]) => d)),
+      )
     }
   } finally {
     await route.release()

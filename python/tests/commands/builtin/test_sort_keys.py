@@ -12,6 +12,7 @@ from mirage.commands.builtin.sort_keys import (
     parse_keydef,
     sort_lines,
 )
+from mirage.io.types import materialize
 
 _G = KeyMods()
 
@@ -412,7 +413,7 @@ async def _rb(_path):
 
 async def _run_sort(data: bytes, **kwargs) -> list[str]:
     output, _ = await sort_generic([], read_bytes=_rb, stdin=data, **kwargs)
-    return output.decode().splitlines()
+    return (await materialize(output)).decode().splitlines()
 
 
 class TestSortDefault:

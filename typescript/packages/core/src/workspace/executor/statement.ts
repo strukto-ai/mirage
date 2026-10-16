@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ByteSpool } from '../../io/spool.ts'
+import { spooled } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
-import { asyncChain } from '../../io/stream.ts'
+import { asyncChain, discardStreams } from '../../io/stream.ts'
 import type { ExecutionFrame } from '../frame.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
@@ -413,27 +413,11 @@ export async function statementOutput(
     else if (key.owner === own || !(await deliver(sink, key, data)))
       written.push([key.channel, data, true])
   }
-  const outStore = new ByteSpool()
-  let out: ByteSource
-  try {
-    await outStore.fill(stdout ?? new Uint8Array())
-    out = await outStore.output()
-  } catch (error) {
-    await outStore.close()
-    throw error
-  }
-  if (!(out instanceof Uint8Array) || out.byteLength > 0) written.push([Channel.STDOUT, out, false])
-  const errStore = new ByteSpool()
-  let err: ByteSource
-  try {
-    await errStore.fill(io.stderr ?? new Uint8Array())
-    err = await errStore.output()
-  } catch (error) {
-    await errStore.close()
-    throw error
-  }
+  const out = await spooled(stdout)
+  if (out !== null) written.push([Channel.STDOUT, out, false])
+  const err = await spooled(io.stderr)
   io.stderr = null
-  if (!(err instanceof Uint8Array) || err.byteLength > 0) written.push([Channel.STDERR, err, false])
+  if (err !== null) written.push([Channel.STDERR, err, false])
   return written
 }
 
@@ -455,9 +439,10 @@ export async function land(
       } catch (err) {
         if (!(err instanceof PipeClosed)) throw err
         // SIGPIPE keeps what the writer already said on stderr.
-        for (const [later, more] of written.slice(index + 1))
-          if (later === Channel.STDERR)
-            for await (const part of chunks(more)) await sink.emit(later, part)
+        for (const [later, more] of written.slice(index + 1)) {
+          if (later !== Channel.STDERR) await discardStreams(more)
+          else for await (const part of chunks(more)) await sink.emit(later, part)
+        }
         throw err
       }
     }

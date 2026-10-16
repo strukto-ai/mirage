@@ -160,7 +160,11 @@ async function putStream(conn: GridFSAccessor, key: string, data: ByteSource): P
   try {
     await pipeline(Readable.from(counted()), upload)
   } catch (error) {
-    await upload.abort()
+    try {
+      await upload.abort()
+    } catch (cleanup) {
+      console.debug('Could not abort GridFS upload', cleanup)
+    }
     throw error
   }
   const revision = upload.id.toString()

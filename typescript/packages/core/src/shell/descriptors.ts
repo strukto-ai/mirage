@@ -148,6 +148,21 @@ export class Recorder extends JobConsole {
   override async emitTo(stream: OwnedStream, data: Uint8Array): Promise<void> {
     await this.record(stream instanceof Inherited ? stream : stream.channel, data)
   }
+  /**
+   * Drop what was recorded and never taken, for a level that failed before
+   * it routed its output; a late job write starts afresh. Mirrors Python.
+   */
+  override async close(): Promise<void> {
+    await this.writing
+    this.chunks.splice(0)
+    const storage = this.storage
+    this.storage = new ByteSpool()
+    try {
+      await storage.close()
+    } finally {
+      await super.close()
+    }
+  }
   async take(): Promise<[Channel | Inherited, ByteSource][]> {
     await this.writing
     const entries = this.chunks.splice(0),

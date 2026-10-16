@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ByteSpool } from '../../../io/spool.ts'
-import { OutputStream } from '../../../io/stream.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -43,7 +42,7 @@ import { type FlagValue, type ParsedFlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
+const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 
 export interface SortFlags extends SortGlobals {
   check: boolean
@@ -308,17 +307,15 @@ function* chunked(records: string[]): Generator<string[], void, undefined> {
  * and CHUNK_CHARS characters unless one record alone is longer, sort as one
  * step, then the sorted chunks merge pairwise, a tie going to the
  * earlier chunk, which is the order one stable sort of every record gives,
- * `-u` included. Under `-m` the inputs merge as given. A large sort shares the
- * loop's core rather than using another (strukto-ai/mirage#1590).
+ * `-u` included. A large sort shares the loop's core rather than using another
+ * (strukto-ai/mirage#1590).
  */
 async function orderedRecords(
   runs: string[][],
   cfg: SortConfig,
-  merge: boolean,
   signal?: AbortSignal,
 ): Promise<string[]> {
   const budget = new YieldBudget(signal)
-  if (merge) return drain(merged(runs, cfg), budget)
   let chunks: string[][] = []
   for (const chunk of chunked(runs.flat())) {
     chunks.push(sortLines(chunk, cfg))
@@ -342,20 +339,22 @@ async function mergeSpools(
   separator: number,
   signal?: AbortSignal,
 ): Promise<ByteSpool> {
-  const output = new ByteSpool(0)
+  const output = new ByteSpool()
   const readers = runs.map((run) => new AsyncLineIterator(run.stream()))
   const budget = new YieldBudget(signal)
+  const head = async (reader: AsyncLineIterator): Promise<string | null> => {
+    const raw = await reader.readline(signal, separator)
+    return raw === null ? null : DEC.decode(raw)
+  }
   try {
-    const heads: (Uint8Array | null)[] = []
-    for (const reader of readers) heads.push(await reader.readline(signal, separator))
+    const heads: (string | null)[] = []
+    for (const reader of readers) heads.push(await head(reader))
     let previous: string | null = null
     for (;;) {
       let chosen = -1
       let line = ''
-      for (const [index, head] of heads.entries()) {
-        if (head === null) continue
-        const text = DEC.decode(head)
-        if (chosen < 0 || compareLines(text, line, cfg) < 0) {
+      for (const [index, text] of heads.entries()) {
+        if (text !== null && (chosen < 0 || compareLines(text, line, cfg) < 0)) {
           chosen = index
           line = text
         }
@@ -367,7 +366,7 @@ async function mergeSpools(
       }
       const reader = readers[chosen]
       if (reader === undefined) throw new Error('missing merge reader')
-      heads[chosen] = await reader.readline(signal, separator)
+      heads[chosen] = await head(reader)
       await budget.run()
     }
     return output
@@ -394,6 +393,7 @@ async function externalRecords(
   let refused: [InputStage, Uint8Array] | null = null
   let buffer: string[] = []
   let size = 0
+  let merges = 0
   async function addRun(initial: ByteSpool): Promise<void> {
     let run = initial
     for (let level = 0; ; level++) {
@@ -402,11 +402,12 @@ async function externalRecords(
       if (group.length < MERGE_FAN_IN) return
       levels[level] = []
       run = await mergeSpools(group, cfg, separator, signal)
+      merges += 1
     }
   }
   async function flush(): Promise<void> {
     if (buffer.length === 0) return
-    const ordered = await orderedRecords([buffer], cfg, false, signal)
+    const ordered = await orderedRecords([buffer], cfg, signal)
     const run = new ByteSpool()
     try {
       for (const line of ordered) await run.append(ENC.encode(line + ending))
@@ -468,13 +469,17 @@ async function externalRecords(
           separator,
           signal,
         )
+        merges += 1
         levels.push([mergedRun])
         next.push(mergedRun)
       }
       runs = next
     }
     let output = runs[0] ?? new ByteSpool()
-    if (parsed.merge && cfg.unique) output = await mergeSpools([output], cfg, separator, signal)
+    // A single -m input still needs -u's adjacent duplicate removal; merged
+    // inputs already had it.
+    if (parsed.merge && cfg.unique && merges === 0)
+      output = await mergeSpools([output], cfg, separator, signal)
     for (const level of levels) for (const run of level) if (run !== output) await run.close()
     levels.length = 0
     return output
@@ -559,5 +564,5 @@ export async function sortGeneric(
     }
     return [new Uint8Array(), new IOResult()]
   }
-  return [new OutputStream(ordered.stream(), () => ordered.close()), new IOResult()]
+  return [await ordered.output(), new IOResult()]
 }

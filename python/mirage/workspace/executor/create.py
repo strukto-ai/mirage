@@ -19,7 +19,8 @@ from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cooperative import chunks
-from mirage.io.stream import slice_stream
+from mirage.io.spool import MEMORY_LIMIT
+from mirage.io.stream import rechunk, slice_stream
 from mirage.io.types import ByteSource, OpReport
 from mirage.runtime.types import DispatchFn
 from mirage.shell.descriptors import FileDescription
@@ -121,11 +122,13 @@ async def write_description(
     session: SessionState,
     file: FileDescription,
     data: ByteSource,
+    *,
+    replace: bool = False,
 ) -> None:
     """Write through a shared open file description, preserving its offset.
 
-    A write-only description lands at its offset with one ``pwrite``, so
-    it needs no read of the file, as a write to a write-only descriptor
+    A write-only description lands at its offset with ``pwrite``, so it
+    needs no read of the file, as a write to a write-only descriptor
     needs none (``exec 3>f; echo a >&3``). A read-write one (``<>``)
     still reads it: that description was opened to read, and its own
     reader resumes over what the write left. Writes through one
@@ -140,7 +143,9 @@ async def write_description(
         dispatch (DispatchFn): operation dispatcher.
         session (SessionState): file creation mode.
         file (FileDescription): shared open description.
-        data (bytes): bytes emitted by the command.
+        data (ByteSource): bytes emitted by the command.
+        replace (bool): the write is the file's whole content from its
+            start, so it lands as one replacement.
     """
     if file.emit is not None:
         async with aclosing(chunks(data)) as source:
@@ -148,69 +153,63 @@ async def write_description(
                 await file.emit(part)
         return
     async with file.writing:
-        if (
-            not isinstance(data, bytes)
-            and file.source is None
-            and (not file.opened or file.append)
+        if file.source is None and (
+            not file.opened or file.append or (replace and not file.offset)
         ):
-            size = 0
-
-            async def counted() -> AsyncIterator[bytes]:
-                nonlocal size
-                async with aclosing(chunks(data)) as source:
-                    async for part in source:
-                        size += len(part)
-                        yield part
-
-            await create_file(
-                dispatch, session, file.scope, counted(), append=file.append
+            file.offset += await create_counted(
+                dispatch, session, file.scope, data, append=file.append
             )
             file.opened = True
-            file.offset += size
             return
-        async with aclosing(chunks(data)) as source:
+        if not file.opened:
+            await create_file(
+                dispatch, session, file.scope, b"", append=file.append
+            )
+            file.opened = True
+        start = offset = file.offset + (
+            file.source.lines.position if file.source is not None else 0
+        )
+        async with aclosing(rechunk(data, MEMORY_LIMIT)) as source:
             async for part in source:
-                await _write_through(dispatch, session, file, part)
+                await dispatch("pwrite", file.scope, data=part, offset=offset)
+                offset += len(part)
+        file.offset = offset
+        if file.source is not None and offset != start:
+            await file.source.lines.discard()
+            content, _ = await dispatch("read", file.scope, stream=True)
+            file.source.lines = AsyncLineIterator(
+                slice_stream(content, offset)
+            )
 
 
-async def _write_through(
+async def create_counted(
     dispatch: DispatchFn,
     session: SessionState,
-    file: FileDescription,
-    data: bytes,
-) -> None:
-    """One write through a description, once it is this write's turn.
+    scope: PathSpec,
+    data: ByteSource,
+    *,
+    append: bool = False,
+) -> int:
+    """``create_file`` that answers how many bytes it wrote.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
         session (SessionState): file creation mode.
-        file (FileDescription): shared open description.
-        data (bytes): bytes emitted by the command.
+        scope (PathSpec): the file.
+        data (ByteSource): its new content, or what to add.
+        append (bool): add rather than replace.
     """
-    if not file.opened:
-        await create_file(
-            dispatch,
-            session,
-            file.scope,
-            b"" if file.source else data,
-            append=file.append,
-        )
-        file.opened = True
-        if file.source is None:
-            file.offset += len(data)
-            return
-    if not data:
-        return
-    if file.source is None:
-        if file.append:
-            await create_file(dispatch, session, file.scope, data, append=True)
-        else:
-            await dispatch("pwrite", file.scope, data=data, offset=file.offset)
-            file.offset += len(data)
-        return
-    offset = file.offset + file.source.lines.position
-    await dispatch("pwrite", file.scope, data=data, offset=offset)
-    await file.source.lines.discard()
-    file.offset = offset + len(data)
-    content, _ = await dispatch("read", file.scope, stream=True)
-    file.source.lines = AsyncLineIterator(slice_stream(content, file.offset))
+    if isinstance(data, bytes):
+        await create_file(dispatch, session, scope, data, append=append)
+        return len(data)
+    size = 0
+
+    async def counted() -> AsyncIterator[bytes]:
+        nonlocal size
+        async with aclosing(chunks(data)) as source:
+            async for part in source:
+                size += len(part)
+                yield part
+
+    await create_file(dispatch, session, scope, counted(), append=append)
+    return size

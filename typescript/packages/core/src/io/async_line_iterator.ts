@@ -67,6 +67,8 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   private searchedFolded = false
   private hits: number[] = []
   private unskippedAttempts = 0
+  holders = 0
+  private released = false
 
   constructor(private readonly input: ByteSource | AsyncIterator<Uint8Array>) {
     const s = this.input as AsyncIterable<Uint8Array>
@@ -228,6 +230,18 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   /** Close the source and drop what it buffered, for input a failed line abandoned. */
   discard(): Promise<void> {
     return this.close()
+  }
+
+  /** Close once no descriptor names this reader, or when the last job still holding it ends. */
+  async release(): Promise<void> {
+    this.released = true
+    if (this.holders === 0) await this.close()
+  }
+
+  /** End a job's hold, closing a reader its shell already closed. */
+  async unhold(): Promise<void> {
+    this.holders -= 1
+    if (this.holders === 0 && this.released) await this.close()
   }
 
   /**
@@ -570,7 +584,14 @@ export async function releaseInputs(
   for (const source of inputs) {
     if (!retained.has(source.lines)) {
       retained.add(source.lines)
-      await source.discard()
+      await source.lines.release()
     }
   }
+}
+
+/** Keep each reader a job inherits open until the job ends. */
+export function holdInputs(inputs: SharedInput[]): AsyncLineIterator[] {
+  const held = [...new Set(inputs.map((source) => source.lines))]
+  for (const lines of held) lines.holders += 1
+  return held
 }

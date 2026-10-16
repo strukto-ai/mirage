@@ -47,7 +47,9 @@ export async function writeStream(
     }
     await writable.close()
   } catch (error) {
-    await writable.abort()
+    await writable.abort().catch((cleanup: unknown) => {
+      console.debug('Could not abort OPFS write', cleanup)
+    })
     throw error
   }
   record('write', p.virtual, VFSName.OPFS, size, timer)

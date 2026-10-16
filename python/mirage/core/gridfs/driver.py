@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
@@ -41,6 +42,8 @@ from mirage.io.types import ByteSource
 from mirage.utils.dates import to_iso_z
 
 _COPY_CHUNK = 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 
 def subtree_query(stem: str) -> dict[str, Any]:
@@ -170,7 +173,10 @@ async def _put_stream(
                 size += len(chunk)
         await upload.close()
     except BaseException:
-        await upload.abort()
+        try:
+            await upload.abort()
+        except Exception:
+            logger.debug("Could not abort GridFS upload", exc_info=True)
         raise
     revision = str(upload._id)
     return ObjectMeta(size=size, fingerprint=revision, revision=revision)

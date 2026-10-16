@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ByteSpool } from '../../../io/spool.ts'
+import { ByteSpool, spooled } from '../../../io/spool.ts'
 import { ByteWriter } from '../../../io/writer.ts'
 
 import { byteView, decodeText, fromByteView, textView } from '../../../shell/bytes.ts'
@@ -228,16 +228,10 @@ export class AwkStreams implements AwkHost {
     await this.flushOutput()
     const source: ByteSource = stdin ?? this.stdinView()
     const io = await shell(`( ${shellJoin(['eval', textView(command)])} )`, source)
-    const out = new ByteSpool(),
-      err = new ByteSpool()
-    try {
-      await out.fill(io.stdout ?? new Uint8Array())
-      await err.fill(io.stderr ?? new Uint8Array())
-      return { stdout: await out.output(), stderr: await err.output(), status: io.exitCode }
-    } catch (error) {
-      await out.close()
-      await err.close()
-      throw error
+    return {
+      stdout: (await spooled(io.stdout)) ?? new Uint8Array(),
+      stderr: (await spooled(io.stderr)) ?? new Uint8Array(),
+      status: io.exitCode,
     }
   }
 }

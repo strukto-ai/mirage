@@ -23,12 +23,13 @@ import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { RecordSpool } from '../../../io/record_spool.ts'
-import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { delimited } from '../../../io/record_spool.ts'
+import { ByteSpool, MEMORY_LIMIT } from '../../../io/spool.ts'
+import { CHUNK_SIZE } from '../../../io/cooperative.ts'
+import { OutputStream, closeQuietly, rechunk } from '../../../io/stream.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 function shuffleInPlace(arr: string[]): void {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -341,50 +342,142 @@ export function parseFlags(bag: Record<string, FlagValue>): ShufFlags | string {
   }
 }
 
+// How input past the memory budget is shuffled: scattered into this many
+// buckets, each scattered again while it is still too large, at most this
+// deep (one record larger than the budget stops anywhere). Mirrors Python.
+const SCATTER_FAN_OUT = 16
+const SCATTER_DEPTH = 4
+
+function splitRecords(data: Uint8Array, terminator: number): Uint8Array[] {
+  const records: Uint8Array[] = []
+  let start = 0
+  for (let found = data.indexOf(terminator); found >= 0; found = data.indexOf(terminator, start)) {
+    records.push(data.subarray(start, found))
+    start = found + 1
+  }
+  if (start < data.length) records.push(data.subarray(start))
+  return records
+}
+
+async function countRecords(data: ByteSpool, terminator: number): Promise<number> {
+  let count = 0
+  let last: number | undefined
+  for await (const chunk of data.stream()) {
+    for (let at = chunk.indexOf(terminator); at >= 0; at = chunk.indexOf(terminator, at + 1))
+      count++
+    last = chunk.at(-1) ?? last
+  }
+  return count + (last !== undefined && last !== terminator ? 1 : 0)
+}
+
+/**
+ * Every record of `data` once, terminated, in uniformly random order. Input
+ * past the memory budget is scattered into buckets by one sequential pass,
+ * then each bucket is shuffled in turn, which is still a uniform permutation
+ * and never reads at random. Mirrors Python's _shuffled.
+ */
+async function* shuffled(
+  data: ByteSpool,
+  terminator: number,
+  depth = 0,
+): AsyncGenerator<Uint8Array> {
+  const end = Uint8Array.of(terminator)
+  if (data.size <= MEMORY_LIMIT || depth === SCATTER_DEPTH) {
+    const records = splitRecords(await data.read(0, data.size), terminator)
+    for (let i = records.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const picked = records[j]
+      const current = records[i]
+      if (picked === undefined || current === undefined) continue
+      records[i] = picked
+      records[j] = current
+    }
+    for (const record of records) yield concat([record, end])
+    return
+  }
+  const buckets = Array.from({ length: SCATTER_FAN_OUT }, () => new ByteSpool(0))
+  const pick = (): number => Math.floor(Math.random() * buckets.length)
+  try {
+    let rest: Uint8Array = new Uint8Array()
+    for await (const chunk of data.stream()) {
+      const joined = concat([rest, chunk])
+      const parts = buckets.map((): Uint8Array[] => [])
+      let start = 0
+      for (let at = joined.indexOf(terminator); at >= 0; at = joined.indexOf(terminator, start)) {
+        parts[pick()]?.push(joined.subarray(start, at + 1))
+        start = at + 1
+      }
+      rest = joined.slice(start)
+      for (const [index, bucket] of buckets.entries()) {
+        const list = parts[index] ?? []
+        if (list.length > 0) await bucket.append(concat(list))
+      }
+    }
+    if (rest.length > 0) await buckets[pick()]?.append(concat([rest, end]))
+    for (const bucket of buckets) {
+      yield* shuffled(bucket, terminator, depth + 1)
+      await bucket.close()
+    }
+  } finally {
+    for (const bucket of buckets) await bucket.close()
+  }
+}
+
+/** Records of `data` drawn at random with replacement, terminated. Mirrors Python's _drawn. */
+async function* drawn(
+  data: ByteSpool,
+  terminator: number,
+  available: number,
+): AsyncGenerator<Uint8Array> {
+  const end = Uint8Array.of(terminator)
+  if (data.size <= MEMORY_LIMIT) {
+    const held = splitRecords(await data.read(0, data.size), terminator)
+    for (;;) yield concat([held[Math.floor(Math.random() * available)] ?? end.subarray(1), end])
+  }
+  const records = await delimited([data.stream()], terminator)
+  try {
+    for (;;) {
+      const record = await records.read(Math.floor(Math.random() * available))
+      yield concat([record.at(-1) === terminator ? record.subarray(0, -1) : record, end])
+    }
+  } finally {
+    await records.close()
+  }
+}
+
 async function sampleRecords(
   sources: ByteSource[],
   sep: string,
   count: bigint | null,
   repeat: boolean,
 ): Promise<ByteSource> {
-  const records = new RecordSpool()
+  const terminator = sep.charCodeAt(0)
+  const data = new ByteSpool()
+  let available: number
   let need: number
   try {
-    for (const source of sources) {
-      const reader = new AsyncLineIterator(source)
-      try {
-        for (;;) {
-          const line = await reader.readline(undefined, sep.charCodeAt(0))
-          if (line === null) break
-          await records.append(ENC.encode(DEC.decode(line)))
-        }
-      } finally {
-        await reader.discard()
-      }
-    }
-    const required = emitCount(BigInt(records.count), count, repeat)
+    for (const source of sources) await data.fill(source)
+    available = await countRecords(data, terminator)
+    const required = emitCount(BigInt(available), count, repeat)
     if (required > MAX_OUTPUT_LINES) throw new Error(MEMORY_EXHAUSTED)
     need = Number(required)
   } catch (error) {
-    await records.close()
+    await data.close()
     throw error
   }
+  const picks = repeat ? drawn(data, terminator, available) : shuffled(data, terminator)
   async function* output(): AsyncGenerator<Uint8Array> {
-    const swaps = new Map<number, number>()
-    for (let i = 0; i < need; i++) {
-      let index: number
-      if (repeat) index = Math.floor(Math.random() * records.count)
-      else {
-        const chosen = i + Math.floor(Math.random() * (records.count - i))
-        index = swaps.get(chosen) ?? chosen
-        swaps.set(chosen, swaps.get(i) ?? i)
-        swaps.delete(i)
+    try {
+      for (let i = 0; i < need; i++) {
+        const next = await picks.next()
+        if (next.done === true) return
+        yield next.value
       }
-      yield* records.stream(index)
-      yield ENC.encode(sep)
+    } finally {
+      await picks.return(undefined)
     }
   }
-  return new OutputStream(output(), () => records.close())
+  return rechunk(new OutputStream(output(), () => data.close()), CHUNK_SIZE)
 }
 
 export async function shufGeneric(

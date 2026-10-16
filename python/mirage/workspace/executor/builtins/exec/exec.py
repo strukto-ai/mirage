@@ -22,12 +22,7 @@ from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
-from mirage.io.async_line_iterator import (
-    PipeInput,
-    SharedInput,
-    release_inputs,
-    share,
-)
+from mirage.io.async_line_iterator import PipeInput, SharedInput, share
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import (
     async_chain,
@@ -207,15 +202,15 @@ async def install_exec_redirects(
     except BaseException:
         for name, value in saved.items():
             setattr(session, name, value)
-        await release_inputs(owned, before)
+        await session.release_inputs(owned)
         raise
     if err is None:
-        await release_inputs(before + owned, session.open_inputs())
+        await session.release_inputs(before + owned)
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
     try:
         return await _roll_back(dispatch, session, saved, err)
     finally:
-        await release_inputs(before + owned, session.open_inputs())
+        await session.release_inputs(before + owned)
 
 
 async def _install(

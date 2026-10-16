@@ -227,26 +227,6 @@ def _cautions(unmatched: list[str], excluded: list[str] | None = None) -> str:
     return text
 
 
-def _offset_slack(data: bytes) -> int:
-    """Bytes before the archive proper, negative when bytes are missing.
-
-    The end record names the central directory's offset and size; where
-    the record actually sits minus where those say it should is the
-    slack, the same arithmetic as Info-ZIP's ``extra_bytes`` and
-    zipfile's ``concat``. Zero for a well-formed archive and for a file
-    with no end record, which the caller has already refused.
-
-    Args:
-        data (bytes): the operand's bytes.
-    """
-    at = data.rfind(EOCD_SIGNATURE, max(0, len(data) - EOCD_SEARCH))
-    if at < 0 or at + 20 > len(data):
-        return 0
-    cd_size = int.from_bytes(data[at + 12 : at + 16], "little")
-    cd_offset = int.from_bytes(data[at + 16 : at + 20], "little")
-    return at - (cd_offset + cd_size)
-
-
 def _slack_warning(slack: int, archive: str) -> tuple[str, int]:
     """Info-ZIP's line for non-zero slack and the exit it floors at.
 
@@ -261,40 +241,42 @@ def _slack_warning(slack: int, archive: str) -> tuple[str, int]:
     ), WARN_EXIT
 
 
-def _central_directory_tiles(data: bytes) -> bool:
-    """Whether the end record's entry count fills its directory exactly.
+async def _directory_slack(spool: ByteSpool, tail: bytes) -> int | None:
+    """Bytes before the archive proper (negative when bytes are missing),
+    or None when the end record's entry count does not fill its directory
+    exactly.
 
-    Each central entry is a 46-byte header plus a name, an extra field
-    and a comment of the lengths it declares, and the directory ends where
-    the end record begins. A record that reaches past that end, or a count
-    that leaves bytes over, is a corrupt directory. Info-ZIP and zipfile
-    both read the truncated record anyway (Info-ZIP lists it and exits 1
-    or 51; a short count makes Info-ZIP exit 3 after listing); mirage
-    refuses up front so the two hosts answer the same.
+    The slack is where the end record sits minus where its directory
+    offset and size say it should, Info-ZIP's ``extra_bytes``. Each
+    central entry is a 46-byte header plus a name, an extra field and a
+    comment of the lengths it declares; a record reaching past the end
+    record, or a count leaving bytes over, is a corrupt directory, which
+    Info-ZIP and zipfile read anyway and mirage refuses up front so the
+    two hosts answer the same.
 
     Args:
-        data (bytes): the operand's bytes.
+        spool (ByteSpool): the operand's bytes.
+        tail (bytes): its last ``EOCD_SEARCH`` bytes.
     """
-    at = data.rfind(EOCD_SIGNATURE, max(0, len(data) - EOCD_SEARCH))
-    if at < 0 or at + 20 > len(data):
-        return False
-    count = int.from_bytes(data[at + 10 : at + 12], "little")
-    cd_size = int.from_bytes(data[at + 12 : at + 16], "little")
-    offset = at - cd_size
+    base = spool.size - len(tail)
+    at = tail.rfind(EOCD_SIGNATURE)
+    if at < 0 or at + 22 > len(tail):
+        return None
+    end = base + at
+    count = int.from_bytes(tail[at + 10 : at + 12], "little")
+    cd_size = int.from_bytes(tail[at + 12 : at + 16], "little")
+    cd_offset = int.from_bytes(tail[at + 16 : at + 20], "little")
+    pos = end - cd_size
     for _ in range(count):
-        if (
-            offset < 0
-            or offset + 46 > at
-            or not data.startswith(CENTRAL_SIGNATURE, offset)
-        ):
-            return False
-        name_len = int.from_bytes(data[offset + 28 : offset + 30], "little")
-        extra_len = int.from_bytes(data[offset + 30 : offset + 32], "little")
-        comment_len = int.from_bytes(data[offset + 32 : offset + 34], "little")
-        offset += 46 + name_len + extra_len + comment_len
-        if offset > at:
-            return False
-    return offset == at
+        if pos < 0 or pos + 46 > end:
+            return None
+        header = await spool.read(pos, 46)
+        if header[:4] != CENTRAL_SIGNATURE:
+            return None
+        pos += 46 + sum(
+            int.from_bytes(header[i : i + 2], "little") for i in (28, 30, 32)
+        )
+    return end - cd_size - cd_offset if pos == end else None
 
 
 def _refusal(
@@ -582,30 +564,8 @@ async def unzip(
     try:
         await spool.fill(normalized_read(read_bytes)(archive_path))
         tail = await spool.read(max(0, spool.size - EOCD_SEARCH), EOCD_SEARCH)
-        at = tail.rfind(EOCD_SIGNATURE)
-        valid = at >= 0 and at + 22 <= len(tail)
-        slack = 0
-        if valid:
-            end = max(0, spool.size - EOCD_SEARCH) + at
-            count = int.from_bytes(tail[at + 10 : at + 12], "little")
-            cd_size = int.from_bytes(tail[at + 12 : at + 16], "little")
-            cd_offset = int.from_bytes(tail[at + 16 : at + 20], "little")
-            slack = end - cd_size - cd_offset
-            pos = end - cd_size
-            for _ in range(count):
-                if pos < 0 or pos + 46 > end:
-                    valid = False
-                    break
-                header = await spool.read(pos, 46)
-                if header[:4] != CENTRAL_SIGNATURE:
-                    valid = False
-                    break
-                pos += 46 + sum(
-                    int.from_bytes(header[i : i + 2], "little")
-                    for i in (28, 30, 32)
-                )
-            valid = valid and pos == end
-        if not valid:
+        slack = await _directory_slack(spool, tail)
+        if slack is None:
             return None, _refusal(
                 tail, archive_path.raw_path, zipinfo=Z, pipe=p
             )

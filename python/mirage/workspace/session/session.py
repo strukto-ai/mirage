@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
 
-from mirage.io.async_line_iterator import SharedInput
+from mirage.io.async_line_iterator import SharedInput, release_inputs
 from mirage.policy.types import (
     AdmissionRules,
     Decision,
@@ -477,6 +477,9 @@ class SessionState:
     # stdout) or is refused (`0: Bad file descriptor`); None for the
     # read end itself.
     exec_stdin_identity: str | None = None
+    # The readers a fork inherited: its parent still holds them, so the
+    # fork closing one never closes the parent's.
+    _borrowed: list[SharedInput] = field(default_factory=list, repr=False)
     _parse_seq: int = field(default=0, repr=False)
     _parse_current: int = field(default=0, repr=False)
     # The row the running parse starts on in the text that spelled it: 0
@@ -527,6 +530,15 @@ class SessionState:
             )
             if source is not None
         ]
+
+    async def release_inputs(self, inputs: list[SharedInput]) -> None:
+        """Close the readers among ``inputs`` that this shell no longer
+        names and did not inherit.
+
+        Args:
+            inputs (list[SharedInput]): the descriptors just let go.
+        """
+        await release_inputs(inputs, [*self.open_inputs(), *self._borrowed])
 
     def to_dict(self) -> dict[str, Any]:
         # A managed name serializes as its pointer, never its value: a
@@ -891,6 +903,7 @@ class SessionState:
             forked.vars = kept
         if self._random_seed == RANDOM_UNSET:
             forked._random_seed = RANDOM_UNSET
+        forked._borrowed = [*self._borrowed, *self.open_inputs()]
         return forked
 
     def subshell(self) -> "SessionState":

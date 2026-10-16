@@ -90,10 +90,10 @@ export async function writeStream(
   } finally {
     await closeQuietly(data)
     if (staged)
-      await new Promise<void>((resolve, reject) => {
+      await new Promise<void>((resolve) => {
         sftp.unlink(target, (error) => {
-          if (error) reject(error)
-          else resolve()
+          if (error) console.debug(`Could not remove staged ${target}`, error)
+          resolve()
         })
       })
   }
