@@ -1,7 +1,7 @@
 ---
 title: Authentication
 sidebarTitle: Overview
-description: Connect service credentials and control who can access your workspace.
+description: Connect service credentials from your environment or a secret store.
 icon: key
 ---
 
@@ -59,10 +59,3 @@ mounts:
 `ref` identifies a secret within a source; `key` selects its field.
 For example, AWS uses a secret name or ARN as `ref`, while 1Password uses
 an `op://vault/item` reference.
-
-## Access to Mirage itself
-
-When you expose a Mirage server, configure who can connect separately from
-the service credentials above. See [HTTP authentication](/home/access/http#auth)
-for bearer tokens and JWTs, or [SSH access](/home/access/ssh) for public keys.
-[Agent profiles](/home/profiles) then control what each session can do.
