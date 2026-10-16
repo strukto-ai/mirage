@@ -225,7 +225,7 @@ Runnable examples:
 
 - [`slack/slack_events.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/slack/slack_events.py) answers Slack's Events API.
 - [`nextcloud/events.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/events.py) is a Nextcloud receiver, with the one-time `occ` registration commands.
-- [`disk/events.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/disk/events.py) and [`disk/events.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/disk/events.ts) need no credentials: they map file watcher events with `DiskEventHook` and read the changed file back through the workspace.
+- [`notification/push/disk.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/push/disk.py) and [`notification/push/disk.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/push/disk.ts) need no credentials: they map file watcher events with `DiskEventHook` and read the changed file back through the workspace.
 
 For a backend with no mapper, build the `FileEvent` yourself:
 
@@ -337,10 +337,10 @@ A feed that names items by id says where an item is now, not where it was, so
 the checkpoint also keeps the path of each item a pull has placed: a later
 rename or delete leaves that path. An item seen for the first time is a
 `create` when the provider says it is as it was made, and an `update`
-otherwise. [`dropbox/events.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/dropbox/events.py)
-and [`dropbox/events.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/events.ts)
+otherwise. [`notification/poll/dropbox.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/poll/dropbox.py)
+and [`notification/poll/dropbox.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/poll/dropbox.ts)
 answer each `list_folder/longpoll` with one pull; the
-[Notification support](/home/notifications/support#the-dropbox-longpoll-example) has the setup.
+[Notification support](/home/notifications/support#poll-examples) has the setup.
 
 ## Queues
 

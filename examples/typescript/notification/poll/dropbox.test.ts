@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { spawn } from 'node:child_process'
 import { Delta, FileEvent, FileChangeKind, PathSpec } from '@struktoai/mirage-core/types'
-import { cursorOf, longpoll, runLongpoll, runWithShutdown } from './events.ts'
+import { cursorOf, longpoll, runLongpoll, runWithShutdown } from './dropbox.ts'
 
 const checkpoint = (cursor: string): string =>
   JSON.stringify({ dropbox: { cursor, seen: { a: 'old' } } })
@@ -127,7 +127,7 @@ for (const [stage, closeDelay] of [
     async () => {
       const code = `
       import { createServer } from 'node:http'
-      import { runLongpoll, runWithShutdown } from ${JSON.stringify(new URL('./events.ts', import.meta.url).href)}
+      import { runLongpoll, runWithShutdown } from ${JSON.stringify(new URL('./dropbox.ts', import.meta.url).href)}
       import { Workspace, PathSpec } from ${JSON.stringify(import.meta.resolve('@struktoai/mirage-node'))}
       import { Delta } from ${JSON.stringify(import.meta.resolve('@struktoai/mirage-core/types'))}
       const controller = new AbortController()
