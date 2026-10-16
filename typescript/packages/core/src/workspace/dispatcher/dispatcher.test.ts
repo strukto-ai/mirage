@@ -18,7 +18,7 @@ import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import { record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
+import { markLost, record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -1792,6 +1792,78 @@ describe('dispatch runs writers to one path one at a time', () => {
       expect(ws.namespace.isLink('/data/sub/b')).toBe(true)
     } finally {
       store.release()
+      await ws.close()
+    }
+  })
+
+  it('keeps the versions a mount now over a late rename destination holds', async () => {
+    // The source's mount stays, but a mount added at the destination after
+    // the timeout owns that name now: the late rename's cleanup must leave
+    // the versions kept for files read there.
+    class CachingRAMVFS extends RAMVFS {
+      override readonly cachesReads: boolean = true
+      override readonly local: boolean = false
+    }
+    const store = new StalledRAMVFS('rename')
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('mkdir', '/data/d')
+      await expect(
+        ws.dispatch('rename', '/data/d', [PathSpec.fromStrPath('/data/e')]),
+      ).rejects.toThrow()
+      ws.addMount('/data/e', new CachingRAMVFS(), MountMode.WRITE)
+      await ws.cache.keepFingerprints({ '/data/e/f': 'seen' })
+      store.release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(await ws.cache.fingerprint('/data/e/f')).toBe('seen')
+    } finally {
+      store.release()
+      await ws.close()
+    }
+  })
+
+  it('keeps the version a late rename lost on', async () => {
+    // A timed-out rename whose store refuses a child's condition as it
+    // lands marks the child lost: the late cleanup keeps the version it
+    // lost on, so a retry without a read is refused again.
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    class LosingRAMVFS extends RAMVFS {
+      override readonly cachesReads: boolean = true
+      override readonly local: boolean = false
+      override async rename(): Promise<void> {
+        await gate
+        markLost(PathSpec.fromStrPath('/data/d/f'), 'refused')
+      }
+    }
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      {
+        '/data': [
+          new LosingRAMVFS(),
+          MountMode.WRITE,
+          { rename: new Limit({ timeoutSeconds: 0.01 }) },
+        ],
+      },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    try {
+      await ws.dispatch('mkdir', '/data/d')
+      await ws.dispatch('write', '/data/d/f', [ENC.encode('f')])
+      await expect(
+        ws.dispatch('rename', '/data/d', [PathSpec.fromStrPath('/data/e')]),
+      ).rejects.toThrow()
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(await ws.cache.fingerprint('/data/d/f')).toBe('refused')
+    } finally {
+      release()
       await ws.close()
     }
   })

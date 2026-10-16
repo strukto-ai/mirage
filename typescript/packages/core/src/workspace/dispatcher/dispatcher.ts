@@ -1387,6 +1387,8 @@ export class Dispatcher {
     await other.ensureReady()
     if (!(await other.canCopyFrom(owner, call.path.virtual))) throw exdev(call.path)
     const key = `${String(this.storeId(other.vfs))}:${mountKey(dst.virtual, rstripSlash(other.prefix))}`
+    const line = activeRecords()
+    const owners = this.owners([dst])
     try {
       await this.holdWrite(
         [key],
@@ -1398,12 +1400,11 @@ export class Dispatcher {
           await this.settleWrite('copy', call.path, dst, [dst], [])
         },
         async () => {
-          if (this.namespace.tryMountFor(rstripSlash(dst.virtual) || '/') !== other) return
-          await this.evictFailedWrite('copy', call.path, dst, [], null)
+          await this.evictFailedWrite('copy', call.path, dst, [], lostPaths(line), owners)
         },
       )
     } catch (err) {
-      await this.evictFailedWrite('copy', call.path, dst, [], lostPaths(activeRecords()))
+      await this.evictFailedWrite('copy', call.path, dst, [], lostPaths(line))
       throw err
     }
   }
@@ -1816,6 +1817,12 @@ export class Dispatcher {
         let mine: OpRecord[] = []
         let line: readonly OpRecord[] | undefined
         let before: [Uint8Array, string | null] | null = null
+        const others = operands(name, call.args, kwargs)
+        const owners = this.owners([
+          p,
+          ...(dst !== null ? [dst] : []),
+          ...others.map(([, other]) => other),
+        ])
         const own = async (onCall: (storeCall: Promise<unknown>) => void): Promise<unknown> => {
           line = activeRecords()
           before = await this.cachedBefore(call, mount)
@@ -1836,29 +1843,15 @@ export class Dispatcher {
                 : own(onCall),
             async (value) => {
               served(report, value)
-              await this.settleWrite(
-                name,
-                p,
-                dst,
-                fullArgs,
-                operands(name, call.args, kwargs),
-                value,
-              )
+              await this.settleWrite(name, p, dst, fullArgs, others, value)
               await this.keepWritten(call, mount, fullArgs, mine, before)
             },
             async () => {
-              if (this.namespace.tryMountFor(rstripSlash(p.virtual) || '/') !== mount) return
-              await this.evictFailedWrite(name, p, dst, operands(name, call.args, kwargs), null)
+              await this.evictFailedWrite(name, p, dst, others, lostPaths(line), owners)
             },
           )
         } catch (err) {
-          await this.evictFailedWrite(
-            name,
-            p,
-            dst,
-            operands(name, call.args, kwargs),
-            lostPaths(line),
-          )
+          await this.evictFailedWrite(name, p, dst, others, lostPaths(line))
           throw err
         }
       } else {
@@ -2267,6 +2260,19 @@ export class Dispatcher {
   }
 
   /**
+   * The mount serving each of a write's names as it starts, keyed by the
+   * name, for the cleanup after a call that lands past its timeout.
+   */
+  private owners(paths: readonly PathSpec[]): ReadonlyMap<string, MountEntry | null> {
+    return new Map(
+      paths.map((path) => [
+        path.virtual,
+        this.namespace.tryMountFor(rstripSlash(path.virtual) || '/'),
+      ]),
+    )
+  }
+
+  /**
    * Drop what a write that threw may have made stale.
    *
    * A write that fails partway may already have changed the store (a
@@ -2277,8 +2283,12 @@ export class Dispatcher {
    * and so is each version `lost` marks under them, which a refused
    * conditional write kept: a retry without a read is refused again.
    * Over-dropping costs a refetch. An eviction error is logged, not thrown,
-   * so the caller still learns why the write failed. Mirrors Python's
-   * Dispatcher._evict_failed_write.
+   * so the caller still learns why the write failed. `owners`, for a call
+   * that landed after its timeout, holds the mount each name was on when the
+   * call started: a name another mount has taken since is that mount's now,
+   * so nothing at or under it is touched. Mirrors Python's
+   * Dispatcher._evict_failed_write, whose timed-out call is cancelled and
+   * never lands late.
    */
   private async evictFailedWrite(
     name: string,
@@ -2286,17 +2296,20 @@ export class Dispatcher {
     dst: PathSpec | null,
     others: readonly [number | string, PathSpec][],
     lost: LostPaths | null,
+    owners: ReadonlyMap<string, MountEntry | null> | null = null,
   ): Promise<void> {
     const names = [
       ...(COPY_OPS.has(name) ? [] : [p]),
       ...(dst !== null && DESTINATION_OPS.has(name) ? [dst] : []),
       ...others.map(([, other]) => other),
     ]
+    const taken = (target: PathSpec, mount: MountEntry): boolean =>
+      owners !== null && owners.get(target.virtual) !== mount
     for (const target of names) {
       try {
         const path = rstripSlash(target.virtual) || '/'
         const mount = this.namespace.tryMountFor(path)
-        if (mount === null) continue
+        if (mount === null || taken(target, mount)) continue
         for (const [owner, alias] of this.aliases(mount, path)) {
           const manager = this.managerFor(owner)
           const spec = PathSpec.fromStrPath(alias)
@@ -2312,10 +2325,11 @@ export class Dispatcher {
     if (lost === null) return
     for (const key of [...lost.marks.keys()]) {
       const version = lost.version(key)
-      if (version === null || !names.some((target) => underPath(key, target.virtual))) continue
+      const target = names.find((written) => underPath(key, written.virtual))
+      if (version === null || target === undefined) continue
       try {
         const mount = this.namespace.tryMountFor(key)
-        if (mount === null) continue
+        if (mount === null || taken(target, mount)) continue
         for (const [owner, alias] of this.aliases(mount, key)) {
           await this.managerFor(owner).keepVersion(PathSpec.fromStrPath(alias), version)
         }
