@@ -37,13 +37,15 @@ for (const [name, className] of [
             throw new Error('stalled request unexpectedly completed')
           } }
         }
-        Workspace.prototype.notify = async () => assert.fail('notification after Ctrl-C')
+        let notifications = 0
+        Workspace.prototype.notify = async () => { notifications++ }
         const close = Workspace.prototype.close
         Workspace.prototype.close = async function () {
           await close.call(this)
           console.log('closed')
         }
         await import(${JSON.stringify(new URL(`./${name}.ts`, import.meta.url).href)})
+        assert.equal(notifications, 0, 'notification after Ctrl-C')
         server.close()
       `
       const child = spawn(
