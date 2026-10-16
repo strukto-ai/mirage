@@ -83,7 +83,7 @@ Virtual path: /data/report.csv
 
 Receive file changes through webhooks, streams or file watchers. Convert them
 with the functions below, then call `ws.notify()` for each change.
-See the [Python and TypeScript example](/home/notifications#payloads).
+See the [Python and TypeScript examples](#push-examples).
 
 | VFS | Notification service | Python method | TypeScript method |
 | --- | --- | --- | --- |
@@ -151,7 +151,7 @@ Fetch changed files from the service, on a schedule or after a notification.
 Create `hook` with `vfs.delta_hook()` (Python) or `vfs.deltaHook()` (TypeScript).
 Call `await hook.pull(root, checkpoint)`, send each item in `result.changes`
 to `ws.notify()`, and save `result.checkpoint` for the next call.
-See the [Python and TypeScript example](/home/notifications#pings).
+See the [Python and TypeScript examples](#poll-examples).
 
 | VFS | Notification service | Python | TypeScript |
 | --- | --- | --- | --- |
