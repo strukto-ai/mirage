@@ -43,13 +43,13 @@ For missing optional dependencies such as `redis` or `pg`, follow
 
 ## Missing files or empty output
 
-Start by inspecting the mounted paths:
+Inspect paths inside Mirage. Replace `YOUR_WORKSPACE_ID` with your workspace ID:
 
 ```bash
-mount
-ls /
-ls /your-mount/
-stat /your-mount/path/to/file
+mirage shell -w YOUR_WORKSPACE_ID -c 'mount'
+mirage shell -w YOUR_WORKSPACE_ID -c 'ls /'
+mirage shell -w YOUR_WORKSPACE_ID -c 'ls /your-mount/'
+mirage shell -w YOUR_WORKSPACE_ID -c 'stat /your-mount/path/to/file'
 ```
 
 Use the exact path shown by the listing. Confirm that the connected account
