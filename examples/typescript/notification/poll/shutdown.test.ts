@@ -12,10 +12,6 @@ for (const [name, className] of [
         import assert from 'node:assert/strict'
         import { createServer } from 'node:http'
         import { ${className}, Workspace } from ${JSON.stringify(import.meta.resolve('@struktoai/mirage-node'))}
-        Object.assign(process.env, {
-          BOX_ACCESS_TOKEN: 'test', GOOGLE_CLIENT_ID: 'test',
-          GOOGLE_CLIENT_SECRET: 'test', GOOGLE_REFRESH_TOKEN: 'test',
-        })
         const server = createServer(() => process.emit('SIGINT'))
         await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
         let pulls = 0
@@ -51,7 +47,16 @@ for (const [name, className] of [
       const child = spawn(
         process.execPath,
         ['--import', import.meta.resolve('tsx'), '--input-type=module', '-e', code],
-        { stdio: ['ignore', 'pipe', 'pipe'] },
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            BOX_ACCESS_TOKEN: 'test',
+            GOOGLE_CLIENT_ID: 'test',
+            GOOGLE_CLIENT_SECRET: 'test',
+            GOOGLE_REFRESH_TOKEN: 'test',
+          },
+        },
       )
       let out = ''
       let err = ''
