@@ -14,7 +14,7 @@
 
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
-import { pathVisible } from '../utils/hidden.ts'
+import { leadsHidden, pathVisible } from '../utils/hidden.ts'
 import { eloop } from '../errors/fs.ts'
 import { CycleError } from '../utils/path.ts'
 import type { LinkView, NamespaceLinks, NamespaceView } from './types.ts'
@@ -88,11 +88,14 @@ export function childMountNames(
  * Session-filtered by `visibleChildSegments`, the same predicate
  * `childMountNames` applies to a mount prefix: the link path is tested,
  * not the segment, so a namespace-only ancestor whose only link the
- * session hides is not named either.
+ * session hides is not named either. A link that leads where the session
+ * cannot see is hidden with its target.
  */
 function linkNames(vis: Visibility | null, links: NamespaceLinks | null, parent: string): string[] {
   if (links === null) return []
-  return visibleChildSegments(vis, links.symlinkTargets().keys(), parent)
+  const targets = links.symlinkTargets()
+  const shown = [...targets.keys()].filter((path) => !leadsHidden(vis, path, targets))
+  return visibleChildSegments(vis, shown, parent)
 }
 
 /**

@@ -120,7 +120,9 @@ function, and mount mode still controls whether a defined mutation may run. Set
 `local = True` only for host-local data; `is_mounted` can override the default
 availability check. `vfs.supports("write")` says whether a class defines a
 function. `commands=[...]` adds bespoke `@command` verbs and replacements: a
-command of the same name as a generic wins on this VFS's mounts.
+command of the same name as a generic wins on this VFS's mounts. Such a command
+reads through its own `accessor`, past the dispatcher, so it does not run
+(exit 127) in a session that hides, rules or caps anything on its mount.
 
 The dispatcher reaches the same functions by name (`ws.dispatch("read", path)`)
 and wraps them the same way for every backend: a read takes a window, `append`
@@ -134,7 +136,7 @@ from mirage import Effect, Target, vfs_call
 
 class JiraVFS(BaseVFS):
     @vfs_call(effect=Effect.READ)
-    async def search_issues(self, scope: PathSpec, jql: str) -> list[str]: ...
+    async def search_issues(self, scope: PathSpec, jql: str) -> list[PathSpec]: ...
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE)
     async def add_comment(self, issue: PathSpec, body: str) -> None: ...
@@ -142,8 +144,10 @@ class JiraVFS(BaseVFS):
 
 `await ws.dispatch("search_issues", PathSpec.from_str_path("/jira/"), jql="project = OPS")`
 then runs through every check the dispatcher runs: hidden paths, path rules, the
-mount's mode and admission policies. A subclass overriding a marked function
-keeps the mark. Every other `PathSpec` argument passes the same checks and
+mount's mode and admission policies. An answer that is a list of `PathSpec`s,
+or of records with a `path`, loses what the session hides; any other answer is
+declined (`Operation not supported`) while the session hides something under
+the call's path. A subclass overriding a marked function keeps the mark. Every other `PathSpec` argument passes the same checks and
 must be on the function's own mount (EXDEV otherwise); the backend receives
 it mount-relative.
 
@@ -447,7 +451,7 @@ The generic commands are registered once per workspace, and every mount falls ba
 - Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command.
 - A verb (`trello card create`) declares its own `CommandSpec` with every id as a flag, reads flags through `FlagView(opts.flags, spec=SPEC)` (never `flags.get(...)`), registers `write=True` for a mutation, and calls `require_mount_writable()` before the client. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's, and a prompt that teaches the verbs is pinned against their specs (`tests/vfs/trello/test_prompt.py`).
 - Handlers take `(accessor, paths, texts, opts)`. Read `stdin`, `index`, `prefix`, and namespace facts from `opts`; do not add injected parameters or a second handler convention.
-- A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
+- A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands=[...]` does not run where the session restricts its mount.
 
 Export the final list as `COMMANDS` from `commands/builtin/<name>/__init__.py`, and map the VFS class's name to that module in `commands/builtin/backends.py`. The mount imports it on first use, and a subclass serves its base's commands.
 

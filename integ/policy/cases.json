@@ -113,6 +113,25 @@
    ]
   },
   {
+   "id": "a_link_into_hidden_space_is_hidden_with_its_target",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"paths": {"hide": ["/data/secret"]}}},
+    {"op": "exec", "command": "mkdir -p /data/secret /data/shared; echo s > /data/secret/f; echo p > /data/pub.txt; ln -s /data/secret/f /data/shared/to_secret; ln -s ../secret /data/shared/dirlink; ln -s ../pub.txt /data/shared/to_pub", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "ls /data/shared", "expect": {"value": {"exit_code": 0, "stdout": "to_pub\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "ls -l /data/shared | grep -c secret", "expect": {"value": {"exit_code": 1, "stdout": "0\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "readlink /data/shared/to_secret", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "stat -c %N /data/shared/to_secret", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "stat: cannot statx '/data/shared/to_secret': No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/shared/dirlink/f", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/shared/dirlink/f: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "find /data/shared", "expect": {"value": {"exit_code": 0, "stdout": "/data/shared\n/data/shared/to_pub\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/shared/to_secret", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "rm: cannot remove '/data/shared/to_secret': No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/shared/to_pub", "expect": {"value": {"exit_code": 0, "stdout": "p\n", "stderr": "", "refusal": null}}},
+    {"op": "vfs", "session": "agent", "call": "readlink", "args": {"path": "/data/shared/to_secret"}, "expect": {"errno": "ENOENT"}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/shared/to_secret"}, "expect": {"errno": "ENOENT"}},
+    {"op": "exec", "command": "readlink /data/shared/to_secret", "expect": {"value": {"exit_code": 0, "stdout": "/data/secret/f\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
    "id": "mount_modes_narrow_what_a_session_may_write",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/ro": {"vfs": "ram", "config": {}, "mode": "read"}}},
    "steps": [

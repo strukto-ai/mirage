@@ -130,6 +130,56 @@ async def test_only_wrapper_responses_bypass_the_write_guard(
         assert "/changed" not in vfs.accessor.store.files
 
 
+@command(
+    "cat",
+    vfs="ram",
+    spec=CommandSpec(arguments=(Argument("path", type="path"),)),
+)
+async def handed_cat(accessor: RAMAccessor, paths, texts, opts):
+    return b"handed\n", IOResult()
+
+
+class HandedRAM(RAMVFS):
+    def commands(self):
+        return [handed_cat]
+
+
+@pytest.mark.asyncio
+async def test_a_handed_command_does_not_run_where_the_session_restricts():
+    profiles = {
+        "here": {"paths": {"hide": ["/data/secret"]}},
+        "pattern": {"paths": {"hide": ["*.key"]}},
+        "elsewhere": {"paths": {"hide": ["/other/x"]}},
+    }
+    ws = Workspace(
+        {"/data/": HandedRAM(), "/other/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles=profiles,
+    )
+    refused = b"cat: command cannot enforce this session's file restrictions\n"
+    try:
+        await ws.shell("echo hi > /data/n.txt; echo o > /other/o.txt")
+        for sid in profiles:
+            ws.create_session(sid, profile=sid)
+        for sid, out, err, code in (
+            (None, b"handed\n", b"", 0),
+            ("elsewhere", b"handed\n", b"", 0),
+            ("here", b"", refused, 127),
+            ("pattern", b"", refused, 127),
+        ):
+            io = await ws.shell("cat /data/n.txt", session_id=sid)
+            got = (
+                await io.materialize_stdout(),
+                await io.materialize_stderr(),
+                io.exit_code,
+            )
+            assert got == (out, err, code), sid
+        io = await ws.shell("cat /other/o.txt", session_id="here")
+        assert await io.materialize_stdout() == b"o\n"
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_the_read_only_refusal_is_newline_terminated():
     # stderr accumulates across a line, so an unterminated refusal ran

@@ -18,6 +18,7 @@ import { RAMAccessor } from '../../accessor/ram.ts'
 import { activePipe, pipeBelow } from '../../core/dev/device.ts'
 import type { DevicePipe } from '../../core/dev/pipe.ts'
 import { norm } from '../../utils/path.ts'
+import { restrictedMountsFor } from '../../runtime/binding.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
 import {
   captureSessionContext,
@@ -1442,7 +1443,9 @@ export class MountEntry {
       const cmdOpts = this.commandOpts(cmdName, this.keyedFlags(flags), context, probe, keyedPaths)
       return this.inCommandScope(probe, async (): Promise<[ByteSource | null, IOResult]> => {
         for (const cmd of handlers) {
-          const refusal = this.readOnlyRefusal(cmdName, cmd, flags, context.access)
+          const refusal =
+            this.readOnlyRefusal(cmdName, cmd, flags, context.access) ??
+            this.unenforcedRefusal(cmdName, cmd, context)
           if (refusal !== null) return [null, refusal]
           const result = await this.runHandler(cmdName, cmd, keyedPaths, texts, cmdOpts, context)
           if (result !== null) return this.wrapOutput(cmdName, cmd, keyedPaths, result)
@@ -1656,6 +1659,34 @@ export class MountEntry {
       })
     }
     return null
+  }
+
+  /**
+   * Refuse a command the VFS was handed while the session restricts this
+   * mount. Such a command reaches its backend through its own handle, past
+   * the dispatcher, so no hide, path rule or mode cap sees what it reads or
+   * writes; like a runtime that cannot enforce them, it does not run. The
+   * commands a builtin backend serves are mirage's own and run. Mirrors
+   * Python's MountEntry._unenforced_refusal.
+   */
+  private unenforcedRefusal(cmdName: string, cmd: Command, context: ExecContext): IOResult | null {
+    const key = cmdKey(cmd.name, cmd.filetype)
+    const handed = this.vfs
+      .commands()
+      .some(
+        (rc) =>
+          (rc.vfs === null || rc.vfs === this.vfs.name) && cmdKey(rc.name, rc.filetype) === key,
+      )
+    if (!handed || this.cmds.get(key) !== cmd) return null
+    const session = currentCaller().session
+    if (session === null) return null
+    const prefixes = context.ns?.mounts?.descendants('/') ?? []
+    const restricted = restrictedMountsFor(session, [...prefixes, this.prefix]).map(norm)
+    if (!restricted.includes(norm(this.prefix))) return null
+    return new IOResult({
+      exitCode: 127,
+      stderr: encodeText(`${cmdName}: command cannot enforce this session's file restrictions\n`),
+    })
   }
 
   /**

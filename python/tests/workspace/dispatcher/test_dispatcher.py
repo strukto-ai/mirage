@@ -1405,6 +1405,65 @@ async def test_rmdir_accounts_for_a_directory_containing_only_a_link(hidden):
 
 
 @pytest.mark.asyncio
+async def test_a_link_into_hidden_space_is_hidden_with_its_target():
+    profiles = {"bob": {"paths": {"hide": ["/data/secret"]}}}
+    with Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, profiles=profiles
+    ) as ws:
+        await ws.shell(
+            "mkdir -p /data/secret /data/pub /data/shared; "
+            "echo s > /data/secret/f; echo p > /data/pub/n.txt; "
+            "ln -s /data/secret/f /data/shared/to_secret; "
+            "ln -s ../secret /data/shared/dirlink; "
+            "ln -s /data/pub/n.txt /data/shared/to_pub"
+        )
+        ws.create_session("bob", profile="bob")
+        gone = "No such file or directory"
+        for line, out, err, code in (
+            ("ls /data/shared", "to_pub\n", "", 0),
+            ("readlink /data/shared/to_secret", "", "", 1),
+            (
+                "stat -c %N /data/shared/to_secret",
+                "",
+                f"stat: cannot statx '/data/shared/to_secret': {gone}\n",
+                1,
+            ),
+            (
+                "ls /data/shared/dirlink",
+                "",
+                f"ls: cannot access '/data/shared/dirlink': {gone}\n",
+                2,
+            ),
+            (
+                "find /data/shared",
+                "/data/shared\n/data/shared/to_pub\n",
+                "",
+                0,
+            ),
+            (
+                "rm /data/shared/to_secret",
+                "",
+                f"rm: cannot remove '/data/shared/to_secret': {gone}\n",
+                1,
+            ),
+        ):
+            result = await ws.shell(line, session_id="bob")
+            got = (
+                await result.stdout_str(),
+                await result.stderr_str(),
+                result.exit_code,
+            )
+            assert got == (out, err, code), line
+        bob = await ws.session("bob-files", profile="bob")
+        for call in (bob.vfs.read, bob.vfs.readlink):
+            with pytest.raises(FileNotFoundError) as exc:
+                await call("/data/shared/to_secret")
+            assert exc.value.filename == "/data/shared/to_secret"
+        shown = await ws.shell("readlink /data/shared/to_secret")
+        assert await shown.stdout_str() == "/data/secret/f\n"
+
+
+@pytest.mark.asyncio
 async def test_rmdir_keeps_a_link_created_while_the_backend_removes():
     with Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE) as ws:
         await ws.shell("mkdir /data/d; ln -s nowhere /data/d/old")

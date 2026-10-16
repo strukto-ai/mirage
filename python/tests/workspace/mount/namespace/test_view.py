@@ -67,6 +67,9 @@ class _FakeNamespace:
     def link_stats_below(self, directory: str) -> list:
         return []
 
+    def symlink_targets(self) -> dict[str, str]:
+        return {}
+
     def follow(self, path: str) -> str:
         return path
 

@@ -1115,6 +1115,67 @@ describe('a write reads the mode again as it starts', () => {
   })
 })
 
+describe('links into hidden space', () => {
+  it('are hidden with their target', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    try {
+      await ws.shell(
+        'mkdir -p /data/secret /data/pub /data/shared; ' +
+          'echo s > /data/secret/f; echo p > /data/pub/n.txt; ' +
+          'ln -s /data/secret/f /data/shared/to_secret; ' +
+          'ln -s ../secret /data/shared/dirlink; ' +
+          'ln -s /data/pub/n.txt /data/shared/to_pub',
+      )
+      const bob = ws.createSession('bob', { profile: { paths: { hide: ['/data/secret'] } } })
+      const gone = 'No such file or directory'
+      for (const [line, out, err, code] of [
+        ['ls /data/shared', 'to_pub\n', '', 0],
+        ['readlink /data/shared/to_secret', '', '', 1],
+        [
+          'stat -c %N /data/shared/to_secret',
+          '',
+          `stat: cannot statx '/data/shared/to_secret': ${gone}\n`,
+          1,
+        ],
+        ['ls /data/shared/dirlink', '', `ls: cannot access '/data/shared/dirlink': ${gone}\n`, 2],
+        ['find /data/shared', '/data/shared\n/data/shared/to_pub\n', '', 0],
+        [
+          'rm /data/shared/to_secret',
+          '',
+          `rm: cannot remove '/data/shared/to_secret': ${gone}\n`,
+          1,
+        ],
+      ] as const) {
+        const result = await ws.shell(line, { sessionId: 'bob' })
+        expect(
+          [DEC.decode(result.stdout), DEC.decode(result.stderr), result.exitCode],
+          line,
+        ).toEqual([out, err, code])
+      }
+      await runWithSession(bob, async () => {
+        for (const call of [
+          () => ws.vfs.read('/data/shared/to_secret'),
+          () => ws.vfs.readlink('/data/shared/to_secret'),
+        ]) {
+          await expect(call()).rejects.toMatchObject({
+            code: 'ENOENT',
+            virtualPath: '/data/shared/to_secret',
+          })
+        }
+      })
+      expect(DEC.decode((await ws.shell('readlink /data/shared/to_secret')).stdout)).toBe(
+        '/data/secret/f\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('rmdir namespace entries', () => {
   it.each([false, true])(
     'accounts for a directory containing only a link (hidden=%s)',

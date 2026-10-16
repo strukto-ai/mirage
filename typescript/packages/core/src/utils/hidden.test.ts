@@ -20,6 +20,7 @@ import {
   hideDepth,
   hiddenUnder,
   isGlob,
+  leadsHidden,
   moveReveals,
   pathCovers,
   pathHidden,
@@ -365,5 +366,46 @@ describe('moveReveals', () => {
     const shown = classifyShows([{ path: '/m/moved/sec/open', mode: null }])
     expect(moveReveals(vis(hidden, shown), '/m/d', '/m/moved')).toBe(true)
     expect(moveReveals(vis(hidden), '/m/d', '/m/moved')).toBe(false)
+  })
+})
+
+const LINKS = new Map([
+  ['/data/shared/to_secret', '/data/secret/f'],
+  ['/data/shared/rel_secret', '../secret/f'],
+  ['/data/shared/dirlink', '/data/secret'],
+  ['/data/shared/chain', '/data/shared/to_secret'],
+  ['/data/shared/to_pub', '/data/pub/n.txt'],
+  ['/data/shared/dangling', '/data/nope'],
+  ['/data/shared/loop', '/data/shared/loop'],
+])
+
+describe('leadsHidden', () => {
+  it('follows a link into hidden space', () => {
+    const v = vis(classifyPaths(['/data/secret']))
+    for (const path of [
+      '/data/shared/to_secret',
+      '/data/shared/rel_secret',
+      '/data/shared/dirlink',
+      '/data/shared/dirlink/f',
+      '/data/shared/chain',
+    ]) {
+      expect(leadsHidden(v, path, LINKS), path).toBe(true)
+    }
+    for (const path of [
+      '/data/shared/to_pub',
+      '/data/shared/dangling',
+      '/data/shared/loop',
+      '/data/pub/n.txt',
+    ]) {
+      expect(leadsHidden(v, path, LINKS), path).toBe(false)
+    }
+  })
+
+  it('needs a hide and a link', () => {
+    expect(leadsHidden(null, '/data/shared/to_secret', LINKS)).toBe(false)
+    expect(leadsHidden(vis(classifyPaths([])), '/data/shared/to_secret', LINKS)).toBe(false)
+    expect(
+      leadsHidden(vis(classifyPaths(['/data/secret'])), '/data/shared/to_secret', new Map()),
+    ).toBe(false)
   })
 })

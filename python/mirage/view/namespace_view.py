@@ -17,7 +17,7 @@ from typing import Any
 
 from mirage.errors.fs import eloop
 from mirage.types import FileStat, FileType, PathSpec, Visibility
-from mirage.utils.hidden import path_visible
+from mirage.utils.hidden import leads_hidden, path_visible
 from mirage.utils.path import CycleError, norm_dir
 from mirage.view.types import LinkView, NamespaceLinks, NamespaceView
 
@@ -98,7 +98,8 @@ def _link_names(
     Session-filtered by :func:`visible_child_segments`, the same
     predicate ``child_mount_names`` applies to a mount prefix: the link
     path is tested, not the segment, so a namespace-only ancestor whose
-    only link the session hides is not named either.
+    only link the session hides is not named either. A link that leads
+    where the session cannot see is hidden with its target.
 
     Args:
         vis (Visibility | None): the session's visibility.
@@ -107,7 +108,10 @@ def _link_names(
     """
     if links is None:
         return []
-    return visible_child_segments(vis, links.symlink_targets(), parent)
+    targets = links.symlink_targets()
+    return visible_child_segments(
+        vis, [p for p in targets if not leads_hidden(vis, p, targets)], parent
+    )
 
 
 def namespace_names(

@@ -128,7 +128,7 @@ function, and mount mode still controls whether a defined mutation may run. Set
 availability check. `vfs.supports('write')` says whether a class defines a
 function. The escape hatches remain:
 
-- `commands` supplies bespoke verbs and replacements from `command({...})`: a command of the same name as a generic wins on this VFS's mounts.
+- `commands` supplies bespoke verbs and replacements from `command({...})`: a command of the same name as a generic wins on this VFS's mounts. Such a command reads through its own `accessor`, past the dispatcher, so it does not run (exit 127) in a session that hides, rules or caps anything on its mount.
 - `sizesAlwaysKnown` declares that `stat` sizes every file without fetching it, which is also what makes the mount legal on FSKit. `supportsSnapshot` declares the drift contract of section 6; setting it without that is not drift detection.
 
 The dispatcher reaches the same functions by name (`ws.dispatch('read', path)`)
@@ -142,7 +142,7 @@ import { Effect, Target, vfsCall } from '@struktoai/mirage-node'
 
 class JiraVFS extends BaseVFS<JiraAccessor> {
   @vfsCall({ effect: Effect.READ })
-  searchIssues(scope: PathSpec, jql: string): Promise<string[]> { ... }
+  searchIssues(scope: PathSpec, jql: string): Promise<PathSpec[]> { ... }
 
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE })
   addComment(issue: PathSpec, body: string): Promise<void> { ... }
@@ -151,8 +151,10 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
 
 `await ws.dispatch('searchIssues', '/jira/', ['project = OPS'])` then runs
 through every check the dispatcher runs: hidden paths, path rules, the mount's mode
-and admission policies. A subclass overriding a marked function keeps the
-mark. Every other `PathSpec` argument passes the same checks and must be on
+and admission policies. An answer that is a list of `PathSpec`s, or of records
+with a `path`, loses what the session hides; any other answer is declined
+(`Operation not supported`) while the session hides something under the call's
+path. A subclass overriding a marked function keeps the mark. Every other `PathSpec` argument passes the same checks and must be on
 the function's own mount (EXDEV otherwise); the backend receives it
 mount-relative.
 
@@ -430,7 +432,7 @@ The generic commands are registered once per workspace, and every mount falls ba
 
 - Let grep and rg skip files by defining `filesContaining` (and `linesContaining` for row stores) on the VFS; `search` serves the `search` command.
 - A verb (`trello card create`) declares its own `new CommandSpec({...})` with every id as a flag, reads flags through `new FlagView(opts.flags, SPEC)` (never `flags.get(...)`), registers `write: true` for a mutation, and calls `requireMountWritable(...)` before the client. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's, and a prompt that teaches the verbs is pinned against their specs (`vfs/trello/prompt.test.ts`).
-- A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands.
+- A handler that reads its `accessor` directly is trusted host code. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands` does not run where the session restricts its mount.
 
 ## 5. VFS Class
 

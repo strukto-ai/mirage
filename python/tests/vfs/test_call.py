@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import errno
 
 import pytest
@@ -313,5 +314,59 @@ async def test_a_custom_write_drops_the_bytes_of_every_path_it_changed():
         await ws.dispatch("copy_to", a, target=b)
         assert (await ws.dispatch("read", a))[0] == b"new\n"
         assert (await ws.dispatch("read", b))[0] == b"new\n"
+    finally:
+        await ws.close()
+
+
+@dataclasses.dataclass(frozen=True)
+class Hit:
+    path: PathSpec
+    score: int
+
+
+class Finder(Shelf):
+    @vfs_call(effect=Effect.READ)
+    async def hits(self, path: PathSpec, query: str) -> list[PathSpec]:
+        return [
+            PathSpec.from_str_path(f"/shelf/{name}")
+            for name in sorted(self.files)
+        ]
+
+    @vfs_call(effect=Effect.READ)
+    async def ranked(self, path: PathSpec, query: str) -> list[Hit]:
+        return [
+            Hit(PathSpec.from_str_path(f"/shelf/{name}"), 1)
+            for name in sorted(self.files)
+        ]
+
+
+@pytest.mark.asyncio
+async def test_a_custom_answer_loses_what_the_session_hides():
+    finder = Finder()
+    finder.files["secret.txt"] = b"s\n"
+    ws = Workspace({"/shelf/": finder}, mode=MountMode.WRITE)
+    root = PathSpec.from_str_path("/shelf/")
+    token = set_current_session(
+        ws.create_session(
+            "agent", profile={"paths": {"hide": ["/shelf/secret.txt"]}}
+        )
+    )
+    try:
+        found, _ = await ws.dispatch("hits", root, query="x")
+        assert [p.virtual for p in found] == ["/shelf/a.txt"]
+        ranked, _ = await ws.dispatch("ranked", root, query="x")
+        assert [hit.path.virtual for hit in ranked] == ["/shelf/a.txt"]
+        with pytest.raises(OSError) as declined:
+            await ws.dispatch("search_abc", root, query="x")
+        assert declined.value.errno == errno.ENOTSUP
+        await ws.dispatch("shelve", PathSpec.from_str_path("/shelf/a.txt"))
+        assert finder.files["a.txt"] == b"new\n"
+    finally:
+        reset_current_session(token)
+    try:
+        found, _ = await ws.dispatch("search_abc", root, query="x")
+        assert found == ["/shelf/: x"]
+        found, _ = await ws.dispatch("hits", root, query="x")
+        assert len(found) == 2
     finally:
         await ws.close()

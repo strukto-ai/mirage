@@ -24,6 +24,7 @@ from mirage.utils.hidden import (
     classify_shows,
     hidden_under,
     hide_depth,
+    leads_hidden,
     move_reveals,
     path_covers,
     path_hidden,
@@ -391,3 +392,41 @@ def test_a_show_below_the_mapped_path_counts_as_a_reveal():
     vis = _vis(["/m/d/sec", "/m/moved"], (ShowEntry("/m/moved/sec/open"),))
     assert move_reveals(vis, "/m/d", "/m/moved")
     assert not move_reveals(Visibility(paths=vis.paths), "/m/d", "/m/moved")
+
+
+LINKS = {
+    "/data/shared/to_secret": "/data/secret/f",
+    "/data/shared/rel_secret": "../secret/f",
+    "/data/shared/dirlink": "/data/secret",
+    "/data/shared/chain": "/data/shared/to_secret",
+    "/data/shared/to_pub": "/data/pub/n.txt",
+    "/data/shared/dangling": "/data/nope",
+    "/data/shared/loop": "/data/shared/loop",
+}
+
+
+def test_leads_hidden_follows_a_link_into_hidden_space():
+    vis = _vis(["/data/secret"])
+    for path in (
+        "/data/shared/to_secret",
+        "/data/shared/rel_secret",
+        "/data/shared/dirlink",
+        "/data/shared/dirlink/f",
+        "/data/shared/chain",
+    ):
+        assert leads_hidden(vis, path, LINKS), path
+    for path in (
+        "/data/shared/to_pub",
+        "/data/shared/dangling",
+        "/data/shared/loop",
+        "/data/pub/n.txt",
+    ):
+        assert not leads_hidden(vis, path, LINKS), path
+
+
+def test_leads_hidden_needs_a_hide_and_a_link():
+    assert not leads_hidden(None, "/data/shared/to_secret", LINKS)
+    assert not leads_hidden(_vis([]), "/data/shared/to_secret", LINKS)
+    assert not leads_hidden(
+        _vis(["/data/secret"]), "/data/shared/to_secret", {}
+    )

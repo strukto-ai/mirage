@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, fields, replace
 from typing import TYPE_CHECKING, Any
@@ -34,6 +34,7 @@ from mirage.types import (
 from mirage.utils.hidden import (
     anchor_depth,
     is_glob,
+    leads_hidden,
     path_visible,
     show_head,
     shown_mode,
@@ -412,7 +413,10 @@ def session_visibility(
 
 
 def hidden_refusal(
-    vis: Visibility | None, virtual: str, create: bool
+    vis: Visibility | None,
+    virtual: str,
+    create: bool,
+    links: Mapping[str, str] | None = None,
 ) -> OSError:
     """The error a hidden path answers, in POSIX's own terms.
 
@@ -431,8 +435,16 @@ def hidden_refusal(
         virtual (str): the hidden virtual path.
         create (bool): whether the op creates the path it names; a
             rename or copy destination is one.
+        links (Mapping[str, str] | None): the namespace's links, so a
+            directory reached through a link into hidden space counts
+            as hidden; None when no link is in question.
     """
-    if create and path_visible(vis, parent(virtual.rstrip("/") or "/")):
+    above = parent(virtual.rstrip("/") or "/")
+    if (
+        create
+        and path_visible(vis, above)
+        and not leads_hidden(vis, above, links or {})
+    ):
         return eacces(virtual)
     return enoent(virtual)
 

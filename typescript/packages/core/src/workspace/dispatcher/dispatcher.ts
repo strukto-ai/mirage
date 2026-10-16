@@ -135,7 +135,7 @@ import {
   sessionAccess,
 } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { hiddenUnder, moveReveals, pathVisible } from '../../utils/hidden.ts'
+import { hiddenUnder, leadsHidden, moveReveals, pathVisible } from '../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -621,6 +621,27 @@ function readType(call: Call): string | null {
   return typeof requested === 'string' ? requested : null
 }
 
+/**
+ * The virtual path each item of a custom function's answer names, null when
+ * the answer is not a list of paths or of records with a `path`. Mirrors
+ * Python's `_answer_paths`.
+ */
+function answerPaths(result: unknown): string[] | null {
+  if (!Array.isArray(result)) return null
+  const named: string[] = []
+  for (const item of result as unknown[]) {
+    const path =
+      item instanceof PathSpec
+        ? item
+        : typeof item === 'object' && item !== null
+          ? (item as { path?: unknown }).path
+          : undefined
+    if (!(path instanceof PathSpec)) return null
+    named.push(path.virtual)
+  }
+  return named
+}
+
 /** Runs a write once the workspace admits it. */
 type AdmitWrite = <T>(write: () => Promise<T>) => Promise<T>
 
@@ -917,9 +938,12 @@ export class Dispatcher {
     const mount = this.namespace.mountFor(call.path.virtual)
     const scope = (name === 'readdir' ? globScope(call.path, mount.prefix) : null) ?? resolvedScope
     if (mount !== owner) throw ebusy(call.path.virtual)
+    const links = this.namespace.symlinkTargets()
     if (
       name === 'rmdir' &&
-      this.namespace.linkStatsBelow(call.path.virtual).some(([link]) => pathVisible(call.vis, link))
+      this.namespace
+        .linkStatsBelow(call.path.virtual)
+        .some(([link]) => pathVisible(call.vis, link) && !leadsHidden(call.vis, link, links))
     ) {
       throw enotempty(call.path.virtual)
     }
@@ -949,7 +973,7 @@ export class Dispatcher {
       throw err
     }
     const [answer, dst, fullArgs] = ran
-    const result = this.filter(call, answer)
+    let result = this.filter(call, answer)
     if (settles) {
       await this.settleWrite(
         name,
@@ -960,6 +984,7 @@ export class Dispatcher {
         answer,
       )
     }
+    if (!CALLS.has(name)) result = this.customAnswer(call, vfs.name, result)
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
     // carries the moved count.
@@ -1193,12 +1218,16 @@ export class Dispatcher {
     issuer: symbol | undefined,
   ): Promise<Call> {
     const vis = sessionVisibility(this.access)
-    if (!pathVisible(vis, path.virtual)) {
-      throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(name))
+    const links = this.namespace.symlinkTargets()
+    if (!pathVisible(vis, path.virtual) || leadsHidden(vis, path.virtual, links)) {
+      throw hiddenRefusal(vis, path.virtual, HIDDEN_CREATE_OPS.has(name), links)
     }
     let dstArg = DESTINATION_OPS.has(name) ? args?.[0] : undefined
-    if (dstArg instanceof PathSpec && !pathVisible(vis, dstArg.virtual)) {
-      throw hiddenRefusal(vis, dstArg.virtual, true)
+    if (
+      dstArg instanceof PathSpec &&
+      (!pathVisible(vis, dstArg.virtual) || leadsHidden(vis, dstArg.virtual, links))
+    ) {
+      throw hiddenRefusal(vis, dstArg.virtual, true, links)
     }
     // An operand the walk already refused (the empty name, a link loop)
     // names nothing an op can reach, whatever `virtual` says.
@@ -2004,7 +2033,7 @@ export class Dispatcher {
       result = this.onDevice(
         call.name,
         call.path.virtual,
-        this.withLinks(call.path, result as Map<string, FileStat>),
+        this.withLinks(call.path, result as Map<string, FileStat>, call.vis),
       )
     }
     // A tree read keys its entries below the path; a search names each hit
@@ -2029,6 +2058,28 @@ export class Dispatcher {
    * one a root mount would have. Anything but a stat or a subtree's stats
    * passes unchanged.
    */
+  /**
+   * A custom function's answer as the session may see it. A list of paths,
+   * or of records with a `path`, loses what the session hides, as a
+   * `files_containing` answer does. Any other answer cannot be told apart
+   * from what it names, so it is declined while the session hides anything
+   * under the call's path. No answer reveals nothing. Mirrors Python's
+   * Dispatcher._custom_answer.
+   */
+  private customAnswer(call: Call, vfs: string, result: unknown): unknown {
+    if (result === null || result === undefined) return result
+    const named = answerPaths(result)
+    if (named !== null) {
+      const links = this.namespace.symlinkTargets()
+      return (result as unknown[]).filter(
+        (_, i) =>
+          pathVisible(call.vis, named[i] ?? '') && !leadsHidden(call.vis, named[i] ?? '', links),
+      )
+    }
+    if (hiddenUnder(call.vis, call.path.virtual)) throw walkDeclined(vfs, call.name, call.path)
+    return result
+  }
+
   private onDevice(name: string, virtual: string, result: unknown): unknown {
     if (name !== 'stat' && name !== 'read_tree') return result
     if (!(result instanceof FileStat) && !(result instanceof Map)) return result
@@ -2046,14 +2097,22 @@ export class Dispatcher {
    * A subtree read with the links the namespace holds below `path` on the
    * same mount, each as the link it is. No backend stores a link, so a walk
    * that reads the subtree in one call meets them only here, as a listing
-   * meets them in `readdir`. Mirrors Python's Dispatcher._with_links.
+   * meets them in `readdir`; a link that leads where the session cannot see
+   * is left out, as a listing leaves it out. Mirrors Python's
+   * Dispatcher._with_links.
    */
-  private withLinks(path: PathSpec, tree: Map<string, FileStat>): Map<string, FileStat> {
+  private withLinks(
+    path: PathSpec,
+    tree: Map<string, FileStat>,
+    vis: Visibility | null,
+  ): Map<string, FileStat> {
     const base = rstripSlash(path.virtual)
     const owner = this.namespace.tryMountFor(path.virtual)
+    const links = this.namespace.symlinkTargets()
     const merged = new Map(tree)
     for (const [virtual, row] of this.namespace.linkStatsBelow(path.virtual)) {
-      if (this.namespace.tryMountFor(virtual) !== owner) continue
+      if (this.namespace.tryMountFor(virtual) !== owner || leadsHidden(vis, virtual, links))
+        continue
       const rel = virtual.slice(base.length + 1)
       if (!merged.has(rel)) merged.set(rel, row)
     }
@@ -2654,8 +2713,11 @@ export class Dispatcher {
     // purge also drops the attr overlays of paths the cascade just
     // destroyed, as `rm` does.
     const base = rstripSlash(path.virtual) + '/'
-    for (const link of this.namespace.symlinkTargets().keys()) {
-      if (link.startsWith(base) && pathVisible(vis, link)) throw refusal
+    const links = this.namespace.symlinkTargets()
+    for (const link of links.keys()) {
+      if (link.startsWith(base) && pathVisible(vis, link) && !leadsHidden(vis, link, links)) {
+        throw refusal
+      }
     }
     await this.namespace.purgeUnder(path.virtual)
   }

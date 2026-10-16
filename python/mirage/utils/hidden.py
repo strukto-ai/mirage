@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from mirage.types import (
     HiddenPaths,
@@ -24,6 +24,13 @@ from mirage.types import (
     weaker_mode,
 )
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.path import (
+    CycleError,
+    norm,
+    parent,
+    resolve_path,
+    resolve_symlinks,
+)
 
 # The characters that make a document entry a pattern rather than an
 # exact name; the permissions document has one grammar for every path
@@ -444,6 +451,37 @@ def classify_shows(entries: Iterable[ShowEntry]) -> ShownPaths | None:
     """
     listed = tuple(entries)
     return ShownPaths(entries=listed) if listed else None
+
+
+def leads_hidden(
+    vis: Visibility | None, virtual: str, links: Mapping[str, str]
+) -> bool:
+    """Whether a visible name leads where the session cannot see: the
+    link at it names a hidden path, or following it lands on one.
+
+    Such a link is as hidden as its target, since its listing row,
+    ``readlink`` and ``ls -l`` would print the hidden name; a link that
+    leads nowhere (dangling, or a loop) leads nowhere hidden.
+
+    Args:
+        vis (Visibility | None): the session's visibility, None for an
+            unrestricted one.
+        virtual (str): absolute virtual path, already visible itself.
+        links (Mapping[str, str]): every link and its stored target.
+    """
+    if vis is None or not links:
+        return False
+    key = norm(virtual)
+    target = links.get(key)
+    if target is not None and not path_visible(
+        vis, resolve_path(target, parent(key))
+    ):
+        return True
+    try:
+        landed = resolve_symlinks(key, links)
+    except CycleError:
+        return False
+    return landed != key and not path_visible(vis, landed)
 
 
 def hidden_under(vis: Visibility | None, virtual: str) -> bool:

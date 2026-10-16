@@ -19,7 +19,7 @@ A refusal reads as a real terminal's. The reason travels beside it.
 | a VFS call | `EACCES` |
 | a variable write | `KEY: permission denied`, exit 1 |
 | an ask | the same as a deny, until a host approves; then the retry runs |
-| a hidden path | `No such file or directory`, as if it did not exist |
+| a hidden path, or a link that leads to one | `No such file or directory`, as if it did not exist |
 
 The reason is on the result's `refusal`, never in stderr:
 

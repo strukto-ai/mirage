@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from mirage.context import get_admission
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, Visibility
-from mirage.utils.hidden import hidden_under, path_visible
+from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
 from mirage.view.namespace_view import namespace_names
 from mirage.view.types import (
     FollowOperands,
@@ -75,8 +75,9 @@ def link_view(
     looks: a command opts in by reading the field, so there is no list
     of symlink-aware commands to keep in step here or anywhere else.
     Filtered by the session's hides, as the dispatcher's own answers
-    are: a hidden link has no row, no listing entry and no target, and
-    resolving one leaves the path as typed, for the dispatcher to refuse.
+    are: a hidden link, or one that leads where the session cannot see,
+    has no row, no listing entry and no target, and resolving one leaves
+    the path as typed, for the dispatcher to refuse.
 
     Args:
         namespace (Namespace | None): addressing authority holding the
@@ -90,26 +91,29 @@ def link_view(
         return None
     links, probe = namespace, dispatch
 
-    def stat_at(virtual: str) -> FileStat | None:
-        return (
-            links.link_stat_at(virtual) if path_visible(vis, virtual) else None
+    def shown(virtual: str) -> bool:
+        return path_visible(vis, virtual) and not leads_hidden(
+            vis, virtual, links.symlink_targets()
         )
+
+    def stat_at(virtual: str) -> FileStat | None:
+        return links.link_stat_at(virtual) if shown(virtual) else None
 
     def subtree(directory: str) -> list[tuple[str, FileStat]]:
         return [
             (path, st)
             for path, st in links.link_stats_below(directory)
-            if path_visible(vis, path)
+            if shown(path)
         ]
 
     def resolve(virtual: str) -> str:
-        if not path_visible(vis, virtual):
+        if not shown(virtual):
             return virtual
         return resolve_link(links, virtual)
 
     async def target_stat(virtual: str | PathSpec) -> FileStat | None:
         path = virtual.virtual if isinstance(virtual, PathSpec) else virtual
-        if not path_visible(vis, path):
+        if not shown(path):
             return None
         return await link_target_stat(links, probe, path)
 

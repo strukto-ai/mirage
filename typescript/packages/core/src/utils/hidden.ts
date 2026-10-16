@@ -22,6 +22,7 @@ import type {
 } from '../types.ts'
 import { weakerMode } from '../types.ts'
 import { fnmatch } from './fnmatch.ts'
+import { CycleError, norm, parent, resolvePath, resolveSymlinks } from './path.ts'
 import { stripSlash } from './slash.ts'
 
 /**
@@ -317,6 +318,32 @@ export function shownMode(
  */
 export function classifyShows(entries: readonly ShowEntry[]): ShownPaths | null {
   return entries.length > 0 ? { entries } : null
+}
+
+/**
+ * Whether a visible name leads where the session cannot see: the link at
+ * it names a hidden path, or following it lands on one. Such a link is as
+ * hidden as its target, since its listing row, `readlink` and `ls -l` would
+ * print the hidden name; a link that leads nowhere (dangling, or a loop)
+ * leads nowhere hidden. Mirrors Python's leads_hidden.
+ */
+export function leadsHidden(
+  vis: Visibility | null | undefined,
+  virtual: string,
+  links: ReadonlyMap<string, string>,
+): boolean {
+  if (vis === null || vis === undefined || links.size === 0) return false
+  const key = norm(virtual)
+  const target = links.get(key)
+  if (target !== undefined && !pathVisible(vis, resolvePath(target, parent(key)))) return true
+  let landed: string
+  try {
+    landed = resolveSymlinks(key, links)
+  } catch (err) {
+    if (err instanceof CycleError) return false
+    throw err
+  }
+  return landed !== key && !pathVisible(vis, landed)
 }
 
 /**

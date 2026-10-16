@@ -16,6 +16,7 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import {
   command,
+  type Command,
   type CommandFn,
   type CommandOpts,
   type ExecContext,
@@ -646,5 +647,53 @@ describe('MountEntry streamed op results', () => {
     )) as AsyncIterableIterator<Uint8Array>
     await stream.return?.()
     expect(vfs.closed).toBeGreaterThanOrEqual(1)
+  })
+})
+
+const [HANDED_CAT] = command<RAMAccessor>({
+  name: 'cat',
+  vfs: 'ram',
+  spec: new CommandSpec({ arguments: [new Argument('path', { type: 'path' })] }),
+  fn: () => [new TextEncoder().encode('handed\n'), new IOResult()],
+})
+
+class HandedRAM extends RAMVFS {
+  override commands(): readonly Command[] {
+    return HANDED_CAT === undefined ? [] : [HANDED_CAT]
+  }
+}
+
+describe('handed commands under restrictions', () => {
+  it('do not run where the session restricts their mount', async () => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/data/': new HandedRAM(), '/other/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    const refused = "cat: command cannot enforce this session's file restrictions\n"
+    try {
+      await ws.shell('echo hi > /data/n.txt; echo o > /other/o.txt')
+      ws.createSession('here', { profile: { paths: { hide: ['/data/secret'] } } })
+      ws.createSession('pattern', { profile: { paths: { hide: ['*.key'] } } })
+      ws.createSession('elsewhere', { profile: { paths: { hide: ['/other/x'] } } })
+      for (const [sid, out, err, code] of [
+        [undefined, 'handed\n', '', 0],
+        ['elsewhere', 'handed\n', '', 0],
+        ['here', '', refused, 127],
+        ['pattern', '', refused, 127],
+      ] as const) {
+        const io = await ws.shell('cat /data/n.txt', sid === undefined ? {} : { sessionId: sid })
+        const dec = new TextDecoder()
+        expect([dec.decode(io.stdout), dec.decode(io.stderr), io.exitCode], String(sid)).toEqual([
+          out,
+          err,
+          code,
+        ])
+      }
+      const other = await ws.shell('cat /other/o.txt', { sessionId: 'here' })
+      expect(new TextDecoder().decode(other.stdout)).toBe('o\n')
+    } finally {
+      await ws.close()
+    }
   })
 })

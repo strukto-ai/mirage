@@ -22,7 +22,14 @@ import type { ExecutionNode } from '../workspace/types.ts'
 import type { EvaluationContext } from '../workspace/evaluation.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
-import { anchorDepth, isGlob, pathVisible, showHead, shownMode } from '../utils/hidden.ts'
+import {
+  anchorDepth,
+  isGlob,
+  leadsHidden,
+  pathVisible,
+  showHead,
+  shownMode,
+} from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { norm, parent } from '../utils/path.ts'
 import type { DryRun, VfsExplanation, EntryGate } from '../policy/types.ts'
@@ -374,10 +381,17 @@ export function sessionVisibility(access?: SessionAccess): Visibility | null {
  * same answer every read gives for that directory, so a write cannot
  * detect a hide a read could not. Everything that is not a create is
  * ENOENT. `create` is whether the op creates the path it names; a
- * rename or copy destination is one.
+ * rename or copy destination is one. `links` are the namespace's links, so
+ * a directory reached through a link into hidden space counts as hidden.
  */
-export function hiddenRefusal(vis: Visibility | null, virtual: string, create: boolean): Error {
-  if (create && pathVisible(vis, parent(rstripSlash(virtual) || '/'))) return eacces(virtual)
+export function hiddenRefusal(
+  vis: Visibility | null,
+  virtual: string,
+  create: boolean,
+  links: ReadonlyMap<string, string> = new Map(),
+): Error {
+  const above = parent(rstripSlash(virtual) || '/')
+  if (create && pathVisible(vis, above) && !leadsHidden(vis, above, links)) return eacces(virtual)
   return enoent(virtual)
 }
 

@@ -45,7 +45,12 @@ from mirage.commands.builtin.utils.limit import (
     with_pull_timeout,
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
-from mirage.commands.config import Command, CommandOpts, ExecContext
+from mirage.commands.config import (
+    Command,
+    CommandOpts,
+    ExecContext,
+    registered_commands,
+)
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.constants import (
@@ -82,6 +87,7 @@ from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import with_mount_context, with_revisions
 from mirage.policy import resolve_limit
+from mirage.runtime.binding import restricted_mounts_for
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -903,7 +909,9 @@ class MountEntry:
             opts = self._command_opts(cmd_name, flags, context, paths)
             with self._command_scope(context):
                 for cmd in handlers:
-                    refusal = self._read_only_refusal(cmd_name, cmd, flags)
+                    refusal = self._read_only_refusal(
+                        cmd_name, cmd, flags
+                    ) or self._unenforced_refusal(cmd_name, cmd, context)
                     if refusal is not None:
                         return None, refusal
                     result = await self._run_handler(
@@ -1173,6 +1181,48 @@ class MountEntry:
                 ),
             )
         return None
+
+    def _unenforced_refusal(
+        self, cmd_name: str, cmd: Command, context: ExecContext
+    ) -> IOResult | None:
+        """Refuse a command the VFS was handed while the session restricts
+        this mount.
+
+        Such a command reaches its backend through its own handle, past
+        the dispatcher, so no hide, path rule or mode cap sees what it
+        reads or writes; like a runtime that cannot enforce them, it does
+        not run. The commands a builtin backend serves are mirage's own
+        and run.
+
+        Args:
+            cmd_name (str): command name.
+            cmd (Command): the handler about to run.
+            context (ExecContext): the invocation's execution context,
+                whose namespace view lists every mount.
+        """
+        key = (cmd.name, cmd.filetype)
+        handed = {
+            (rc.name, rc.filetype)
+            for rc in registered_commands(self.vfs.commands())
+            if rc.vfs is None or rc.vfs == self.vfs.name
+        }
+        if key not in handed or self._cmds.get(key) is not cmd:
+            return None
+        session = current_caller().session
+        if session is None:
+            return None
+        mounts = context.ns.mounts if context.ns is not None else None
+        prefixes = [] if mounts is None else mounts.descendants("/")
+        restricted = restricted_mounts_for(session, [*prefixes, self.prefix])
+        if norm(self.prefix) not in {norm(p) for p in restricted}:
+            return None
+        return IOResult(
+            exit_code=127,
+            stderr=encode_text(
+                f"{cmd_name}: command cannot enforce this session's "
+                "file restrictions\n"
+            ),
+        )
 
     async def _run_handler(
         self,

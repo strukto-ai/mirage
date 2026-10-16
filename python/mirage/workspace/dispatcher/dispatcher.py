@@ -98,7 +98,12 @@ from mirage.types import (
     WritePolicy,
 )
 from mirage.utils.filetype import get_extension
-from mirage.utils.hidden import hidden_under, move_reveals, path_visible
+from mirage.utils.hidden import (
+    hidden_under,
+    leads_hidden,
+    move_reveals,
+    path_visible,
+)
 from mirage.utils.key_prefix import mount_key, under_path
 from mirage.utils.path import CycleError, norm, norm_dir, owner_prefix, parent
 from mirage.utils.ranges import slice_window
@@ -398,6 +403,27 @@ def _visible_answer(
     if name == "files_containing":
         return [hit for hit in result if path_visible(vis, hit.virtual)]
     return [hit for hit in result if path_visible(vis, hit[0])]
+
+
+def _answer_paths(result: Any) -> list[str] | None:
+    """The virtual path each item of a custom function's answer names,
+    None when the answer is not a list of paths or of records with a
+    ``path``.
+
+    Args:
+        result (Any): the function's answer.
+    """
+    if not isinstance(result, (list, tuple)):
+        return None
+    named: list[str] = []
+    for item in result:
+        path = (
+            item if isinstance(item, PathSpec) else getattr(item, "path", None)
+        )
+        if not isinstance(path, PathSpec):
+            return None
+        named.append(path.virtual)
+    return named
 
 
 async def _fits_read_ahead(
@@ -1123,6 +1149,8 @@ class Dispatcher:
             await self._settle_write(
                 mount, name, call.path, kwargs, call.vis, created=ran
             )
+        if name not in CALLS:
+            result = self._custom_answer(call, mount, result)
         result = await boundary.complete(mark, call.path, call.write, result)
         return result, IOResult()
 
@@ -1355,9 +1383,10 @@ class Dispatcher:
 
         Hidden paths answer before anything else can: the typed path is
         checked so a link inside hidden space cannot be followed out of
-        it, the followed path is re-checked (``_follow``) so a visible
-        link cannot lead in, and a rename's or a copy's destination is a
-        create. Every
+        it, a link that leads into hidden space answers as hidden under
+        the name it was reached by, the followed path is re-checked
+        (``_follow``) so a visible link cannot lead in, and a rename's or
+        a copy's destination is a create. Every
         link above the final name is then followed, whatever the op does
         with the name: command dispatch walks the operands it classifies,
         and this is the same walk for every other caller (a relative word
@@ -1375,11 +1404,19 @@ class Dispatcher:
             caller (Caller): who makes the op.
         """
         vis = caller.visibility
-        if not path_visible(vis, path.virtual):
-            raise hidden_refusal(vis, path.virtual, name in HIDDEN_CREATE_OPS)
+        links = self._namespace.symlink_targets()
+        if not path_visible(vis, path.virtual) or leads_hidden(
+            vis, path.virtual, links
+        ):
+            raise hidden_refusal(
+                vis, path.virtual, name in HIDDEN_CREATE_OPS, links
+            )
         dst = kwargs.get("dst") if name in DESTINATION_OPS else None
-        if isinstance(dst, PathSpec) and not path_visible(vis, dst.virtual):
-            raise hidden_refusal(vis, dst.virtual, True)
+        if isinstance(dst, PathSpec) and (
+            not path_visible(vis, dst.virtual)
+            or leads_hidden(vis, dst.virtual, links)
+        ):
+            raise hidden_refusal(vis, dst.virtual, True, links)
         # An operand the walk already refused (the empty name, a link
         # loop) names nothing an op can reach, whatever `virtual` says.
         for walked in (path, dst):
@@ -1752,8 +1789,10 @@ class Dispatcher:
             ).admit(mark._replace(creates=True), call.dst, True)
         for _, other in _operands(call.name, call.kwargs):
             await boundary.admit(mark, other, call.write)
+        links = self._namespace.symlink_targets()
         if call.name == "rmdir" and any(
             path_visible(call.vis, link)
+            and not leads_hidden(call.vis, link, links)
             for link, _ in self._namespace.link_stats_below(call.path.virtual)
         ):
             raise enotempty(call.path.virtual)
@@ -2227,7 +2266,7 @@ class Dispatcher:
             result = self._on_device(
                 call.name,
                 call.path.virtual,
-                self._with_links(call.path, result),
+                self._with_links(call.path, result, call.vis),
             )
         # A tree read keys its entries below the path; a search names each
         # hit itself, and a store can rank a hit from outside the scope (a
@@ -2241,6 +2280,37 @@ class Dispatcher:
             )
         ):
             return _visible_answer(call.name, call.vis, call.path, result)
+        return result
+
+    def _custom_answer(
+        self, call: _Call, mount: MountEntry, result: Any
+    ) -> Any:
+        """A custom function's answer as the session may see it.
+
+        A list of paths, or of records with a ``path``, loses what the
+        session hides, as a ``files_containing`` answer does. Any other
+        answer cannot be told apart from what it names, so it is
+        declined while the session hides anything under the call's path.
+        No answer reveals nothing.
+
+        Args:
+            call (_Call): the function that ran.
+            mount (MountEntry): the mount serving its path.
+            result (Any): the function's answer.
+        """
+        if result is None:
+            return result
+        named = _answer_paths(result)
+        if named is not None:
+            links = self._namespace.symlink_targets()
+            return type(result)(
+                item
+                for item, virtual in zip(result, named)
+                if path_visible(call.vis, virtual)
+                and not leads_hidden(call.vis, virtual, links)
+            )
+        if hidden_under(call.vis, call.path.virtual):
+            raise walk_declined(str(mount.vfs.name), call.name, call.path)
         return result
 
     def _on_device(self, name: str, virtual: str, result: Any) -> Any:
@@ -2276,24 +2346,33 @@ class Dispatcher:
         }
 
     def _with_links(
-        self, path: PathSpec, tree: dict[str, FileStat]
+        self,
+        path: PathSpec,
+        tree: dict[str, FileStat],
+        vis: Visibility | None,
     ) -> dict[str, FileStat]:
         """A subtree read with the links the namespace holds below
         ``path`` on the same mount, each as the link it is.
 
         No backend stores a link, so a walk that reads the subtree in one
-        call meets them only here, as a listing meets them in ``readdir``.
+        call meets them only here, as a listing meets them in ``readdir``;
+        a link that leads where the session cannot see is left out, as a
+        listing leaves it out.
 
         Args:
             path (PathSpec): the directory the read answered for.
             tree (dict[str, FileStat]): the backend's answer, keyed below
                 ``path``.
+            vis (Visibility | None): the session's view.
         """
         base = path.virtual.rstrip("/")
         owner = self._namespace.try_mount_for(path.virtual)
+        links = self._namespace.symlink_targets()
         merged = dict(tree)
         for virtual, row in self._namespace.link_stats_below(path.virtual):
-            if self._namespace.try_mount_for(virtual) is not owner:
+            if self._namespace.try_mount_for(
+                virtual
+            ) is not owner or leads_hidden(vis, virtual, links):
                 continue
             merged.setdefault(virtual[len(base) + 1 :], row)
         return merged
@@ -2614,10 +2693,12 @@ class Dispatcher:
         # visible remnant, and the purge also drops the attr overlays
         # of paths the cascade just destroyed, as ``rm`` does.
         base = path.virtual.rstrip("/") + "/"
-        links_below = [
-            p for p in self._namespace.symlink_targets() if p.startswith(base)
-        ]
-        if any(path_visible(vis, p) for p in links_below):
+        links = self._namespace.symlink_targets()
+        links_below = [p for p in links if p.startswith(base)]
+        if any(
+            path_visible(vis, p) and not leads_hidden(vis, p, links)
+            for p in links_below
+        ):
             raise refusal
         await self._namespace.purge_under(path.virtual)
 

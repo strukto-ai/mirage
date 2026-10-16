@@ -288,3 +288,48 @@ describe('VFS functions', () => {
     }
   })
 })
+
+/** A shelf whose search names paths, bare or in records. */
+class Finder extends Shelf {
+  @vfsCall({ effect: Effect.READ })
+  hits(_path: PathSpec, _query: string): Promise<PathSpec[]> {
+    return Promise.resolve(
+      [...this.files.keys()].sort().map((name) => PathSpec.fromStrPath(`/shelf/${name}`)),
+    )
+  }
+
+  @vfsCall({ effect: Effect.READ })
+  ranked(_path: PathSpec, _query: string): Promise<{ path: PathSpec; score: number }[]> {
+    return Promise.resolve(
+      [...this.files.keys()]
+        .sort()
+        .map((name) => ({ path: PathSpec.fromStrPath(`/shelf/${name}`), score: 1 })),
+    )
+  }
+}
+
+describe('custom answers under hides', () => {
+  it('lose what the session hides', async () => {
+    const finder = new Finder()
+    finder.files.set('secret.txt', ENC.encode('s\n'))
+    const ws = new Workspace({ '/shelf': finder }, { mode: MountMode.WRITE })
+    const session = ws.createSession('agent', {
+      profile: parseSessionProfile({ paths: { hide: ['/shelf/secret.txt'] } }),
+    })
+    try {
+      await runWithSession(session, async () => {
+        const found = (await ws.dispatch('hits', '/shelf/', ['x'])) as PathSpec[]
+        expect(found.map((p) => p.virtual)).toEqual(['/shelf/a.txt'])
+        const ranked = (await ws.dispatch('ranked', '/shelf/', ['x'])) as { path: PathSpec }[]
+        expect(ranked.map((hit) => hit.path.virtual)).toEqual(['/shelf/a.txt'])
+        await expect(ws.dispatch('peek', '/shelf/')).rejects.toMatchObject({ code: 'ENOTSUP' })
+        await ws.dispatch('shelve', '/shelf/a.txt')
+      })
+      expect(DEC.decode(finder.files.get('a.txt'))).toBe('new\n')
+      expect(await ws.dispatch('peek', '/shelf/')).toBe('/shelf/')
+      expect(((await ws.dispatch('hits', '/shelf/', ['x'])) as PathSpec[]).length).toBe(2)
+    } finally {
+      await ws.close()
+    }
+  })
+})

@@ -23,7 +23,7 @@ import type {
 } from '../../../view/types.ts'
 import { namespaceNames } from '../../../view/namespace_view.ts'
 import { getAdmission } from '../../../context/session_context.ts'
-import { hiddenUnder, pathVisible } from '../../../utils/hidden.ts'
+import { hiddenUnder, leadsHidden, pathVisible } from '../../../utils/hidden.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -104,8 +104,9 @@ export function linkViewFor(
 }
 
 // Filtered by the session's hides, as the dispatcher's own answers are: a
-// hidden link has no row, no listing entry and no target, and resolving one
-// leaves the path as typed, for the dispatcher to refuse.
+// hidden link, or one that leads where the session cannot see, has no row,
+// no listing entry and no target, and resolving one leaves the path as
+// typed, for the dispatcher to refuse.
 function linkView(
   namespace: Namespace | null,
   dispatch: DispatchFn,
@@ -113,16 +114,16 @@ function linkView(
   vis: Visibility | null,
 ): LinkView | null {
   if (namespace === null) return null
+  const shown = (path: string): boolean =>
+    pathVisible(vis, path) && !leadsHidden(vis, path, namespace.symlinkTargets())
   return {
-    statAt: (path: string) => (pathVisible(vis, path) ? namespace.linkStatAt(path) : null),
+    statAt: (path: string) => (shown(path) ? namespace.linkStatAt(path) : null),
     subtree: (directory: string) =>
-      namespace.linkStatsBelow(directory).filter(([path]) => pathVisible(vis, path)),
-    resolve: (path: string) => (pathVisible(vis, path) ? resolveLink(namespace, path) : path),
+      namespace.linkStatsBelow(directory).filter(([path]) => shown(path)),
+    resolve: (path: string) => (shown(path) ? resolveLink(namespace, path) : path),
     exists: (path: string) => pathExists(dispatch, path),
     targetStat: (path: string) =>
-      pathVisible(vis, path)
-        ? linkTargetStat(namespace, dispatch, path, overlay)
-        : Promise.resolve(null),
+      shown(path) ? linkTargetStat(namespace, dispatch, path, overlay) : Promise.resolve(null),
   }
 }
 
