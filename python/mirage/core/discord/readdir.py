@@ -26,7 +26,7 @@ from mirage.core.discord.entry import (
     member_entry,
     snowflake_to_date,
 )
-from mirage.core.discord.files import file_blob_name
+from mirage.core.discord.files import file_blob_name, is_listed
 from mirage.core.discord.guilds import list_guilds
 from mirage.core.discord.history import list_messages_for_day
 from mirage.core.discord.members import list_members
@@ -185,15 +185,7 @@ async def _day_listing(
     blobs: list[FileStat] = []
     for msg in messages:
         for att in msg.get("attachments") or []:
-            # Tombstoned (deleted) and access-restricted attachment payloads
-            # carry an id but no download URL and no byte size; read()
-            # ENOENTs on them, so listing them would surface phantom files
-            # with unknown sizes. Mirrors the slack guard.
-            if (
-                not att.get("id")
-                or not att.get("url")
-                or att.get("size") is None
-            ):
+            if not is_listed(att):
                 continue
             mimetype = att.get("content_type", "")
             blobs.append(

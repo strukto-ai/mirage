@@ -22,7 +22,12 @@ from urllib.parse import quote, urlencode
 import aiohttp
 
 from mirage.accessor.airtable import AirtableAccessor
-from mirage.core.airtable.constants import MAX_BATCH, META_KEY, PAGE_SIZE
+from mirage.core.airtable.constants import (
+    MAX_BATCH,
+    META_KEY,
+    PAGE_SIZE,
+    WEBHOOK_PAGE_SIZE,
+)
 from mirage.core.airtable.errors import AirtableAPIError, error_parts
 from mirage.core.airtable.normalize import as_row, as_rows
 from mirage.core.api.client import RetryPolicy, api_request
@@ -184,6 +189,51 @@ async def list_tables(
         pace_key=base_id,
     )
     return as_rows(as_row(data).get("tables"))
+
+
+async def list_webhooks(
+    accessor: AirtableAccessor, base_id: str
+) -> list[dict[str, Any]]:
+    """A base's webhooks, each with ``cursorForNextPayload``.
+
+    Args:
+        accessor (AirtableAccessor): the account.
+        base_id (str): the base.
+    """
+    data = await _get(
+        accessor,
+        f"/bases/{_segment(base_id)}/webhooks",
+        params=None,
+        pace_key=base_id,
+    )
+    return as_rows(as_row(data).get("webhooks"))
+
+
+async def webhook_payloads(
+    accessor: AirtableAccessor,
+    base_id: str,
+    webhook_id: str,
+    cursor: int | None,
+) -> dict[str, Any]:
+    """One page of a webhook's payloads from ``cursor``: ``payloads``,
+    the ``cursor`` after them, and ``mightHaveMore``.
+
+    Args:
+        accessor (AirtableAccessor): the account.
+        base_id (str): the base.
+        webhook_id (str): the webhook.
+        cursor (int | None): the first payload's number, None for the
+            oldest Airtable still keeps.
+    """
+    params: dict[str, str | int] = {"limit": WEBHOOK_PAGE_SIZE}
+    if cursor is not None:
+        params["cursor"] = cursor
+    path = f"/bases/{_segment(base_id)}/webhooks/{_segment(webhook_id)}"
+    return as_row(
+        await _get(
+            accessor, f"{path}/payloads", params=params, pace_key=base_id
+        )
+    )
 
 
 async def list_records(

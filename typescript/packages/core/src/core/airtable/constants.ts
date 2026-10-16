@@ -18,6 +18,9 @@ export const DEFAULT_REQUESTS_PER_SECOND = 5
 
 export const PAGE_SIZE = 100
 
+// The most payloads one webhook payloads read answers.
+export const WEBHOOK_PAGE_SIZE = 50
+
 // Metadata calls (the base listing) are metered per account rather than per
 // base; they pace under their own key.
 export const META_KEY = 'meta'

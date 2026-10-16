@@ -25,11 +25,13 @@ from mirage.core.airtable.search import (
     lines_containing as _lines_containing,
 )
 from mirage.core.airtable.stat import stat as _stat
+from mirage.core.airtable.watch import build_delta_hook
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.airtable.prompt import PROMPT, WRITE_PROMPT
 from mirage.vfs.base import BaseVFS
+from mirage.watch.base import DeltaHook
 
 
 class AirtableVFS(BaseVFS):
@@ -101,6 +103,9 @@ class AirtableVFS(BaseVFS):
         parent: FileStat | None = None,
     ) -> bytes | None:
         return await _first_lines(self.accessor, path, n, entry, parent)
+
+    def delta_hook(self) -> DeltaHook:
+        return build_delta_hook(self.accessor)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

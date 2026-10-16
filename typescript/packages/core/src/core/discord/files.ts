@@ -27,6 +27,19 @@ export interface DiscordAttachment {
 }
 
 /**
+ * Whether a day's `files` directory lists an attachment.
+ *
+ * Tombstoned (deleted) and access-restricted attachment payloads carry an id
+ * but no download URL and no byte size; read() ENOENTs on them, so listing
+ * them would surface phantom files with unknown sizes. Mirrors the slack guard.
+ */
+export function isListed<T extends Record<string, unknown>>(
+  att: T,
+): att is T & { id: string; url: string; size: number } {
+  return Boolean(att.id) && Boolean(att.url) && att.size !== undefined && att.size !== null
+}
+
+/**
  * Construct a stable VFS filename for a Discord attachment, of shape
  * `<stem>__<att-id>.<ext>`, named after `filename` and else `title` (see
  * `fileIdName`).

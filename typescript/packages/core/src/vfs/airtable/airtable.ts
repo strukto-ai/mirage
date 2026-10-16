@@ -31,6 +31,8 @@ import {
   readStream as airtableStream,
 } from '../../core/airtable/read.ts'
 import { stat as airtableStat } from '../../core/airtable/stat.ts'
+import { buildDeltaHook } from '../../core/airtable/watch.ts'
+import type { DeltaHook } from '../../watch/index.ts'
 import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
 import type { ByteSource } from '../../io/types.ts'
 
@@ -105,6 +107,10 @@ export class AirtableVFS extends BaseVFS {
 
   override firstLines(path: PathSpec, n: number, handed?: Handed): Promise<Uint8Array | null> {
     return airtableFirstLines(this.accessor, path, n, handed?.entry, handed?.parent)
+  }
+
+  override deltaHook(): DeltaHook {
+    return buildDeltaHook(this.accessor)
   }
 
   override getState(): AirtableVFSState {

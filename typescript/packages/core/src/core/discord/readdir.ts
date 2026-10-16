@@ -21,7 +21,7 @@ import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listChannels } from './channels.ts'
 import { DiscordApiError } from './client.ts'
 import { channelEntry, guildEntry, historyEntry, memberEntry, snowflakeToDate } from './entry.ts'
-import { fileBlobName } from './files.ts'
+import { fileBlobName, isListed } from './files.ts'
 import { listGuilds } from './guilds.ts'
 import { listMessagesForDay } from './history.ts'
 import { listMembers } from './members.ts'
@@ -166,11 +166,7 @@ async function dayListing(
       size?: number
     }[]
     for (const att of atts) {
-      // Tombstoned (deleted) and access-restricted attachment payloads
-      // carry an id but no download URL and no byte size; read() ENOENTs
-      // on them, so listing them would surface phantom files with unknown
-      // sizes. Mirrors the slack guard.
-      if (!att.id || !att.url || att.size === undefined) continue
+      if (!isListed(att)) continue
       const mimetype = att.content_type ?? ''
       blobs.push(
         new FileStat({

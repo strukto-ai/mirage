@@ -14,6 +14,8 @@
 
 PAGE_SIZE = 100
 
+WEBHOOK_PAGE_SIZE = 50
+
 # Metadata calls (the base listing) are metered per account rather than
 # per base; they pace under their own key.
 META_KEY = "meta"

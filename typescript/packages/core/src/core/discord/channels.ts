@@ -22,7 +22,7 @@ export interface DiscordChannel {
   [key: string]: unknown
 }
 
-const TEXT_CHANNEL_TYPES: ReadonlySet<number> = new Set([0, 5, 15])
+export const TEXT_CHANNEL_TYPES: ReadonlySet<number> = new Set([0, 5, 15])
 
 async function* listChannelsStream(
   accessor: DiscordAccessor,

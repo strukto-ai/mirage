@@ -15,7 +15,7 @@
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
 import { apiRequest, type RetryPolicy, type ErrorOf } from '../api/client.ts'
 import { cursorItems, cursorPages, offsetCursor, type PageShape } from '../api/paginate.ts'
-import { MAX_BATCH, META_KEY, PAGE_SIZE } from './constants.ts'
+import { MAX_BATCH, META_KEY, PAGE_SIZE, WEBHOOK_PAGE_SIZE } from './constants.ts'
 import { AirtableApiError, errorParts } from './errors.ts'
 import { asRow, asRows, type Row } from './normalize.ts'
 
@@ -152,6 +152,29 @@ export async function listTables(accessor: AirtableAccessor, baseId: string): Pr
  * `filterByFormula`, listing only the records it is true for; `maxRecords`
  * stops after that many records, both on the wire and in the collector.
  */
+/** A base's webhooks, each with `cursorForNextPayload`. Mirrors Python `list_webhooks`. */
+export async function listWebhooks(accessor: AirtableAccessor, baseId: string): Promise<Row[]> {
+  const data = await get(accessor, `/bases/${segment(baseId)}/webhooks`, undefined, baseId)
+  return asRows(asRow(data).webhooks)
+}
+
+/**
+ * One page of a webhook's payloads from `cursor` (null for the oldest Airtable
+ * still keeps): `payloads`, the `cursor` after them, and `mightHaveMore`.
+ * Mirrors Python `webhook_payloads`.
+ */
+export async function webhookPayloads(
+  accessor: AirtableAccessor,
+  baseId: string,
+  webhookId: string,
+  cursor: number | null,
+): Promise<Row> {
+  const params: Record<string, string | number> = { limit: WEBHOOK_PAGE_SIZE }
+  if (cursor !== null) params.cursor = cursor
+  const path = `/bases/${segment(baseId)}/webhooks/${segment(webhookId)}`
+  return asRow(await get(accessor, `${path}/payloads`, params, baseId))
+}
+
 export async function listRecords(
   accessor: AirtableAccessor,
   baseId: string,

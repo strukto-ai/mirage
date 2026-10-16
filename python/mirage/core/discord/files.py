@@ -25,6 +25,24 @@ from mirage.utils.naming import file_id_name
 from mirage.utils.ranges import window_for
 
 
+def is_listed(att: dict[str, Any]) -> bool:
+    """Whether a day's ``files`` directory lists an attachment.
+
+    Tombstoned (deleted) and access-restricted attachment payloads
+    carry an id but no download URL and no byte size; read() ENOENTs on
+    them, so listing them would surface phantom files with unknown
+    sizes. Mirrors the slack guard.
+
+    Args:
+        att (dict): Discord attachment dict.
+    """
+    return (
+        bool(att.get("id"))
+        and bool(att.get("url"))
+        and (att.get("size") is not None)
+    )
+
+
 def file_blob_name(att: dict[str, Any]) -> str:
     """Construct a stable VFS filename for a Discord attachment.
 
