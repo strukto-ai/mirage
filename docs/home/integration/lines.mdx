@@ -13,8 +13,8 @@ whole table. A chat service can send new messages to `tail -f`.
 With PostgreSQL mounted at `/db/`:
 
 ```bash
-head -n 20 /db/public/tickets/rows.jsonl
-wc -l /db/public/tickets/rows.jsonl
+head -n 20 /db/public/tables/tickets/rows.jsonl
+wc -l /db/public/tables/tickets/rows.jsonl
 ```
 
 Mirage uses `LIMIT` to fetch the first 20 rows and `COUNT(*)` to count them.
@@ -34,6 +34,10 @@ Override the methods your service supports:
 The TypeScript names are `firstLines`, `lastLines`, `lineCount` and `follow`.
 For `first_lines` and `last_lines`, N must be positive. Standard input is
 always read normally.
+
+For `follow`, first yield the last N lines, then new lines as they arrive.
+Keep the stream open until the caller closes it; ending it makes `tail -f`
+exit with an error.
 
 Return the same content and order as a normal file read. Return `None` in
 Python or `null` in TypeScript when a method cannot answer; Mirage reads the

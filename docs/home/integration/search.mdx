@@ -62,6 +62,9 @@ Return candidate lines from one file, in their original order. Used by
 `grep` and `rg`, including during directory searches. The TypeScript name is
 `linesContaining`.
 
+For files that may contain a NUL (zero) byte, return `None` or `null` so
+Mirage reads the original file and detects binary content correctly.
+
 | Command or option | How Mirage uses your retrieval |
 | --- | --- |
 | Plain search with one term | Match the returned lines directly. |
