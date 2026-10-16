@@ -193,8 +193,6 @@ const ws = new Workspace(
 )
 ```
 
-Xem [tài liệu cache](https://docs.mirage.strukto.ai/home/cache) để biết vòng đời miss/hit đầy đủ.
-
 ## Người đóng góp
 
 Cảm ơn tất cả những người đã đóng góp cho Mirage.

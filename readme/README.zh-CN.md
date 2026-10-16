@@ -193,8 +193,6 @@ const ws = new Workspace(
 )
 ```
 
-完整的 miss/hit 生命周期见[缓存文档](https://docs.mirage.strukto.ai/home/cache)。
-
 ## 贡献者
 
 感谢所有为 Mirage 做出贡献的人。

@@ -117,7 +117,7 @@ like a real filesystem; the rest of the mount keeps working.
 
 A write records the `md5Checksum` (else the `headRevisionId`) its upload
 reply names, so a `fresh` read right after a `tee` or `sed -i` downloads
-nothing. See [Writes](/home/cache#writes).
+nothing.
 
 ### Writing inside a Shared Drive
 
@@ -156,7 +156,7 @@ live file instead.
 The Google Drive VFS uses `IndexCacheStore` (same as Slack,
 Gmail, and other mounts). Index entries store folder IDs, file
 IDs, and file metadata. File bytes go through the workspace
-[file cache](/home/cache).
+file cache.
 
 ## Example
 

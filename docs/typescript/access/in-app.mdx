@@ -42,7 +42,7 @@ One terminal over the backends mounted at each prefix.
   Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
 </ResponseField>
 
-The other options (`cache`, `index`, `store`, `runtimes`, `clis`, `env`, `secrets`, `commandLimits`, ...) are the [top-level YAML keys](/home/yaml#top-level), in camelCase.
+The other options (`cache`, `index`, `store`, `runtimes`, `clis`, `env`, `secrets`, `commandLimits`, ...) are the top-level YAML keys, in camelCase.
 
 ```ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
@@ -123,7 +123,7 @@ ws.snapshot(target, { s3? }): Promise<number>
 Workspace.load(source, { s3?, ... }): Promise<Workspace>
 ```
 
-Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it rejects with an `EBUSY` error; a path target streams disk mount files rather than holding them whole. See [Snapshots](/home/snapshot) for what a tar holds.
+Save the workspace to a tar and rebuild it from one. With no target, `snapshot` answers the tar's bytes; with one, its size. `target` and `source` are a path, or an object key with `s3`; `source` can also be the bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it rejects with an `EBUSY` error; a path target streams disk mount files rather than holding them whole.
 
 ```ts
 const tar = await ws.snapshot()
@@ -251,7 +251,7 @@ console.log(result.exitCode, result.stdoutText)
 
 ### Streaming execution
 
-`await session.shell(line, { stream: true })` returns a running `ShellExecution`. Its `id` identifies this execution; `events` yields ordered `{stream, data}` events with `stream: "stdout"` or `stream: "stderr"` and raw `Uint8Array` bytes. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through [workspace I/O settings](/home/yaml#io-buffers), with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+`await session.shell(line, { stream: true })` returns a running `ShellExecution`. Its `id` identifies this execution; `events` yields ordered `{stream, data}` events with `stream: "stdout"` or `stream: "stderr"` and raw `Uint8Array` bytes. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
 
 Consume `events` while the line runs, then await `wait()` for its final `ExecuteResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. The result describes finished work; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
 

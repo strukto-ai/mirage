@@ -46,7 +46,8 @@ if any("marker" in contents(path) for path in ctx["paths"]):
 ```
 
 Each entry names its program and its runtime: a name, or `{name, config}`
-when the runtime needs settings, as in a `runtimes` entry. A method's
+when the runtime needs settings, as in a `runtimes` entry. An entry with no
+`runtime` runs on monty. A method's
 programs are asked in order, up to the first deny, and each answer counts
 as if a policy of its own gave it
 ([when answers disagree](/home/policy/policies#when-answers-disagree)):
@@ -193,7 +194,10 @@ line with a routing error instead.
 | `pyodide` | full CPython on wasm | TypeScript |
 
 Each runtime is the policy's own, built from the name and settings the
-profile gives and never shared with the agent. `wasi` needs a CPython WASI
+profile gives and never shared with the agent. Monty is the default, and it
+must be installed: `mirage-ai[monty]` in Python, `@pydantic/monty` in
+TypeScript. Without it, a program on monty refuses every action it judges
+and the refusal names the package to install. `wasi` needs a CPython WASI
 build: its folder as `config: {home: ...}`, or in `MIRAGE_WASI_HOME`.
 
 A program gets 10M of memory on monty and 128M on `wasi` and `pyodide`,

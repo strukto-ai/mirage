@@ -18,7 +18,10 @@ mode: "frame"
 
 <div className="max-w-none text-[15px] leading-7 mb-6">
   <p className="my-0">
-    <img noZoom src="/images/mirage-icon-light.svg" alt="Mirage" className="inline-block h-4 align-middle mr-1 dark:hidden" /><img noZoom src="/images/mirage-icon-dark.svg" alt="Mirage" className="hidden h-4 align-middle mr-1 dark:inline-block" /><b>Mirage</b> is <b>a Virtual Terminal for AI Agents</b>. The virtual filesystem delivers broad data context, virtualized CLIs give an agent more flexibility on tool use, dynamic runtimes save infrastructure cost and tokens, and fine-grained control over what an agent runs and even what it can see gives the best security. Together these parts form one virtual terminal.
+    <img noZoom src="/images/mirage-icon-light.svg" alt="Mirage" className="inline-block h-4 align-middle mr-1 dark:hidden" /><img noZoom src="/images/mirage-icon-dark.svg" alt="Mirage" className="hidden h-4 align-middle mr-1 dark:inline-block" /><b>Mirage</b> is <b>a Virtual Terminal for AI Agents</b>. An agent needs a terminal-like interface, not a local kernel or a fixed sandbox. Mirage gives it one over any infrastructure, lets you change and route what runs underneath, and guards every file and command with a deeply integrated policy layer.
+  </p>
+  <p className="mt-3 mb-0">
+    The virtual filesystem delivers broad data context, virtualized CLIs give an agent more flexibility on tool use, dynamic runtimes save underlying infrastructure cost, and fine-grained control over what an agent runs and even what it can see gives the best security. Together these parts form one virtual terminal.
   </p>
 </div>
 
@@ -122,217 +125,68 @@ mode: "frame"
 </Tabs>
 
 <div className="max-w-none text-[15px] leading-7 mt-4 mb-2">
-  <ul className="my-0">
-    <li>One <code>grep</code> sweeps Redis and RAM in a single pass.</li>
-    <li><code>python3</code> runs a script someone shared in <code>#general</code>, sandboxed in the workspace, and files its report into Redis. List the day's <code>files/</code> folder for your file's real name.</li>
-    <li><code>slack</code> is dispatched by name, not by path, and <code>man</code>, <code>type</code> and <code>which</code> find it like any other program.</li>
-  </ul>
+  <ol className="my-0">
+    <li><code>grep -rln session /redis /tmp</code> searches Redis and RAM in one pass and lists the files that mention <code>session</code>.</li>
+    <li><code>python3</code> runs a script someone shared in Slack's <code>#general</code>. Monty runs it inside Mirage, with no host files or network, and <code>&gt;</code> writes its output into Redis. The path is an example: list the day's <code>files/</code> folder for your file's real name.</li>
+    <li><code>slack send-message</code> is a virtual CLI: Mirage answers it with the token you registered, with nothing installed. It is found by name, so <code>man</code>, <code>type</code> and <code>which</code> see it like any other program.</li>
+  </ol>
 </div>
 
 <h2 className="text-2xl font-bold mt-16 mb-6">What is Mirage?</h2>
 
 <CardGroup cols={2}>
-  <Card title="Virtual Filesystem" icon="folder" href="/home/vfs-matrix">
-    S3, Google Drive, Slack, Gmail, Redis and the rest mount side by side under one root. An agent reaches all of them with the tools it already knows: <code>ls</code>, <code>grep</code>, <code>find</code>, <code>jq</code>.
+  <Card title="Virtual Filesystem" icon="folder" href="/home/setup/vfs">
+    S3, Drive, Slack, Gmail, Redis and more under one root, read with <code>ls</code>, <code>grep</code> and <code>find</code>.
   </Card>
   <Card title="Virtual CLIs" icon="wrench" href="/home/setup/clis">
-    <code>git</code>, <code>gh</code>, <code>slack</code>, <code>ntn</code> and more are answered by Mirage itself, with nothing installed. One tool can be installed twice under two names, each with its own account.
+    <code>git</code>, <code>gh</code>, <code>slack</code>, <code>ntn</code> and more, answered by Mirage with nothing installed.
   </Card>
   <Card title="Virtual Runtimes" icon="microchip" href="/home/setup/runtime/overview">
-    Python, JavaScript and any other program go to a configured runtime: in-process, sandboxed or remote. Computation and storage change independently.
+    Python, JavaScript and other programs run inside Mirage, in a sandbox or on a remote host.
   </Card>
   <Card title="Mirage Shell" icon="terminal" href="/home/core/shell">
-    One command line binds the filesystem, the CLIs and the runtimes, so pipes, redirects, variables, jobs and history work across all three.
+    One command line where pipes, redirects, jobs and history work across all of it.
   </Card>
   <Card title="Profiles" icon="robot" href="/home/policy/overview">
-    <code>allow</code>, <code>ask</code> and <code>deny</code> govern commands and CLIs; <code>hide</code> and <code>show</code> govern paths. A hidden file is not just unreadable: it is absent.
+    <code>allow</code>, <code>ask</code> or <code>deny</code> a command, and <code>hide</code> or <code>show</code> a path.
   </Card>
   <Card title="Policy Engine" icon="scale-balanced" href="/home/policy/policies">
-    A policy script refuses a dangerous action before it runs. The same stack gates every VFS call and session write, so neither a file nor a variable leaks.
+    A script checks every command, file access and variable before it runs.
   </Card>
   <Card title="Notifications" icon="bell" href="/python/watch">
-    External changes arrive as events on the mount. A new Slack reply is a change to the chat file, so the agent reacts instead of rescanning the tree.
+    A change in a service arrives as a file event, so the agent reacts instead of rescanning.
   </Card>
   <Card title="Authentication" icon="key">
-    An environment variable can resolve to a credential in the environment, dotenv, AWS Secrets Manager or 1Password, or in a source you register yourself.
+    Credentials come from the environment, dotenv, AWS Secrets Manager or 1Password.
   </Card>
 </CardGroup>
-
-<h2 className="text-2xl font-bold mt-16 mb-6">A Real-world Example</h2>
-
-<div className="max-w-none text-[15px] leading-7 mb-4">
-  <p className="my-0">
-    An agent watches your team's <Icon icon="slack" /> Slack <code>#incident</code> channel. A user posts a screenshot of <code>mirage --help</code> with the message <i>"the CLI design is confusing and hard to follow"</i>.
-  </p>
-</div>
-
-<div className="max-w-none text-[15px] leading-7 mt-6 mb-2">
-  <p className="my-0">
-    Built with the <a href="https://github.com/openai/openai-agents-python" target="_blank" rel="noopener noreferrer"><img noZoom src="/images/openai-logo.svg" alt="" className="inline-block h-4 align-middle mr-1 brightness-0 dark:invert" />OpenAI Agents SDK</a>, the agent reads <Icon icon="slack" /> Slack and <Icon icon="github" /> GitHub as files and files the issue with the <Icon icon="linear" /> <code>linear</code> CLI, all through one shell tool.
-  </p>
-</div>
-
-<h4 className="text-lg font-bold mt-8 mb-2">Code</h4>
-
-<Tabs>
-  <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    import os
-
-    from agents import Runner
-    from agents.run import RunConfig
-    from agents.sandbox import SandboxAgent, SandboxRunConfig
-
-    from mirage import Workspace
-    from mirage.agents.openai_agents import MirageSandboxClient
-    from mirage.commands.cli.builtin.linear import LINEAR
-    from mirage.vfs.github import GitHubConfig, GitHubVFS
-    from mirage.vfs.slack import SlackConfig, SlackVFS
-
-    slack = SlackVFS(SlackConfig(token=os.environ["SLACK_BOT_TOKEN"]))
-    github = GitHubVFS(
-        GitHubConfig(token=os.environ["GITHUB_TOKEN"]),
-        owner="strukto-ai",
-        repo="mirage",
-    )
-
-    ws = Workspace({"/slack": slack, "/github": github})
-    ws.register_cli("linear", LINEAR, {"api_key": os.environ["LINEAR_API_KEY"]})
-
-    agent = SandboxAgent(
-        name="Design feedback triage",
-        model="gpt-5.5",
-        instructions=(await ws.vfs_md()),
-    )
-    config = RunConfig(sandbox=SandboxRunConfig(client=MirageSandboxClient(ws)))
-
-    task = (
-        "Scan recent messages in the Slack #incident channel. If anyone posts "
-        "feedback about Mirage with a screenshot, read the image, locate the "
-        "relevant CLI code in the Mirage GitHub repo, and file a design issue "
-        "with `linear issue create`, including the user's feedback and links "
-        "to the offending source files."
-    )
-    result = await Runner.run(agent, task, run_config=config)
-    print(result.final_output)
-    ```
-
-    <div className="max-w-none text-[15px] leading-7 mt-4 mb-4">
-      <p className="my-0">
-        Full runnable source: <a href="https://github.com/strukto-ai/mirage/blob/main/examples/python/demo/design_feedback.py" target="_blank" rel="noopener noreferrer"><code>examples/python/demo/design_feedback.py</code></a>.
-      </p>
-    </div>
-  </Tab>
-  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```typescript
-    import { Agent, run, shellTool } from '@openai/agents'
-    import { MirageShell, buildSystemPrompt } from '@struktoai/mirage-agents/openai'
-    import { GitHubVFS, LINEAR, SlackVFS, Workspace } from '@struktoai/mirage-node'
-
-    const slack = new SlackVFS({ token: process.env.SLACK_BOT_TOKEN! })
-    const github = await GitHubVFS.create({
-      token: process.env.GITHUB_TOKEN!,
-      owner: 'strukto-ai',
-      repo: 'mirage',
-    })
-
-    const ws = new Workspace({ '/slack': slack, '/github': github })
-    ws.registerCli('linear', LINEAR, { apiKey: process.env.LINEAR_API_KEY! })
-
-    const agent = new Agent({
-      name: 'Design feedback triage',
-      model: 'gpt-5.5',
-      instructions: await buildSystemPrompt({ workspace: ws }),
-      tools: [shellTool({ shell: new MirageShell(ws) })],
-    })
-
-    const task =
-      'Scan recent messages in the Slack #incident channel. If anyone posts ' +
-      'feedback about Mirage with a screenshot, read the image, locate the ' +
-      'relevant CLI code in the Mirage GitHub repo, and file a design issue ' +
-      "with `linear issue create`, including the user's feedback and links " +
-      'to the offending source files.'
-
-    const result = await run(agent, task)
-    console.log(result.finalOutput)
-    ```
-
-    <div className="max-w-none text-[15px] leading-7 mt-4 mb-4">
-      <p className="my-0">
-        Runnable source: <a href="https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/multi_vfs_agent.ts" target="_blank" rel="noopener noreferrer"><code>examples/typescript/agents/openai/multi_vfs_agent.ts</code></a>, the same shell-tool pattern over Slack and S3.
-      </p>
-    </div>
-  </Tab>
-</Tabs>
-
-<h4 className="text-lg font-bold mt-10 mb-2">Walk-through</h4>
-
-<div className="max-w-none text-[15px] leading-7 mb-2">
-  <p className="my-0">
-    Inside the workspace shell, the agent reads the latest <code>#incident</code> message and lists its attachments, then reads the screenshot through the model's vision input:
-  </p>
-</div>
-
-```bash
-cat /slack/channels/incident__C0B0DB9K11T/2026-04-28/chat.jsonl
-ls /slack/channels/incident__C0B0DB9K11T/2026-04-28/files/
-```
-
-<div className="max-w-none text-[15px] leading-7 mt-4 mb-2">
-  <p className="my-0">
-    It finds the CLI source the screenshot complains about:
-  </p>
-</div>
-
-```bash
-rg -n "Mirage daemon CLI|workspace|session" /github/typescript
-cat /github/typescript/packages/cli/src/main.ts
-```
-
-<div className="max-w-none text-[15px] leading-7 mt-4 mb-2">
-  <p className="my-0">
-    And it files the issue with the virtual <code>linear</code> CLI, the body piped through stdin:
-  </p>
-</div>
-
-```bash
-cat <<'EOF' | linear issue create --team ENG --title "[Design] Rework Mirage CLI top-level command surface"
-... feedback, screenshot summary, and links to the offending files ...
-EOF
-```
-
-<div className="max-w-none text-[15px] leading-7 mt-6 mb-2">
-  <p className="my-0">
-    The new issue lands in <Icon icon="linear" /> Linear with the user's feedback and links to the relevant source files.
-  </p>
-</div>
 
 <h2 className="text-2xl font-bold mt-16 mb-6">Use Cases</h2>
 
 <div className="max-w-none text-[15px] leading-7 mb-4">
   <p className="my-0">
-    Mirage shows up wherever an agent needs to read, write, or stitch together data that doesn't already live on a local disk.
+    Mirage is the world's first virtual terminal: it turns any infrastructure into a terminal-like interface for AI agents. It is highly scriptable, customizable, secure and durable.
   </p>
 </div>
 
 <CardGroup cols={2}>
-  <Card title="Cross-app triage agents" icon="bell">
-    Watch Slack, search GitHub, file Linear issues. One shell, no per-service wiring.
+  <Card title="Event-driven triage" icon="bolt">
+    A Slack reply or GitHub push becomes a file change the agent reacts to.
   </Card>
-  <Card title="SWE agents on remote data" icon="code">
-    Point Claude Code or Codex at S3, Postgres, or SSH hosts as if they were files.
+  <Card title="Search and RAG" icon="book-open">
+    <code>grep</code> uses each service's own search, and <code>search</code> finds semantic matches in vector stores.
   </Card>
-  <Card title="RAG with writes" icon="pen-to-square">
-    WRITE mounts and CLIs on Notion, Drive, and Linear so the agent can edit and comment back.
+  <Card title="Scriptable Policy" icon="scale-balanced">
+    A policy script guards every command, and can even route it to the runtime it runs on.
   </Card>
-  <Card title="Ops & observability copilots" icon="chart-line">
-    <code>tail</code>, <code>grep</code>, <code>jq</code> over remote logs, metrics, and config without per-source plugins.
+  <Card title="Observability copilots" icon="gauge">
+    <code>grep</code> and <code>jq</code> over Langfuse and Jaeger traces.
   </Card>
-  <Card title="Sandboxed code" icon="box">
-    Run <code>python3</code> on Monty inside Mirage, or route native programs to Docker, E2B, Daytona or an SSH host while the files stay in Mirage.
+  <Card title="Scriptable Terminal" icon="code">
+    Run <code>python3</code> and <code>node</code> inside Mirage, or native programs in a sandbox.
   </Card>
-  <Card title="Reproducible agent runs" icon="wand-magic-sparkles">
-    Snapshot, restore, and clone workspaces for branchable, replayable agent runs.
+  <Card title="Durable Terminal" icon="clock-rotate-left">
+    Snapshot a run to one file and restore it later.
   </Card>
 </CardGroup>
 
@@ -349,7 +203,7 @@ EOF
     The shell only sees your mounts. The default runtimes run inside Mirage with no host files or network: Monty takes <code>python3</code> in a pool of local worker processes, and QuickJS takes <code>node</code> in-process. Host and sandbox runtimes (<code>local</code>, Docker, E2B, Daytona, SSH) have their own files and network; see <a href="/home/setup/runtime/overview#files">what each runtime reaches</a>.
   </Accordion>
   <Accordion title="What about latency and cost?">
-    Backend-bound. <code>cat /s3/...</code> is one GetObject; <code>find /postgres/...</code> is a SQL query. Reads go through the workspace <a href="/home/cache">cache</a>: under the default <code>read: bounded</code> a repeat read within the mount's <code>ttl</code> makes no backend call, and under <code>read: fresh</code> it costs one metadata check (and a download if the file changed).
+    Backend-bound. <code>cat /s3/...</code> is one GetObject; <code>find /postgres/...</code> is a SQL query. Reads go through the workspace cache: under the default <code>read: bounded</code> a repeat read within the mount's <code>ttl</code> makes no backend call, and under <code>read: fresh</code> it costs one metadata check (and a download if the file changed).
   </Accordion>
   <Accordion title="Hosted or self-hosted?">
     Self-hosted. Mirage is a library plus a thin local daemon. The daemon lives in your process or sandbox; data only leaves your network if a mount you configured already does (e.g. an S3 read).
@@ -377,8 +231,8 @@ EOF
   <Card title="CLI" icon="terminal" href="/home/access/cli">
     Drive workspaces from the shell: create, run shell lines, snapshot, and restore.
   </Card>
-  <Card title="VFS Matrix" icon="grid-2" href="/home/vfs-matrix">
-    Compare VFS types by mount mode, setup path, and common use cases.
+  <Card title="VFS Providers" icon="grid-2" href="/home/setup/vfs">
+    Set up S3, Drive, Slack and the other VFS backends.
   </Card>
 </CardGroup>
 

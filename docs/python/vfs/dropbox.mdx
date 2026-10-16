@@ -107,8 +107,7 @@ are acceptable.
 The Dropbox VFS caches directory listings via `IndexCacheStore` to
 reduce repeated API calls during traversal; with no `index:` configured, listings live
 for the mount's `ttl` (600 s by default), at most 24 hours; a configured
-`index:` uses its own `ttl`, still capped by the mount's `ttl:`
-([index TTL](/home/cache#index-ttl)). File reads go
+`index:` uses its own `ttl`, still capped by the mount's `ttl:`. File reads go
 through the standard read cache (`caches_reads = True`).
 
 Under `read: fresh`, a cached file is checked against its `content_hash`
@@ -139,12 +138,11 @@ listing costs one request.
 ## Writes
 
 A write records the `content_hash` its upload reply names, so a `fresh` read
-right after a `tee` or `sed -i` downloads nothing. See
-[Writes](/home/cache#writes).
+right after a `tee` or `sed -i` downloads nothing.
 
 ## Conditional writes
 
-A Dropbox mount accepts [`write: conditional`](/home/yaml#the-write-policy).
+A Dropbox mount accepts `write: conditional`.
 A write that holds a version looks the file up once (`get_metadata`),
 refuses a file whose `content_hash` changed since it was read, and uploads
 in `update` mode with the file's `rev`, so Dropbox refuses (409
@@ -152,8 +150,7 @@ in `update` mode with the file's `rev`, so Dropbox refuses (409
 `parent_rev`. `rm -r` walks the folder file by file, and a `mv` within the
 mount is Dropbox's own move, which is not refused when its source changed
 (a `mv` to another mount is a copy and a conditioned delete, so there a
-changed source stays and `mv` reports the failed removal); see
-[which backends](/home/yaml#which-backends).
+changed source stays and `mv` reports the failed removal).
 
 ## Example
 

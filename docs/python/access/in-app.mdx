@@ -41,7 +41,7 @@ One terminal over the backends mounted at each prefix.
   Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
 </ResponseField>
 
-The other parameters (`cache`, `index`, `store`, `runtimes`, `clis`, `env`, `secrets`, `command_limits`, ...) are the [top-level YAML keys](/home/yaml#top-level).
+The other parameters (`cache`, `index`, `store`, `runtimes`, `clis`, `env`, `secrets`, `command_limits`, ...) are the top-level YAML keys.
 
 ```python
 from mirage import MountMode, Workspace
@@ -118,7 +118,7 @@ await ws.snapshot(target, *, compress=None, s3=None) -> int
 await Workspace.load(source, *, s3=None, ...) -> Workspace
 ```
 
-Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole. See [Snapshots](/home/snapshot) for what a tar holds.
+Save the workspace to a tar and rebuild it from one. `target` and `source` are a path or a file object, or an object key with `s3=`. `snapshot` answers the tar's size in bytes. While it captures, new lines and file writes wait, and running ones get 30 seconds to end, else it raises `OSError` (`EBUSY`); disk mount files are streamed, never held whole.
 
 ```python
 await ws.snapshot("run.tar")
@@ -243,7 +243,7 @@ print(result.exit_code, await result.stdout_str())
 
 ### Streaming execution
 
-`await session.shell(line, stream=True)` returns a running `ShellExecution`. Its `id` identifies this execution; `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through [workspace I/O settings](/home/yaml#io-buffers), with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+`await session.shell(line, stream=True)` returns a running `ShellExecution`. Its `id` identifies this execution; `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
 
 Consume `events` while the line runs, then await `wait()` for its final `IOResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. `IOResult` describes a finished result; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
 

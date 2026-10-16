@@ -193,8 +193,6 @@ const ws = new Workspace(
 )
 ```
 
-Die [Cache-Dokumentation](https://docs.mirage.strukto.ai/home/cache) beschreibt den vollständigen Miss/Hit-Lebenszyklus.
-
 ## Mitwirkende
 
 Dank an alle, die zu Mirage beigetragen haben.

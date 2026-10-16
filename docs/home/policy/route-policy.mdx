@@ -50,7 +50,8 @@ the session. It prints its answer:
 
 A program that exits non-zero, runs past 10 seconds, or prints anything
 else fails the line with a routing error. It runs on its own runtime,
-as [a profile's programs do](/home/policy/scripts#runtimes).
+monty unless the block names one, as
+[a profile's programs do](/home/policy/scripts#runtimes).
 
 In code, `route_policy=` takes the same block with a `ScriptSource`, or
 a plain function, sync or async, returning a runtime name or `None`:

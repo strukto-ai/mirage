@@ -218,7 +218,7 @@ change stream.
 
 The MongoDB VFS lists database names, collection names, and document counts.
 These listings are not cached by default (`index_ttl = 0`); a workspace or
-mount `index:` caches them for its `ttl`. See [index TTL](/home/cache#index-ttl).
+mount `index:` caches them for its `ttl`.
 
 Document content is **not** cached. The VFS leaves `caches_reads`
 at its default of `False`, so `cat`, `grep`, `head`, and `tail` always

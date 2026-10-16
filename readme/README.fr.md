@@ -193,8 +193,6 @@ const ws = new Workspace(
 )
 ```
 
-Voir la [documentation du cache](https://docs.mirage.strukto.ai/home/cache) pour le cycle de vie complet miss/hit.
-
 ## Contributeurs
 
 Merci à toutes les personnes qui ont contribué à Mirage.

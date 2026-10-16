@@ -98,7 +98,7 @@ It answers only the `Host` names in `allowed_hosts` (`MIRAGE_ALLOWED_HOSTS`), `1
 
 <Badge color="green">POST</Badge> `/v1/workspaces`
 
-<ParamField body="config" type="object" required>The [workspace YAML](/home/yaml) as JSON.</ParamField>
+<ParamField body="config" type="object" required>The workspace YAML as JSON.</ParamField>
 <ParamField body="id" type="string">The workspace id. A fresh one when absent.</ParamField>
 
 Answers `201` and the workspace. The same id and config again answers `200` and that workspace; another config under a taken id answers `409`.
@@ -112,7 +112,7 @@ curl -i http://127.0.0.1:8765/v1/workspaces \
 Set the queue capacity in the creation payload's `config.io` block. For
 example, `{"config":{"io":{"buffer_bytes":262144},"mounts":{"/":{"vfs":"ram"}}}}`
 sets 256 KiB per queue. Shell upload/output streams and MCP on this workspace
-inherit it; there is no buffer-size query parameter. See [I/O buffers](/home/yaml#io-buffers).
+inherit it; there is no buffer-size query parameter.
 
 ### List workspaces
 
@@ -163,7 +163,7 @@ Answers the tar (`application/x-tar`). Secrets are stored redacted. The server n
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/snapshot`
 
-<ParamField body="key" type="string" required>Puts the tar in the server's [snapshot store](/home/snapshot#an-s3-like-store) under this key, and answers `{id, key, size}`. `400` when the server has none.</ParamField>
+<ParamField body="key" type="string" required>Puts the tar in the server's snapshot store under this key, and answers `{id, key, size}`. `400` when the server has none.</ParamField>
 
 ### Load a snapshot
 
@@ -226,7 +226,7 @@ Replaces the session's modes, hides and rules. Its cwd, env and history stay.
 <ParamField query="profile" type="string">GET only, on the workspace route: preview this profile.</ParamField>
 <ParamField body="path" type="string" required>PUT only: expose the document as a live, read-only file at this path.</ParamField>
 
-Answers the [document](/home/workspace#vfs-md-and-skill-md) as `text/markdown`. `skill-md` in place of `vfs-md` serves SKILL.md. A missing session or parent is `404`, a path that is taken `409`, a bad path or profile `422`.
+Answers the document as `text/markdown`. `skill-md` in place of `vfs-md` serves SKILL.md. A missing session or parent is `404`, a path that is taken `409`, a bad path or profile `422`.
 
 ## Shell, VFS calls and tools
 

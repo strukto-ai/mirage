@@ -65,8 +65,7 @@ Example with `root="/var/data"`:
 ## Cache
 
 Directory listings are cached for 60 seconds by default (a configured
-`index:` uses its own `ttl`, and the mount's `ttl:` caps it; see
-[index TTL](/home/cache#index-ttl)). File bytes are cached and served
+`index:` uses its own `ttl`, and the mount's `ttl:` caps it). File bytes are cached and served
 without a check until the mount's `ttl:`; SSH does not accept `read: fresh`.
 
 ## Example

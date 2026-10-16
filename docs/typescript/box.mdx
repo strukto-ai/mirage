@@ -160,17 +160,16 @@ mapping in the mount's index store (RAM unless an `index:` is configured). The f
 it walks the tree top-down (one API call per level) and caches each entry's ID. Subsequent reads
 of `/box/foo/bar/anyfile.json` hit the cache instead of re-walking.
 
-With no `index:` configured, listings live for the mount's `ttl` (600 s by default), at most 24 hours; a configured `index:` uses its own `ttl`, still capped by the mount's `ttl:` ([index TTL](/home/cache#index-ttl)). To force re-resolution, unmount the prefix and mount a new `BoxVFS` there.
+With no `index:` configured, listings live for the mount's `ttl` (600 s by default), at most 24 hours; a configured `index:` uses its own `ttl`, still capped by the mount's `ttl:`. To force re-resolution, unmount the prefix and mount a new `BoxVFS` there.
 
 ## Writes
 
 A write records the `sha1` its upload reply names, so a `fresh` read
-right after a `tee` or `sed -i` downloads nothing. See
-[Writes](/home/cache#writes).
+right after a `tee` or `sed -i` downloads nothing.
 
 ## Conditional writes
 
-A Box mount accepts [`write: conditional`](/home/yaml#the-write-policy). A
+A Box mount accepts `write: conditional`. A
 write or a file delete compares the `sha1` mirage holds with the one the
 folder listing it walks anyway shows, and refuses a file changed since it
 was read before sending anything; the request then carries the file's
@@ -179,8 +178,7 @@ A conditional write costs no request more than a plain one. `rm -r` walks
 the folder file by file, and a `mv` within the mount is Box's own move,
 which is not refused when its source changed (a `mv` to another mount is a
 copy and a conditioned delete, so there a changed source stays and `mv`
-reports the failed removal); see
-[which backends](/home/yaml#which-backends).
+reports the failed removal).
 
 ## Reads under `fresh`
 
@@ -188,7 +186,7 @@ A Box mount accepts `read: fresh`. The token is the file's `sha1`, which a
 folder listing and `GET /files/{id}` both carry; a download names no version,
 so a whole read stamps the listed `sha1` only when the downloaded bytes hash
 to it, and a ranged read stamps nothing. On a
-[`write: conditional`](/home/yaml#the-write-policy) mount a whole read stamps
+`write: conditional` mount a whole read stamps
 the `sha1` of the bytes it downloaded, so a listing another client has since
 outdated cannot leave the next write without the version the agent read. `modified_at` is never the token:
 two same-size edits in one second share it.

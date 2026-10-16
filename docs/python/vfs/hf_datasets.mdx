@@ -58,8 +58,7 @@ mount at that commit is served. A mount whose `revision` is a full 40- or
 per command: a branch or tag named like the sha could take the name, and
 mirage does not assume which one the Hub resolves. With a
 `key_prefix`, the stored version is that commit joined with the prefix, so mounts
-of different subtrees sharing an index never share a version. See
-[listings under `fresh`](/home/cache#listings-under-fresh).
+of different subtrees sharing an index never share a version.
 
 ## Filesystem Layout
 
@@ -131,8 +130,7 @@ so `rm` and `touch` are refused, as is any command asked to write into it.
 ## Cache
 
 Uses `IndexCacheStore` with `index_ttl = 86_400` (one day), capped by the
-mount's `ttl:` (600 seconds unless raised; see
-[index TTL](/home/cache#index-ttl)). Directory listings are cached and populate file-size/type entries for `stat`'s fast
+mount's `ttl:` (600 seconds unless raised). Directory listings are cached and populate file-size/type entries for `stat`'s fast
 path. The first listing fills the index for the whole mount: one revision
 request for the commit, then the recursive tree walked at that commit, so a
 `readdir` + per-entry `stat` (which `ls`, FUSE `getattr`, and most shell

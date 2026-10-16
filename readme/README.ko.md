@@ -193,8 +193,6 @@ const ws = new Workspace(
 )
 ```
 
-전체 miss/hit 라이프사이클은 [캐시 문서](https://docs.mirage.strukto.ai/home/cache)를 참고하세요.
-
 ## 기여자
 
 Mirage에 기여해 주신 모든 분께 감사드립니다.

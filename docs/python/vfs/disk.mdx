@@ -57,8 +57,7 @@ to the root boundary.
 
 The Disk VFS uses `IndexCacheStore` with `index_ttl = 60` (1 minute).
 Directory listings are cached for up to 60 seconds before being refreshed
-from disk. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it; see
-[index TTL](/home/cache#index-ttl).
+from disk. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it.
 
 Each listing is stored with its folder's version: the folder's device,
 inode, change time and modified time. Under `read: fresh`, a later command
@@ -77,7 +76,7 @@ vfs = DiskVFS(root="/mnt/nfs/share", folder_versions=False)
 ```
 
 That mount then re-lists a cached folder once per command, as every
-unversioned backend does. See [the cache](/home/cache#listings-under-fresh).
+unversioned backend does.
 
 ## Example
 

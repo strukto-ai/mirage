@@ -33,7 +33,7 @@ await ws.shell('cat /disk/note.txt')
 | `root` | required | Absolute path on the host. Reads and writes are scoped to this directory. |
 | `folderVersions` | `true` | Store each listing at its folder's version (device, inode, change and modified time), so a `read: fresh` mount re-lists only folders that changed. Must be a boolean. Set `false` for a network or FUSE root (NFS, SMB, rclone, s3fs, mirage's own FUSE), whose change time may not move with its entries. In YAML: `folder_versions`. |
 
-A folder changed in the last 2 seconds gets no version and is re-listed until it has been quiet that long. See [the cache](/home/cache#listings-under-fresh).
+A folder changed in the last 2 seconds gets no version and is re-listed until it has been quiet that long.
 
 ## Mount mode
 
@@ -41,6 +41,6 @@ A folder changed in the last 2 seconds gets no version and is re-listed until it
 
 ## Snapshot behavior
 
-A snapshot carries the mount's files, and loading it restores them. See [Snapshot & Replay](/home/snapshot#what-a-snapshot-captures).
+A snapshot carries the mount's files, and loading it restores them.
 
 For behavior shared with Python (filesystem layout, supported shell commands), see the [Python Disk docs](/python/vfs/disk).
